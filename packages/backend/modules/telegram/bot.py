@@ -6,6 +6,7 @@ import httpx
 from sqlalchemy.exc import SQLAlchemyError
 from sqlmodel import Session
 
+from backend_core.api_execution_budget import run_api_blocking
 from backend_core.database import run_db
 from backend_core.telegram_store import add_subscriber, get_subscriber_by_chat
 from modules.telegram.store import require_generation
@@ -36,7 +37,7 @@ async def handle_update(client: httpx.AsyncClient, *, token: str, update: dict[s
 
 async def _subscribe(client: httpx.AsyncClient, *, token: str, chat_id: str, title: str, generation: int) -> None:
     try:
-        await asyncio.to_thread(run_db, _add_subscriber, chat_id, title, token, generation)
+        await run_api_blocking(run_db, _add_subscriber, chat_id, title, token, generation)
     except SQLAlchemyError:
         await _send_message(client, token=token, chat_id=chat_id, text='Failed to subscribe. Please try again.')
         raise
@@ -44,7 +45,7 @@ async def _subscribe(client: httpx.AsyncClient, *, token: str, chat_id: str, tit
 
 
 async def _unsubscribe(client: httpx.AsyncClient, *, token: str, chat_id: str, generation: int) -> None:
-    await asyncio.to_thread(run_db, _deactivate_subscriber, chat_id, token, generation)
+    await run_api_blocking(run_db, _deactivate_subscriber, chat_id, token, generation)
     await _send_message(client, token=token, chat_id=chat_id, text='Unsubscribed. You will no longer receive notifications.')
 
 

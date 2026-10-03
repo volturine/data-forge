@@ -32,11 +32,17 @@ def test_runtime_schema_has_only_public_and_tenant_creation_revisions() -> None:
         '0015_durable_chat_turns.py',
         '0016_telegram_integration_runtime.py',
         '0017_compute_source_index.py',
+        '0018_runtime_work_generations.py',
+        '0019_build_run_datasources.py',
+        '0020_runtime_namespace_work_wakes.py',
+        '0021_storage_cleanup_catalog_indexes.py',
+        '0022_telegram_part_receipts.py',
     ]
 
 
-def test_public_revision_is_telegram_runtime_head() -> None:
-    assert _PUBLIC_REVISION == '0016_telegram_runtime'
+def test_public_revision_is_runtime_namespace_work_wakes_head() -> None:
+    assert _PUBLIC_REVISION == '0020_runtime_wakes'
+    assert len(_PUBLIC_REVISION) <= 32
 
 
 def test_public_schema_registers_telegram_runtime_tables(monkeypatch: pytest.MonkeyPatch) -> None:

@@ -19,7 +19,6 @@ import polars as pl
 import pyarrow as pa  # type: ignore[import-untyped]
 import pyarrow.parquet as pq  # type: ignore[import-untyped]
 from pyiceberg.table import Table as IcebergTable
-from sqlalchemy.exc import IntegrityError
 
 from builds.build_live import RuntimeBuild
 from dataforge_protocol import compute_pb2, enums_pb2
@@ -59,7 +58,7 @@ from runtime.healthchecks import (
     resolve_build_status as _resolve_build_status,
     run_healthchecks as _run_worker_healthchecks,
 )
-from runtime.iceberg_catalog import load_runtime_catalog
+from runtime.iceberg_catalog import ensure_catalog_namespace, load_runtime_catalog
 from runtime.iceberg_metadata import resolve_iceberg_branch_metadata_path, resolve_iceberg_metadata_path, sync_iceberg_schema
 from runtime.json_utils import copy_json_dict
 from runtime.namespace import get_namespace
@@ -123,14 +122,8 @@ class _BuildJobCancellation:
             self._manager.cancel_engine_job(self._identity, namespace=self._namespace, job_id=job_id)
 
 
-def _ensure_catalog_namespace(catalog, namespace: str) -> None:
-    try:
-        catalog.create_namespace_if_not_exists(namespace)
-    except IntegrityError:
-        logger.info("Namespace %s was created concurrently; continuing", namespace)
-
-
 MAX_DOWNLOAD_BYTES: Final = 10 * 1024 * 1024
+_SLOW_PREVIEW_LOG_SECONDS = 5.0
 
 
 def _secure_temp_path(suffix: str) -> str:
@@ -1657,6 +1650,7 @@ def preview_step(
     request_json: dict | None = None,
     triggered_by: str | None = None,
     request_id: str | None = None,
+    command_hash: str | None = None,
 ):
     """Preview the result of executing pipeline up to a specific step with pagination."""
     from runtime.domain.compute.schemas import StepPreviewResponse
@@ -1706,6 +1700,7 @@ def preview_step(
         requested_target_step_id,
         tab_id,
     )
+    request_namespace = get_namespace()
     persist_preview_runs = settings.persist_preview_runs
     run_response = None
     initial_run_result: dict[str, object] | None = None
@@ -1886,11 +1881,19 @@ def preview_step(
         raise
     finally:
         total_duration_ms = (time.perf_counter() - started_perf) * 1000
-        if total_duration_ms >= 5000:
+        if total_duration_ms >= _SLOW_PREVIEW_LOG_SECONDS * 1000:
             phase_timings = " ".join(f"{name}={value:.1f}" for name, value in execution_phases.items())
+            try:
+                engine_scope = enums_pb2.EngineScope.Name(resolved_engine_identity.scope).removeprefix("ENGINE_SCOPE_").lower()
+            except ValueError:
+                engine_scope = str(resolved_engine_identity.scope)
             logger.warning(
-                "Slow preview request_id=%s duration_ms=%.1f %s",
+                "Slow preview request_id=%s namespace=%s engine_scope=%s resource_id=%s command_hash=%s duration_ms=%.1f %s",
                 request_id or "unknown",
+                request_namespace,
+                engine_scope,
+                resolved_engine_identity.resource_id,
+                command_hash or "-",
                 total_duration_ms,
                 phase_timings,
             )
@@ -2367,7 +2370,7 @@ def export_data(
         }
 
         catalog = load_runtime_catalog("local", **catalog_config)
-        _ensure_catalog_namespace(catalog, namespace)
+        ensure_catalog_namespace(catalog, namespace)
 
         identifier = f"{namespace}.{table_name}"
 
@@ -3891,11 +3894,17 @@ async def run_analysis_build_stream(
     }
 
 
-def list_iceberg_snapshots(session: object, datasource_id: str, branch: str | None = None):
+def list_iceberg_snapshots(
+    session: object,
+    datasource_id: str,
+    branch: str | None = None,
+    *,
+    request_namespace: str,
+):
     from runtime.domain.compute.schemas import IcebergSnapshotInfo, IcebergSnapshotsResponse
 
     del session
-    datasource = client_from_env().datasource_metadata(namespace=get_namespace(), datasource_id=datasource_id)
+    datasource = client_from_env().datasource_metadata(namespace=request_namespace, datasource_id=datasource_id)
 
     if not datasource.found or datasource.config is None:
         raise datasource_not_found(datasource_id)
@@ -3957,11 +3966,11 @@ def list_iceberg_snapshots(session: object, datasource_id: str, branch: str | No
     )
 
 
-def delete_iceberg_snapshot(session: object, datasource_id: str, snapshot_id: str):
+def delete_iceberg_snapshot(session: object, datasource_id: str, snapshot_id: str, *, request_namespace: str):
     from runtime.domain.compute.schemas import IcebergSnapshotDeleteResponse
 
     del session
-    datasource = client_from_env().datasource_metadata(namespace=get_namespace(), datasource_id=datasource_id)
+    datasource = client_from_env().datasource_metadata(namespace=request_namespace, datasource_id=datasource_id)
 
     if not datasource.found or datasource.config is None:
         raise datasource_not_found(datasource_id)

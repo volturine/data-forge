@@ -6,6 +6,7 @@ from datetime import UTC, datetime, timedelta
 from typing import Any, TypedDict, cast
 
 from sqlalchemy import and_, case, func, or_, select, text, update
+from sqlalchemy.orm import load_only
 from sqlmodel import Session
 
 from backend_core import engine_runs_service, runtime_ipc, runtime_work_service
@@ -22,7 +23,6 @@ from backend_core.domain.compute_requests.models import (
 )
 from backend_core.domain.engine_runs.schemas import EngineRunKind, EngineRunStatus
 from backend_core.lease_observability import record_lease_transition
-from backend_core.namespace import get_namespace
 from backend_core.persistence.compute_requests.models import ComputeRequest, ComputeRequestDatasource, ComputeRequestFlight
 from backend_core.persistence.datasource.models import DataSource
 from backend_core.runtime_work_service import RuntimeWorkKind
@@ -174,10 +174,10 @@ def _request_priority_clause(table):
     )
 
 
-def _refresh_pending_work(session: Session) -> None:
+def _refresh_pending_work(session: Session, *, namespace: str) -> None:
     runtime_work_service.refresh_pending_work(
         session,
-        namespace=get_namespace(),
+        namespace=namespace,
         kind=RuntimeWorkKind.COMPUTE,
         pending_query=_COMPUTE_WORK_PENDING_QUERY,
         due_query=_COMPUTE_WORK_DUE_QUERY,
@@ -222,10 +222,18 @@ def _flight_lock_key(namespace: str, flight_key: str) -> int:
 
 
 def _engine_claim_lock_key(request: ComputeRequest) -> int | None:
+    identity = _engine_claim_identity(request)
+    if identity is None:
+        return None
+    namespace, scope, reuse_policy, resource_id = identity
+    key = f'{namespace}:{scope}:{reuse_policy}:{resource_id}'
+    return int.from_bytes(hashlib.sha256(f'dataforge:compute-engine-claim:{key}'.encode()).digest()[:8], 'big', signed=True)
+
+
+def _engine_claim_identity(request: ComputeRequest) -> tuple[str, int, int, str] | None:
     if request.engine_scope is None or request.engine_reuse_policy is None or request.engine_resource_id is None:
         return None
-    identity = f'{request.namespace}:{request.engine_scope}:{request.engine_reuse_policy}:{request.engine_resource_id}'
-    return int.from_bytes(hashlib.sha256(f'dataforge:compute-engine-claim:{identity}'.encode()).digest()[:8], 'big', signed=True)
+    return request.namespace, request.engine_scope, request.engine_reuse_policy, request.engine_resource_id
 
 
 def _try_lock_flight(session: Session, namespace: str, flight_key: str) -> bool:
@@ -242,18 +250,62 @@ def _try_lock_flight(session: Session, namespace: str, flight_key: str) -> bool:
 def _lock_engine_claim(session: Session, request: ComputeRequest) -> bool:
     lock_key = _engine_claim_lock_key(request)
     if lock_key is None or getattr(getattr(session.get_bind(), 'dialect', None), 'name', None) != 'postgresql':
-        return lock_key is not None
-    session.execute(text('SELECT pg_advisory_xact_lock(:key)'), {'key': lock_key})
-    return True
+        return True
+    acquired = session.execute(text('SELECT pg_try_advisory_xact_lock(:key)'), {'key': lock_key}).scalar_one()
+    return bool(acquired)
 
 
 def _reusable_flight(session: Session, namespace: str, flight_key: str, *, now: datetime) -> ComputeRequest | None:
-    flight = (
+    flight_state = _read_flight(session, namespace, flight_key)
+    if flight_state is None:
+        return None
+    flight, request = flight_state
+    reusable = _reusable_flight_request(request, flight, now=now)
+    if reusable is not None:
+        return reusable
+
+    # Stale cleanup can race with completion extending the cache. Lock and
+    # refresh both rows before deleting; active/cached followers stay lock-free.
+    stale_flight = (
         session.execute(
             select(ComputeRequestFlight)
             .where(sa(ComputeRequestFlight.namespace == namespace))
             .where(sa(ComputeRequestFlight.flight_key == flight_key))
             .with_for_update()
+            .execution_options(populate_existing=True)
+        )
+        .scalars()
+        .first()
+    )
+    if stale_flight is None:
+        return None
+
+    request = session.get(ComputeRequest, stale_flight.request_id, populate_existing=True)
+    reusable = _reusable_flight_request(request, stale_flight, now=now)
+    if reusable is not None:
+        return reusable
+
+    session.delete(stale_flight)
+    session.flush()
+    return None
+
+
+def _find_reusable_flight(session: Session, namespace: str, flight_key: str, *, now: datetime) -> ComputeRequest | None:
+    flight_state = _read_flight(session, namespace, flight_key)
+    if flight_state is None:
+        return None
+    flight, request = flight_state
+    return _reusable_flight_request(request, flight, now=now)
+
+
+def _read_flight(
+    session: Session,
+    namespace: str,
+    flight_key: str,
+) -> tuple[ComputeRequestFlight, ComputeRequest | None] | None:
+    flight = (
+        session.execute(
+            select(ComputeRequestFlight).where(sa(ComputeRequestFlight.namespace == namespace)).where(sa(ComputeRequestFlight.flight_key == flight_key))
         )
         .scalars()
         .first()
@@ -261,28 +313,25 @@ def _reusable_flight(session: Session, namespace: str, flight_key: str, *, now: 
     if flight is None:
         return None
 
-    request = session.get(ComputeRequest, flight.request_id)
-    if request is None:
-        session.delete(flight)
-        session.flush()
-        return None
+    request = session.get(ComputeRequest, flight.request_id, populate_existing=True)
+    return flight, request
 
-    active = request.status in {
+
+def _reusable_flight_request(request: ComputeRequest | None, flight: ComputeRequestFlight, *, now: datetime) -> ComputeRequest | None:
+    if request is None:
+        return None
+    if request.status in {
         enums_pb2.COMPUTE_REQUEST_STATUS_QUEUED,
         enums_pb2.COMPUTE_REQUEST_STATUS_RUNNING,
-    }
+    }:
+        return request
     cached = (
         request.status == enums_pb2.COMPUTE_REQUEST_STATUS_COMPLETED
         and request.response_envelope is not None
         and flight.expires_at is not None
         and flight.expires_at > now
     )
-    if active or cached:
-        return request
-
-    session.delete(flight)
-    session.flush()
-    return None
+    return request if cached else None
 
 
 def _finish_flight(session: Session, request: ComputeRequest, *, cache_result: bool, completed_at: datetime) -> None:
@@ -327,9 +376,13 @@ def _stage_request(
     datasource_ids = _datasource_ids_for_command(command)
     flight_key = _flight_key(kind, command) if deduplicate_flight else None
     if flight_key is not None:
+        existing = _find_reusable_flight(session, namespace, flight_key, now=now)
+        if existing is not None:
+            return existing, False
+
         # PostgreSQL advisory transaction locking serializes only equal keys;
-        # unrelated read commands remain fully concurrent across API
-        # workers. SQLite tests use the same lookup without advisory locking.
+        # misses recheck under the lock before creation. Active and cached
+        # followers use the lock-free lookup above.
         if not _try_lock_flight(session, namespace, flight_key):
             # Never park an API database connection behind another viewer of
             # the same preview. The HTTP layer retries after closing this
@@ -824,6 +877,7 @@ def claim_next_request(
         table.c.engine_reuse_policy.is_not(None),
         table.c.engine_resource_id.is_not(None),
     )
+    blocked_engine_identities: set[tuple[str, int, int, str]] = set()
     while True:
         now = _database_now(session)
         queued_clause = table.c.status == enums_pb2.COMPUTE_REQUEST_STATUS_QUEUED
@@ -846,6 +900,23 @@ def claim_next_request(
         base = select(ComputeRequest).where(or_(queued_clause, reclaimable_clause)).where(or_(~has_engine_identity, ~has_running_sibling))
         if allowed_kinds is not None:
             base = base.where(table.c.kind.in_(allowed_kinds))
+        if blocked_engine_identities:
+            base = base.where(
+                or_(
+                    ~has_engine_identity,
+                    ~or_(
+                        *(
+                            and_(
+                                table.c.namespace == namespace,
+                                table.c.engine_scope == scope,
+                                table.c.engine_reuse_policy == reuse_policy,
+                                table.c.engine_resource_id == resource_id,
+                            )
+                            for namespace, scope, reuse_policy, resource_id in sorted(blocked_engine_identities)
+                        )
+                    ),
+                )
+            )
         base = base.order_by(_request_priority_clause(table), table.c.created_at, table.c.id).limit(1)
         stmt = with_for_update_skip_locked(session, base)
         row = session.execute(stmt).scalars().first()
@@ -853,7 +924,12 @@ def claim_next_request(
             session.commit()
             return None
         if not _lock_engine_claim(session, row):
-            break
+            identity = _engine_claim_identity(row)
+            if identity is None:
+                raise RuntimeError(f'Engine claim lock was unavailable without an engine identity for request {row.id}')
+            session.rollback()
+            blocked_engine_identities.add(identity)
+            continue
 
         active_sibling = session.execute(
             select(running.c.id)
@@ -922,7 +998,7 @@ def claim_next_request(
     return claimed
 
 
-def stage_exhausted_requests(session: Session) -> int:
+def stage_exhausted_requests(session: Session, *, namespace: str) -> int:
     """Reconcile compute queue state once per namespace recovery pass.
 
     Claiming stays limited to one directed request. This scheduled pass fails
@@ -933,6 +1009,7 @@ def stage_exhausted_requests(session: Session) -> int:
     table = ComputeRequest.metadata.tables[ComputeRequest.__tablename__]
     statement = (
         select(ComputeRequest)
+        .where(table.c.namespace == namespace)
         .where(table.c.status == enums_pb2.COMPUTE_REQUEST_STATUS_RUNNING)
         .where(table.c.attempts >= table.c.max_attempts)
         .where(table.c.lease_expires_at <= now)
@@ -974,7 +1051,7 @@ def stage_exhausted_requests(session: Session) -> int:
             attempt=request.attempts,
         )
     session.flush()
-    _refresh_pending_work(session)
+    _refresh_pending_work(session, namespace=namespace)
     return len(requests)
 
 
@@ -1110,19 +1187,78 @@ def lock_active_request_claim(
     worker_id: str,
     claim_token: str,
     lease_generation: int,
+    include_command_envelope: bool = False,
+) -> ComputeRequest | None:
+    return _active_request_claim(
+        session,
+        request_id,
+        worker_id=worker_id,
+        claim_token=claim_token,
+        lease_generation=lease_generation,
+        for_update=True,
+        include_command_envelope=include_command_envelope,
+    )
+
+
+def get_active_request_claim(
+    session: Session,
+    request_id: str,
+    *,
+    worker_id: str,
+    claim_token: str,
+    lease_generation: int,
+    include_command_envelope: bool = False,
+) -> ComputeRequest | None:
+    """Read a candidate claim without holding its row lock during preparation.
+
+    Callers that will publish a terminal state must revalidate with
+    ``lock_active_request_claim`` immediately before writing.
+    """
+    return _active_request_claim(
+        session,
+        request_id,
+        worker_id=worker_id,
+        claim_token=claim_token,
+        lease_generation=lease_generation,
+        for_update=False,
+        include_command_envelope=include_command_envelope,
+    )
+
+
+def _active_request_claim(
+    session: Session,
+    request_id: str,
+    *,
+    worker_id: str,
+    claim_token: str,
+    lease_generation: int,
+    for_update: bool,
+    include_command_envelope: bool,
 ) -> ComputeRequest | None:
     now = _database_now(session)
+    lease_now = database_lease_clock(session, now)
     table = ComputeRequest.metadata.tables[ComputeRequest.__tablename__]
+    selected_columns: list[Any] = [
+        ComputeRequest.id,
+        ComputeRequest.namespace,
+        ComputeRequest.kind,
+        ComputeRequest.status,
+        ComputeRequest.engine_resource_id,
+    ]
+    if include_command_envelope:
+        selected_columns.append(ComputeRequest.command_envelope)
     statement = (
         select(ComputeRequest)
+        .options(load_only(*selected_columns))
         .where(table.c.id == request_id)
         .where(table.c.status == enums_pb2.COMPUTE_REQUEST_STATUS_RUNNING)
         .where(table.c.lease_owner == worker_id)
         .where(table.c.claim_token == claim_token)
         .where(table.c.lease_generation == lease_generation)
-        .where(table.c.lease_expires_at > now)
-        .with_for_update()
+        .where(table.c.lease_expires_at > lease_now)
     )
+    if for_update:
+        statement = statement.with_for_update()
     return session.execute(statement).scalars().first()
 
 
@@ -1147,9 +1283,10 @@ def _stage_engine_run_finalization(
         session,
         finalization.run_id,
         merge_result_json=finalization.merge_result_json,
+        serialize_response=False,
         **fields,
     )
-    if not result.applied:
+    if result is not True:
         raise ValueError(f'Preview engine run {finalization.run_id} rejected its terminal status transition')
 
 
@@ -1195,12 +1332,17 @@ def mark_request_completed(
     artifact_content_type: str | None = None,
     engine_run_finalization: EngineRunFinalization | None = None,
 ) -> ComputeRequest | None:
-    request = lock_active_request_claim(
+    # Serialize the potentially large preview payload before opening a DB
+    # transaction or locking the durable request row.
+    serialized_response = response_envelope.SerializeToString()
+    include_command_envelope = response_envelope.kind == enums_pb2.COMPUTE_REQUEST_KIND_DATASOURCE_SCHEMA
+    request = get_active_request_claim(
         session,
         request_id,
         worker_id=worker_id,
         claim_token=claim_token,
         lease_generation=lease_generation,
+        include_command_envelope=include_command_envelope,
     )
     if request is None:
         session.rollback()
@@ -1220,8 +1362,31 @@ def mark_request_completed(
         engine_run_finalization,
         expected_status=EngineRunStatus.SUCCESS,
     )
+    # Engine-run finalization and payload serialization can be expensive. Keep
+    # the request row unlocked during that work, then revalidate under lock at
+    # the write boundary. If the claim changed, rollback also discards the
+    # staged engine-run finalization.
+    request = lock_active_request_claim(
+        session,
+        request_id,
+        worker_id=worker_id,
+        claim_token=claim_token,
+        lease_generation=lease_generation,
+        include_command_envelope=include_command_envelope,
+    )
+    if request is None:
+        session.rollback()
+        return _matching_terminal_request(
+            session,
+            request_id,
+            status=enums_pb2.COMPUTE_REQUEST_STATUS_COMPLETED,
+            response_envelope=response_envelope,
+            artifact_path=artifact_path,
+            artifact_name=artifact_name,
+            artifact_content_type=artifact_content_type,
+        )
     request.status = enums_pb2.COMPUTE_REQUEST_STATUS_COMPLETED
-    request.response_envelope = response_envelope.SerializeToString()
+    request.response_envelope = serialized_response
     request.error_message = None
     request.artifact_path = artifact_path
     request.artifact_name = artifact_name
@@ -1242,7 +1407,6 @@ def mark_request_completed(
     )
     runtime_ipc.notify_compute_response_on_commit(session, request_id=request.id, namespace=request.namespace)
     session.commit()
-    session.refresh(request)
     return request
 
 
@@ -1257,7 +1421,8 @@ def mark_request_failed(
     lease_generation: int,
     engine_run_finalization: EngineRunFinalization | None = None,
 ) -> ComputeRequest | None:
-    request = lock_active_request_claim(
+    serialized_response = response_envelope.SerializeToString()
+    request = get_active_request_claim(
         session,
         request_id,
         worker_id=worker_id,
@@ -1280,9 +1445,27 @@ def mark_request_failed(
         engine_run_finalization,
         expected_status=EngineRunStatus.FAILED,
     )
+    # Do not hold the request row lock through engine-run finalization. The
+    # final lock below revalidates the exact claim before publishing failure.
+    request = lock_active_request_claim(
+        session,
+        request_id,
+        worker_id=worker_id,
+        claim_token=claim_token,
+        lease_generation=lease_generation,
+    )
+    if request is None:
+        session.rollback()
+        return _matching_terminal_request(
+            session,
+            request_id,
+            status=enums_pb2.COMPUTE_REQUEST_STATUS_FAILED,
+            response_envelope=response_envelope,
+            error_message=error_message,
+        )
     request.status = enums_pb2.COMPUTE_REQUEST_STATUS_FAILED
     request.error_message = error_message
-    request.response_envelope = response_envelope.SerializeToString()
+    request.response_envelope = serialized_response
     request.completed_at = _utcnow()
     request.updated_at = request.completed_at
     request.lease_owner = None
@@ -1294,7 +1477,6 @@ def mark_request_failed(
     _finish_flight(session, request, cache_result=False, completed_at=request.completed_at)
     runtime_ipc.notify_compute_response_on_commit(session, request_id=request.id, namespace=request.namespace)
     session.commit()
-    session.refresh(request)
     return request
 
 

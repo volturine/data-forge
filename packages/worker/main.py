@@ -40,7 +40,8 @@ from runtime.worker_runtime_client import (
     BackendWorkerRpcError,
     ClaimedBuildJob,
     WorkerRuntimeClient,
-    client_from_env,
+    async_client_from_env,
+    close_async_runtime_clients,
     run_worker_heartbeat_loop,
     shutdown_compute_request_lease_batcher,
 )
@@ -54,10 +55,6 @@ _DEFAULT_EXECUTOR_WORKERS = 4
 _SHUTDOWN_CONTROL_CONCURRENCY = 4
 _COORDINATOR_GENERATION_POLL_SECONDS = 5.0
 _DISPATCH_LANES = ("compute-active", "compute-shutdown", "build", "datasource-delete", "outbox-cleanup")
-
-
-def worker_runtime_client() -> WorkerRuntimeClient:
-    return client_from_env()
 
 
 def coordinator_id() -> str:
@@ -124,21 +121,29 @@ async def run_runtime_coordinator(
     stop_event: asyncio.Event | None = None,
     coordinator_generation: int | None = None,
     coordinator_guard: Callable[[], None] | None = None,
+    client: WorkerRuntimeClient | None = None,
 ) -> None:
+    owns_client = client is None
+    runtime_client = client if client is not None else await async_client_from_env()
     worker_id = coordinator_id()
     health = DispatcherHealth(
         worker_id,
         lanes=_DISPATCH_LANES,
         max_age_seconds=max(90.0, float(settings.runtime_reconciliation_poll_interval_seconds) + 60.0),
     )
-    async with health.serve():
-        await _run_runtime_coordinator(
-            stop_event=stop_event,
-            coordinator_generation=coordinator_generation,
-            coordinator_guard=coordinator_guard,
-            worker_id=worker_id,
-            health=health,
-        )
+    try:
+        async with health.serve():
+            await _run_runtime_coordinator(
+                stop_event=stop_event,
+                coordinator_generation=coordinator_generation,
+                coordinator_guard=coordinator_guard,
+                worker_id=worker_id,
+                health=health,
+                client=runtime_client,
+            )
+    finally:
+        if owns_client:
+            await runtime_client.aclose()
 
 
 async def _run_runtime_coordinator(
@@ -148,9 +153,10 @@ async def _run_runtime_coordinator(
     coordinator_guard: Callable[[], None] | None,
     worker_id: str,
     health: DispatcherHealth,
+    client: WorkerRuntimeClient,
 ) -> None:
-    configure_logging()
     _configure_blocking_executor(max_workers=_DEFAULT_EXECUTOR_WORKERS, thread_name_prefix="runtime-default")
+    await run_control_in_thread(configure_logging)
     logger.info("Starting runtime coordinator...")
     await run_control_in_thread(validate_engine_runtime_readiness)
     if coordinator_generation is not None:
@@ -163,7 +169,6 @@ async def _run_runtime_coordinator(
     if removed:
         logger.warning("Removed %s orphaned engine container(s) during startup", removed)
     local_stop = stop_event or asyncio.Event()
-    client = worker_runtime_client()
     recovery_poll_seconds = max(
         _MIN_RUNTIME_RECOVERY_SECONDS,
         float(settings.runtime_reconciliation_poll_interval_seconds),
@@ -192,12 +197,12 @@ async def _run_runtime_coordinator(
         work_kinds=("storage_cleanup",),
     )
     compute_request_recovery = NamespaceRecovery(
-        client.reconcile_expired_compute_requests,
+        client.reconcile_expired_compute_requests_async,
         work_name="exhausted compute requests",
         interval_seconds=recovery_poll_seconds,
     )
     build_job_recovery = NamespaceRecovery(
-        client.reconcile_expired_build_jobs,
+        client.reconcile_expired_build_jobs_async,
         work_name="expired build jobs",
         interval_seconds=recovery_poll_seconds,
     )
@@ -242,8 +247,7 @@ async def _run_runtime_coordinator(
             # Polling remains a recovery path if Postgres LISTEN is unavailable
             # during startup. Normal operation should be notification-driven.
             logger.warning("Worker runtime notifications unavailable; using recovery polling: %s", exc)
-        await run_control_in_thread(
-            client.register_worker,
+        await client.register_worker_async(
             worker_id=worker_id,
             kind=RuntimeWorkerKind.COORDINATOR.value,
             hostname=os.uname().nodename,
@@ -405,14 +409,14 @@ async def _run_runtime_coordinator(
         # for request tasks before this point can deadlock shutdown forever.
         await run_control_in_thread(manager.shutdown_all)
         await asyncio.gather(*request_tasks, datasource_delete_task, storage_cleanup_task, *build_tasks, return_exceptions=True)
-        await run_control_in_thread(shutdown_compute_request_lease_batcher)
+        await shutdown_compute_request_lease_batcher()
         if runtime_listener_task is not None:
             await asyncio.gather(runtime_listener_task, return_exceptions=True)
         await stop_runtime_listener(runtime_listener)
         await data_plane_server.stop(grace=1.0)
         await run_control_in_thread(snapshot_notifier.close)
         with contextlib.suppress(Exception):
-            await run_control_in_thread(client.stop_worker, worker_id=worker_id, timeout_seconds=2.0)
+            await client.stop_worker_async(worker_id=worker_id, timeout_seconds=2.0)
     logger.info("Runtime coordinator shutdown complete generation=%s", coordinator_generation)
 
 
@@ -431,7 +435,7 @@ async def _wait_for_coordinator_generation(stop_event: asyncio.Event, client: Wo
     retry_seconds = 0.25
     while not stop_event.is_set():
         try:
-            return await run_control_in_thread(client.get_coordinator_generation)
+            return await client.get_coordinator_generation_async()
         except BackendWorkerRpcError as exc:
             if exc.error_code not in {"UNAVAILABLE", "DEADLINE_EXCEEDED"}:
                 raise
@@ -451,7 +455,7 @@ async def _watch_coordinator_generation(
 ) -> None:
     while not process_stop_event.is_set():
         try:
-            active_generation = await run_control_in_thread(client.get_coordinator_generation)
+            active_generation = await client.get_coordinator_generation_async()
         except BackendWorkerRpcError as exc:
             if exc.error_code not in {"UNAVAILABLE", "DEADLINE_EXCEEDED"}:
                 logger.warning("Worker coordinator generation check failed permanently: %s", exc.error)
@@ -481,6 +485,7 @@ async def _run_worker_generation(
             stop_event=generation_stop_event,
             coordinator_generation=generation,
             coordinator_guard=lambda: client.assert_coordinator_generation(generation),
+            client=client,
         ),
         name=f"worker-runtime-generation-{generation}",
     )
@@ -519,23 +524,26 @@ async def _run_worker_generation(
 async def main() -> None:
     stop_event = asyncio.Event()
     install_stop_handlers(stop_event)
-    client = worker_runtime_client()
-    while not stop_event.is_set():
-        generation = await _wait_for_coordinator_generation(stop_event, client)
-        if generation is None:
-            return
-        os.environ["RUNTIME_COORDINATOR_GENERATION"] = str(generation)
-        try:
-            await _run_worker_generation(stop_event, client, generation)
-        except asyncio.CancelledError:
-            raise
-        except Exception:
-            logger.exception("Worker manager generation failed; waiting for coordinator recovery generation=%s", generation)
-        finally:
-            os.environ.pop("RUNTIME_COORDINATOR_GENERATION", None)
-        if not stop_event.is_set():
-            with contextlib.suppress(TimeoutError):
-                await asyncio.wait_for(stop_event.wait(), timeout=1.0)
+    client = await async_client_from_env()
+    try:
+        while not stop_event.is_set():
+            generation = await _wait_for_coordinator_generation(stop_event, client)
+            if generation is None:
+                return
+            os.environ["RUNTIME_COORDINATOR_GENERATION"] = str(generation)
+            try:
+                await _run_worker_generation(stop_event, client, generation)
+            except asyncio.CancelledError:
+                raise
+            except Exception:
+                logger.exception("Worker manager generation failed; waiting for coordinator recovery generation=%s", generation)
+            finally:
+                os.environ.pop("RUNTIME_COORDINATOR_GENERATION", None)
+            if not stop_event.is_set():
+                with contextlib.suppress(TimeoutError):
+                    await asyncio.wait_for(stop_event.wait(), timeout=1.0)
+    finally:
+        await close_async_runtime_clients()
 
 
 if __name__ == "__main__":

@@ -232,12 +232,31 @@ just prod           # Build frontend and start production server
 
 ### Running Tests
 
+Each public test recipe invocation gets its own private Docker Compose
+enclave, daemon, network, and volumes. `just test` runs the public per-suite
+recipes sequentially, so each suite gets a fresh enclave. Install Docker with a
+daemon that permits privileged containers, plus `just`; Python, Bun, protocol
+compiler, and browser dependencies are installed inside the test images. Test
+logs and diagnostics are exported under `.test-artifacts/<run-id>` on success
+and failure.
+
 ```bash
 # Standard validation workflow
 just verify
 just test
 just test-e2e
 ```
+
+`TEST_MEMORY_MB` and `TEST_CPUS` optionally cap the total memory and CPU budget
+per test recipe invocation, shared between its runner and isolated Docker
+daemon. Without `TEST_MEMORY_MB`, Python and Vitest invocations budget 75% of
+memory available to Docker; E2E budgets 90%. The E2E controller receives 512
+MiB and a CPU allocation of at least 0.5 CPUs or 20% of the total budget,
+whichever is greater; the isolated daemon receives the remainder, including
+all browser containers. Concurrent invocations each receive their own cap,
+so their combined use can exceed available host capacity. These limits do not
+reserve host resources; all containers and other workloads still share the
+machine's finite CPU and memory.
 
 For code or config changes, run all three commands before opening a PR. For targeted local work, the tests live under `packages/backend/tests/`, `packages/scheduler/tests/`, `packages/worker/tests/`, and `packages/frontend/tests/` (unit) plus `packages/frontend/src/**/*.test.ts` (Vitest).
 

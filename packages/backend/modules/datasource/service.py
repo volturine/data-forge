@@ -9,7 +9,6 @@ from sqlalchemy.orm import defer
 from sqlmodel import Session
 
 from backend_core import datasource_delete_service, storage_cleanup_service
-from backend_core.datasource_storage import cleanup_datasource_storage
 from backend_core.domain.build_runs.models import BuildRunStatus
 from backend_core.domain.datasource.models import DataSourceCreatedBy
 from backend_core.domain.datasource.source_types import DataSourceFileType, DataSourceType
@@ -755,10 +754,8 @@ def update_datasource(
 
 
 def delete_datasource(session: Session, datasource_id: str) -> None:
-    datasource = datasource_delete_service.get_datasource(session, datasource_id)
-    if not datasource:
-        raise datasource_not_found(datasource_id)
-    cleanup_datasource_storage(datasource)
-    session.delete(datasource)
-    session.commit()
+    # Keep internal onboarding deletion on the same tombstone/drain path as
+    # the datasource API. The worker finalizes the row after active RID work
+    # has settled and atomically records managed-storage cleanup intents.
+    datasource_delete_service.request_delete(session, datasource_id)
     logger.info(f'Deleted datasource {datasource_id}')

@@ -23,7 +23,8 @@ Before you begin, ensure you have the following installed:
 - **Bun** — Frontend runtime and package manager
 - **uv** — Python package manager ([install](https://github.com/astral-sh/uv))
 - **just** — Command runner ([install](https://github.com/casey/just))
-- **Docker** (optional) — For containerized development/deployment
+- **Docker** — Required for tests and container workflows. Test runs need a
+  daemon that permits privileged containers for the isolated nested daemon.
 
 You can run the prerequisites script for Ubuntu/Debian:
 
@@ -70,6 +71,20 @@ just test             # Run backend pytest + frontend unit tests
 just test-e2e         # Run end-to-end tests with the managed runtime
 just verify           # Format + static checks only
 ```
+
+Each public test recipe invocation gets a separate Docker Compose enclave,
+daemon, network, and volumes. `just test` orchestrates the public per-suite
+recipes sequentially, each with a fresh enclave. For tests, the host needs
+Docker and `just`; Python, Bun, protocol tools, and browsers are provided
+inside the enclave. Test logs and diagnostics are exported under
+`.test-artifacts/<run-id>` on success and failure. `TEST_MEMORY_MB` and
+`TEST_CPUS` optionally cap the combined runner and daemon resources per
+invocation; when memory is unset, Python and Vitest invocations budget 75% of
+memory available to Docker, and E2E budgets 90%. E2E assigns 512 MiB and at
+least 0.5 CPUs or 20% of its CPU budget, whichever is greater, to the
+controller; the daemon gets the remainder and runs all browser containers.
+Concurrent invocations add their budgets together, and the host's CPU and
+memory remain finite and shared with other workloads.
 
 For code or config changes, run `just verify`, `just test`, and `just test-e2e` before asking for review or opening a PR.
 

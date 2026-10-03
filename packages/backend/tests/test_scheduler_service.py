@@ -5,19 +5,22 @@ from datetime import UTC, datetime, timedelta
 from typing import Any
 
 import pytest
-from sqlalchemy import event, update
+from sqlalchemy import event, select, update
 from sqlmodel import Session
 
 from backend_core import (
     build_jobs_service as build_job_service,
     build_runs_service as build_run_service,
 )
+from backend_core.build_datasource_dependencies import external_datasource_ids
 from backend_core.domain.analysis.models import AnalysisStatus
 from backend_core.domain.build_runs.models import BuildRunStatus
+from backend_core.domain.compute import schemas as compute_schemas
 from backend_core.domain.engine_runs.schemas import EngineRunKind
 from backend_core.domain.scheduler.schemas import ScheduleCreate, ScheduleUpdate
 from backend_core.exceptions import AppError
 from backend_core.persistence.analysis.models import Analysis, AnalysisDataSource
+from backend_core.persistence.build_runs.models import BuildRunDatasource
 from backend_core.persistence.datasource.models import DataSource
 from backend_core.persistence.scheduler.models import Schedule
 from backend_core.sqlmodel_typing import col
@@ -1061,6 +1064,14 @@ class TestEnqueueScheduleRun:
         assert run.schedule_id == schedule.id
         assert run.status == BuildRunStatus.QUEUED
         assert run.current_datasource_id == output.id
+        pipeline = compute_schemas.AnalysisPipelinePayload.model_validate(run.request_json['analysis_pipeline'])
+        source_ids = external_datasource_ids(pipeline)
+        persisted_ids = set(
+            test_db_session.execute(select(col(BuildRunDatasource.datasource_id)).where(col(BuildRunDatasource.build_id) == run.id)).scalars().all()
+        )
+        assert source_ids == (sample_datasource.id,)
+        assert persisted_ids == set(source_ids)
+        assert build_run_service.has_active_build_for_datasource(test_db_session, namespace='default', datasource_id=sample_datasource.id)
         job = build_job_service.get_job_by_build_id(test_db_session, run_id)
         assert job is not None
 
@@ -1088,6 +1099,7 @@ class TestEnqueueScheduleRun:
         assert run.schedule_id == schedule.id
         assert run.current_kind == EngineRunKind.BUILD.value
         assert run.status == BuildRunStatus.QUEUED
+        assert build_run_service.has_active_build_for_datasource(test_db_session, namespace='default', datasource_id=sample_datasource.id)
 
     def test_enqueue_schedule_for_raw_datasource_uses_build_kind(self, test_db_session: Session, sample_csv_file):
         raw = DataSource(
@@ -1133,6 +1145,7 @@ class TestEnqueueScheduleRun:
         assert run.schedule_id == schedule.id
         assert run.current_kind == EngineRunKind.BUILD.value
         assert run.status == BuildRunStatus.QUEUED
+        assert build_run_service.has_active_build_for_datasource(test_db_session, namespace='default', datasource_id=raw.id)
 
 
 class TestScheduleReconciliation:

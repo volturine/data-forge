@@ -46,7 +46,7 @@ async def _smtp_settings_lookup(_operation: object) -> dict[str, object]:
 def _use_smtp_test_executor(monkeypatch, executor: object, deadline: float = 12.0) -> None:
     from modules.settings import routes
 
-    monkeypatch.setattr(routes, 'run_in_threadpool', _smtp_settings_lookup)
+    monkeypatch.setattr(routes, 'run_api_blocking', _smtp_settings_lookup)
     monkeypatch.setattr(routes, '_SMTP_TEST_EXECUTOR', executor)
     monkeypatch.setattr(routes, '_SMTP_TEST_CAPACITY', threading.BoundedSemaphore(1))
     monkeypatch.setattr(routes, '_SMTP_TEST_DEADLINE', deadline)
@@ -482,7 +482,7 @@ class TestTestSmtp:
 
         with ThreadPoolExecutor(max_workers=1) as executor:
             _use_smtp_test_executor(monkeypatch, executor)
-            monkeypatch.setattr(routes, 'run_in_threadpool', _blocked_lookup)
+            monkeypatch.setattr(routes, 'run_api_blocking', _blocked_lookup)
             monkeypatch.setattr(routes, 'send_smtp_message', lambda *_args, **_kwargs: sent.set())
             request = asyncio.create_task(routes.test_smtp(TestSmtpRequest(to='recipient@test.com')))
             await waiting.wait()
@@ -513,7 +513,7 @@ class TestTestSmtp:
         executor = DelayedExecutor()
         sent = threading.Event()
         monkeypatch.setattr(routes, 'send_smtp_message', lambda *_args, **_kwargs: sent.set())
-        monkeypatch.setattr(routes, 'run_in_threadpool', _smtp_settings_lookup)
+        monkeypatch.setattr(routes, 'run_api_blocking', _smtp_settings_lookup)
         monkeypatch.setattr(routes, '_SMTP_TEST_EXECUTOR', executor)
         monkeypatch.setattr(routes, '_SMTP_TEST_CAPACITY', threading.BoundedSemaphore(1))
         monkeypatch.setattr(routes, '_SMTP_TEST_DEADLINE', 0.01)

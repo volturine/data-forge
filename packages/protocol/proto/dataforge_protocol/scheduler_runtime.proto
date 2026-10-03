@@ -29,7 +29,8 @@ message SchedulerEnqueuedRun {
 
 message SchedulerDueNamespace {
   string namespace = 1 [(buf.validate.field).string.pattern = "^[a-zA-Z0-9_-]+$"];
-  int64 generation = 2 [(buf.validate.field).int64.gte = 1];
+  int64 generation = 2 [(buf.validate.field).int64.gte = 0];
+  repeated int64 wake_ids = 3 [(buf.validate.field).repeated.items.int64.gte = 1];
 }
 
 message SchedulerDueNamespacesResponse {
@@ -39,7 +40,8 @@ message SchedulerDueNamespacesResponse {
 message SchedulerRunDueRequest {
   string worker_id = 1 [(buf.validate.field).string.min_len = 1];
   string target_namespace = 2 [(buf.validate.field).string.pattern = "^[a-zA-Z0-9_-]+$"];
-  int64 generation = 3 [(buf.validate.field).int64.gte = 1];
+  int64 generation = 3 [(buf.validate.field).int64.gte = 0];
+  repeated int64 wake_ids = 4 [(buf.validate.field).repeated.items.int64.gte = 1];
 }
 
 message SchedulerRunFailure {

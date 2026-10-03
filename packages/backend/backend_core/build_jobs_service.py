@@ -16,7 +16,7 @@ from backend_core.namespace import get_namespace
 from backend_core.persistence.build_jobs.models import BuildJob
 from backend_core.persistence.build_runs.models import BuildRun
 from backend_core.runtime_work_service import RuntimeWorkKind
-from backend_core.sqlmodel_typing import sa
+from backend_core.sqlmodel_typing import col, sa
 from backend_core.transactions import committed
 from backend_core.transitions import TransitionOutcome, TransitionResult, applied, rejected
 
@@ -191,6 +191,7 @@ def stage_exhausted_jobs(session: Session) -> list[str]:
         generation = row.lease_generation
         attempt = row.attempts
         build_ids.append(row.build_id)
+        schedule_id = session.execute(select(col(BuildRun.schedule_id)).where(col(BuildRun.id) == row.build_id)).scalar_one_or_none()
         row.status = BuildJobStatus.FAILED
         row.last_error = 'Build job lease expired after maximum attempts'
         row.clear_lease()
@@ -207,6 +208,8 @@ def stage_exhausted_jobs(session: Session) -> list[str]:
                 updated_at=now,
             )
         )
+        if schedule_id is not None:
+            runtime_work_service.mark_schedule_pending(session, namespace=get_namespace())
         record_lease_transition(
             kind='build_job',
             transition='exhaust',

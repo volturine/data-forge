@@ -176,9 +176,10 @@ def test_compute_wakes_skip_postgres_notification_for_sqlite() -> None:
 
 
 class _NotificationConnection:
-    def __init__(self, payloads: Iterable[str] = (), *, fail_receive: bool = False) -> None:
+    def __init__(self, payloads: Iterable[str] = (), *, fail_receive: bool = False, end_receive: bool = False) -> None:
         self.payloads = payloads
         self.fail_receive = fail_receive
+        self.end_receive = end_receive
         self.closed = False
         self.emitted = 0
         self.operation_threads: list[int] = []
@@ -205,7 +206,8 @@ class _NotificationConnection:
             for payload in self.payloads:
                 self.emitted += 1
                 yield Notify('runtime_events', payload, 1)
-            await asyncio.Event().wait()
+            if not self.end_receive:
+                await asyncio.Event().wait()
         finally:
             self.generator_closed.set()
 
@@ -242,6 +244,55 @@ async def test_runtime_listener_owns_async_connection_on_the_event_loop(monkeypa
 
     assert connection.closed
     assert connection.operation_threads == [threading.get_ident(), threading.get_ident()]
+
+
+@pytest.mark.parametrize('server_mode', ['closes', 'raises', 'missing'])
+@pytest.mark.asyncio
+async def test_stopping_runtime_listener_resets_sync_notify_connection(monkeypatch, server_mode: str) -> None:
+    from backend_core import runtime_ipc
+
+    class CachedConnection:
+        closed = False
+
+        def close(self) -> None:
+            self.closed = True
+
+    class Listener:
+        async def close(self) -> None:
+            if server_mode == 'raises':
+                raise RuntimeError('listener close failed')
+
+    connection = CachedConnection()
+    monkeypatch.setattr(runtime_ipc, '_notify_connection_state', (connection, 'postgresql://test'))
+    listener = None if server_mode == 'missing' else cast(runtime_ipc.RuntimeNotificationListener, Listener())
+
+    if server_mode == 'raises':
+        with pytest.raises(RuntimeError, match='listener close failed'):
+            await runtime_ipc.stop_api_server(listener)
+    else:
+        await runtime_ipc.stop_api_server(listener)
+
+    assert connection.closed
+    assert runtime_ipc._notify_connection_state is None
+
+
+def test_configuring_runtime_database_url_resets_sync_notify_connection(monkeypatch) -> None:
+    from backend_core import runtime_ipc
+
+    class CachedConnection:
+        closed = False
+
+        def close(self) -> None:
+            self.closed = True
+
+    connection = CachedConnection()
+    monkeypatch.setattr(runtime_ipc, '_notify_connection_state', (connection, 'postgresql://old'))
+    monkeypatch.setattr(runtime_ipc, '_database_url_provider', runtime_ipc._database_url_provider)
+    runtime_ipc.configure_database_url_provider(lambda: 'postgresql://new')
+
+    assert connection.closed
+    assert runtime_ipc._notify_connection_state is None
+    assert runtime_ipc._psycopg_conninfo() == 'postgresql://new'
 
 
 @pytest.mark.asyncio
@@ -287,6 +338,43 @@ async def test_runtime_listener_reconnect_requests_recovery_without_a_new_notifi
         await task
         await listener.close()
     assert second.closed and second.generator_closed.is_set()
+
+
+@pytest.mark.asyncio
+async def test_runtime_listener_reconnects_after_normal_notification_stream_end(monkeypatch) -> None:
+    from backend_core import runtime_ipc
+
+    first = _NotificationConnection(end_receive=True)
+    second = _NotificationConnection([json.dumps({'kind': 'live'})])
+    _install_connections(monkeypatch, first, second)
+    listener = await runtime_ipc.start_api_server()
+    stop = asyncio.Event()
+    recovered = asyncio.Event()
+    handled = asyncio.Event()
+    recoveries = 0
+    received: list[dict[str, object]] = []
+
+    async def handle(payload: dict[str, object]) -> None:
+        received.append(payload)
+        handled.set()
+
+    async def recover() -> None:
+        nonlocal recoveries
+        if second.entered.is_set():
+            recoveries += 1
+            recovered.set()
+
+    task = asyncio.create_task(runtime_ipc.serve_api_notifications(listener, stop, handle, recover=recover))
+    try:
+        await asyncio.wait_for(asyncio.gather(recovered.wait(), handled.wait()), timeout=2)
+        assert first.closed and first.generator_closed.is_set()
+        assert received == [{'kind': 'live'}]
+    finally:
+        stop.set()
+        await task
+        await listener.close()
+    assert second.closed and second.generator_closed.is_set()
+    assert recoveries >= 1
 
 
 @pytest.mark.asyncio

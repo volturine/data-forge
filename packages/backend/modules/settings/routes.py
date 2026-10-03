@@ -8,11 +8,10 @@ from functools import partial
 
 import httpx
 from fastapi import Depends, HTTPException
-from fastapi.concurrency import run_in_threadpool
-from sqlmodel import Session
 
 from backend_core import settings_store
-from backend_core.database import get_settings_db_async, run_settings_db
+from backend_core.api_execution_budget import run_api_blocking
+from backend_core.database import run_settings_db
 from backend_core.error_handlers import handle_errors
 from backend_core.secrets import MASKED_SECRET
 from backend_core.settings_schemas import (
@@ -65,25 +64,26 @@ def _consume_smtp_test_result(future: asyncio.Future[None]) -> None:
 
 @router.get('', response_model=SettingsResponse, mcp=True)
 @handle_errors(operation='get settings')
-def read_settings(
-    session: Session = Depends(get_settings_db_async),
+async def read_settings(
     user: User = Depends(get_current_user),
 ) -> SettingsResponse:
     """Get application settings including SMTP config, Telegram token, OpenRouter API key, and feature flags."""
-    return SettingsResponse.model_validate(settings_store.get_settings(session))
+    settings = await run_api_blocking(run_settings_db, settings_store.get_settings)
+    return SettingsResponse.model_validate(settings)
 
 
 @router.put('', response_model=SettingsResponse, mcp=True)
 @handle_errors(operation='update settings')
-def write_settings(
+async def write_settings(
     data: SettingsUpdate,
-    session: Session = Depends(get_settings_db_async),
     user: User = Depends(get_current_user),
 ) -> SettingsResponse:
     """Update application settings. Only provided fields are changed; omitted fields keep current values."""
-    result = settings_store.update_settings(
-        session,
-        CoreSettingsUpdate.model_validate(data.model_dump(exclude_unset=True)),
+    update = CoreSettingsUpdate.model_validate(data.model_dump(exclude_unset=True))
+    result = await run_api_blocking(
+        run_settings_db,
+        settings_store.update_settings,
+        update,
     )
     typed_result = SettingsResponse.model_validate(result)
 
@@ -94,7 +94,7 @@ def write_settings(
 @handle_errors(operation='test smtp')
 async def test_smtp(body: TestSmtpRequest, user: User = Depends(get_current_user)) -> TestResult:
     """Send a test email via SMTP to verify email notification settings. Requires 'to' address in body."""
-    smtp = await run_in_threadpool(settings_store.get_resolved_smtp)
+    smtp = await run_api_blocking(settings_store.get_resolved_smtp)
     host = str(smtp.get('host', ''))
     port = int(str(smtp.get('port', 587)))
     smtp_user = str(smtp.get('user', ''))
@@ -144,7 +144,7 @@ async def test_smtp(body: TestSmtpRequest, user: User = Depends(get_current_user
 @handle_errors(operation='test telegram')
 async def test_telegram(body: TestTelegramRequest, user: User = Depends(get_current_user)) -> TestResult:
     """Send a test message to a Telegram chat to verify bot settings. Requires chat_id in body."""
-    resolved = await run_in_threadpool(run_settings_db, telegram_runtime_store.read_settings)
+    resolved = await run_api_blocking(run_settings_db, telegram_runtime_store.read_settings)
     token = resolved.token
     if not resolved.enabled:
         return TestResult(success=False, message='Telegram bot token not configured')
@@ -179,7 +179,7 @@ async def detect_telegram_chat(
     Send a message to your bot first, then call this to discover the chat_id.
     Returns a list of detected chats with their IDs and titles.
     """
-    resolved = await run_in_threadpool(run_settings_db, telegram_runtime_store.read_settings)
+    resolved = await run_api_blocking(run_settings_db, telegram_runtime_store.read_settings)
     if not resolved.enabled:
         return DetectTelegramResponse(success=False, message='Telegram bot token not configured')
     try:

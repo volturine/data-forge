@@ -27,8 +27,10 @@ import { createRequestTrace, type RequestTrace } from './utils/request-trace.js'
 const rawBrowserCount = process.env.E2E_CONCURRENCY_BROWSERS?.trim() ?? '';
 const browserCount = rawBrowserCount ? Number.parseInt(rawBrowserCount, 10) : 50;
 const accountCount = Math.min(30, browserCount);
-const browserTabsPerProcess = 10;
-const browserProcessCount = Math.min(browserCount, Math.ceil(browserCount / browserTabsPerProcess));
+// BrowserContexts isolate account cookies and storage. Spread them across a
+// small process pool so the constrained load generator does not starve document
+// navigation by starting one Chromium process per account.
+const browserProcessCount = Math.min(accountCount, 8);
 const authRequired = process.env.AUTH_REQUIRED !== 'false';
 
 if (!Number.isInteger(browserCount) || browserCount < 1) {
@@ -38,6 +40,15 @@ if (!Number.isInteger(browserCount) || browserCount < 1) {
 type LoadAnalysis = {
 	id: string;
 	name: string;
+};
+
+type NavigationFailurePage = {
+	index: number;
+	kind: 'analysis' | 'datasource';
+	page: Page;
+	failedAtEpochMs: number;
+	failedAtMonotonicMs: number;
+	state: Promise<{ pageState: unknown; snapshotReceivedAtEpochMs: number }>;
 };
 
 type PageDiagnostics = {
@@ -92,24 +103,14 @@ function installPageDiagnostics(
 			/^\/api\/v1\/(config|auth\/me|namespaces?|analysis|datasource)(\/|$)/.test(path) ||
 			path === '/api/v1/compute/preview'
 		) {
-			pendingResponseReads.push(
-				response
-					.allHeaders()
-					.then((headers) => {
-						const serverDuration = headers['server-timing']?.match(/app;dur=([\d.]+)/)?.[1];
-						const requestId = headers['x-request-id'] ?? 'missing';
-						const serverTime = serverDuration ? `${serverDuration}ms` : 'missing';
-						recordDiagnostic(
-							diagnostics.apiResponses,
-							`${summary} server_ms=${serverTime} request_id=${requestId}`
-						);
-					})
-					.catch(() =>
-						recordDiagnostic(
-							diagnostics.apiResponses,
-							`${summary} server_ms=unavailable request_id=unavailable`
-						)
-					)
+			// These ordinary headers are already cached; allHeaders() adds one protocol call per response.
+			const headers = response.headers();
+			const serverDuration = headers['server-timing']?.match(/app;dur=([\d.]+)/)?.[1];
+			const requestId = headers['x-request-id'] ?? 'missing';
+			const serverTime = serverDuration ? `${serverDuration}ms` : 'missing';
+			recordDiagnostic(
+				diagnostics.apiResponses,
+				`${summary} server_ms=${serverTime} request_id=${requestId}`
 			);
 		}
 		if (request.resourceType() === 'document') {
@@ -203,6 +204,38 @@ async function capturePageState(
 		const datasourceRow = Array.from(document.querySelectorAll('[data-ds-row]')).find(
 			(element) => element.getAttribute('data-ds-row') === targetDatasourceName
 		);
+		const shellBootstrap = document.querySelector<HTMLElement>('[data-shell-bootstrap]');
+		const mainRoute = document.querySelector<HTMLElement>('main[data-app-route]');
+		const navigationTiming = performance.getEntriesByType('navigation')[0] as
+			PerformanceNavigationTiming | undefined;
+		const apiResourceTimings = performance.getEntriesByType('resource').flatMap((entry) => {
+			const timing = entry as PerformanceResourceTiming;
+			let url: URL;
+			try {
+				url = new URL(timing.name, window.location.href);
+			} catch {
+				return [];
+			}
+			if (url.origin !== window.location.origin || !url.pathname.startsWith('/api/')) return [];
+			return [
+				{
+					path: url.pathname,
+					initiatorType: timing.initiatorType,
+					startTime: timing.startTime,
+					fetchStart: timing.fetchStart,
+					requestStart: timing.requestStart,
+					responseStart: timing.responseStart,
+					responseEnd: timing.responseEnd,
+					duration: timing.duration,
+					transferSize: timing.transferSize,
+					serverTiming: timing.serverTiming.map(({ name, duration, description }) => ({
+						name,
+						duration,
+						description
+					}))
+				}
+			];
+		});
 		const rowRect = datasourceRow?.getBoundingClientRect();
 		const hitTarget = rowRect
 			? document.elementFromPoint(rowRect.x + rowRect.width / 2, rowRect.y + rowRect.height / 2)
@@ -211,6 +244,36 @@ async function capturePageState(
 			readyState: document.readyState,
 			visibilityState: document.visibilityState,
 			title: document.title,
+			snapshotObservedAt: { timeOrigin: performance.timeOrigin, now: performance.now() },
+			navigationCount: document.querySelectorAll('[aria-label="Main navigation"]').length,
+			shellInteractiveCount: document.querySelectorAll('[data-shell-interactive="true"]').length,
+			shellBootstrap: shellBootstrap
+				? {
+						phase: shellBootstrap.getAttribute('data-shell-bootstrap'),
+						text: shellBootstrap.textContent?.trim().slice(0, 300) ?? '',
+						display: getComputedStyle(shellBootstrap).display,
+						visibility: getComputedStyle(shellBootstrap).visibility,
+						rect: (() => {
+							const rect = shellBootstrap.getBoundingClientRect();
+							return { x: rect.x, y: rect.y, width: rect.width, height: rect.height };
+						})()
+					}
+				: null,
+			mainRoute: mainRoute?.getAttribute('data-app-route') ?? null,
+			navigationTiming: navigationTiming
+				? {
+						startTime: navigationTiming.startTime,
+						fetchStart: navigationTiming.fetchStart,
+						requestStart: navigationTiming.requestStart,
+						responseStart: navigationTiming.responseStart,
+						responseEnd: navigationTiming.responseEnd,
+						domInteractive: navigationTiming.domInteractive,
+						domContentLoadedEventEnd: navigationTiming.domContentLoadedEventEnd,
+						loadEventEnd: navigationTiming.loadEventEnd,
+						duration: navigationTiming.duration
+					}
+				: null,
+			apiResourceTimings,
 			bodyText: document.body?.innerText.slice(0, 1_200) ?? '',
 			navigation: describe(document.querySelector('[aria-label="Main navigation"]')),
 			main: describe(document.querySelector('main')),
@@ -340,6 +403,33 @@ test.describe('Concurrent authenticated browser sessions', () => {
 			Page,
 			Map<Request, { startedAt: number; resourceId: string | null }>
 		>();
+		const failedNavigationPages: NavigationFailurePage[] = [];
+		const captureNavigationFailure = (
+			page: Page,
+			index: number,
+			kind: NavigationFailurePage['kind']
+		): void => {
+			const failedAtEpochMs = Date.now();
+			const failedAtMonotonicMs = performance.now();
+			const state = capturePageState(page, index, sharedDatasource.name)
+				.then((pageState) => ({ pageState, snapshotReceivedAtEpochMs: Date.now() }))
+				.catch((captureError: unknown) => ({
+					pageState: {
+						index,
+						url: page.url(),
+						snapshotError: String(captureError)
+					},
+					snapshotReceivedAtEpochMs: Date.now()
+				}));
+			failedNavigationPages.push({
+				index,
+				kind,
+				page,
+				failedAtEpochMs,
+				failedAtMonotonicMs,
+				state
+			});
+		};
 
 		let probeFailure: unknown;
 		try {
@@ -451,6 +541,7 @@ test.describe('Concurrent authenticated browser sessions', () => {
 					try {
 						await gotoAnalysisEditor(page, analyses[index].id, readyTimeoutMs());
 					} catch (error) {
+						captureNavigationFailure(page, index, 'analysis');
 						throw new Error(`analysis tab ${index} editor navigation failed: ${String(error)}`, {
 							cause: error
 						});
@@ -465,6 +556,7 @@ test.describe('Concurrent authenticated browser sessions', () => {
 						await gotoAuthedRoute(page, `/datasources/${sharedDatasource.id}`, readyTimeoutMs());
 						await waitForDatasourceList(page, readyTimeoutMs());
 					} catch (error) {
+						captureNavigationFailure(page, tabIndex, 'datasource');
 						throw new Error(`datasource tab ${tabIndex} page navigation failed: ${String(error)}`, {
 							cause: error
 						});
@@ -530,6 +622,27 @@ test.describe('Concurrent authenticated browser sessions', () => {
 			if (!templateBody) throw new Error('No preview request body was captured by the load probe');
 			const template = JSON.parse(templateBody) as Record<string, unknown>;
 			const workPages = datasourcePages.length > 0 ? datasourcePages : analysisPages;
+			const completedCacheHit = await workPages[0].evaluate(async (body) => {
+				const startedAt = performance.now();
+				const response = await fetch('/api/v1/compute/preview', {
+					method: 'POST',
+					headers: { 'content-type': 'application/json' },
+					body: JSON.stringify(body)
+				});
+				const payload = (await response.json()) as { data?: unknown[] };
+				const serverTiming = response.headers.get('server-timing') ?? '';
+				const appDuration = serverTiming.match(/app;dur=([\d.]+)/)?.[1];
+				return {
+					status: response.status,
+					rowCount: payload.data?.length ?? null,
+					wallMs: performance.now() - startedAt,
+					serverMs: appDuration ? Number(appDuration) : null
+				};
+			}, template);
+			expect(completedCacheHit.status).toBe(200);
+			expect(completedCacheHit.rowCount).toBeGreaterThan(0);
+			expect(completedCacheHit.serverMs).not.toBeNull();
+
 			const distinctResponses = await Promise.all(
 				[1, 2].map((rowLimit, index) =>
 					workPages[index % workPages.length].evaluate(
@@ -577,7 +690,9 @@ test.describe('Concurrent authenticated browser sessions', () => {
 				datasourcePreviewP50Ms: percentile(datasourcePreviewLatencies, 0.5),
 				datasourcePreviewP95Ms: percentile(datasourcePreviewLatencies, 0.95),
 				commandIsolationRowCounts: distinctResponses.map(({ rowCount }) => rowCount),
-				distinctDatasourceCommands
+				distinctDatasourceCommands,
+				completedSameCommandCacheHitWallMs: completedCacheHit.wallMs,
+				completedSameCommandCacheHitServerMs: completedCacheHit.serverMs
 			};
 			await testInfo.attach('load-probe-metrics', {
 				body: JSON.stringify(loadMetrics, null, 2),
@@ -586,22 +701,75 @@ test.describe('Concurrent authenticated browser sessions', () => {
 			console.info(`[load-probe-metrics] ${JSON.stringify(loadMetrics)}`);
 		} catch (error) {
 			probeFailure = error;
+			const browserDiagnostics =
+				failedNavigationPages.length > 0
+					? await Promise.all(
+							failedNavigationPages.map(async (failure) => {
+								const screenshotPromise = failure.page
+									.screenshot({ timeout: 2_000 })
+									.catch((captureError: unknown) => {
+										console.error(
+											`Could not capture navigation failure screenshot for tab ${failure.index}: ${String(captureError)}`
+										);
+										return undefined;
+									});
+								const [state, screenshot] = await Promise.all([failure.state, screenshotPromise]);
+								const pendingPreviewRequests = [
+									...(pendingPreviewRequestsByPage.get(failure.page) ?? [])
+								].map(([_request, pending]) => ({
+									resourceId: pending.resourceId,
+									startedMsAgo: Date.now() - pending.startedAt
+								}));
+								const diagnostic = {
+									...(state.pageState as object),
+									navigationFailureKind: failure.kind,
+									failedAtEpochMs: failure.failedAtEpochMs,
+									failedAtMonotonicMs: failure.failedAtMonotonicMs,
+									snapshotReceivedAtEpochMs: state.snapshotReceivedAtEpochMs,
+									...diagnosticsByPage.get(failure.page),
+									pendingPreviewRequests
+								};
+								await testInfo
+									.attach(
+										`load-probe-${failure.kind}-navigation-failure-tab-${failure.index}-dom`,
+										{ body: JSON.stringify(diagnostic, null, 2), contentType: 'application/json' }
+									)
+									.catch((attachError: unknown) => {
+										console.error(
+											`Could not attach navigation failure DOM: ${String(attachError)}`
+										);
+									});
+								if (screenshot) {
+									await testInfo
+										.attach(
+											`load-probe-${failure.kind}-navigation-failure-tab-${failure.index}-screenshot`,
+											{ body: screenshot, contentType: 'image/png' }
+										)
+										.catch((attachError: unknown) => {
+											console.error(
+												`Could not attach navigation failure screenshot: ${String(attachError)}`
+											);
+										});
+								}
+								return diagnostic;
+							})
+						)
+					: await Promise.all(
+							pages.map(async (page, index) => {
+								const pendingPreviewRequests = [
+									...(pendingPreviewRequestsByPage.get(page) ?? [])
+								].map(([_request, pending]) => ({
+									resourceId: pending.resourceId,
+									startedMsAgo: Date.now() - pending.startedAt
+								}));
+								return {
+									...((await capturePageState(page, index, sharedDatasource.name)) as object),
+									...diagnosticsByPage.get(page),
+									pendingPreviewRequests
+								};
+							})
+						);
 			await Promise.all([...pendingResponseReadsByPage.values()].flat());
-			const browserDiagnostics = await Promise.all(
-				pages.map(async (page, index) => {
-					const pendingPreviewRequests = [...(pendingPreviewRequestsByPage.get(page) ?? [])].map(
-						([_request, pending]) => ({
-							resourceId: pending.resourceId,
-							startedMsAgo: Date.now() - pending.startedAt
-						})
-					);
-					return {
-						...((await capturePageState(page, index, sharedDatasource.name)) as object),
-						...diagnosticsByPage.get(page),
-						pendingPreviewRequests
-					};
-				})
-			);
 			const accountUserIds = await Promise.all(
 				accountContexts.map(async (context) => {
 					try {

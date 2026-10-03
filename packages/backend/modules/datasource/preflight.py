@@ -1,4 +1,3 @@
-import asyncio
 import uuid
 from collections.abc import Mapping
 from dataclasses import dataclass
@@ -7,6 +6,7 @@ from datetime import UTC, datetime
 from sqlmodel import Session, select
 
 from backend_core import compute_requests_service, storage_cleanup_service
+from backend_core.api_execution_budget import run_api_blocking
 from backend_core.database import run_db
 from backend_core.dependencies import RuntimeAvailabilityProbe
 from backend_core.persistence.compute_requests.models import ComputeRequest
@@ -70,7 +70,7 @@ async def create_preflight(
         runtime_probe=runtime_probe,
         delete_source=delete_source,
     )
-    preflight = await asyncio.to_thread(run_db, _load_preflight, preflight_id)
+    preflight = await run_api_blocking(run_db, _load_preflight, preflight_id)
     if preflight is None:
         raise ValueError('Durable Excel preflight disappeared after completion')
     return preflight_id, preflight, result
@@ -78,7 +78,7 @@ async def create_preflight(
 
 async def get_preflight(preflight_id: str) -> ExcelPreflight | None:
     await _cleanup_expired()
-    return await asyncio.to_thread(run_db, _load_preflight, preflight_id)
+    return await run_api_blocking(run_db, _load_preflight, preflight_id)
 
 
 def _remove_preflight(session: Session, preflight_id: str, *, delete_source: bool) -> str | None:
@@ -96,7 +96,7 @@ def _remove_preflight(session: Session, preflight_id: str, *, delete_source: boo
 
 
 async def clear_preflight(preflight_id: str, *, delete_source: bool = True) -> None:
-    await asyncio.to_thread(run_db, _remove_preflight, preflight_id, delete_source=delete_source)
+    await run_api_blocking(run_db, _remove_preflight, preflight_id, delete_source=delete_source)
 
 
 def _expire_preflights(session: Session) -> None:
@@ -127,7 +127,7 @@ def _expire_preflights(session: Session) -> None:
 
 
 async def _cleanup_expired() -> None:
-    await asyncio.to_thread(run_db, _expire_preflights)
+    await run_api_blocking(run_db, _expire_preflights)
 
 
 def preview_rows(result: Mapping[str, object]) -> list[list[str | None]]:

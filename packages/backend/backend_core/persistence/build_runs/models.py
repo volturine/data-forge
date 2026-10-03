@@ -1,7 +1,7 @@
 import datetime as dt
 from typing import Any
 
-from sqlalchemy import JSON, BigInteger, Column, DateTime, Float, Index, Integer, String, UniqueConstraint
+from sqlalchemy import JSON, BigInteger, Column, DateTime, Float, ForeignKey, Index, Integer, String, UniqueConstraint
 from sqlmodel import Field, SQLModel
 
 from backend_core.domain.build_runs.models import BuildRunStatus
@@ -182,3 +182,16 @@ class BuildEvent(SQLModel, table=True):  # type: ignore[call-arg, assignment]
     engine_run_id: str | None = Field(default=None, sa_column=Column(String, nullable=True, index=True))
     emitted_at: dt.datetime = Field(sa_column=Column(DateTime(timezone=True), nullable=False))
     created_at: dt.datetime = Field(sa_column=Column(DateTime(timezone=True), nullable=False))
+
+
+class BuildRunDatasource(SQLModel, table=True):  # type: ignore[call-arg, assignment]
+    """Immutable external datasource dependencies for a durable build run."""
+
+    __tablename__ = 'build_run_datasources'  # type: ignore[assignment]
+    __table_args__ = (Index('ix_build_run_datasources_namespace_source', 'namespace', 'datasource_id', 'build_id'),)
+
+    build_id: str = Field(
+        sa_column=Column(String, ForeignKey('build_runs.id', ondelete='CASCADE'), primary_key=True),
+    )
+    namespace: str = Field(sa_column=Column(String, nullable=False))
+    datasource_id: str = Field(sa_column=Column(String, primary_key=True))

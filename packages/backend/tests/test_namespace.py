@@ -1,3 +1,4 @@
+import asyncio
 from concurrent.futures import ThreadPoolExecutor
 from contextlib import contextmanager, nullcontext
 from pathlib import Path
@@ -5,6 +6,7 @@ from threading import Barrier, Event
 
 import pytest
 
+from backend_core.api_execution_budget import BoundedThreadPoolExecutor
 from backend_core.config import settings
 from backend_core.namespace import (
     get_namespace,
@@ -95,6 +97,39 @@ def test_list_namespaces_endpoint_merges_filesystem_and_runtime_namespaces(monke
 
     assert response.status_code == 200
     assert response.json() == {'namespaces': ['alpha', 'beta', 'default']}
+
+
+@pytest.mark.asyncio
+async def test_namespace_work_waits_for_bounded_executor_capacity(monkeypatch: pytest.MonkeyPatch) -> None:
+    executor = BoundedThreadPoolExecutor(max_workers=1, max_pending=0, thread_name_prefix='namespace-admission-test')
+    started = Event()
+    release = Event()
+
+    def block() -> str:
+        started.set()
+        if not release.wait(timeout=5):
+            raise TimeoutError('namespace admission test was not released')
+        return 'finished'
+
+    monkeypatch.setattr(namespace_routes, '_NAMESPACE_EXECUTOR', executor)
+    try:
+        running = asyncio.create_task(namespace_routes._run_namespace(namespace_routes._NAMESPACE_EXECUTOR, block))
+        assert await asyncio.to_thread(started.wait, 1)
+        waiting = asyncio.create_task(namespace_routes._run_namespace(namespace_routes._NAMESPACE_EXECUTOR, lambda: 'queued'))
+        cancelled = asyncio.create_task(namespace_routes._run_namespace(namespace_routes._NAMESPACE_EXECUTOR, lambda: 'cancelled'))
+        await asyncio.sleep(0)
+        assert not waiting.done()
+        assert not cancelled.done()
+        cancelled.cancel()
+        with pytest.raises(asyncio.CancelledError):
+            await cancelled
+        release.set()
+        assert await running == 'finished'
+        assert await waiting == 'queued'
+        assert await namespace_routes._run_namespace(namespace_routes._NAMESPACE_EXECUTOR, lambda: 'after-settlement') == 'after-settlement'
+    finally:
+        release.set()
+        executor.shutdown(wait=True, cancel_futures=True)
 
 
 def test_create_namespace_endpoint_registers_namespace(monkeypatch: pytest.MonkeyPatch) -> None:

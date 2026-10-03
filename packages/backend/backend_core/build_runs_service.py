@@ -8,7 +8,7 @@ from google.protobuf import json_format, timestamp_pb2
 from sqlalchemy import desc, func, or_, select, update
 from sqlmodel import Session
 
-from backend_core import runtime_ipc, runtime_outbox_service
+from backend_core import runtime_ipc, runtime_outbox_service, runtime_work_service
 from backend_core.domain.analysis.step_types import PipelineStepType
 from backend_core.domain.build_runs.models import BuildRunStatus
 from backend_core.domain.compute import schemas as compute_schemas
@@ -16,7 +16,7 @@ from backend_core.domain.engine_runs.schemas import EngineRunExecutionCategory, 
 from backend_core.domain.runtime.events import RuntimePayloadKind
 from backend_core.json_utils import copy_json_dict
 from backend_core.namespace import get_namespace
-from backend_core.persistence.build_runs.models import BuildEvent, BuildRun
+from backend_core.persistence.build_runs.models import BuildEvent, BuildRun, BuildRunDatasource
 from backend_core.persistence.datasource.models import DataSource
 from backend_core.persistence.runtime_events.models import RuntimeOutboxEvent
 from backend_core.sqlmodel_typing import col, sa
@@ -218,6 +218,7 @@ def stage_build_run(
     current_output_name: str | None = None,
     total_tabs: int = 0,
     execution_generation: int = 0,
+    datasource_ids: tuple[str, ...] = (),
     created_at: datetime | None = None,
     started_at: datetime | None = None,
 ) -> BuildRun:
@@ -249,6 +250,8 @@ def stage_build_run(
     )
     session.add(run)
     session.flush()
+    session.add_all(BuildRunDatasource(build_id=build_id, namespace=namespace, datasource_id=datasource_id) for datasource_id in sorted(set(datasource_ids)))
+    session.flush()
     return run
 
 
@@ -257,6 +260,19 @@ create_build_run = committed(stage_build_run, refresh=True)
 
 def get_build_run(session: Session, build_id: str) -> BuildRun | None:
     return session.get(BuildRun, build_id)
+
+
+def has_active_build_for_datasource(session: Session, *, namespace: str, datasource_id: str) -> bool:
+    statement = (
+        select(col(BuildRunDatasource.build_id))
+        .join(BuildRun, sa(BuildRun.id == BuildRunDatasource.build_id))
+        .where(sa(BuildRunDatasource.namespace == namespace))
+        .where(sa(BuildRunDatasource.datasource_id == datasource_id))
+        .where(sa(BuildRun.namespace == namespace))
+        .where(col(BuildRun.status).in_((BuildRunStatus.QUEUED, BuildRunStatus.RUNNING)))
+        .limit(1)
+    )
+    return session.execute(statement).first() is not None
 
 
 def get_build_run_by_engine_run(session: Session, engine_run_id: str) -> BuildRun | None:
@@ -517,6 +533,8 @@ def stage_build_event(
         _timings['outbox_sequence_update_ms'] = (time.perf_counter() - phase_started) * 1000
     phase_started = time.perf_counter()
     session.flush()
+    if terminal_status is not None and run.schedule_id is not None:
+        runtime_work_service.mark_schedule_pending(session, namespace=run_namespace)
     if _timings is not None:
         _timings['flush_ms'] = (time.perf_counter() - phase_started) * 1000
     if _outbox_notification is None and terminal_status is None:

@@ -164,3 +164,75 @@ def test_runtime_overview_includes_filesystem_namespaces(client, monkeypatch) ->
     assert response.status_code == 200
     namespaces = [item['namespace'] for item in response.json()['queue']['namespaces']]
     assert namespaces == ['default', 'beta']
+
+
+def test_runtime_overview_executes_its_database_unit_on_the_bounded_api_executor(client, monkeypatch) -> None:
+    import threading
+
+    from modules.runtime_overview import routes, schemas
+
+    thread_names: list[str] = []
+    response_body = schemas.RuntimeOverviewResponse(
+        mode='durable_single_node',
+        api=schemas.ApiProcessSummary(worker_id='api:test', pid=1, hostname='test', version='test'),
+        workers=[],
+        engines=[],
+        queue=schemas.QueueSummary(
+            namespaces=[],
+            totals=schemas.QueueTotalsSummary(
+                queued=0,
+                running=0,
+                orphaned=0,
+                oldest_queued_at=None,
+                oldest_queued_age_seconds=None,
+            ),
+        ),
+    )
+
+    def read_overview(_worker_id: str | None) -> schemas.RuntimeOverviewResponse:
+        thread_names.append(threading.current_thread().name)
+        return response_body
+
+    monkeypatch.setattr(routes, '_read_runtime_overview', read_overview)
+
+    response = client.get('/api/v1/runtime/overview')
+
+    assert response.status_code == 200
+    assert thread_names and thread_names[0].startswith('api-blocking_')
+
+
+def test_queue_summary_reuses_the_runtime_overview_settings_session(monkeypatch) -> None:
+    from typing import cast
+
+    from sqlmodel import Session
+
+    from modules.runtime_overview import schemas, service
+
+    session = cast(Session, object())
+    worker_sessions: list[object] = []
+
+    def reclaimable_worker_ids(used_session, *, kind):
+        assert kind == RuntimeWorkerKind.BUILD_WORKER
+        worker_sessions.append(used_session)
+        return set()
+
+    def read_namespace(_function, *, namespace, reclaimable_worker_ids):
+        assert reclaimable_worker_ids == set()
+        return schemas.QueueNamespaceSummary(
+            namespace=namespace,
+            queued=0,
+            running=0,
+            orphaned=0,
+            oldest_queued_at=None,
+            oldest_queued_age_seconds=None,
+        )
+
+    monkeypatch.setattr(service.runtime_workers_service, 'reclaimable_worker_ids', reclaimable_worker_ids)
+    monkeypatch.setattr(service, 'run_db', read_namespace)
+    monkeypatch.setattr(service, 'list_namespaces', lambda: ['default'])
+
+    summary = service.queue_summary(session)
+
+    assert worker_sessions == [session]
+    assert summary.totals.queued == 0
+    assert summary.namespaces[0].namespace == 'default'

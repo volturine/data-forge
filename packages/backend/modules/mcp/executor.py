@@ -2,7 +2,6 @@
 
 from __future__ import annotations
 
-import asyncio
 import re
 from typing import Any
 from urllib.parse import quote
@@ -10,6 +9,7 @@ from urllib.parse import quote
 import httpx
 from fastapi import FastAPI
 
+from backend_core.api_execution_budget import run_api_blocking
 from backend_core.websocket import serialize_json
 from modules.mcp.models import MCPHttpMethod
 from modules.mcp.tool_output import redact_secrets
@@ -92,4 +92,4 @@ async def call_tool(
             body = resp.text
         return {'status': status, 'body': redact_secrets(body), 'ok': 200 <= status < 300}
 
-    return await asyncio.to_thread(decode_response)
+    return await run_api_blocking(decode_response)

@@ -1,19 +1,21 @@
-import asyncio
 import contextvars
 import os
+import re
 import sys
 import threading
 import time
-from collections.abc import AsyncGenerator, AsyncIterator, Callable, Generator, Iterator
-from contextlib import asynccontextmanager, contextmanager
+from collections.abc import Callable, Generator, Iterator
+from contextlib import contextmanager
 from hashlib import sha256
 from threading import Lock
-from typing import Concatenate, ParamSpec
+from typing import Any, Concatenate, ParamSpec
 
 from sqlalchemy import event, text
 from sqlalchemy.engine import Connection, Engine
+from sqlalchemy.pool import QueuePool
 from sqlmodel import Session, create_engine
 
+from backend_core.api_execution_budget import run_api_blocking
 from backend_core.config import settings
 from backend_core.namespace import (
     get_namespace,
@@ -37,6 +39,9 @@ _DATABASE_STATEMENT_TIMING: contextvars.ContextVar[dict[str, object] | None] = c
     'database_statement_timing',
     default=None,
 )
+_SQL_STRING_LITERAL = re.compile(r"'(?:''|[^'])*'")
+_SQL_QUOTED_IDENTIFIER = re.compile(r'"(?:""|[^"])*"')
+_SQL_NUMBER = re.compile(r'(?<![A-Za-z_])\d+(?:\.\d+)?(?![A-Za-z_])')
 
 
 class RuntimeCoordinatorFenced(RuntimeError):
@@ -60,11 +65,44 @@ def _record_database_duration(metrics: dict[str, object], field: str, duration: 
     metrics[field] = float(recorded) + max(duration, 0.0)
 
 
-def record_database_admission_wait(duration_ms: float) -> None:
-    """Add API DB admission delay to the active request timing context."""
+class _TimedQueuePool(QueuePool):
+    """Record checkout wall time inside the active request/RPC timing span."""
+
+    def connect(self) -> Any:
+        metrics = _DATABASE_STATEMENT_TIMING.get()
+        if metrics is None:
+            return super().connect()
+        started = time.perf_counter()
+        try:
+            return super().connect()
+        finally:
+            duration_ms = max((time.perf_counter() - started) * 1000, 0.0)
+            _record_database_duration(metrics, 'db_pool_checkout_ms', duration_ms)
+            count = metrics.get('db_pool_checkout_count', 0)
+            metrics['db_pool_checkout_count'] = (count if isinstance(count, int) else 0) + 1
+            max_checkout_ms = metrics.get('db_pool_checkout_max_ms', 0.0)
+            if not isinstance(max_checkout_ms, (int, float)) or duration_ms > max_checkout_ms:
+                metrics['db_pool_checkout_max_ms'] = duration_ms
+
+
+def record_api_blocking_admission_wait(duration_ms: float, *, lane: str = 'general') -> None:
+    """Add API blocking-lane admission delay to the active request timing context."""
     metrics = _DATABASE_STATEMENT_TIMING.get()
     if metrics is not None:
-        _record_database_duration(metrics, 'api_db_admission_wait_ms', duration_ms)
+        _record_database_duration(metrics, 'api_blocking_admission_wait_ms', duration_ms)
+        _record_database_duration(metrics, f'api_{lane}_admission_wait_ms', duration_ms)
+
+
+def record_api_blocking_executor_queue(duration_ms: float, *, lane: str) -> None:
+    metrics = _DATABASE_STATEMENT_TIMING.get()
+    if metrics is not None:
+        _record_database_duration(metrics, f'api_{lane}_executor_queue_ms', duration_ms)
+
+
+def record_api_blocking_work(duration_ms: float, *, lane: str) -> None:
+    metrics = _DATABASE_STATEMENT_TIMING.get()
+    if metrics is not None:
+        _record_database_duration(metrics, f'api_{lane}_work_ms', duration_ms)
 
 
 def _before_cursor_execute(_connection, _cursor, _statement, _parameters, context, _executemany) -> None:
@@ -73,7 +111,11 @@ def _before_cursor_execute(_connection, _cursor, _statement, _parameters, contex
         return
     starts = metrics.setdefault('_statement_starts', {})
     if isinstance(starts, dict):
-        starts[id(context)] = time.perf_counter()
+        statement = ' '.join(_statement.split())
+        statement = _SQL_STRING_LITERAL.sub("'?'", statement)
+        statement = _SQL_QUOTED_IDENTIFIER.sub('"?"', statement)
+        statement = _SQL_NUMBER.sub('?', statement)
+        starts[id(context)] = (time.perf_counter(), statement[:240])
 
 
 def _finish_cursor_execute(context) -> None:
@@ -84,8 +126,15 @@ def _finish_cursor_execute(context) -> None:
     if not isinstance(starts, dict):
         return
     started = starts.pop(id(context), None)
-    if isinstance(started, (int, float)):
-        _record_database_duration(metrics, 'sql_ms', (time.perf_counter() - started) * 1000)
+    if isinstance(started, tuple) and len(started) == 2:
+        started_at, statement = started
+        if isinstance(started_at, (int, float)):
+            duration_ms = (time.perf_counter() - started_at) * 1000
+            _record_database_duration(metrics, 'sql_ms', duration_ms)
+            slowest_sql_ms = metrics.get('slowest_sql_ms', 0.0)
+            if isinstance(statement, str) and isinstance(slowest_sql_ms, (int, float)) and duration_ms > slowest_sql_ms:
+                metrics['slowest_sql_ms'] = duration_ms
+                metrics['slowest_sql_statement'] = statement
         sql_count = metrics.get('sql_count', 0)
         metrics['sql_count'] = (sql_count if isinstance(sql_count, int) else 0) + 1
 
@@ -196,17 +245,65 @@ def _pool_checkout_snapshot(engine: Engine, pool_name: str) -> dict[str, int | s
     }
 
 
+_RUNTIME_CRITICAL_POOL_SIZE = 0
+
+
+def _runtime_database_pool_split(pool_size: int, max_overflow: int) -> tuple[int, int, int]:
+    """Reserve a small internal pool for coordinator lease/liveness transactions.
+
+    The total connection ceiling remains ``pool_size + max_overflow``. The
+    general pool gives up base connections only when the dedicated coordinator
+    pool is enabled; this is not another deployment limit.
+    """
+    if pool_size <= 1:
+        return pool_size, max_overflow, 0
+    critical_pool_size = min(4, max(1, pool_size // 2))
+    return pool_size - critical_pool_size, max_overflow, critical_pool_size
+
+
+def configure_runtime_critical_database_budget() -> int:
+    """Reserve coordinator-only SQL capacity before any database engine starts."""
+    global _RUNTIME_CRITICAL_POOL_SIZE
+    if _RUNTIME_CRITICAL_POOL_SIZE:
+        return _RUNTIME_CRITICAL_POOL_SIZE
+    if settings_engine is not None or tenant_engine is not None:
+        raise RuntimeError('Runtime critical DB budget must be configured before database engines are created')
+    _general_pool_size, _max_overflow, _RUNTIME_CRITICAL_POOL_SIZE = _runtime_database_pool_split(
+        settings.database_pool_size,
+        settings.database_max_overflow,
+    )
+    return _RUNTIME_CRITICAL_POOL_SIZE
+
+
 def _engine_kwargs() -> dict[str, object]:
+    general_pool_size, max_overflow, _critical_pool_size = _runtime_database_pool_split(
+        settings.database_pool_size,
+        settings.database_max_overflow,
+    )
+    if not _RUNTIME_CRITICAL_POOL_SIZE:
+        general_pool_size = settings.database_pool_size
     return {
+        'poolclass': _TimedQueuePool,
         'pool_pre_ping': True,
-        'pool_size': settings.database_pool_size,
-        'max_overflow': settings.database_max_overflow,
+        'pool_size': general_pool_size,
+        'max_overflow': max_overflow,
         'pool_timeout': settings.database_pool_timeout,
     }
 
 
-def _create_engine(url: str, *, pool_name: str, connect_args: dict[str, object] | None = None) -> Engine:
+def _create_engine(
+    url: str,
+    *,
+    pool_name: str,
+    connect_args: dict[str, object] | None = None,
+    pool_size: int | None = None,
+    max_overflow: int | None = None,
+) -> Engine:
     kwargs = _engine_kwargs()
+    if pool_size is not None:
+        kwargs['pool_size'] = pool_size
+    if max_overflow is not None:
+        kwargs['max_overflow'] = max_overflow
     if connect_args is not None:
         kwargs['connect_args'] = connect_args
     engine = create_engine(url, echo=settings.sql_echo, **kwargs)
@@ -216,8 +313,12 @@ def _create_engine(url: str, *, pool_name: str, connect_args: dict[str, object] 
 
 settings_engine: Engine | None = None
 tenant_engine: Engine | None = None
+critical_settings_engine: Engine | None = None
+critical_tenant_engine: Engine | None = None
 _settings_engine_lock = Lock()
 _tenant_engine_lock = Lock()
+_critical_settings_engine_lock = Lock()
+_critical_tenant_engine_lock = Lock()
 
 _engine_override: Engine | None = None
 _settings_engine_override: Engine | None = None
@@ -268,11 +369,14 @@ def _apply_postgres_search_path(connection: Connection, namespace: str) -> None:
     connection.execute(text(f'SET search_path TO "{schema}", {_PUBLIC_SCHEMA}'))
 
 
-def _create_public_engine() -> Engine:
+def _create_public_engine(*, critical: bool = False) -> Engine:
+    pool_size = _RUNTIME_CRITICAL_POOL_SIZE if critical else None
     engine = _create_engine(
         settings.database_url,
-        pool_name='settings',
+        pool_name='settings-critical' if critical else 'settings',
         connect_args={'options': f'-c search_path={_PUBLIC_SCHEMA}'},
+        pool_size=pool_size if critical else None,
+        max_overflow=0 if critical else None,
     )
 
     @event.listens_for(engine, 'checkout')
@@ -303,7 +407,6 @@ def _get_tenant_engine() -> Engine:
         return _engine_override
     if tenant_engine is not None:
         return tenant_engine
-
     with _tenant_engine_lock:
         if tenant_engine is None:
             tenant_engine = _create_engine(settings.database_url, pool_name='tenant')
@@ -313,6 +416,44 @@ def _get_tenant_engine() -> Engine:
                 _set_postgres_search_path(dbapi_connection, get_namespace())
 
         return tenant_engine
+
+
+def _get_critical_settings_engine() -> Engine:
+    global critical_settings_engine
+    if _settings_engine_override is not None:
+        return _settings_engine_override
+    if not _RUNTIME_CRITICAL_POOL_SIZE:
+        return get_settings_engine()
+    if critical_settings_engine is not None:
+        return critical_settings_engine
+    with _critical_settings_engine_lock:
+        if critical_settings_engine is None:
+            critical_settings_engine = _create_public_engine(critical=True)
+        return critical_settings_engine
+
+
+def _get_critical_tenant_engine() -> Engine:
+    global critical_tenant_engine
+    if _engine_override is not None:
+        return _engine_override
+    if not _RUNTIME_CRITICAL_POOL_SIZE:
+        return _get_tenant_engine()
+    if critical_tenant_engine is not None:
+        return critical_tenant_engine
+    with _critical_tenant_engine_lock:
+        if critical_tenant_engine is None:
+            critical_tenant_engine = _create_engine(
+                settings.database_url,
+                pool_name='tenant-critical',
+                pool_size=_RUNTIME_CRITICAL_POOL_SIZE,
+                max_overflow=0,
+            )
+
+            @event.listens_for(critical_tenant_engine, 'checkout')
+            def _set_critical_namespace_search_path(dbapi_connection, _connection_record, _connection_proxy) -> None:
+                _set_postgres_search_path(dbapi_connection, get_namespace())
+
+        return critical_tenant_engine
 
 
 @contextmanager
@@ -335,32 +476,6 @@ def get_settings_db():
         yield session
 
 
-@asynccontextmanager
-async def _async_session_scope(engine_factory: Callable[[], Engine]) -> AsyncIterator[Session]:
-    # Engine initialization is completed during API startup; constructing a
-    # Session is local and does not check out a connection.
-    session = Session(engine_factory())
-    try:
-        yield session
-    finally:
-        if session.in_transaction():
-            await asyncio.to_thread(session.close)
-        else:
-            session.close()
-
-
-async def get_db_async() -> AsyncGenerator[Session]:
-    """FastAPI dependency that closes sync DB sessions on its bounded executor."""
-    async with _async_session_scope(_get_tenant_engine) as session:
-        yield session
-
-
-async def get_settings_db_async() -> AsyncGenerator[Session]:
-    """FastAPI dependency for settings sessions without AnyIO's sync-exit worker."""
-    async with _async_session_scope(get_settings_engine) as session:
-        yield session
-
-
 def run_db[**P, T](func: Callable[Concatenate[Session, P], T], *args: P.args, **kwargs: P.kwargs) -> T:
     engine_to_use = _get_tenant_engine()
     with Session(engine_to_use) as session:
@@ -373,12 +488,26 @@ def run_settings_db[**P, T](func: Callable[Concatenate[Session, P], T], *args: P
         return func(session, *args, **kwargs)
 
 
+def run_critical_db[**P, T](func: Callable[Concatenate[Session, P], T], *args: P.args, **kwargs: P.kwargs) -> T:
+    """Run a short lease-critical tenant transaction on its reserved pool."""
+    with Session(_get_critical_tenant_engine()) as session:
+        return func(session, *args, **kwargs)
+
+
+def run_critical_settings_db[**P, T](func: Callable[Concatenate[Session, P], T], *args: P.args, **kwargs: P.kwargs) -> T:
+    """Run a short worker/scheduler heartbeat transaction on its reserved pool."""
+    with Session(_get_critical_settings_engine()) as session:
+        return func(session, *args, **kwargs)
+
+
 def database_pool_snapshot() -> dict[str, object]:
     """Return non-blocking pool counters for slow-request diagnostics."""
     snapshots: dict[str, object] = {}
     engines: list[tuple[str, Engine | None]] = [
         ('settings', _settings_engine_override or settings_engine),
         ('tenant', _engine_override or tenant_engine),
+        ('critical_settings', _settings_engine_override or critical_settings_engine),
+        ('critical_tenant', _engine_override or critical_tenant_engine),
     ]
     seen: set[int] = set()
     for name, engine in engines:
@@ -407,7 +536,7 @@ def _shared_tables():
     from backend_core.persistence.engine_instances.models import EngineInstance
     from backend_core.persistence.mcp_pending.models import McpPendingAction
     from backend_core.persistence.namespaces.models import NamespaceEngineCredential, RuntimeNamespace
-    from backend_core.persistence.runtime_events.models import RuntimeCoordinatorState, RuntimeNamespaceWork
+    from backend_core.persistence.runtime_events.models import RuntimeCoordinatorState, RuntimeNamespaceWork, RuntimeNamespaceWorkWake
     from backend_core.persistence.runtime_workers.models import RuntimeWorker
     from backend_core.persistence.settings.models import AppSettings
     from modules.chat.models import ChatEvent, ChatMessage, ChatSession, ChatTurn
@@ -420,6 +549,7 @@ def _shared_tables():
         RuntimeNamespace.__tablename__,
         RuntimeCoordinatorState.__tablename__,
         RuntimeNamespaceWork.__tablename__,
+        RuntimeNamespaceWorkWake.__tablename__,
         RuntimeWorker.__tablename__,
         ChatSession.__tablename__,
         ChatTurn.__tablename__,
@@ -433,13 +563,13 @@ def _tenant_tables():
     from backend_core.persistence.analysis.models import Analysis, AnalysisDataSource, AnalysisFavorite
     from backend_core.persistence.analysis_versions.models import AnalysisVersion
     from backend_core.persistence.build_jobs.models import BuildJob
-    from backend_core.persistence.build_runs.models import BuildEvent, BuildRun
+    from backend_core.persistence.build_runs.models import BuildEvent, BuildRun, BuildRunDatasource
     from backend_core.persistence.compute_requests.models import ComputeRequest, ComputeRequestDatasource, ComputeRequestFlight
     from backend_core.persistence.datasource.models import DataSource, DataSourceColumnMetadata
     from backend_core.persistence.engine_runs.models import EngineRun
     from backend_core.persistence.healthchecks.models import HealthCheck, HealthCheckResult
     from backend_core.persistence.locks.models import ResourceLock
-    from backend_core.persistence.runtime_events.models import NotificationDeliveryReceipt, RuntimeOutboxEvent
+    from backend_core.persistence.runtime_events.models import NotificationDeliveryPartReceipt, NotificationDeliveryReceipt, RuntimeOutboxEvent
     from backend_core.persistence.scheduler.models import Schedule
     from backend_core.persistence.telegram.models import TelegramListener, TelegramSubscriber
     from backend_core.persistence.udfs.models import Udf
@@ -452,6 +582,7 @@ def _tenant_tables():
         BuildEvent.__tablename__,
         BuildJob.__tablename__,
         BuildRun.__tablename__,
+        BuildRunDatasource.__tablename__,
         ComputeRequest.__tablename__,
         ComputeRequestDatasource.__tablename__,
         ComputeRequestFlight.__tablename__,
@@ -463,6 +594,7 @@ def _tenant_tables():
         ResourceLock.__tablename__,
         RuntimeOutboxEvent.__tablename__,
         NotificationDeliveryReceipt.__tablename__,
+        NotificationDeliveryPartReceipt.__tablename__,
         Schedule.__tablename__,
         TelegramListener.__tablename__,
         TelegramSubscriber.__tablename__,
@@ -599,7 +731,7 @@ async def init_db() -> None:
         _bootstrap_postgres()
         _seed_shared_state()
 
-    await asyncio.to_thread(_run_postgres_init_locked, _init_postgres)
+    await run_api_blocking(_run_postgres_init_locked, _init_postgres)
 
 
 def supports_distributed_runtime() -> bool:

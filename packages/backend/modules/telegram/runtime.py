@@ -5,13 +5,17 @@ import contextvars
 import logging
 from collections.abc import Callable
 from concurrent.futures import ThreadPoolExecutor
+from contextlib import suppress
 from datetime import UTC, datetime
 from functools import partial
 
 import httpx
+import psycopg
+from sqlalchemy.exc import OperationalError as SQLAlchemyOperationalError
 
+from backend_core.api_execution_budget import run_bootstrap_settings_db
 from backend_core.database import run_settings_db
-from backend_core.live_hubs import VersionHub
+from backend_core.live_hubs import KeyedVersionHub, VersionHub
 from modules.telegram import bot, store
 from modules.telegram.domain import TelegramDetectionClaim, TelegramSettings
 
@@ -21,7 +25,11 @@ _TELEGRAM_BASE_URL = 'https://api.telegram.org'
 _POLL_TIMEOUT_SECONDS = 5
 _HTTP_TIMEOUT = httpx.Timeout(connect=3.0, read=10.0, write=5.0, pool=3.0)
 _RECOVERY_SECONDS = 5.0
-_DATABASE_EXECUTOR = ThreadPoolExecutor(max_workers=1, thread_name_prefix='telegram-database')
+_DATABASE_RETRY_INITIAL_SECONDS = 0.25
+_DATABASE_RETRY_MAX_SECONDS = 5.0
+_TRANSIENT_DATABASE_ERRORS = (SQLAlchemyOperationalError, psycopg.OperationalError)
+_DETECTION_RESULT_HUB = KeyedVersionHub()
+_COORDINATOR_DATABASE_EXECUTOR = ThreadPoolExecutor(max_workers=1, thread_name_prefix='telegram-coordinator-database')
 
 
 class TelegramDetectionFailed(RuntimeError):
@@ -41,7 +49,7 @@ async def request_chat_detection(*, token: str, request_user_id: str, namespace:
 
 
 async def _wait_chat_detection(*, token: str, request_user_id: str, namespace: str) -> dict[str, object]:
-    request_id = await _run_public_database(
+    request_id = await _run_detection_database(
         store.enqueue_detection,
         token=token,
         request_user_id=request_user_id,
@@ -50,7 +58,8 @@ async def _wait_chat_detection(*, token: str, request_user_id: str, namespace: s
     loop = asyncio.get_running_loop()
     deadline = loop.time() + store.DETECTION_TIMEOUT_SECONDS
     while True:
-        result = await _run_public_database(
+        wake_version = _DETECTION_RESULT_HUB.version(request_id)
+        result = await _run_detection_database(
             store.get_detection_result,
             request_id=request_id,
             request_user_id=request_user_id,
@@ -65,15 +74,33 @@ async def _wait_chat_detection(*, token: str, request_user_id: str, namespace: s
             raise TelegramDetectionTimedOut(result.error or 'Telegram detection timed out')
         remaining = deadline - loop.time()
         if remaining <= 0:
-            await _run_public_database(store.time_out_detection, request_id=request_id, request_user_id=request_user_id)
+            await _run_detection_database(store.time_out_detection, request_id=request_id, request_user_id=request_user_id)
             raise TelegramDetectionTimedOut('Telegram detection timed out')
-        await asyncio.sleep(min(0.1, remaining))
+        with suppress(TimeoutError):
+            await asyncio.wait_for(
+                _DETECTION_RESULT_HUB.wait(request_id, last_seen=wake_version),
+                timeout=min(_RECOVERY_SECONDS, remaining),
+            )
+            # PostgreSQL notifications are a fast path. This bounded reread is
+            # the recovery path if this API process missed a notification.
 
 
 async def _run_public_database[T](function: Callable[..., T], *args: object, **kwargs: object) -> T:
+    """Run one coordinator DB operation; its single actor awaits each call."""
     loop = asyncio.get_running_loop()
     context = contextvars.copy_context()
-    return await loop.run_in_executor(_DATABASE_EXECUTOR, context.run, partial(run_settings_db, function, *args, **kwargs))
+    work = partial(run_settings_db, function, *args, **kwargs)
+    return await loop.run_in_executor(_COORDINATOR_DATABASE_EXECUTOR, context.run, work)
+
+
+async def _run_detection_database[T](function: Callable[..., T], *args: object, **kwargs: object) -> T:
+    """Run HTTP-waiter DB work through the API's bounded protected lane."""
+    return await run_bootstrap_settings_db(function, *args, **kwargs)
+
+
+def notify_detection_result(request_id: str) -> None:
+    """Wake local HTTP waiters; the durable row remains authoritative."""
+    _DETECTION_RESULT_HUB.publish(request_id)
 
 
 class TelegramIntegrationRuntime:
@@ -89,44 +116,66 @@ class TelegramIntegrationRuntime:
 
     async def run(self, stop_event: asyncio.Event) -> None:
         wake_version = self._wake_hub.version()
+        retry_delay = _DATABASE_RETRY_INITIAL_SECONDS
         async with httpx.AsyncClient(timeout=_HTTP_TIMEOUT) as client:
             while not stop_event.is_set():
-                await self._database(store.recover_detection_requests, generation=self.generation)
-                claim = await self._database(store.claim_detection, generation=self.generation)
-                if claim is not None:
-                    await self._process_detection(client, claim)
-                    wake_version = self._wake_hub.version()
-                    if stop_event.is_set():
-                        break
-
-                settings = await self._database(store.read_settings)
-                current_version = self._wake_hub.version()
-                if current_version != wake_version:
-                    wake_version = current_version
-                    continue
-                if not settings.enabled or not settings.token:
-                    wake_version = await self._wait_for_signal(
-                        stop_event,
-                        wake_version,
-                        timeout=1.0,
+                try:
+                    wake_version = await self._run_cycle(client, stop_event, wake_version)
+                except asyncio.CancelledError:
+                    raise
+                except store.TelegramOwnerFenced:
+                    raise
+                except _TRANSIENT_DATABASE_ERRORS:
+                    logger.warning(
+                        'Telegram actor database operation failed; retrying in %.2fs',
+                        retry_delay,
+                        exc_info=True,
                     )
-                    continue
+                    with suppress(TimeoutError):
+                        await asyncio.wait_for(stop_event.wait(), timeout=retry_delay)
+                    if stop_event.is_set():
+                        return
+                    retry_delay = min(retry_delay * 2, _DATABASE_RETRY_MAX_SECONDS)
+                else:
+                    retry_delay = _DATABASE_RETRY_INITIAL_SECONDS
 
-                fingerprint = store.token_fingerprint(settings.token)
-                offset = await self._database(store.get_next_update_id, fingerprint)
-                response, wake_version = await self._get_updates_or_wake(
-                    client,
-                    stop_event,
-                    wake_version,
-                    token=settings.token,
-                    offset=offset,
-                    poll_timeout=_POLL_TIMEOUT_SECONDS,
-                )
-                if response is None:
-                    continue
-                handled = await self._process_poll_response(client, settings, fingerprint, response)
-                if not handled:
-                    wake_version = await self._wait_for_signal(stop_event, wake_version, timeout=_RECOVERY_SECONDS)
+    async def _run_cycle(
+        self,
+        client: httpx.AsyncClient,
+        stop_event: asyncio.Event,
+        wake_version: int,
+    ) -> int:
+        await self._database(store.recover_detection_requests, generation=self.generation)
+        claim = await self._database(store.claim_detection, generation=self.generation)
+        if claim is not None:
+            await self._process_detection(client, claim)
+            wake_version = self._wake_hub.version()
+            if stop_event.is_set():
+                return wake_version
+
+        settings = await self._database(store.read_settings)
+        current_version = self._wake_hub.version()
+        if current_version != wake_version:
+            return current_version
+        if not settings.enabled or not settings.token:
+            return await self._wait_for_signal(stop_event, wake_version, timeout=1.0)
+
+        fingerprint = store.token_fingerprint(settings.token)
+        offset = await self._database(store.get_next_update_id, fingerprint)
+        response, wake_version = await self._get_updates_or_wake(
+            client,
+            stop_event,
+            wake_version,
+            token=settings.token,
+            offset=offset,
+            poll_timeout=_POLL_TIMEOUT_SECONDS,
+        )
+        if response is None:
+            return wake_version
+        handled = await self._process_poll_response(client, settings, fingerprint, response)
+        if not handled:
+            return await self._wait_for_signal(stop_event, wake_version, timeout=_RECOVERY_SECONDS)
+        return wake_version
 
     async def _process_poll_response(
         self,
@@ -181,6 +230,8 @@ class TelegramIntegrationRuntime:
                 return False
             except store.TelegramOwnerFenced:
                 raise
+            except _TRANSIENT_DATABASE_ERRORS:
+                raise
             except Exception:
                 logger.warning('Telegram update handling failed; update offset was not advanced')
                 return False
@@ -216,6 +267,10 @@ class TelegramIntegrationRuntime:
                 claim,
                 {'success': True, 'message': f'Found {len(chats)} chat(s)', 'chats': chats},
             )
+        except store.TelegramOwnerFenced:
+            raise
+        except _TRANSIENT_DATABASE_ERRORS:
+            raise
         except Exception as exc:
             error = _redact_token(str(exc), claim.token)
             await self._database(store.fail_detection, claim=claim, error=error)

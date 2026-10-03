@@ -3,6 +3,7 @@ import importlib.util
 import threading
 import time
 import uuid
+from concurrent.futures import ThreadPoolExecutor
 from dataclasses import replace
 from datetime import UTC, datetime, timedelta
 from pathlib import Path
@@ -50,6 +51,31 @@ async def test_datasource_delete_wakeup_returns_without_recovery_delay() -> None
     datasource_delete_hub.publish("default")
 
     assert await asyncio.wait_for(task, timeout=1) == (wake_version + 1, False)
+
+
+@pytest.mark.asyncio
+async def test_cancelled_datasource_delete_wait_cleans_up_child_tasks(monkeypatch) -> None:
+    from runtime.datasource_delete_runtime import _wait_for_delete_wakeup_or_recovery
+
+    entered = asyncio.Event()
+    child_finished = asyncio.Event()
+
+    async def wait_for_wakeup(*, last_seen: int) -> int:
+        del last_seen
+        entered.set()
+        try:
+            await asyncio.Event().wait()
+        finally:
+            child_finished.set()
+
+    monkeypatch.setattr(datasource_delete_hub, "wait", wait_for_wakeup)
+    task = asyncio.create_task(_wait_for_delete_wakeup_or_recovery(asyncio.Event(), datasource_delete_hub.version()))
+    await entered.wait()
+    task.cancel()
+
+    with pytest.raises(asyncio.CancelledError):
+        await task
+    assert child_finished.is_set()
 
 
 def test_worker_heartbeat_reregisters_and_resynchronizes_after_api_loss() -> None:
@@ -164,13 +190,13 @@ async def test_namespace_recovery_deduplicates_concurrent_attempts() -> None:
         def __init__(self) -> None:
             self.calls: list[str] = []
 
-        def reconcile_expired_compute_requests(self, *, namespace: str) -> int:
+        async def reconcile_expired_compute_requests_async(self, *, namespace: str) -> int:
             self.calls.append(namespace)
             return 0
 
     client = Client()
     recovery = NamespaceRecovery(
-        client.reconcile_expired_compute_requests,
+        client.reconcile_expired_compute_requests_async,
         work_name="compute requests",
         interval_seconds=5.0,
     )
@@ -456,6 +482,9 @@ class FakeWorkerRuntimeClient:
         self.renewal_errors = 0
         self.claim_delay_seconds = 0.0
 
+    async def aclose(self) -> None:
+        return None
+
     def register_worker(self, **kwargs) -> None:
         self.calls.append(("register_worker", kwargs))
         self.call_threads.append(("register_worker", threading.get_ident()))
@@ -505,9 +534,49 @@ class FakeWorkerRuntimeClient:
         self.calls.append(("reconcile_expired_build_jobs", kwargs))
         return 0
 
+    async def reconcile_expired_build_jobs_async(self, **kwargs) -> int:
+        return self.reconcile_expired_build_jobs(**kwargs)
+
     def reconcile_expired_compute_requests(self, **kwargs) -> int:
         self.calls.append(("reconcile_expired_compute_requests", kwargs))
         return 0
+
+    async def reconcile_expired_compute_requests_async(self, **kwargs) -> int:
+        return self.reconcile_expired_compute_requests(**kwargs)
+
+    async def register_worker_async(self, **kwargs) -> None:
+        self.register_worker(**kwargs)
+
+    async def heartbeat_worker_async(self, **kwargs) -> None:
+        self.heartbeat_worker(**kwargs)
+
+    async def stop_worker_async(self, **kwargs) -> None:
+        self.stop_worker(**kwargs)
+
+    async def claim_build_job_async(self, *, worker_id: str, namespace: str) -> ClaimedBuildJob | None:
+        self.calls.append(("claim_build_job", {"worker_id": worker_id, "namespace": namespace}))
+        if self.claim_delay_seconds:
+            await asyncio.sleep(self.claim_delay_seconds)
+        return self.jobs.pop(0) if self.jobs else None
+
+    async def pending_runtime_work_namespaces_async(self, *, work_kinds: tuple[str, ...] = ()) -> list[str]:
+        self.calls.append(("pending_runtime_work_namespaces", work_kinds))
+        return ["default"]
+
+    async def renew_build_job_lease_async(self, **kwargs) -> int | None:
+        self.calls.append(("renew_build_job_lease", kwargs))
+        if self.renewal_errors > 0:
+            self.renewal_errors -= 1
+            raise ConnectionError("temporary renewal failure")
+        if not self.lease_active:
+            return None
+        return 300
+
+    async def fail_build_job_async(self, **kwargs) -> bool:
+        return self.fail_build_job(**kwargs)
+
+    async def finalize_build_job_async(self, **kwargs) -> bool:
+        return self.finalize_build_job(**kwargs)
 
     def idle_build_worker_pids(self) -> set[int]:
         self.calls.append(("idle_build_worker_pids", None))
@@ -530,7 +599,7 @@ runtime_process = _load_runtime_process()
 @pytest.mark.asyncio
 async def test_worker_runtime_stops_old_generation_when_coordinator_fences_it(monkeypatch) -> None:
     class Client:
-        def get_coordinator_generation(self) -> int:
+        async def get_coordinator_generation_async(self) -> int:
             return 8
 
     process_stop_event = asyncio.Event()
@@ -823,18 +892,27 @@ async def test_delete_dispatch_progress_ticks_without_tombstones(monkeypatch) ->
 
     stop = asyncio.Event()
     ticks = 0
-    closed = False
+    close_calls = 0
 
     class EmptyClient:
-        def pending_runtime_work_namespaces(self, *, work_kinds: tuple[str, ...] = ()) -> list[str]:
+        async def pending_datasource_deletes_async(self, *, namespace: str):
+            assert namespace == "default"
             return []
 
-        def close(self) -> None:
-            nonlocal closed
-            closed = True
+        async def aclose(self) -> None:
+            nonlocal close_calls
+            close_calls += 1
+
+    class NamespaceDirectory:
+        async def next_namespace(self) -> str:
+            return "default"
 
     client = EmptyClient()
-    monkeypatch.setattr(deletion, "worker_runtime_client", lambda: client)
+
+    async def get_client() -> EmptyClient:
+        return client
+
+    monkeypatch.setattr(deletion, "async_client_from_env", get_client)
     monkeypatch.setattr(deletion, "_DATASOURCE_DELETE_RECOVERY_SECONDS", 0.001)
     await deletion.datasource_delete_hub.clear()
 
@@ -845,11 +923,16 @@ async def test_delete_dispatch_progress_ticks_without_tombstones(monkeypatch) ->
             stop.set()
 
     await asyncio.wait_for(
-        deletion.datasource_delete_loop(stop, manager=cast(ProcessManager, object()), on_progress=progress),
+        deletion.datasource_delete_loop(
+            stop,
+            manager=cast(ProcessManager, object()),
+            namespace_directory=cast(Any, NamespaceDirectory()),
+            on_progress=progress,
+        ),
         timeout=1,
     )
     assert ticks >= 3
-    assert closed
+    assert close_calls == 0
 
 
 @pytest.mark.asyncio
@@ -857,7 +940,7 @@ async def test_build_worker_loop_tracks_runtime_worker_lifecycle() -> None:
     job = _job()
     client = FakeWorkerRuntimeClient([job])
     recovery = NamespaceRecovery(
-        client.reconcile_expired_build_jobs,
+        client.reconcile_expired_build_jobs_async,
         work_name="expired build jobs",
         interval_seconds=5.0,
     )
@@ -1077,7 +1160,7 @@ async def test_runtime_namespace_directory_requests_only_its_work_kind() -> None
     requested_kinds: list[tuple[str, ...]] = []
 
     class FilteredClient:
-        def pending_runtime_work_namespaces(self, *, work_kinds: tuple[str, ...]) -> list[str]:
+        async def pending_runtime_work_namespaces_async(self, *, work_kinds: tuple[str, ...]) -> list[str]:
             requested_kinds.append(work_kinds)
             return ["build-namespace"]
 
@@ -1217,10 +1300,11 @@ async def test_run_runtime_coordinator_shares_compute_budget_across_lanes(
     manager_kwargs: dict[str, object] = {}
     stop_event = asyncio.Event()
     client = FakeWorkerRuntimeClient()
+    logging_threads: list[int] = []
 
-    monkeypatch.setattr(runtime_process, "worker_runtime_client", lambda: client)
+    monkeypatch.setattr(runtime_process, "async_client_from_env", lambda: asyncio.sleep(0, result=client))
     monkeypatch.setattr(runtime_process, "coordinator_id", lambda: "manager-1")
-    monkeypatch.setattr(runtime_process, "configure_logging", lambda: None)
+    monkeypatch.setattr(runtime_process, "configure_logging", lambda: logging_threads.append(threading.get_ident()))
     monkeypatch.setattr(runtime_process, "validate_engine_runtime_readiness", lambda: None)
     monkeypatch.setattr(runtime_process, "reconcile_deployment_containers", lambda **_kwargs: 0)
 
@@ -1274,6 +1358,8 @@ async def test_run_runtime_coordinator_shares_compute_budget_across_lanes(
 
     await runtime_process.run_runtime_coordinator(stop_event=stop_event)
 
+    assert len(logging_threads) == 1
+    assert logging_threads[0] != coordinator_thread_id
     build_calls = [payload for name, payload in calls if name == "build_worker_loop"]
     assert [payload["worker_id"] for payload in build_calls] == ["manager-1"]
     assert all(payload["capacity"] == 4 for payload in build_calls)
@@ -1286,7 +1372,7 @@ async def test_run_runtime_coordinator_shares_compute_budget_across_lanes(
     assert register_payload["kind"] == "coordinator"
     assert register_payload["capacity"] == runtime_process.settings.compute_workers
     registration_thread = next(thread_id for name, thread_id in client.call_threads if name == "register_worker")
-    assert registration_thread != coordinator_thread_id
+    assert registration_thread == coordinator_thread_id
     assert manager_kwargs["warm_worker_target"] == runtime_process.settings.compute_warm_workers
     request_lane_kwargs = [payload for name, payload in calls if name == "compute_request_loop"]
     assert [payload["allowed_kinds"] for payload in request_lane_kwargs] == [
@@ -1303,7 +1389,7 @@ async def test_run_runtime_coordinator_shares_compute_budget_across_lanes(
     assert build_execution_calls[0]["work_semaphore"] is shared_compute_budget
     assert ("stop_worker", {"worker_id": "manager-1", "timeout_seconds": 2.0}) in client.calls
     stop_thread = next(thread_id for name, thread_id in client.call_threads if name == "stop_worker")
-    assert stop_thread != coordinator_thread_id
+    assert stop_thread == coordinator_thread_id
 
 
 @pytest.mark.asyncio
@@ -1316,7 +1402,7 @@ async def test_runtime_coordinator_cleans_up_when_registration_fails(monkeypatch
         raise ConnectionError("coordinator unavailable")
 
     client.register_worker = fail_registration
-    monkeypatch.setattr(runtime_process, "worker_runtime_client", lambda: client)
+    monkeypatch.setattr(runtime_process, "async_client_from_env", lambda: asyncio.sleep(0, result=client))
     monkeypatch.setattr(runtime_process, "coordinator_id", lambda: "manager-1")
     monkeypatch.setattr(runtime_process, "configure_logging", lambda: None)
     monkeypatch.setattr(runtime_process, "validate_engine_runtime_readiness", lambda: None)
@@ -1396,19 +1482,66 @@ def test_runtime_clients_share_one_channel_per_target(monkeypatch) -> None:
     assert client_module.client_from_env()._channel is second._channel
 
 
+@pytest.mark.asyncio
+async def test_async_runtime_client_is_loop_owned_and_closes_at_shutdown(monkeypatch) -> None:
+    from runtime import worker_runtime_client as client_module
+
+    monkeypatch.setenv("INTERNAL_GRPC_TARGET", "api.test:50051")
+    monkeypatch.setenv("INTERNAL_API_TOKEN", "token")
+    first = await client_module.async_client_from_env()
+    assert await client_module.async_client_from_env() is first
+
+    first._async_stubs()
+    assert first._aio_channel is not None
+    await client_module.close_async_runtime_clients()
+    assert first._aio_channel is None
+
+    second = await client_module.async_client_from_env()
+    assert second is not first
+    await client_module.close_async_runtime_clients()
+
+
+@pytest.mark.asyncio
+async def test_cancelled_async_runtime_rpc_settles_before_cancellation_returns() -> None:
+    client = object.__new__(WorkerRuntimeClient)
+    client._target = "api.test:50051"
+    rpc_started = asyncio.Event()
+    allow_commit = asyncio.Event()
+    committed: list[str] = []
+
+    async def mutation() -> str:
+        rpc_started.set()
+        await allow_commit.wait()
+        committed.append("done")
+        return "done"
+
+    task = asyncio.create_task(client._call_async(mutation()))
+    await asyncio.wait_for(rpc_started.wait(), timeout=1)
+    task.cancel()
+    await asyncio.sleep(0)
+    assert not task.done()
+
+    allow_commit.set()
+    with pytest.raises(asyncio.CancelledError):
+        await task
+    assert committed == ["done"]
+
+
 def test_coordinator_generation_rpc_bootstraps_and_validates_generation(monkeypatch) -> None:
     class CoordinatorStub:
         def __init__(self) -> None:
             self.active_generation = 7
             self.bootstrap_metadata = None
-            self.assertion: tuple[int, tuple[tuple[str, str], ...]] | None = None
+            self.bootstrap_timeout = None
+            self.assertion: tuple[int, float, tuple[tuple[str, str], ...]] | None = None
 
         def GetCoordinatorGeneration(self, _request, *, timeout: float, metadata):
             self.bootstrap_metadata = metadata
+            self.bootstrap_timeout = timeout
             return SimpleNamespace(generation=self.active_generation)
 
         def AssertCoordinatorGeneration(self, request, *, timeout: float, metadata):
-            self.assertion = (request.generation, metadata)
+            self.assertion = (request.generation, timeout, metadata)
             return SimpleNamespace(generation=self.active_generation)
 
     client = object.__new__(WorkerRuntimeClient)
@@ -1417,17 +1550,68 @@ def test_coordinator_generation_rpc_bootstraps_and_validates_generation(monkeypa
     client._timeout_seconds = 15.0
     client._coordinator_stub = CoordinatorStub()
     client._call = lambda operation: operation()
+    client._coordinator_assertions_lock = threading.Lock()
+    client._coordinator_assertions = {}
     monkeypatch.delenv("RUNTIME_COORDINATOR_GENERATION", raising=False)
 
     assert client.get_coordinator_generation() == 7
     assert client._coordinator_stub.bootstrap_metadata == (("x-internal-token", "internal-token"),)
+    assert client._coordinator_stub.bootstrap_timeout == 15.0
 
     client.assert_coordinator_generation(7)
     assert client._coordinator_stub.assertion == (
         7,
+        15.0,
         (("x-internal-token", "internal-token"), ("x-runtime-coordinator-generation", "7")),
     )
 
     client._coordinator_stub.active_generation = 8
     with pytest.raises(BackendWorkerRpcError, match="fenced by 8"):
         client.assert_coordinator_generation(7)
+
+
+def test_concurrent_coordinator_generation_assertions_share_one_rpc() -> None:
+    class CoordinatorStub:
+        def __init__(self) -> None:
+            self.calls = 0
+            self.lock = threading.Lock()
+            self.started = threading.Event()
+            self.release = threading.Event()
+
+        def AssertCoordinatorGeneration(self, request, *, timeout: float, metadata):
+            del timeout, metadata
+            with self.lock:
+                self.calls += 1
+            self.started.set()
+            assert self.release.wait(timeout=2)
+            return SimpleNamespace(generation=request.generation)
+
+    client = object.__new__(WorkerRuntimeClient)
+    client._target = "runtime:50051"
+    client._token = "internal-token"
+    client._timeout_seconds = 15.0
+    client._coordinator_stub = CoordinatorStub()
+    client._call = lambda operation: operation()
+    client._coordinator_assertions_lock = threading.Lock()
+    client._coordinator_assertions = {}
+    simultaneous_start = threading.Barrier(2)
+    second_call_started = threading.Event()
+
+    def assert_generation(*, second: bool = False) -> None:
+        simultaneous_start.wait(timeout=2)
+        if second:
+            second_call_started.set()
+        client.assert_coordinator_generation(7)
+
+    with ThreadPoolExecutor(max_workers=2) as executor:
+        first = executor.submit(assert_generation)
+        second = executor.submit(assert_generation, second=True)
+        assert client._coordinator_stub.started.wait(timeout=1)
+        assert second_call_started.wait(timeout=1)
+        time.sleep(0.05)
+        with client._coordinator_stub.lock:
+            assert client._coordinator_stub.calls == 1
+        client._coordinator_stub.release.set()
+        first.result(timeout=1)
+        second.result(timeout=1)
+    assert client._coordinator_stub.calls == 1

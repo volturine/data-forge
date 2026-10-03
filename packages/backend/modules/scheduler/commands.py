@@ -32,7 +32,4 @@ def delete_schedule(session: Session, schedule_id: str) -> None:
 
 def reconcile_expired_build_jobs(session: Session) -> int:
     with transaction(session):
-        build_ids = build_job_service.stage_exhausted_jobs(session)
-        for build_id in build_ids:
-            service.apply_schedule_run_reconciliation(session, build_id=build_id)
-    return len(build_ids)
+        return len(build_job_service.stage_exhausted_jobs(session))

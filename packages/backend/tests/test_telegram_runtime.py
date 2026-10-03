@@ -3,14 +3,16 @@ from datetime import UTC, datetime, timedelta
 from unittest.mock import AsyncMock
 
 import httpx
+import psycopg
 import pytest
+from sqlalchemy.exc import OperationalError as SQLAlchemyOperationalError
 from sqlmodel import Session
 
 from backend_core.persistence.runtime_events.models import RuntimeCoordinatorState
 from backend_core.persistence.telegram.models import TelegramDetectionRequest, TelegramPollOffset
 from backend_core.secrets import decrypt_secret
 from modules.telegram import runtime, store
-from modules.telegram.domain import TelegramDetectionClaim, TelegramSettings
+from modules.telegram.domain import TelegramDetectionClaim, TelegramDetectionResult, TelegramSettings
 
 
 @pytest.fixture
@@ -82,6 +84,69 @@ def test_detection_overload_and_expiration_are_bounded(telegram_db, monkeypatch)
     assert row.token_encrypted == ''
 
 
+def test_detection_completion_commits_result_wakeup_to_postgres(telegram_db, postgres_container) -> None:
+    import json
+
+    import psycopg
+
+    with psycopg.connect(postgres_container.url.replace('+psycopg', ''), autocommit=True) as listener:
+        listener.execute('LISTEN runtime_events')
+        request_id = store.enqueue_detection(
+            telegram_db,
+            token='secret-token',
+            request_user_id='user-1',
+            namespace='tenant-a',
+        )
+        list(listener.notifies(timeout=1, stop_after=1))
+        claim = store.claim_detection(telegram_db, generation=7)
+        assert claim is not None
+
+        assert store.complete_detection(
+            telegram_db,
+            claim=claim,
+            result={'success': True, 'chats': []},
+        )
+        notifications = [json.loads(message.payload) for message in listener.notifies(timeout=1, stop_after=10)]
+
+    assert notifications == [{'kind': 'telegram_detection_result', 'request_id': request_id}]
+
+
+@pytest.mark.asyncio
+async def test_detection_waiter_uses_notification_and_closes_read_wait_race(monkeypatch) -> None:
+    reads = 0
+
+    async def database(function, *args, **kwargs):
+        nonlocal reads
+        if function is store.enqueue_detection:
+            return 'detection-1'
+        if function is store.get_detection_result:
+            reads += 1
+            if reads == 1:
+                # Completion between the durable read and hub wait must not be lost.
+                runtime.notify_detection_result('detection-1')
+                return TelegramDetectionResult(status='running', result=None, error=None, deadline_at=datetime.now(UTC) + timedelta(seconds=10))
+            return TelegramDetectionResult(status='completed', result={'success': True, 'chats': []}, error=None, deadline_at=datetime.now(UTC))
+        raise AssertionError(f'unexpected database operation: {function.__name__}')
+
+    monkeypatch.setattr(runtime, '_run_detection_database', database)
+    result = await runtime._wait_chat_detection(token='secret', request_user_id='user-1', namespace='tenant-a')
+
+    assert reads == 2
+    assert result == {'success': True, 'chats': []}
+
+
+@pytest.mark.asyncio
+async def test_telegram_detection_result_notification_wakes_local_waiters(monkeypatch) -> None:
+    from backend_core import runtime_notifications
+
+    received: list[str] = []
+    monkeypatch.setattr(runtime, 'notify_detection_result', received.append)
+
+    await runtime_notifications.handle_runtime_payload({'kind': 'telegram_detection_result', 'request_id': 'detection-1'})
+
+    assert received == ['detection-1']
+
+
 @pytest.mark.asyncio
 async def test_settings_wake_cancels_inflight_native_poll() -> None:
     started = asyncio.Event()
@@ -104,6 +169,78 @@ async def test_settings_wake_cancels_inflight_native_poll() -> None:
         response, _version = await asyncio.wait_for(task, timeout=1)
     assert response is None
     assert canceled.is_set()
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize('sqlalchemy_error', [False, True])
+async def test_telegram_actor_retries_transient_database_failure_without_epoch_restart(monkeypatch, sqlalchemy_error: bool) -> None:
+    stop = asyncio.Event()
+    actor = runtime.TelegramIntegrationRuntime(7)
+    recover_calls = 0
+
+    async def database(function, *args, **kwargs):
+        nonlocal recover_calls
+        if function is store.recover_detection_requests:
+            recover_calls += 1
+            if recover_calls == 1:
+                if sqlalchemy_error:
+                    raise SQLAlchemyOperationalError('SELECT 1', {}, psycopg.OperationalError('temporary disconnect'))
+                raise psycopg.OperationalError('temporary disconnect')
+            return None
+        if function is store.claim_detection:
+            return None
+        if function is store.read_settings:
+            stop.set()
+            return TelegramSettings(enabled=False, token='')
+        raise AssertionError(f'unexpected database operation: {function.__name__}')
+
+    monkeypatch.setattr(actor, '_database', database)
+    task = asyncio.create_task(actor.run(stop))
+
+    await asyncio.wait_for(task, timeout=2)
+
+    assert recover_calls == 2
+    assert task.exception() is None
+
+
+@pytest.mark.asyncio
+async def test_telegram_actor_propagates_coordinator_fencing_without_retry(monkeypatch) -> None:
+    actor = runtime.TelegramIntegrationRuntime(7)
+    calls = 0
+
+    async def database(_function, *args, **kwargs):
+        nonlocal calls
+        calls += 1
+        raise store.TelegramOwnerFenced('coordinator generation changed')
+
+    monkeypatch.setattr(actor, '_database', database)
+
+    with pytest.raises(store.TelegramOwnerFenced, match='generation changed'):
+        await actor.run(asyncio.Event())
+
+    assert calls == 1
+
+
+@pytest.mark.asyncio
+async def test_telegram_actor_cancellation_interrupts_database_retry_backoff(monkeypatch) -> None:
+    actor = runtime.TelegramIntegrationRuntime(7)
+    database_failed = asyncio.Event()
+    calls = 0
+
+    async def database(_function, *args, **kwargs):
+        nonlocal calls
+        calls += 1
+        database_failed.set()
+        raise psycopg.OperationalError('temporary disconnect')
+
+    monkeypatch.setattr(actor, '_database', database)
+    task = asyncio.create_task(actor.run(asyncio.Event()))
+    await asyncio.wait_for(database_failed.wait(), timeout=1)
+    task.cancel()
+
+    with pytest.raises(asyncio.CancelledError):
+        await task
+    assert calls == 1
 
 
 @pytest.mark.asyncio

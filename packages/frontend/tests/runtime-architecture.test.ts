@@ -1,7 +1,6 @@
 import { randomUUID } from 'node:crypto';
-import { execFile } from 'node:child_process';
+import { execFileSync } from 'node:child_process';
 import { request as httpRequest } from 'node:http';
-import { promisify } from 'node:util';
 import type { Page } from '@playwright/test';
 import { expect, test } from './fixtures.js';
 import { createCsvDatasource, deleteDatasource } from './utils/api.js';
@@ -9,41 +8,47 @@ import { waitForLayoutReady } from './utils/readiness.js';
 
 type ChatEvent = { type: string; [key: string]: unknown };
 type SseEvent = { id: string; data: ChatEvent };
-const execFileAsync = promisify(execFile);
-
-async function chatDatabaseContainer(): Promise<string> {
+function chatDatabaseContainer(): string {
 	const deploymentId = process.env.E2E_DEPLOYMENT_ID;
 	if (!deploymentId) throw new Error('E2E_DEPLOYMENT_ID was not provided by the owned test recipe');
-	const result = await execFileAsync('docker', [
-		'ps',
-		'--filter',
-		`label=com.docker.compose.project=${deploymentId}`,
-		'--filter',
-		'label=com.docker.compose.service=postgres',
-		'--format',
-		'{{.ID}}'
-	]);
-	const containers = result.stdout.trim().split('\n');
+	const result = execFileSync(
+		'docker',
+		[
+			'ps',
+			'--filter',
+			`label=com.docker.compose.project=${deploymentId}`,
+			'--filter',
+			'label=com.docker.compose.service=postgres',
+			'--format',
+			'{{.ID}}'
+		],
+		{ encoding: 'utf8' }
+	);
+	const containers = result.trim().split('\n');
 	if (containers.length !== 1 || !containers[0])
 		throw new Error('Expected the owned E2E PostgreSQL container');
 	return containers[0];
 }
 
-async function chatTurnState(containerId: string, sessionId: string): Promise<string> {
+function chatTurnState(containerId: string, sessionId: string): string {
 	if (!/^[A-Za-z0-9_-]+$/.test(sessionId)) throw new Error('Invalid owned chat session ID');
-	const result = await execFileAsync('docker', [
-		'exec',
-		containerId,
-		'psql',
-		'-U',
-		'dataforge',
-		'-d',
-		'dataforge',
-		'-At',
-		'-c',
-		`SELECT status || ':' || COALESCE(checkpoint ->> 'phase', '') FROM public.chat_turns WHERE session_id = '${sessionId}' ORDER BY created_at DESC LIMIT 1`
-	]);
-	return result.stdout.trim();
+	const result = execFileSync(
+		'docker',
+		[
+			'exec',
+			containerId,
+			'psql',
+			'-U',
+			'dataforge',
+			'-d',
+			'dataforge',
+			'-At',
+			'-c',
+			`SELECT status || ':' || COALESCE(checkpoint ->> 'phase', '') FROM public.chat_turns WHERE session_id = '${sessionId}' ORDER BY created_at DESC LIMIT 1`
+		],
+		{ encoding: 'utf8' }
+	);
+	return result.trim();
 }
 
 async function readChatStreams(
@@ -215,12 +220,9 @@ test.describe('runtime architecture', () => {
 		}
 		const model = `e2e-settings-${randomUUID()}`;
 		const fixtureUrl = process.env.E2E_OPENAI_FIXTURE_URL;
-		const fixtureHostUrl = process.env.E2E_OPENAI_FIXTURE_HOST_URL;
-		if (!fixtureUrl || !fixtureHostUrl) {
-			throw new Error('E2E OpenAI fixture URLs must be resolved by scripts/test_e2e.sh');
-		}
+		if (!fixtureUrl) throw new Error('E2E_OPENAI_FIXTURE_URL was not provided by the harness');
 
-		const fixtureCheck = await page.context().request.get(`${fixtureHostUrl}/models`);
+		const fixtureCheck = await page.context().request.get(`${fixtureUrl}/models`);
 		expect(fixtureCheck.ok()).toBeTruthy();
 		const settingsUpdate = {
 			openai_api_key: 'e2e-provider-key',
@@ -273,12 +275,17 @@ test.describe('runtime architecture', () => {
 						return { pid, debug, model: readSettings.openai_default_model };
 					})
 				);
-				const otherApiReader = observations.find(({ pid }) => pid !== writerApiPid);
-				expect(otherApiReader).toBeDefined();
-				expect(otherApiReader).toMatchObject({
-					debug: !original.public_idb_debug,
-					model
-				});
+				const configuredApiWorkers = process.env.E2E_API_WORKERS?.trim();
+				const apiWorkers = Number(configuredApiWorkers || '4');
+				expect(Number.isInteger(apiWorkers) && apiWorkers > 0).toBeTruthy();
+				if (apiWorkers > 1) {
+					const otherApiReader = observations.find(({ pid }) => pid !== writerApiPid);
+					expect(otherApiReader).toBeDefined();
+					expect(otherApiReader).toMatchObject({
+						debug: !original.public_idb_debug,
+						model
+					});
+				}
 				for (let index = 0; index < 4; index += 1) {
 					const context = contexts[index];
 					if (!context) throw new Error(`Missing settings projection context ${index}`);

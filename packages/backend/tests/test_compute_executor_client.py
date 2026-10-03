@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import asyncio
+import contextvars
 import os
 import threading
 from datetime import datetime
@@ -14,6 +15,11 @@ from pydantic import BaseModel, Field
 
 import modules.compute.executor_client as executor_client
 from backend_core import compute_requests_service
+from backend_core.api_execution_budget import (
+    BoundedThreadPoolExecutor,
+    install_api_blocking_executor,
+    remove_api_blocking_executor,
+)
 from backend_core.compute_response_recovery import ComputeResponseRecovery
 from backend_core.dependencies import RuntimeAvailabilityProbe
 from backend_core.domain.compute.schemas import AnalysisPipelinePayload, DownloadRequest
@@ -29,6 +35,64 @@ class _DisconnectedRequest:
         self.checks += 1
         await asyncio.sleep(0)
         return self.checks >= 2
+
+
+@pytest.mark.asyncio
+async def test_compute_serialization_executor_waits_for_capacity_and_releases_queued_cancel(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    executor = BoundedThreadPoolExecutor(max_workers=1, max_pending=1, thread_name_prefix='serialization-admission-test')
+    monkeypatch.setattr(executor_client, '_COMPUTE_SERIALIZATION_EXECUTOR', executor)
+    started = threading.Event()
+    release = threading.Event()
+
+    def block() -> str:
+        started.set()
+        if not release.wait(timeout=5):
+            raise TimeoutError('serialization admission test was not released')
+        return 'running'
+
+    first = asyncio.create_task(executor_client._run_compute_serialization(block))
+    second: asyncio.Task[str] | None = None
+    replacement: asyncio.Task[str] | None = None
+    waiting: asyncio.Task[str] | None = None
+    try:
+        assert await asyncio.to_thread(started.wait, 1)
+        second = asyncio.create_task(executor_client._run_compute_serialization(lambda: 'cancelled'))
+        await asyncio.sleep(0.02)
+        waiting = asyncio.create_task(executor_client._run_compute_serialization(lambda: 'waiting'))
+        await asyncio.sleep(0)
+        assert not waiting.done()
+
+        second.cancel()
+        with pytest.raises(asyncio.CancelledError):
+            await second
+        replacement = asyncio.create_task(executor_client._run_compute_serialization(lambda: 'replacement'))
+        release.set()
+        assert await first == 'running'
+        assert await asyncio.wait_for(waiting, timeout=2) == 'waiting'
+        assert await asyncio.wait_for(replacement, timeout=2) == 'replacement'
+    finally:
+        release.set()
+        for task in (first, second, replacement, waiting):
+            if task is not None and not task.done():
+                task.cancel()
+        await asyncio.gather(*(task for task in (first, second, replacement, waiting) if task is not None), return_exceptions=True)
+        executor.shutdown(wait=True, cancel_futures=True)
+
+
+@pytest.mark.asyncio
+async def test_compute_serialization_preserves_contextvars(monkeypatch: pytest.MonkeyPatch) -> None:
+    executor = BoundedThreadPoolExecutor(max_workers=1, max_pending=1, thread_name_prefix='serialization-context-test')
+    monkeypatch.setattr(executor_client, '_COMPUTE_SERIALIZATION_EXECUTOR', executor)
+    request_context = contextvars.ContextVar('request_context', default='missing')
+    token = request_context.set('tenant-context')
+    try:
+        result = await executor_client._run_compute_serialization(request_context.get)
+        assert result == 'tenant-context'
+    finally:
+        request_context.reset(token)
+        executor.shutdown(wait=True, cancel_futures=True)
 
 
 def _staged_request(
@@ -61,24 +125,59 @@ async def test_json_response_serializes_model_and_preserves_headers() -> None:
 
     payload = Payload(publicValue='ready', created_at=datetime(2026, 9, 26, 12, 0))
 
-    response = await executor_client.json_response(
-        payload,
-        headers={'ETag': '"analysis-1-2"'},
-    )
+    loop = asyncio.get_running_loop()
+    executor = BoundedThreadPoolExecutor(max_workers=1, max_pending=1, thread_name_prefix='json-response-test')
+    install_api_blocking_executor(loop, executor, 1, max_pending=1)
+    try:
+        response = await executor_client.json_response(
+            payload,
+            headers={'ETag': '"analysis-1-2"'},
+        )
 
-    assert response.media_type == 'application/json'
-    assert response.body == b'{"publicValue":"ready","created_at":"2026-09-26T12:00:00"}'
-    assert response.headers['ETag'] == '"analysis-1-2"'
+        assert response.media_type == 'application/json'
+        assert response.body == b'{"publicValue":"ready","created_at":"2026-09-26T12:00:00"}'
+        assert response.headers['ETag'] == '"analysis-1-2"'
 
-    sync_response = executor_client.json_response_sync(
-        payload,
-        headers={'ETag': '"analysis-1-2"'},
-    )
-    assert sync_response.body == response.body
-    assert sync_response.headers['ETag'] == response.headers['ETag']
+        sync_response = executor_client.json_response_sync(
+            payload,
+            headers={'ETag': '"analysis-1-2"'},
+        )
+        assert sync_response.body == response.body
+        assert sync_response.headers['ETag'] == response.headers['ETag']
 
-    list_response = await executor_client.json_response([payload])
-    assert list_response.body == b'[{"publicValue":"ready","created_at":"2026-09-26T12:00:00"}]'
+        list_response = await executor_client.json_response([payload])
+        assert list_response.body == b'[{"publicValue":"ready","created_at":"2026-09-26T12:00:00"}]'
+    finally:
+        remove_api_blocking_executor(loop)
+        executor.shutdown(wait=True, cancel_futures=True)
+
+
+@pytest.mark.asyncio
+async def test_json_response_does_not_consume_compute_serialization_admission(monkeypatch: pytest.MonkeyPatch) -> None:
+    executor = BoundedThreadPoolExecutor(max_workers=1, max_pending=0, thread_name_prefix='compute-serialization-saturated-test')
+    monkeypatch.setattr(executor_client, '_COMPUTE_SERIALIZATION_EXECUTOR', executor)
+    started = threading.Event()
+    release = threading.Event()
+
+    def block_compute_serialization() -> None:
+        started.set()
+        if not release.wait(timeout=5):
+            raise TimeoutError('compute serialization test was not released')
+
+    blocked = executor.submit(block_compute_serialization)
+    loop = asyncio.get_running_loop()
+    api_executor = BoundedThreadPoolExecutor(max_workers=1, max_pending=0, thread_name_prefix='json-response-api-test')
+    install_api_blocking_executor(loop, api_executor, 1, max_pending=0)
+    try:
+        assert await asyncio.to_thread(started.wait, 1)
+        response = await asyncio.wait_for(executor_client.json_response({'ready': True}), timeout=1)
+        assert response.body == b'{"ready":true}'
+    finally:
+        release.set()
+        blocked.result(timeout=1)
+        remove_api_blocking_executor(loop)
+        api_executor.shutdown(wait=True, cancel_futures=True)
+        executor.shutdown(wait=True, cancel_futures=True)
 
 
 @pytest.mark.asyncio

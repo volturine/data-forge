@@ -27,12 +27,12 @@ class TestSettings:
                 'DATABASE_URL',
                 'DATA_DIR',
                 'DEFAULT_NAMESPACE',
-                'UPLOAD_CHUNK_SIZE',
                 'UPLOAD_MAX_FILE_SIZE_BYTES',
                 'LOG_LEVEL',
                 'LOG_ICEBERG_PATH',
                 'PUBLIC_IDB_DEBUG',
                 'WORKERS',
+                'COMPUTE_WORKERS',
             ]:
                 monkeypatch.delenv(key, raising=False)
         _set_isolated_settings_env(monkeypatch, tmp_path)
@@ -43,13 +43,30 @@ class TestSettings:
         assert settings.debug is False
         assert settings.database_url == 'postgresql+psycopg://user:pass@host:5432/db'
         assert settings.data_dir.exists()
-        assert settings.upload_chunk_size == 5 * 1024 * 1024
         assert settings.upload_max_file_size_bytes == 2 * 1024 * 1024 * 1024
         assert settings.lock_ttl_seconds == 30
         assert settings.lock_heartbeat_interval_seconds == 10
         assert settings.public_idb_debug is False
         assert settings.sql_echo is False
         assert settings.prod_mode_enabled is False
+        assert settings.compute_workers == 14
+
+    def test_compute_workers_from_env(self, monkeypatch, tmp_path):
+        _set_isolated_settings_env(monkeypatch, tmp_path)
+        monkeypatch.setenv('COMPUTE_WORKERS', '32')
+
+        settings = Settings()
+
+        assert settings.compute_workers == 32
+        assert Settings.model_fields['compute_workers'].alias == 'COMPUTE_WORKERS'
+
+    @pytest.mark.parametrize(('value', 'message'), [('0', 'compute_workers must be >= 1'), ('101', 'compute_workers must be <= 100')])
+    def test_compute_workers_must_be_between_one_and_one_hundred(self, monkeypatch, tmp_path, value, message):
+        _set_isolated_settings_env(monkeypatch, tmp_path)
+        monkeypatch.setenv('COMPUTE_WORKERS', value)
+
+        with pytest.raises(ValidationError, match=message):
+            Settings()
 
     def test_custom_settings_from_env(self, monkeypatch, tmp_path):
         data_dir = tmp_path / 'data'
@@ -59,7 +76,6 @@ class TestSettings:
         monkeypatch.setenv('DATABASE_URL', 'postgresql+psycopg://user:pass@host:5433/test')
         monkeypatch.setenv('DATA_DIR', str(data_dir))
         monkeypatch.setenv('DEFAULT_NAMESPACE', 'acme')
-        monkeypatch.setenv('UPLOAD_CHUNK_SIZE', '2000000')
         monkeypatch.setenv('PUBLIC_IDB_DEBUG', 'true')
 
         settings = Settings()
@@ -69,7 +85,6 @@ class TestSettings:
         assert settings.database_url == 'postgresql+psycopg://user:pass@host:5433/test'
         assert settings.data_dir == data_dir
         assert settings.default_namespace == 'acme'
-        assert settings.upload_chunk_size == 2000000
         assert settings.public_idb_debug is True
 
     def test_sql_echo_from_env(self, monkeypatch, tmp_path):

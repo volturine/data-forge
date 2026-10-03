@@ -1,8 +1,7 @@
-import asyncio
-
 from fastapi import Depends, HTTPException, Request
 from starlette.requests import HTTPConnection
 
+from backend_core.api_execution_budget import run_api_blocking
 from backend_core.auth_config import settings as auth_settings
 from backend_core.database import run_settings_db
 from modules.auth.models import User
@@ -22,11 +21,11 @@ def _resolve_session_token(request: HTTPConnection) -> str | None:
 async def _resolve_user(request: HTTPConnection) -> User | None:
     token = _resolve_session_token(request)
     if token:
-        user = await asyncio.to_thread(run_settings_db, validate_session, token)
+        user = await run_api_blocking(run_settings_db, validate_session, token)
         if user:
             return user
     if not auth_settings.auth_required:
-        return await asyncio.to_thread(run_settings_db, ensure_default_user)
+        return await run_api_blocking(run_settings_db, ensure_default_user)
     return None
 
 
@@ -48,7 +47,7 @@ async def get_optional_user(request: Request) -> User | None:
 async def get_optional_user_id(request: Request) -> str | None:
     token = _resolve_session_token(request)
     if token:
-        user = await asyncio.to_thread(run_settings_db, validate_session, token)
+        user = await run_api_blocking(run_settings_db, validate_session, token)
         if user:
             return user.id
     if not auth_settings.auth_required:

@@ -25,7 +25,7 @@ async def test_blocked_external_provider_does_not_block_runtime_wake_lane() -> N
     release_delivery = threading.Event()
     runtime_wakes: list[str] = []
 
-    def deliver(_payload: dict[str, object], _event_id: str) -> None:
+    def deliver(_payload: dict[str, object], _event_id: str, _progress: object) -> None:
         delivery_started.set()
         assert release_delivery.wait(timeout=2)
 
@@ -60,7 +60,7 @@ async def test_canceled_delivery_finishes_claim_finalization_before_stopping() -
     release_delivery = threading.Event()
     finalized: list[str | None] = []
 
-    def deliver(_payload: dict[str, object], _event_id: str) -> None:
+    def deliver(_payload: dict[str, object], _event_id: str, _progress: object) -> None:
         delivery_started.set()
         assert release_delivery.wait(timeout=2)
 
@@ -87,10 +87,49 @@ async def test_canceled_delivery_finishes_claim_finalization_before_stopping() -
 
 
 @pytest.mark.asyncio
+async def test_canceled_claim_joins_and_logs_its_started_database_operation(caplog: pytest.LogCaptureFixture) -> None:
+    claim_started = threading.Event()
+    release_claim = threading.Event()
+    claim_finished = threading.Event()
+
+    def claim(_namespace: str, _limit: int) -> list[OutboxClaim]:
+        claim_started.set()
+        if not release_claim.wait(timeout=3):
+            raise TimeoutError('test DB claim was not released')
+        claim_finished.set()
+        raise RuntimeError('late claim failure')
+
+    dispatcher = IntegrationDeliveryDispatcher(
+        kind=EMAIL_DELIVERY_KIND,
+        claim_delivery=claim,
+    )
+    task = asyncio.create_task(dispatcher.dispatch_namespace('default'))
+    try:
+        assert await asyncio.to_thread(claim_started.wait, 1)
+        task.cancel()
+        await asyncio.sleep(0.05)
+        assert not task.done()
+        assert not claim_finished.is_set()
+
+        release_claim.set()
+        with pytest.raises(asyncio.CancelledError):
+            await asyncio.wait_for(task, timeout=1)
+        assert claim_finished.is_set()
+        assert 'Integration delivery operation failed after its caller was cancelled' in caplog.text
+        assert 'RuntimeError' in caplog.text
+        assert 'late claim failure' in caplog.text
+    finally:
+        release_claim.set()
+        if not task.done():
+            task.cancel()
+            await asyncio.gather(task, return_exceptions=True)
+
+
+@pytest.mark.asyncio
 async def test_failed_delivery_is_finalized_for_durable_retry() -> None:
     finalized: list[str | None] = []
 
-    def deliver(_payload: dict[str, object], _event_id: str) -> None:
+    def deliver(_payload: dict[str, object], _event_id: str, _progress: object) -> None:
         raise RuntimeError('provider unavailable')
 
     def finalize(_namespace: str, _claim: OutboxClaim, error: str | None) -> bool:

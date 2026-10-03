@@ -20,7 +20,6 @@ logger = logging.getLogger(__name__)
 # compute budget. Engine polling keeps that same width because each active
 # engine has a synchronous progress stream to service.
 _CONTROL_WORKERS = min(4, settings.compute_workers)
-_LEASE_WORKERS = min(2, settings.compute_workers)
 _CLEANUP_WORKERS = min(2, settings.compute_workers)
 
 COMPUTE_EXECUTOR = ThreadPoolExecutor(
@@ -30,10 +29,6 @@ COMPUTE_EXECUTOR = ThreadPoolExecutor(
 CONTROL_EXECUTOR = ThreadPoolExecutor(
     max_workers=_CONTROL_WORKERS,
     thread_name_prefix="runtime-control",
-)
-LEASE_EXECUTOR = ThreadPoolExecutor(
-    max_workers=_LEASE_WORKERS,
-    thread_name_prefix="runtime-lease",
 )
 CLEANUP_EXECUTOR = ThreadPoolExecutor(
     max_workers=_CLEANUP_WORKERS,
@@ -63,7 +58,6 @@ class _ExecutorLane:
 
 COMPUTE_LANE = _ExecutorLane(COMPUTE_EXECUTOR, settings.compute_workers * 2)
 CONTROL_LANE = _ExecutorLane(CONTROL_EXECUTOR, _CONTROL_WORKERS * 2)
-LEASE_LANE = _ExecutorLane(LEASE_EXECUTOR, _LEASE_WORKERS * 2)
 CLEANUP_LANE = _ExecutorLane(CLEANUP_EXECUTOR, _CLEANUP_WORKERS * 2)
 ENGINE_IO_LANE = _ExecutorLane(ENGINE_IO_EXECUTOR, settings.compute_workers * 2)
 
@@ -81,10 +75,6 @@ async def run_compute_in_thread[T](
 
 async def run_control_in_thread[T](function: Callable[..., T], /, *args: Any, **kwargs: Any) -> T:
     return await _run_in_executor(CONTROL_LANE, "runtime-control", function, True, None, *args, **kwargs)
-
-
-async def run_lease_in_thread[T](function: Callable[..., T], /, *args: Any, **kwargs: Any) -> T:
-    return await _run_in_executor(LEASE_LANE, "runtime-lease", function, True, None, *args, **kwargs)
 
 
 async def _run_cleanup_in_thread[T](function: Callable[..., T], /, *args: Any, **kwargs: Any) -> T:

@@ -266,7 +266,8 @@ def _execute_datasource_job(
     if kind == "datasource_stage":
         return datasource_execution.stage_datasource_to_object_store(
             _required_mapping(payload, "source_config"),
-            artifact_url=str(payload.get("artifact_url", "")),
+            table_path=str(payload.get("table_path", "")),
+            manifest_url=str(payload.get("manifest_url", "")),
             progress_callback=progress_callback,
         )
 

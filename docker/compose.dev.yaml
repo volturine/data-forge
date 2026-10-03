@@ -47,6 +47,7 @@ services:
 
   frontend:
     image: oven/bun:1
+    cpu_shares: 512
     working_dir: /app/packages/frontend
     depends_on:
       api:

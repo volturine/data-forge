@@ -14,6 +14,7 @@ from pydantic import BaseModel
 from sqlalchemy import text
 from sqlmodel import Session
 
+from backend_core.api_execution_budget import run_api_blocking
 from backend_core.domain.enums import DataForgeStrEnum
 from backend_core.domain.runtime.events import RuntimePayloadKind
 
@@ -100,7 +101,7 @@ class RuntimeNotificationListener:
                         delivered += 1
                         if delivered % 100 == 0:
                             await asyncio.sleep(0)
-                raise RuntimeError('PostgreSQL runtime notification generator exited unexpectedly')
+                raise psycopg.OperationalError('PostgreSQL runtime notification generator exited unexpectedly')
             except psycopg.Error, OSError:
                 logger.warning('Runtime notification listener lost its connection; reconnecting', exc_info=True)
                 self._recovery_requested.set()
@@ -147,9 +148,7 @@ def _psycopg_conninfo() -> str:
 
 
 def configure_database_url_provider(provider: Callable[[], str] | None) -> None:
-    global _database_url_provider
-    _database_url_provider = provider
-    _reset_notify_connection()
+    _close_notify_connection(provider, replace_provider=True)
 
 
 async def start_api_server(listener: ListenerKind = RuntimeListenerKind.API) -> RuntimeNotificationListener:
@@ -207,9 +206,11 @@ async def stop_api_server(
     listener: ListenerKind = RuntimeListenerKind.API,
 ) -> None:
     del listener
-    if server is None:
-        return
-    await server.close()
+    try:
+        if server is not None:
+            await server.close()
+    finally:
+        await run_api_blocking(_close_notify_connection)
 
 
 def notify_api_build(namespace: str, build_id: str, latest_sequence: int) -> None:
@@ -327,6 +328,19 @@ def _reset_notify_connection() -> None:
             connection, _conninfo = _notify_connection_state
             connection.close()
         _notify_connection_state = None
+
+
+def _close_notify_connection(
+    provider: Callable[[], str] | None = None,
+    *,
+    replace_provider: bool = False,
+) -> None:
+    """Serialize publisher shutdown/configuration against in-flight sends."""
+    global _database_url_provider
+    with _notify_connection_io_lock:
+        if replace_provider:
+            _database_url_provider = provider
+        _reset_notify_connection()
 
 
 def _send_postgres_message(payload: dict[str, object]) -> None:

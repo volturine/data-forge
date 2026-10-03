@@ -7,6 +7,7 @@ import copy
 import json
 import logging
 import logging.handlers
+import math
 import queue
 import threading
 import time
@@ -23,6 +24,7 @@ import psycopg
 from fastapi import Request
 from starlette.requests import ClientDisconnect
 
+from backend_core.api_execution_budget import run_api_blocking
 from backend_core.config import settings
 from backend_core.database import database_statement_timing
 from backend_core.domain.enums import DataForgeStrEnum
@@ -585,6 +587,11 @@ class RequestTimingMiddleware:
         self.pool_snapshot = pool_snapshot
         self.get_time = get_time or time.perf_counter
 
+    @staticmethod
+    def _timing_ms(metrics: dict[str, object], name: str) -> float:
+        value = metrics.get(name, 0.0)
+        return float(value) if isinstance(value, (int, float)) and not isinstance(value, bool) else 0.0
+
     async def __call__(self, scope: dict[str, Any], receive: AsgiReceive, send: AsgiSend) -> None:
         if scope.get('type') != 'http':
             await self.app(scope, receive, send)
@@ -606,7 +613,18 @@ class RequestTimingMiddleware:
                 break
         request_id = request_id or uuid.uuid4().hex
         state['request_id'] = request_id
-        database_metrics: dict[str, object] = {'sql_count': 0, 'sql_ms': 0.0, 'commit_ms': 0.0, 'api_db_admission_wait_ms': 0.0}
+        database_metrics: dict[str, object] = {
+            'sql_count': 0,
+            'sql_ms': 0.0,
+            'commit_ms': 0.0,
+            'api_blocking_admission_wait_ms': 0.0,
+            'api_bootstrap_admission_wait_ms': 0.0,
+            'api_general_admission_wait_ms': 0.0,
+            'api_bootstrap_executor_queue_ms': 0.0,
+            'api_general_executor_queue_ms': 0.0,
+            'api_bootstrap_work_ms': 0.0,
+            'api_general_work_ms': 0.0,
+        }
 
         async def report_slow_request() -> None:
             await asyncio.sleep(self.slow_request_seconds)
@@ -634,10 +652,18 @@ class RequestTimingMiddleware:
                 headers = [(name, value) for name, value in message.get('headers', []) if name.lower() not in {b'x-request-id', b'server-timing'}]
                 headers.append((b'x-request-id', request_id.encode('latin-1')))
                 server_duration_ms = max(0.0, (response_started_at - start) * 1000)
-                admission_wait_ms = database_metrics.get('api_db_admission_wait_ms', 0.0)
+                admission_wait_ms = database_metrics.get('api_blocking_admission_wait_ms', 0.0)
                 if not isinstance(admission_wait_ms, (int, float)):
                     admission_wait_ms = 0.0
-                server_timing = f'app;dur={server_duration_ms:.1f}, api-db-admission;dur={admission_wait_ms:.1f}'
+                server_timing = (
+                    f'app;dur={server_duration_ms:.1f}, api-blocking-admission;dur={admission_wait_ms:.1f}, '
+                    f'api-bootstrap-admission;dur={self._timing_ms(database_metrics, "api_bootstrap_admission_wait_ms"):.1f}, '
+                    f'api-general-admission;dur={self._timing_ms(database_metrics, "api_general_admission_wait_ms"):.1f}, '
+                    f'api-bootstrap-executor-queue;dur={self._timing_ms(database_metrics, "api_bootstrap_executor_queue_ms"):.1f}, '
+                    f'api-general-executor-queue;dur={self._timing_ms(database_metrics, "api_general_executor_queue_ms"):.1f}, '
+                    f'api-bootstrap-work;dur={self._timing_ms(database_metrics, "api_bootstrap_work_ms"):.1f}, '
+                    f'api-general-work;dur={self._timing_ms(database_metrics, "api_general_work_ms"):.1f}'
+                )
                 headers.append((b'server-timing', server_timing.encode('ascii')))
                 message = {**message, 'headers': headers}
             await send(message)
@@ -682,9 +708,27 @@ class RequestTimingMiddleware:
                 pool = await self.pool_snapshot()
         sql_ms = database_metrics.get('sql_ms')
         commit_ms = database_metrics.get('commit_ms')
+        admission_wait_ms = database_metrics.get('api_blocking_admission_wait_ms')
+        if isinstance(admission_wait_ms, (int, float)) and not isinstance(admission_wait_ms, bool):
+            try:
+                admission_wait_ms = float(admission_wait_ms)
+            except OverflowError:
+                admission_wait_ms = 0.0
+            if not math.isfinite(admission_wait_ms) or admission_wait_ms < 0:
+                admission_wait_ms = 0.0
+        else:
+            admission_wait_ms = 0.0
+        checkout_ms = database_metrics.get('db_pool_checkout_ms')
+        checkout_max_ms = database_metrics.get('db_pool_checkout_max_ms')
+        slowest_sql_ms = database_metrics.get('slowest_sql_ms')
         _logger.warning(
             'Slow API request phase=%s method=%s path=%s status=%s total_ms=%.1f response_start_ms=%s '
-            'response_stream_ms=%s request_id=%s db_sql_count=%s db_sql_ms=%.1f db_commit_ms=%.1f db_pool=%s',
+            'response_stream_ms=%s request_id=%s db_sql_count=%s db_sql_ms=%.1f '
+            'api_blocking_admission_wait_ms=%.1f api_bootstrap_admission_wait_ms=%.1f '
+            'api_general_admission_wait_ms=%.1f api_bootstrap_executor_queue_ms=%.1f '
+            'api_general_executor_queue_ms=%.1f api_bootstrap_work_ms=%.1f api_general_work_ms=%.1f '
+            'db_checkout_count=%s db_checkout_ms=%.1f db_checkout_max_ms=%.1f '
+            'db_slowest_sql_ms=%.1f db_slowest_sql=%s db_commit_ms=%.1f db_pool=%s',
             phase,
             scope.get('method', '-'),
             scope.get('path', '-'),
@@ -695,6 +739,18 @@ class RequestTimingMiddleware:
             request_id,
             database_metrics.get('sql_count', 0),
             sql_ms if isinstance(sql_ms, (int, float)) else 0.0,
+            admission_wait_ms,
+            self._timing_ms(database_metrics, 'api_bootstrap_admission_wait_ms'),
+            self._timing_ms(database_metrics, 'api_general_admission_wait_ms'),
+            self._timing_ms(database_metrics, 'api_bootstrap_executor_queue_ms'),
+            self._timing_ms(database_metrics, 'api_general_executor_queue_ms'),
+            self._timing_ms(database_metrics, 'api_bootstrap_work_ms'),
+            self._timing_ms(database_metrics, 'api_general_work_ms'),
+            database_metrics.get('db_pool_checkout_count', 0),
+            checkout_ms if isinstance(checkout_ms, (int, float)) else 0.0,
+            checkout_max_ms if isinstance(checkout_max_ms, (int, float)) else 0.0,
+            slowest_sql_ms if isinstance(slowest_sql_ms, (int, float)) else 0.0,
+            database_metrics.get('slowest_sql_statement', '-'),
             commit_ms if isinstance(commit_ms, (int, float)) else 0.0,
             pool,
         )
@@ -719,7 +775,7 @@ class RequestLoggingMiddleware:
             return
 
         if not self.writer:
-            self.writer = await asyncio.to_thread(get_log_writer)
+            self.writer = await run_api_blocking(get_log_writer)
         start = self.get_time()
         request = Request(scope, receive)
         state = scope.setdefault('state', {})
@@ -989,7 +1045,7 @@ def configure_logging() -> DatabaseLogWriter:
 
 async def configure_logging_off_loop() -> DatabaseLogWriter:
     """Initialize the database-backed logger without blocking an async service loop."""
-    return await asyncio.to_thread(configure_logging)
+    return await run_api_blocking(configure_logging)
 
 
 def shutdown_logging() -> None:

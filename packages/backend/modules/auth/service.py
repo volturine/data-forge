@@ -1,4 +1,3 @@
-import asyncio
 import hashlib
 import hmac
 import logging
@@ -13,6 +12,7 @@ from typing import Any, cast
 from sqlalchemy import inspect, text, update
 from sqlmodel import Session, select
 
+from backend_core.api_execution_budget import run_api_blocking
 from backend_core.auth_config import settings as auth_settings
 from backend_core.auth_exceptions import (
     DefaultUserDeletionError,
@@ -670,7 +670,7 @@ async def send_verification_email(user_email: str, token: str) -> bool:
     try:
         from backend_core.settings_store import get_resolved_smtp
 
-        smtp = await asyncio.to_thread(get_resolved_smtp)
+        smtp = await run_api_blocking(get_resolved_smtp)
     except Exception:
         logger.error('Failed to resolve SMTP config for verification email', exc_info=True)
         raise
@@ -691,7 +691,7 @@ async def send_verification_email(user_email: str, token: str) -> bool:
     msg.set_content(f'Please verify your email by opening this link: {verify_url}')
 
     try:
-        await asyncio.to_thread(_send_smtp_message, host, port, smtp_user, password, msg)
+        await run_api_blocking(_send_smtp_message, host, port, smtp_user, password, msg)
     except Exception:
         logger.error('Failed to send verification email', exc_info=True)
         raise
@@ -738,7 +738,7 @@ async def send_password_reset_email(user_email: str, token: str) -> bool:
     try:
         from backend_core.settings_store import get_resolved_smtp
 
-        smtp = await asyncio.to_thread(get_resolved_smtp)
+        smtp = await run_api_blocking(get_resolved_smtp)
     except Exception:
         logger.error('Failed to resolve SMTP config for password reset email', exc_info=True)
         raise
@@ -756,7 +756,7 @@ async def send_password_reset_email(user_email: str, token: str) -> bool:
     msg['Subject'] = 'Reset your password'
     msg.set_content(f'Use this link to reset your password: {reset_url}')
     try:
-        await asyncio.to_thread(_send_smtp_message, host, port, smtp_user, password, msg)
+        await run_api_blocking(_send_smtp_message, host, port, smtp_user, password, msg)
     except Exception:
         logger.error('Failed to send password reset email', exc_info=True)
         raise

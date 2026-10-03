@@ -1,7 +1,7 @@
 import logging
 import uuid
 from collections import deque
-from collections.abc import Iterator, Sequence
+from collections.abc import Collection, Iterator, Sequence
 from datetime import UTC, datetime, timedelta
 from typing import Any
 
@@ -10,6 +10,7 @@ from sqlalchemy import Select, case, func, literal, or_, select, tuple_
 from sqlmodel import Session
 
 from backend_core import (
+    build_datasource_dependencies,
     build_jobs_service as build_job_service,
     build_runs_service as build_run_service,
     runtime_ipc,
@@ -18,6 +19,7 @@ from backend_core import (
 )
 from backend_core.claiming import claim_by_lease_owner, with_for_update_skip_locked
 from backend_core.domain.build_jobs.live import hub as build_job_hub
+from backend_core.domain.build_jobs.models import BuildJobStatus
 from backend_core.domain.build_runs.models import BuildRunStatus
 from backend_core.domain.compute import schemas as compute_schemas
 from backend_core.domain.datasource.models import DataSourceTargetKind
@@ -31,6 +33,7 @@ from backend_core.exceptions import (
 from backend_core.lease_observability import record_lease_transition
 from backend_core.namespace import get_namespace
 from backend_core.persistence.analysis.models import Analysis, AnalysisDataSource
+from backend_core.persistence.build_jobs.models import BuildJob
 from backend_core.persistence.build_runs.models import BuildRun
 from backend_core.persistence.datasource.models import DataSource
 from backend_core.persistence.scheduler.models import Schedule
@@ -295,6 +298,9 @@ def _enqueue_schedule_ingest_build(
 ) -> build_run_service.BuildRun:
     build_id = str(uuid.uuid4())
     analysis_name = f'Schedule ingest {schedule.datasource_id}'
+    request = _build_ingest_request(schedule)
+    datasource_ids = build_datasource_dependencies.external_datasource_ids(request.analysis_pipeline)
+    build_datasource_dependencies.lock_active_datasources(session, namespace=namespace, datasource_ids=datasource_ids)
     run = build_run_service.stage_build_run(
         session,
         build_id=build_id,
@@ -302,7 +308,7 @@ def _enqueue_schedule_ingest_build(
         schedule_id=schedule.id,
         analysis_id=schedule.id,
         analysis_name=analysis_name,
-        request_json=_build_request_json(_build_ingest_request(schedule)),
+        request_json=_build_request_json(request),
         starter_json=compute_schemas.BuildStarter.for_schedule(schedule.id).model_dump(mode='json'),
         status=BuildRunStatus.QUEUED,
         current_kind=target_kind,
@@ -312,6 +318,7 @@ def _enqueue_schedule_ingest_build(
         current_output_id=schedule.datasource_id,
         current_output_name=analysis_name,
         total_tabs=1,
+        datasource_ids=datasource_ids,
         created_at=now,
         started_at=now,
     )
@@ -333,6 +340,8 @@ def _enqueue_schedule_analysis_build(
     now: datetime,
 ) -> build_run_service.BuildRun:
     build_id = str(uuid.uuid4())
+    datasource_ids = build_datasource_dependencies.external_datasource_ids(request.analysis_pipeline)
+    build_datasource_dependencies.lock_active_datasources(session, namespace=namespace, datasource_ids=datasource_ids)
     run = build_run_service.stage_build_run(
         session,
         build_id=build_id,
@@ -350,6 +359,7 @@ def _enqueue_schedule_analysis_build(
         current_output_id=schedule.datasource_id,
         current_output_name=tab_name,
         total_tabs=len(request.analysis_pipeline.tabs),
+        datasource_ids=datasource_ids,
         created_at=now,
         started_at=now,
     )
@@ -806,13 +816,14 @@ def _next_schedule_namespace_due_at(session: Session) -> datetime | None:
     return due_at.replace(tzinfo=UTC) if due_at.tzinfo is None else due_at.astimezone(UTC)
 
 
-def finish_schedule_work_scan(session: Session, *, namespace: str, generation: int) -> None:
+def finish_schedule_work_scan(session: Session, *, namespace: str, generation: int, wake_ids: Collection[int] = ()) -> None:
     """Ack the scanned event generation and publish the next cron/lease wake."""
     runtime_work_service.finish_schedule_scan(
         session,
         namespace=namespace,
         generation=generation,
         due_at=_next_schedule_namespace_due_at(session),
+        wake_ids=wake_ids,
     )
     session.commit()
 
@@ -1007,16 +1018,27 @@ def apply_schedule_run_reconciliation(session: Session, *, build_id: str) -> Sch
     if run is None or run.status not in _SCHEDULE_TERMINAL_STATUSES:
         return None
     if run.schedule_id is None:
-        runtime_work_service.mark_schedule_pending(session, namespace=run.namespace)
         return None
-    schedule = session.get(Schedule, run.schedule_id)
+    schedule = session.execute(
+        select(Schedule).where(col(Schedule.id) == run.schedule_id).with_for_update().execution_options(populate_existing=True)
+    ).scalar_one_or_none()
     if schedule is None:
-        runtime_work_service.mark_schedule_pending(session, namespace=run.namespace)
         return None
 
     completed = run.completed_at or run.updated_at
     stamp = completed.replace(tzinfo=None) if completed.tzinfo is not None else completed
+    if schedule.last_triggered_at is not None and run.created_at < schedule.last_triggered_at:
+        return None
+    already_applied = (
+        schedule.last_successful_build_id == run.id
+        if run.status == BuildRunStatus.COMPLETED
+        else schedule.last_failure_at is not None and _naive_utc(schedule.last_failure_at) >= stamp
+    )
+    if schedule.lease_owner is None and already_applied:
+        return None
+
     schedule.lease_owner = None
+    schedule.claim_token = None
     schedule.lease_expires_at = None
     if run.status == BuildRunStatus.COMPLETED:
         schedule.last_run = stamp
@@ -1027,8 +1049,34 @@ def apply_schedule_run_reconciliation(session: Session, *, build_id: str) -> Sch
         schedule.last_failure_at = stamp
     session.add(schedule)
     session.flush()
-    runtime_work_service.mark_schedule_pending(session, namespace=run.namespace)
     return schedule
+
+
+def reconcile_pending_schedule_runs(session: Session, *, namespace: str, limit: int = _SCHEDULE_CANDIDATE_BATCH_SIZE) -> int:
+    """Apply terminal scheduled builds whose schedule lease is still outstanding."""
+    candidates = (
+        session.execute(
+            select(col(BuildRun.id))
+            .join(Schedule, col(Schedule.id) == col(BuildRun.schedule_id))
+            .join(BuildJob, col(BuildJob.build_id) == col(BuildRun.id))
+            .where(col(BuildRun.namespace) == namespace)
+            .where(col(BuildRun.status).in_(_SCHEDULE_TERMINAL_STATUSES))
+            .where(col(BuildJob.status).in_([status for status in BuildJobStatus.members() if status.is_terminal]))
+            .where(col(Schedule.lease_owner).is_not(None))
+            .where(col(Schedule.last_triggered_at).is_(None) | (col(BuildRun.created_at) >= col(Schedule.last_triggered_at)))
+            .order_by(col(BuildRun.completed_at), col(BuildRun.id))
+            .limit(limit)
+        )
+        .scalars()
+        .all()
+    )
+    reconciled = 0
+    for build_id in candidates:
+        if apply_schedule_run_reconciliation(session, build_id=build_id) is not None:
+            reconciled += 1
+    if candidates:
+        session.commit()
+    return reconciled
 
 
 def reconcile_schedule_run(session: Session, *, build_id: str) -> Schedule | None:

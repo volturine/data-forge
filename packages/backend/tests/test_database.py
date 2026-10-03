@@ -5,9 +5,7 @@ from concurrent.futures import ThreadPoolExecutor
 from contextlib import contextmanager
 from types import SimpleNamespace
 
-import pytest
 from sqlalchemy import event, text
-from sqlalchemy.pool import StaticPool
 from sqlmodel import Session, create_engine
 
 from backend_core import database
@@ -45,47 +43,46 @@ def test_get_db_session_is_lazy_about_connection_checkout() -> None:
         clear_engine_override()
 
 
-@pytest.mark.asyncio
-async def test_async_api_session_dependencies_close_on_the_bounded_executor(monkeypatch) -> None:
-    engine = create_engine(
-        'sqlite:///:memory:',
-        connect_args={'check_same_thread': False},
-        poolclass=StaticPool,
-    )
-    monkeypatch.setattr(database, '_get_tenant_engine', lambda: engine)
-    monkeypatch.setattr(database, 'get_settings_engine', lambda: engine)
+def test_runtime_critical_pool_is_carved_from_the_configured_connection_ceiling() -> None:
+    general_size, overflow, critical_size = database._runtime_database_pool_split(8, 4)
 
-    loop_thread = threading.get_ident()
-    close_threads: list[int] = []
-    original_close = Session.close
+    assert (general_size, overflow, critical_size) == (4, 4, 4)
+    assert general_size + overflow + critical_size == 8 + 4
+    assert database._runtime_database_pool_split(4, 0) == (2, 0, 2)
+    assert database._runtime_database_pool_split(1, 0) == (1, 0, 0)
 
-    def tracked_close(session: Session) -> None:
-        close_threads.append(threading.get_ident())
-        original_close(session)
 
-    monkeypatch.setattr(Session, 'close', tracked_close)
-    for dependency in (database.get_db_async(), database.get_settings_db_async()):
-        session = await anext(dependency)
-        await asyncio.to_thread(session.execute, text('SELECT 1'))
-        await dependency.aclose()
-        assert not session.in_transaction()
+def test_critical_db_helpers_run_sessions_on_their_reserved_engines(monkeypatch) -> None:
+    engine = create_engine('sqlite:///:memory:')
+    monkeypatch.setattr(database, '_get_critical_tenant_engine', lambda: engine)
+    monkeypatch.setattr(database, '_get_critical_settings_engine', lambda: engine)
 
-    assert len(close_threads) == 2
-    assert all(thread_id != loop_thread for thread_id in close_threads)
-    engine.dispose()
+    def query(session: Session) -> int:
+        return session.execute(text('SELECT 1')).scalar_one()
+
+    try:
+        assert database.run_critical_db(query) == 1
+        assert database.run_critical_settings_db(query) == 1
+    finally:
+        engine.dispose()
 
 
 def test_database_statement_timing_collects_sql_and_commit_costs() -> None:
-    engine = create_engine('sqlite:///:memory:')
+    engine = database._create_engine('sqlite:///:memory:', pool_name='statement-timing')
     metrics: dict[str, object] = {'sql_count': 0, 'sql_ms': 0.0, 'commit_ms': 0.0}
 
     with database.database_statement_timing(metrics), Session(engine) as session:
-        session.execute(text('SELECT 1'))
+        session.execute(text("SELECT 'sensitive-value', 123"))
         session.commit()
 
     engine.dispose()
     assert isinstance(metrics['sql_count'], int) and metrics['sql_count'] >= 1
     assert isinstance(metrics['sql_ms'], (int, float)) and float(metrics['sql_ms']) >= 0
+    assert isinstance(metrics['slowest_sql_ms'], (int, float)) and float(metrics['slowest_sql_ms']) >= 0
+    assert str(metrics['slowest_sql_statement']).startswith('SELECT')
+    assert 'sensitive-value' not in str(metrics['slowest_sql_statement'])
+    assert metrics['db_pool_checkout_count'] == 1
+    assert isinstance(metrics['db_pool_checkout_ms'], (int, float)) and float(metrics['db_pool_checkout_ms']) >= 0
     assert isinstance(metrics['commit_ms'], (int, float)) and float(metrics['commit_ms']) >= 0
 
 

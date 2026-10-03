@@ -1,22 +1,20 @@
 from __future__ import annotations
 
+import base64
 import contextlib
 import json
 import logging
-import os
-import tempfile
 from collections.abc import Callable, Mapping
 from datetime import UTC, datetime
 from itertools import chain
-from pathlib import Path
 from time import monotonic
 from typing import Any
+from urllib.parse import unquote, urlsplit
 
 import polars as pl
 from polars.datatypes import Array, List, Struct
 from pyiceberg.expressions import AlwaysTrue
 from pyiceberg.table import Table
-from sqlalchemy.exc import IntegrityError
 
 from dataforge_protocol import datasource_pb2
 from datasources.datasource_loading import iter_datasource_batches, load_datasource
@@ -32,19 +30,21 @@ from runtime.compute_manager import ProcessManager
 from runtime.domain.datasource.source_types import DataSourceType
 from runtime.domain.engine_runs.schemas import EngineRunKind, EngineRunStatus, SchemaDiffStatus
 from runtime.exceptions import DataSourceConnectionError, DataSourceValidationError
-from runtime.iceberg_catalog import load_runtime_catalog
+from runtime.iceberg_catalog import ensure_catalog_namespace, load_runtime_catalog
 from runtime.namespace import get_namespace
 from runtime.object_store import (
     MultipartObjectUpload,
-    download_file,
     is_object_store_url,
+    join_object_store_url,
     object_store_storage_options,
     object_store_url,
+    upload_bytes,
 )
 from runtime.protocol_mapping import schema_info_proto
 from runtime.worker_runtime_client import BackendWorkerRpcError, DatasourceMetadata, WorkerRuntimeClient
 
 logger = logging.getLogger(__name__)
+_MAX_DATASOURCE_MANIFEST_BYTES = 1024 * 1024
 
 
 class DatasourcePublicationClaimLost(RuntimeError):
@@ -53,13 +53,6 @@ class DatasourcePublicationClaimLost(RuntimeError):
 
 class DatasourceNotFound(RuntimeError):
     """Raised when a datasource metadata lookup fails."""
-
-
-def _ensure_catalog_namespace(catalog, namespace: str) -> None:
-    try:
-        catalog.create_namespace_if_not_exists(namespace)
-    except IntegrityError:
-        logger.info("Namespace %s was created concurrently; continuing", namespace)
 
 
 def _coerce_iceberg_compatible_lazyframe(lazy: pl.LazyFrame) -> pl.LazyFrame:
@@ -106,7 +99,7 @@ def _coerce_database_iceberg_compatible_lazyframe(lazy: pl.LazyFrame) -> pl.Lazy
     return lazy.with_columns(expressions)
 
 
-class _MultipartArrowSink:
+class _MultipartObjectSink:
     def __init__(self, upload: MultipartObjectUpload) -> None:
         self._upload = upload
         self._position = 0
@@ -114,7 +107,7 @@ class _MultipartArrowSink:
 
     def write(self, data: bytes) -> int:
         if self.closed:
-            raise ValueError("Arrow staging stream is closed")
+            raise ValueError("Parquet staging stream is closed")
         view = memoryview(data)
         for offset in range(0, len(view), 1024 * 1024):
             chunk = view[offset : offset + 1024 * 1024]
@@ -138,13 +131,16 @@ class _MultipartArrowSink:
 def stage_datasource_to_object_store(
     source_config: Mapping[str, object],
     *,
-    artifact_url: str,
+    table_path: str,
+    manifest_url: str,
     progress_callback: Callable[[dict[str, object]], None],
 ) -> dict[str, object]:
-    import pyarrow as pa  # type: ignore[import-untyped]  # PyArrow does not ship typing metadata.
+    import pyarrow.parquet as pq  # type: ignore[import-untyped]  # PyArrow does not ship typing metadata.
 
-    if not is_object_store_url(artifact_url):
-        raise ValueError("Datasource staging output must be an object-store URL")
+    if not is_object_store_url(table_path):
+        raise ValueError("Datasource staging output must be an object-store table path")
+    if not is_object_store_url(manifest_url):
+        raise ValueError("Datasource staging manifest must be an object-store URL")
     batches = iter_datasource_batches(dict(source_config), batch_size=65_536)
     first = next(batches, None)
     if first is None:
@@ -153,74 +149,117 @@ def stage_datasource_to_object_store(
     first = coerce(first.lazy()).collect(engine="streaming")
     schema = first.schema
     arrow_schema = first.to_arrow().schema
-    upload = MultipartObjectUpload(artifact_url, content_type="application/vnd.apache.arrow.stream")
-    sink = _MultipartArrowSink(upload)
+    upload: MultipartObjectUpload | None = None
+    sink: _MultipartObjectSink | None = None
+    writer: Any = None
+    file_paths: list[str] = []
     row_count = 0
     try:
-        with pa.ipc.new_stream(sink, arrow_schema) as writer:
-            for batch in chain((first,), batches):
-                progress_callback({"type": "datasource_batch", "row_count": row_count})
-                batch = coerce(batch.lazy()).collect(engine="streaming")
-                batch = batch.cast(schema, strict=False)
-                arrow_batch = batch.to_arrow().to_batches()
-                for record_batch in arrow_batch:
-                    writer.write_batch(record_batch.cast(arrow_schema))
-                    row_count += record_batch.num_rows
-        upload.commit()
+        for batch in chain((first,), batches):
+            progress_callback({"type": "datasource_batch", "row_count": row_count})
+            batch = coerce(batch.lazy()).collect(engine="streaming")
+            batch = batch.cast(schema, strict=False)
+            for record_batch in batch.to_arrow().to_batches():
+                if not record_batch.num_rows:
+                    continue
+                if writer is None:
+                    parquet_url = join_object_store_url(table_path, "data.parquet")
+                    upload = MultipartObjectUpload(parquet_url, content_type="application/vnd.apache.parquet")
+                    sink = _MultipartObjectSink(upload)
+                    writer = pq.ParquetWriter(sink, arrow_schema, compression="zstd")
+                    file_paths.append(parquet_url)
+                writer.write_batch(record_batch.cast(arrow_schema))
+                row_count += record_batch.num_rows
+        if writer is not None and upload is not None:
+            writer.close()
+            upload.commit()
+        manifest = {
+            "file_paths": file_paths,
+            "arrow_schema": base64.b64encode(arrow_schema.serialize().to_pybytes()).decode("ascii"),
+            "row_count": row_count,
+            "columns": [{"name": name, "dtype": str(dtype), "nullable": True} for name, dtype in schema.items()],
+        }
+        manifest_bytes = json.dumps(manifest, separators=(",", ":")).encode("utf-8")
+        if len(manifest_bytes) > _MAX_DATASOURCE_MANIFEST_BYTES:
+            raise ValueError("Datasource staging manifest exceeds 1 MiB")
+        upload_bytes(manifest_bytes, manifest_url, content_type="application/json")
     except BaseException:
-        upload.abort()
+        if writer is not None:
+            with contextlib.suppress(Exception):
+                writer.close()
+        if upload is not None:
+            upload.abort()
         raise
     finally:
-        sink.closed = True
+        if sink is not None:
+            sink.closed = True
         batches.close()
-    return {
-        "artifact_url": artifact_url,
-        "row_count": row_count,
-        "columns": [{"name": name, "dtype": str(dtype), "nullable": True} for name, dtype in schema.items()],
-    }
+    return manifest
 
 
-def import_staged_arrow_artifact(artifact_url: str, *, table_path: str, database_url: str) -> Table:
+def import_staged_parquet_files(manifest: Mapping[str, object], *, table_path: str, database_url: str) -> Table:
     import pyarrow as pa  # type: ignore[import-untyped]  # PyArrow does not ship typing metadata.
-    import pyarrow.ipc as ipc  # type: ignore[import-untyped]  # PyArrow does not ship typing metadata.
 
-    descriptor, filename = tempfile.mkstemp(suffix=".arrow")
-    os.close(descriptor)
-    path = Path(filename)
+    encoded_schema = manifest.get("arrow_schema")
+    raw_paths = manifest.get("file_paths")
+    if not isinstance(encoded_schema, str) or not isinstance(raw_paths, list):
+        raise ValueError("Datasource Parquet manifest is incomplete")
+    if len(encoded_schema) > _MAX_DATASOURCE_MANIFEST_BYTES:
+        raise ValueError("Datasource Parquet manifest exceeds 1 MiB")
     try:
-        download_file(artifact_url, path)
-        with ipc.open_stream(path) as reader:
-            catalog = load_runtime_catalog(
-                "local",
-                type="sql",
-                uri=database_url,
-                warehouse=object_store_url("clean", namespace=get_namespace()),
-                **object_store_storage_options(),
-            )
-            _ensure_catalog_namespace(catalog, "clean")
-            table_name = table_path.rstrip("/").split("/")[-2]
-            identifier = f"clean.{table_name}"
-            if catalog.table_exists(identifier):
-                table = catalog.load_table(identifier)
-                with table.transaction() as transaction:
-                    current_names = {field.name for field in transaction.table_metadata.schema().fields}
-                    new_names = set(reader.schema.names)
-                    update = transaction.update_schema()
-                    for name in sorted(current_names - new_names):
-                        update.delete_column(name)
-                    update.union_by_name(reader.schema).commit()
-                    transaction.delete(delete_filter=AlwaysTrue())
-                    for record_batch in reader:
-                        transaction.append(pa.Table.from_batches([record_batch]))
-            else:
-                table = catalog.create_table(identifier, schema=reader.schema, location=table_path)
-                with table.transaction() as transaction:
-                    for record_batch in reader:
-                        transaction.append(pa.Table.from_batches([record_batch]))
-            table.refresh()
-            return table
-    finally:
-        path.unlink(missing_ok=True)
+        schema_bytes = base64.b64decode(encoded_schema, validate=True)
+        schema = pa.ipc.read_schema(pa.BufferReader(schema_bytes))
+    except (ValueError, pa.ArrowException) as exc:
+        raise ValueError("Datasource Parquet manifest contains an invalid Arrow schema") from exc
+
+    expected = urlsplit(table_path)
+    expected_key_prefix = expected.path.rstrip("/") + "/"
+    file_paths = [path for path in raw_paths if isinstance(path, str)]
+    if len(file_paths) != len(raw_paths) or len(file_paths) != len(set(file_paths)):
+        raise ValueError("Datasource Parquet manifest contains invalid file paths")
+    for path in file_paths:
+        parsed = urlsplit(path)
+        path_segments = unquote(parsed.path).split("/")
+        if (
+            parsed.scheme != expected.scheme
+            or parsed.netloc != expected.netloc
+            or not parsed.path.startswith(expected_key_prefix)
+            or any(segment in {".", ".."} for segment in path_segments)
+            or parsed.query
+            or parsed.fragment
+            or not parsed.path.endswith(".parquet")
+        ):
+            raise ValueError("Datasource Parquet files must be inside the claim-scoped table prefix")
+
+    catalog = load_runtime_catalog(
+        "local",
+        type="sql",
+        uri=database_url,
+        warehouse=object_store_url("clean", namespace=get_namespace()),
+        **object_store_storage_options(),
+    )
+    ensure_catalog_namespace(catalog, "clean")
+    table_name = table_path.rstrip("/").split("/")[-2]
+    identifier = f"clean.{table_name}"
+    if catalog.table_exists(identifier):
+        table = catalog.load_table(identifier)
+        with table.transaction() as transaction:
+            current_names = {field.name for field in transaction.table_metadata.schema().fields}
+            new_names = set(schema.names)
+            update = transaction.update_schema()
+            for name in sorted(current_names - new_names):
+                update.delete_column(name)
+            update.union_by_name(schema).commit()
+            transaction.delete(delete_filter=AlwaysTrue())
+            if file_paths:
+                transaction.add_files(file_paths)
+    else:
+        table = catalog.create_table(identifier, schema=schema, location=table_path)
+        if file_paths:
+            with table.transaction() as transaction:
+                transaction.add_files(file_paths)
+    table.refresh()
+    return table
 
 
 def _build_iceberg_config(
@@ -422,7 +461,6 @@ def ingest_datasource_for_schedule(
 ) -> DataSourceRecord:
     from dataforge_protocol import compute_pb2, enums_pb2
     from runtime.compute_utils import await_engine_result
-    from runtime.object_store import delete_object
 
     metadata = _require_metadata(client, namespace=namespace, datasource_id=datasource_id)
     if metadata.revision is None:
@@ -434,7 +472,7 @@ def ingest_datasource_for_schedule(
         resource_id=datasource_id,
     )
     config = dict(metadata.config or {})
-    artifact_url = object_store_url("runtime-staging", "schedule-ingest", job_id, str(lease_generation), "data.arrow", namespace=namespace)
+    manifest_url = object_store_url("runtime-staging", "schedule-ingest", job_id, str(lease_generation), "manifest.json", namespace=namespace)
     schema = None
     try:
         with manager.acquire_engine(identity) as engine:
@@ -454,11 +492,11 @@ def ingest_datasource_for_schedule(
                     claim_token=claim_token,
                     lease_generation=lease_generation,
                     prefix_url=target,
-                    artifact_url=artifact_url,
+                    manifest_url=manifest_url,
                     catalog_identifier=f"clean.{target.rstrip('/').split('/')[-2]}",
                 )
                 source, _source_type = _external_source(metadata)
-                engine_job = engine.datasource_job("datasource_stage", {"source_config": source, "artifact_url": artifact_url})
+                engine_job = engine.datasource_job("datasource_stage", {"source_config": source, "table_path": target, "manifest_url": manifest_url})
             else:
                 engine_job = engine.datasource_job(
                     "datasource_schema",
@@ -476,7 +514,7 @@ def ingest_datasource_for_schedule(
             if result.get("error") or not isinstance(result.get("data"), dict):
                 raise DataSourceConnectionError("Scheduled datasource computation failed", details={"datasource_id": datasource_id})
             if is_reingestable_raw(metadata):
-                table = import_staged_arrow_artifact(artifact_url, table_path=target, database_url=database_url)
+                table = import_staged_parquet_files(result["data"], table_path=target, database_url=database_url)
                 config.update(_build_iceberg_config(target, branch_name, source_config=source))
                 _set_snapshot_metadata(config, table)
             else:
@@ -498,9 +536,6 @@ def ingest_datasource_for_schedule(
         if exc.error_code == "FAILED_PRECONDITION":
             raise DatasourcePublicationClaimLost("Datasource publication claim is no longer active") from exc
         raise
-    finally:
-        with contextlib.suppress(Exception):
-            delete_object(artifact_url)
 
 
 def _schema_from_batches(config: dict[str, object]) -> datasource_pb2.SchemaInfo:

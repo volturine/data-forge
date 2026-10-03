@@ -27,7 +27,6 @@ BACKEND_ROOT = REPO_ROOT / 'packages' / 'backend'
 CORE_ROOT = BACKEND_ROOT
 SCHEDULER_ROOT = REPO_ROOT / 'packages' / 'scheduler'
 WORKER_ROOT = REPO_ROOT / 'packages' / 'worker'
-LOCAL_SERVICE_HOST = '127.0.0.1' if os.environ.get('CI') else 'rolands-mac-mini.bee-justice.ts.net'
 OWNER_HOST_LABEL = 'data-forge.test-owner-host'
 OWNER_PID_LABEL = 'data-forge.test-owner-pid'
 OWNER_START_LABEL = 'data-forge.test-owner-start'
@@ -131,8 +130,22 @@ def _cleanup_stale_owned_resources(resource_type: Literal['container', 'volume']
         run_command(command, env=docker_env(), check=False, timeout=300)
 
 
+def process_host() -> str:
+    host = os.environ.get('TEST_PROCESS_HOST')
+    if not host:
+        raise RuntimeError('TEST_PROCESS_HOST must identify the test runner container')
+    return host
+
+
+def docker_service_host() -> str:
+    host = os.environ.get('TEST_DOCKER_SERVICE_HOST')
+    if not host:
+        raise RuntimeError('TEST_DOCKER_SERVICE_HOST must identify the Docker service container')
+    return host
+
+
 def local_service_bind_address() -> str:
-    return '127.0.0.1' if os.environ.get('CI') else socket.gethostbyname(LOCAL_SERVICE_HOST)
+    return '0.0.0.0'
 
 
 def docker_env(extra: dict[str, str] | None = None) -> dict[str, str]:
@@ -158,7 +171,7 @@ def require_docker() -> None:
 
     if docker_available():
         return
-    pytest.skip('Docker daemon is required for Postgres integration tests')
+    pytest.fail('Docker daemon is unavailable inside the mandatory containerized test runner')
 
 
 def cleanup_stale_test_postgres(*, label: str = 'data-forge.test-postgres=1') -> None:
@@ -321,7 +334,7 @@ class RustfsContainer:
     @property
     def endpoint(self) -> str:
         assert self.port is not None
-        return f'http://{LOCAL_SERVICE_HOST}:{self.port}'
+        return f'http://{docker_service_host()}:{self.port}'
 
     def start(self) -> None:
         try:
@@ -339,7 +352,7 @@ class RustfsContainer:
                     '-e',
                     f'RUSTFS_SECRET_KEY={self.secret_key}',
                     '-p',
-                    f'{local_service_bind_address()}::9000',
+                    '0.0.0.0::9000',
                     self.image,
                     '/data',
                 ],
@@ -416,7 +429,7 @@ class PostgresContainer:
     @property
     def url(self) -> str:
         assert self.port is not None
-        return f'postgresql+psycopg://{self.user}:{self.password}@{LOCAL_SERVICE_HOST}:{self.port}/{self.database}'
+        return f'postgresql+psycopg://{self.user}:{self.password}@{docker_service_host()}:{self.port}/{self.database}'
 
     def start(self) -> None:
         try:
@@ -443,7 +456,7 @@ class PostgresContainer:
                     '-e',
                     f'POSTGRES_PASSWORD={self.password}',
                     '-p',
-                    f'{local_service_bind_address()}::5432',
+                    '0.0.0.0::5432',
                     self.image,
                 ],
                 env=docker_env(),

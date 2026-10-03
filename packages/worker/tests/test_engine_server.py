@@ -70,9 +70,9 @@ def engine_stub(monkeypatch):
     engine_runtime_pb2_grpc.add_PolarsEngineServiceServicer_to_server(
         PolarsEngineServicer(engine_identity="analysis-1", application_version="test", token="token", on_shutdown=lambda: None), server
     )
-    port = server.add_insecure_port("0.0.0.0:0")
+    port = server.add_insecure_port("127.0.0.1:0")
     server.start()
-    channel = grpc.insecure_channel(f"rolands-mac-mini.bee-justice.ts.net:{port}")
+    channel = grpc.insecure_channel(f"127.0.0.1:{port}")
     try:
         yield engine_runtime_pb2_grpc.PolarsEngineServiceStub(channel)
     finally:
@@ -331,9 +331,9 @@ def test_engine_rpc_control_calls_are_not_starved_by_watch_streams(monkeypatch) 
         ),
         server,
     )
-    port = server.add_insecure_port("0.0.0.0:0")
+    port = server.add_insecure_port("127.0.0.1:0")
     server.start()
-    channel = grpc.insecure_channel(f"rolands-mac-mini.bee-justice.ts.net:{port}")
+    channel = grpc.insecure_channel(f"127.0.0.1:{port}")
     stub = engine_runtime_pb2_grpc.PolarsEngineServiceStub(channel)
     metadata = (("x-engine-token", "token"),)
     watch_pool = ThreadPoolExecutor(max_workers=1)
@@ -387,9 +387,9 @@ def test_engine_server_warm_mode_and_initialize(monkeypatch) -> None:
         on_shutdown=lambda: None,
     )
     engine_runtime_pb2_grpc.add_PolarsEngineServiceServicer_to_server(servicer, server)
-    port = server.add_insecure_port("0.0.0.0:0")
+    port = server.add_insecure_port("127.0.0.1:0")
     server.start()
-    channel = grpc.insecure_channel(f"rolands-mac-mini.bee-justice.ts.net:{port}")
+    channel = grpc.insecure_channel(f"127.0.0.1:{port}")
     stub = engine_runtime_pb2_grpc.PolarsEngineServiceStub(channel)
 
     try:
@@ -501,9 +501,9 @@ def test_initialized_engine_ignores_init_deadline(monkeypatch) -> None:
         init_timeout_seconds=1,
     )
     engine_runtime_pb2_grpc.add_PolarsEngineServiceServicer_to_server(servicer, server)
-    port = server.add_insecure_port("0.0.0.0:0")
+    port = server.add_insecure_port("127.0.0.1:0")
     server.start()
-    channel = grpc.insecure_channel(f"rolands-mac-mini.bee-justice.ts.net:{port}")
+    channel = grpc.insecure_channel(f"127.0.0.1:{port}")
     stub = engine_runtime_pb2_grpc.PolarsEngineServiceStub(channel)
 
     try:

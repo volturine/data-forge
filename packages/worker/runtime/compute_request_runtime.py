@@ -33,7 +33,7 @@ from runtime.domain.compute import schemas as compute_schemas
 from runtime.domain.compute_requests.live import ComputeRequestWake, request_hub
 from runtime.domain.domain_enums import domain_token
 from runtime.exceptions import AppError, StaleComputeInputError, status_for_app_error
-from runtime.executors import run_compute_in_thread, run_control_in_thread, run_lease_in_thread
+from runtime.executors import run_compute_in_thread, run_control_in_thread
 from runtime.json_values import dict_to_struct
 from runtime.namespace import reset_namespace, set_namespace_context
 from runtime.object_store import object_store_url, upload_bytes
@@ -43,6 +43,7 @@ from runtime.worker_runtime_client import (
     DatasourceMetadata,
     EngineRunFinalization,
     WorkerRuntimeClient,
+    async_client_from_env,
     client_from_env,
     reset_datasource_metadata_snapshot,
     set_datasource_metadata_snapshot,
@@ -206,19 +207,19 @@ def _lease_renewal_delay(lease_ttl_seconds: float, request_id: str | None = None
     return base_delay * (0.5 + phase * 0.5)
 
 
-def next_compute_request(
+async def next_compute_request(
     worker_id: str,
     *,
     allowed_kinds: frozenset[enums_pb2.ComputeRequestKind] = ALL_REQUEST_KINDS,
     namespace: str,
 ) -> ClaimedComputeRequest | None:
     claim_started = time.monotonic()
-    with worker_runtime_client() as client:
-        claimed = client.claim_compute_request(
-            worker_id=worker_id,
-            allowed_kinds=allowed_kinds,
-            namespace=namespace,
-        )
+    client = await async_client_from_env()
+    claimed = await client.claim_compute_request_async(
+        worker_id=worker_id,
+        allowed_kinds=allowed_kinds,
+        namespace=namespace,
+    )
     if claimed is None:
         return None
     return ClaimedComputeRequest(
@@ -417,18 +418,19 @@ async def _run_once(
     claim_semaphore: asyncio.Semaphore | None = None,
     work_semaphore: asyncio.Semaphore | None = None,
 ) -> bool:
-    claim = partial(
-        next_compute_request,
-        worker_id,
-        allowed_kinds=allowed_kinds,
-        namespace=namespace,
-    )
-
     async def claim_once() -> ClaimedComputeRequest | None:
         if claim_semaphore is None:
-            return await run_control_in_thread(claim)
+            return await next_compute_request(
+                worker_id,
+                allowed_kinds=allowed_kinds,
+                namespace=namespace,
+            )
         async with claim_semaphore:
-            return await run_control_in_thread(claim)
+            return await next_compute_request(
+                worker_id,
+                allowed_kinds=allowed_kinds,
+                namespace=namespace,
+            )
 
     claimed = await claim_once()
     if claimed is None:
@@ -738,54 +740,50 @@ async def _renew_compute_lease(
     # lease, so this one immediate heartbeat does not create a poll loop.
     delay = 0.0
     first_renewal_started = clock()
-    client = worker_runtime_client()
-    try:
-        while True:
-            try:
-                await asyncio.wait_for(stop_event.wait(), timeout=delay)
-                return
-            except TimeoutError:
-                pass
+    client = await async_client_from_env()
+    while True:
+        try:
+            await asyncio.wait_for(stop_event.wait(), timeout=delay)
+            return
+        except TimeoutError:
+            pass
+        remaining = deadline - clock()
+        if remaining <= 0:
+            raise ComputeRequestLeaseLost(f"Compute request {claimed.id} lease renewal was not confirmed before expiry")
+        renewal_started = clock()
+        try:
+            lease_ttl_seconds = await client.renew_compute_request_lease(
+                request_id=claimed.id,
+                namespace=claimed.namespace,
+                worker_id=claimed.worker_id,
+                claim_token=claimed.claim_token,
+                lease_generation=claimed.lease_generation,
+                timeout_seconds=remaining,
+            )
+        except Exception as exc:
             remaining = deadline - clock()
             if remaining <= 0:
-                raise ComputeRequestLeaseLost(f"Compute request {claimed.id} lease renewal was not confirmed before expiry")
-            renewal_started = clock()
-            try:
-                lease_ttl_seconds = await run_lease_in_thread(
-                    client.renew_compute_request_lease,
-                    request_id=claimed.id,
-                    namespace=claimed.namespace,
-                    worker_id=claimed.worker_id,
-                    claim_token=claimed.claim_token,
-                    lease_generation=claimed.lease_generation,
-                    timeout_seconds=remaining,
+                raise ComputeRequestLeaseLost(f"Compute request {claimed.id} lease renewal was not confirmed before expiry") from exc
+            delay = _lease_renewal_delay(min(remaining, 3.0), claimed.id)
+            logger.warning("Compute request %s lease renewal failed; retrying before confirmed expiry: %s", claimed.id, exc)
+            continue
+        if lease_ttl_seconds is None:
+            raise ComputeRequestLeaseLost(f"Compute request {claimed.id} lease is no longer active")
+        deadline = renewal_started + lease_ttl_seconds
+        if lease_confirmed is not None and not lease_confirmed.is_set():
+            lease_confirmed.set()
+            first_renewal_ms = (clock() - first_renewal_started) * 1000
+            if first_renewal_ms >= 500:
+                logger.warning(
+                    "Compute request initial lease renewal confirmed request_id=%s namespace=%s "
+                    "renewal_ms=%.1f remaining_delivery_lease_ms=%.1f work_lease_ttl_seconds=%s",
+                    claimed.id,
+                    claimed.namespace,
+                    first_renewal_ms,
+                    max(0.0, (deadline - clock()) * 1000),
+                    lease_ttl_seconds,
                 )
-            except Exception as exc:
-                remaining = deadline - clock()
-                if remaining <= 0:
-                    raise ComputeRequestLeaseLost(f"Compute request {claimed.id} lease renewal was not confirmed before expiry") from exc
-                delay = _lease_renewal_delay(min(remaining, 3.0), claimed.id)
-                logger.warning("Compute request %s lease renewal failed; retrying before confirmed expiry: %s", claimed.id, exc)
-                continue
-            if lease_ttl_seconds is None:
-                raise ComputeRequestLeaseLost(f"Compute request {claimed.id} lease is no longer active")
-            deadline = renewal_started + lease_ttl_seconds
-            if lease_confirmed is not None and not lease_confirmed.is_set():
-                lease_confirmed.set()
-                first_renewal_ms = (clock() - first_renewal_started) * 1000
-                if first_renewal_ms >= 500:
-                    logger.warning(
-                        "Compute request initial lease renewal confirmed request_id=%s namespace=%s "
-                        "renewal_ms=%.1f remaining_delivery_lease_ms=%.1f work_lease_ttl_seconds=%s",
-                        claimed.id,
-                        claimed.namespace,
-                        first_renewal_ms,
-                        max(0.0, (deadline - clock()) * 1000),
-                        lease_ttl_seconds,
-                    )
-            delay = _lease_renewal_delay(lease_ttl_seconds, claimed.id)
-    finally:
-        client.close()
+        delay = _lease_renewal_delay(lease_ttl_seconds, claimed.id)
 
 
 def _datasource_result_from_payload(kind: enums_pb2.ComputeRequestKind, payload: dict[str, object]) -> datasource_pb2.DatasourceResult:
@@ -909,7 +907,6 @@ def _publish_staged_datasource(
     from datetime import UTC, datetime
 
     from runtime.domain.datasource.source_types import DataSourceType
-    from runtime.object_store import delete_object
     from runtime.protocol_mapping import proto_value_to_enum_name, schema_info_proto, struct_to_dict
 
     operation = command.WhichOneof("command")
@@ -964,7 +961,9 @@ def _publish_staged_datasource(
     datasource_id = claimed.id if create else command.ingest.datasource_id
     staging_id = f"{datasource_id}__claim_{claimed.claim_token.replace('-', '_')}"
     target_path = object_store_url("clean", staging_id, branch, namespace=claimed.namespace)
-    artifact_url = object_store_url("runtime-staging", "datasource-stage", claimed.id, str(claimed.lease_generation), "data.arrow", namespace=claimed.namespace)
+    manifest_url = object_store_url(
+        "runtime-staging", "datasource-stage", claimed.id, str(claimed.lease_generation), "manifest.json", namespace=claimed.namespace
+    )
     client.register_datasource_stage(
         namespace=claimed.namespace,
         datasource_id=datasource_id,
@@ -973,7 +972,7 @@ def _publish_staged_datasource(
         claim_token=claimed.claim_token,
         lease_generation=claimed.lease_generation,
         prefix_url=target_path,
-        artifact_url=artifact_url,
+        manifest_url=manifest_url,
         catalog_identifier=f"clean.{target_path.rstrip('/').split('/')[-2]}",
     )
     run_id = datasource_execution._create_ingest_run(
@@ -987,10 +986,15 @@ def _publish_staged_datasource(
     )
     started = time.monotonic()
     try:
-        artifact = _datasource_engine_job(manager, claimed, "datasource_stage", {"source_config": source, "artifact_url": artifact_url})
-        schema_info = schema_info_proto(artifact)
+        manifest = _datasource_engine_job(
+            manager,
+            claimed,
+            "datasource_stage",
+            {"source_config": source, "table_path": target_path, "manifest_url": manifest_url},
+        )
+        schema_info = schema_info_proto(manifest)
         client.update_engine_run(namespace=claimed.namespace, run_id=run_id, fields={"current_step": "Importing staged batches", "progress": 0.7})
-        table = datasource_execution.import_staged_arrow_artifact(artifact_url, table_path=target_path, database_url=settings.database_url)
+        table = datasource_execution.import_staged_parquet_files(manifest, table_path=target_path, database_url=settings.database_url)
         if create:
             config = datasource_execution._build_iceberg_config(target_path, branch, source_config=source)
         else:
@@ -1049,9 +1053,6 @@ def _publish_staged_datasource(
     except Exception as exc:
         datasource_execution._fail_ingest_run(client, namespace=claimed.namespace, run_id=run_id, started=started, exc=exc)
         raise
-    finally:
-        with contextlib.suppress(Exception):
-            delete_object(artifact_url)
 
 
 def _execute_datasource_command(
@@ -1201,6 +1202,7 @@ def _execute_request_sync(
                 tab_id=preview_request.tab_id if preview_request.HasField("tab_id") else None,
                 request_json=request_json,
                 request_id=claimed.id,
+                command_hash=claimed.command_hash,
             )
             response_ready = time.monotonic()
             preview_response_envelope = _preview_result(preview_outcome.response)

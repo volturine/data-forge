@@ -10,7 +10,6 @@ from backend_core.domain.compute import schemas as compute_schemas
 from backend_core.domain.engine_runs.schemas import EngineRunKind
 from backend_core.persistence.build_jobs.models import BuildJob
 from backend_core.transactions import committed
-from modules.scheduler import service as scheduler_service
 
 
 @dataclass(frozen=True)
@@ -111,7 +110,6 @@ def fail_build_job(session: Session, claim: BuildClaimCommand, *, error: str) ->
     )
     if job is None:
         return None
-    scheduler_service.apply_schedule_run_reconciliation(session, build_id=claim.build_id)
     return FailedBuildResult(job=job, namespace=run.namespace, latest_sequence=latest_sequence)
 
 
@@ -154,5 +152,4 @@ def finalize_build_job(session: Session, claim: BuildClaimCommand) -> BuildJob |
     )
     if job is None:
         return None
-    scheduler_service.apply_schedule_run_reconciliation(session, build_id=claim.build_id)
     return job

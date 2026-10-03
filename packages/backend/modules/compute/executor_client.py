@@ -8,7 +8,6 @@ import logging
 import os
 import time
 from collections.abc import Callable, Mapping
-from concurrent.futures import ThreadPoolExecutor
 from functools import partial
 from pathlib import Path
 from typing import Any, cast
@@ -19,11 +18,11 @@ from fastapi.exceptions import RequestValidationError
 from pydantic import BaseModel, ValidationError as PydanticValidationError
 from sqlmodel import Session, select
 
-from backend_core import compute_requests_service, datasource_delete_service, runtime_ipc
+from backend_core import build_datasource_dependencies, compute_requests_service, runtime_ipc
+from backend_core.api_execution_budget import BoundedThreadPoolExecutor, run_api_blocking, run_in_bounded_executor
 from backend_core.compute_response_recovery import response_recovery
 from backend_core.data_plane_client import client_from_settings
 from backend_core.database import run_db
-from backend_core.datasource_lifecycle import lock_datasource_lifecycle, uses_postgres_advisory_locks
 from backend_core.dependencies import RuntimeAvailabilityProbe
 from backend_core.domain.compute import schemas as compute_schemas
 from backend_core.domain.compute_requests.models import command_from_payload
@@ -44,8 +43,9 @@ logger = logging.getLogger(__name__)
 # include every tab, step, and nested config. Keep it off Uvicorn's event loop
 # and bound the CPU fan-out so a burst of browser previews cannot create one
 # executor thread per request or compete with the durable DB work.
-_COMPUTE_SERIALIZATION_EXECUTOR = ThreadPoolExecutor(
+_COMPUTE_SERIALIZATION_EXECUTOR = BoundedThreadPoolExecutor(
     max_workers=4,
+    max_pending=8,
     thread_name_prefix='compute-serialization',
 )
 
@@ -55,10 +55,9 @@ def _command_fingerprint(command: compute_pb2.ComputeCommand) -> str:
 
 
 async def _run_compute_serialization[T](function: Callable[..., T], *args: object, **kwargs: object) -> T:
-    loop = asyncio.get_running_loop()
-    return await loop.run_in_executor(
+    return await run_in_bounded_executor(
         _COMPUTE_SERIALIZATION_EXECUTOR,
-        partial(function, *args, **kwargs),
+        work=partial(function, *args, **kwargs),
     )
 
 
@@ -88,8 +87,8 @@ def _json_response_content(value: object) -> str:
 
 
 async def json_response(value: object, *, headers: Mapping[str, str] | None = None) -> Response:
-    """Serialize a potentially large response without occupying the API loop."""
-    content = await _run_compute_serialization(_json_response_content, value)
+    """Serialize an HTTP response on the API's bounded blocking executor."""
+    content = await run_api_blocking(_json_response_content, value)
     return Response(content=content, media_type='application/json', headers=headers)
 
 
@@ -144,38 +143,18 @@ async def _wait_for_response_or_disconnect(
 
 def _require_active_pipeline_datasources(session: Session, pipeline: compute_schemas.AnalysisPipelinePayload) -> None:
     """Reject stale pipeline snapshots before they enter the durable queue."""
-    tab_ids = {tab.id for tab in pipeline.tabs}
-    output_ids = {result_id for tab in pipeline.tabs if isinstance((result_id := tab.output.get('result_id')), str)}
-    local_ids = tab_ids | output_ids
-    external_ids: set[str] = set()
-    for tab in pipeline.tabs:
-        datasource = tab.datasource
-        if datasource.analysis_tab_id is None and datasource.id not in local_ids:
-            external_ids.add(datasource.id)
-        for step in tab.steps:
-            config = step.get('config')
-            if not isinstance(config, dict):
-                continue
-            right_source = config.get('right_source')
-            if isinstance(right_source, str) and right_source not in local_ids:
-                external_ids.add(right_source)
-            sources = config.get('sources')
-            if isinstance(sources, list):
-                external_ids.update(source for source in sources if isinstance(source, str) and source not in local_ids)
-    for datasource_id in sorted(external_ids):
-        _require_active_datasource_for_enqueue(session, datasource_id)
+    build_datasource_dependencies.lock_active_datasources(
+        session,
+        namespace=get_namespace(),
+        datasource_ids=build_datasource_dependencies.external_datasource_ids(pipeline),
+    )
 
 
 def _require_active_datasource_for_enqueue(session: Session, datasource_id: str) -> None:
-    # PostgreSQL uses a short transaction-scoped lifecycle fence shared with
-    # datasource deletion. Keeping the row lock only for SQLite preserves the
-    # in-process test database's race semantics without creating a production
-    # row-lock convoy for every preview that shares one source.
-    lock_datasource_lifecycle(session, namespace=get_namespace(), datasource_id=datasource_id, shared=True)
-    datasource_delete_service.get_active_datasource(
+    build_datasource_dependencies.lock_active_datasources(
         session,
-        datasource_id,
-        for_update=not uses_postgres_advisory_locks(session),
+        namespace=get_namespace(),
+        datasource_ids=(datasource_id,),
     )
 
 
@@ -372,7 +351,7 @@ async def _stage_shared_request_without_waiting_on_a_database_lock(stage: Callab
     delay_seconds = 0.01
     while True:
         try:
-            return await asyncio.to_thread(stage)
+            return await run_api_blocking(stage)
         except compute_requests_service.ComputeFlightLockBusy:
             await asyncio.sleep(delay_seconds)
             delay_seconds = min(delay_seconds * 2, 0.1)
@@ -408,7 +387,7 @@ async def _submit_and_wait(
     if kind in compute_requests_service.SHARED_FLIGHT_REQUEST_KINDS:
         request = await _stage_shared_request_without_waiting_on_a_database_lock(stage)
     else:
-        request = await asyncio.to_thread(stage)
+        request = await run_api_blocking(stage)
     command_hash = await _run_compute_serialization(
         _command_fingerprint,
         compute_requests_service.command_envelope_for_request(request).command,
@@ -431,7 +410,7 @@ async def _submit_and_wait(
         while True:
             completed = await response_recovery.terminal_request(request.id)
             if completed is None:
-                completed = await asyncio.to_thread(_read_request_in_new_session, request.id, request.namespace)
+                completed = await run_api_blocking(_read_request_in_new_session, request.id, request.namespace)
             if completed is None:
                 raise PipelineExecutionError(f'Compute request {request.id} disappeared')
             if not slow_wait_reported and time.monotonic() - wait_started >= 5.0:
@@ -494,7 +473,7 @@ async def _submit_and_wait(
     except asyncio.CancelledError, ClientDisconnectedError:
         if kind not in compute_requests_service.SHARED_FLIGHT_REQUEST_KINDS:
             with contextlib.suppress(Exception):
-                await asyncio.to_thread(
+                await run_api_blocking(
                     _cancel_disconnected_request_in_new_session,
                     request.id,
                     request.namespace,
@@ -644,15 +623,15 @@ async def download_step(
     )
     if not completed.artifact_path or not completed.artifact_name or not completed.artifact_content_type:
         raise PipelineExecutionError('Download artifact missing from compute response')
-    data_plane = await asyncio.to_thread(client_from_settings)
-    classification = await asyncio.to_thread(data_plane.classify_object_url, completed.artifact_path)
+    data_plane = await run_api_blocking(client_from_settings)
+    classification = await run_api_blocking(data_plane.classify_object_url, completed.artifact_path)
     if classification.is_object_store:
-        data = await asyncio.to_thread(data_plane.download_object_bytes, completed.artifact_path)
-        await asyncio.to_thread(data_plane.delete_object, completed.artifact_path)
+        data = await run_api_blocking(data_plane.download_object_bytes, completed.artifact_path)
+        await run_api_blocking(data_plane.delete_object, completed.artifact_path)
         return data, completed.artifact_name, completed.artifact_content_type
     path = Path(completed.artifact_path)
-    data = await asyncio.to_thread(path.read_bytes)
-    await asyncio.to_thread(path.unlink, missing_ok=True)
+    data = await run_api_blocking(path.read_bytes)
+    await run_api_blocking(path.unlink, missing_ok=True)
     return data, completed.artifact_name, completed.artifact_content_type
 
 
@@ -848,7 +827,7 @@ async def get_datasource_schema(
         runtime_probe=runtime_probe,
         datasource_ids=(datasource_id,),
     )
-    return await asyncio.to_thread(schema_info_proto, await _response_payload(completed))
+    return await run_api_blocking(schema_info_proto, await _response_payload(completed))
 
 
 async def get_column_stats(
@@ -938,7 +917,7 @@ async def shutdown_engine(
     identity: EngineIdentity,
     runtime_probe: RuntimeAvailabilityProbe,
 ) -> None:
-    await asyncio.to_thread(
+    await run_api_blocking(
         _cancel_active_requests_for_engine_in_new_session,
         identity,
     )

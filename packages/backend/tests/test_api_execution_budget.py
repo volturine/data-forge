@@ -12,9 +12,14 @@ from sqlmodel import Session, create_engine
 from backend_core import database
 from backend_core.api_execution_budget import (
     ApiDatabaseBudget,
+    ApiWorkAdmissionFull,
+    BoundedThreadPoolExecutor,
+    install_api_blocking_executor,
     install_bootstrap_executor,
     register_bootstrap_executor_lifecycle,
+    remove_api_blocking_executor,
     remove_bootstrap_executor,
+    run_api_blocking,
     run_bootstrap_db,
     run_bootstrap_settings_db,
 )
@@ -30,6 +35,167 @@ def test_budget_uses_the_smaller_engine_capacity_and_api_upper_bound() -> None:
 
     assert budget == ApiDatabaseBudget(12, 6, 4, 2)
     assert budget.general_workers + budget.sync_workers + budget.bootstrap_workers == budget.database_capacity
+
+
+@pytest.mark.asyncio
+async def test_bounded_executor_rejects_overflow_and_queued_cancel_releases_capacity() -> None:
+    executor = BoundedThreadPoolExecutor(max_workers=1, max_pending=1, thread_name_prefix='bounded-queue-test')
+    started = threading.Event()
+    release = threading.Event()
+
+    def block() -> str:
+        started.set()
+        if not release.wait(timeout=5):
+            raise TimeoutError('bounded executor test was not released')
+        return 'done'
+
+    try:
+        running = executor.submit(block)
+        assert await asyncio.to_thread(started.wait, 1)
+        queued = executor.submit(lambda: 'cancelled')
+        with pytest.raises(ApiWorkAdmissionFull, match='API execution capacity is full'):
+            executor.submit(lambda: 'overflow')
+
+        assert queued.cancel()
+        replacement = executor.submit(lambda: 'replacement')
+        release.set()
+        assert running.result(timeout=2) == 'done'
+        assert replacement.result(timeout=2) == 'replacement'
+    finally:
+        release.set()
+        executor.shutdown(wait=True, cancel_futures=True)
+
+
+@pytest.mark.asyncio
+async def test_api_blocking_records_admission_executor_queue_and_work_timings() -> None:
+    loop = asyncio.get_running_loop()
+    executor = ThreadPoolExecutor(max_workers=1, thread_name_prefix='api-lane-metrics-test')
+    install_api_blocking_executor(loop, executor, workers=1, max_pending=0)
+    work_started = threading.Event()
+    release_work = threading.Event()
+    metrics: dict[str, object] = {}
+
+    def blocking_work() -> str:
+        work_started.set()
+        if not release_work.wait(timeout=5):
+            raise TimeoutError('API lane metrics work was not released')
+        return 'done'
+
+    try:
+        with database.database_statement_timing(metrics):
+            first = asyncio.create_task(run_api_blocking(blocking_work))
+            assert await asyncio.to_thread(work_started.wait, 1)
+            second = asyncio.create_task(run_api_blocking(lambda: 'second'))
+            await asyncio.sleep(0.02)
+            assert not second.done()
+            release_work.set()
+            assert await asyncio.gather(first, second) == ['done', 'second']
+
+        admission_wait = metrics['api_general_admission_wait_ms']
+        executor_queue = metrics['api_general_executor_queue_ms']
+        work_duration = metrics['api_general_work_ms']
+        assert isinstance(admission_wait, (int, float)) and admission_wait > 0
+        assert isinstance(executor_queue, (int, float)) and executor_queue >= 0
+        assert isinstance(work_duration, (int, float)) and work_duration > 0
+    finally:
+        release_work.set()
+        remove_api_blocking_executor(loop)
+        executor.shutdown(wait=True, cancel_futures=True)
+
+
+@pytest.mark.asyncio
+async def test_bootstrap_lane_records_its_own_admission_executor_queue_and_work_timings() -> None:
+    loop = asyncio.get_running_loop()
+    executor = ThreadPoolExecutor(max_workers=1, thread_name_prefix='bootstrap-lane-metrics-test')
+    install_bootstrap_executor(loop, executor, workers=1, max_pending=0)
+    metrics: dict[str, object] = {}
+
+    try:
+        with database.database_statement_timing(metrics):
+            assert await run_bootstrap_db(lambda: 'done') == 'done'
+
+        admission_wait = metrics['api_blocking_admission_wait_ms']
+        bootstrap_admission = metrics['api_bootstrap_admission_wait_ms']
+        executor_queue = metrics['api_bootstrap_executor_queue_ms']
+        work_duration = metrics['api_bootstrap_work_ms']
+        assert isinstance(admission_wait, (int, float)) and admission_wait >= 0
+        assert isinstance(bootstrap_admission, (int, float)) and bootstrap_admission >= 0
+        assert isinstance(executor_queue, (int, float)) and executor_queue >= 0
+        assert isinstance(work_duration, (int, float)) and work_duration > 0
+    finally:
+        remove_bootstrap_executor(loop)
+        executor.shutdown(wait=True, cancel_futures=True)
+
+
+@pytest.mark.asyncio
+async def test_bounded_executor_keeps_started_cancelled_work_admitted_until_settlement() -> None:
+    executor = BoundedThreadPoolExecutor(max_workers=1, max_pending=0, thread_name_prefix='bounded-running-test')
+    started = threading.Event()
+    release = threading.Event()
+
+    def block() -> None:
+        started.set()
+        if not release.wait(timeout=5):
+            raise TimeoutError('bounded running test was not released')
+
+    try:
+        task = asyncio.ensure_future(asyncio.wrap_future(executor.submit(block)))
+        assert await asyncio.to_thread(started.wait, 1)
+        task.cancel()
+        with pytest.raises(asyncio.CancelledError):
+            await task
+        with pytest.raises(ApiWorkAdmissionFull):
+            executor.submit(lambda: None)
+
+        release.set()
+        deadline = asyncio.get_running_loop().time() + 2
+        while True:
+            try:
+                completed = executor.submit(lambda: 'released')
+                break
+            except ApiWorkAdmissionFull:
+                if asyncio.get_running_loop().time() >= deadline:
+                    raise
+                await asyncio.sleep(0.01)
+        assert completed.result(timeout=2) == 'released'
+    finally:
+        release.set()
+        executor.shutdown(wait=True, cancel_futures=True)
+
+
+def test_api_admission_overflow_maps_to_retryable_http_503() -> None:
+    from starlette.requests import Request
+
+    from backend_core.error_handlers import handle_errors
+    from main import api_work_admission_full_handler, app
+
+    @handle_errors(operation='test bounded API work')
+    async def route():
+        raise ApiWorkAdmissionFull()
+
+    with pytest.raises(ApiWorkAdmissionFull):
+        asyncio.run(route())
+
+    request = Request({'type': 'http', 'method': 'GET', 'path': '/', 'headers': []})
+    capacity_error = ApiWorkAdmissionFull()
+    response = asyncio.run(api_work_admission_full_handler(request, capacity_error))
+
+    assert app.exception_handlers[ApiWorkAdmissionFull] is api_work_admission_full_handler
+    assert response.status_code == 503
+    assert response.headers['retry-after'] == '1'
+    assert response.body == b'{"detail":"API execution capacity is full"}'
+
+
+def test_api_blocking_work_queue_is_independent_of_socket_limit(monkeypatch) -> None:
+    from backend_core.config import settings
+    from main import _api_blocking_pending_limit
+
+    for connection_limit in (1_000, 2_500, 0):
+        monkeypatch.setattr(settings, 'worker_connections', connection_limit)
+        assert _api_blocking_pending_limit(6) == 96
+
+    assert _api_blocking_pending_limit(2) == 32
+    assert _api_blocking_pending_limit(0) == 0
 
 
 @pytest.mark.asyncio
@@ -130,7 +296,7 @@ async def test_config_and_auth_db_adapters_progress_while_general_executor_is_bl
 
 
 @pytest.mark.asyncio
-async def test_bootstrap_admission_bounds_executor_submissions_and_records_wait() -> None:
+async def test_bootstrap_admission_waits_asynchronously_when_running_and_pending_window_is_full() -> None:
     class RecordingExecutor(ThreadPoolExecutor):
         def __init__(self) -> None:
             super().__init__(max_workers=1, thread_name_prefix='bootstrap-admission-test')
@@ -142,11 +308,9 @@ async def test_bootstrap_admission_bounds_executor_submissions_and_records_wait(
 
     executor = RecordingExecutor()
     loop = asyncio.get_running_loop()
-    install_bootstrap_executor(loop, executor, 1)
+    install_bootstrap_executor(loop, executor, 1, max_pending=1)
     first_started = threading.Event()
     release_first = threading.Event()
-    first_metrics: dict[str, object] = {'sql_count': 0, 'sql_ms': 0.0, 'commit_ms': 0.0}
-    second_metrics: dict[str, object] = {'sql_count': 0, 'sql_ms': 0.0, 'commit_ms': 0.0}
 
     def first_operation() -> str:
         first_started.set()
@@ -154,25 +318,22 @@ async def test_bootstrap_admission_bounds_executor_submissions_and_records_wait(
             raise TimeoutError('bootstrap admission test operation was not released')
         return 'first'
 
-    async def submit_first() -> str:
-        with database.database_statement_timing(first_metrics):
-            return await run_bootstrap_db(first_operation)
-
-    async def submit_second() -> str:
-        with database.database_statement_timing(second_metrics):
-            return await run_bootstrap_db(lambda: 'second')
-
     try:
-        first = asyncio.create_task(submit_first())
+        first = asyncio.create_task(run_bootstrap_db(first_operation))
         assert await asyncio.to_thread(first_started.wait, 1)
-        second = asyncio.create_task(submit_second())
-        await asyncio.sleep(0.02)
-        assert executor.submissions == 1
-        release_first.set()
-        assert await asyncio.gather(first, second) == ['first', 'second']
+        second = asyncio.create_task(run_bootstrap_db(lambda: 'second'))
+        await asyncio.sleep(0)
         assert executor.submissions == 2
-        admission_wait_ms = second_metrics.get('api_db_admission_wait_ms')
-        assert isinstance(admission_wait_ms, (int, float)) and admission_wait_ms > 0
+        third = asyncio.create_task(run_bootstrap_db(lambda: 'third'))
+        await asyncio.sleep(0)
+        assert executor.submissions == 2
+        assert not third.done()
+        # Waiting for capacity is async: unrelated loop work still runs.
+        await asyncio.wait_for(asyncio.sleep(0), timeout=0.1)
+        release_first.set()
+        assert await asyncio.gather(first, second, third) == ['first', 'second', 'third']
+        assert await run_bootstrap_db(lambda: 'after-settlement') == 'after-settlement'
+        assert executor.submissions == 4
     finally:
         release_first.set()
         remove_bootstrap_executor(loop)
@@ -192,7 +353,7 @@ async def test_cancelled_bootstrap_caller_keeps_running_thread_admitted_until_se
 
     loop = asyncio.get_running_loop()
     executor = RecordingExecutor()
-    install_bootstrap_executor(loop, executor, 1)
+    install_bootstrap_executor(loop, executor, 1, max_pending=1)
     operation_started = threading.Event()
     release_operation = threading.Event()
     late_errors: list[dict[str, object]] = []
@@ -215,20 +376,27 @@ async def test_cancelled_bootstrap_caller_keeps_running_thread_admitted_until_se
         assert operation_started.is_set()
         second = asyncio.create_task(run_bootstrap_db(lambda: 'second'))
         await asyncio.sleep(0.02)
-        assert executor.submissions == 1
+        assert executor.submissions == 2
+        waiting = asyncio.create_task(run_bootstrap_db(lambda: 'cancelled-while-waiting'))
+        await asyncio.sleep(0)
+        assert executor.submissions == 2
 
         first.cancel()
         with pytest.raises(asyncio.CancelledError):
             await first
+        waiting.cancel()
+        with pytest.raises(asyncio.CancelledError):
+            await waiting
         await asyncio.sleep(0.02)
-        assert executor.submissions == 1
+        assert executor.submissions == 2
         assert not second.done()
 
         release_operation.set()
         assert second is not None
         assert await asyncio.wait_for(second, timeout=2) == 'second'
+        assert await run_bootstrap_db(lambda: 'after-settlement') == 'after-settlement'
         await asyncio.sleep(0)
-        assert executor.submissions == 2
+        assert executor.submissions == 3
         assert any(str(context.get('exception')) == 'late protected database failure' for context in late_errors)
     finally:
         release_operation.set()
@@ -253,7 +421,7 @@ async def test_cancel_before_thread_start_cancels_queued_future_and_releases_its
 
     loop = asyncio.get_running_loop()
     executor = RecordingExecutor()
-    install_bootstrap_executor(loop, executor, 2)
+    install_bootstrap_executor(loop, executor, 1, max_pending=2)
     first_started = threading.Event()
     release_first = threading.Event()
     second_started = threading.Event()
@@ -271,6 +439,7 @@ async def test_cancel_before_thread_start_cancels_queued_future_and_releases_its
     first = asyncio.create_task(run_bootstrap_db(first_operation))
     second: asyncio.Task[str] | None = None
     third: asyncio.Task[str] | None = None
+    fourth: asyncio.Task[str] | None = None
     try:
         start_deadline = loop.time() + 1
         while not first_started.is_set() and loop.time() < start_deadline:
@@ -282,26 +451,157 @@ async def test_cancel_before_thread_start_cancels_queued_future_and_releases_its
         assert len(executor.futures) == 2
         assert not second_started.is_set()
 
+        third = asyncio.create_task(run_bootstrap_db(lambda: 'third'))
+        await asyncio.sleep(0)
+        assert len(executor.futures) == 3
+        fourth = asyncio.create_task(run_bootstrap_db(lambda: 'fourth'))
+        await asyncio.sleep(0)
+        assert len(executor.futures) == 3
+        assert not fourth.done()
+
         second.cancel()
         with pytest.raises(asyncio.CancelledError):
             await second
         assert executor.futures[1].cancelled()
         assert not second_started.is_set()
 
-        third = asyncio.create_task(run_bootstrap_db(lambda: 'third'))
         await asyncio.sleep(0.02)
-        assert len(executor.futures) == 3
+        assert len(executor.futures) == 4
         release_first.set()
         assert await first == 'first'
         assert await asyncio.wait_for(third, timeout=2) == 'third'
+        assert await asyncio.wait_for(fourth, timeout=2) == 'fourth'
     finally:
         release_first.set()
-        for task in (first, second, third):
+        for task in (first, second, third, fourth):
             if task is not None and not task.done():
                 task.cancel()
-        await asyncio.gather(*(task for task in (first, second, third) if task is not None), return_exceptions=True)
+        await asyncio.gather(*(task for task in (first, second, third, fourth) if task is not None), return_exceptions=True)
         remove_bootstrap_executor(loop)
         await loop.run_in_executor(None, executor.shutdown, True)
+
+
+@pytest.mark.asyncio
+async def test_api_blocking_burst_waits_without_stalling_the_event_loop() -> None:
+    class RecordingExecutor(BoundedThreadPoolExecutor):
+        def __init__(self) -> None:
+            super().__init__(max_workers=1, max_pending=1, thread_name_prefix='api-blocking-burst-test')
+            self.submissions = 0
+
+        def submit(self, function, /, *args, **kwargs):
+            self.submissions += 1
+            return super().submit(function, *args, **kwargs)
+
+    loop = asyncio.get_running_loop()
+    executor = RecordingExecutor()
+    install_api_blocking_executor(loop, executor, 1, max_pending=1)
+    first_started = threading.Event()
+    release_first = threading.Event()
+
+    def first_operation() -> str:
+        first_started.set()
+        if not release_first.wait(timeout=5):
+            raise TimeoutError('API blocking burst test was not released')
+        return 'first'
+
+    try:
+        first = asyncio.create_task(run_api_blocking(first_operation))
+        assert await asyncio.to_thread(first_started.wait, 1)
+        second = asyncio.create_task(run_api_blocking(lambda: 'second'))
+        await asyncio.sleep(0.02)
+        assert executor.submissions == 2
+        third = asyncio.create_task(run_api_blocking(lambda: 'third'))
+        await asyncio.sleep(0)
+        assert not third.done()
+        assert executor.submissions == 2
+        # This deadline can only be met if admission wait yields to the loop.
+        await asyncio.wait_for(asyncio.sleep(0), timeout=0.1)
+        release_first.set()
+        assert await asyncio.gather(first, second, third) == ['first', 'second', 'third']
+        assert executor.submissions == 3
+    finally:
+        release_first.set()
+        remove_api_blocking_executor(loop)
+        executor.shutdown(wait=True, cancel_futures=True)
+
+
+@pytest.mark.asyncio
+async def test_api_blocking_cancellation_while_queued_releases_only_settled_capacity() -> None:
+    class RecordingExecutor(BoundedThreadPoolExecutor):
+        def __init__(self) -> None:
+            super().__init__(max_workers=1, max_pending=1, thread_name_prefix='api-blocking-cancel-queued-test')
+            self.futures: list[Future[object]] = []
+
+        def submit(self, function, /, *args, **kwargs):
+            future = super().submit(function, *args, **kwargs)
+            self.futures.append(future)
+            return future
+
+    loop = asyncio.get_running_loop()
+    executor = RecordingExecutor()
+    install_api_blocking_executor(loop, executor, 1, max_pending=1)
+    first_started = threading.Event()
+    release_first = threading.Event()
+
+    def block() -> str:
+        first_started.set()
+        if not release_first.wait(timeout=5):
+            raise TimeoutError('API queued-cancellation test was not released')
+        return 'first'
+
+    try:
+        first = asyncio.create_task(run_api_blocking(block))
+        assert await asyncio.to_thread(first_started.wait, 1)
+        queued = asyncio.create_task(run_api_blocking(lambda: 'cancelled'))
+        await asyncio.sleep(0.02)
+        assert len(executor.futures) == 2
+        waiting = asyncio.create_task(run_api_blocking(lambda: 'waiting'))
+        await asyncio.sleep(0)
+        assert len(executor.futures) == 2
+
+        queued.cancel()
+        with pytest.raises(asyncio.CancelledError):
+            await queued
+        assert executor.futures[1].cancelled()
+        release_first.set()
+        assert await first == 'first'
+        assert await asyncio.wait_for(waiting, timeout=1) == 'waiting'
+    finally:
+        release_first.set()
+        remove_api_blocking_executor(loop)
+        executor.shutdown(wait=True, cancel_futures=True)
+
+
+@pytest.mark.asyncio
+async def test_api_blocking_cancelled_running_thread_retains_admission_until_done() -> None:
+    executor = BoundedThreadPoolExecutor(max_workers=1, max_pending=0, thread_name_prefix='api-blocking-running-cancel-test')
+    loop = asyncio.get_running_loop()
+    install_api_blocking_executor(loop, executor, 1, max_pending=0)
+    started = threading.Event()
+    release = threading.Event()
+
+    def block() -> str:
+        started.set()
+        if not release.wait(timeout=5):
+            raise TimeoutError('API running-cancellation test was not released')
+        return 'finished'
+
+    try:
+        cancelled = asyncio.create_task(run_api_blocking(block))
+        assert await asyncio.to_thread(started.wait, 1)
+        cancelled.cancel()
+        with pytest.raises(asyncio.CancelledError):
+            await cancelled
+
+        next_call = asyncio.create_task(run_api_blocking(lambda: 'next'))
+        await asyncio.sleep(0.02)
+        assert not next_call.done()
+        release.set()
+        assert await asyncio.wait_for(next_call, timeout=1) == 'next'
+    finally:
+        release.set()
+        remove_api_blocking_executor(loop)
+        executor.shutdown(wait=True, cancel_futures=True)
 
 
 @pytest.mark.asyncio

@@ -202,6 +202,20 @@ class TestEngineWebsocketAuth:
 
 
 class TestNamespaceMiddleware:
+    def test_headerless_health_does_not_register_implicit_namespace_when_auth_is_disabled(self, client: TestClient, monkeypatch: pytest.MonkeyPatch) -> None:
+        import main
+
+        monkeypatch.setattr('backend_core.auth_config.settings.auth_required', False)
+
+        async def reject_namespace_database_work(*_args, **_kwargs):
+            raise AssertionError('Headerless process health must not access the namespace database')
+
+        monkeypatch.setattr(main, '_run_namespace_middleware', reject_namespace_database_work)
+
+        response = client.get('/health')
+
+        assert response.status_code == 200
+
     def test_rejects_unknown_namespace_without_session(self, client: TestClient, monkeypatch: pytest.MonkeyPatch) -> None:
         monkeypatch.setattr('backend_core.auth_config.settings.auth_required', True)
         namespace = f'ghost-{uuid.uuid4().hex[:8]}'

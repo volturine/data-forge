@@ -6,7 +6,7 @@ import threading
 from collections.abc import Callable, Generator, Iterable
 from dataclasses import dataclass
 from pathlib import Path
-from typing import TypeVar, cast
+from typing import BinaryIO, TypeVar, cast
 
 import grpc
 from google.protobuf import json_format
@@ -154,6 +154,24 @@ class WorkerDataPlaneClient:
             with path.open('rb') as source:
                 while chunk := source.read(_OBJECT_TRANSFER_CHUNK_BYTES):
                     yield chunk
+
+        stream = chunks()
+        try:
+            return self.upload_object_stream(stream, target_url, max_bytes=max_bytes, content_type=content_type)
+        finally:
+            stream.close()
+
+    def upload_object_fileobj(
+        self,
+        source: BinaryIO,
+        target_url: str,
+        *,
+        max_bytes: int,
+        content_type: str | None = None,
+    ) -> str:
+        def chunks() -> Generator[bytes]:
+            while chunk := source.read(_OBJECT_TRANSFER_CHUNK_BYTES):
+                yield chunk
 
         stream = chunks()
         try:

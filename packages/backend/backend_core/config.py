@@ -16,6 +16,7 @@ _NUMERIC_CONSTRAINTS: list[tuple[str, int | None, int | None]] = [
     ('worker_data_plane_grpc_port', 1, 65535),
     ('database_pool_size', 1, 100),
     ('database_max_overflow', 0, 32),
+    ('compute_workers', 1, 100),
     ('database_pool_timeout', 1, None),
     ('scheduler_check_interval', 1, None),
     ('lock_ttl_seconds', 1, None),
@@ -108,9 +109,9 @@ class Settings(BaseSettings):
     database_pool_size: int = Field(default=8, alias='DATABASE_POOL_SIZE')
     database_max_overflow: int = Field(default=4, alias='DATABASE_MAX_OVERFLOW')
     database_pool_timeout: int = Field(default=30, alias='DATABASE_POOL_TIMEOUT')
+    compute_workers: int = Field(default=14, alias='COMPUTE_WORKERS')
     default_namespace: str = Field(default='default', alias='DEFAULT_NAMESPACE')
 
-    upload_chunk_size: int = Field(default=5 * 1024 * 1024, alias='UPLOAD_CHUNK_SIZE')
     # Zero disables the configurable soft cap; the data-plane transport still enforces its 2 GiB ceiling.
     upload_max_file_size_bytes: int = Field(default=_MAX_UPLOAD_FILE_SIZE_BYTES, alias='UPLOAD_MAX_FILE_SIZE_BYTES')
 
@@ -144,7 +145,7 @@ class Settings(BaseSettings):
     runtime_work_lease_ttl_seconds: int = Field(default=300, alias='RUNTIME_WORK_LEASE_TTL_SECONDS')
 
     # Maximum connections per worker
-    worker_connections: int = Field(default=1000, alias='WORKER_CONNECTIONS')
+    worker_connections: int = Field(default=4096, alias='WORKER_CONNECTIONS')
 
     engine_idle_ttl_seconds: int = Field(default=300, alias='ENGINE_IDLE_TTL_SECONDS')
     engine_idle_reap_interval_seconds: int = Field(default=30, alias='ENGINE_IDLE_REAP_INTERVAL_SECONDS')
@@ -232,15 +233,6 @@ class Settings(BaseSettings):
     @classmethod
     def _ensure_dirs(cls, value: Path) -> Path:
         return _resolve_dir(value)
-
-    @field_validator('upload_chunk_size')
-    @classmethod
-    def _validate_upload_chunk_size(cls, value: int) -> int:
-        if value < 1024:
-            raise ValueError(f'upload_chunk_size must be at least 1024 bytes, got {value}')
-        if value > 100 * 1024 * 1024:
-            raise ValueError(f'upload_chunk_size must be at most 100MB, got {value}')
-        return value
 
     @field_validator('log_level')
     @classmethod

@@ -277,17 +277,40 @@ verify:
 
 
 test:
-    just generate-protocol
-    DATAFORGE_SKIP_PROTOCOL_GENERATE=1 just test-backend-unit
-    DATAFORGE_SKIP_PROTOCOL_GENERATE=1 just test-backend-integration
-    DATAFORGE_SKIP_PROTOCOL_GENERATE=1 just test-worker
-    DATAFORGE_SKIP_PROTOCOL_GENERATE=1 just test-scheduler
-    cd packages/backend && env -u VIRTUAL_ENV uv run python ../../scripts/scan_warnings.py -- just test-frontend-raw
+    just test-backend-unit
+    just test-backend-integration
+    just test-worker
+    just test-scheduler
+    just test-frontend
+
+_test-container-guard:
+    #!/usr/bin/env bash
+    set -euo pipefail
+    if [ "${DATAFORGE_TEST_CONTAINER:-}" != "1" ] || [ ! -f /.dockerenv ]; then
+        echo "Raw test recipes may only run inside the containerized test runner." >&2
+        exit 2
+    fi
+
+[private]
+_prepare-test-services: _test-container-guard
+    #!/usr/bin/env bash
+    set -euo pipefail
+    cd packages/backend
+    env -u VIRTUAL_ENV uv run python - <<'PY'
+    import subprocess
+
+    from tests.harness.postgres_harness import PostgresContainer, RustfsContainer
+
+    for image in (PostgresContainer().image, RustfsContainer().image):
+        print(f'Preparing test service image: {image}', flush=True)
+        subprocess.run(['docker', 'pull', image], check=True)
+    PY
 
 test-backend-unit:
-    cd packages/backend && env -u VIRTUAL_ENV uv run python ../../scripts/scan_warnings.py -- just test-backend-unit-raw
+    TEST_TARGET=test-backend-unit scripts/test_container.sh
 
-test-backend-unit-raw:
+[private]
+test-backend-unit-raw: _prepare-test-services
     #!/usr/bin/env bash
     set -euo pipefail
     if [ "${DATAFORGE_SKIP_PROTOCOL_GENERATE:-}" != "1" ]; then
@@ -297,9 +320,10 @@ test-backend-unit-raw:
     {{pytest}} -n auto --maxprocesses=8 --dist=loadfile tests --ignore=tests/integration
 
 test-backend-integration:
-    cd packages/backend && env -u VIRTUAL_ENV uv run python ../../scripts/scan_warnings.py -- just test-backend-integration-raw
+    TEST_TARGET=test-backend-integration scripts/test_container.sh
 
-test-backend-integration-raw:
+[private]
+test-backend-integration-raw: _prepare-test-services
     #!/usr/bin/env bash
     set -euo pipefail
     if [ "${DATAFORGE_SKIP_PROTOCOL_GENERATE:-}" != "1" ]; then
@@ -310,9 +334,10 @@ test-backend-integration-raw:
     {{pytest}} -n auto --maxprocesses=4 --dist=loadfile tests/integration
 
 test-worker:
-    cd packages/worker && env -u VIRTUAL_ENV uv run python ../../scripts/scan_warnings.py -- just test-worker-raw
+    TEST_TARGET=test-worker scripts/test_container.sh
 
-test-worker-raw:
+[private]
+test-worker-raw: _test-container-guard
     #!/usr/bin/env bash
     set -euo pipefail
     if [ "${DATAFORGE_SKIP_PROTOCOL_GENERATE:-}" != "1" ]; then
@@ -322,9 +347,10 @@ test-worker-raw:
     {{pytest}} -n auto --maxprocesses=4 --dist=loadfile tests --ignore=tests/integration
 
 test-scheduler:
-    cd packages/scheduler && env -u VIRTUAL_ENV uv run python ../../scripts/scan_warnings.py -- just test-scheduler-raw
+    TEST_TARGET=test-scheduler scripts/test_container.sh
 
-test-scheduler-raw:
+[private]
+test-scheduler-raw: _test-container-guard
     #!/usr/bin/env bash
     set -euo pipefail
     if [ "${DATAFORGE_SKIP_PROTOCOL_GENERATE:-}" != "1" ]; then
@@ -333,10 +359,20 @@ test-scheduler-raw:
     cd packages/scheduler
     {{pytest}} tests
 
-test-frontend-raw:
+[private]
+test-frontend-raw: _test-container-guard
+    #!/usr/bin/env bash
+    set -euo pipefail
     cd packages/frontend && bun run test:unit
 
+test-frontend:
+    TEST_TARGET=test-frontend scripts/test_container.sh
+
 test-runtime-stability repeats='3':
+    TEST_TARGET=test-runtime-stability REPEATS={{quote(repeats)}} scripts/test_container.sh
+
+[private]
+test-runtime-stability-raw repeats='3': _prepare-test-services
     #!/usr/bin/env bash
     set -euo pipefail
     for run in $(seq 1 {{repeats}}); do
@@ -353,13 +389,64 @@ test-runtime-stability repeats='3':
     done
 
 test-e2e:
+    TEST_TARGET=test-e2e scripts/test_container.sh
+
+test-e2e-capacity sessions='2000' repeats='3' duration='60' active_ratio='0' api_workers='1':
+    #!/usr/bin/env bash
+    set -euo pipefail
+    sessions={{ quote(sessions) }}
+    sessions="${sessions#sessions=}"
+    if [[ ! "$sessions" =~ ^[1-9][0-9]*$ ]]; then
+        echo "Expected a positive session count, got: $sessions" >&2
+        exit 2
+    fi
+    duration={{ quote(duration) }}
+    duration="${duration#duration=}"
+    if [[ ! "$duration" =~ ^[1-9][0-9]*$ ]]; then
+        echo "Expected a positive steady-state duration in seconds, got: $duration" >&2
+        exit 2
+    fi
+    repeats={{ quote(repeats) }}
+    repeats="${repeats#repeats=}"
+    if [[ ! "$repeats" =~ ^[1-9][0-9]*$ ]]; then
+        echo "Expected a positive repeat count, got: $repeats" >&2
+        exit 2
+    fi
+    active_ratio={{ quote(active_ratio) }}
+    active_ratio="${active_ratio#active_ratio=}"
+    if [[ ! "$active_ratio" =~ ^([0-9]+([.][0-9]*)?|[.][0-9]+)$ ]] || \
+        ! awk -v value="$active_ratio" 'BEGIN { exit !(value >= 0 && value <= 1) }'; then
+        echo "Expected active_ratio between 0 and 1 inclusive, got: $active_ratio" >&2
+        exit 2
+    fi
+    api_workers={{ quote(api_workers) }}
+    api_workers="${api_workers#api_workers=}"
+    if [[ ! "$api_workers" =~ ^[1-9][0-9]*$ ]]; then
+        echo "Expected a positive API process count, got: $api_workers" >&2
+        exit 2
+    fi
+    WORKERS="$api_workers" E2E_API_WORKERS="$api_workers" E2E_SHARDS=1 PW_E2E_WORKERS=1 \
+        E2E_SESSION_CONNECTIONS="$sessions" E2E_SESSION_REPEATS="$repeats" E2E_SESSION_DURATION_SECONDS="$duration" \
+        E2E_SESSION_ACTIVE_RATIO="$active_ratio" \
+        TEST_TARGET=test-e2e-capacity scripts/test_container.sh
+
+[private]
+test-e2e-raw: _test-container-guard
     #!/usr/bin/env bash
     set -euo pipefail
     if [ "${DATAFORGE_SKIP_PROTOCOL_GENERATE:-}" != "1" ]; then
         just generate-protocol
     fi
-    cd packages/backend && env -u VIRTUAL_ENV uv run python ../../scripts/scan_warnings.py --cwd . \
-        --ignore-pattern 'InvalidCredentialsError: Invalid email or password' -- scripts/test_e2e.sh
+    scripts/test_e2e.sh
+
+[private]
+test-e2e-capacity-raw: _test-container-guard
+    #!/usr/bin/env bash
+    set -euo pipefail
+    if [ "${DATAFORGE_SKIP_PROTOCOL_GENERATE:-}" != "1" ]; then
+        just generate-protocol
+    fi
+    scripts/test_e2e.sh capacity
 
 test-e2e-concurrency browsers='50':
     #!/usr/bin/env bash
@@ -371,10 +458,8 @@ test-e2e-concurrency browsers='50':
         exit 2
     fi
     DATAFORGE_SKIP_PROTOCOL_GENERATE=1 E2E_SHARDS=1 PW_E2E_WORKERS=1 \
-        E2E_CONCURRENCY_BROWSERS="$browsers" PLAYWRIGHT_TEST_FILES=tests/concurrency.test.ts just test-e2e
-
-test-e2e-down stack_id:
-    E2E_STACK_ID="{{stack_id}}" scripts/test_e2e.sh stack-down
+        E2E_CONCURRENCY_BROWSERS="$browsers" PLAYWRIGHT_TEST_FILES=tests/concurrency.test.ts \
+        TEST_TARGET=test-e2e scripts/test_container.sh
 
 # Containerized dev stack (source mounts + Vite). Uses the same host ports as
 # `just dev` (API 8000, frontend 3000), so run either one, not both.

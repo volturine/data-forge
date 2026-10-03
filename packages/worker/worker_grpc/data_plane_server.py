@@ -10,7 +10,7 @@ from collections.abc import Awaitable, Callable
 from concurrent.futures import Executor, Future as ConcurrentFuture, ThreadPoolExecutor
 from datetime import UTC, datetime
 from functools import partial
-from typing import Any, cast
+from typing import Any, Never, cast
 
 import grpc
 import pyarrow as pa  # type: ignore[import-untyped]
@@ -23,6 +23,7 @@ from dataforge_protocol import common_pb2, iceberg_pb2, iceberg_pb2_grpc, object
 from runtime import compute_service, iceberg_metadata, iceberg_snapshot_reader, object_store
 from runtime.config import settings
 from runtime.json_values import dict_to_struct
+from runtime.worker_runtime_client import BackendWorkerRpcError
 
 logger = logging.getLogger(__name__)
 _TOKEN_METADATA_KEY = "x-internal-token"
@@ -221,6 +222,11 @@ async def _require_internal_token(context: grpc.aio.ServicerContext) -> None:
     metadata = {key: value for key, value in invocation_metadata}
     if metadata.get(_TOKEN_METADATA_KEY) != settings.internal_api_token:
         await context.abort(grpc.StatusCode.UNAUTHENTICATED, "Invalid worker data-plane token")
+
+
+async def _abort_backend_worker_rpc_error(context: grpc.aio.ServicerContext, error: BackendWorkerRpcError) -> Never:
+    status_code = next((status for status in grpc.StatusCode if status.name == error.error_code), grpc.StatusCode.UNKNOWN)
+    await context.abort(status_code, error.error)
 
 
 class ObjectStoreServicer(object_store_pb2_grpc.ObjectStoreServiceServicer):
@@ -439,7 +445,17 @@ class IcebergServicer(iceberg_pb2_grpc.IcebergServiceServicer):
         if not request.HasField("datasource_id"):
             await context.abort(grpc.StatusCode.INVALID_ARGUMENT, "datasource_id is required")
         branch = request.branch if request.HasField("branch") else None
-        response = await _run_blocking(_ICEBERG_LANE, compute_service.list_iceberg_snapshots, None, request.datasource_id, branch)
+        try:
+            response = await _run_blocking(
+                _ICEBERG_LANE,
+                compute_service.list_iceberg_snapshots,
+                None,
+                request.datasource_id,
+                branch,
+                request_namespace=request.namespace,
+            )
+        except BackendWorkerRpcError as exc:
+            await _abort_backend_worker_rpc_error(context, exc)
         return iceberg_pb2.IcebergSnapshotsResponse(
             datasource_id=response.datasource_id,
             table_path=response.table_path,
@@ -480,13 +496,17 @@ class IcebergServicer(iceberg_pb2_grpc.IcebergServiceServicer):
         context: grpc.aio.ServicerContext,
     ) -> iceberg_pb2.IcebergSnapshotDeleteResponse:
         await _require_internal_token(context)
-        response = await _run_blocking(
-            _ICEBERG_LANE,
-            compute_service.delete_iceberg_snapshot,
-            None,
-            request.datasource_id,
-            request.snapshot_id,
-        )
+        try:
+            response = await _run_blocking(
+                _ICEBERG_LANE,
+                compute_service.delete_iceberg_snapshot,
+                None,
+                request.datasource_id,
+                request.snapshot_id,
+                request_namespace=request.namespace,
+            )
+        except BackendWorkerRpcError as exc:
+            await _abort_backend_worker_rpc_error(context, exc)
         return iceberg_pb2.IcebergSnapshotDeleteResponse(datasource_id=response.datasource_id, snapshot_id=response.snapshot_id)
 
 

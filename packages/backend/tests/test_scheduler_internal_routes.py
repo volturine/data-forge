@@ -71,7 +71,7 @@ async def test_internal_scheduler_grpc_registers_and_stops_worker(monkeypatch: p
 @pytest.mark.asyncio
 async def test_internal_scheduler_lists_only_due_schedule_namespaces(monkeypatch: pytest.MonkeyPatch) -> None:
     token = _set_internal_token(monkeypatch)
-    monkeypatch.setattr(runtime_work_service, 'list_due_schedule_namespaces', lambda _session: [('alpha', 3)])
+    monkeypatch.setattr(runtime_work_service, 'list_due_schedule_namespaces', lambda _session: [('alpha', 3, [41, 42])])
 
     response = await SchedulerRuntimeServicer().ListDueScheduleNamespaces(
         common_pb2.EmptyRequest(),
@@ -79,6 +79,7 @@ async def test_internal_scheduler_lists_only_due_schedule_namespaces(monkeypatch
     )
 
     assert [(item.namespace, item.generation) for item in response.namespaces] == [('alpha', 3)]
+    assert list(response.namespaces[0].wake_ids) == [41, 42]
 
 
 @pytest.mark.asyncio

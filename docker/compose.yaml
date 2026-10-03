@@ -1,6 +1,11 @@
+# cpu_shares are relative scheduling weights, not CPU quotas. Core progress
+# services use 2048; supporting services use lower weights. Each compute
+# container uses 128, so infrastructure wins contention while idle CPU remains
+# available to compute.
 services:
   postgres:
     image: postgres:18-alpine
+    cpu_shares: 2048
     environment:
       POSTGRES_DB: ${DF_POSTGRES_DB}
       POSTGRES_USER: ${DF_POSTGRES_USER}
@@ -15,6 +20,7 @@ services:
 
   rustfs:
     image: rustfs/rustfs:1.0.0-rc.1
+    cpu_shares: 512
     environment:
       RUSTFS_ACCESS_KEY: ${DF_OBJECT_STORE_ACCESS_KEY}
       RUSTFS_SECRET_KEY: ${DF_OBJECT_STORE_SECRET_KEY}
@@ -27,6 +33,7 @@ services:
 
   api:
     image: ${DF_API_IMAGE}
+    cpu_shares: 2048
     depends_on:
       postgres:
         condition: service_healthy
@@ -54,7 +61,6 @@ services:
       DATABASE_MAX_OVERFLOW: ${DF_DATABASE_MAX_OVERFLOW}
       DATABASE_POOL_TIMEOUT: ${DF_DATABASE_POOL_TIMEOUT}
       DEFAULT_NAMESPACE: ${DF_DEFAULT_NAMESPACE}
-      UPLOAD_CHUNK_SIZE: ${DF_UPLOAD_CHUNK_SIZE}
       OBJECT_STORE_ENDPOINT: ${DF_OBJECT_STORE_ENDPOINT}
       OBJECT_STORE_REGION: ${DF_OBJECT_STORE_REGION}
       OBJECT_STORE_ACCESS_KEY: ${DF_OBJECT_STORE_ACCESS_KEY}
@@ -99,6 +105,7 @@ services:
 
   runtime:
     image: ${DF_RUNTIME_IMAGE}
+    cpu_shares: 2048
     depends_on:
       postgres:
         condition: service_healthy
@@ -106,8 +113,7 @@ services:
         condition: service_started
     environment:
       <<: *api-env
-      DATABASE_POOL_SIZE: ${COMPUTE_WORKERS:-10}
-      DATABASE_MAX_OVERFLOW: "13"
+      COMPUTE_WORKERS: ${COMPUTE_WORKERS:-10}
       WORKERS: "1"
       DATAFORGE_DEPLOYMENT_ID: ${DF_DEPLOYMENT_ID}
     command: ["python3", "runtime_coordinator.py"]
@@ -129,6 +135,7 @@ services:
 
   worker:
     image: ${DF_WORKER_IMAGE}
+    cpu_shares: 2048
     depends_on:
       postgres:
         condition: service_healthy
@@ -195,6 +202,7 @@ services:
 
   scheduler:
     image: ${DF_SCHEDULER_IMAGE}
+    cpu_shares: 1024
     depends_on:
       postgres:
         condition: service_healthy

@@ -7,14 +7,23 @@ import logging
 import os
 import signal
 import threading
-from collections.abc import Callable
+import time
+from collections.abc import Awaitable, Callable
+from concurrent.futures import Future
 from functools import partial
+from typing import Any
 
 import psycopg
+from sqlalchemy.exc import OperationalError as SQLAlchemyOperationalError
 
 from backend_core import runtime_ipc
 from backend_core.config import settings
-from backend_core.database import init_db, set_active_runtime_coordinator_generation
+from backend_core.database import (
+    active_runtime_coordinator_generation,
+    configure_runtime_critical_database_budget,
+    init_db,
+    set_active_runtime_coordinator_generation,
+)
 from backend_core.logging import configure_logging_off_loop
 from backend_core.public_schema import ensure_backend_public_tables
 from backend_core.runtime_integration_delivery import NotificationDeliveryDispatcher
@@ -30,7 +39,11 @@ logger = logging.getLogger(__name__)
 
 _COORDINATOR_LOCK_KEY = int.from_bytes(hashlib.sha256(b'dataforge:runtime-coordinator').digest()[:8], 'big', signed=True)
 _LEASE_CHECK_SECONDS = 1.0
+_LEASE_CHECK_FRESHNESS_SECONDS = 0.25
 _LEASE_RETRY_SECONDS = 1.0
+_ACTOR_SHUTDOWN_GRACE_SECONDS = 15.0
+_CHAT_DATABASE_RETRY_MIN_SECONDS = 0.25
+_CHAT_DATABASE_RETRY_MAX_SECONDS = 5.0
 
 
 def _database_conninfo() -> str:
@@ -46,7 +59,10 @@ class RuntimeCoordinatorLease:
     connection disappears, PostgreSQL releases the lock and a replacement
     coordinator can start. No API child can accidentally become a second
     runtime gRPC owner because it never acquires this lease or binds the
-    coordinator port.
+    coordinator port. Request-path checks may reuse a very recent successful
+    session ping. The lease monitor always forces a new ping; neither path
+    reads ``pg_locks`` or the fencing row because the dedicated live session
+    owns the advisory lock.
     """
 
     def __init__(self, *, connection_factory=psycopg.connect) -> None:
@@ -55,6 +71,11 @@ class RuntimeCoordinatorLease:
         self._generation: int | None = None
         self._owns_lock = False
         self._connection_lock = threading.Lock()
+        self._check_lock = threading.Lock()
+        self._check_inflight: Future[None] | None = None
+        self._check_valid_until = 0.0
+        self._check_epoch = 0
+        self._last_ping_timeout_log = 0.0
 
     @property
     def generation(self) -> int:
@@ -64,6 +85,7 @@ class RuntimeCoordinatorLease:
 
     def acquire(self) -> bool:
         with self._connection_lock:
+            self._invalidate_check_cache()
             if self._owns_lock:
                 raise RuntimeError('Runtime coordinator lease is already held')
             if self._connection is None or self._connection.closed:
@@ -81,12 +103,15 @@ class RuntimeCoordinatorLease:
                     'SELECT pg_try_advisory_lock(%s)',
                     (_COORDINATOR_LOCK_KEY,),
                 ).fetchone()
+                self._owns_lock = bool(result and result[0])
+                if not self._owns_lock:
+                    return False
             except BaseException:
                 if not self._connection.closed:
                     self._connection.close()
                 self._connection = None
+                self._owns_lock = False
                 raise
-            self._owns_lock = bool(result and result[0])
             return self._owns_lock
 
     def activate_generation(self) -> int:
@@ -109,43 +134,68 @@ class RuntimeCoordinatorLease:
             self._generation = int(row[0])
             return self._generation
 
-    def check(self) -> None:
+    def check(self, *, force: bool = False) -> None:
+        with self._check_lock:
+            check = self._check_inflight
+            if check is None and not force and time.monotonic() < self._check_valid_until:
+                return
+            is_owner = check is None
+            check_epoch = self._check_epoch
+            if check is None:
+                check = Future()
+                self._check_inflight = check
+        if not is_owner:
+            check.result()
+            return
+
+        try:
+            confirmed = self._check_owner_session()
+        except BaseException as exc:
+            self._invalidate_check_cache()
+            check.set_exception(exc)
+            raise
+        else:
+            with self._check_lock:
+                if check_epoch == self._check_epoch:
+                    self._check_valid_until = time.monotonic() + _LEASE_CHECK_FRESHNESS_SECONDS if confirmed else 0.0
+            check.set_result(None)
+        finally:
+            with self._check_lock:
+                if self._check_inflight is check:
+                    self._check_inflight = None
+
+    def _check_owner_session(self) -> bool:
         with self._connection_lock:
             connection = self._connection
             if connection is None or connection.closed:
                 raise RuntimeError('Runtime coordinator PostgreSQL lease connection is closed')
             if not self._owns_lock:
                 raise RuntimeError('Runtime coordinator advisory lease is not held')
-            if self._generation is None:
+            # This connection is dedicated to the session-level advisory
+            # lock. PostgreSQL keeps that lock until this session explicitly
+            # unlocks or disconnects; only release() can unlock it, under the
+            # same connection lock. A successful round-trip here therefore
+            # proves the lock-owning session is still alive without scanning
+            # pg_locks or the fencing table for every lifecycle RPC.
+            try:
                 connection.execute('SELECT 1')
-            else:
-                generation = self._generation
-                row = connection.execute(
-                    """
-                    SELECT EXISTS (
-                               SELECT 1
-                               FROM pg_locks
-                               WHERE locktype = 'advisory'
-                                 AND pid = pg_backend_pid()
-                                 AND classid = %s::oid
-                                 AND objid = %s::oid
-                                 AND objsubid = 1
-                           ),
-                           generation
-                    FROM public.runtime_coordinator_state
-                    WHERE singleton_id = 1
-                    """,
-                    (
-                        ((_COORDINATOR_LOCK_KEY & 0xFFFFFFFFFFFFFFFF) >> 32),
-                        (_COORDINATOR_LOCK_KEY & 0xFFFFFFFF),
-                    ),
-                ).fetchone()
-                if row is None:
-                    raise RuntimeError('Runtime coordinator fencing state is missing')
-                if not row[0]:
-                    raise RuntimeError('Runtime coordinator advisory lease was lost')
-                if int(row[1]) != generation:
-                    raise RuntimeError('Runtime coordinator fencing generation was superseded')
+            except psycopg.errors.QueryCanceled:
+                # PostgreSQL responded, so the session and its advisory lock
+                # are still alive. This probe did not complete, however, so
+                # it must not refresh the successful-check cache.
+                now = time.monotonic()
+                if now - self._last_ping_timeout_log >= 30.0:
+                    logger.warning('Runtime coordinator owner-session lease ping timed out; retaining the live session lock and retrying')
+                    self._last_ping_timeout_log = now
+                return False
+            except psycopg.Error as exc:
+                raise RuntimeError('Runtime coordinator advisory lease connection is unavailable') from exc
+            return True
+
+    def _invalidate_check_cache(self) -> None:
+        with self._check_lock:
+            self._check_epoch += 1
+            self._check_valid_until = 0.0
 
     def release(self) -> None:
         with self._connection_lock:
@@ -154,6 +204,7 @@ class RuntimeCoordinatorLease:
             self._generation = None
             owns_lock = self._owns_lock
             self._owns_lock = False
+            self._invalidate_check_cache()
             if connection is None:
                 return
             if owns_lock:
@@ -223,11 +274,40 @@ async def _lease_monitor(
         except TimeoutError:
             pass
         try:
-            await asyncio.to_thread(lease.check)
+            await asyncio.to_thread(lease.check, force=True)
         except Exception:
             logger.critical('Runtime coordinator lease was lost; stopping this coordinator', exc_info=True)
             owner_stop_event.set()
             return
+
+
+async def _run_chat_turn_consumer(
+    run: Callable[[asyncio.Event], Awaitable[None]],
+    stop_event: asyncio.Event,
+) -> None:
+    """Reconnect the durable chat consumer without taking down runtime RPCs."""
+    delay = _CHAT_DATABASE_RETRY_MIN_SECONDS
+    while not stop_event.is_set():
+        try:
+            await run(stop_event)
+            if stop_event.is_set():
+                return
+            raise RuntimeError('Chat turn consumer exited unexpectedly')
+        except asyncio.CancelledError:
+            raise
+        except SQLAlchemyOperationalError, psycopg.OperationalError:
+            if stop_event.is_set():
+                return
+            logger.warning(
+                'Chat turn consumer database connection failed; retrying in %.2fs',
+                delay,
+                exc_info=True,
+            )
+            try:
+                await asyncio.wait_for(stop_event.wait(), timeout=delay)
+                return
+            except TimeoutError:
+                delay = min(delay * 2, _CHAT_DATABASE_RETRY_MAX_SECONDS)
 
 
 async def _wait_for_lease(stop_event: asyncio.Event, lease: RuntimeCoordinatorLease) -> bool:
@@ -262,6 +342,131 @@ async def _wait_for_lease(stop_event: asyncio.Event, lease: RuntimeCoordinatorLe
         except TimeoutError:
             continue
     return False
+
+
+async def _cancel_and_join_actors(tasks: list[asyncio.Task[None]]) -> None:
+    """Request actor shutdown, then join every task before relinquishing ownership."""
+    if not tasks:
+        return
+    _done, pending = await asyncio.wait(tasks, timeout=_ACTOR_SHUTDOWN_GRACE_SECONDS)
+    for task in pending:
+        task.cancel()
+    if pending:
+        # Actors may be inside bounded synchronous DB/provider operations.
+        # Their cancellation handlers join those exact operations. There is
+        # deliberately no second timeout here: releasing the epoch while any
+        # actor can still publish would permit overlapping coordinator work.
+        await asyncio.gather(*pending, return_exceptions=True)
+    for task in tasks:
+        if task.done() and not task.cancelled():
+            task.exception()
+
+
+async def _finish_actor_shutdown(tasks: list[asyncio.Task[None]]) -> bool:
+    """Make actor join a teardown barrier even if the epoch is cancelled again.
+
+    Returns whether another cancellation arrived while the barrier was being
+    completed. The caller can propagate it after clearing the generation and
+    releasing the lease, which is safe only after all actor tasks have settled.
+    """
+    shutdown = asyncio.create_task(_cancel_and_join_actors(tasks), name='coordinator-actor-shutdown')
+    interrupted = False
+    current = asyncio.current_task()
+    while not shutdown.done():
+        try:
+            await asyncio.shield(shutdown)
+        except asyncio.CancelledError:
+            interrupted = True
+            if current is not None:
+                current.uncancel()
+    shutdown.result()
+    return interrupted
+
+
+async def _settle_epoch_ownership(tasks: list[asyncio.Task[None]], lease: RuntimeCoordinatorLease) -> bool:
+    """Clear local fencing and release the DB lease only after all actors settle."""
+    interrupted = await _finish_actor_shutdown(tasks)
+    set_active_runtime_coordinator_generation(None)
+    await asyncio.to_thread(lease.release)
+    return interrupted
+
+
+async def _stop_endpoints_and_settle_epoch(
+    owner_stop_event: asyncio.Event,
+    control_tasks: tuple[asyncio.Task[bool], asyncio.Task[bool]],
+    grpc_server: Any | None,
+    listener: Any,
+    tasks: list[asyncio.Task[None]],
+    lease: RuntimeCoordinatorLease,
+) -> bool:
+    """Attempt endpoint shutdowns but make actor settlement unconditional."""
+    shutdown_errors: list[BaseException] = []
+    owner_stop_event.set()
+    for task in control_tasks:
+        if not task.done():
+            task.cancel()
+    await asyncio.gather(*control_tasks, return_exceptions=True)
+    try:
+        if grpc_server is not None:
+            await grpc_server.stop(grace=0.5)
+    except BaseException as exc:
+        shutdown_errors.append(exc)
+        logger.error('Runtime coordinator gRPC shutdown failed', exc_info=(type(exc), exc, exc.__traceback__))
+    try:
+        await runtime_ipc.stop_api_server(listener, listener=RuntimeListenerKind.JOB)
+    except BaseException as exc:
+        shutdown_errors.append(exc)
+        logger.error('Runtime coordinator listener shutdown failed', exc_info=(type(exc), exc, exc.__traceback__))
+    if shutdown_errors:
+        # An endpoint that failed to stop may still admit work. Join actors,
+        # but retain the fencing generation and advisory lease so a standby
+        # cannot overlap this possibly-live endpoint.
+        await _finish_actor_shutdown(tasks)
+        raise RuntimeError('Runtime coordinator endpoint shutdown failed; retaining its lease') from shutdown_errors[0]
+    interrupted = await _settle_epoch_ownership(tasks, lease)
+    return interrupted
+
+
+async def _finish_epoch_shutdown(
+    owner_stop_event: asyncio.Event,
+    control_tasks: tuple[asyncio.Task[bool], asyncio.Task[bool]],
+    grpc_server: Any | None,
+    listener: Any,
+    tasks: list[asyncio.Task[None]],
+    lease: RuntimeCoordinatorLease,
+) -> bool:
+    """Run the entire teardown barrier to completion despite further cancellation."""
+    shutdown = asyncio.create_task(
+        _stop_endpoints_and_settle_epoch(owner_stop_event, control_tasks, grpc_server, listener, tasks, lease),
+        name='coordinator-epoch-shutdown',
+    )
+    interrupted = False
+    current = asyncio.current_task()
+    while not shutdown.done():
+        try:
+            await asyncio.shield(shutdown)
+        except asyncio.CancelledError:
+            interrupted = True
+            if current is not None:
+                current.uncancel()
+    return interrupted or shutdown.result()
+
+
+def _fail_stop_if_epoch_active() -> None:
+    """Terminate the process if an epoch could still own live endpoints/work."""
+    generation = active_runtime_coordinator_generation()
+    if generation is not None:
+        logger.critical(
+            'Coordinator generation %s did not settle; terminating without releasing its PostgreSQL lease',
+            generation,
+        )
+        os._exit(1)
+
+
+async def _release_coordinator_lease(lease: RuntimeCoordinatorLease) -> None:
+    """Release only a settled epoch; otherwise terminate without unlocking it."""
+    _fail_stop_if_epoch_active()
+    await asyncio.to_thread(lease.release)
 
 
 async def _run_owned_epoch(process_stop_event: asyncio.Event, lease: RuntimeCoordinatorLease) -> None:
@@ -299,7 +504,7 @@ async def _run_owned_epoch(process_stop_event: asyncio.Event, lease: RuntimeCoor
                 ),
                 asyncio.create_task(RuntimeOutboxDispatcher().run(owner_stop_event), name='runtime-outbox'),
                 asyncio.create_task(NotificationDeliveryDispatcher().run(owner_stop_event), name='notification-delivery'),
-                asyncio.create_task(chat_consumer.run(owner_stop_event), name='chat-turn-consumer'),
+                asyncio.create_task(_run_chat_turn_consumer(chat_consumer.run, owner_stop_event), name='chat-turn-consumer'),
                 asyncio.create_task(telegram_runtime.run(owner_stop_event), name='telegram-integration'),
             ]
         )
@@ -312,36 +517,28 @@ async def _run_owned_epoch(process_stop_event: asyncio.Event, lease: RuntimeCoor
         )
         await _supervise_epoch(tasks, process_stop_task, owner_stop_task)
     finally:
-        owner_stop_event.set()
-        for control_task in (process_stop_task, owner_stop_task):
-            if not control_task.done():
-                control_task.cancel()
-        await asyncio.gather(process_stop_task, owner_stop_task, return_exceptions=True)
-        # Withdraw the control-plane endpoint before stopping engines. An old
-        # owner must not accept new lifecycle/claim RPCs while a replacement
-        # is taking its fencing epoch.
-        if grpc_server is not None:
-            await grpc_server.stop(grace=0.5)
-            grpc_server = None
-        await runtime_ipc.stop_api_server(listener, listener=RuntimeListenerKind.JOB)
-        if tasks:
-            _done, pending = await asyncio.wait(tasks, timeout=15.0)
-            for task in pending:
-                task.cancel()
-            if pending:
-                _done, still_running = await asyncio.wait(pending, timeout=5.0)
-                if still_running:
-                    process_stop_event.set()
-                    logger.error('Coordinator actors exceeded shutdown deadline: %s', [task.get_name() for task in still_running])
-            for task in tasks:
-                if task.done() and not task.cancelled():
-                    task.exception()
-        set_active_runtime_coordinator_generation(None)
-        await asyncio.to_thread(lease.release)
+        # Run endpoint shutdown and the actor/lease barrier in a separate
+        # cancellation-resistant task. No endpoint-stop error or cancellation
+        # may bypass settlement and let main() release a live epoch.
+        try:
+            interrupted_shutdown = await _finish_epoch_shutdown(
+                owner_stop_event,
+                (process_stop_task, owner_stop_task),
+                grpc_server,
+                listener,
+                tasks,
+                lease,
+            )
+        except RuntimeError:
+            process_stop_event.set()
+            raise
         logger.info('Runtime coordinator stopped generation=%s', coordinator_generation)
+        if interrupted_shutdown:
+            raise asyncio.CancelledError
 
 
 async def main() -> None:
+    configure_runtime_critical_database_budget()
     await configure_logging_off_loop()
     if not settings.distributed_runtime_enabled:
         raise RuntimeError('The runtime coordinator requires DISTRIBUTED_RUNTIME_ENABLED=true')
@@ -360,6 +557,7 @@ async def main() -> None:
                 raise
             except Exception:
                 logger.exception('Runtime coordinator owner epoch failed; returning to standby')
+                _fail_stop_if_epoch_active()
             else:
                 retry_seconds = _LEASE_RETRY_SECONDS
             if process_stop_event.is_set():
@@ -371,7 +569,7 @@ async def main() -> None:
             else:
                 return
     finally:
-        await asyncio.to_thread(lease.release)
+        await _release_coordinator_lease(lease)
 
 
 if __name__ == '__main__':

@@ -3,6 +3,7 @@ from __future__ import annotations
 import json
 import subprocess
 import sys
+from pathlib import Path
 from types import SimpleNamespace
 from typing import cast
 
@@ -32,6 +33,10 @@ def _owner_labels(*, host: str = 'test-host', pid: int, process_start: float) ->
 
 
 def test_sessionstart_stale_container_cleanup_runs_only_in_xdist_controller(monkeypatch: pytest.MonkeyPatch) -> None:
+    monkeypatch.setenv('DATAFORGE_TEST_CONTAINER', '1')
+    monkeypatch.setenv('TEST_PROCESS_HOST', '172.30.0.4')
+    monkeypatch.setenv('TEST_DOCKER_SERVICE_HOST', 'docker')
+    monkeypatch.setenv('DOCKER_HOST', 'tcp://docker:2375')
     for key in (
         'POLARS_CORES_AVAILABLE',
         'POLARS_MAX_THREADS',
@@ -54,6 +59,32 @@ def test_sessionstart_stale_container_cleanup_runs_only_in_xdist_controller(monk
     controller_session = cast(pytest.Session, SimpleNamespace(config=SimpleNamespace()))
     base_fixtures.pytest_sessionstart(controller_session)
     assert cleanups == ['postgres', 'rustfs']
+
+
+def test_sessionstart_rejects_non_containerized_backend_tests(monkeypatch: pytest.MonkeyPatch) -> None:
+    monkeypatch.delenv('DATAFORGE_TEST_CONTAINER', raising=False)
+
+    with pytest.raises(RuntimeError, match='containerized test runner'):
+        base_fixtures.pytest_sessionstart(cast(pytest.Session, SimpleNamespace(config=SimpleNamespace())))
+
+
+@pytest.mark.parametrize(
+    ('dind_cpus', 'expected'),
+    [('7.50', '3.000'), ('4.00', '1.600'), ('0.08', '0.032')],
+)
+def test_load_probe_cpu_budget_is_capped_and_derived_from_dind(dind_cpus: str, expected: str) -> None:
+    script = Path(__file__).resolve().parents[3] / 'scripts/e2e/load_probe_cpu_budget.py'
+
+    result = subprocess.run([sys.executable, str(script), dind_cpus], capture_output=True, text=True, check=True)
+
+    assert result.stdout.strip() == expected
+
+
+def test_require_docker_fails_when_container_daemon_is_unavailable(monkeypatch: pytest.MonkeyPatch) -> None:
+    monkeypatch.setattr(postgres_harness, 'docker_available', lambda: False)
+
+    with pytest.raises(pytest.fail.Exception, match='Docker daemon is unavailable inside the mandatory containerized test runner'):
+        postgres_harness.require_docker()
 
 
 def test_cleanup_from_second_session_preserves_live_first_session_resources(monkeypatch: pytest.MonkeyPatch) -> None:
@@ -174,6 +205,7 @@ def test_new_postgres_resources_share_owner_labels_and_context_exit_targets_exac
 
     owner_labels = _docker_labels(owner, container.label)
     assert all(all(f'{key}={value}' in command for key, value in owner_labels.items()) for command in commands[:2])
+    assert '0.0.0.0::5432' in commands[1]
     assert commands[2] == ['docker', 'rm', '-f', 'container-id']
     assert commands[3] == ['docker', 'volume', 'rm', '-f', container.volume_name]
 
@@ -197,6 +229,35 @@ def test_new_rustfs_container_carries_owner_labels(monkeypatch: pytest.MonkeyPat
 
     owner_labels = _docker_labels(owner, container.label)
     assert all(f'{key}={value}' in commands[0] for key, value in owner_labels.items())
+    assert '0.0.0.0::9000' in commands[0]
+
+
+def test_test_service_addresses_follow_runner_and_docker_container_environment(monkeypatch: pytest.MonkeyPatch) -> None:
+    monkeypatch.setenv('TEST_PROCESS_HOST', '172.30.0.4')
+    monkeypatch.setenv('TEST_DOCKER_SERVICE_HOST', 'docker')
+    monkeypatch.setenv('DOCKER_HOST', 'tcp://docker:2375')
+
+    postgres = PostgresContainer(port=54321)
+    rustfs = RustfsContainer(port=9000)
+
+    assert postgres_harness.process_host() == '172.30.0.4'
+    assert postgres_harness.docker_service_host() == 'docker'
+    assert postgres_harness.local_service_bind_address() == '0.0.0.0'
+    assert postgres.url == 'postgresql+psycopg://dataforge:dataforge@docker:54321/dataforge'
+    assert rustfs.endpoint == 'http://docker:9000'
+    assert postgres_harness.docker_env()['DOCKER_HOST'] == 'tcp://docker:2375'
+
+
+@pytest.mark.parametrize(('variable', 'address_reader'), [('TEST_PROCESS_HOST', 'runner'), ('TEST_DOCKER_SERVICE_HOST', 'docker')])
+def test_test_service_addresses_require_container_environment(monkeypatch: pytest.MonkeyPatch, variable: str, address_reader: str) -> None:
+    with monkeypatch.context() as scoped:
+        scoped.delenv(variable, raising=False)
+
+        with pytest.raises(RuntimeError, match=variable):
+            if address_reader == 'runner':
+                postgres_harness.process_host()
+            else:
+                postgres_harness.docker_service_host()
 
 
 def test_integration_network_cleanup_runs_only_in_xdist_controller(monkeypatch: pytest.MonkeyPatch) -> None:

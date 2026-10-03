@@ -1,4 +1,5 @@
 import asyncio
+import logging
 import threading
 import time
 from concurrent.futures import ThreadPoolExecutor
@@ -406,4 +407,12 @@ class TestUvicornSettings:
         assert len(database_calls) == 1
         assert len(stack_calls) == 1
         assert all(snapshot['settings_checkedout'] == 0 for snapshot in snapshots)
-        assert all('anyio_waiting' in snapshot for snapshot in snapshots)
+        assert all('anyio_tokens' in snapshot for snapshot in snapshots)
+        assert all('anyio_borrowed' in snapshot for snapshot in snapshots)
+
+
+def test_event_loop_lag_diagnostic_uses_info_until_warning_threshold() -> None:
+    import main
+
+    assert main._event_loop_lag_log_level(0.9, 1.5) == logging.INFO
+    assert main._event_loop_lag_log_level(1.5, 1.5) == logging.WARNING

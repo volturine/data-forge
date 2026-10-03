@@ -7,14 +7,15 @@ from threading import Event, get_ident
 
 import pytest
 from fastapi import FastAPI
-from sqlalchemy import Connection, Engine, event, text
+from sqlalchemy import Connection, Engine, event, select, text
 from sqlmodel import Session
 
 import modules.chat.routes as routes_module
 from backend_core.database import get_settings_engine
+from backend_core.sqlmodel_typing import col
 from modules.auth.models import User
 from modules.chat.consumer import ChatTurnConsumer
-from modules.chat.models import ChatTurn
+from modules.chat.models import ChatEvent, ChatSession, ChatTurn
 from modules.chat.sessions import ChatSessionBusy, session_store
 from modules.chat.store import ChatTurnStore
 from modules.mcp.models import MCPToolDefinition
@@ -30,6 +31,40 @@ def _create_session(client: TestClient) -> str:
 
 def _enqueue(session_id: str, user_id: str, content: str) -> str:
     return ChatTurnStore().enqueue(session_id=session_id, user_id=user_id, content=content, tool_ids=[], namespace='default', session_token='token')
+
+
+def test_claim_batch_fails_only_turn_with_undecryptable_credentials(test_user: User) -> None:
+    engine = get_settings_engine()
+    assert engine.dialect.name == 'postgresql'
+    poisoned_session = session_store.create('openrouter', 'test', 'poisoned-api-key', user_id=test_user.id)
+    valid_session = session_store.create('openrouter', 'test', 'valid-api-key', user_id=test_user.id)
+    poisoned_turn_id = _enqueue(poisoned_session.id, test_user.id, 'poisoned turn')
+    valid_turn_id = _enqueue(valid_session.id, test_user.id, 'valid turn')
+
+    with Session(engine) as db:
+        session = db.get(ChatSession, poisoned_session.id)
+        assert session is not None
+        session.api_key = 'enc:v1:corrupt'
+        db.add(session)
+        db.commit()
+
+    claims = ChatTurnStore().claim_batch(generation=9, limit=2)
+
+    assert len(claims) == 1
+    assert claims[0].id == valid_turn_id
+    assert claims[0].api_key == 'valid-api-key'
+    with Session(engine) as db:
+        poisoned = db.get(ChatTurn, poisoned_turn_id)
+        assert poisoned is not None
+        assert poisoned.status == 'failed'
+        assert poisoned.claim_token is None
+        assert poisoned.coordinator_generation is None
+        events = db.execute(select(ChatEvent).where(col(ChatEvent.turn_id) == poisoned_turn_id).order_by(col(ChatEvent.sequence))).scalars().all()
+        payloads = [event.payload for event in events]
+    errors = [payload['content'] for payload in payloads if payload.get('type') == 'error']
+    assert errors == ['Chat credentials could not be decrypted; update the session credentials and try again.']
+    assert not any('poisoned-api-key' in message for message in errors)
+    assert any(payload.get('type') == 'done' for payload in payloads)
 
 
 @pytest.mark.parametrize('status', ['queued', 'running', 'awaiting_confirmation'])

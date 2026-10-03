@@ -1,11 +1,11 @@
 """MCP API routes — list tools, call tools, confirm pending actions."""
 
-import asyncio
 from typing import Any
 
 from fastapi import APIRouter, Depends, FastAPI, HTTPException, Request
 from pydantic import BaseModel
 
+from backend_core.api_execution_budget import run_api_blocking
 from backend_core.error_handlers import handle_errors
 from backend_core.namespace import get_namespace
 from modules.auth.dependencies import get_current_user
@@ -104,7 +104,7 @@ async def call(request: Request, body: ToolRequest, user: User = Depends(get_cur
     context = _request_tool_context(request)
 
     if tool.method.is_mutating:
-        token = await asyncio.to_thread(
+        token = await run_api_blocking(
             pending_store.create,
             tool.id,
             tool.method,
@@ -126,7 +126,7 @@ async def call(request: Request, body: ToolRequest, user: User = Depends(get_cur
 @handle_errors('confirm MCP tool')
 async def confirm(request: Request, body: ConfirmRequest, user: User = Depends(get_current_user)) -> dict:
     """Execute a previously previewed mutating tool call by token."""
-    entry = await asyncio.to_thread(pending_store.pop, body.token, owner_id=user.id)
+    entry = await run_api_blocking(pending_store.pop, body.token, owner_id=user.id)
     if entry is None:
         raise HTTPException(status_code=404, detail='Token not found or expired')
 

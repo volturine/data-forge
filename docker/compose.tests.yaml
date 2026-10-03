@@ -1,0 +1,71 @@
+services:
+  workspace-seed:
+    image: dataforge-test-runner:${TEST_IMAGE_TAG:-local}
+    command: ["/bin/true"]
+    volumes:
+      - workspace:/app
+
+  docker:
+    image: docker:29.7.2-dind
+    privileged: true
+    cgroup: private
+    # Keep inner Docker bridges outside the outer Compose network; the runner
+    # checks the dynamically allocated outer subnet before starting a suite.
+    command:
+      - --tls=false
+      - --bip=${INNER_DOCKER_BRIDGE:?}
+      - --default-address-pool=base=${INNER_DOCKER_ADDRESS_POOL:?},size=24
+    depends_on:
+      workspace-seed:
+        condition: service_completed_successfully
+    environment:
+      DOCKER_TLS_CERTDIR: ""
+    healthcheck:
+      test: ["CMD", "docker", "info"]
+      interval: 2s
+      timeout: 5s
+      retries: 60
+      start_period: 2s
+    mem_limit: ${DIND_MEMORY_MB}m
+    cpus: ${DIND_CPUS}
+    volumes:
+      - workspace:/app
+      - docker-data:/var/lib/docker
+
+  runner:
+    image: dataforge-test-runner:${TEST_IMAGE_TAG:-local}
+    depends_on:
+      docker:
+        condition: service_healthy
+    environment:
+      CI: "1"
+      DATAFORGE_TEST_CONTAINER: "1"
+      DATAFORGE_SKIP_PROTOCOL_GENERATE: "1"
+      DOCKER_HOST: tcp://docker:2375
+      DOCKER_BUILDKIT: "1"
+      TEST_DOCKER_SERVICE_HOST: docker
+      INNER_DOCKER_BRIDGE: ${INNER_DOCKER_BRIDGE:?}
+      INNER_DOCKER_ADDRESS_POOL: ${INNER_DOCKER_ADDRESS_POOL:?}
+      TEST_OUTER_NETWORK_SUBNETS: ${TEST_OUTER_NETWORK_SUBNETS:-}
+      TEST_TARGET: ${TEST_TARGET:?TEST_TARGET must be set by scripts/test_container.sh}
+      E2E_LOAD_PROBE_CPUS: ${E2E_LOAD_PROBE_CPUS:-}
+      PW_E2E_WORKERS: ${PW_E2E_WORKERS:-}
+      E2E_SHARDS: ${E2E_SHARDS:-}
+      E2E_API_WORKERS: ${E2E_API_WORKERS:-}
+      E2E_CONCURRENCY_BROWSERS: ${E2E_CONCURRENCY_BROWSERS:-}
+      E2E_SESSION_CONNECTIONS: ${E2E_SESSION_CONNECTIONS:-}
+      E2E_SESSION_REPEATS: ${E2E_SESSION_REPEATS:-}
+      E2E_SESSION_DURATION_SECONDS: ${E2E_SESSION_DURATION_SECONDS:-}
+      E2E_SESSION_ACTIVE_RATIO: ${E2E_SESSION_ACTIVE_RATIO:-0}
+      PLAYWRIGHT_TEST_FILES: ${PLAYWRIGHT_TEST_FILES:-}
+      PLAYWRIGHT_GREP: ${PLAYWRIGHT_GREP:-}
+      PYTEST_ADDOPTS: ${PYTEST_ADDOPTS:-}
+      REPEATS: ${REPEATS:-3}
+    mem_limit: ${RUNNER_MEMORY_MB}m
+    cpus: ${RUNNER_CPUS}
+    volumes:
+      - workspace:/app
+
+volumes:
+  workspace:
+  docker-data:

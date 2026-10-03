@@ -3,18 +3,22 @@ from __future__ import annotations
 import asyncio
 import contextlib
 import json
+import os
+import subprocess
 import threading
 import time
 import uuid
 from collections.abc import Generator
+from concurrent.futures import ThreadPoolExecutor
 from datetime import UTC, datetime, timedelta
 from pathlib import Path
 
 import psycopg
 import pytest
 from alembic import command
+from psycopg.types.json import Jsonb
 from sqlalchemy import text
-from sqlmodel import Session
+from sqlmodel import Session, select
 from websockets.asyncio.client import connect
 
 from backend_core.migrations import _PUBLIC_REVISION, _TENANT_REVISION, _alembic_config
@@ -22,15 +26,16 @@ from dataforge_protocol import compute_pb2, enums_pb2
 from tests.harness.postgres_harness import (
     BACKEND_ROOT,
     CORE_ROOT,
-    LOCAL_SERVICE_HOST,
     SCHEDULER_ROOT,
     WORKER_ROOT,
     ManagedProcess,
     PostgresContainer,
     RustfsContainer,
     docker_env,
+    docker_service_host,
     free_port,
     local_service_bind_address,
+    process_host,
     require_docker,
     run_command,
     wait_for_condition,
@@ -84,11 +89,11 @@ ENGINE_TEST_IMAGE = 'data-forge-polars-engine:integration'
 
 
 def _http_base_url(port: int) -> str:
-    return f'http://{LOCAL_SERVICE_HOST}:{port}'
+    return f'http://{process_host()}:{port}'
 
 
 def _websocket_url(port: int, path: str) -> str:
-    return f'ws://{LOCAL_SERVICE_HOST}:{port}{path}'
+    return f'ws://{process_host()}:{port}{path}'
 
 
 def _make_csv(rows: int) -> str:
@@ -135,13 +140,33 @@ def _runtime_env(
             'INTERNAL_API_TOKEN': INTERNAL_API_TOKEN,
             'INTERNAL_GRPC_HOST': local_service_bind_address(),
             'INTERNAL_GRPC_PORT': str(grpc_port),
-            'INTERNAL_GRPC_TARGET': f'{LOCAL_SERVICE_HOST}:{target_port}',
-            'RUNTIME_COORDINATOR_TARGET': f'{LOCAL_SERVICE_HOST}:{target_port}',
+            'INTERNAL_GRPC_TARGET': f'{process_host()}:{target_port}',
+            'RUNTIME_COORDINATOR_TARGET': f'{process_host()}:{target_port}',
             'WORKER_DATA_PLANE_GRPC_HOST': local_service_bind_address(),
             'WORKER_DATA_PLANE_GRPC_PORT': str(worker_data_plane_port),
-            'WORKER_DATA_PLANE_GRPC_TARGET': f'{LOCAL_SERVICE_HOST}:{worker_data_plane_port}',
+            'WORKER_DATA_PLANE_GRPC_TARGET': f'{process_host()}:{worker_data_plane_port}',
         }
     )
+
+
+def test_runtime_service_addresses_use_runner_and_docker_services(monkeypatch: pytest.MonkeyPatch, tmp_path: Path) -> None:
+    monkeypatch.setenv('TEST_PROCESS_HOST', '172.30.0.4')
+    monkeypatch.setenv('TEST_DOCKER_SERVICE_HOST', 'docker')
+
+    env = _runtime_env(
+        data_dir=tmp_path,
+        database_url='postgresql+psycopg://dataforge:dataforge@docker:54321/dataforge',
+        port=8000,
+        grpc_port=50051,
+        data_plane_port=50052,
+        rustfs=RustfsContainer(port=9000),
+    )
+
+    assert env['HOST'] == '0.0.0.0'
+    assert env['INTERNAL_GRPC_TARGET'] == '172.30.0.4:50051'
+    assert env['RUNTIME_COORDINATOR_TARGET'] == '172.30.0.4:50051'
+    assert env['WORKER_DATA_PLANE_GRPC_TARGET'] == '172.30.0.4:50052'
+    assert env['OBJECT_STORE_ENDPOINT'] == 'http://docker:9000'
 
 
 @pytest.fixture(scope='module')
@@ -153,13 +178,9 @@ def engine_runtime_env(rustfs_container: RustfsContainer) -> Generator[dict[str,
         cwd=CORE_ROOT,
         env=docker_env(),
     )
-    docker_host = run_command(
-        ['docker', 'context', 'inspect', '--format', '{{.Endpoints.docker.Host}}'],
-        cwd=CORE_ROOT.parent.parent,
-        env=docker_env(),
-    ).stdout.strip()
+    docker_host = os.environ.get('DOCKER_HOST')
     if not docker_host:
-        raise RuntimeError('Docker context did not provide a daemon endpoint')
+        raise RuntimeError('DOCKER_HOST must identify the Docker service daemon')
     network_label = 'data-forge.test-engine-network=1'
     network_name = f'dataforge-integration-engine-{uuid.uuid4().hex[:10]}'
     run_command(
@@ -174,7 +195,7 @@ def engine_runtime_env(rustfs_container: RustfsContainer) -> Generator[dict[str,
             'ENGINE_DOCKER_HOST': docker_host,
             'ENGINE_DOCKER_NETWORK': network_name,
             'ENGINE_OBJECT_STORE_ENDPOINT': f'http://{rustfs_container.name}:9000',
-            'ENGINE_CONNECT_HOST': LOCAL_SERVICE_HOST,
+            'ENGINE_CONNECT_HOST': docker_service_host(),
         }
     finally:
         run_command(['docker', 'network', 'disconnect', '--force', network_name, rustfs_container.name], env=docker_env(), check=False, timeout=120)
@@ -248,6 +269,76 @@ def _coordinator_generation(container: PostgresContainer) -> int:
     with container.connect() as connection:
         value = _query_value(connection, 'SELECT generation FROM public.runtime_coordinator_state WHERE singleton_id = 1')
     return int(value) if value is not None else 0
+
+
+def _blocked_compute_terminal_publications(container: PostgresContainer, blocker_pid: int) -> list[tuple[int, str]]:
+    with container.connect() as connection:
+        rows = connection.execute(
+            """
+            WITH RECURSIVE blocking_chain(waiter_pid, blocker_pid, depth) AS (
+                SELECT activity.pid, blocker.pid, 1
+                FROM pg_stat_activity AS activity
+                CROSS JOIN LATERAL unnest(pg_blocking_pids(activity.pid)) AS blocker(pid)
+                WHERE activity.datname = current_database()
+                UNION ALL
+                SELECT blocking_chain.waiter_pid, blocker.pid, blocking_chain.depth + 1
+                FROM blocking_chain
+                CROSS JOIN LATERAL unnest(pg_blocking_pids(blocking_chain.blocker_pid)) AS blocker(pid)
+                WHERE blocking_chain.depth < 8
+            )
+            SELECT activity.pid, activity.query
+            FROM pg_stat_activity AS activity
+            WHERE activity.wait_event_type = 'Lock'
+              AND activity.query ILIKE 'SELECT%%compute_requests%%FOR UPDATE%%'
+              AND EXISTS (
+                  SELECT 1 FROM blocking_chain
+                  WHERE blocking_chain.waiter_pid = activity.pid AND blocking_chain.blocker_pid = %s
+              )
+            """,
+            (blocker_pid,),
+        ).fetchall()
+    return [(int(pid), str(query)) for pid, query in rows]
+
+
+def _runtime_coordinator_lock_activity(container: PostgresContainer) -> list[tuple[object, ...]]:
+    with container.connect() as connection:
+        rows = connection.execute(
+            """
+            SELECT pid, application_name, client_addr, state, wait_event_type, wait_event,
+                   client_port, xact_start, pg_blocking_pids(pid), query
+            FROM pg_stat_activity
+            WHERE datname = current_database()
+              AND (query ILIKE '%runtime_coordinator_state%' OR wait_event_type = 'Lock')
+            ORDER BY backend_start
+            """
+        ).fetchall()
+    return [tuple(row) for row in rows]
+
+
+def _runtime_coordinator_processes() -> list[str]:
+    result = subprocess.run(['ps', '-eo', 'pid=,ppid=,pgid=,sid=,stat=,args='], capture_output=True, check=True, text=True)
+    return [line.strip() for line in result.stdout.splitlines() if '/runtime_coordinator.py' in line]
+
+
+def _coordinator_database_sessions(container: PostgresContainer, application_name: str) -> list[int]:
+    with container.connect() as connection:
+        sessions = connection.execute(
+            'SELECT pid FROM pg_stat_activity WHERE datname = current_database() AND application_name = %s AND pid <> pg_backend_pid()',
+            (application_name,),
+        ).fetchall()
+    return [int(row[0]) for row in sessions]
+
+
+def _terminate_coordinator_database_sessions(container: PostgresContainer, application_name: str) -> list[int]:
+    with container.connect() as connection:
+        sessions = connection.execute(
+            'SELECT pid FROM pg_stat_activity WHERE datname = current_database() AND application_name = %s AND pid <> pg_backend_pid()',
+            (application_name,),
+        ).fetchall()
+        pids = [int(row[0]) for row in sessions]
+        for pid in pids:
+            connection.execute('SELECT pg_terminate_backend(%s)', (pid,))
+    return pids
 
 
 def _runtime_coordinator(
@@ -458,13 +549,17 @@ def test_init_db_bootstraps_public_and_tenant_schemas_in_postgres(monkeypatch, t
             assert _table_exists(connection, 'public', 'runtime_coordinator_state')
             assert _query_value(connection, 'SELECT generation FROM public.runtime_coordinator_state WHERE singleton_id = 1') == 0
             assert _table_exists(connection, 'default', 'build_runs')
+            assert _table_exists(connection, 'default', 'build_run_datasources')
             assert _table_exists(connection, 'default', 'build_jobs')
             assert _table_exists(connection, 'default', 'runtime_outbox_events')
             assert _table_exists(connection, 'default', 'notification_delivery_receipts')
+            assert _table_exists(connection, 'default', 'notification_delivery_part_receipts')
             assert _table_exists(connection, 'alpha', 'build_runs')
+            assert _table_exists(connection, 'alpha', 'build_run_datasources')
             assert _table_exists(connection, 'alpha', 'build_jobs')
             assert _table_exists(connection, 'alpha', 'runtime_outbox_events')
             assert _table_exists(connection, 'alpha', 'notification_delivery_receipts')
+            assert _table_exists(connection, 'alpha', 'notification_delivery_part_receipts')
             assert _query_value(connection, 'SELECT count(*) FROM public.app_settings') == 1
             assert _query_value(connection, 'SELECT version_num FROM public.alembic_version') == _PUBLIC_REVISION
             assert _query_value(connection, 'SELECT version_num FROM "default".alembic_version') == _TENANT_REVISION
@@ -514,6 +609,160 @@ def test_init_db_bootstraps_public_and_tenant_schemas_in_postgres(monkeypatch, t
         _clear_database_state()
 
 
+@pytest.mark.timeout(300)
+def test_build_datasource_migration_backfills_nonterminal_pipeline_dependencies(monkeypatch) -> None:
+    require_docker()
+
+    from backend_core.config import settings
+
+    with PostgresContainer() as container:
+        monkeypatch.setattr(settings, 'database_url', container.url, raising=False)
+        schema = f'build_deps_{uuid.uuid4().hex[:12]}'
+        config = _alembic_config(scope='tenant', schema=schema)
+        command.upgrade(config, '0018_runtime_work_generations', tag='tenant')
+        build_id = str(uuid.uuid4())
+        now = datetime.now(UTC)
+        request_json = {
+            'analysis_pipeline': {
+                'analysis_id': 'migration-analysis',
+                'tabs': [
+                    {
+                        'id': 'tab-main',
+                        'datasource': {'id': 'source-main', 'analysis_tab_id': None, 'source_type': 'file'},
+                        'output': {'result_id': 'local-output'},
+                        'steps': [
+                            {'type': 'join', 'config': {'right_source': 'source-right'}},
+                            {'type': 'union_by_name', 'config': {'sources': ['source-third', 'local-output', 'tab-derived']}},
+                        ],
+                    },
+                    {
+                        'id': 'tab-derived',
+                        'datasource': {'id': 'local-output', 'analysis_tab_id': 'tab-main', 'source_type': 'analysis'},
+                        'output': {'result_id': 'local-derived-output'},
+                        'steps': [],
+                    },
+                ],
+            },
+            'tab_id': 'tab-main',
+        }
+        try:
+            with container.connect() as connection:
+                connection.execute(f'SET search_path TO "{schema}", public')
+                connection.execute(
+                    'INSERT INTO build_runs '
+                    '(id, namespace, analysis_id, analysis_name, status, request_json, starter_json, '
+                    'progress, elapsed_ms, total_steps, total_tabs, created_at, started_at, updated_at, '
+                    'version, execution_generation, next_event_sequence) '
+                    'VALUES (%s, %s, %s, %s, %s, %s, %s, 0, 0, 0, 1, %s, %s, %s, 1, 0, 1)',
+                    (
+                        build_id,
+                        'legacy',
+                        'migration-analysis',
+                        'Migration analysis',
+                        'queued',
+                        Jsonb(request_json),
+                        Jsonb({}),
+                        now,
+                        now,
+                        now,
+                    ),
+                )
+
+            command.upgrade(config, '0019_build_run_datasources', tag='tenant')
+            with container.connect() as connection:
+                dependencies = connection.execute(
+                    f'SELECT namespace, datasource_id FROM "{schema}".build_run_datasources WHERE build_id = %s ORDER BY datasource_id',
+                    (build_id,),
+                ).fetchall()
+                revision_row = connection.execute(f'SELECT version_num FROM "{schema}".alembic_version').fetchone()
+                assert revision_row is not None
+                revision = revision_row[0]
+            assert dependencies == [('legacy', 'source-main'), ('legacy', 'source-right'), ('legacy', 'source-third')]
+            assert revision == '0019_build_run_datasources'
+        finally:
+            with container.connect() as connection:
+                connection.execute(f'DROP SCHEMA IF EXISTS "{schema}" CASCADE')
+
+
+@pytest.mark.timeout(180)
+def test_storage_cleanup_catalog_migration_backfills_indexes_and_downgrades(monkeypatch) -> None:
+    require_docker()
+
+    from backend_core.config import settings
+
+    with PostgresContainer() as container:
+        monkeypatch.setattr(settings, 'database_url', container.url, raising=False)
+        schema = f'cleanup_catalog_{uuid.uuid4().hex[:12]}'
+        config = _alembic_config(scope='tenant', schema=schema)
+        command.upgrade(config, '0019_build_run_datasources', tag='tenant')
+        now = datetime.now(UTC)
+        event_id = str(uuid.uuid4())
+        payload = {
+            'resource_id': 'source-rid',
+            'owner_kind': 'datasource',
+            'owner_id': 'source-rid',
+            'url': 's3://default/exports/source-rid',
+            'is_prefix': True,
+            'catalog_namespace': 'outputs',
+            'catalog_table': 'source-rid_main_rev1',
+            'catalog_family_prefix': 'source-rid_',
+            'phase': 'tracked',
+        }
+        try:
+            with container.connect() as connection:
+                connection.execute(
+                    f'INSERT INTO "{schema}".runtime_outbox_events '
+                    '(id, kind, status, payload_json, attempts, lease_generation, available_at, created_at, updated_at) '
+                    'VALUES (%s, %s, %s, %s, 0, 0, %s, %s, %s)',
+                    (event_id, 'storage_cleanup', 'pending', Jsonb(payload), now, now, now),
+                )
+
+            command.upgrade(config, '0021_cleanup_catalog_idx', tag='tenant')
+            with container.connect() as connection:
+                identity = connection.execute(
+                    f'SELECT catalog_namespace, catalog_table, catalog_family_prefix FROM "{schema}".runtime_outbox_events WHERE id = %s',
+                    (event_id,),
+                ).fetchone()
+                indexes = {
+                    row[0]
+                    for row in connection.execute(
+                        'SELECT indexname FROM pg_indexes WHERE schemaname = %s',
+                        (schema,),
+                    ).fetchall()
+                }
+                version_row = connection.execute(f'SELECT version_num FROM "{schema}".alembic_version').fetchone()
+
+            assert version_row is not None
+            assert identity == ('outputs', 'source-rid_main_rev1', 'source-rid_')
+            assert {'ix_runtime_outbox_catalog_table', 'ix_runtime_outbox_catalog_family'} <= indexes
+            assert version_row[0] == '0021_cleanup_catalog_idx'
+
+            command.upgrade(config, '0022_telegram_part_receipts', tag='tenant')
+            with container.connect() as connection:
+                has_part_receipts = _table_exists(connection, schema, 'notification_delivery_part_receipts')
+                version_row = connection.execute(f'SELECT version_num FROM "{schema}".alembic_version').fetchone()
+            assert has_part_receipts
+            assert version_row is not None
+            assert version_row[0] == '0022_telegram_part_receipts'
+
+            command.downgrade(config, '0019_build_run_datasources', tag='tenant')
+            with container.connect() as connection:
+                columns = {
+                    row[0]
+                    for row in connection.execute(
+                        'SELECT column_name FROM information_schema.columns WHERE table_schema = %s AND table_name = %s',
+                        (schema, 'runtime_outbox_events'),
+                    ).fetchall()
+                }
+                version_row = connection.execute(f'SELECT version_num FROM "{schema}".alembic_version').fetchone()
+            assert version_row is not None
+            assert not {'catalog_namespace', 'catalog_table', 'catalog_family_prefix'} & columns
+            assert version_row[0] == '0019_build_run_datasources'
+        finally:
+            with container.connect() as connection:
+                connection.execute(f'DROP SCHEMA IF EXISTS "{schema}" CASCADE')
+
+
 @pytest.mark.timeout(120)
 def test_runtime_database_transactions_reject_a_stale_coordinator_generation(monkeypatch, tmp_path: Path) -> None:
     require_docker()
@@ -526,6 +775,14 @@ def test_runtime_database_transactions_reject_a_stale_coordinator_generation(mon
 
     with PostgresContainer() as container:
         _clear_database_state()
+        data_dir = tmp_path / 'data'
+        data_dir.mkdir(parents=True, exist_ok=True)
+        monkeypatch.setattr(settings, 'database_url', container.url, raising=False)
+        monkeypatch.setattr(settings, 'data_dir', data_dir, raising=False)
+        monkeypatch.setattr(settings, 'distributed_runtime_enabled', True, raising=False)
+        database.set_settings_engine_override(database._create_public_engine())
+        asyncio.run(database.init_db())
+
         data_dir = tmp_path / 'data'
         data_dir.mkdir(parents=True, exist_ok=True)
         monkeypatch.setattr(settings, 'database_url', container.url, raising=False)
@@ -627,6 +884,137 @@ def test_runtime_work_migration_backfills_existing_tenant_work(monkeypatch, tmp_
 
 
 @pytest.mark.timeout(300)
+def test_terminal_scheduled_build_reconciles_after_event_commit_without_holding_build_lock(monkeypatch, tmp_path: Path) -> None:
+    require_docker()
+
+    from backend_core import build_jobs_service, build_runs_service, database, runtime_work_service
+    from backend_core.build_commands import BuildClaimCommand, fail_build_job
+    from backend_core.config import settings
+    from backend_core.domain.build_runs.models import BuildRunStatus
+    from backend_core.domain.compute.schemas import BuildFailedEvent
+    from backend_core.persistence.scheduler.models import Schedule
+    from modules.scheduler.service import reconcile_pending_schedule_runs
+
+    with PostgresContainer() as container:
+        _clear_database_state()
+        data_dir = tmp_path / 'data'
+        data_dir.mkdir(parents=True, exist_ok=True)
+        monkeypatch.setattr(settings, 'database_url', container.url, raising=False)
+        monkeypatch.setattr(settings, 'data_dir', data_dir, raising=False)
+        monkeypatch.setattr(settings, 'distributed_runtime_enabled', True, raising=False)
+        database.set_settings_engine_override(database._create_public_engine())
+        asyncio.run(database.init_db())
+
+        now = datetime.now(UTC)
+        schedule_id = 'schedule-terminal-race'
+        build_id = 'build-terminal-race'
+        worker_id = 'build-worker-terminal-race'
+        with Session(database._get_tenant_engine()) as session:
+            session.add(
+                Schedule(
+                    id=schedule_id,
+                    datasource_id='source-datasource',
+                    cron_expression='* * * * *',
+                    enabled=True,
+                    lease_owner='scheduler:test',
+                    claim_token='schedule-claim-terminal-race',
+                    lease_generation=1,
+                    lease_expires_at=now + timedelta(minutes=5),
+                    last_triggered_at=now,
+                    created_at=now,
+                )
+            )
+            build_runs_service.stage_build_run(
+                session,
+                build_id=build_id,
+                namespace='default',
+                schedule_id=schedule_id,
+                analysis_id='analysis-terminal-race',
+                analysis_name='Analysis',
+                request_json={'analysis_pipeline': {'analysis_id': 'analysis-terminal-race', 'tabs': []}, 'tab_id': None},
+                starter_json={'triggered_by': f'schedule:{schedule_id}'},
+                status=BuildRunStatus.RUNNING,
+                execution_generation=1,
+                created_at=now,
+                started_at=now,
+            )
+            session.commit()
+            build_jobs_service.stage_job(session, build_id=build_id, namespace='default')
+            session.commit()
+            claimed = build_jobs_service.claim_next_job(session, worker_id=worker_id)
+            assert claimed is not None
+            claim = BuildClaimCommand(
+                job_id=claimed.id,
+                build_id=build_id,
+                worker_id=worker_id,
+                claim_token=claimed.claim_token or '',
+                lease_generation=claimed.lease_generation,
+            )
+
+        schedule_lock = Session(database._get_tenant_engine())
+        schedule_lock.execute(text('SELECT id FROM schedules WHERE id = :id FOR UPDATE'), {'id': schedule_id})
+        failure_done = threading.Event()
+        failure_results: list[object] = []
+        failure_errors: list[BaseException] = []
+
+        def fail_in_independent_session() -> None:
+            try:
+                with Session(database._get_tenant_engine()) as session:
+                    session.execute(text("SET LOCAL lock_timeout = '3s'"))
+                    failure_results.append(fail_build_job(session, claim, error='integration failure'))
+            except BaseException as exc:
+                failure_errors.append(exc)
+            finally:
+                failure_done.set()
+
+        failure_thread = threading.Thread(target=fail_in_independent_session, name='terminal-build-failure')
+        failure_thread.start()
+        try:
+            assert failure_done.wait(timeout=5), 'terminal transition waited on schedule reconciliation while holding BuildRun'
+            failure_thread.join(timeout=1)
+            assert not failure_errors, failure_errors
+            assert failure_results and failure_results[0] is not None
+
+            # The schedule row remains locked to simulate slow reconciliation.
+            # A subsequent event for this terminal build must still commit.
+            with Session(database._get_tenant_engine()) as session:
+                appended = build_runs_service.append_build_event(
+                    session,
+                    build_id=build_id,
+                    event=BuildFailedEvent(
+                        build_id=build_id,
+                        analysis_id='analysis-terminal-race',
+                        emitted_at=datetime.now(UTC),
+                        progress=0,
+                        elapsed_ms=0,
+                        total_steps=0,
+                        tabs_built=0,
+                        results=[],
+                        duration_ms=0,
+                        error='integration failure replay',
+                    ),
+                )
+                assert appended is not None
+            with Session(database._get_tenant_engine()) as session:
+                assert runtime_work_service.list_due_schedule_namespaces(session)
+        finally:
+            schedule_lock.rollback()
+            schedule_lock.close()
+            failure_thread.join(timeout=5)
+
+        with Session(database._get_tenant_engine()) as session:
+            assert reconcile_pending_schedule_runs(session, namespace='default') == 1
+            schedule = session.get(Schedule, schedule_id)
+            assert schedule is not None
+            assert schedule.lease_owner is None
+            assert schedule.claim_token is None
+            assert schedule.last_failure_at is not None
+            assert reconcile_pending_schedule_runs(session, namespace='default') == 0
+
+        _clear_database_state()
+
+
+@pytest.mark.timeout(300)
 def test_schedule_work_generation_preserves_wakeup_during_scan(monkeypatch, tmp_path: Path) -> None:
     require_docker()
 
@@ -647,23 +1035,222 @@ def test_schedule_work_generation_preserves_wakeup_during_scan(monkeypatch, tmp_
         with Session(database._get_tenant_engine()) as session:
             runtime_work_service.mark_schedule_pending(session, namespace='default')
             session.commit()
-            assert runtime_work_service.list_due_schedule_namespaces(session) == [('default', 1)]
+            first = runtime_work_service.list_due_schedule_namespaces(session)
+            assert len(first) == 1
+            namespace, generation, first_wake_ids = first[0]
+            assert namespace == 'default' and first_wake_ids
+
+            # A producer commits after this pass captured its exact wake IDs.
+            runtime_work_service.mark_schedule_pending(session, namespace='default')
+            session.commit()
+            runtime_work_service.finish_schedule_scan(
+                session,
+                namespace='default',
+                generation=generation,
+                due_at=due_at,
+                wake_ids=first_wake_ids,
+            )
+            session.commit()
+
+            second = runtime_work_service.list_due_schedule_namespaces(session)
+            assert len(second) == 1
+            namespace, generation, second_wake_ids = second[0]
+            assert namespace == 'default' and second_wake_ids
+            assert set(first_wake_ids).isdisjoint(second_wake_ids)
+
+            runtime_work_service.finish_schedule_scan(
+                session,
+                namespace='default',
+                generation=generation,
+                due_at=due_at,
+                wake_ids=second_wake_ids,
+            )
+            session.commit()
+            assert runtime_work_service.list_due_schedule_namespaces(session) == []
+
+            runtime_work_service.finish_schedule_scan(
+                session,
+                namespace='default',
+                generation=generation + 1,
+                due_at=datetime.now(UTC) - timedelta(seconds=1),
+            )
+            session.commit()
+            due = runtime_work_service.list_due_schedule_namespaces(session)
+            assert len(due) == 1 and due[0][0] == 'default' and due[0][2] == []
+
+        _clear_database_state()
+
+
+@pytest.mark.timeout(300)
+def test_runtime_wake_migration_recreates_journal_and_preserves_markers(monkeypatch, tmp_path: Path) -> None:
+    require_docker()
+
+    from backend_core.config import settings
+
+    with PostgresContainer() as container:
+        data_dir = tmp_path / 'data'
+        data_dir.mkdir(parents=True, exist_ok=True)
+        monkeypatch.setattr(settings, 'database_url', container.url, raising=False)
+        monkeypatch.setattr(settings, 'data_dir', data_dir, raising=False)
+        config = _alembic_config(scope='public', schema='public')
+        command.upgrade(config, '0018_runtime_work_generations')
+
+        marker_due_at = datetime.now(UTC) + timedelta(minutes=10)
+        with container.connect() as connection:
+            connection.execute(
+                """
+                INSERT INTO public.runtime_namespace_work
+                    (namespace, kind, pending, generation, processed_generation, due_at, updated_at)
+                VALUES ('alpha', 'compute', TRUE, 17, 12, %s, statement_timestamp())
+                """,
+                (marker_due_at,),
+            )
+            connection.commit()
+            assert not _table_exists(connection, 'public', 'runtime_namespace_work_wakes')
+
+        command.upgrade(config, _PUBLIC_REVISION)
+        with container.connect() as connection:
+            assert _table_exists(connection, 'public', 'runtime_namespace_work_wakes')
+            marker = connection.execute(
+                """
+                SELECT pending, generation, processed_generation, due_at
+                FROM public.runtime_namespace_work
+                WHERE namespace = 'alpha' AND kind = 'compute'
+                """
+            ).fetchone()
+            assert marker == (True, 17, 12, marker_due_at)
+            index_names = {
+                row[0]
+                for row in connection.execute(
+                    """
+                    SELECT indexname FROM pg_indexes
+                    WHERE schemaname = 'public' AND tablename = 'runtime_namespace_work_wakes'
+                    """
+                ).fetchall()
+            }
+            assert {
+                'ix_runtime_namespace_work_wakes_kind_namespace_id',
+                'ix_runtime_namespace_work_wakes_namespace_kind_id',
+            } <= index_names
+
+
+@pytest.mark.timeout(300)
+def test_runtime_wake_appends_do_not_wait_for_marker_lock(monkeypatch, tmp_path: Path) -> None:
+    require_docker()
+
+    from backend_core import database, runtime_work_service
+    from backend_core.config import settings
+
+    with PostgresContainer() as container:
+        _clear_database_state()
+        data_dir = tmp_path / 'data'
+        data_dir.mkdir(parents=True, exist_ok=True)
+        monkeypatch.setattr(settings, 'database_url', container.url, raising=False)
+        monkeypatch.setattr(settings, 'data_dir', data_dir, raising=False)
+        monkeypatch.setattr(settings, 'distributed_runtime_enabled', True, raising=False)
+        database.set_settings_engine_override(database._create_public_engine())
+        asyncio.run(database.init_db())
+
+        from backend_core.persistence.runtime_events.models import RuntimeNamespaceWork
+
+        engine = database._get_tenant_engine()
+        with Session(engine) as setup:
+            setup.add(
+                RuntimeNamespaceWork(
+                    namespace='default',
+                    kind=runtime_work_service.RuntimeWorkKind.OUTBOX.value,
+                    pending=False,
+                    generation=0,
+                    processed_generation=0,
+                    due_at=None,
+                    updated_at=datetime.now(UTC),
+                )
+            )
+            setup.commit()
+
+        append_durations_ms: list[float] = []
+        append_errors: list[BaseException] = []
+        appends_finished = threading.Event()
+
+        def produce_wakes(producer_number: int) -> None:
+            try:
+                with Session(engine) as producer:
+                    for _ in range(25):
+                        started = time.perf_counter()
+                        runtime_work_service.append_wake(
+                            producer,
+                            namespace='default',
+                            kind=runtime_work_service.RuntimeWorkKind.OUTBOX,
+                        )
+                        append_durations_ms.append((time.perf_counter() - started) * 1000)
+                    producer.commit()
+            except BaseException as exc:
+                append_errors.append(exc)
+            finally:
+                if producer_number == 3:
+                    appends_finished.set()
+
+        with Session(engine) as marker_lock:
+            marker_lock.execute(text("SELECT namespace FROM public.runtime_namespace_work WHERE namespace = 'default' AND kind = 'outbox' FOR UPDATE")).one()
+            producers = [threading.Thread(target=produce_wakes, args=(index,)) for index in range(4)]
+            for producer_thread in producers:
+                producer_thread.start()
+            completed_while_locked = appends_finished.wait(timeout=3)
+            for producer_thread in producers:
+                producer_thread.join(timeout=1)
+            assert completed_while_locked, 'append-only producers waited behind the held namespace marker lock'
+            assert not append_errors
+            assert len(append_durations_ms) == 100
+            measured_max_ms = max(append_durations_ms)
+            print(f'100 concurrent outbox wake appends under held marker lock: max={measured_max_ms:.2f}ms')
+            assert measured_max_ms < 1000, f'wake append unexpectedly stalled under marker lock: {measured_max_ms:.1f}ms'
+
+        with Session(engine) as session:
+            runtime_work_service.append_wake(session, namespace='alpha', kind=runtime_work_service.RuntimeWorkKind.BUILD)
+            session.commit()
+            assert runtime_work_service.list_pending_namespaces(session, kinds=[runtime_work_service.RuntimeWorkKind.OUTBOX]) == ['default']
+            assert runtime_work_service.list_pending_namespaces(session, kinds=[runtime_work_service.RuntimeWorkKind.BUILD]) == ['alpha']
+            assert (
+                session.execute(text("SELECT count(*) FROM public.runtime_namespace_work_wakes WHERE namespace = 'default' AND kind = 'outbox'")).scalar_one()
+                == 100
+            )
+
+        _clear_database_state()
+        data_dir = tmp_path / 'data'
+        data_dir.mkdir(parents=True, exist_ok=True)
+        monkeypatch.setattr(settings, 'database_url', container.url, raising=False)
+        monkeypatch.setattr(settings, 'data_dir', data_dir, raising=False)
+        monkeypatch.setattr(settings, 'distributed_runtime_enabled', True, raising=False)
+        database.set_settings_engine_override(database._create_public_engine())
+        asyncio.run(database.init_db())
+
+        due_at = datetime.now(UTC) + timedelta(hours=1)
+        with Session(database._get_tenant_engine()) as session:
+            runtime_work_service.mark_schedule_pending(session, namespace='default')
+            session.commit()
+            due = runtime_work_service.list_due_schedule_namespaces(session)
+            assert len(due) == 1 and due[0][0] == 'default' and due[0][1] == 0
+            first_wake_id = due[0][2][0]
 
             runtime_work_service.mark_schedule_pending(session, namespace='default')
             runtime_work_service.finish_schedule_scan(
                 session,
                 namespace='default',
-                generation=1,
+                generation=0,
                 due_at=due_at,
+                wake_ids=[first_wake_id],
             )
             session.commit()
-            assert runtime_work_service.list_due_schedule_namespaces(session) == [('default', 2)]
+            due = runtime_work_service.list_due_schedule_namespaces(session)
+            assert len(due) == 1 and due[0][0] == 'default' and due[0][1] == 1
+            second_wake_id = due[0][2][0]
 
             runtime_work_service.finish_schedule_scan(
                 session,
                 namespace='default',
-                generation=2,
+                generation=1,
                 due_at=due_at,
+                wake_ids=[second_wake_id],
             )
             session.commit()
             assert runtime_work_service.list_due_schedule_namespaces(session) == []
@@ -675,7 +1262,45 @@ def test_schedule_work_generation_preserves_wakeup_during_scan(monkeypatch, tmp_
                 due_at=datetime.now(UTC) - timedelta(seconds=1),
             )
             session.commit()
-            assert runtime_work_service.list_due_schedule_namespaces(session) == [('default', 2)]
+            due = runtime_work_service.list_due_schedule_namespaces(session)
+            assert len(due) == 1 and due[0][0] == 'default' and due[0][1] == 3 and due[0][2] == []
+
+        # Sequence allocation is not commit order: the lower ID remains
+        # discoverable when a consumer acknowledges only the captured higher ID.
+        low_id_producer = Session(database._get_tenant_engine())
+        low_id = runtime_work_service.append_wake(
+            low_id_producer,
+            namespace='alpha',
+            kind=runtime_work_service.RuntimeWorkKind.SCHEDULE,
+        )
+        assert low_id is not None
+        with Session(database._get_tenant_engine()) as high_id_producer:
+            high_id = runtime_work_service.append_wake(
+                high_id_producer,
+                namespace='alpha',
+                kind=runtime_work_service.RuntimeWorkKind.SCHEDULE,
+            )
+            assert high_id is not None
+            high_id_producer.commit()
+        with Session(database._get_tenant_engine()) as consumer:
+            captured = runtime_work_service.list_due_schedule_namespaces(consumer)
+            alpha = next(item for item in captured if item[0] == 'alpha')
+            assert alpha[2] == [high_id] and high_id > low_id
+            captured_high_id = alpha[2]
+        low_id_producer.commit()
+        low_id_producer.close()
+        with Session(database._get_tenant_engine()) as consumer:
+            runtime_work_service.finish_schedule_scan(
+                consumer,
+                namespace='alpha',
+                generation=0,
+                due_at=due_at,
+                wake_ids=captured_high_id,
+            )
+            consumer.commit()
+            remaining = runtime_work_service.list_due_schedule_namespaces(consumer)
+            alpha = next(item for item in remaining if item[0] == 'alpha')
+            assert alpha[2] == [low_id]
 
         _clear_database_state()
 
@@ -726,7 +1351,7 @@ def test_runtime_work_recovers_expired_leases_and_preserves_concurrent_enqueue(m
             assert compute_requests_service.claim_next_request(session, worker_id='runtime') is None
             assert runtime_work_service.list_pending_namespaces(session) == ['default']
 
-            assert compute_requests_service.reconcile_expired_requests(session) == 0
+            assert compute_requests_service.reconcile_expired_requests(session, namespace='default') == 0
             marker = session.execute(text("SELECT pending, due_at FROM public.runtime_namespace_work WHERE namespace = 'default' AND kind = 'compute'")).one()
             assert marker.pending is False
             assert marker.due_at is not None and marker.due_at > datetime.now(UTC)
@@ -744,7 +1369,7 @@ def test_runtime_work_recovers_expired_leases_and_preserves_concurrent_enqueue(m
             session.commit()
             assert runtime_work_service.list_pending_namespaces(session) == ['default']
 
-            assert compute_requests_service.reconcile_expired_requests(session) == 1
+            assert compute_requests_service.reconcile_expired_requests(session, namespace='default') == 1
             assert compute_requests_service.claim_next_request(session, worker_id='runtime') is None
             assert runtime_work_service.list_pending_namespaces(session) == []
 
@@ -829,6 +1454,7 @@ def test_runtime_work_recovers_expired_leases_and_preserves_concurrent_enqueue(m
             assert request_to_delete is not None
             session.delete(request_to_delete)
             session.commit()
+            session.execute(text("DELETE FROM public.runtime_namespace_work_wakes WHERE namespace = 'default' AND kind = 'compute'"))
             session.execute(text("UPDATE public.runtime_namespace_work SET pending = FALSE, due_at = NULL WHERE namespace = 'default' AND kind = 'compute'"))
             session.commit()
 
@@ -856,6 +1482,10 @@ def test_runtime_work_recovers_expired_leases_and_preserves_concurrent_enqueue(m
                 refresh_finished.set()
 
         refresh_thread = threading.Thread(target=refresh_during_enqueue)
+        with Session(database._get_tenant_engine()) as session:
+            generation_before_race = int(
+                session.execute(text("SELECT generation FROM public.runtime_namespace_work WHERE namespace = 'default' AND kind = 'compute'")).scalar_one()
+            )
         refresh_thread.start()
         scanning = False
         deadline = time.monotonic() + 5
@@ -917,14 +1547,178 @@ def test_runtime_work_recovers_expired_leases_and_preserves_concurrent_enqueue(m
         assert not refresh_thread.is_alive()
         assert not refresh_errors
         with Session(database._get_tenant_engine()) as session:
-            marker = session.execute(text("SELECT pending FROM public.runtime_namespace_work WHERE namespace = 'default' AND kind = 'compute'")).one()
-            assert marker.pending is False, 'the older queue snapshot incorrectly changed the durable queue state'
-            assert (
-                session.execute(text("SELECT 1 FROM public.runtime_namespace_work_wakes WHERE namespace = 'default' AND kind = 'compute' LIMIT 1")).first()
-                is not None
-            ), 'a wake committed after capture was deleted by the older queue scan'
+            marker = session.execute(
+                text("SELECT pending, generation FROM public.runtime_namespace_work WHERE namespace = 'default' AND kind = 'compute'")
+            ).one()
+            assert marker.pending is False, 'the older snapshot should not claim unseen work as part of its projection'
+            assert marker.generation > generation_before_race
             assert runtime_work_service.list_pending_namespaces(session) == ['default']
+            assert (
+                session.execute(text("SELECT count(*) FROM public.runtime_namespace_work_wakes WHERE namespace = 'default' AND kind = 'compute'")).scalar_one()
+                == 1
+            ), 'wake committed after capture was acknowledged by the older refresh'
             assert session.get(ComputeRequest, 'enqueue-during-refresh') is not None
+
+        _clear_database_state()
+
+
+@pytest.mark.timeout(300)
+def test_refresh_missing_runtime_work_marker_does_not_block_producer(monkeypatch, tmp_path: Path) -> None:
+    require_docker()
+
+    from backend_core import database, runtime_work_service
+    from backend_core.config import settings
+    from backend_core.persistence.compute_requests.models import ComputeRequest
+
+    with PostgresContainer() as container:
+        _clear_database_state()
+        data_dir = tmp_path / 'data'
+        data_dir.mkdir(parents=True, exist_ok=True)
+        monkeypatch.setattr(settings, 'database_url', container.url, raising=False)
+        monkeypatch.setattr(settings, 'data_dir', data_dir, raising=False)
+        monkeypatch.setattr(settings, 'distributed_runtime_enabled', True, raising=False)
+        database.set_settings_engine_override(database._create_public_engine())
+        asyncio.run(database.init_db())
+
+        kind = runtime_work_service.RuntimeWorkKind.COMPUTE
+        gate_key = int.from_bytes(uuid.uuid4().bytes[:8], 'big', signed=True)
+        pending_query = f"""
+            WITH gate AS MATERIALIZED (
+                SELECT pg_advisory_xact_lock_shared({gate_key})
+            )
+            SELECT 1 FROM gate WHERE random() < 0
+        """
+        refresh_pid: list[int] = []
+        refresh_started = threading.Event()
+        refresh_finished = threading.Event()
+        refresh_errors: list[BaseException] = []
+        producer_finished = threading.Event()
+        producer_errors: list[BaseException] = []
+        now = datetime.now(UTC)
+
+        def refresh_missing_marker() -> None:
+            try:
+                with Session(database._get_tenant_engine()) as session:
+                    refresh_pid.append(int(session.execute(text('SELECT pg_backend_pid()')).scalar_one()))
+                    refresh_started.set()
+                    runtime_work_service.refresh_pending_work(
+                        session,
+                        namespace='default',
+                        kind=kind,
+                        pending_query=pending_query,
+                    )
+                    session.commit()
+            except BaseException as exc:
+                refresh_errors.append(exc)
+            finally:
+                refresh_finished.set()
+
+        def enqueue_work_during_snapshot() -> None:
+            try:
+                with Session(database._get_tenant_engine()) as session:
+                    session.add(
+                        ComputeRequest(
+                            id='enqueue-during-missing-marker-refresh',
+                            namespace='default',
+                            kind=enums_pb2.COMPUTE_REQUEST_KIND_PREVIEW,
+                            status=enums_pb2.COMPUTE_REQUEST_STATUS_QUEUED,
+                            command_envelope=b'{}',
+                            attempts=0,
+                            max_attempts=1,
+                            created_at=now,
+                            updated_at=now,
+                        )
+                    )
+                    session.flush()
+                    runtime_work_service.append_wake(session, namespace='default', kind=kind)
+                    session.commit()
+            except BaseException as exc:
+                producer_errors.append(exc)
+            finally:
+                producer_finished.set()
+
+        with container.connect() as gate_connection:
+            gate_connection.execute('SELECT pg_advisory_lock(%s)', (gate_key,))
+            refresh_thread = threading.Thread(target=refresh_missing_marker)
+            producer_thread = threading.Thread(target=enqueue_work_during_snapshot)
+            gate_released = False
+            try:
+                with Session(database._get_tenant_engine()) as session:
+                    session.execute(
+                        text('DELETE FROM public.runtime_namespace_work WHERE namespace = :namespace AND kind = :kind'),
+                        {'namespace': 'default', 'kind': kind.value},
+                    )
+                    session.execute(
+                        text('DELETE FROM public.runtime_namespace_work_wakes WHERE namespace = :namespace AND kind = :kind'),
+                        {'namespace': 'default', 'kind': kind.value},
+                    )
+                    session.commit()
+                with container.connect() as observer:
+                    assert (
+                        observer.execute(
+                            'SELECT 1 FROM public.runtime_namespace_work WHERE namespace = %s AND kind = %s',
+                            ('default', kind.value),
+                        ).fetchone()
+                        is None
+                    )
+
+                refresh_thread.start()
+                assert refresh_started.wait(timeout=5), 'refresh did not start its queue snapshot'
+                scanning = False
+                deadline = time.monotonic() + 5
+                while time.monotonic() < deadline:
+                    with container.connect() as observer:
+                        activity = observer.execute(
+                            'SELECT wait_event_type, wait_event FROM pg_stat_activity WHERE pid = %s',
+                            (refresh_pid[0],),
+                        ).fetchone()
+                    if activity == ('Lock', 'advisory'):
+                        scanning = True
+                        break
+                    time.sleep(0.01)
+                assert scanning, 'queue snapshot did not block on the advisory-lock gate'
+
+                producer_thread.start()
+                assert producer_finished.wait(timeout=2), 'producer blocked behind refresh initialization or snapshot'
+                producer_thread.join(timeout=1)
+                assert not producer_thread.is_alive()
+                assert not producer_errors
+                assert not refresh_finished.is_set(), 'refresh passed the still-held queue-snapshot gate'
+
+                with container.connect() as observer:
+                    marker = observer.execute(
+                        'SELECT pending, generation FROM public.runtime_namespace_work WHERE namespace = %s AND kind = %s',
+                        ('default', kind.value),
+                    ).fetchone()
+                assert marker is None, 'producer unexpectedly touched the namespace marker'
+                with container.connect() as observer:
+                    assert observer.execute(
+                        'SELECT count(*) FROM public.runtime_namespace_work_wakes WHERE namespace = %s AND kind = %s',
+                        ('default', kind.value),
+                    ).fetchone() == (1,)
+
+                gate_connection.execute('SELECT pg_advisory_unlock(%s)', (gate_key,))
+                gate_released = True
+                refresh_thread.join(timeout=10)
+                assert not refresh_thread.is_alive(), 'refresh did not finish after releasing the gate'
+                assert not refresh_errors
+                with Session(database._get_tenant_engine()) as session:
+                    final_marker = session.execute(
+                        text(
+                            'SELECT pending, generation, processed_generation FROM public.runtime_namespace_work WHERE namespace = :namespace AND kind = :kind'
+                        ),
+                        {'namespace': 'default', 'kind': kind.value},
+                    ).one()
+                    assert final_marker == (False, 1, 1), 'queue snapshot should not claim a post-capture enqueue'
+                    assert runtime_work_service.list_pending_namespaces(session, kinds=[kind]) == ['default']
+                    assert session.get(ComputeRequest, 'enqueue-during-missing-marker-refresh') is not None
+            finally:
+                if not gate_released:
+                    gate_connection.execute('SELECT pg_advisory_unlock(%s)', (gate_key,))
+                if producer_thread.ident is not None:
+                    producer_thread.join(timeout=10)
+                if refresh_thread.ident is not None:
+                    refresh_thread.join(timeout=10)
 
         _clear_database_state()
 
@@ -1021,10 +1815,325 @@ def test_postgres_compute_claims_are_serialized_per_engine_identity(monkeypatch,
 
 
 @pytest.mark.timeout(300)
+def test_postgres_busy_engine_claim_does_not_block_other_identity(monkeypatch, tmp_path: Path) -> None:
+    """A held same-RID advisory lock must not pin a claim ahead of other RIDs."""
+    require_docker()
+
+    from backend_core import compute_requests_service, database
+    from backend_core.config import settings
+    from backend_core.namespace import reset_namespace, set_namespace_context
+    from backend_core.persistence.compute_requests.models import ComputeRequest
+
+    with PostgresContainer() as container:
+        _clear_database_state()
+        data_dir = tmp_path / 'data'
+        data_dir.mkdir(parents=True, exist_ok=True)
+        monkeypatch.setattr(settings, 'database_url', container.url, raising=False)
+        monkeypatch.setattr(settings, 'data_dir', data_dir, raising=False)
+        monkeypatch.setattr(settings, 'distributed_runtime_enabled', True, raising=False)
+        database.set_active_runtime_coordinator_generation(None)
+        database.set_settings_engine_override(database._create_public_engine())
+        asyncio.run(database.init_db())
+
+        namespace_token = set_namespace_context('default')
+        gate_connection = None
+        gate_held = False
+        lock_key: int | None = None
+        claim_thread: threading.Thread | None = None
+        claim_done = threading.Event()
+        claim_started = threading.Event()
+        claim_result: list[ComputeRequest | None] = []
+        claim_errors: list[BaseException] = []
+        try:
+            now = datetime.now(UTC)
+            busy_requests = [
+                ComputeRequest(
+                    id=request_id,
+                    namespace='default',
+                    kind=enums_pb2.COMPUTE_REQUEST_KIND_PREVIEW,
+                    status=enums_pb2.COMPUTE_REQUEST_STATUS_QUEUED,
+                    engine_scope=enums_pb2.ENGINE_SCOPE_ANALYSIS_INTERACTIVE,
+                    engine_reuse_policy=enums_pb2.ENGINE_REUSE_POLICY_SHARED,
+                    engine_resource_id='analysis-busy',
+                    command_envelope=b'{}',
+                    attempts=0,
+                    max_attempts=3,
+                    created_at=now + timedelta(microseconds=index),
+                    updated_at=now,
+                )
+                for index, request_id in enumerate(('claim-busy-first', 'claim-busy-follower'))
+            ]
+            other_request = ComputeRequest(
+                id='claim-other-rid',
+                namespace='default',
+                kind=enums_pb2.COMPUTE_REQUEST_KIND_PREVIEW,
+                status=enums_pb2.COMPUTE_REQUEST_STATUS_QUEUED,
+                engine_scope=enums_pb2.ENGINE_SCOPE_ANALYSIS_INTERACTIVE,
+                engine_reuse_policy=enums_pb2.ENGINE_REUSE_POLICY_SHARED,
+                engine_resource_id='analysis-other',
+                command_envelope=b'{}',
+                attempts=0,
+                max_attempts=3,
+                created_at=now + timedelta(seconds=1),
+                updated_at=now,
+            )
+            busy_request_ids = tuple(request.id for request in busy_requests)
+            other_request_id = other_request.id
+            with Session(database._get_tenant_engine()) as session:
+                session.add_all([*busy_requests, other_request])
+                session.commit()
+                lock_key = compute_requests_service._engine_claim_lock_key(busy_requests[0])
+            assert lock_key is not None
+
+            gate_connection = container.connect()
+            lock_result = gate_connection.execute('SELECT pg_try_advisory_lock(%s)', (lock_key,)).fetchone()
+            assert lock_result is not None
+            gate_held = bool(lock_result[0])
+            assert gate_held, 'test could not acquire the same-RID engine claim lock'
+
+            def claim_other_work() -> None:
+                token = set_namespace_context('default')
+                claim_started.set()
+                try:
+                    with Session(database._get_tenant_engine()) as session:
+                        claim_result.append(compute_requests_service.claim_next_request(session, worker_id='worker-other'))
+                except BaseException as exc:
+                    claim_errors.append(exc)
+                finally:
+                    reset_namespace(token)
+                    claim_done.set()
+
+            claim_thread = threading.Thread(target=claim_other_work, name='claim-other-engine-rid')
+            claim_thread.start()
+            assert claim_started.wait(timeout=3)
+            assert claim_done.wait(timeout=5), 'same-RID advisory lock blocked an eligible different-RID claim'
+            assert not claim_errors, claim_errors
+            assert len(claim_result) == 1
+            assert claim_result[0] is not None and claim_result[0].id == other_request_id
+
+            with Session(database._get_tenant_engine()) as session:
+                persisted_busy = [session.get(ComputeRequest, request_id) for request_id in busy_request_ids]
+                persisted_other = session.get(ComputeRequest, other_request_id)
+            assert all(request is not None for request in persisted_busy)
+            assert all(request.status == enums_pb2.COMPUTE_REQUEST_STATUS_QUEUED for request in persisted_busy if request is not None)
+            assert persisted_other is not None and persisted_other.status == enums_pb2.COMPUTE_REQUEST_STATUS_RUNNING
+
+            gate_connection.execute('SELECT pg_advisory_unlock(%s)', (lock_key,))
+            gate_held = False
+            claim_thread.join(timeout=5)
+            assert not claim_thread.is_alive()
+
+            with Session(database._get_tenant_engine()) as session:
+                claimed_busy = compute_requests_service.claim_next_request(session, worker_id='worker-after-release')
+                assert claimed_busy is not None and claimed_busy.id == busy_request_ids[0]
+                persisted_busy = [session.get(ComputeRequest, request_id) for request_id in busy_request_ids]
+            statuses = [request.status for request in persisted_busy if request is not None]
+            assert statuses.count(enums_pb2.COMPUTE_REQUEST_STATUS_RUNNING) == 1
+            assert statuses.count(enums_pb2.COMPUTE_REQUEST_STATUS_QUEUED) == 1
+        finally:
+            if gate_held and gate_connection is not None and lock_key is not None:
+                gate_connection.execute('SELECT pg_advisory_unlock(%s)', (lock_key,))
+            if gate_connection is not None:
+                gate_connection.close()
+            if claim_thread is not None:
+                claim_thread.join(timeout=10)
+            reset_namespace(namespace_token)
+            _clear_database_state()
+
+
+@pytest.mark.timeout(300)
+def test_postgres_shared_flight_followers_do_not_block_completion(monkeypatch, tmp_path: Path) -> None:
+    """Active and cached follower reads must not retain row locks until HTTP commit."""
+    require_docker()
+
+    from backend_core import compute_requests_service, database
+    from backend_core.config import settings
+    from backend_core.domain.compute_requests.models import command_from_payload
+    from backend_core.namespace import reset_namespace, set_namespace_context
+    from backend_core.persistence.compute_requests.models import ComputeRequest, ComputeRequestFlight
+    from backend_core.persistence.datasource.models import DataSource
+
+    with PostgresContainer() as container:
+        _clear_database_state()
+        data_dir = tmp_path / 'data'
+        data_dir.mkdir(parents=True, exist_ok=True)
+        monkeypatch.setattr(settings, 'database_url', container.url, raising=False)
+        monkeypatch.setattr(settings, 'data_dir', data_dir, raising=False)
+        monkeypatch.setattr(settings, 'distributed_runtime_enabled', True, raising=False)
+        database.set_active_runtime_coordinator_generation(None)
+        database.set_settings_engine_override(database._create_public_engine())
+        asyncio.run(database.init_db())
+
+        now = datetime.now(UTC)
+        flight_specs = (
+            ('active', enums_pb2.COMPUTE_REQUEST_STATUS_RUNNING, None, None),
+            ('cached', enums_pb2.COMPUTE_REQUEST_STATUS_COMPLETED, b'cached-response', now + timedelta(minutes=5)),
+        )
+        requests = [
+            ComputeRequest(
+                id=f'shared-flight-{suffix}',
+                namespace='default',
+                kind=enums_pb2.COMPUTE_REQUEST_KIND_PREVIEW,
+                status=status,
+                command_envelope=b'{}',
+                response_envelope=response,
+                max_attempts=3,
+                created_at=now,
+                updated_at=now,
+            )
+            for suffix, status, response, _expires_at in flight_specs
+        ]
+        flights = [
+            ComputeRequestFlight(
+                namespace='default',
+                flight_key=f'{suffix}-flight-key',
+                request_id=f'shared-flight-{suffix}',
+                created_at=now,
+                expires_at=expires_at,
+            )
+            for suffix, _status, _response, expires_at in flight_specs
+        ]
+        request_ids = [request.id for request in requests]
+        namespace_token = set_namespace_context('default')
+        follower_session: Session | None = None
+        try:
+            with Session(database._get_tenant_engine()) as session:
+                session.add_all([*requests, *flights])
+                session.commit()
+
+            follower_session = Session(database._get_tenant_engine())
+            for suffix, _status, _response, _expires_at in flight_specs:
+                reused = compute_requests_service._reusable_flight(
+                    follower_session,
+                    'default',
+                    f'{suffix}-flight-key',
+                    now=now,
+                )
+                assert reused is not None
+                assert reused.id == f'shared-flight-{suffix}'
+
+            completion_done = threading.Event()
+            completion_errors: list[BaseException] = []
+
+            def finalize_flights() -> None:
+                token = set_namespace_context('default')
+                try:
+                    with Session(database._get_tenant_engine()) as session:
+                        session.execute(text("SET LOCAL lock_timeout = '1500ms'"))
+                        for request_id in request_ids:
+                            request = session.get(ComputeRequest, request_id)
+                            assert request is not None
+                            compute_requests_service._finish_flight(session, request, cache_result=True, completed_at=now)
+                        session.commit()
+                except BaseException as exc:
+                    completion_errors.append(exc)
+                finally:
+                    reset_namespace(token)
+                    completion_done.set()
+
+            completion_thread = threading.Thread(target=finalize_flights, name='shared-flight-finalizer')
+            completion_thread.start()
+            assert completion_done.wait(timeout=5), 'completion remained blocked behind active/cached flight followers'
+            completion_thread.join(timeout=1)
+            assert not completion_errors, completion_errors
+
+            follower_session.close()
+            follower_session = None
+
+            datasource_id = 'shared-flight-race-datasource'
+            command = command_from_payload(
+                enums_pb2.COMPUTE_REQUEST_KIND_PREVIEW,
+                {
+                    'analysis_id': 'shared-flight-race-analysis',
+                    'target_step_id': 'source',
+                    'row_limit': 100,
+                    'page': 1,
+                    'analysis_pipeline': {
+                        'analysis_id': 'shared-flight-race-analysis',
+                        'tabs': [
+                            {
+                                'id': 'shared-flight-race-tab',
+                                'datasource': {
+                                    'id': datasource_id,
+                                    'analysis_tab_id': 'shared-flight-race-tab',
+                                    'source_type': 'file',
+                                    'config': {'branch': 'main'},
+                                },
+                                'output': {'result_id': 'shared-flight-race-output', 'filename': 'result.csv', 'format': 'csv'},
+                                'steps': [],
+                            }
+                        ],
+                    },
+                },
+            )
+            command_bytes = command.SerializeToString(deterministic=True)
+            with Session(database._get_tenant_engine()) as session:
+                session.add(
+                    DataSource(
+                        id=datasource_id,
+                        name='Shared flight race source',
+                        source_type='file',
+                        config={'file_path': 's3://bucket/source.csv'},
+                        created_at=now,
+                    )
+                )
+                session.commit()
+
+            concurrent_submitters = 20
+            start_together = threading.Barrier(concurrent_submitters)
+
+            def submit_identical_preview(_index: int) -> tuple[str, bool]:
+                token = set_namespace_context('default')
+                try:
+                    start_together.wait(timeout=10)
+                    deadline = time.monotonic() + 10
+                    while True:
+                        try:
+                            with Session(database._get_tenant_engine()) as session:
+                                request, created = compute_requests_service.stage_shared_flight_request(
+                                    session,
+                                    namespace='default',
+                                    kind=enums_pb2.COMPUTE_REQUEST_KIND_PREVIEW,
+                                    command=compute_pb2.ComputeCommand.FromString(command_bytes),
+                                )
+                                result = (request.id, created)
+                                session.commit()
+                                return result
+                        except compute_requests_service.ComputeFlightLockBusy:
+                            if time.monotonic() >= deadline:
+                                raise TimeoutError('identical compute-flight submissions did not converge')
+                            time.sleep(0.01)
+                finally:
+                    reset_namespace(token)
+
+            with ThreadPoolExecutor(max_workers=concurrent_submitters, thread_name_prefix='flight-follower') as executor:
+                staged_requests = list(executor.map(submit_identical_preview, range(concurrent_submitters)))
+
+            durable_request_ids = {request_id for request_id, _created in staged_requests}
+            assert len(durable_request_ids) == 1
+            assert sum(created for _request_id, created in staged_requests) == 1
+            durable_request_id = next(iter(durable_request_ids))
+            with Session(database._get_tenant_engine()) as session:
+                flight_count = len(
+                    session.exec(
+                        select(ComputeRequestFlight)
+                        .where(ComputeRequestFlight.namespace == 'default')
+                        .where(ComputeRequestFlight.request_id == durable_request_id)
+                    ).all()
+                )
+            assert flight_count == 1
+        finally:
+            if follower_session is not None:
+                follower_session.close()
+            reset_namespace(namespace_token)
+            _clear_database_state()
+
+
+@pytest.mark.timeout(300)
 def test_postgres_outbox_dispatchers_do_not_share_unclaimed_batch_rows(monkeypatch, tmp_path: Path) -> None:
     require_docker()
 
-    from backend_core import database, runtime_outbox_service
+    from backend_core import database, runtime_outbox_service, runtime_work_service
     from backend_core.config import settings
 
     with PostgresContainer() as container:
@@ -1043,14 +2152,11 @@ def test_postgres_outbox_dispatchers_do_not_share_unclaimed_batch_rows(monkeypat
             session.commit()
             event_ids = [first.id, second.id]
 
-        with container.connect() as connection:
+        with Session(database._get_tenant_engine()) as session:
+            assert runtime_work_service.list_pending_namespaces(session, kinds=[runtime_work_service.RuntimeWorkKind.OUTBOX]) == ['default']
             assert (
-                _query_value(
-                    connection,
-                    'SELECT count(*) FROM public.runtime_namespace_work_wakes WHERE namespace = %s AND kind = %s',
-                    ('default', 'outbox'),
-                )
-                >= 1
+                session.execute(text("SELECT count(*) FROM public.runtime_namespace_work_wakes WHERE namespace = 'default' AND kind = 'outbox'")).scalar_one()
+                == 2
             )
 
         delivered: list[str] = []
@@ -1090,11 +2196,13 @@ def test_postgres_outbox_dispatchers_do_not_share_unclaimed_batch_rows(monkeypat
             assert (
                 _query_value(
                     connection,
-                    'SELECT count(*) FROM public.runtime_namespace_work_wakes WHERE namespace = %s AND kind = %s',
+                    'SELECT pending FROM public.runtime_namespace_work WHERE namespace = %s AND kind = %s',
                     ('default', 'outbox'),
                 )
-                == 0
+                is False
             )
+        with Session(database._get_tenant_engine()) as session:
+            assert runtime_work_service.list_pending_namespaces(session, kinds=[runtime_work_service.RuntimeWorkKind.OUTBOX]) == []
         _clear_database_state()
 
 
@@ -1630,6 +2738,273 @@ def test_postgres_runtime_roles_restart_after_forced_process_exit(
             ) from exc
         finally:
             scheduler.stop()
+            worker_manager.stop()
+            coordinator.stop()
+            api.stop()
+
+
+@pytest.mark.timeout(480)
+def test_postgres_runtime_coordinator_takeover_during_compute_terminal_publication(
+    tmp_path: Path,
+    rustfs_container: RustfsContainer,
+    engine_runtime_env: dict[str, str],
+) -> None:
+    """A coordinator crash at the terminal row lock must recover without stale publication."""
+    require_docker()
+
+    with PostgresContainer() as container:
+        data_dir = tmp_path / 'data'
+        data_dir.mkdir(parents=True, exist_ok=True)
+        api_port = free_port()
+        coordinator_grpc_port = free_port()
+        data_plane_port = free_port()
+        base_env = _runtime_env(
+            data_dir=data_dir,
+            database_url=container.url,
+            port=api_port,
+            grpc_port=coordinator_grpc_port,
+            rustfs=rustfs_container,
+            data_plane_port=data_plane_port,
+        )
+        base_env.update(engine_runtime_env)
+        # A short lease makes crash recovery bounded while preserving the real
+        # claim-expiry/reconciliation path exercised by production.
+        base_env['RUNTIME_WORK_LEASE_TTL_SECONDS'] = '5'
+        _init_runtime_db(base_env)
+        coordinator_application_name = f'dataforge-test-coordinator-{uuid.uuid4().hex[:12]}'
+
+        api = ManagedProcess(
+            name='publication-takeover-api',
+            command=['uv', 'run', '--no-env-file', str(BACKEND_ROOT / 'main.py')],
+            cwd=CORE_ROOT,
+            env=base_env,
+        )
+        coordinator = _runtime_coordinator(
+            data_dir=data_dir,
+            database_url=container.url,
+            grpc_port=coordinator_grpc_port,
+            data_plane_port=data_plane_port,
+            rustfs=rustfs_container,
+            extra_env={
+                'PGAPPNAME': coordinator_application_name,
+                'RUNTIME_WORK_LEASE_TTL_SECONDS': '5',
+            },
+        )
+        worker_manager = _worker_manager(
+            data_dir=data_dir,
+            database_url=container.url,
+            grpc_port=coordinator_grpc_port,
+            data_plane_port=data_plane_port,
+            rustfs=rustfs_container,
+            extra_env={**engine_runtime_env, 'RUNTIME_WORK_LEASE_TTL_SECONDS': '5'},
+        )
+        blocker_connection: psycopg.Connection | None = None
+        preview_thread: threading.Thread | None = None
+        preview_result: dict[str, object] = {}
+        coordinator_processes_after_crash: list[str] = []
+        terminated_coordinator_database_sessions: list[int] = []
+        try:
+            api.start()
+            wait_for_http_ready(f'{_http_base_url(api_port)}/health/ready')
+            coordinator.start()
+            worker_manager.start()
+            wait_for_condition(
+                lambda: _registered_worker_count(container, 'coordinator') >= 1,
+                timeout=90,
+                description='coordinator registration before publication crash',
+            )
+            previous_generation = _coordinator_generation(container)
+            assert previous_generation > 0
+
+            import httpx
+
+            with httpx.Client(base_url=_http_base_url(api_port), timeout=30) as client:
+                datasource_id = _upload_datasource(client, 'coordinator-publication-takeover', content=_make_csv(200000))
+                analysis = _create_analysis(client, 'Coordinator Publication Takeover', datasource_id, steps=_slow_steps())
+                pipeline = analysis['pipeline_definition']
+                assert isinstance(pipeline, dict)
+                analysis_id = str(analysis['id'])
+                tabs = pipeline.get('tabs')
+                assert isinstance(tabs, list) and tabs
+                first_tab = tabs[0]
+                assert isinstance(first_tab, dict)
+                steps = first_tab.get('steps')
+                assert isinstance(steps, list) and steps
+                preview_request = {
+                    'analysis_id': analysis_id,
+                    'target_step_id': str(steps[-1]['id']),
+                    'analysis_pipeline': {'analysis_id': analysis_id, **pipeline},
+                    'row_limit': 50,
+                    'page': 1,
+                }
+
+            def submit_preview() -> None:
+                try:
+                    with httpx.Client(base_url=_http_base_url(api_port), timeout=300) as preview_client:
+                        preview_result['response'] = preview_client.post('/api/v1/compute/preview', json=preview_request)
+                except BaseException as exc:
+                    preview_result['error'] = exc
+
+            preview_thread = threading.Thread(target=submit_preview, name='coordinator-publication-preview')
+            preview_thread.start()
+            active = wait_for_condition(
+                lambda: _active_preview_request(container),
+                timeout=90,
+                interval=0.1,
+                description='durable preview request to enter running state',
+            )
+            request_id, active_status = active
+            assert active_status == enums_pb2.COMPUTE_REQUEST_STATUS_RUNNING
+
+            blocker_connection = psycopg.connect(container.url.replace('+psycopg', ''))
+            blocker_pid_row = blocker_connection.execute('SELECT pg_backend_pid()').fetchone()
+            assert blocker_pid_row is not None
+            blocker_pid = int(blocker_pid_row[0])
+            claim_row = blocker_connection.execute(
+                'SELECT status, lease_owner, claim_token, lease_generation FROM "default".compute_requests WHERE id = %s FOR UPDATE',
+                (request_id,),
+            ).fetchone()
+            assert claim_row is not None and int(claim_row[0]) == enums_pb2.COMPUTE_REQUEST_STATUS_RUNNING
+            worker_id, claim_token, lease_generation = str(claim_row[1]), str(claim_row[2]), int(claim_row[3])
+            assert worker_id and claim_token and lease_generation > 0
+
+            blocked = wait_for_condition(
+                lambda: _blocked_compute_terminal_publications(container, blocker_pid),
+                timeout=90,
+                interval=0.1,
+                description='coordinator terminal publication SELECT FOR UPDATE to wait on the held compute row',
+            )
+            assert blocked is not None
+            assert len(blocked) == 1, f'expected one blocked terminal publication, found {blocked!r}'
+            assert 'FOR UPDATE' in blocked[0][1].upper()
+
+            worker_registration_count = _worker_registration_count(container, 'coordinator')
+            coordinator.crash()
+            coordinator_processes_after_crash = _runtime_coordinator_processes()
+            assert not coordinator_processes_after_crash, f'coordinator processes survived SIGKILL: {coordinator_processes_after_crash!r}'
+            # Test services reach the nested-Docker Postgres through its
+            # published-port proxy. After proving the owner process is gone,
+            # close only its tagged backend sessions: the proxy can retain
+            # those sockets longer than a direct production DB connection.
+            terminated_coordinator_database_sessions = _terminate_coordinator_database_sessions(container, coordinator_application_name)
+            wait_for_condition(
+                lambda: not _coordinator_database_sessions(container, coordinator_application_name),
+                timeout=10,
+                interval=0.1,
+                description='terminated coordinator database sessions to close',
+            )
+            coordinator.start()
+            try:
+                wait_for_condition(
+                    lambda: _coordinator_generation(container) > previous_generation,
+                    timeout=90,
+                    description='new fenced coordinator generation during terminal publication',
+                )
+            except AssertionError as exc:
+                lock_activity = _runtime_coordinator_lock_activity(container)
+                postgres_clients = _coordinator_database_sessions(container, coordinator_application_name)
+                replacement_pid = coordinator.proc.pid if coordinator.proc is not None else None
+                raise AssertionError(
+                    f'{exc}; database lock activity={lock_activity!r}; active coordinator sessions={postgres_clients!r}; '
+                    f'terminated coordinator sessions={terminated_coordinator_database_sessions!r}; '
+                    f'coordinator processes after crash={coordinator_processes_after_crash!r}; replacement_pid={replacement_pid}'
+                ) from exc
+            wait_for_condition(
+                lambda: _worker_registration_count(container, 'coordinator') > worker_registration_count,
+                timeout=90,
+                description='worker manager resynchronization after publication-time coordinator crash',
+            )
+
+            # The killed coordinator's blocked transaction must have rolled
+            # back. Releasing the test lock lets normal lease expiry and
+            # durable request recovery proceed under the replacement owner.
+            blocker_connection.rollback()
+            blocker_connection.close()
+            blocker_connection = None
+
+            def completed_request() -> tuple[object, ...] | None:
+                with container.connect() as connection:
+                    row = connection.execute(
+                        'SELECT status, response_envelope, completed_at, attempts, lease_owner, claim_token FROM "default".compute_requests WHERE id = %s',
+                        (request_id,),
+                    ).fetchone()
+                if row is None or int(row[0]) != enums_pb2.COMPUTE_REQUEST_STATUS_COMPLETED:
+                    return None
+                return tuple(row)
+
+            terminal = wait_for_condition(
+                completed_request,
+                timeout=240,
+                interval=0.5,
+                description='durable preview completion after coordinator takeover',
+            )
+            assert terminal[1] is not None and terminal[2] is not None
+            assert terminal[4] is None and terminal[5] is None
+            preview_thread.join(timeout=30)
+            assert not preview_thread.is_alive(), 'preview waiter did not observe the recovered durable result'
+            preview_response = preview_result.get('response')
+            assert isinstance(preview_response, httpx.Response), f'preview waiter failed: {preview_result!r}'
+            assert preview_response.status_code == 200, preview_response.text
+            assert preview_response.json().get('data')
+
+            with container.connect() as connection:
+                request_count = _query_value(connection, 'SELECT count(*) FROM "default".compute_requests WHERE id = %s', (request_id,))
+                flight_count = _query_value(connection, 'SELECT count(*) FROM "default".compute_request_flights WHERE request_id = %s', (request_id,))
+                run_count = _query_value(
+                    connection,
+                    'SELECT count(*) FROM "default".engine_runs WHERE analysis_id = %s AND kind = %s',
+                    (analysis_id, 'preview'),
+                )
+                accepted_snapshot = connection.execute(
+                    'SELECT status, response_envelope, completed_at, attempts FROM "default".compute_requests WHERE id = %s',
+                    (request_id,),
+                ).fetchone()
+            assert request_count == 1
+            assert flight_count == 1
+            assert run_count == 1
+
+            # Exercise the actual replacement coordinator interceptor with an
+            # otherwise-valid terminal RPC carrying the old owner generation.
+            import grpc
+
+            from dataforge_protocol import worker_runtime_pb2, worker_runtime_pb2_grpc
+
+            stale_completion = worker_runtime_pb2.WorkerCompleteComputeRequestRequest(
+                namespace='default',
+                request_id=request_id,
+                worker_id=worker_id,
+                claim_token=claim_token,
+                lease_generation=lease_generation,
+                response_envelope=compute_pb2.ComputeResponseEnvelope.FromString(bytes(terminal[1])),
+            )
+            with grpc.insecure_channel(f'{process_host()}:{coordinator_grpc_port}') as channel:
+                grpc.channel_ready_future(channel).result(timeout=30)
+                stub = worker_runtime_pb2_grpc.WorkerRuntimeServiceStub(channel)
+                with pytest.raises(grpc.RpcError) as stale_call:
+                    stub.CompleteComputeRequest(
+                        stale_completion,
+                        timeout=15,
+                        metadata=(
+                            ('x-internal-token', INTERNAL_API_TOKEN),
+                            ('x-runtime-coordinator-generation', str(previous_generation)),
+                        ),
+                    )
+            assert stale_call.value.code() == grpc.StatusCode.FAILED_PRECONDITION
+            with container.connect() as connection:
+                after_stale_call = connection.execute(
+                    'SELECT status, response_envelope, completed_at, attempts FROM "default".compute_requests WHERE id = %s',
+                    (request_id,),
+                ).fetchone()
+            assert after_stale_call == accepted_snapshot, 'stale generation changed the accepted terminal result'
+        except AssertionError as exc:
+            raise AssertionError(
+                f'{exc}\napi tail:\n{api.tail()}\ncoordinator tail:\n{coordinator.tail()}\n'
+                f'worker manager tail:\n{worker_manager.tail()}\npreview outcome: {preview_result!r}'
+            ) from exc
+        finally:
+            if blocker_connection is not None:
+                blocker_connection.rollback()
+                blocker_connection.close()
             worker_manager.stop()
             coordinator.stop()
             api.stop()

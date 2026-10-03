@@ -591,6 +591,8 @@ def test_request_timing_middleware_marks_response_serialization_boundary(caplog,
 
     @contextmanager
     def database_timing(metrics):
+        metrics['api_blocking_admission_wait_ms'] = 37.5
+        metrics['api_general_admission_wait_ms'] = 37.5
         yield
         metrics.update(sql_count=2, sql_ms=3.5, commit_ms=1.26)
 
@@ -615,15 +617,26 @@ def test_request_timing_middleware_marks_response_serialization_boundary(caplog,
 
     assert response.status_code == 200
     assert response.headers['x-request-id'] == 'timing-test'
-    assert response.headers['server-timing'] == 'app;dur=5200.0, api-db-admission;dur=0.0'
+    assert response.headers['server-timing'] == (
+        'app;dur=5200.0, api-blocking-admission;dur=37.5, api-bootstrap-admission;dur=0.0, '
+        'api-general-admission;dur=37.5, api-bootstrap-executor-queue;dur=0.0, '
+        'api-general-executor-queue;dur=0.0, api-bootstrap-work;dur=0.0, api-general-work;dur=0.0'
+    )
     assert 'phase=completed' in caplog.text
     assert 'response_start_ms=5200.0' in caplog.text
-    assert 'db_sql_count=2 db_sql_ms=3.5 db_commit_ms=1.3' in caplog.text
+    assert (
+        'db_sql_count=2 db_sql_ms=3.5 api_blocking_admission_wait_ms=37.5 '
+        'api_bootstrap_admission_wait_ms=0.0 api_general_admission_wait_ms=37.5 '
+        'api_bootstrap_executor_queue_ms=0.0 api_general_executor_queue_ms=0.0 '
+        'api_bootstrap_work_ms=0.0 api_general_work_ms=0.0 '
+        'db_checkout_count=0 db_checkout_ms=0.0 db_checkout_max_ms=0.0 '
+        'db_slowest_sql_ms=0.0 db_slowest_sql=- db_commit_ms=1.3'
+    ) in caplog.text
     assert 'settings_checkedout' in caplog.text
 
 
-def test_request_timing_middleware_exposes_accumulated_database_admission_wait() -> None:
-    from backend_core.database import record_database_admission_wait
+def test_request_timing_middleware_exposes_accumulated_api_blocking_admission_wait() -> None:
+    from backend_core.database import record_api_blocking_admission_wait
 
     app = FastAPI()
     timestamps = iter([0.0, 5.2, 5.3])
@@ -631,19 +644,24 @@ def test_request_timing_middleware_exposes_accumulated_database_admission_wait()
 
     @app.get('/api/admission-timing')
     async def admission_timing() -> dict[str, str]:
-        record_database_admission_wait(12.5)
-        record_database_admission_wait(25.0)
+        record_api_blocking_admission_wait(12.5)
+        record_api_blocking_admission_wait(25.0)
         return {'status': 'ok'}
 
     with TestClient(app) as client:
         response = client.get('/api/admission-timing')
 
     assert response.status_code == 200
-    assert response.headers['server-timing'] == 'app;dur=5200.0, api-db-admission;dur=37.5'
+    assert response.headers['server-timing'] == (
+        'app;dur=5200.0, api-blocking-admission;dur=37.5, api-bootstrap-admission;dur=0.0, '
+        'api-general-admission;dur=37.5, api-bootstrap-executor-queue;dur=0.0, '
+        'api-general-executor-queue;dur=0.0, api-bootstrap-work;dur=0.0, api-general-work;dur=0.0'
+    )
 
 
 def test_request_timing_middleware_logs_completed_duration_after_in_flight_warning(caplog) -> None:
     sent: list[dict[str, object]] = []
+    from backend_core.database import record_api_blocking_admission_wait
 
     async def receive() -> dict[str, object]:
         return {'type': 'http.request', 'body': b'', 'more_body': False}
@@ -653,6 +671,7 @@ def test_request_timing_middleware_logs_completed_duration_after_in_flight_warni
 
     async def slow_response(scope, receive_for_app, send_for_app) -> None:
         del scope, receive_for_app
+        record_api_blocking_admission_wait(18.75)
         await asyncio.sleep(0.15)
         await send_for_app({'type': 'http.response.start', 'status': 200, 'headers': []})
         await asyncio.sleep(0.15)
@@ -673,8 +692,10 @@ def test_request_timing_middleware_logs_completed_duration_after_in_flight_warni
     assert len(sent) == 2
     assert len(timing_logs) == 2
     assert 'phase=in_flight' in timing_logs[0]
+    assert 'api_blocking_admission_wait_ms=18.8' in timing_logs[0]
     assert 'response_start_ms=-' in timing_logs[0]
     assert 'phase=completed' in timing_logs[1]
+    assert 'api_blocking_admission_wait_ms=18.8' in timing_logs[1]
     assert 'status=200' in timing_logs[1]
     assert 'response_start_ms=' in timing_logs[1]
     assert 'response_stream_ms=' in timing_logs[1]

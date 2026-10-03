@@ -18,6 +18,7 @@ from pydantic import BaseModel, ConfigDict
 from sqlalchemy.exc import SQLAlchemyError
 
 from backend_core.ai_clients import AIError, ai_provider_name, get_ai_client, resolve_ai_provider
+from backend_core.api_execution_budget import run_api_blocking
 from backend_core.database import RuntimeCoordinatorFenced
 from backend_core.error_handlers import handle_errors
 from backend_core.namespace import get_namespace
@@ -57,7 +58,7 @@ async def _require_owned_session_async(session_id: str, user: User) -> ChatSessi
 
 
 async def _run_chat_db[**P, T](function: Callable[P, T], *args: P.args, **kwargs: P.kwargs) -> T:
-    return await asyncio.to_thread(function, *args, **kwargs)
+    return await run_api_blocking(function, *args, **kwargs)
 
 
 @dataclass(frozen=True, slots=True)
@@ -83,7 +84,7 @@ class ChatProviderDefinition:
             api_key=body.api_key or None,
             organization_id=body.organization_id,
         )
-        return await asyncio.to_thread(client.list_models)
+        return await run_api_blocking(client.list_models)
 
 
 CHAT_PROVIDER_DEFINITIONS: dict[enums_pb2.AIProvider, ChatProviderDefinition] = {
@@ -417,7 +418,7 @@ async def _execute_tool_calls(
         path = tool.path
 
         try:
-            args = await asyncio.to_thread(json.loads, raw_args) if isinstance(raw_args, str) else raw_args
+            args = await run_api_blocking(json.loads, raw_args) if isinstance(raw_args, str) else raw_args
         except json.JSONDecodeError as exc:
             logger.warning(
                 'Malformed tool args session=%s tool=%s: %s',
@@ -446,7 +447,7 @@ async def _execute_tool_calls(
             }
         )
 
-        valid, errors, normalized = await asyncio.to_thread(tool.validate_arguments, args)
+        valid, errors, normalized = await run_api_blocking(tool.validate_arguments, args)
         if not valid:
             await session.push_event(
                 {
@@ -650,7 +651,7 @@ async def _run_agent_turn(
                 use_text_format = False  # model uses native calling; drop text instructions hereafter
                 session.use_text_format = False
             elif assistant_content:
-                cleaned, parsed = await asyncio.to_thread(_parse_text_tool_calls, assistant_content)
+                cleaned, parsed = await run_api_blocking(_parse_text_tool_calls, assistant_content)
                 if parsed:
                     tool_calls = parsed
                     assistant_content = cleaned

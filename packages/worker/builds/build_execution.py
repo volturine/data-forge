@@ -15,7 +15,7 @@ from runtime.domain.datasource.models import DataSourceTargetKind
 from runtime.domain.engine_runs.schemas import EngineRunKind
 from runtime.executors import run_compute_in_thread, run_control_in_thread
 from runtime.namespace import reset_namespace, set_namespace_context
-from runtime.worker_runtime_client import BuildJobLeaseLost, ClaimedBuildJob, WorkerRuntimeClient, client_from_env
+from runtime.worker_runtime_client import BuildJobLeaseLost, ClaimedBuildJob, WorkerRuntimeClient, async_client_from_env, client_from_env
 
 logger = logging.getLogger(__name__)
 
@@ -83,8 +83,8 @@ async def _emit_build_event(
 ) -> None:
     token = set_namespace_context(claim.namespace)
     try:
-        sequence = await run_control_in_thread(
-            worker_runtime_client().persist_build_event,
+        client = await async_client_from_env()
+        sequence = await client.persist_build_event_async(
             namespace=claim.namespace,
             build_id=claim.build_id,
             job_id=claim.job_id,
@@ -169,8 +169,8 @@ async def _run_queued_build_job(
     build: RuntimeBuild | None = None
     pipeline: dict | None = None
     starter: schemas.BuildStarter | None = None
-    run = await run_control_in_thread(
-        worker_runtime_client().start_build_run,
+    client = await async_client_from_env()
+    run = await client.start_build_run_async(
         namespace=claim.namespace,
         build_id=claim.build_id,
         job_id=claim.job_id,

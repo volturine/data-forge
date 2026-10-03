@@ -1,19 +1,18 @@
 import asyncio
-import contextlib
 import logging
-import os
-import tempfile
 import uuid
 from pathlib import Path
+from typing import BinaryIO
 from urllib.parse import urlparse
 
 from fastapi import Depends, Form, HTTPException, UploadFile
 from sqlmodel import Session
 
-from backend_core import datasource_delete_service
+from backend_core import datasource_delete_service, storage_cleanup_service
+from backend_core.api_execution_budget import run_api_blocking
 from backend_core.config import settings
 from backend_core.data_plane_client import WorkerDataPlaneClient, client_from_settings
-from backend_core.database import get_db_async, run_db
+from backend_core.database import run_db
 from backend_core.dependencies import (
     RuntimeAvailabilityProbe,
     get_runtime_availability_probe,
@@ -57,6 +56,8 @@ from modules.mcp.router import MCPRouter
 
 logger = logging.getLogger(__name__)
 _MAX_OBJECT_TRANSFER_BYTES = 2 * 1024 * 1024 * 1024
+_UPLOAD_INTENT_RENEW_SECONDS = 60.0
+_UPLOAD_INTENT_RETRY_SECONDS = 5.0
 
 router = MCPRouter(prefix='/datasource', tags=['datasource'])
 
@@ -92,33 +93,6 @@ def _require_active_datasource(session: Session, datasource_id: str) -> None:
     datasource_delete_service.get_active_datasource(session, datasource_id)
 
 
-def _write_chunk(path: Path, chunk: bytes) -> None:
-    with open(path, 'ab') as handle:
-        handle.write(chunk)
-
-
-async def _save_upload_file(file: UploadFile, file_path: Path, max_bytes: int) -> None:
-    effective_max_bytes = min(max_bytes or _MAX_OBJECT_TRANSFER_BYTES, _MAX_OBJECT_TRANSFER_BYTES)
-    total = 0
-    await asyncio.to_thread(file_path.write_bytes, b'')
-    while True:
-        chunk = await file.read(settings.upload_chunk_size)
-        if not chunk:
-            return
-        total += len(chunk)
-        if total > effective_max_bytes:
-            raise HTTPException(status_code=413, detail='Uploaded file exceeds size limit')
-        await asyncio.to_thread(_write_chunk, file_path, chunk)
-
-
-def _temporary_upload_path(suffix: str) -> Path:
-    directory = Path(settings.data_dir) / 'runtime-upload-temp'
-    directory.mkdir(parents=True, exist_ok=True)
-    fd, path = tempfile.mkstemp(suffix=suffix, dir=directory)
-    os.close(fd)
-    return Path(path)
-
-
 async def _wait_for_transfer_task[T](task: asyncio.Task[T]) -> T:
     while True:
         try:
@@ -128,22 +102,80 @@ async def _wait_for_transfer_task[T](task: asyncio.Task[T]) -> T:
                 return task.result()
 
 
-async def _upload_staged_file_to_object_store(
+async def _run_upload_intent_operation(operation, *, upload_id: str, source_path: str) -> None:
+    task = asyncio.create_task(run_api_blocking(run_db, operation, upload_id=upload_id, source_path=source_path))
+    try:
+        await asyncio.shield(task)
+    except asyncio.CancelledError:
+        await _wait_for_transfer_task(task)
+        raise
+
+
+async def _transfer_with_upload_intent(data_plane: WorkerDataPlaneClient, source: BinaryIO, target_url: str, *, max_bytes: int) -> None:
+    upload_id = str(uuid.uuid4())
+    await _run_upload_intent_operation(storage_cleanup_service.register_upload_source, upload_id=upload_id, source_path=target_url)
+    transfer = asyncio.create_task(_upload_file_to_object_store(data_plane, source, target_url, max_bytes=max_bytes))
+    cancelled = False
+    transfer_error: BaseException | None = None
+    next_renewal = asyncio.get_running_loop().time() + _UPLOAD_INTENT_RENEW_SECONDS
+    while not transfer.done():
+        timeout = max(0.0, next_renewal - asyncio.get_running_loop().time())
+        try:
+            await asyncio.wait({transfer}, timeout=timeout)
+        except asyncio.CancelledError:
+            # The object-store call is running in a thread and cannot be
+            # cancelled safely. Keep its durable protection alive until it
+            # settles, then hand the exact target to normal cleanup.
+            cancelled = True
+        if transfer.done():
+            break
+        try:
+            await _run_upload_intent_operation(storage_cleanup_service.renew_upload_source, upload_id=upload_id, source_path=target_url)
+            next_renewal = asyncio.get_running_loop().time() + _UPLOAD_INTENT_RENEW_SECONDS
+        except asyncio.CancelledError:
+            cancelled = True
+            next_renewal = asyncio.get_running_loop().time() + _UPLOAD_INTENT_RETRY_SECONDS
+        except Exception:
+            # Do not cancel a thread that may still be writing this key. Retry
+            # the ownership renewal while it runs; once it settles, leave the
+            # durable intent eligible for cleanup rather than losing tracking.
+            logger.warning('Could not renew upload cleanup intent; transfer remains protected by its durable intent')
+            next_renewal = asyncio.get_running_loop().time() + _UPLOAD_INTENT_RETRY_SECONDS
+
+    try:
+        await asyncio.shield(transfer)
+    except BaseException as exc:
+        transfer_error = exc
+
+    if cancelled or transfer_error is not None:
+        try:
+            await _run_upload_intent_operation(storage_cleanup_service.release_upload_source_for_cleanup, upload_id=upload_id, source_path=target_url)
+        except Exception:
+            logger.exception('Settled upload intent could not be made immediately eligible for cleanup: %s', target_url)
+        if cancelled:
+            raise asyncio.CancelledError
+        assert transfer_error is not None
+        raise transfer_error
+
+    await _run_upload_intent_operation(storage_cleanup_service.complete_upload_source, upload_id=upload_id, source_path=target_url)
+
+
+async def _upload_file_to_object_store(
     data_plane: WorkerDataPlaneClient,
-    file_path: Path,
+    source: BinaryIO,
     target_url: str,
     *,
     max_bytes: int,
 ) -> None:
-    upload_task = asyncio.create_task(asyncio.to_thread(data_plane.upload_object_file, file_path, target_url, max_bytes=max_bytes))
+    upload_task = asyncio.create_task(run_api_blocking(data_plane.upload_object_fileobj, source, target_url, max_bytes=max_bytes))
     try:
         await asyncio.shield(upload_task)
     except asyncio.CancelledError:
         try:
             await _wait_for_transfer_task(upload_task)
         except Exception:
-            logger.debug('Cancelled staged upload did not complete successfully: %s', target_url, exc_info=True)
-        cleanup_task = asyncio.create_task(asyncio.to_thread(data_plane.delete_object, target_url))
+            logger.debug('Cancelled upload did not complete successfully: %s', target_url, exc_info=True)
+        cleanup_task = asyncio.create_task(run_api_blocking(data_plane.delete_object, target_url))
         try:
             await _wait_for_transfer_task(cleanup_task)
         except Exception:
@@ -152,28 +184,64 @@ async def _upload_staged_file_to_object_store(
 
 
 async def _stage_upload_to_object_store(file: UploadFile, target_name: str) -> str:
-    temp_path = await asyncio.to_thread(_temporary_upload_path, Path(target_name).suffix.lower())
+    max_bytes = min(settings.upload_max_file_size_bytes or _MAX_OBJECT_TRANSFER_BYTES, _MAX_OBJECT_TRANSFER_BYTES)
+    if file.size is not None and file.size > max_bytes:
+        raise HTTPException(status_code=413, detail='Uploaded file exceeds size limit')
+    await file.seek(0)
+    data_plane = await run_api_blocking(client_from_settings)
+    target_url = await run_api_blocking(lambda: data_plane.build_object_url('uploads', target_name, namespace=get_namespace()))
     try:
-        await _save_upload_file(file, temp_path, settings.upload_max_file_size_bytes)
-        data_plane = await asyncio.to_thread(client_from_settings)
-        target_url = await asyncio.to_thread(lambda: data_plane.build_object_url('uploads', target_name, namespace=get_namespace()))
-        await _upload_staged_file_to_object_store(
-            data_plane,
-            temp_path,
-            target_url,
-            max_bytes=settings.upload_max_file_size_bytes,
-        )
-        return target_url
-    finally:
-        with contextlib.suppress(FileNotFoundError):
-            await asyncio.to_thread(temp_path.unlink)
+        await _transfer_with_upload_intent(data_plane, file.file, target_url, max_bytes=max_bytes)
+    except ValueError as exc:
+        if 'object upload exceeds' in str(exc):
+            raise HTTPException(status_code=413, detail='Uploaded file exceeds size limit') from exc
+        raise
+    return target_url
 
 
 async def _delete_managed_object(source_path: str) -> None:
-    data_plane = await asyncio.to_thread(client_from_settings)
-    classification = await asyncio.to_thread(data_plane.classify_object_url, source_path)
+    data_plane = await run_api_blocking(client_from_settings)
+    classification = await run_api_blocking(data_plane.classify_object_url, source_path)
     if classification.is_managed:
-        await asyncio.to_thread(data_plane.delete_object, source_path)
+        await run_api_blocking(data_plane.delete_object, source_path)
+
+
+async def _create_uploaded_datasource(
+    *,
+    runtime_probe: RuntimeAvailabilityProbe,
+    name: str,
+    description: str | None,
+    file_path: str,
+    file_type: str,
+    csv_options: dict[str, object] | None,
+    owner_id: str | None,
+) -> schemas.DataSourceResponse:
+    """Join durable creation on HTTP cancellation; database intents own source retirement."""
+    creation = asyncio.create_task(
+        create_remote_file_datasource(
+            runtime_probe=runtime_probe,
+            name=name,
+            description=description,
+            file_path=file_path,
+            file_type=file_type,
+            csv_options=csv_options,
+            owner_id=owner_id,
+        )
+    )
+    try:
+        return await asyncio.shield(creation)
+    except asyncio.CancelledError:
+        try:
+            await _wait_for_transfer_task(creation)
+        except Exception as exc:
+            logger.info(
+                'Datasource creation settled with an error after upload cancellation; durable cleanup owns source retirement source_path=%s error=%s',
+                file_path,
+                type(exc).__name__,
+            )
+        except asyncio.CancelledError:
+            logger.debug('Datasource creation task was cancelled after upload cancellation: %s', file_path)
+        raise
 
 
 def _list_export_branches(metadata_path: str, current_branch: str | None = None) -> list[str]:
@@ -264,7 +332,7 @@ async def upload_file(
 
     try:
         owner_id = user.id if user else None
-        datasource = await create_remote_file_datasource(
+        datasource = await _create_uploaded_datasource(
             runtime_probe=runtime_probe,
             name=name,
             description=description,
@@ -275,11 +343,9 @@ async def upload_file(
         )
         return await json_response(datasource)
     except AppError, HTTPException, ValueError:
-        await _delete_managed_object(file_path)
         raise
     except Exception as e:
         logger.error('Failed to create datasource: %s', type(e).__name__, exc_info=True)
-        await _delete_managed_object(file_path)
         raise HTTPException(status_code=500, detail='Failed to create datasource') from e
 
 
@@ -364,7 +430,7 @@ async def upload_bulk(
         file_csv_options = csv_options if file_type.uses_csv_options else None
         try:
             owner_id = user.id if user else None
-            datasource = await create_remote_file_datasource(
+            datasource = await _create_uploaded_datasource(
                 runtime_probe=runtime_probe,
                 name=name,
                 description=None,
@@ -375,16 +441,12 @@ async def upload_bulk(
             )
             results.append(schemas.BulkUploadResult(name=file.filename, success=True, datasource=datasource))
         except AppError as exc:
-            await _delete_managed_object(file_path)
             results.append(schemas.BulkUploadResult(name=file.filename, success=False, error=exc.message))
         except HTTPException as exc:
-            await _delete_managed_object(file_path)
             results.append(schemas.BulkUploadResult(name=file.filename, success=False, error=str(exc.detail)))
         except ValueError as exc:
-            await _delete_managed_object(file_path)
             results.append(schemas.BulkUploadResult(name=file.filename, success=False, error=str(exc)))
         except Exception as e:
-            await _delete_managed_object(file_path)
             results.append(
                 schemas.BulkUploadResult(
                     name=file.filename,
@@ -425,29 +487,14 @@ async def preflight_excel(
         raise HTTPException(status_code=400, detail='File content does not match extension')
 
     unique_filename = f'{uuid.uuid4()}{Path(file.filename).suffix.lower()}'
-    temp_path = await asyncio.to_thread(_temporary_upload_path, Path(file.filename).suffix.lower())
     try:
-        await _save_upload_file(file, temp_path, settings.upload_max_file_size_bytes)
-        data_plane = await asyncio.to_thread(client_from_settings)
-        source_path = await asyncio.to_thread(lambda: data_plane.build_object_url('uploads', unique_filename, namespace=get_namespace()))
-        await _upload_staged_file_to_object_store(
-            data_plane,
-            temp_path,
-            source_path,
-            max_bytes=settings.upload_max_file_size_bytes,
-        )
+        source_path = await _stage_upload_to_object_store(file, unique_filename)
     except asyncio.CancelledError:
-        with contextlib.suppress(FileNotFoundError):
-            await asyncio.to_thread(temp_path.unlink)
         raise
     except HTTPException:
-        with contextlib.suppress(FileNotFoundError):
-            await asyncio.to_thread(temp_path.unlink)
         raise
     except Exception as e:
         logger.error('Failed to save file: %s', type(e).__name__, exc_info=True)
-        with contextlib.suppress(FileNotFoundError):
-            await asyncio.to_thread(temp_path.unlink)
         raise HTTPException(status_code=500, detail='Failed to save file') from e
 
     try:
@@ -468,13 +515,10 @@ async def preflight_excel(
             delete_source=True,
         )
     except asyncio.CancelledError:
-        cleanup_task = asyncio.create_task(_delete_managed_object(source_path))
-        with contextlib.suppress(Exception):
-            await _wait_for_transfer_task(cleanup_task)
+        # The durable preflight intent owns this object while its worker may
+        # still be reading it; cleanup authorization runs after the request
+        # settles and checks for any published datasource reference.
         raise
-    finally:
-        with contextlib.suppress(FileNotFoundError):
-            await asyncio.to_thread(temp_path.unlink)
     target_sheet = sheet_name or (preflight.sheets[0] if preflight.sheets else None)
     if not target_sheet:
         await clear_preflight(preflight_id)
@@ -501,8 +545,8 @@ async def preflight_excel_path(
     payload: schemas.ExcelPreflightPathRequest,
     runtime_probe: RuntimeAvailabilityProbe = Depends(get_runtime_availability_probe),
 ):
-    data_plane = await asyncio.to_thread(client_from_settings)
-    if not await asyncio.to_thread(data_plane.object_exists, payload.file_path):
+    data_plane = await run_api_blocking(client_from_settings)
+    if not await run_api_blocking(data_plane.object_exists, payload.file_path):
         raise HTTPException(status_code=400, detail='Excel file not found')
 
     if DataSourceFileType.from_upload_suffix(Path(urlparse(payload.file_path).path).suffix.lower()) != DataSourceFileType.EXCEL:
@@ -701,7 +745,7 @@ async def connect_datasource(
 
     owner_id = user.id if user else None
     if source_type == DataSourceType.FILE:
-        file_config = await asyncio.to_thread(schemas.FileDataSourceConfig.model_validate, datasource.config)
+        file_config = await run_api_blocking(schemas.FileDataSourceConfig.model_validate, datasource.config)
         result = await create_remote_file_datasource(
             runtime_probe=runtime_probe,
             name=datasource.name,
@@ -723,7 +767,7 @@ async def connect_datasource(
         )
         return await json_response(result)
     if source_type == DataSourceType.DATABASE:
-        db_config = await asyncio.to_thread(schemas.DatabaseDataSourceConfig.model_validate, datasource.config)
+        db_config = await run_api_blocking(schemas.DatabaseDataSourceConfig.model_validate, datasource.config)
         result = await create_remote_database_datasource(
             runtime_probe=runtime_probe,
             name=datasource.name,
@@ -735,7 +779,7 @@ async def connect_datasource(
         )
         return await json_response(result)
     if source_type == DataSourceType.ICEBERG:
-        iceberg_config = await asyncio.to_thread(schemas.IcebergDataSourceConfig.model_validate, datasource.config)
+        iceberg_config = await run_api_blocking(schemas.IcebergDataSourceConfig.model_validate, datasource.config)
         result = await create_remote_iceberg_datasource(
             runtime_probe=runtime_probe,
             name=datasource.name,
@@ -753,17 +797,15 @@ async def connect_datasource(
 
 @router.get('/internal-postgres/tables', response_model=list[schemas.InternalPostgresTable])
 @handle_errors(operation='list internal Postgres tables')
-def list_internal_postgres_tables(session: Session = Depends(get_db_async)):
-    return service.list_internal_postgres_tables(session)
+async def list_internal_postgres_tables():
+    return await run_api_blocking(run_db, service.list_internal_postgres_tables)
 
 
-@router.post('/internal-postgres/toggle', response_model=schemas.InternalPostgresTable)
-@handle_errors(operation='toggle internal Postgres table', value_error_status=400)
-def toggle_internal_postgres_table(
+def _toggle_internal_postgres_table(
+    session: Session,
     request: schemas.InternalPostgresToggleRequest,
-    session: Session = Depends(get_db_async),
-    user: User | None = Depends(get_current_user),
-):
+    owner_id: str | None,
+) -> schemas.InternalPostgresTable:
     if request.enabled:
         if service.internal_postgres_table_is_onboarded(session, request.schema_name, request.table_name):
             return schemas.InternalPostgresTable(
@@ -785,7 +827,7 @@ def toggle_internal_postgres_table(
             connection_string=service.internal_postgres_connection_string(),
             query=query,
             branch='master',
-            owner_id=user.id if user else None,
+            owner_id=owner_id,
         )
         return schemas.InternalPostgresTable(
             schema_name=request.schema_name,
@@ -800,6 +842,20 @@ def toggle_internal_postgres_table(
     )
 
 
+@router.post('/internal-postgres/toggle', response_model=schemas.InternalPostgresTable)
+@handle_errors(operation='toggle internal Postgres table', value_error_status=400)
+async def toggle_internal_postgres_table(
+    request: schemas.InternalPostgresToggleRequest,
+    user: User | None = Depends(get_current_user),
+):
+    return await run_api_blocking(
+        run_db,
+        _toggle_internal_postgres_table,
+        request,
+        user.id if user else None,
+    )
+
+
 @router.get('', response_model=list[schemas.DataSourceListItem], mcp=True)
 @handle_errors(operation='list datasources')
 async def list_datasources(include_hidden: bool = False):
@@ -808,18 +864,17 @@ async def list_datasources(include_hidden: bool = False):
     Set include_hidden=true to include auto-generated output datasources created by analyses.
     Each datasource has an id, name, source_type, and config dict.
     """
-    datasources = await asyncio.to_thread(run_db, service.list_datasources, include_hidden=include_hidden)
+    datasources = await run_api_blocking(run_db, service.list_datasources, include_hidden=include_hidden)
     return await json_response(datasources)
 
 
 @router.get('/lineage', mcp=True)
 @handle_errors(operation='get lineage')
-def get_lineage(
+async def get_lineage(
     target_datasource_id: DataSourceId | None = None,
     branch: str | None = None,
     include_internals: bool = False,
     mode: str = 'full',
-    session: Session = Depends(get_db_async),
 ):
     """Get the dependency lineage graph for datasources.
 
@@ -838,8 +893,9 @@ def get_lineage(
         branch = branch.strip()
         if not branch:
             branch = None
-    return build_lineage(
-        session,
+    return await run_api_blocking(
+        run_db,
+        build_lineage,
         target_datasource_id=datasource_id,
         branch=branch,
         include_internals=include_internals,
@@ -851,7 +907,7 @@ def get_lineage(
 @handle_errors(operation='get datasource')
 async def get_datasource(datasource_id: DataSourceId):
     """Get a single datasource by ID with full config and metadata. Use GET /datasource to find IDs."""
-    response = await asyncio.to_thread(run_db, service.get_datasource, parse_datasource_id(datasource_id))
+    response = await run_api_blocking(run_db, service.get_datasource, parse_datasource_id(datasource_id))
     # Branch listing is optional enrichment for analysis outputs (data-plane / object store).
     # Existence of the row is a DB fact — never fail GET when the data-plane is unavailable.
     if response.source_type == DataSourceType.ICEBERG and response.created_by == DataSourceCreatedBy.ANALYSIS.value:
@@ -859,7 +915,7 @@ async def get_datasource(datasource_id: DataSourceId):
         branch_name = response.config.get('branch') if isinstance(response.config.get('branch'), str) else None
         if isinstance(metadata_path, str):
             try:
-                response.config['branches'] = await asyncio.to_thread(_list_export_branches, metadata_path, branch_name)
+                response.config['branches'] = await run_api_blocking(_list_export_branches, metadata_path, branch_name)
             except Exception:
                 logger.warning(
                     'Failed to list export branches for analysis output %s; returning row without live branches',
@@ -884,9 +940,9 @@ async def get_datasource_schema(
     Set refresh=true to re-read the schema from the source file.
     """
     datasource_id_value = parse_datasource_id(datasource_id)
-    await asyncio.to_thread(run_db, _require_active_datasource, datasource_id_value)
+    await run_api_blocking(run_db, _require_active_datasource, datasource_id_value)
     if refresh:
-        datasource = await asyncio.to_thread(run_db, service.get_datasource, datasource_id_value)
+        datasource = await run_api_blocking(run_db, service.get_datasource, datasource_id_value)
         source = datasource.config.get('source') if isinstance(datasource.config, dict) else None
         source_type = DataSourceType.read(source.get('source_type') if isinstance(source, dict) else None, default=None)
         if datasource.source_type == DataSourceType.ICEBERG and source_type is not None and source_type.supports_external_ingestion:
@@ -896,7 +952,7 @@ async def get_datasource_schema(
             )
     schema = None
     if sheet_name is None:
-        schema = await asyncio.to_thread(run_db, service.cached_schema, datasource_id_value)
+        schema = await run_api_blocking(run_db, service.cached_schema, datasource_id_value)
     if schema is None:
         schema = await get_remote_datasource_schema(
             datasource_id=datasource_id_value,
@@ -904,8 +960,8 @@ async def get_datasource_schema(
             refresh=False,
             runtime_probe=runtime_probe,
         )
-    schema = await asyncio.to_thread(run_db, service.attach_column_descriptions, datasource_id_value, schema)
-    response = await asyncio.to_thread(schemas.SchemaInfo.model_validate, schema_info_response_payload(schema))
+    schema = await run_api_blocking(run_db, service.attach_column_descriptions, datasource_id_value, schema)
+    response = await run_api_blocking(schemas.SchemaInfo.model_validate, schema_info_response_payload(schema))
     return await json_response(response)
 
 
@@ -918,8 +974,8 @@ async def update_datasource_column_metadata(
 ):
     """Update one or more datasource column descriptions and return the active schema."""
     datasource_id_value = parse_datasource_id(datasource_id)
-    await asyncio.to_thread(run_db, _require_active_datasource, datasource_id_value)
-    schema = await asyncio.to_thread(run_db, service.cached_schema, datasource_id_value)
+    await run_api_blocking(run_db, _require_active_datasource, datasource_id_value)
+    schema = await run_api_blocking(run_db, service.cached_schema, datasource_id_value)
     if schema is None:
         schema = await get_remote_datasource_schema(
             datasource_id=datasource_id_value,
@@ -927,8 +983,8 @@ async def update_datasource_column_metadata(
             refresh=False,
             runtime_probe=runtime_probe,
         )
-    schema = await asyncio.to_thread(run_db, service.update_column_descriptions, datasource_id_value, payload, schema)
-    response = await asyncio.to_thread(schemas.SchemaInfo.model_validate, schema_info_response_payload(schema))
+    schema = await run_api_blocking(run_db, service.update_column_descriptions, datasource_id_value, payload, schema)
+    response = await run_api_blocking(schemas.SchemaInfo.model_validate, schema_info_response_payload(schema))
     return await json_response(response)
 
 
@@ -949,7 +1005,7 @@ async def compare_snapshots(
     Use GET /compute/iceberg/{id}/snapshots to find snapshot IDs.
     """
     datasource_id_value = parse_datasource_id(datasource_id)
-    await asyncio.to_thread(run_db, _require_active_datasource, datasource_id_value)
+    await run_api_blocking(run_db, _require_active_datasource, datasource_id_value)
     response = await compare_remote_iceberg_snapshots(
         datasource_id=datasource_id_value,
         snapshot_a=payload.snapshot_a,
@@ -968,7 +1024,7 @@ async def _handle_column_stats(
     runtime_probe: RuntimeAvailabilityProbe,
 ):
     datasource_id_value = parse_datasource_id(datasource_id)
-    await asyncio.to_thread(run_db, _require_active_datasource, datasource_id_value)
+    await run_api_blocking(run_db, _require_active_datasource, datasource_id_value)
     datasource = payload.datasource if payload else None
     config = None
     if isinstance(datasource, dict):
@@ -1031,9 +1087,9 @@ async def update_datasource(
     """Update a datasource's name or config. Use GET /datasource/{id} to see current values."""
     datasource_id_value = parse_datasource_id(datasource_id)
     if update.config is None or not any(key in update.config for key in (*_EXCEL_PARSING_KEYS, 'csv_options', 'skip_rows')):
-        return await asyncio.to_thread(run_db, service.update_datasource, datasource_id_value, update)
+        return await run_api_blocking(run_db, service.update_datasource, datasource_id_value, update)
 
-    snapshot = await asyncio.to_thread(run_db, _datasource_update_snapshot, datasource_id_value)
+    snapshot = await run_api_blocking(run_db, _datasource_update_snapshot, datasource_id_value)
     current_config, expected_revision, source_type, file_type = snapshot
     next_config = {**current_config, **update.config}
     is_excel = (
@@ -1044,11 +1100,11 @@ async def update_datasource(
         if is_excel:
             simple_config = {key: value for key, value in update.config.items() if key not in _EXCEL_PARSING_KEYS or value != current_config.get(key)}
             update = update.model_copy(update={'config': simple_config})
-        return await asyncio.to_thread(run_db, service.update_datasource, datasource_id_value, update)
+        return await run_api_blocking(run_db, service.update_datasource, datasource_id_value, update)
 
     source_path = current_config.get('file_path')
     if not isinstance(source_path, str) or not source_path:
-        return await asyncio.to_thread(run_db, service.update_datasource, datasource_id_value, update)
+        return await run_api_blocking(run_db, service.update_datasource, datasource_id_value, update)
     selection = {key: next_config[key] for key in _EXCEL_PARSING_KEYS if key in next_config}
     selection.setdefault('has_header', True)
     resolved = await execute_excel_preflight(
@@ -1060,7 +1116,7 @@ async def update_datasource(
         delete_source=False,
         datasource_id=datasource_id_value,
     )
-    return await asyncio.to_thread(
+    return await run_api_blocking(
         run_db,
         service.update_datasource,
         datasource_id_value,
@@ -1078,7 +1134,7 @@ async def ingest_datasource(
 ):
     """Ingest an external datasource again from source. Useful after upstream data changes."""
     datasource_id_value = parse_datasource_id(datasource_id)
-    await asyncio.to_thread(run_db, _require_active_datasource, datasource_id_value)
+    await run_api_blocking(run_db, _require_active_datasource, datasource_id_value)
     response = await ingest_remote_datasource(
         datasource_id=datasource_id_value,
         runtime_probe=runtime_probe,
@@ -1088,11 +1144,13 @@ async def ingest_datasource(
 
 @router.delete('/{datasource_id}', status_code=202, mcp=True)
 @handle_errors(operation='delete datasource')
-def delete_datasource(
-    datasource_id: DataSourceId,
-    session: Session = Depends(get_db_async),
-):
+async def delete_datasource(datasource_id: DataSourceId):
     """Queue datasource deletion and finalize it once the preview engine is fully drained."""
     datasource_id_value = parse_datasource_id(datasource_id)
-    datasource_delete_service.request_delete(session, datasource_id_value)
+
+    def request_delete(session: Session) -> None:
+        # Do not let the service's ORM return value escape the session scope.
+        datasource_delete_service.request_delete(session, datasource_id_value)
+
+    await run_api_blocking(run_db, request_delete)
     return {'accepted': True}

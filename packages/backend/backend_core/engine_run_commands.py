@@ -15,4 +15,7 @@ def update_engine_run(
     run_id: str,
     **changes: Any,
 ) -> EngineRunResponseSchema:
-    return engine_runs_service.stage_update_engine_run(session, run_id, **changes)
+    result = engine_runs_service.stage_update_engine_run(session, run_id, **changes)
+    if isinstance(result, bool):
+        raise ValueError('Engine-run response serialization cannot be disabled on the API command path')
+    return result

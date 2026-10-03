@@ -1,12 +1,12 @@
 from __future__ import annotations
 
-import asyncio
 from typing import Any, Protocol
 
 from fastapi import Depends, HTTPException, Request
 from sqlmodel import Session
 
 from backend_core import runtime_workers_service
+from backend_core.api_execution_budget import run_api_blocking
 from backend_core.auth_config import settings as auth_settings
 from backend_core.database import run_settings_db
 from backend_core.domain.runtime_workers.models import RuntimeWorkerKind
@@ -47,7 +47,7 @@ def resolve_lock_owner_id(session: Session, token: str | None) -> str | None:
 
 
 async def get_optional_lock_owner_id(request: Request) -> str | None:
-    return await asyncio.to_thread(run_settings_db, resolve_lock_owner_id, _resolve_session_token(request))
+    return await run_api_blocking(run_settings_db, resolve_lock_owner_id, _resolve_session_token(request))
 
 
 async def get_runtime_availability_probe(

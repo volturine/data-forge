@@ -11,6 +11,7 @@ from dataclasses import dataclass
 from datetime import UTC, datetime
 
 from dataforge_protocol import compute_pb2, enums_pb2
+from runtime.compute_request_context import get_compute_request_id
 from runtime.config import settings
 from runtime.docker_engine import DockerComputeEngine, reconcile_deployment_containers
 from runtime.domain.compute.base import ComputeEngine, EngineStatusInfo
@@ -23,6 +24,7 @@ logger = logging.getLogger(__name__)
 _RESOURCE_KEYS = frozenset({"max_threads", "max_memory_mb", "streaming_chunk_size"})
 _ENGINE_ACTIVITY_SNAPSHOT_INTERVAL_SECONDS = 30.0
 _DOCKER_RECONCILE_INTERVAL_SECONDS = 60.0
+_SLOW_ENGINE_ACQUISITION_SECONDS = 5.0
 
 # Admission classes are scheduled round-robin. Datasource work can still be
 # shared by many tabs, while interactive and lifecycle/build work cannot be
@@ -57,6 +59,18 @@ class EngineIdentityKey:
     scope: int
     reuse_policy: int
     resource_id: str
+
+
+@dataclass(frozen=True, slots=True)
+class _WarmWorkerCleanup:
+    engine: ComputeEngine
+    identity: EngineIdentityKey
+    request_id: str
+    attempts: int = 0
+
+
+_WARM_WORKER_CLEANUP_RETRY_BASE_SECONDS = 0.25
+_WARM_WORKER_CLEANUP_RETRY_MAX_SECONDS = 4.0
 
 
 @dataclass(slots=True)
@@ -121,6 +135,54 @@ def _engine_reuse_policy_value(identity: EngineIdentity) -> str:
     if identity.reuse_policy == enums_pb2.ENGINE_REUSE_POLICY_EXCLUSIVE:
         return "exclusive"
     raise ValueError("engine identity reuse policy is unspecified")
+
+
+def _log_engine_acquisition(
+    identity: EngineIdentity,
+    *,
+    namespace: str,
+    source: str,
+    acquisition_ms: float,
+    warm_health_ms: float = 0.0,
+    warm_candidate_shutdown_wait_ms: float = 0.0,
+    warm_bind_ms: float = 0.0,
+    cold_start_ms: float = 0.0,
+    warm_candidate_rejected: bool = False,
+    lifecycle_wait_ms: float = 0.0,
+    prior_engine_shutdown_ms: float = 0.0,
+    idle_eviction_shutdown_ms: float = 0.0,
+    process_alive_check_ms: float = 0.0,
+    snapshot_publication_ms: float = 0.0,
+) -> None:
+    try:
+        scope = _engine_scope_value(identity)
+    except ValueError:
+        scope = str(identity.scope)
+    log_acquisition = logger.warning if acquisition_ms >= _SLOW_ENGINE_ACQUISITION_SECONDS * 1000 else logger.info
+    log_acquisition(
+        "Engine acquisition request_id=%s namespace=%s engine_scope=%s resource_id=%s source=%s "
+        "acquisition_ms=%.1f warm_health_ms=%.1f warm_candidate_shutdown_wait_ms=%.1f "
+        "warm_bind_ms=%.1f "
+        "cold_start_ms=%.1f warm_candidate_rejected=%s "
+        "lifecycle_wait_ms=%.1f prior_engine_shutdown_ms=%.1f idle_eviction_shutdown_ms=%.1f "
+        "process_alive_check_ms=%.1f snapshot_publication_ms=%.1f",
+        get_compute_request_id() or "-",
+        namespace,
+        scope,
+        identity.resource_id,
+        source,
+        acquisition_ms,
+        warm_health_ms,
+        warm_candidate_shutdown_wait_ms,
+        warm_bind_ms,
+        cold_start_ms,
+        warm_candidate_rejected,
+        lifecycle_wait_ms,
+        prior_engine_shutdown_ms,
+        idle_eviction_shutdown_ms,
+        process_alive_check_ms,
+        snapshot_publication_ms,
+    )
 
 
 class EngineInfo:
@@ -199,6 +261,10 @@ class ProcessManager:
         # A shutdown removes an engine from the active map before Docker work
         # completes. Keep that container protected until stop/remove returns.
         self._stopping_engines: dict[int, ComputeEngine] = {}
+        # Rejected unassigned workers are outside active compute capacity, but
+        # remain protected from Docker reconciliation until serial cleanup ends.
+        self._stopping_warm_workers: dict[int, ComputeEngine] = {}
+        self._warm_worker_cleanups: deque[_WarmWorkerCleanup] = deque()
         self._closed = False
         self._supervisor_id = supervisor_id
         self._coordinator_generation = coordinator_generation
@@ -308,6 +374,76 @@ class ProcessManager:
             self._stopping_engines.pop(id(engine), None)
             self._capacity_reserved_stops.discard(id(engine))
 
+    def _queue_rejected_warm_worker(self, engine: ComputeEngine, identity: EngineIdentityKey) -> float:
+        """Transfer a rejected reserve worker to the bounded serial cleanup lane."""
+        started = time.perf_counter()
+        with self._capacity_changed:
+            self._starting_engines.pop(id(engine), None)
+            self._stopping_warm_workers[id(engine)] = engine
+            self._warm_worker_cleanups.append(_WarmWorkerCleanup(engine=engine, identity=identity, request_id=get_compute_request_id() or "-"))
+            self._warm_worker_replenish_trigger.set()
+            self._capacity_changed.notify_all()
+        return (time.perf_counter() - started) * 1000
+
+    def _cleanup_rejected_warm_worker(self, cleanup: _WarmWorkerCleanup) -> float:
+        """Stop one rejected candidate; return a bounded retry delay on failure."""
+        started = time.perf_counter()
+        try:
+            cleanup.engine.shutdown()
+        except Exception:
+            duration_ms = (time.perf_counter() - started) * 1000
+            with self._capacity_changed:
+                shutting_down = self._closed or self._reaper_stop.is_set()
+                next_attempt = cleanup.attempts + 1
+                if shutting_down:
+                    # Do not keep shutdown_all() alive in an unbounded retry
+                    # loop. Startup reconciliation owns any remaining labeled
+                    # container after this final best-effort attempt.
+                    self._stopping_warm_workers.pop(id(cleanup.engine), None)
+                    self._capacity_changed.notify_all()
+                else:
+                    self._warm_worker_cleanups.appendleft(
+                        _WarmWorkerCleanup(
+                            engine=cleanup.engine,
+                            identity=cleanup.identity,
+                            request_id=cleanup.request_id,
+                            attempts=next_attempt,
+                        )
+                    )
+            log_cleanup_failure = logger.error if shutting_down else (logger.warning if next_attempt == 1 else logger.debug)
+            log_cleanup_failure(
+                "Rejected warm worker cleanup failed request_id=%s namespace=%s engine_scope=%s resource_id=%s duration_ms=%.1f attempt=%s outcome=%s",
+                cleanup.request_id,
+                cleanup.identity.namespace,
+                enums_pb2.EngineScope.Name(cleanup.identity.scope).removeprefix("ENGINE_SCOPE_").lower(),
+                cleanup.identity.resource_id,
+                duration_ms,
+                next_attempt,
+                "handed_to_startup_reconciliation" if shutting_down else "retrying_with_backoff",
+                exc_info=True,
+            )
+            if shutting_down:
+                return 0.0
+            return min(
+                _WARM_WORKER_CLEANUP_RETRY_BASE_SECONDS * (2 ** min(next_attempt - 1, 4)),
+                _WARM_WORKER_CLEANUP_RETRY_MAX_SECONDS,
+            )
+
+        duration_ms = (time.perf_counter() - started) * 1000
+        with self._capacity_changed:
+            self._stopping_warm_workers.pop(id(cleanup.engine), None)
+            self._capacity_changed.notify_all()
+        log_cleanup_complete = logger.warning if duration_ms >= _SLOW_ENGINE_ACQUISITION_SECONDS * 1000 else logger.info
+        log_cleanup_complete(
+            "Rejected warm worker cleanup complete request_id=%s namespace=%s engine_scope=%s resource_id=%s duration_ms=%.1f",
+            cleanup.request_id,
+            cleanup.identity.namespace,
+            enums_pb2.EngineScope.Name(cleanup.identity.scope).removeprefix("ENGINE_SCOPE_").lower(),
+            cleanup.identity.resource_id,
+            duration_ms,
+        )
+        return 0.0
+
     def _managed_container_ids(self) -> set[str]:
         """Return Docker containers that belong to this manager right now."""
         with self._capacity_changed:
@@ -316,6 +452,7 @@ class ProcessManager:
                 *self._warm_workers,
                 *self._starting_engines.values(),
                 *self._stopping_engines.values(),
+                *self._stopping_warm_workers.values(),
             ]
         return {container_id for engine in engines if (container_id := getattr(engine, "container_id", None)) is not None}
 
@@ -851,6 +988,7 @@ class ProcessManager:
         _reserve: bool = False,
     ) -> EngineInfo:
         """Spawn a new compute engine or reuse an existing one for the same identity."""
+        acquisition_started = time.perf_counter()
         normalized_config = self._normalize_config(resource_config)
         qualified_key = self._key(identity)
         namespace = qualified_key.namespace
@@ -863,6 +1001,16 @@ class ProcessManager:
         capacity_start_held = False
         warm_claim_held = False
         cold_start_held = False
+        warm_health_ms = 0.0
+        warm_candidate_shutdown_wait_ms = 0.0
+        warm_bind_ms = 0.0
+        cold_start_ms = 0.0
+        warm_candidate_rejected = False
+        lifecycle_wait_ms = 0.0
+        prior_engine_shutdown_ms = 0.0
+        idle_eviction_shutdown_ms = 0.0
+        process_alive_check_ms = 0.0
+        snapshot_publication_ms = 0.0
 
         while True:
             with self._engines_lock:
@@ -913,14 +1061,28 @@ class ProcessManager:
                     break
 
             if wait_event is not None:
+                wait_started = time.perf_counter()
                 wait_event.wait()
+                lifecycle_wait_ms += (time.perf_counter() - wait_started) * 1000
                 wait_event = None
 
         if reused_info is not None:
             if admission is not None:
                 self.release_spawn_admission(identity, namespace=namespace, owned=True)
             if publish_activity_snapshot:
-                self._emit_snapshot_for_namespaces(changed_namespaces)
+                snapshot_started = time.perf_counter()
+                try:
+                    self._emit_snapshot_for_namespaces(changed_namespaces)
+                finally:
+                    snapshot_publication_ms = (time.perf_counter() - snapshot_started) * 1000
+            _log_engine_acquisition(
+                identity,
+                namespace=namespace,
+                source="existing",
+                acquisition_ms=(time.perf_counter() - acquisition_started) * 1000,
+                lifecycle_wait_ms=lifecycle_wait_ms,
+                snapshot_publication_ms=snapshot_publication_ms,
+            )
             return reused_info
 
         spawned_info: EngineInfo | None = None
@@ -929,10 +1091,12 @@ class ProcessManager:
         admission_consumed = False
         try:
             if shutdown_target is not None:
+                shutdown_started = time.perf_counter()
                 try:
                     shutdown_target.shutdown()
                 finally:
                     self._untrack_stopping_engine(shutdown_target)
+                    prior_engine_shutdown_ms += (time.perf_counter() - shutdown_started) * 1000
 
             # Non-blocking admission: running engines only count. If full, raise
             # EngineCapacityFull so the caller parks outside the runner pool.
@@ -969,12 +1133,14 @@ class ProcessManager:
                 raise EngineCapacityFull(f"Compute worker capacity ({settings.compute_workers}) is full")
             if evict_info is not None:
                 _, idle_engine_info, _ = evict_info
+                shutdown_started = time.perf_counter()
                 try:
                     idle_engine_info.engine.shutdown()
                 finally:
                     self._untrack_stopping_engine(idle_engine_info.engine)
                     if eviction_event is not None:
                         self._finish_engine_event(evict_info[0], eviction_event)
+                    idle_eviction_shutdown_ms += (time.perf_counter() - shutdown_started) * 1000
                 changed_namespaces.add(evict_info[0].namespace)
 
             # Health checks are engine RPCs: pop under the lock, probe outside it.
@@ -999,22 +1165,25 @@ class ProcessManager:
                 if candidate is None:
                     break
                 try:
+                    health_started = time.perf_counter()
                     healthy = candidate.check_health()
                 except Exception:
                     healthy = False
+                finally:
+                    warm_health_ms += (time.perf_counter() - health_started) * 1000
                 if healthy:
                     warm_worker = candidate
                 else:
-                    self._untrack_starting_engine(candidate)
-                    with contextlib.suppress(Exception):
-                        candidate.shutdown()
+                    warm_candidate_rejected = True
+                    warm_candidate_shutdown_wait_ms += self._queue_rejected_warm_worker(candidate, qualified_key)
 
             if warm_worker is not None:
-                logger.info("Assigning warm worker to engine identity %s", qualified_key)
                 engine = warm_worker
                 bind_id = getattr(engine, "bind_identity", None)
                 if callable(bind_id):
+                    bind_started = time.perf_counter()
                     bind_id(identity, resource_config=normalized_config, namespace=namespace)
+                    warm_bind_ms = (time.perf_counter() - bind_started) * 1000
                 bind_cap = getattr(engine, "bind_capacity_notifier", None)
                 if callable(bind_cap):
                     bind_cap(self.notify_capacity_changed)
@@ -1023,11 +1192,17 @@ class ProcessManager:
                     with self._capacity_changed:
                         self._cold_starts += 1
                         cold_start_held = True
-                logger.info("Spawning new engine for key %s", qualified_key)
-                engine = self._engine_factory(identity, normalized_config)
-                self._track_starting_engine(engine)
-                engine.start()
-            if not engine.is_process_alive():
+                cold_start_started = time.perf_counter()
+                try:
+                    engine = self._engine_factory(identity, normalized_config)
+                    self._track_starting_engine(engine)
+                    engine.start()
+                finally:
+                    cold_start_ms = (time.perf_counter() - cold_start_started) * 1000
+            process_check_started = time.perf_counter()
+            process_alive = engine.is_process_alive()
+            process_alive_check_ms = (time.perf_counter() - process_check_started) * 1000
+            if not process_alive:
                 engine.shutdown()
                 raise RuntimeError(f"Failed to start engine for {qualified_key}")
             info = EngineInfo(engine)
@@ -1089,7 +1264,27 @@ class ProcessManager:
 
         if spawned_info is None:
             raise RuntimeError(f"Failed to start engine for {qualified_key}")
-        self._emit_snapshot_for_namespaces(changed_namespaces)
+        snapshot_started = time.perf_counter()
+        try:
+            self._emit_snapshot_for_namespaces(changed_namespaces)
+        finally:
+            snapshot_publication_ms = (time.perf_counter() - snapshot_started) * 1000
+        _log_engine_acquisition(
+            identity,
+            namespace=namespace,
+            source="warm" if warm_worker is not None else "cold",
+            acquisition_ms=(time.perf_counter() - acquisition_started) * 1000,
+            warm_health_ms=warm_health_ms,
+            warm_candidate_shutdown_wait_ms=warm_candidate_shutdown_wait_ms,
+            warm_bind_ms=warm_bind_ms,
+            cold_start_ms=cold_start_ms,
+            warm_candidate_rejected=warm_candidate_rejected,
+            lifecycle_wait_ms=lifecycle_wait_ms,
+            prior_engine_shutdown_ms=prior_engine_shutdown_ms,
+            idle_eviction_shutdown_ms=idle_eviction_shutdown_ms,
+            process_alive_check_ms=process_alive_check_ms,
+            snapshot_publication_ms=snapshot_publication_ms,
+        )
         return spawned_info
 
     def _configs_differ(self, old_config: dict, new_config: dict) -> bool:
@@ -1362,6 +1557,47 @@ class ProcessManager:
             # new RPC client against the old container and report collisions.
             self._finish_engine_event(qualified_key, shutdown_event)
 
+    def shutdown_engine_if_idle(self, identity: EngineIdentity, *, namespace: str | None = None) -> bool:
+        """Stop an engine only after atomically fencing new RID work.
+
+        Datasource deletion uses this instead of checking ``current_job_id``
+        and then shutting down in separate operations. A claimed request may
+        already hold a reservation while it waits for the per-RID job lane,
+        before the engine reports a current job.
+        """
+        key = self._key(identity, namespace=namespace)
+        while True:
+            with self._capacity_changed:
+                lifecycle_event = self._engine_events.get(key)
+                if lifecycle_event is None:
+                    info = self._engines.get(key)
+                    if info is None:
+                        return not (
+                            self._request_reservations.get(key, 0)
+                            or self._spawn_admissions.get(key)
+                            or any(waiter.key == key for waiter in self._spawn_waiters)
+                        )
+                    if self._request_reservations.get(key, 0) or info.active_reservations or info.engine.current_job_id:
+                        return False
+                    shutdown_event = threading.Event()
+                    self._engine_events[key] = shutdown_event
+                    del self._engines[key]
+                    self._engine_identities.pop(key, None)
+                    self._stopping_engines[id(info.engine)] = info.engine
+                    self._capacity_changed.notify_all()
+                    break
+            lifecycle_event.wait()
+
+        try:
+            logger.info("Shutting down idle engine for %s", key)
+            info.engine.shutdown()
+            logger.info("Idle engine shutdown complete for %s", key)
+            self._emit_snapshot_for_namespaces({key.namespace})
+            return True
+        finally:
+            self._untrack_stopping_engine(info.engine)
+            self._finish_engine_event(key, shutdown_event)
+
     def shutdown_all(self) -> None:
         self._reaper_stop.set()
         self._warm_worker_replenish_trigger.set()
@@ -1406,6 +1642,14 @@ class ProcessManager:
                 loop.call_soon_threadsafe(reject)
         for spawn_event in spawn_events:
             spawn_event.wait()
+        # A spawn already in progress may reject and enqueue a warm candidate
+        # after the replenisher thread observed _closed and exited. Drain that
+        # residual work once here so teardown remains deterministic.
+        with self._capacity_changed:
+            final_warm_cleanups = list(self._warm_worker_cleanups)
+            self._warm_worker_cleanups.clear()
+        for cleanup in final_warm_cleanups:
+            self._cleanup_rejected_warm_worker(cleanup)
         with self._capacity_changed:
             shutdown_targets = list(self._engines.items())
             self._engines.clear()
@@ -1484,25 +1728,45 @@ class ProcessManager:
             return None
 
     def _replenish_warm_workers_loop(self) -> None:
-        while not self._closed and not self._reaper_stop.is_set():
+        factory = self._warm_worker_factory
+        while True:
             self._warm_worker_replenish_trigger.wait(timeout=1.0)
             self._warm_worker_replenish_trigger.clear()
-            if self._closed or self._reaper_stop.is_set() or self._warm_worker_factory is None:
-                break
-            factory = self._warm_worker_factory
-            # Refill one worker at a time. A single startup avoids a
-            # Docker/process burst during a claim.
-            while not self._closed and not self._reaper_stop.is_set():
+            # Starts and rejected-worker shutdowns share this one serial
+            # lifecycle lane. A rejected worker remains part of the warm
+            # budget until Docker cleanup completes, bounding queued cleanup
+            # by the configured reserve and preventing replacement overrun.
+            while True:
+                cleanup: _WarmWorkerCleanup | None = None
                 with self._capacity_changed:
+                    stopping = self._closed or self._reaper_stop.is_set()
                     target_warm = max(self._warm_worker_target, 0)
                     current_warm = len(self._warm_workers)
-                    if current_warm + self._warm_worker_starts >= target_warm:
+                    can_replenish = (
+                        not stopping and factory is not None and current_warm + self._warm_worker_starts + len(self._stopping_warm_workers) < target_warm
+                    )
+                    if can_replenish:
+                        self._cold_starts += 1
+                        self._warm_worker_starts += 1
+                    elif self._warm_worker_cleanups:
+                        cleanup = self._warm_worker_cleanups.popleft()
+                    elif stopping or factory is None:
+                        if stopping and self._engine_events:
+                            self._capacity_changed.wait(timeout=1.0)
+                            continue
+                        return
+                    else:
                         break
-                    self._cold_starts += 1
-                    self._warm_worker_starts += 1
+
+                if cleanup is not None:
+                    retry_delay = self._cleanup_rejected_warm_worker(cleanup)
+                    if retry_delay > 0:
+                        self._reaper_stop.wait(retry_delay)
+                    continue
 
                 engine: ComputeEngine | None = None
                 discard_engine = False
+                assert factory is not None
                 try:
                     engine = self._spawn_warm_worker(factory)
                 finally:
@@ -1529,8 +1793,8 @@ class ProcessManager:
                     self._untrack_starting_engine(engine)
                 # Back off outside the lock: engine startup and the global
                 # advisory-lock probe are both allowed to fail transiently.
-                if engine is None and self._reaper_stop.wait(1.0):
-                    break
+                if engine is None:
+                    time.sleep(1.0)
 
     def _reap_idle_engines_loop(self) -> None:
         reconciliation_interval = max(_DOCKER_RECONCILE_INTERVAL_SECONDS, self._idle_reap_interval_seconds)

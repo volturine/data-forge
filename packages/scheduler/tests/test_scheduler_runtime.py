@@ -2,7 +2,6 @@ from __future__ import annotations
 
 import asyncio
 import os
-import threading
 
 import pytest
 
@@ -15,52 +14,53 @@ class FakeSchedulerClient:
         self.calls: list[tuple[str, str]] = []
         self.run_due_calls = 0
 
-    def register(self, *, worker_id: str, hostname: str, pid: int, capacity: int, retry_seconds: float | None = None) -> None:
+    async def register(self, *, worker_id: str, hostname: str, pid: int, capacity: int, retry_seconds: float | None = None) -> None:
         assert hostname
         assert pid == os.getpid()
         assert capacity == 1
         self.calls.append(("register", worker_id))
 
-    def heartbeat(self, *, worker_id: str, timeout_seconds: float | None = None) -> None:
+    async def heartbeat(self, *, worker_id: str, timeout_seconds: float | None = None) -> None:
         self.calls.append(("heartbeat", worker_id))
 
-    def stop(self, *, worker_id: str, timeout_seconds: float | None = None) -> None:
+    async def stop(self, *, worker_id: str, timeout_seconds: float | None = None) -> None:
         self.calls.append(("stop", worker_id))
 
-    def due_schedule_namespaces(self) -> list[scheduler_main.DueScheduleNamespace]:
+    async def due_schedule_namespaces(self) -> list[scheduler_main.DueScheduleNamespace]:
         self.calls.append(("due_schedule_namespaces", "default"))
         return [scheduler_main.DueScheduleNamespace(namespace="default", generation=1)]
 
-    def run_due(self, *, worker_id: str, namespace: str, generation: int) -> scheduler_main.SchedulerRunDueResult:
+    async def run_due(self, *, worker_id: str, namespace: str, generation: int, wake_ids: tuple[int, ...] = ()) -> scheduler_main.SchedulerRunDueResult:
         assert generation == 1
         self.run_due_calls += 1
         self.calls.append(("run_due", f"{worker_id}:{namespace}"))
         return scheduler_main.SchedulerRunDueResult(handled=False, enqueued=[], failures=[])
 
 
-def test_scheduler_heartbeat_retries_transient_deadline_without_error_traceback(caplog: pytest.LogCaptureFixture) -> None:
-    stop = threading.Event()
+@pytest.mark.asyncio
+async def test_scheduler_heartbeat_retries_transient_deadline_without_error_traceback(caplog: pytest.LogCaptureFixture) -> None:
+    stop = asyncio.Event()
     timeouts: list[float | None] = []
     health = DispatcherHealth("scheduler:test", lanes=("scheduler",), max_age_seconds=30)
     health.registered()
     health.progress("scheduler")
 
     class _Client(FakeSchedulerClient):
-        def register(self, *, worker_id: str, hostname: str, pid: int, capacity: int, retry_seconds: float | None = None) -> None:
+        async def register(self, *, worker_id: str, hostname: str, pid: int, capacity: int, retry_seconds: float | None = None) -> None:
             assert worker_id == "scheduler:test"
             assert retry_seconds == 0.0
             assert health.snapshot()["registered"] is False
 
-        def heartbeat(self, *, worker_id: str, timeout_seconds: float | None = None) -> None:
+        async def heartbeat(self, *, worker_id: str, timeout_seconds: float | None = None) -> None:
             assert worker_id == "scheduler:test"
             timeouts.append(timeout_seconds)
             if len(timeouts) == 1:
                 raise RuntimeError("Backend scheduler gRPC failed with DEADLINE_EXCEEDED: Deadline Exceeded")
             stop.set()
 
-    scheduler_main._heartbeat_loop_sync(
+    await scheduler_main._heartbeat_loop(
         client=_Client(),
-        stop_signal=stop,
+        stop_event=stop,
         worker_id="scheduler:test",
         heartbeat_seconds=0.001,
         health=health,
@@ -124,14 +124,58 @@ async def test_scheduler_loop_registers_runs_due_work_and_stops() -> None:
 
 
 @pytest.mark.asyncio
+async def test_scheduler_stops_starting_namespace_work_after_stop_during_rpc() -> None:
+    first_started = asyncio.Event()
+    allow_first_to_return = asyncio.Event()
+    stop_event = asyncio.Event()
+
+    class MultiNamespaceClient(FakeSchedulerClient):
+        async def due_schedule_namespaces(self) -> list[scheduler_main.DueScheduleNamespace]:
+            return [
+                scheduler_main.DueScheduleNamespace(namespace="first", generation=1),
+                scheduler_main.DueScheduleNamespace(namespace="second", generation=2),
+            ]
+
+        async def run_due(self, *, worker_id: str, namespace: str, generation: int, wake_ids: tuple[int, ...] = ()) -> scheduler_main.SchedulerRunDueResult:
+            self.run_due_calls += 1
+            self.calls.append(("run_due", f"{worker_id}:{namespace}"))
+            if namespace == "first":
+                first_started.set()
+                await asyncio.wait_for(allow_first_to_return.wait(), timeout=5)
+            return scheduler_main.SchedulerRunDueResult(handled=False, enqueued=[], failures=[])
+
+    client = MultiNamespaceClient()
+    loop_task = asyncio.create_task(
+        scheduler_main.scheduler_loop(
+            stop_event,
+            "scheduler-stop-batch",
+            client=client,
+            health=DispatcherHealth("scheduler-stop-batch", lanes=("scheduler",), max_age_seconds=30),
+            check_interval_seconds=1,
+            heartbeat_seconds=60,
+        )
+    )
+    try:
+        await asyncio.wait_for(first_started.wait(), timeout=2)
+    finally:
+        stop_event.set()
+        allow_first_to_return.set()
+    await asyncio.wait_for(loop_task, timeout=3)
+
+    assert client.run_due_calls == 1
+    assert ("run_due", "scheduler-stop-batch:first") in client.calls
+    assert ("run_due", "scheduler-stop-batch:second") not in client.calls
+
+
+@pytest.mark.asyncio
 async def test_scheduler_loop_retries_after_backend_restart() -> None:
     class FlakySchedulerClient(FakeSchedulerClient):
-        def run_due(self, *, worker_id: str, namespace: str, generation: int) -> scheduler_main.SchedulerRunDueResult:
+        async def run_due(self, *, worker_id: str, namespace: str, generation: int, wake_ids: tuple[int, ...] = ()) -> scheduler_main.SchedulerRunDueResult:
             assert generation == 1
             if self.run_due_calls == 0:
                 self.run_due_calls += 1
                 raise RuntimeError("backend unavailable")
-            return super().run_due(worker_id=worker_id, namespace=namespace, generation=generation)
+            return await super().run_due(worker_id=worker_id, namespace=namespace, generation=generation, wake_ids=wake_ids)
 
     client = FlakySchedulerClient()
     stop_event = asyncio.Event()
@@ -157,19 +201,19 @@ async def test_scheduler_loop_retries_after_backend_restart() -> None:
 
 @pytest.mark.asyncio
 async def test_stalled_scheduler_dispatch_expires_health_while_heartbeat_continues() -> None:
-    entered = threading.Event()
-    release = threading.Event()
-    heartbeat_seen = threading.Event()
+    entered = asyncio.Event()
+    release = asyncio.Event()
+    heartbeat_seen = asyncio.Event()
     now = 100.0
     health = DispatcherHealth("scheduler:hung", lanes=("scheduler",), max_age_seconds=45, clock=lambda: now)
 
     class StalledSchedulerClient(FakeSchedulerClient):
-        def run_due(self, *, worker_id: str, namespace: str, generation: int) -> scheduler_main.SchedulerRunDueResult:
+        async def run_due(self, *, worker_id: str, namespace: str, generation: int, wake_ids: tuple[int, ...] = ()) -> scheduler_main.SchedulerRunDueResult:
             entered.set()
-            assert release.wait(5)
-            return super().run_due(worker_id=worker_id, namespace=namespace, generation=generation)
+            await asyncio.wait_for(release.wait(), timeout=5)
+            return await super().run_due(worker_id=worker_id, namespace=namespace, generation=generation, wake_ids=wake_ids)
 
-        def heartbeat(self, *, worker_id: str, timeout_seconds: float | None = None) -> None:
+        async def heartbeat(self, *, worker_id: str, timeout_seconds: float | None = None) -> None:
             heartbeat_seen.set()
 
     stop_event = asyncio.Event()
@@ -184,10 +228,10 @@ async def test_stalled_scheduler_dispatch_expires_health_while_heartbeat_continu
         )
     )
     try:
-        assert await asyncio.to_thread(entered.wait, 1)
+        await asyncio.wait_for(entered.wait(), timeout=1)
         assert health.snapshot()["healthy"] is True
         now += 46
-        assert await asyncio.to_thread(heartbeat_seen.wait, 1)
+        await asyncio.wait_for(heartbeat_seen.wait(), timeout=1)
         assert health.snapshot()["healthy"] is False
     finally:
         stop_event.set()

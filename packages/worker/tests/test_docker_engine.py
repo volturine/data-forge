@@ -925,9 +925,12 @@ def test_engine_start_closes_docker_client_when_container_creation_fails(monkeyp
     assert client.closed
 
 
-def test_engine_start_waits_for_rpc_listener_before_initializing(monkeypatch) -> None:
+def test_engine_start_waits_for_rpc_listener_before_initializing(monkeypatch, caplog) -> None:
     calls: list[str] = []
     created: dict[str, object] = {}
+    monkeypatch.setattr("runtime.docker_engine._SLOW_ENGINE_START_SECONDS", 0.0)
+    monkeypatch.setattr("runtime.docker_engine.get_compute_request_id", lambda: "cold-preview-request")
+    caplog.set_level(logging.WARNING, logger="runtime.docker_engine")
 
     class Container:
         id = "engine-container"
@@ -966,7 +969,12 @@ def test_engine_start_waits_for_rpc_listener_before_initializing(monkeypatch) ->
     engine.start()
 
     assert calls == ["container.create", "container.start", "rpc.listener_ready", "rpc.initialize"]
-    assert "cpu_shares" not in created
+    assert created["cpu_shares"] == 128
+    startup_log = next(record.message for record in caplog.records if "Slow engine startup" in record.message)
+    assert "request_id=cold-preview-request" in startup_log
+    assert "namespace=tenant-a" in startup_log
+    assert "engine_scope=analysis_interactive" in startup_log
+    assert f"resource_id={engine.identity.resource_id}" in startup_log
     client.close()
 
 
@@ -1014,7 +1022,7 @@ def test_warm_worker_uses_the_standard_engine_runtime(monkeypatch) -> None:
     assert isinstance(environment, dict)
     assert environment["ENGINE_INIT_TIMEOUT_SECONDS"] == "0"
     assert "ENGINE_PRELOAD_COMPUTE" not in environment
-    assert "cpu_shares" not in captured
+    assert captured["cpu_shares"] == 128
     engine._detach_local_handles()
 
 

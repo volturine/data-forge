@@ -8,7 +8,7 @@ import threading
 import time
 import traceback
 from collections.abc import AsyncIterator, Awaitable, Callable, MutableMapping
-from concurrent.futures import ThreadPoolExecutor
+from concurrent.futures import Future, ThreadPoolExecutor
 from contextlib import AsyncExitStack, asynccontextmanager
 from pathlib import Path
 from typing import Any, cast
@@ -23,7 +23,14 @@ from starlette.requests import ClientDisconnect
 
 from api import include_api_routes
 from backend_core import runtime_ipc
-from backend_core.api_execution_budget import ApiDatabaseBudget, register_bootstrap_executor_lifecycle
+from backend_core.api_execution_budget import (
+    ApiDatabaseBudget,
+    ApiWorkAdmissionFull,
+    BoundedThreadPoolExecutor,
+    register_api_blocking_executor_lifecycle,
+    register_bootstrap_executor_lifecycle,
+    run_api_blocking,
+)
 from backend_core.auth_config import settings as auth_settings
 from backend_core.compute_response_recovery import response_recovery
 from backend_core.config import settings
@@ -69,6 +76,7 @@ logger = logging.getLogger(__name__)
 _API_BLOCKING_WORKERS = 12
 _API_SYNC_HANDLER_WORKERS = 4
 _API_BOOTSTRAP_WORKERS = 2
+_API_BLOCKING_PENDING_PER_WORKER = 16
 _API_DIAGNOSTICS_EXECUTOR = ThreadPoolExecutor(max_workers=1, thread_name_prefix='api-diagnostics')
 _API_PROCESS_SNAPSHOT_TTL_SECONDS = 1.0
 _API_PROCESS_SNAPSHOT_LOCK = threading.Lock()
@@ -88,7 +96,12 @@ def _api_thread_budget() -> ApiDatabaseBudget:
     )
 
 
-def _new_api_blocking_executor(workers: int | None = None) -> ThreadPoolExecutor:
+def _api_blocking_pending_limit(workers: int) -> int:
+    """Keep blocking-work backlog proportional to its thread budget, not socket count."""
+    return max(0, workers * _API_BLOCKING_PENDING_PER_WORKER)
+
+
+def _new_api_blocking_executor(workers: int | None = None) -> BoundedThreadPoolExecutor:
     # ``asyncio.to_thread`` is used for short database, object-store, and
     # filesystem operations throughout the async API routes. The default
     # executor is based on host CPU count, not application capacity; in a
@@ -99,8 +112,10 @@ def _new_api_blocking_executor(workers: int | None = None) -> ThreadPoolExecutor
     # Create this per event loop. TestClient and development reloads close
     # their loop, which also shuts down its default executor; a process-global
     # executor would then be reused after shutdown by the next lifespan.
-    return ThreadPoolExecutor(
-        max_workers=_api_thread_budget().general_workers if workers is None else workers,
+    worker_count = _api_thread_budget().general_workers if workers is None else workers
+    return BoundedThreadPoolExecutor(
+        max_workers=worker_count,
+        max_pending=_api_blocking_pending_limit(worker_count),
         thread_name_prefix='api-blocking',
     )
 
@@ -193,13 +208,41 @@ def _schedule_api_process_snapshot_refresh() -> None:
     future.add_done_callback(finish_refresh)
 
 
-_READINESS_EXECUTOR = ThreadPoolExecutor(
-    max_workers=1,
-    thread_name_prefix='readiness-probe',
-)
+_READINESS_EXECUTOR = ThreadPoolExecutor(max_workers=1, thread_name_prefix='readiness-probe')
+
+
+class ReadinessProbe:
+    """Coalesce concurrent health checks onto one blocking probe operation."""
+
+    def __init__(self, executor: ThreadPoolExecutor, check: Callable[[], tuple[dict[str, str], bool]]) -> None:
+        self._executor = executor
+        self._check = check
+        self._lock = threading.Lock()
+        self._inflight: Future[tuple[dict[str, str], bool]] | None = None
+
+    async def run(self) -> tuple[dict[str, str], bool]:
+        with self._lock:
+            future = self._inflight
+            if future is None or future.done():
+                future = self._executor.submit(self._check)
+                self._inflight = future
+                future.add_done_callback(self._clear)
+        return await asyncio.shield(asyncio.wrap_future(future))
+
+    def _clear(self, completed: Future[tuple[dict[str, str], bool]]) -> None:
+        with self._lock:
+            if self._inflight is completed:
+                self._inflight = None
+
+
 _EVENT_LOOP_LAG_INTERVAL_SECONDS = 0.25
-_EVENT_LOOP_LAG_WARN_SECONDS = 0.5
+_EVENT_LOOP_LAG_INFO_SECONDS = 0.5
+_EVENT_LOOP_LAG_WARN_SECONDS = 1.5
 _EVENT_LOOP_BLOCK_SAMPLE_SECONDS = 0.1
+
+
+def _event_loop_lag_log_level(lag_seconds: float, warning_seconds: float) -> int:
+    return logging.WARNING if lag_seconds >= warning_seconds else logging.INFO
 
 
 class EventLoopBlockWatchdog:
@@ -263,7 +306,7 @@ class EventLoopBlockWatchdog:
 
 
 async def _run_namespace_middleware[T](function, *args, **kwargs) -> T:
-    return await asyncio.to_thread(function, *args, **kwargs)
+    return await run_api_blocking(function, *args, **kwargs)
 
 
 frontend_build_dir = ROOT / 'packages' / 'frontend' / 'build'
@@ -360,7 +403,7 @@ async def _provision_default_namespace_credentials() -> None:
     attempts = 5
     for attempt in range(1, attempts + 1):
         try:
-            await asyncio.to_thread(run_settings_db, provision_namespace_engine_credentials, settings.default_namespace)
+            await run_api_blocking(run_settings_db, provision_namespace_engine_credentials, settings.default_namespace)
             return
         except NamespaceCredentialError:
             if attempt == attempts:
@@ -390,8 +433,9 @@ async def event_loop_lag_loop(
             except TimeoutError:
                 pass
             lag = max(0.0, loop.time() - started - interval)
-            if lag >= warning:
-                logger.warning(
+            if lag >= _EVENT_LOOP_LAG_INFO_SECONDS:
+                logger.log(
+                    _event_loop_lag_log_level(lag, warning),
                     'API event loop lag detected pid=%s lag_ms=%.1f interval_ms=%.1f',
                     os.getpid(),
                     lag * 1000,
@@ -422,12 +466,21 @@ async def _start_api_lifespan(app: FastAPI, cleanup: AsyncExitStack) -> None:
     _guard_runtime_workers(_resolve_uvicorn_workers())
     api_budget = _api_thread_budget()
     sync_handler_workers = _configure_sync_thread_capacity()
-    # ``asyncio.to_thread`` otherwise creates a host-sized default executor.
-    # General, AnyIO, and bootstrap threads together fit the database capacity.
+    # API blocking calls pass through asynchronous admission before submission.
+    # Keep the default executor installed for framework and explicitly excluded
+    # adapters; application call sites use run_api_blocking directly.
     loop = asyncio.get_running_loop()
     api_blocking_workers = api_budget.general_workers
     api_blocking_executor = _new_api_blocking_executor(api_blocking_workers)
     loop.set_default_executor(api_blocking_executor)
+    register_api_blocking_executor_lifecycle(
+        loop,
+        api_blocking_executor,
+        api_blocking_workers,
+        _api_blocking_pending_limit(api_blocking_workers),
+        cleanup,
+        _API_DIAGNOSTICS_EXECUTOR,
+    )
     bootstrap_executor = ThreadPoolExecutor(max_workers=api_budget.bootstrap_workers, thread_name_prefix='api-bootstrap')
     api_logging_configured = False
 
@@ -435,8 +488,8 @@ async def _start_api_lifespan(app: FastAPI, cleanup: AsyncExitStack) -> None:
         if not api_logging_configured:
             return
         logger.info('Application shutdown complete')
-        await asyncio.to_thread(flush_request_logs)
-        await asyncio.to_thread(shutdown_logging)
+        await run_api_blocking(flush_request_logs)
+        await run_api_blocking(shutdown_logging)
 
     register_bootstrap_executor_lifecycle(
         loop,
@@ -445,11 +498,11 @@ async def _start_api_lifespan(app: FastAPI, cleanup: AsyncExitStack) -> None:
         cleanup,
         _API_DIAGNOSTICS_EXECUTOR,
         after_shutdown=shutdown_api_resources,
+        max_pending=_api_blocking_pending_limit(api_budget.bootstrap_workers),
     )
     # ThreadPoolExecutor creates threads on its first submissions. Doing that
     # lazily during a burst blocks the submitting event loop in Thread.start().
     # Prime all API-owned request pools while startup is still closed to traffic.
-    from backend_core.websocket import _WEBSOCKET_SERIALIZATION_EXECUTOR
     from modules.compute.executor_client import _COMPUTE_SERIALIZATION_EXECUTOR
 
     request_log_prewarm = _prewarm_executor(_REQUEST_LOG_EXECUTOR, _REQUEST_LOG_WORKERS) if settings.log_requests_enabled else asyncio.sleep(0)
@@ -459,7 +512,6 @@ async def _start_api_lifespan(app: FastAPI, cleanup: AsyncExitStack) -> None:
         _prewarm_executor(_API_DIAGNOSTICS_EXECUTOR, 1),
         _prewarm_executor(_READINESS_EXECUTOR, 1),
         _prewarm_executor(_COMPUTE_SERIALIZATION_EXECUTOR, 4),
-        _prewarm_executor(_WEBSOCKET_SERIALIZATION_EXECUTOR, 2),
         request_log_prewarm,
         _prewarm_executor(bootstrap_executor, api_budget.bootstrap_workers),
     )
@@ -474,7 +526,7 @@ async def _start_api_lifespan(app: FastAPI, cleanup: AsyncExitStack) -> None:
     # Frontend asset serving is on the API process in the containerized
     # deployment. Load it before accepting requests so the first browser burst
     # cannot serialize on filesystem access or the default AnyIO threadpool.
-    await asyncio.to_thread(_load_frontend_asset_cache)
+    await run_api_blocking(_load_frontend_asset_cache)
     await configure_logging_off_loop()
     api_logging_configured = True
     cleanup.push_async_callback(close_clients)
@@ -486,10 +538,10 @@ async def _start_api_lifespan(app: FastAPI, cleanup: AsyncExitStack) -> None:
     from backend_core.public_schema import ensure_backend_public_tables
     from modules.auth.service import ensure_default_user
 
-    await asyncio.to_thread(ensure_backend_public_tables)
-    await asyncio.to_thread(run_settings_db, ensure_default_user)
+    await run_api_blocking(ensure_backend_public_tables)
+    await run_api_blocking(run_settings_db, ensure_default_user)
     await _provision_default_namespace_credentials()
-    await asyncio.to_thread(run_db, udf_service.seed_defaults)
+    await run_api_blocking(run_db, udf_service.seed_defaults)
 
     # Start background cleanup task
     stop_event = asyncio.Event()
@@ -520,7 +572,7 @@ async def _start_api_lifespan(app: FastAPI, cleanup: AsyncExitStack) -> None:
 
     from modules.mcp.routes import get_registry
 
-    await asyncio.to_thread(get_registry, app)
+    await run_api_blocking(get_registry, app)
     warmed_anyio_threads = await _prewarm_anyio_thread_pool(sync_handler_workers)
     logger.info('Prewarmed AnyIO synchronous-handler threads=%s', warmed_anyio_threads)
 
@@ -533,10 +585,20 @@ async def _recover_api_notifications() -> None:
 
 app = FastAPI(title=settings.app_name, version=settings.app_version, lifespan=lifespan)
 
+
+async def api_work_admission_full_handler(_request: Request, _exc: ApiWorkAdmissionFull) -> JSONResponse:
+    return JSONResponse(
+        status_code=503,
+        content={'detail': 'API execution capacity is full'},
+        headers={'Retry-After': '1'},
+    )
+
+
 # Global exception handlers for consistent structured error responses
 app.add_exception_handler(AppError, cast(Any, app_error_handler))
 app.add_exception_handler(RequestValidationError, cast(Any, validation_error_handler))
 app.add_exception_handler(ClientDisconnect, cast(Any, client_disconnect_handler))
+app.add_exception_handler(ApiWorkAdmissionFull, cast(Any, api_work_admission_full_handler))
 app.add_exception_handler(Exception, generic_error_handler)
 
 # Namespaces already known to this process; avoids a DB roundtrip per request.
@@ -602,11 +664,13 @@ class NamespaceMiddleware:
             await self.app(scope, receive, send)
             return
 
-        raw = _scope_header(scope, b'x-namespace')
+        namespace_header = _scope_header(scope, b'x-namespace')
+        raw = namespace_header
         token = set_namespace_context(raw)
         try:
             if not auth_settings.auth_required:
-                await _run_namespace_middleware(run_settings_db, register_namespace, raw)
+                if not (is_health_request and namespace_header is None):
+                    await _run_namespace_middleware(run_settings_db, register_namespace, raw)
                 await self.app(scope, receive, send)
                 return
             normalized = normalize_namespace(raw)
@@ -688,7 +752,6 @@ if settings.log_requests_enabled:
 
 async def _api_observability_snapshot() -> dict[str, object]:
     limiter = anyio.to_thread.current_default_thread_limiter()
-    statistics = limiter.statistics()
     with _API_PROCESS_SNAPSHOT_LOCK:
         cached = _api_process_snapshot_cache
     if cached is None or time.monotonic() - cached[0] >= _API_PROCESS_SNAPSHOT_TTL_SECONDS:
@@ -696,9 +759,8 @@ async def _api_observability_snapshot() -> dict[str, object]:
     snapshot = {} if cached is None else dict(cached[1])
     snapshot.update(
         {
-            'anyio_tokens': statistics.total_tokens,
-            'anyio_borrowed': statistics.borrowed_tokens,
-            'anyio_waiting': statistics.tasks_waiting,
+            'anyio_tokens': limiter.total_tokens,
+            'anyio_borrowed': limiter.borrowed_tokens,
         }
     )
     return snapshot
@@ -722,7 +784,7 @@ async def root() -> Response | dict[str, str]:
         cached = _cached_frontend_response('index.html')
         if cached is not None:
             return cached
-        if await asyncio.to_thread(index_path.is_file):
+        if await run_api_blocking(index_path.is_file):
             return FileResponse(str(index_path))
 
     return {
@@ -783,6 +845,9 @@ def _readiness_checks() -> tuple[dict[str, str], bool]:
     return checks, is_ready
 
 
+_READINESS_PROBE = ReadinessProbe(_READINESS_EXECUTOR, _readiness_checks)
+
+
 @app.get('/health/ready')
 async def readiness() -> JSONResponse:
     """Readiness check - verifies app can handle requests.
@@ -791,8 +856,7 @@ async def readiness() -> JSONResponse:
     single executor. Health-check bursts therefore cannot occupy the shared
     AnyIO worker pool used by sync dependencies and routes.
     """
-    loop = asyncio.get_running_loop()
-    checks, is_ready = await loop.run_in_executor(_READINESS_EXECUTOR, _readiness_checks)
+    checks, is_ready = await _READINESS_PROBE.run()
     status_code = 200 if is_ready else 503
     return JSONResponse(
         content={'status': 'ready' if is_ready else 'not_ready', 'checks': checks},
@@ -839,24 +903,24 @@ async def serve_static_or_index(full_path: str) -> Response:
         if cached is not None:
             return cached
         prerendered_path = frontend_build_dir / f'{relative_path}.html'
-        if await asyncio.to_thread(prerendered_path.is_file):
+        if await run_api_blocking(prerendered_path.is_file):
             return FileResponse(str(prerendered_path))
 
     # This branch is only for tests/development or a cache miss after a
     # filesystem change. It is intentionally not part of the normal E2E path.
     path = frontend_build_dir / relative_path
-    if await asyncio.to_thread(path.is_file):
+    if await run_api_blocking(path.is_file):
         return FileResponse(str(path))
 
     fallback_path = frontend_build_dir / '200.html'
-    if await asyncio.to_thread(fallback_path.is_file):
+    if await run_api_blocking(fallback_path.is_file):
         cached = _cached_frontend_response('200.html')
         if cached is not None:
             return cached
         return FileResponse(str(fallback_path))
 
     index_path = frontend_build_dir / 'index.html'
-    if await asyncio.to_thread(index_path.is_file):
+    if await run_api_blocking(index_path.is_file):
         cached = _cached_frontend_response('index.html')
         if cached is not None:
             return cached

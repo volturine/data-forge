@@ -141,3 +141,78 @@ async def test_dispatcher_uses_cached_namespaces_when_refresh_fails() -> None:
     dispatcher._next_refresh = 0
 
     assert await dispatcher._next_namespace() == 'alpha'
+
+
+@pytest.mark.asyncio
+async def test_canceling_dispatcher_joins_its_started_database_operation() -> None:
+    wake_hub = VersionHub()
+    operation_started = threading.Event()
+    release_operation = threading.Event()
+    operation_finished = threading.Event()
+
+    def dispatch(_namespace: str, _limit: int) -> int:
+        operation_started.set()
+        if not release_operation.wait(timeout=3):
+            raise TimeoutError('test database operation was not released')
+        operation_finished.set()
+        return 0
+
+    dispatcher = RuntimeOutboxDispatcher(
+        poll_seconds=30,
+        namespace_refresh_seconds=30,
+        list_namespaces=lambda: ['alpha'],
+        dispatch_namespace=dispatch,
+        wake_hub=wake_hub,
+    )
+    task = asyncio.create_task(dispatcher.run(asyncio.Event()))
+    try:
+        assert await asyncio.to_thread(operation_started.wait, 1)
+        task.cancel()
+        await asyncio.sleep(0.05)
+        assert not task.done()
+        assert not operation_finished.is_set()
+
+        release_operation.set()
+        with pytest.raises(asyncio.CancelledError):
+            await asyncio.wait_for(task, timeout=1)
+        assert operation_finished.is_set()
+    finally:
+        release_operation.set()
+        if not task.done():
+            task.cancel()
+            await asyncio.gather(task, return_exceptions=True)
+
+
+@pytest.mark.asyncio
+async def test_cancelled_dispatcher_logs_late_database_failure(caplog: pytest.LogCaptureFixture) -> None:
+    operation_started = threading.Event()
+    release_operation = threading.Event()
+
+    def dispatch(_namespace: str, _limit: int) -> int:
+        operation_started.set()
+        if not release_operation.wait(timeout=3):
+            raise TimeoutError('test DB operation was not released')
+        raise RuntimeError('late commit failure')
+
+    dispatcher = RuntimeOutboxDispatcher(
+        poll_seconds=30,
+        namespace_refresh_seconds=30,
+        list_namespaces=lambda: ['alpha'],
+        dispatch_namespace=dispatch,
+        wake_hub=VersionHub(),
+    )
+    task = asyncio.create_task(dispatcher.run(asyncio.Event()))
+    try:
+        assert await asyncio.to_thread(operation_started.wait, 1)
+        task.cancel()
+        release_operation.set()
+        with pytest.raises(asyncio.CancelledError):
+            await asyncio.wait_for(task, timeout=1)
+        assert 'Runtime outbox operation failed after its caller was cancelled' in caplog.text
+        assert 'RuntimeError' in caplog.text
+        assert 'late commit failure' in caplog.text
+    finally:
+        release_operation.set()
+        if not task.done():
+            task.cancel()
+            await asyncio.gather(task, return_exceptions=True)

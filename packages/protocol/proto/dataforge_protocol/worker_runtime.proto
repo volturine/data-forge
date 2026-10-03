@@ -231,6 +231,12 @@ message WorkerStorageCleanupClaim {
   string url = 3 [(buf.validate.field).string.min_len = 1];
   bool is_prefix = 4;
   optional string catalog_identifier = 5 [(buf.validate.field).string.min_len = 1];
+  optional string catalog_type = 6 [(buf.validate.field).string.min_len = 1];
+  optional string catalog_uri = 7 [(buf.validate.field).string.min_len = 1];
+  optional string warehouse = 8 [(buf.validate.field).string.min_len = 1];
+  optional string catalog_namespace = 9 [(buf.validate.field).string.min_len = 1];
+  optional string catalog_table = 10 [(buf.validate.field).string.min_len = 1];
+  optional string catalog_family_prefix = 11 [(buf.validate.field).string.min_len = 1];
 }
 
 message WorkerStorageCleanupClaimsResponse {

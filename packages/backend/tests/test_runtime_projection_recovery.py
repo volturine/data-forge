@@ -35,13 +35,13 @@ def projection_socket(monkeypatch) -> WebSocket:
     async def wait_for_disconnect(_socket: WebSocket) -> None:
         await asyncio.Event().wait()
 
-    def database():
-        yield SimpleNamespace(close=lambda: None)
+    def database(function, *args, **kwargs):
+        return function(SimpleNamespace(), *args, **kwargs)
 
     monkeypatch.setattr(compute_routes, '_require_websocket_user', AsyncMock())
     monkeypatch.setattr(compute_routes, '_wait_for_websocket_disconnect', wait_for_disconnect)
     monkeypatch.setattr(compute_routes, 'safe_close_websocket', AsyncMock())
-    monkeypatch.setattr(compute_routes, 'get_db', database)
+    monkeypatch.setattr(compute_routes, 'run_db', database)
     return cast(WebSocket, Socket())
 
 

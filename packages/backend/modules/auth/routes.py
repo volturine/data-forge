@@ -1,4 +1,3 @@
-import asyncio
 import secrets
 from collections.abc import Callable
 from functools import partial
@@ -10,10 +9,10 @@ from fastapi.responses import RedirectResponse
 from sqlmodel import Session
 
 from backend_core import http as http_client
-from backend_core.api_execution_budget import run_bootstrap_settings_db
+from backend_core.api_execution_budget import run_api_blocking, run_bootstrap_settings_db
 from backend_core.auth_config import settings as auth_settings
 from backend_core.auth_exceptions import OAuthError
-from backend_core.database import get_settings_db_async, run_settings_db
+from backend_core.database import run_settings_db
 from backend_core.error_handlers import handle_errors
 from backend_core.proxy import client_ip, request_scheme
 from modules.auth import commands, service as auth_service
@@ -46,7 +45,7 @@ router = APIRouter(prefix='/auth', tags=['auth'])
 
 async def _run_auth_db[**P, T](function: Callable[Concatenate[Session, P], T], *args: P.args, **kwargs: P.kwargs) -> T:
     work = partial(run_settings_db, function, *args, **kwargs)
-    return await asyncio.to_thread(work)
+    return await run_api_blocking(work)
 
 
 async def send_verification_email(user_email: str, token: str) -> bool:
@@ -149,6 +148,24 @@ def _register_user(
     return _build_user_public(session, result.user), result.user_session.id, result.verification_token
 
 
+def _login_user(
+    session: Session,
+    *,
+    email: str,
+    password: str,
+    device_info: str | None,
+    ip_address: str | None,
+) -> tuple[UserPublic, str]:
+    result = commands.login_user(
+        session,
+        email=email,
+        password=password,
+        device_info=device_info,
+        ip_address=ip_address,
+    )
+    return _build_user_public(session, result.user), result.user_session.id
+
+
 def _authenticate_oauth_user(
     session: Session,
     *,
@@ -198,41 +215,40 @@ async def register(
 
 @router.post('/login', response_model=UserPublic)
 @handle_errors(operation='login')
-def login(
+async def login(
     body: LoginRequest,
     request: Request,
     response: Response,
-    session: Session = Depends(get_settings_db_async),
 ) -> UserPublic:
-    result = commands.login_user(
-        session,
+    user, session_token = await run_api_blocking(
+        run_settings_db,
+        _login_user,
         email=body.email,
         password=body.password,
         device_info=_request_device_info(request),
         ip_address=_request_ip_address(request),
     )
-    _set_session_cookie(response, result.user_session.id, secure=request_scheme(request) == 'https')
-    return _build_user_public(session, result.user)
+    _set_session_cookie(response, session_token, secure=request_scheme(request) == 'https')
+    return user
 
 
 @router.post('/logout')
 @handle_errors(operation='logout')
-def logout(request: Request, response: Response, session: Session = Depends(get_settings_db_async)) -> dict[str, bool]:
+async def logout(request: Request, response: Response) -> dict[str, bool]:
     token = request.cookies.get('session_token') or request.headers.get('X-Session-Token')
     if token:
-        commands.revoke_session(session, token)
+        await run_api_blocking(run_settings_db, commands.revoke_session, token)
     _clear_session_cookie(response)
     return {'success': True}
 
 
 @router.delete('/account')
 @handle_errors(operation='delete account')
-def delete_account_route(
+async def delete_account_route(
     response: Response,
     current_user: User = Depends(get_current_user),
-    session: Session = Depends(get_settings_db_async),
 ) -> dict[str, bool]:
-    commands.delete_user_account(session, current_user.id)
+    await run_api_blocking(run_settings_db, commands.delete_user_account, current_user.id)
     _clear_session_cookie(response)
     return {'success': True}
 
@@ -324,26 +340,31 @@ async def update_profile_route(
 
 @router.put('/password')
 @handle_errors(operation='change password')
-def change_password_route(
+async def change_password_route(
     body: ChangePasswordRequest,
     current_user: User = Depends(get_current_user),
-    session: Session = Depends(get_settings_db_async),
 ) -> dict[str, bool]:
-    commands.change_password(session, current_user.id, body.current_password, body.new_password)
+    await run_api_blocking(
+        run_settings_db,
+        commands.change_password,
+        current_user.id,
+        body.current_password,
+        body.new_password,
+    )
     return {'success': True}
 
 
 @router.delete('/sessions')
 @handle_errors(operation='revoke all sessions')
-def revoke_all_sessions_route(
+async def revoke_all_sessions_route(
     request: Request,
     response: Response,
     current_user: User = Depends(get_current_user),
-    session: Session = Depends(get_settings_db_async),
 ) -> dict[str, bool]:
     current_token = request.cookies.get('session_token') or request.headers.get('X-Session-Token')
-    commands.revoke_all_user_sessions(
-        session,
+    await run_api_blocking(
+        run_settings_db,
+        commands.revoke_all_user_sessions,
         user_id=current_user.id,
         current_session_id=current_token,
     )
@@ -498,7 +519,7 @@ async def github_oauth_callback(
         email = next((item.get('email') for item in emails if item.get('verified')), None)
     if not isinstance(email, str):
         raise OAuthError('GitHub account has no verified email')
-    result = await asyncio.to_thread(
+    result = await run_api_blocking(
         run_settings_db,
         _authenticate_oauth_user,
         provider=AuthProviderName.GITHUB,
@@ -515,10 +536,9 @@ async def github_oauth_callback(
 
 @router.post('/providers/{provider}/unlink')
 @handle_errors(operation='unlink provider')
-def unlink_provider_route(
+async def unlink_provider_route(
     provider: str,
     current_user: User = Depends(get_current_user),
-    session: Session = Depends(get_settings_db_async),
 ) -> dict[str, bool]:
     try:
         provider_name = AuthProviderName(provider)
@@ -526,5 +546,5 @@ def unlink_provider_route(
         raise HTTPException(status_code=400, detail='Unsupported provider') from exc
     if provider_name not in {AuthProviderName.GOOGLE, AuthProviderName.GITHUB}:
         raise HTTPException(status_code=400, detail='Unsupported provider')
-    commands.unlink_provider(session, current_user.id, provider_name)
+    await run_api_blocking(run_settings_db, commands.unlink_provider, current_user.id, provider_name)
     return {'success': True}

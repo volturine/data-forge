@@ -9,6 +9,7 @@ from collections.abc import Awaitable, Callable
 from sqlalchemy import tuple_
 from sqlmodel import Session, col, select
 
+from backend_core.api_execution_budget import run_api_blocking
 from backend_core.compute_response_recovery import response_recovery
 from backend_core.database import run_db
 from backend_core.domain.build_runs.live import BuildNotification, hub as build_hub
@@ -47,7 +48,7 @@ async def refresh_build_projections() -> None:
     for namespace, build_ids in grouped.items():
         for offset in range(0, len(build_ids), _PROJECTION_RECOVERY_BATCH_SIZE):
             batch = build_ids[offset : offset + _PROJECTION_RECOVERY_BATCH_SIZE]
-            sequences = await asyncio.to_thread(_read_build_sequences, namespace, batch)
+            sequences = await run_api_blocking(_read_build_sequences, namespace, batch)
             for build_id, sequence in sequences.items():
                 # publish preserves a newer sequence if a notification raced
                 # the database read. Never synthesize a replay cursor.
@@ -78,7 +79,7 @@ async def refresh_lock_projections() -> None:
     for namespace, targets in grouped.items():
         for offset in range(0, len(targets), _PROJECTION_RECOVERY_BATCH_SIZE):
             batch = targets[offset : offset + _PROJECTION_RECOVERY_BATCH_SIZE]
-            statuses = await asyncio.to_thread(_read_lock_statuses, namespace, [(resource_type, resource_id) for resource_type, resource_id, _version in batch])
+            statuses = await run_api_blocking(_read_lock_statuses, namespace, [(resource_type, resource_id) for resource_type, resource_id, _version in batch])
             for resource_type, resource_id, version in batch:
                 payload = LockWebsocketStatusMessage(resource_type=resource_type, resource_id=resource_id, lock=statuses.get((resource_type, resource_id)))
                 await lock_watchers.refresh_watchers(namespace, resource_type, resource_id, payload, expected_version=version)
@@ -121,6 +122,13 @@ async def _handle_lock_payload(payload: dict[str, object]) -> None:
 
 
 async def handle_runtime_payload(payload: dict[str, object]) -> None:
+    if payload.get('kind') == 'telegram_detection_result':
+        request_id = payload.get('request_id')
+        if isinstance(request_id, str):
+            from modules.telegram.runtime import notify_detection_result
+
+            notify_detection_result(request_id)
+        return
     if payload.get('kind') == _CHAT_EVENT_WAKE_KIND:
         session_id = payload.get('session_id')
         sequence = payload.get('sequence')

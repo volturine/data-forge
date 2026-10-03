@@ -208,7 +208,6 @@ just dev
 | `DISTRIBUTED_RUNTIME_ENABLED`          | `false`                                                                                   | Enables supported distributed runtime behavior when `DATABASE_URL` is Postgres.                                                                                                                                                                                  |
 | `DEFAULT_NAMESPACE`                    | `default`                                                                                 | Namespace used when no namespace is selected.                                                                                                                                                                                                                    |
 | `CORS_ORIGINS`                         | `http://localhost:3000,http://127.0.0.1:3000,http://localhost:5173,http://127.0.0.1:5173` | Comma-separated allowed browser origins. Required in dev (Vite server is cross-origin). In prod (single port) same-origin applies and this can be left unset.                                                                                                    |
-| `UPLOAD_CHUNK_SIZE`                    | `5242880`                                                                                 | Upload chunk size in bytes. Valid range: `1024` to `104857600`.                                                                                                                                                                                                  |
 | `UPLOAD_MAX_FILE_SIZE_BYTES`           | `2147483648`                                                                              | Configurable upload size limit in bytes, from `0` to `2147483648` (2 GiB). Values above 2 GiB are rejected because the worker data-plane transport has a hard 2 GiB ceiling. `0` disables the configurable soft cap but does not disable that transport ceiling. |
 
 ### Object storage
@@ -273,10 +272,16 @@ Same-host processes can keep the loopback defaults. Split Docker roles must bind
 | `POLARS_STREAMING_CHUNK_SIZE`     | `0`     | `0` means automatic chunk sizing.                                                                                                                                                                                                                                                                                                                                |
 | `COMPUTE_WORKERS`                 | `14`    | Current single-manager active capacity (`1`–`100` in this implementation): concurrent compute jobs and assigned workers. Builds, previews, and datasource operations share it; excess work remains durable and waits. Each assigned worker is bound to one exact analysis/datasource identity. Cluster-wide grants across multiple managers are not implemented. |
 | `WORKERS`                         | `1`     | Valid range: `0` to `32`; `0` means auto in deployment scripts. Values above `1` require the dedicated runtime coordinator service and scale API processes only, not compute capacity.                                                                                                                                                                           |
-| `WORKER_CONNECTIONS`              | `1000`  | Maximum connections per worker.                                                                                                                                                                                                                                                                                                                                  |
-| `DATABASE_POOL_SIZE`              | `8`     | SQLAlchemy pool size per API process and per engine. The API requires `DATABASE_POOL_SIZE + DATABASE_MAX_OVERFLOW >= 3` for its general, synchronous-handler, and protected bootstrap lanes. The runtime coordinator derives its pool size from `COMPUTE_WORKERS`; its pool plus overflow must allow at least three connections for the dedicated lease lane, general RPC lane, and outbox recovery. |
-| `DATABASE_MAX_OVERFLOW`           | `4`     | Extra Postgres connections allowed above the API process pool size. Together with `DATABASE_POOL_SIZE`, the API value must be at least `3`; the runtime coordinator derives a separate fixed overflow of `13` to preserve lease, general RPC, and outbox capacity.                                                                                  |
+| `WORKER_CONNECTIONS`              | `4096`  | Coarse maximum concurrent HTTP/WebSocket connections per Uvicorn process. Thread counts and blocking-work queue bounds are derived independently from database capacity; saturation returns overload responses instead of growing those queues with this connection limit.                                                                                                                                                                                                  |
+| `DATABASE_POOL_SIZE`              | `8`     | SQLAlchemy pool size per process and per engine. The runtime coordinator inherits this bounded value; it is independent of `COMPUTE_WORKERS`. The API requires `DATABASE_POOL_SIZE + DATABASE_MAX_OVERFLOW >= 3` for its general, synchronous-handler, and protected bootstrap lanes. |
+| `DATABASE_MAX_OVERFLOW`           | `4`     | Extra Postgres connections allowed above each process's pool size. API processes and the runtime coordinator use this same bound; it must not scale with `COMPUTE_WORKERS`.                                                                                  |
 | `DATABASE_POOL_TIMEOUT`           | `30`    | Seconds to wait for a Postgres pooled connection.                                                                                                                                                                                                                                                                                                                |
+
+The runtime coordinator's pending RPC queue is bounded from `COMPUTE_WORKERS`
+(`max(8, 2 × COMPUTE_WORKERS)` per RPC lane). Active RPC threads are still
+bounded by its database pool; the queue bound allows compute bursts to wait
+without making a database pool the admission limit. Work beyond the queue is
+rejected explicitly while accepted compute requests remain durable.
 
 ### Logging and time handling
 
@@ -364,6 +369,19 @@ Same-host processes can keep the loopback defaults. Split Docker roles must bind
 | Variable         | Default | Notes                                                                                                                                                                                                              |
 | ---------------- | ------- | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------ |
 | `PW_E2E_WORKERS` | `5`     | Playwright workers per E2E shard (3×5 validated). The checked-in E2E topology uses four API processes, one active runtime coordinator, one worker manager, a 32-worker compute budget, and four prewarmed workers. |
+| `TEST_MEMORY_MB` | derived | Optional total memory budget in MiB per test recipe invocation. When unset, Python/Vitest uses 75% and E2E uses 90% of memory available to Docker. Explicit values must be at least `1024` MiB and no greater than Docker's available memory. E2E allocates 512 MiB to its controller and the remainder to its isolated DinD daemon, which runs all browser containers. |
+| `TEST_CPUS`      | unset   | Optional total CPU budget per test recipe invocation; when set, it must be at least `0.1`. Without it, the invocation uses the Docker-reported CPU capacity. E2E allocates at least 0.5 CPUs or 20% of the total to its controller, whichever is greater, and gives the remainder to DinD; its total must leave CPU for both. Concurrent invocations each get their own cap. |
+
+Every public per-suite recipe creates a fresh daemon, network, and volumes in
+its own private Compose enclave. `just test` runs the per-suite recipes
+sequentially, while independent recipe invocations such as CI matrix jobs may
+run concurrently. `TEST_MEMORY_MB` and `TEST_CPUS` are per invocation, not a
+global host budget: concurrent caps add together and the host's CPU and memory
+remain finite and shared. Budgets do not change service counts or test
+concurrency. Recipes require Docker with privileged-container
+support and `just` on the host. See [Docker test setup](../docker/README.md#containerized-tests)
+for enclave lifecycle and security limits. Test logs and diagnostics are
+exported to `.test-artifacts/<run-id>`.
 
 ## Recommended additions to consider later
 

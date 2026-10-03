@@ -134,7 +134,35 @@ class RuntimeOutboxDispatcher:
     async def _run_blocking(self, function: Callable[..., T], *args: object) -> T:
         loop = asyncio.get_running_loop()
         context = contextvars.copy_context()
-        return await loop.run_in_executor(_OUTBOX_EXECUTOR, context.run, partial(function, *args))
+        operation_name = getattr(function, '__qualname__', type(function).__qualname__)
+        operation = loop.run_in_executor(_OUTBOX_EXECUTOR, context.run, partial(function, *args))
+        try:
+            return await asyncio.shield(operation)
+        except asyncio.CancelledError:
+            # Cancelling a dispatcher must not abandon a DB transaction that
+            # is already running in the executor. Join this exact operation
+            # before its coordinator actor can finish and release its lease.
+            task = asyncio.current_task()
+            while not operation.done():
+                try:
+                    await asyncio.shield(operation)
+                except asyncio.CancelledError:
+                    # A second shutdown request must not break the join.
+                    if task is not None:
+                        task.uncancel()
+                except BaseException:
+                    break
+            try:
+                operation.result()
+            except BaseException as exc:
+                if not isinstance(exc, asyncio.CancelledError):
+                    logger.warning(
+                        'Runtime outbox operation failed after its caller was cancelled operation=%s exception=%s',
+                        operation_name,
+                        type(exc).__name__,
+                        exc_info=(type(exc), exc, exc.__traceback__),
+                    )
+            raise
 
     def _dispatch_namespace_in_database(self, namespace: str, limit: int) -> int:
         token = set_namespace_context(namespace)

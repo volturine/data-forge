@@ -1,7 +1,7 @@
 # PRD: Capacity-First Runtime Optimization
 
-> **Status (2026-09-30): Active — architecture fixes implemented; static/unit gates passed; E2E verification pending. Capacity validation remains open.**
-> **Target:** Sustain 2,000 concurrent users with the fewest service replicas that measurements support. The 2,000-user workload profile and SLOs still need validation; this is not yet a capacity claim, and the active PRD records no successful 2,000-user run.
+> **Status (2026-10-03): Active — `just verify`, the complete containerized test suite, the 1×1 E2E suite, and its permanent 50-tab probe pass. The 2,000-session connected-WebSocket profile and one coordinator-takeover-during-publication case pass; broader active-work chaos, interactive API/compute profiles, and formal SLO validation remain open.**
+> **Target:** Sustain a representative 2,000-user workload with the fewest service replicas that measurements support. A connected-session-only profile passed; the interactive API/compute workload mix and SLOs still need validation, so this is not yet a general 2,000-user capacity claim.
 > **Portfolio:** [PRD index](../README.md)
 
 ## Objective
@@ -9,10 +9,14 @@
 Reduce request-path and orchestration overhead before adding replicas, managers,
 brokers, or database shards. Start with one API container and one API process
 (`WORKERS=1`), the existing dedicated runtime coordinator, one worker manager,
-and separate compute-worker containers. Here “1×1” means one API replica × one
-Uvicorn process; it does not mean merging the coordinator, worker manager, or
-compute containers into the API. Scale only the service whose measured capacity
-is saturated.
+and separate compute-worker containers. To avoid overloaded shorthand, API
+topology is written as “API replicas × Uvicorn processes per replica,” while
+E2E topology is written as “Playwright shards × Playwright workers,” followed
+by the API `WORKERS` value. Thus the measured **E2E 1×1** run means one shard ×
+one Playwright worker with `WORKERS=1`; the corresponding API shape is one API
+replica × one Uvicorn process. Neither notation merges the coordinator, worker
+manager, or compute containers into the API. Scale only the service whose
+measured capacity is saturated.
 
 “2,000 users” is not “2,000 compute jobs.” Connected sessions, HTTP request
 rate, unique resource identities, and distinct compute commands are separate
@@ -45,12 +49,13 @@ manager, and compute containers remain separate roles.
 
 ## Implemented runtime contracts
 
-- **Database/session boundary:** async compute helpers carry no unused session
-  or database dependency through a remote wait. Each short synchronous DB unit
-  opens, commits/rolls back, and closes its own session in a bounded thread.
-  Datasource updates run off the API loop, lock and reread the row, and advance
-  the fresh revision atomically; a stale revision cannot overwrite a concurrent
-  update.
+- **Database/session boundary:** FastAPI routes do not receive synchronous
+  SQLAlchemy sessions through dependencies. Each complete DB unit opens,
+  commits/rolls back, and closes its own session in the bounded API thread lane
+  through `run_db`/`run_settings_db`; async compute waits carry no unused DB
+  dependency. Datasource updates run off the API loop, lock and reread the row,
+  and advance the fresh revision atomically; a stale revision cannot overwrite
+  a concurrent update.
 - **Notification receive/recovery:** each API/coordinator receiver owns one
   dedicated `psycopg.AsyncConnection` and continuous `notifies()` generator.
   Publication remains synchronous DB/thread work. Explicit recovery callbacks
@@ -60,6 +65,15 @@ manager, and compute containers remain separate roles.
   chat/settings consumers. See
   [receiver](../../../packages/backend/backend_core/runtime_ipc.py) and
   [projection recovery](../../../packages/backend/backend_core/runtime_notifications.py).
+- **Runtime wake admission:** work producers insert append-only rows into the
+  public wake journal in the same transaction as their durable work; they never
+  update the shared namespace marker. Consumers capture bounded exact wake IDs,
+  refresh only the target namespace/kind, CAS the marker projection, and delete
+  only those IDs atomically. Namespace discovery unions indexed pending/due
+  markers with journal rows. Sequence maxima are not acknowledgement
+  watermarks because sequence allocation can commit out of order. Migration
+  `0020_runtime_wakes` restores the journal after `0018` while
+  retaining the migrated marker state.
 - **Chat lifecycle:** enqueue and deletion lock the same session row; competing
   enqueue or deletion with an active turn returns HTTP 409. Typed claim revocation within the local
   epoch settles that turn. SQL failures and coordinator-epoch fencing propagate
@@ -78,8 +92,11 @@ manager, and compute containers remain separate roles.
 - **Health/scheduler progress:** worker/scheduler Docker probes use PID1's
   private Unix socket and require actual registration plus fresh progress on
   every dispatch lane. A registry row or heartbeat cannot hide a stalled lane.
-  Scheduler candidates use ordered batches of 100, advancing over non-due
-  candidates to preserve fairness and rereading eligibility under row locks.
+  The scheduler uses `grpc.aio` for registration, heartbeat, and dispatch; its
+  independent heartbeat coroutine continues while a namespace dispatch awaits
+  the backend. Scheduler candidates use ordered batches of 100, advancing over
+  non-due candidates to preserve fairness and rereading eligibility under row
+  locks.
   See [scheduler claims](../../../packages/backend/modules/scheduler/service.py).
 
 ### Private storage GC
@@ -104,7 +121,7 @@ Docker-owning manager and adds no service or public tunables. See
 [authorization and state transitions](../../../packages/backend/backend_core/storage_cleanup_service.py)
 and [worker cleanup lane](../../../packages/worker/runtime/storage_cleanup_runtime.py).
 
-## Why start with 1×1
+## Why start with one API process
 
 FastAPI can multiplex many concurrent network waits on one async event loop.
 More Uvicorn processes are useful only when the API process itself is the
@@ -121,7 +138,8 @@ those boundaries; do not collapse them merely to reduce service count.
 
 ### API topology choices
 
-Notation here is `API replicas × Uvicorn processes per replica`:
+API topology notation here is `API replicas × Uvicorn processes per replica`;
+it is distinct from the E2E shard × Playwright-worker notation above:
 
 | Shape  | Expected effect                                                                                                                                                                                | Policy                                                                                                                                                      |
 | ------ | ---------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- | ----------------------------------------------------------------------------------------------------------------------------------------------------------- |
@@ -170,8 +188,11 @@ API processes or replicas.
   worker registry per request. Keep wakeups coalesced and use batched recovery
   rather than one polling loop per browser tab.
 - Perform command single-flight before engine admission so duplicate viewers
-  do not reserve worker capacity. Keep the full-command fingerprint distinct
-  from the resource identity.
+  do not reserve worker capacity. Active/cached hits are lock-free reads;
+  only stale-entry cleanup takes a row lock and refreshes both rows before
+  deletion. The per-key advisory lock protects miss/create races, and a busy
+  follower retries only after its short DB session closes. Keep the
+  full-command fingerprint distinct from the resource identity.
 - Reuse a warm worker for the first cold identity, then replenish the reserve
   asynchronously. Do not start duplicate workers for one RID or repeatedly
   tear down an engine needed by followers.
@@ -218,16 +239,169 @@ tests. Define p95/p99 latency and error thresholds before claiming the target;
 report throughput, queue age, API loop lag, DB checkout/lock waits, coordinator
 RPC lane wait, worker starts, executor occupancy, and CPU/memory in the same run.
 
-### Current architecture gate status (2026-09-30)
+### Current architecture gate status (2026-10-03)
 
-Recorded gate results: `just verify` and `just test` both exited 0. The test gate
-passed 3,369 cases in 376.77s: 1,407 backend unit, 103 integration (plus two
-skipped), 581 worker, 11 scheduler, and 1,267 frontend cases.
+`just verify` passed. The latest `just test` passed **3,536 tests** with two
+integration skips: 1,529 backend unit, 114 backend integration, 609 worker, 12
+scheduler, and 1,272 frontend tests. This includes the PostgreSQL coordinator
+takeover-during-publication regression described below.
 
-E2E run `run-20260930104837-9934` is in progress with the 3×5 suite, eight
-architecture checks, and the 50-tab probe. The expected full-suite population
-is 372 cases; that count and the final result are not yet verified. No final
-E2E pass count or new probe latency is recorded pending the run's final result.
+The latest 1×1 E2E run used `WORKERS=1`, `E2E_API_WORKERS=1`, `E2E_SHARDS=1`,
+and `PW_E2E_WORKERS=1`. The isolated enclave had 8 Docker CPUs and 10,751 MiB
+total memory. It passed **362 ordinary E2E tests** (6.2m), **9 runtime
+architecture regressions** (54.7s), and the permanent **50-tab / 30-account**
+probe (52.3s; 50/50 previews). The probe used 30 Chromium processes and was
+capped at **3.0 vCPU**. Overall preview p50/p95/max was **10.80s / 17.50s /
+18.48s**; analysis preview p50/p95 was **14.07s / 18.04s**; shared-datasource
+p50/p95 was **157ms / 714ms**; and an exact completed-command cache hit took
+**63ms wall / 52ms server**. This is a readiness result for the measured setup,
+not a 50-user or 2,000-user capacity guarantee.
+
+A prior paired single-run comparison (2026-10-02) kept Playwright at **1 shard ×
+1 worker** and changed only API `WORKERS` from 1 to 4. Both full suites,
+architecture checks, and 50-tab probes passed. The whole command took **15m37s**
+versus **12m48s**.
+With API `WORKERS=4`, ordinary E2E took **9.2m** instead of **6.4m**; probe
+overall p95 was **28.60s** instead of **23.03s**,
+analysis p95 **28.77s** instead of **23.11s**, datasource p95 **1.29s** instead
+of **426ms**, and a completed shared-command hit took **487ms** instead of
+**104ms** wall time. During the API-4 probe, one sample showed the API container
+at about **975 MiB / 136 processes**, versus **237 MiB / 35 processes** for
+API-1; event-loop lag peaked at **8.69s** and a recovery poll took **3.77s**.
+This single pair is not a causal or repeatable benchmark, but it shows no
+benefit from four API processes for this workload and warrants profiling their
+multiplied pools/listeners before scaling them at small user counts.
+
+One preceding same-config attempt stopped before tests during API-image `uv sync`;
+the original quiet build output hid the underlying package-manager error. An
+identical retry completed successfully. The E2E harness now retains per-target
+BuildKit logs and prints the failing target's log tail, so a recurrence is
+diagnosable instead of being misclassified as a browser/runtime failure.
+
+A separate PostgreSQL race test co-starts 20 identical datasource-preview
+submissions and verifies one durable request/flight. A new PostgreSQL
+integration test blocks terminal preview publication, kills the coordinator,
+confirms its process is gone, advances the generation, verifies worker-manager
+re-registration, recovers one terminal preview result, and proves an
+old-generation completion cannot change it. The test tags coordinator DB
+sessions and terminates any sessions left by the nested-Docker published-port
+proxy after process death; this is test-enclave cleanup, not a production
+coordinator recovery mechanism. Broader worker-failure-during-publication,
+unrelated-RID continuity, and sustained interactive capacity remain separate
+resilience/load gates.
+
+The subsequent multi-process validation (2026-10-02) used `WORKERS=4`, three
+Playwright shards, and five Playwright workers per shard. All **362 ordinary E2E tests**,
+**9 runtime architecture regressions**, and the permanent **50-tab / 30-account**
+probe passed. The isolated enclave took **14m56s** including setup/image pulls;
+the ordinary shards completed in **5.9–7.5m**. Probe overall preview
+p50/p95/max was **4.66s / 24.39s / 26.46s**; analysis preview p50/p95 was
+**20.34s / 24.72s**, shared-datasource preview p95 was **205ms**, and a completed
+cache hit took **64ms wall / 27.4ms server**. This validates multi-process E2E
+correctness at this test topology, not a general 2,000-user compute SLO.
+
+This run followed a red 3×5/API4 run that recorded a **26.7s** update to the
+shared `(default, outbox)` runtime-work marker, with lease/build RPCs delayed by
+roughly the same interval. Outbox producers now append indexed wake-journal rows
+instead of updating that shared marker; consumers acknowledge exact captured
+IDs, so late or out-of-order commits remain visible. In the green rerun, no slow
+outbox-generation update was logged. Some runtime RPCs and scheduler heartbeats
+still hit long delays under the local resource limit. A mid-run sample of the
+7.5-vCPU DIND enclave showed CPU pressure `some avg10≈71%` and `full avg10≈7%`,
+with low memory pressure and no OOM kills. The local 3×5 workload remains
+CPU-bound; the remaining slow RPC warnings are not evidence of the fixed
+marker-row convoy.
+
+The uncapped comparison run had 362 + 9 tests pass but 2 probe tabs failed with
+HTTP 504: their worker hit a hardcoded 5s coordinator-generation assertion
+deadline while spawning/replenishing a warm worker. Generation bootstrap and
+assertion now use the existing 15s-bounded control timeout. The earlier probe
+also exposed fail-fast default-executor admission; API blocking work now waits
+asynchronously for bounded executor capacity, and WebSocket error delivery no
+longer resubmits through a saturated pool. Engine claim contention now uses
+`pg_try_advisory_xact_lock`, rolls back a busy candidate, skips that exact RID
+for the current claim pass, and continues to another eligible RID. A PostgreSQL
+race test verifies different-RID progress while one RID's claim lock is held.
+
+An earlier 1×1 capped run showed API event-loop lag up to **6.47s**, runtime claim
+and datasource-metadata RPCs around **7–9s**, and transient engine-heartbeat
+deadlines. The preceding uncapped run's Playwright generator peaked at **780.6%
+CPU** inside a **7.5-CPU DIND** enclave; the capped generator peaked at **329.7%**.
+This supports generator contention as a major contributor, but the runtime DB
+and RPC latency outliers remain and require attribution. The run proves this
+scenario can finish at the defined **1×1** setting (one Playwright shard × one
+Playwright worker, API `WORKERS=1`); it does not establish stable p95 or
+sustained user capacity.
+
+The connected-session profile ran three consecutive repeats against one isolated
+stack with one API process and `WORKER_CONNECTIONS=4096`: each repeat registered
+2,000 unique accounts and held 2,000 authenticated lock-watch WebSockets for 60
+seconds, sending staggered application heartbeats every 10 seconds. All three
+repeats passed: 6,000 account/token registrations, 6,000 WebSocket handshakes
+and subscriptions, 36,000 heartbeat round trips, and 51/51 readiness checks
+succeeded. Across repeats, session-ready p95 was **223–323ms** / p99
+**312–342ms**, heartbeat RTT p95 **2.8–3.0ms** / p99 **4.5–5.8ms**, and
+WebSocket handshake p95 **39–46ms** / p99 **47–67ms**. Account setup took
+16.6–17.2s per repeat; each full profile took 83.3–84.0s. The probe uses
+synthetic watched analysis IDs; no saves, navigation mix, previews, or compute
+jobs were included.
+
+The 8-CPU, 10.5-GiB enclave's sampled API memory reached about 313MiB after
+setup and API CPU stayed about 0.23–0.61 cores during steady heartbeats; API CPU
+peaked around 4.8 cores during account registration. PostgreSQL peaked around
+113MiB and 0.1 CPU. There were no readiness failures or test-enclave OOM events
+in the three measured repeats. The first attempt before correcting
+the probe client's keep-alive expiry had two client-side `RemoteProtocolError`s
+on readiness polls at the same five-second interval as Uvicorn's idle
+keep-alive timeout; the repeat harness now expires that client connection at
+two seconds. This connected-session profile is reproducible with
+`just test-e2e-capacity sessions=2000 repeats=3`.
+
+#### External delivery guarantee
+
+Telegram part receipts prevent retransmission of parts whose receipt is
+durable. The provider send and local receipt commit cannot share a transaction;
+if provider acceptance is uncertain at that final boundary, a part may be sent
+again. Delivery is therefore at-least-once at that boundary, not exactly-once.
+
+### Historical regression evidence (before the 2026-10-01 fixes)
+
+The earlier pre-fix run used Docker Desktop at 8 CPUs and 10 GiB and finished
+with 358/362 ordinary tests passing, all nine architecture tests passing, and
+one of 50 probe tabs missing editor readiness. Four ordinary failures involved
+two pipeline previews, one column-stats request, and one build deadline. Runtime
+evidence showed a worker heartbeat taking 4.9s against its 5s deadline, repeated
+lease/RPC delays, and engine listener startup of about 15s; database samples
+showed no blocking sessions. The private daemon recorded 520,841 memory-limit
+events but zero OOM kills. These observations identify pressure and backend
+delay, not a unique cause for each failure.
+
+CI run `36712501309` on commit `81c3ddbe` failed independently in two
+areas: six worker tests dialed an unresolvable Mac Tailscale hostname, and the
+E2E selector lacked `rg`, started all 124 discovered tests in each of three
+ordinary shards, then the harness exited 137. The logs do not establish that
+exit 137 was a kernel OOM kill. The worktree now uses in-container loopback for
+the worker-local servers, installs `rg`, and makes selection fail closed.
+
+The first E2E failure after the last green CI run (`36580405720`, commit
+`8a5e943`) appeared in run `36620347698` after increasing the shard worker count
+from four to five. That increased browser concurrency from 12 to 15. Preview
+and storage deadlines and editor-lock errors appeared before the coordinator
+generation changed; failover was a later symptom, not the initial trigger.
+This timing implicates the higher load as a contributor, but does not prove it
+caused every failure.
+
+The coordinator database pool no longer scales from `COMPUTE_WORKERS`, and API
+blocking/serialization/bootstrap queues have bounded admission independently
+from `WORKER_CONNECTIONS`. The 2,000-session connected profile uses 4,096 as
+Uvicorn's coarse connection ceiling, not as a thread or database-work budget.
+The 1×1 reference run fixes browser and API process concurrency for comparison;
+the separate 3×5/API4 run above confirms that four API processes can complete
+the full E2E/readiness suite, but does not establish the interactive API or
+compute SLOs. Neither E2E profile changes the separate 2,000-session connected
+profile above.
+The interactive API, compute, and resilience profiles and their SLO thresholds
+are still undefined and unmeasured.
 
 ### Pre-review regression baseline
 
@@ -277,13 +451,69 @@ or verify the current E2E run.
 These historical runs show that one API process can pass the regression
 workload measured then, not that it meets the 2,000-session SLO. Their cold engine
 startup/CPU demand and occasional API response-send stalls remain optimization
-leads. Run at least three more paired probes in alternating
-`WORKERS=1`/`4` order with clean stacks, and collect per-container CPU before
-attributing the loop stalls. Based on the successful 1×1 full E2E and no
-repeatable 4-process throughput benefit, `docker/env/prod.env` now defaults to
-`WORKERS=1`; E2E retains `WORKERS=4` to keep multi-process safety covered. This
-is a low-overhead starting default, not a claim that 1×1 meets the 2,000-session
-target.
+leads. Based on the successful 1×1 full E2E and no repeatable 4-process
+throughput benefit, `docker/env/prod.env` now defaults to `WORKERS=1`; E2E
+retains `WORKERS=4` to keep multi-process safety covered. This is a low-overhead
+starting default, not a claim that 1×1 meets the 2,000-session target.
+
+#### Prior post-change 1×1 diagnostic run (2026-10-02)
+
+The 2026-10-02 post-change `1×1` validation passed the full containerized E2E
+suite: **362 ordinary tests** (6.5m), **9 architecture
+regressions** (54.1s), and the permanent **50-tab / 30-account** probe (50/50
+previews, 47.5s). The whole `just test-e2e` command took **12m24s** including
+builds, bootstrap, and teardown. The probe's overall preview p50/p95/max was
+**3.30s / 15.36s / 18.75s**, analysis p50/p95 was **11.81s / 15.39s**,
+datasource p50/p95 was **140ms / 3.06s**, and a completed-command cache hit
+took **32.5ms wall / 14ms server**. It used 30 Chromium processes and the
+existing 3-vCPU probe cap. Routing compute/build WebSocket database,
+serialization, object-store RPC, runtime notification, and test-only manager
+work through the API's bounded execution lane did not regress the measured
+workload. Routes avoid direct dependency-session generators and generic
+`run_in_threadpool`; a static test guards that boundary. These timings remain
+historical diagnostic evidence, not the latest 1×1 result or a capacity SLO.
+
+That run's `api_blocking_admission_wait_ms` diagnostic recorded **0ms** in all
+50 slow-preview records, so preview latency was not waiting for API blocking-lane
+admission. Its slowest runtime RPC was `PersistEngineSnapshot` at **6.77s**;
+SQL totaled **216ms**, DB checkout **230ms**, and RPC executor queue **1.2ms**.
+The remaining handler time was not attributed in that run; snapshot phase
+profiling remains open. This is readiness evidence, not a capacity SLO.
+
+#### Latest clean 50-tab API-process comparison (2026-10-02)
+
+Two additional probe-only runs used fresh isolated stacks, one Playwright shard
+and one Playwright worker, with no full E2E suite running concurrently. Both
+returned all 50 previews successfully. The API1 run (`WORKERS=1`) measured
+preview p50/p95/max **8.51s / 16.27s / 18.50s**, analysis p95 **16.32s**,
+datasource p95 **8.35s**, and an identical completed-command cache hit at
+**61ms wall / 33.9ms server**. The API4 run (`WORKERS=4`) measured overall
+preview p50/p95/max **7.43s / 22.59s / 31.02s**, analysis p95 **24.19s**,
+datasource p95 **8.08s**, and the same-command hit at **52.7ms wall / 37.6ms
+server**. This single alternating pair does not establish a causal API-worker
+performance difference. The API4 container used about **881MiB / 115 tasks**
+versus **226MiB / 31 tasks** for API1.
+
+The API4 run passed, unlike one earlier clean API4 probe that failed one
+analysis tab with an empty response; that failed run had no OOM kill. Both
+those runs still logged event-loop lag of several seconds and runtime/database
+outliers. In the API4 run, a runtime worker heartbeat checked out a critical
+settings connection for about **4.2s**, while unrelated control RPCs took about
+**4.2–4.5s**; a claim and a response-recovery poll also took about **5.3s**.
+The API1 run logged lease renewal around **3.6s** and completion RPCs around
+**3.8s**, with periods of multi-second DB checkout/commit delay. These coincide
+with high process load from the 30 Chromium processes and 30 cold analysis
+workers, so they do not yet isolate an application-level bottleneck. Peak
+container sampling was incomplete: the sampler's Docker CLI timed out during
+the burst, so its initial low samples cannot characterize peak CPU.
+
+The identical-command cache hit remaining under **65ms** confirms that already
+completed work is shared efficiently. The 16–31s tail is dominated by first
+work on distinct analysis RIDs and shared host/control-plane pressure; it is
+not the cache-hit path. Next, separate compute cold-start demand from API and
+control-plane work using a repeatable service-side request profile and
+non-invasive cgroup metrics, then tune only the saturated boundary. Do not
+infer that API1 is faster from this pair or raise pool/worker limits from it.
 
 ## Scale only after identifying the saturated layer
 

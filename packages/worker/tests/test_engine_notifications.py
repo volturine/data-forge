@@ -79,3 +79,25 @@ def test_snapshot_publisher_coalesces_to_latest_per_namespace() -> None:
         notify.close()
 
     assert calls == [("default", ["first"]), ("default", ["latest"]), ("other", ["other"])]
+
+
+def test_snapshot_publisher_logs_slow_round_trip_with_engine_count(monkeypatch, caplog) -> None:
+    completed = Event()
+    monkeypatch.setattr(engine_notifications, "_SLOW_SNAPSHOT_PUBLISH_SECONDS", 0.0)
+
+    def persist(_namespace: str, _statuses: list[EngineStatusInfo]) -> None:
+        completed.set()
+
+    notify = engine_notifications.create_snapshot_notifier(
+        namespace_provider=lambda: "default",
+        persist=persist,
+    )
+    try:
+        with caplog.at_level("WARNING", logger="runtime.engine_notifications"):
+            notify([_status("analysis-1"), _status("analysis-2")])
+            assert completed.wait(2)
+            notify.close()
+    finally:
+        notify.close()
+
+    assert "Slow engine snapshot publish namespace=default engine_count=2 duration_ms=" in caplog.text

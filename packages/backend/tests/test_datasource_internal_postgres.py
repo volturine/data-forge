@@ -1,6 +1,7 @@
 from datetime import UTC, datetime
 from typing import Any
 
+from backend_core import datasource_delete_service
 from backend_core.domain.datasource.source_types import DataSourceType
 from backend_core.persistence.datasource.models import DataSource
 from modules.datasource import service
@@ -187,6 +188,11 @@ def test_toggle_internal_postgres_table_creates_database_datasource_once_and_del
         'table_name': 'analyses',
         'is_onboarded': False,
     }
+    pending_delete = test_db_session.get(DataSource, 'internal-ds-1')
+    assert pending_delete is not None
+    assert pending_delete.is_pending_delete is True
+    assert pending_delete.is_hidden is True
+    assert datasource_delete_service.finalize_delete(test_db_session, 'internal-ds-1') is True
     assert test_db_session.get(DataSource, 'internal-ds-1') is None
 
     relisted = client.get('/api/v1/datasource/internal-postgres/tables')

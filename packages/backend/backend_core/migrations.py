@@ -10,8 +10,8 @@ from sqlalchemy import create_engine, pool, text
 from backend_core.config import settings
 from backend_core.namespace import namespace_database_schema
 
-_PUBLIC_REVISION = '0016_telegram_runtime'
-_TENANT_REVISION = '0017_compute_source_index'
+_PUBLIC_REVISION = '0020_runtime_wakes'
+_TENANT_REVISION = '0022_telegram_part_receipts'
 _MISSING_DATABASE_SQLSTATE = '3D000'
 
 
@@ -172,8 +172,18 @@ def migrate_runtime(namespaces: list[str]) -> None:
         '0003_engine_request_identity',
         '0004_compute_request_datasources',
         '0007_schedule_due_index',
+        '0008_schedule_wake_due',
         '0008_schedule_trigger_index',
+        '0009_runtime_lease_wake_due',
+        '0010_mcp_pending_actions',
         '0011_namespace_preview_flights',
+        '0012_compute_request_flights',
+        '0013_runtime_work_wakes',
+        '0014_runtime_coordinator_fencing',
+        '0015_durable_chat_turns',
+        '0016_telegram_runtime',
+        '0017_compute_source_index',
+        '0018_runtime_work_generations',
         _TENANT_REVISION,
     )
     for namespace in namespaces:

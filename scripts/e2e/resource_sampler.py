@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-"""Collect bounded, run-scoped host and Docker load-probe samples."""
+"""Collect bounded Linux-runner and private-Docker load-probe samples."""
 
 from __future__ import annotations
 
@@ -8,14 +8,13 @@ import csv
 import os
 import signal
 import subprocess
-import sys
 import time
 from datetime import datetime, timezone
 from pathlib import Path
 from threading import Event
 
-_SAMPLE_INTERVAL_SECONDS = 2.5
-_SAMPLE_BUDGET_SECONDS = 1.5
+_SAMPLE_INTERVAL_SECONDS = 5.0
+_SAMPLE_BUDGET_SECONDS = 3.0
 _STOP = Event()
 _ACTIVE_PROCESS: subprocess.Popen[str] | None = None
 
@@ -30,11 +29,19 @@ _HEADER = (
     "load_1m",
     "load_5m",
     "load_15m",
-    "host_runnable_processes",
-    "playwright_processes",
-    "playwright_cpu_percent_sum",
-    "playwright_rss_kb_sum",
-    "playwright_runnable_processes",
+    "runner_process_count",
+    "runner_cpu_percent_sum",
+    "runner_rss_kb_sum",
+    "runner_runnable_processes",
+    "runner_cgroup_cpu_usage_usec",
+    "runner_cgroup_cpu_user_usec",
+    "runner_cgroup_cpu_system_usec",
+    "runner_cgroup_memory_current_bytes",
+    "runner_cgroup_memory_max_bytes",
+    "runner_cgroup_cpu_pressure_some_avg10",
+    "runner_cgroup_cpu_pressure_full_avg10",
+    "runner_cgroup_memory_pressure_some_avg10",
+    "runner_cgroup_memory_pressure_full_avg10",
     "error",
 )
 
@@ -86,25 +93,74 @@ def _bounded_command(command: list[str], deadline: float) -> str:
 
 def _load_averages(deadline: float) -> tuple[str, str, str]:
     try:
-        if sys.platform == "darwin":
-            raw = _bounded_command(["sysctl", "-n", "vm.loadavg"], deadline)
-            values = raw.replace("{", " ").replace("}", " ").split()
-        else:
-            values = Path("/proc/loadavg").read_text().split()[:3]
+        values = Path("/proc/loadavg").read_text().split()[:3]
         if len(values) != 3:
             raise ValueError("load average returned fewer than three values")
         return values[0], values[1], values[2]
-    except (OSError, RuntimeError, TimeoutError, ValueError):
+    except OSError, RuntimeError, TimeoutError, ValueError:
         return "", "", ""
+
+
+def _read_cgroup_key_values(path: Path) -> dict[str, str]:
+    try:
+        values: dict[str, str] = {}
+        for line in path.read_text().splitlines():
+            fields = line.split(maxsplit=1)
+            if len(fields) == 2:
+                values[fields[0]] = fields[1]
+        return values
+    except OSError:
+        return {}
+
+
+def _read_pressure_avg10(path: Path) -> dict[str, str]:
+    try:
+        values: dict[str, str] = {}
+        for line in path.read_text().splitlines():
+            fields = line.split()
+            if not fields:
+                continue
+            for field in fields[1:]:
+                key, separator, value = field.partition("=")
+                if separator and key == "avg10":
+                    values[fields[0]] = value
+        return values
+    except OSError:
+        return {}
+
+
+def _runner_cgroup_metrics() -> tuple[str, ...]:
+    cgroup_root = Path("/sys/fs/cgroup")
+    cpu = _read_cgroup_key_values(cgroup_root / "cpu.stat")
+    cpu_pressure = _read_pressure_avg10(cgroup_root / "cpu.pressure")
+    memory_pressure = _read_pressure_avg10(cgroup_root / "memory.pressure")
+    return (
+        cpu.get("usage_usec", ""),
+        cpu.get("user_usec", ""),
+        cpu.get("system_usec", ""),
+        _read_scalar(cgroup_root / "memory.current"),
+        _read_scalar(cgroup_root / "memory.max"),
+        cpu_pressure.get("some", ""),
+        cpu_pressure.get("full", ""),
+        memory_pressure.get("some", ""),
+        memory_pressure.get("full", ""),
+    )
+
+
+def _read_scalar(path: Path) -> str:
+    try:
+        return path.read_text().strip()
+    except OSError:
+        return ""
 
 
 def _process_rows(deadline: float) -> list[tuple[int, int, float, int, str, str]]:
     try:
         raw = _bounded_command(
-            ["ps", "-axo", "pid=,ppid=,%cpu=,rss=,state=,command="],
+            ["ps", "-eo", "pid=,ppid=,%cpu=,rss=,stat=,args="],
             deadline,
         )
-    except (OSError, RuntimeError, TimeoutError):
+    except OSError, RuntimeError, TimeoutError:
         return []
 
     rows = []
@@ -119,7 +175,7 @@ def _process_rows(deadline: float) -> list[tuple[int, int, float, int, str, str]
     return rows
 
 
-def _playwright_summary(
+def _runner_process_summary(
     rows: list[tuple[int, int, float, int, str, str]],
     script_pid: int,
 ) -> tuple[int, float, int, int]:
@@ -133,26 +189,12 @@ def _playwright_summary(
                     descendants.add(pid)
                     changed = True
 
-    roots = {
-        pid
-        for pid, _parent_pid, _cpu, _rss, _state, command in rows
-        if pid in descendants and "run_with_timeout.py" in command and "tests/concurrency.test.ts" in command
-    }
-    selected = set(roots)
-    changed = True
-    while changed:
-        changed = False
-        for pid, parent_pid, _cpu, _rss, _state, _command in rows:
-            if parent_pid in selected and pid not in selected:
-                selected.add(pid)
-                changed = True
-
-    browser_rows = [row for row in rows if row[0] in selected]
+    runner_rows = [row for row in rows if row[0] in descendants]
     return (
-        len(browser_rows),
-        sum(row[2] for row in browser_rows),
-        sum(row[3] for row in browser_rows),
-        sum(row[4].startswith("R") for row in browser_rows),
+        len(runner_rows),
+        sum(row[2] for row in runner_rows),
+        sum(row[3] for row in runner_rows),
+        sum(row[4].startswith("R") for row in runner_rows),
     )
 
 
@@ -164,10 +206,7 @@ def _container_ids(
 ) -> tuple[list[str], list[str]]:
     # Docker's project and deployment labels are alternatives, so list label
     # metadata once and send only exact run-owned IDs to `docker stats`.
-    template = (
-        '{{.ID}}\t{{.Names}}\t{{.Label "com.docker.compose.project"}}'
-        '\t{{.Label "io.dataforge.deployment"}}'
-    )
+    template = '{{.ID}}\t{{.Names}}\t{{.Label "com.docker.compose.project"}}\t{{.Label "io.dataforge.deployment"}}'
     try:
         container_rows = _bounded_command(
             ["docker", "ps", "--format", template],
@@ -200,8 +239,8 @@ def _sample(
     errors: list[str] = []
     process_rows = _process_rows(deadline)
     load_averages = _load_averages(deadline)
-    browser_count, browser_cpu, browser_rss, browser_runnable = _playwright_summary(process_rows, script_pid)
-    host_runnable = sum(row[4].startswith("R") for row in process_rows)
+    runner_count, runner_cpu, runner_rss, runner_runnable = _runner_process_summary(process_rows, script_pid)
+    runner_cgroup_metrics = _runner_cgroup_metrics()
     ids, docker_errors = _container_ids(compose_project, deployment_id, runner_name, deadline)
     errors.extend(docker_errors)
 
@@ -231,24 +270,33 @@ def _sample(
     writer.writerow(
         (
             timestamp,
-            "host",
+            "runner",
             "",
             "",
             "",
             "",
             "",
             *load_averages,
-            host_runnable,
-            browser_count,
-            f"{browser_cpu:.1f}",
-            browser_rss,
-            browser_runnable,
+            runner_count,
+            f"{runner_cpu:.1f}",
+            runner_rss,
+            runner_runnable,
+            *runner_cgroup_metrics,
             "; ".join(errors).replace("\t", " "),
         )
     )
     for name, cpu, memory, memory_percent, pids in container_rows:
         writer.writerow(
-            (timestamp, "container", name, cpu, memory, memory_percent, pids, "", "", "", "", "", "", "", "", "")
+            (
+                timestamp,
+                "container",
+                name,
+                cpu,
+                memory,
+                memory_percent,
+                pids,
+                *("",) * (len(_HEADER) - 7),
+            )
         )
 
 

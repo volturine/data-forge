@@ -1,12 +1,14 @@
+from concurrent.futures import ThreadPoolExecutor
 from copy import deepcopy
 from datetime import UTC, datetime, timedelta
+from threading import Event
 from typing import cast
 from uuid import uuid4
 
 import pytest
-from sqlalchemy import event
+from sqlalchemy import event, inspect, text, update
 from sqlalchemy.exc import IntegrityError
-from sqlmodel import select
+from sqlmodel import Session, select
 
 from backend_core import compute_requests_service
 from backend_core.claiming import CLAIM_DELIVERY_LEASE_SECONDS
@@ -19,6 +21,7 @@ from backend_core.domain.compute_requests.models import (
     response_payload,
 )
 from backend_core.domain.engine_runs.schemas import EngineRunKind, EngineRunStatus
+from backend_core.namespace import reset_namespace, set_namespace_context
 from backend_core.persistence.compute_requests.models import ComputeRequest, ComputeRequestFlight
 from backend_core.persistence.datasource.models import DataSource
 from backend_core.persistence.engine_runs.models import EngineRun
@@ -148,6 +151,7 @@ def test_stage_shared_flight_request_reuses_one_durable_active_flight(test_db_se
     assert created is True
     assert wake_writes == [('default', runtime_work_service.RuntimeWorkKind.COMPUTE)]
     test_db_session.commit()
+    monkeypatch.setattr(compute_requests_service, '_try_lock_flight', lambda *_args: pytest.fail('active followers must bypass the flight advisory lock'))
 
     follower, created = compute_requests_service.stage_shared_flight_request(
         test_db_session,
@@ -163,7 +167,7 @@ def test_stage_shared_flight_request_reuses_one_durable_active_flight(test_db_se
     assert len(test_db_session.execute(select(ComputeRequest)).scalars().all()) == 1
 
 
-def test_stage_shared_flight_request_reuses_completed_durable_response(test_db_session) -> None:
+def test_stage_shared_flight_request_reuses_completed_durable_response(test_db_session, monkeypatch) -> None:
     command = command_from_payload(enums_pb2.COMPUTE_REQUEST_KIND_PREVIEW, _preview_payload())
     leader, created = compute_requests_service.stage_shared_flight_request(
         test_db_session,
@@ -188,6 +192,7 @@ def test_stage_shared_flight_request_reuses_completed_durable_response(test_db_s
         response_envelope=response,
     )
     assert completed is not None
+    monkeypatch.setattr(compute_requests_service, '_try_lock_flight', lambda *_args: pytest.fail('cached followers must bypass the flight advisory lock'))
 
     cached, created = compute_requests_service.stage_shared_flight_request(
         test_db_session,
@@ -920,6 +925,121 @@ def test_claim_next_request_serializes_exact_engine_identity_and_keeps_other_ids
     assert follower_claim is not None and follower_claim.id == follower.id
 
 
+def test_claim_next_request_skips_busy_engine_identity_for_claim_call(test_db_session, monkeypatch) -> None:
+    first_payload = _preview_payload()
+    follower_payload = deepcopy(first_payload)
+    follower_payload['row_limit'] = 101
+    other_payload = deepcopy(first_payload)
+    other_payload['analysis_id'] = 'analysis-2'
+    cast(dict[str, object], other_payload['analysis_pipeline'])['analysis_id'] = 'analysis-2'
+
+    first = _create_request(
+        test_db_session,
+        namespace='default',
+        kind=enums_pb2.COMPUTE_REQUEST_KIND_PREVIEW,
+        request_json=first_payload,
+    )
+    follower = _create_request(
+        test_db_session,
+        namespace='default',
+        kind=enums_pb2.COMPUTE_REQUEST_KIND_PREVIEW,
+        request_json=follower_payload,
+    )
+    other = _create_request(
+        test_db_session,
+        namespace='default',
+        kind=enums_pb2.COMPUTE_REQUEST_KIND_PREVIEW,
+        request_json=other_payload,
+    )
+    created = datetime.now(UTC)
+    first.created_at = created - timedelta(seconds=3)
+    follower.created_at = created - timedelta(seconds=2)
+    other.created_at = created - timedelta(seconds=1)
+    test_db_session.add_all([first, follower, other])
+    test_db_session.commit()
+
+    lock_attempts: list[str] = []
+
+    def try_engine_claim_lock(_session, request: ComputeRequest) -> bool:
+        lock_attempts.append(request.engine_resource_id or '')
+        return request.engine_resource_id != 'analysis-1'
+
+    monkeypatch.setattr(compute_requests_service, '_lock_engine_claim', try_engine_claim_lock)
+
+    claimed = compute_requests_service.claim_next_request(test_db_session, worker_id='worker-1')
+
+    assert claimed is not None and claimed.id == other.id
+    assert lock_attempts == ['analysis-1', 'analysis-2']
+    for request in (first, follower, other):
+        test_db_session.refresh(request)
+    assert first.status == enums_pb2.COMPUTE_REQUEST_STATUS_QUEUED
+    assert follower.status == enums_pb2.COMPUTE_REQUEST_STATUS_QUEUED
+    assert other.status == enums_pb2.COMPUTE_REQUEST_STATUS_RUNNING
+
+
+def test_claim_next_request_busy_engine_identity_does_not_filter_non_engine_work(test_db_session, monkeypatch) -> None:
+    busy_request = _create_request(
+        test_db_session,
+        namespace='default',
+        kind=enums_pb2.COMPUTE_REQUEST_KIND_PREVIEW,
+        request_json=_preview_payload(),
+    )
+    now = datetime.now(UTC)
+    non_engine_request = ComputeRequest(
+        id='non-engine-while-rid-busy',
+        namespace='default',
+        kind=enums_pb2.COMPUTE_REQUEST_KIND_EXPORT,
+        status=enums_pb2.COMPUTE_REQUEST_STATUS_QUEUED,
+        command_envelope=b'{}',
+        attempts=0,
+        max_attempts=3,
+        created_at=now + timedelta(seconds=1),
+        updated_at=now,
+    )
+    busy_request.created_at = now
+    test_db_session.add_all([busy_request, non_engine_request])
+    test_db_session.commit()
+    lock_attempts: list[str | None] = []
+
+    def try_engine_claim_lock(_session, request: ComputeRequest) -> bool:
+        lock_attempts.append(request.engine_resource_id)
+        return request.engine_resource_id is None
+
+    monkeypatch.setattr(compute_requests_service, '_lock_engine_claim', try_engine_claim_lock)
+
+    claimed = compute_requests_service.claim_next_request(test_db_session, worker_id='worker-1')
+
+    assert claimed is not None and claimed.id == non_engine_request.id
+    assert lock_attempts == [busy_request.engine_resource_id, None]
+    test_db_session.refresh(busy_request)
+    assert busy_request.status == enums_pb2.COMPUTE_REQUEST_STATUS_QUEUED
+    assert claimed.status == enums_pb2.COMPUTE_REQUEST_STATUS_RUNNING
+
+
+def test_claim_next_request_returns_none_when_all_remaining_engine_identities_are_busy(test_db_session, monkeypatch) -> None:
+    first = _create_request(
+        test_db_session,
+        namespace='default',
+        kind=enums_pb2.COMPUTE_REQUEST_KIND_PREVIEW,
+        request_json=_preview_payload(),
+    )
+    test_db_session.commit()
+    lock_attempts: list[str] = []
+
+    def try_engine_claim_lock(_session, request: ComputeRequest) -> bool:
+        lock_attempts.append(request.engine_resource_id or '')
+        return False
+
+    monkeypatch.setattr(compute_requests_service, '_lock_engine_claim', try_engine_claim_lock)
+
+    claimed = compute_requests_service.claim_next_request(test_db_session, worker_id='worker-1')
+
+    assert claimed is None
+    assert lock_attempts == [first.engine_resource_id]
+    test_db_session.refresh(first)
+    assert first.status == enums_pb2.COMPUTE_REQUEST_STATUS_QUEUED
+
+
 def test_expired_engine_request_is_reclaimed_before_its_follower(test_db_session) -> None:
     leader_payload = _preview_payload()
     follower_payload = deepcopy(leader_payload)
@@ -1302,7 +1422,108 @@ def test_mark_request_completed_stores_typed_response_envelope(test_db_session) 
     }
 
 
-def test_preview_completion_commits_request_and_engine_run_together(test_db_session) -> None:
+def test_reclaim_during_completion_preparation_rolls_back_engine_run_finalization(test_db_session, monkeypatch) -> None:
+    request = _create_request(
+        test_db_session,
+        namespace='default',
+        kind=enums_pb2.COMPUTE_REQUEST_KIND_PREVIEW,
+        request_json=_preview_payload(),
+    )
+    worker_id, claim_token, lease_generation = _claim_identity(test_db_session, request)
+    request_id = request.id
+
+    engine_run = _create_preview_engine_run(test_db_session)
+    stage_started = Event()
+    resume_stage = Event()
+    finalization_time = datetime.now(UTC)
+    finalization = compute_requests_service.EngineRunFinalization(
+        run_id=engine_run.id,
+        fields={
+            'status': EngineRunStatus.SUCCESS.value,
+            'completed_at': finalization_time,
+            'duration_ms': 42,
+        },
+        merge_result_json=False,
+    )
+    original_stage_finalization = compute_requests_service._stage_engine_run_finalization
+
+    def pause_engine_run_finalization(session, claim, staged_finalization, *, expected_status) -> None:
+        assert expected_status == EngineRunStatus.SUCCESS
+        assert 'command_envelope' in inspect(claim).unloaded
+        original_stage_finalization(
+            session,
+            claim,
+            staged_finalization,
+            expected_status=expected_status,
+        )
+        stage_started.set()
+        if not resume_stage.wait(timeout=5):
+            raise TimeoutError('test did not release engine-run finalization')
+
+    monkeypatch.setattr(compute_requests_service, '_stage_engine_run_finalization', pause_engine_run_finalization)
+    response = _response(
+        request,
+        {'step_id': 'source', 'columns': [], 'data': [], 'total_rows': 0, 'page': 1, 'page_size': 100},
+    )
+    engine = test_db_session.get_bind()
+
+    def complete_request():
+        token = set_namespace_context('default')
+        try:
+            with Session(engine) as session:
+                return compute_requests_service.mark_request_completed(
+                    session,
+                    request_id,
+                    worker_id=worker_id,
+                    claim_token=claim_token,
+                    lease_generation=lease_generation,
+                    response_envelope=response,
+                    engine_run_finalization=finalization,
+                )
+        finally:
+            reset_namespace(token)
+
+    def expire_and_reclaim():
+        token = set_namespace_context('default')
+        try:
+            with Session(engine) as session:
+                session.execute(text("SET LOCAL lock_timeout = '500ms'"))
+                expired = session.execute(
+                    update(ComputeRequest).where(ComputeRequest.id == request_id).values(lease_expires_at=text("clock_timestamp() - interval '1 second'"))
+                )
+                assert expired.rowcount == 1
+                session.commit()
+                reclaimed = compute_requests_service.claim_next_request(session, worker_id='worker-reclaimed')
+                assert reclaimed is not None
+                return reclaimed
+        finally:
+            reset_namespace(token)
+
+    with ThreadPoolExecutor(max_workers=2) as executor:
+        completion = executor.submit(complete_request)
+        try:
+            assert stage_started.wait(timeout=3)
+            # The completion has staged an EngineRun update but must not yet
+            # own the ComputeRequest row. A new worker can expire and reclaim
+            # the lease while that work is paused.
+            reclaimed = executor.submit(expire_and_reclaim).result(timeout=3)
+            assert reclaimed.id == request_id
+            assert reclaimed.lease_owner == 'worker-reclaimed'
+        finally:
+            resume_stage.set()
+        assert completion.result(timeout=5) is None
+
+    test_db_session.expire_all()
+    persisted_run = test_db_session.get(EngineRun, engine_run.id)
+    assert persisted_run is not None
+    assert persisted_run.status == EngineRunStatus.RUNNING.value
+    persisted_request = compute_requests_service.get_request(test_db_session, request_id)
+    assert persisted_request is not None
+    assert persisted_request.status == enums_pb2.COMPUTE_REQUEST_STATUS_RUNNING
+    assert persisted_request.lease_owner == 'worker-reclaimed'
+
+
+def test_preview_completion_commits_request_and_engine_run_together(test_db_session, monkeypatch) -> None:
     request = _create_request(
         test_db_session,
         namespace='default',
@@ -1312,6 +1533,11 @@ def test_preview_completion_commits_request_and_engine_run_together(test_db_sess
     claim = compute_requests_service.claim_next_request(test_db_session, worker_id='worker-1')
     assert claim is not None and claim.claim_token is not None
     engine_run = _create_preview_engine_run(test_db_session)
+
+    def fail_response_serialization(_run) -> None:
+        raise AssertionError('compute completion must not serialize an unused engine-run response')
+
+    monkeypatch.setattr(compute_requests_service.engine_runs_service, '_serialize_run', fail_response_serialization)
 
     completed = compute_requests_service.mark_request_completed(
         test_db_session,
@@ -1792,7 +2018,7 @@ def test_expired_request_is_failed_after_attempt_exhaustion(test_db_session, mon
     test_db_session.add(claimed)
     test_db_session.commit()
 
-    assert compute_requests_service.reconcile_expired_requests(test_db_session) == 1
+    assert compute_requests_service.reconcile_expired_requests(test_db_session, namespace='default') == 1
 
     test_db_session.refresh(claimed)
     assert claimed.status == enums_pb2.COMPUTE_REQUEST_STATUS_FAILED
@@ -1801,4 +2027,42 @@ def test_expired_request_is_failed_after_attempt_exhaustion(test_db_session, mon
     assert response_payload(_stored_response(claimed))['error'] == 'Compute request exhausted 1 execution attempts'
     assert len(refreshes) == 1
     assert refreshes[0]['namespace'] == 'default'
+    assert refreshes[0]['kind'] == compute_requests_service.RuntimeWorkKind.COMPUTE
+
+
+def test_reconcile_expired_requests_is_scoped_to_target_namespace(test_db_session, monkeypatch) -> None:
+    refreshes: list[dict[str, object]] = []
+    monkeypatch.setattr(
+        compute_requests_service.runtime_work_service,
+        'refresh_pending_work',
+        lambda _session, **kwargs: refreshes.append(kwargs),
+    )
+    expired_at = datetime.now(UTC) - timedelta(seconds=1)
+    requests = []
+    for namespace in ('tenant-a', 'tenant-b'):
+        request = _create_request(
+            test_db_session,
+            namespace=namespace,
+            kind=enums_pb2.COMPUTE_REQUEST_KIND_PREVIEW,
+            request_json=_preview_payload(),
+        )
+        request.status = enums_pb2.COMPUTE_REQUEST_STATUS_RUNNING
+        request.attempts = 1
+        request.max_attempts = 1
+        request.lease_owner = f'worker-{namespace}'
+        request.claim_token = f'claim-{namespace}'
+        request.lease_generation = 3
+        request.lease_expires_at = expired_at
+        test_db_session.add(request)
+        requests.append(request)
+    test_db_session.commit()
+
+    reconciled = compute_requests_service.reconcile_expired_requests(test_db_session, namespace='tenant-a')
+
+    assert reconciled == 1
+    for request in requests:
+        test_db_session.refresh(request)
+    assert requests[0].status == enums_pb2.COMPUTE_REQUEST_STATUS_FAILED
+    assert requests[1].status == enums_pb2.COMPUTE_REQUEST_STATUS_RUNNING
+    assert [refresh['namespace'] for refresh in refreshes] == ['tenant-a']
     assert refreshes[0]['kind'] == compute_requests_service.RuntimeWorkKind.COMPUTE

@@ -14,7 +14,9 @@ from typing import Any
 from sqlalchemy import and_, delete, func, or_, select, text
 from sqlmodel import Session
 
+from backend_core.api_execution_budget import run_api_blocking
 from backend_core.database import RuntimeCoordinatorFenced, run_settings_db
+from backend_core.exceptions import SettingsConfigurationError
 from backend_core.live_hubs import KeyedVersionHub
 from backend_core.secrets import decrypt_secret, encrypt_secret
 from backend_core.sqlmodel_typing import col
@@ -24,6 +26,7 @@ from modules.chat.sessions import ACTIVE_TURN_STATUSES, MAX_EVENTS, MAX_MESSAGES
 CHAT_TURN_WAKE_KIND = 'chat_turn'
 CHAT_EVENT_WAKE_KIND = 'chat_event'
 _RUNTIME_CHANNEL = 'runtime_events'
+_CHAT_CREDENTIAL_DECRYPTION_ERROR = 'Chat credentials could not be decrypted; update the session credentials and try again.'
 logger = logging.getLogger(__name__)
 
 
@@ -170,6 +173,25 @@ def _claim_batch(db: Session, *, generation: int, limit: int) -> list[TurnClaim]
     ).all()
     claims: list[TurnClaim] = []
     for turn, session in rows:
+        try:
+            session_token = decrypt_secret(turn.session_token_encrypted)
+            api_key = decrypt_secret(session.api_key)
+        except SettingsConfigurationError:
+            turn.status = 'failed'
+            turn.claim_token = None
+            turn.coordinator_generation = None
+            turn.confirmation_decision = None
+            turn.updated_at = datetime.now(UTC)
+            db.add(turn)
+            _append_event(
+                db,
+                session_id=turn.session_id,
+                turn_id=turn.id,
+                payload={'type': 'error', 'content': _CHAT_CREDENTIAL_DECRYPTION_ERROR},
+            )
+            _append_event(db, session_id=turn.session_id, turn_id=turn.id, payload={'type': 'done'})
+            continue
+
         claim_token = secrets.token_urlsafe(24)
         turn.claim_token = claim_token
         turn.coordinator_generation = generation
@@ -184,10 +206,10 @@ def _claim_batch(db: Session, *, generation: int, limit: int) -> list[TurnClaim]
                 content=turn.content,
                 tool_ids=tuple(turn.tool_ids),
                 namespace=turn.namespace,
-                session_token=decrypt_secret(turn.session_token_encrypted),
+                session_token=session_token,
                 provider=session.provider,
                 model=session.model,
-                api_key=decrypt_secret(session.api_key),
+                api_key=api_key,
                 system_prompt=session.system_prompt,
                 checkpoint=dict(turn.checkpoint),
                 claim_token=claim_token,
@@ -475,7 +497,7 @@ class ChatStreamRecovery:
                 self._wake_event.clear()
                 session_ids = list(self._subscribers)
                 try:
-                    latest = await asyncio.to_thread(_latest_session_events, session_ids)
+                    latest = await run_api_blocking(_latest_session_events, session_ids)
                     for session_id in session_ids:
                         sequence = latest.get(session_id, 0)
                         if sequence > self._known_sequences.get(session_id, 0):

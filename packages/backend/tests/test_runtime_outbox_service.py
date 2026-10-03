@@ -4,7 +4,11 @@ from backend_core import runtime_outbox_service
 from backend_core.config import settings
 from backend_core.domain.runtime.events import RuntimePayloadKind
 from backend_core.notification_delivery import EMAIL_DELIVERY_KIND, TELEGRAM_DELIVERY_KIND
-from backend_core.persistence.runtime_events.models import NotificationDeliveryReceipt, RuntimeOutboxStatus
+from backend_core.persistence.runtime_events.models import (
+    NotificationDeliveryPartReceipt,
+    NotificationDeliveryReceipt,
+    RuntimeOutboxStatus,
+)
 
 
 def test_dispatch_pending_events_marks_event_dispatched(test_db_session, monkeypatch) -> None:
@@ -160,6 +164,36 @@ def test_external_delivery_failure_is_redacted_and_retryable(test_db_session) ->
     assert event.last_error == 'request to https://api.telegram.org/bot[REDACTED]/sendMessage failed'
     assert '12345:SECRET-TOKEN' not in (event.last_error or '')
     assert event.available_at > datetime.now(UTC)
+
+
+def test_telegram_delivery_progress_survives_retry_and_rejects_stale_claim(test_db_session) -> None:
+    event = runtime_outbox_service.enqueue_notification_delivery(
+        test_db_session,
+        {'kind': TELEGRAM_DELIVERY_KIND, 'chat_id': '123', 'message': 'Ready', 'attachments': [{'filename': 'one.csv'}]},
+    )
+    test_db_session.commit()
+    first_claim = runtime_outbox_service.claim_external_deliveries(test_db_session, kind=TELEGRAM_DELIVERY_KIND)[0]
+
+    assert first_claim.completed_parts == frozenset()
+    assert runtime_outbox_service.record_external_delivery_part(test_db_session, first_claim, part_key='message')
+    assert test_db_session.get(NotificationDeliveryPartReceipt, (event.id, 'message')) is not None
+
+    event.lease_expires_at = datetime.now(UTC) - timedelta(seconds=1)
+    test_db_session.add(event)
+    test_db_session.commit()
+    retry_claim = runtime_outbox_service.claim_external_deliveries(test_db_session, kind=TELEGRAM_DELIVERY_KIND)[0]
+
+    assert retry_claim.claim_token != first_claim.claim_token
+    assert retry_claim.completed_parts == frozenset({'message'})
+    assert not runtime_outbox_service.record_external_delivery_part(test_db_session, first_claim, part_key='attachment:0')
+    assert runtime_outbox_service.record_external_delivery_part(test_db_session, retry_claim, part_key='attachment:0')
+    assert runtime_outbox_service.finalize_external_delivery(test_db_session, retry_claim)
+
+    test_db_session.refresh(event)
+    assert event.status == RuntimeOutboxStatus.DISPATCHED
+    assert test_db_session.get(NotificationDeliveryPartReceipt, (event.id, 'message')) is None
+    assert test_db_session.get(NotificationDeliveryPartReceipt, (event.id, 'attachment:0')) is None
+    assert test_db_session.get(NotificationDeliveryReceipt, event.id) is not None
 
 
 def test_external_delivery_finalization_rejects_stale_lease(test_db_session) -> None:

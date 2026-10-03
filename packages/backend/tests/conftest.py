@@ -220,7 +220,6 @@ def test_user() -> User:
 
 @pytest.fixture(scope='function')
 def client(test_db_session, test_user, monkeypatch):
-    from backend_core.database import get_db_async
     from main import app
     from modules.auth.dependencies import get_current_user, get_current_user_id, get_optional_user_id
 
@@ -228,15 +227,11 @@ def client(test_db_session, test_user, monkeypatch):
     # unit tests have none.
     monkeypatch.setattr('main._provision_default_namespace_credentials', lambda: asyncio.sleep(0))
 
-    def override_get_db():
-        yield test_db_session
-
     if hasattr(app.state, 'mcp_registry'):
         del app.state.mcp_registry
 
     app.state.manager = _BackendTestManager()
     app.state.runtime_availability_probe = _UnavailableRuntimeAvailabilityProbe()
-    app.dependency_overrides[get_db_async] = override_get_db
     app.dependency_overrides[get_current_user] = lambda: test_user
     app.dependency_overrides[get_current_user_id] = lambda: test_user.id
     app.dependency_overrides[get_optional_user_id] = lambda: test_user.id

@@ -1,16 +1,54 @@
+import time
 from datetime import datetime
 from hashlib import sha256
+from typing import Any
 
 from sqlalchemy import func, text, update
 from sqlalchemy.exc import IntegrityError
 from sqlmodel import Session, select
 
+from backend_core import runtime_ipc, runtime_workers_service
 from backend_core.domain.compute.base import EngineStatusInfo
 from backend_core.domain.engine_instances.models import EngineInstanceStatus
+from backend_core.domain.runtime.events import RuntimePayloadKind
+from backend_core.domain.runtime_workers.models import RuntimeWorkerKind
 from backend_core.json_utils import copy_json_object
 from backend_core.persistence.engine_instances.models import EngineInstance
 from backend_core.sqlmodel_typing import col, sa
 from backend_core.time import utc_now as _utcnow
+
+_snapshot_phase_clock = time.perf_counter
+_ENGINE_STATUS_PROJECTION_FIELDS = (
+    'container_id',
+    'image_digest',
+    'termination_reason',
+    'exit_code',
+    'oom_killed',
+    'supervisor_id',
+    'owner_id',
+    'status',
+    'engine_scope',
+    'engine_reuse_policy',
+    'datasource_id',
+    'build_id',
+    'current_job_id',
+    'current_build_id',
+    'current_engine_run_id',
+    'resource_config_json',
+    'effective_resources_json',
+    'last_activity_at',
+)
+
+
+def _start_snapshot_phase(phase_timings: dict[str, float] | None) -> float | None:
+    return _snapshot_phase_clock() if phase_timings is not None else None
+
+
+def _finish_snapshot_phase(phase_timings: dict[str, float] | None, name: str, started: float | None) -> None:
+    if phase_timings is None or started is None:
+        return
+    elapsed_ms = (_snapshot_phase_clock() - started) * 1000
+    phase_timings[name] = phase_timings.get(name, 0.0) + elapsed_ms
 
 
 def _required_identity_value(value: str | None, field_name: str) -> str:
@@ -28,8 +66,8 @@ def _lock_engine_snapshot(session: Session, *, worker_id: str, namespace: str) -
     session.execute(text('SELECT pg_advisory_xact_lock(:key)'), {'key': key})
 
 
-def _apply_engine_status(row: EngineInstance, *, status: EngineStatusInfo, stamp: datetime) -> None:
-    projection = {
+def _engine_status_projection(*, status: EngineStatusInfo, last_activity_at: datetime | None, stamp: datetime) -> dict[str, object]:
+    return {
         'container_id': status.container_id,
         'image_digest': status.image_digest,
         'termination_reason': status.termination_reason,
@@ -51,8 +89,12 @@ def _apply_engine_status(row: EngineInstance, *, status: EngineStatusInfo, stamp
         'current_engine_run_id': status.current_engine_run_id,
         'resource_config_json': copy_json_object(status.resource_config),
         'effective_resources_json': copy_json_object(status.effective_resources),
-        'last_activity_at': _read_dt(status.last_activity) or row.last_activity_at or stamp,
+        'last_activity_at': _read_dt(status.last_activity) or last_activity_at or stamp,
     }
+
+
+def _apply_engine_status(row: EngineInstance, *, status: EngineStatusInfo, stamp: datetime) -> None:
+    projection = _engine_status_projection(status=status, last_activity_at=row.last_activity_at, stamp=stamp)
     changed = {field: value for field, value in projection.items() if getattr(row, field, None) != value}
     if not changed:
         return
@@ -130,7 +172,15 @@ def upsert_engine_status(session: Session, *, worker_id: str, namespace: str, st
     return _upsert_engine_status(session, worker_id=worker_id, namespace=namespace, status=status, now=now, commit=True)
 
 
-def persist_engine_snapshot(session: Session, *, worker_id: str, namespace: str, statuses: list[EngineStatusInfo], now: datetime | None = None) -> None:
+def persist_engine_snapshot(
+    session: Session,
+    *,
+    worker_id: str,
+    namespace: str,
+    statuses: list[EngineStatusInfo],
+    now: datetime | None = None,
+    phase_timings: dict[str, float] | None = None,
+) -> None:
     """Persist one namespace snapshot in one transaction.
 
     Engine lifecycle changes can include several identities at once. Committing
@@ -140,7 +190,12 @@ def persist_engine_snapshot(session: Session, *, worker_id: str, namespace: str,
     be written atomically and observed as one state transition.
     """
     for attempt in range(2):
+        lock_started = _snapshot_phase_clock()
         _lock_engine_snapshot(session, worker_id=worker_id, namespace=namespace)
+        advisory_lock_wait_ms = (_snapshot_phase_clock() - lock_started) * 1000
+        if phase_timings is not None:
+            phase_timings['advisory_lock_wait_ms'] = phase_timings.get('advisory_lock_wait_ms', 0.0) + advisory_lock_wait_ms
+        snapshot_started = _snapshot_phase_clock()
         try:
             _persist_engine_snapshot_locked(
                 session,
@@ -148,7 +203,11 @@ def persist_engine_snapshot(session: Session, *, worker_id: str, namespace: str,
                 namespace=namespace,
                 statuses=statuses,
                 now=now,
+                phase_timings=phase_timings,
             )
+            snapshot_write_ms = (_snapshot_phase_clock() - snapshot_started) * 1000
+            if phase_timings is not None:
+                phase_timings['snapshot_write_ms'] = phase_timings.get('snapshot_write_ms', 0.0) + snapshot_write_ms
             return
         except IntegrityError:
             # PostgreSQL snapshots are fenced by the advisory lock. Retrying
@@ -166,18 +225,30 @@ def _persist_engine_snapshot_locked(
     namespace: str,
     statuses: list[EngineStatusInfo],
     now: datetime | None,
+    phase_timings: dict[str, float] | None,
 ) -> None:
     stamp = now or _utcnow()
+    phase_started = _start_snapshot_phase(phase_timings)
     active_by_id: dict[str, EngineStatusInfo] = {}
     for status in statuses:
         scope = _required_identity_value(status.scope, 'scope')
         resource_id = _required_identity_value(status.resource_id, 'resource_id')
         active_by_id[f'{worker_id}:{namespace}:{scope}:{resource_id}'] = status
+    _finish_snapshot_phase(phase_timings, 'active_id_mapping_ms', phase_started)
 
-    existing = {}
+    existing: dict[str, Any] = {}
+    phase_started = _start_snapshot_phase(phase_timings)
     if active_by_id:
-        existing = {row.id: row for row in session.exec(select(EngineInstance).where(col(EngineInstance.id).in_(active_by_id)))}
+        columns = (
+            col(EngineInstance.id),
+            *(col(getattr(EngineInstance, field)) for field in _ENGINE_STATUS_PROJECTION_FIELDS),
+        )
+        result = session.execute(select(*columns).where(col(EngineInstance.id).in_(active_by_id)))
+        existing = {row['id']: row for row in result.mappings()}
+    _finish_snapshot_phase(phase_timings, 'existing_row_query_fetch_ms', phase_started)
 
+    phase_started = _start_snapshot_phase(phase_timings)
+    updates: list[dict[str, object]] = []
     for instance_id, status in active_by_id.items():
         row = existing.get(instance_id)
         if row is None:
@@ -192,12 +263,24 @@ def _persist_engine_snapshot_locked(
                 last_seen_at=stamp,
                 updated_at=stamp,
             )
-        _apply_engine_status(row, status=status, stamp=stamp)
-        session.add(row)
+            _apply_engine_status(row, status=status, stamp=stamp)
+            session.add(row)
+            continue
 
+        projection = _engine_status_projection(status=status, last_activity_at=row['last_activity_at'], stamp=stamp)
+        changed = {field: value for field, value in projection.items() if row[field] != value}
+        if changed:
+            updates.append({'id': instance_id, **changed, 'last_seen_at': stamp, 'updated_at': stamp})
+    if updates:
+        session.execute(update(EngineInstance).execution_options(synchronize_session=False), updates)
+    _finish_snapshot_phase(phase_timings, 'applying_statuses_ms', phase_started)
+
+    phase_started = _start_snapshot_phase(phase_timings)
+    prior_worker_ids = runtime_workers_service.reclaimable_worker_ids(session, kind=RuntimeWorkerKind.COORDINATOR) - {worker_id}
+    worker_ids_to_stop = prior_worker_ids | {worker_id}
     stop_engines = (
         update(EngineInstance)
-        .where(col(EngineInstance.worker_id) == worker_id)
+        .where(col(EngineInstance.worker_id).in_(worker_ids_to_stop))
         .where(col(EngineInstance.namespace) == namespace)
         .where(col(EngineInstance.status) != EngineInstanceStatus.STOPPED.value)
     )
@@ -213,7 +296,18 @@ def _persist_engine_snapshot_locked(
             updated_at=stamp,
         ).execution_options(synchronize_session=False)
     )
+    _finish_snapshot_phase(phase_timings, 'stale_row_sweep_ms', phase_started)
+
+    phase_started = _start_snapshot_phase(phase_timings)
+    runtime_ipc.notify_runtime_payload_on_commit(
+        session,
+        {'kind': RuntimePayloadKind.ENGINE.value, 'namespace': namespace},
+    )
+    _finish_snapshot_phase(phase_timings, 'notification_enqueue_ms', phase_started)
+
+    phase_started = _start_snapshot_phase(phase_timings)
     session.commit()
+    _finish_snapshot_phase(phase_timings, 'snapshot_commit_ms', phase_started)
 
 
 def mark_namespace_engines_stopped(

@@ -36,6 +36,10 @@ _ENGINE_TOKEN_METADATA_KEY = "x-engine-token"
 _ENGINE_APPLICATION_VERSION = "engine"
 _COORDINATOR_GENERATION_LABEL = "io.dataforge.coordinator-generation"
 _MIB = 1024 * 1024
+_SLOW_ENGINE_START_SECONDS = 5.0
+# Relative scheduling weight only (not a cap): one engine gets 1/16 the weight
+# of an API, runtime, database, or worker-manager service under CPU contention.
+_COMPUTE_ENGINE_CPU_SHARES = 128
 _IMAGE_DIGEST_RE = re.compile(r"^.+@sha256:[0-9a-f]{64}$")
 _ENGINE_CHANNEL_OPTIONS = (
     ("grpc.max_send_message_length", 128 * 1024 * 1024),
@@ -480,6 +484,7 @@ class DockerComputeEngine(ComputeEngine):
                 },
                 "labels": labels,
                 "network": settings.engine_docker_network,
+                "cpu_shares": _COMPUTE_ENGINE_CPU_SHARES,
                 "mem_limit": resources["max_memory_mb"] * _MIB if resources["max_memory_mb"] else None,
                 "pids_limit": 256,
                 "cap_drop": ["ALL"],
@@ -542,10 +547,13 @@ class DockerComputeEngine(ComputeEngine):
                 )
                 self._heartbeat_thread.start()
                 startup_duration_ms = (time.perf_counter() - start_started) * 1000
-                if startup_duration_ms >= 5000:
+                if startup_duration_ms >= _SLOW_ENGINE_START_SECONDS * 1000:
                     phase_timings = " ".join(f"{name}={duration:.1f}" for name, duration in startup_phases.items())
                     logger.warning(
-                        "Slow engine startup resource_id=%s duration_ms=%.1f %s",
+                        "Slow engine startup request_id=%s namespace=%s engine_scope=%s resource_id=%s duration_ms=%.1f %s",
+                        get_compute_request_id() or "-",
+                        self._namespace,
+                        _identity_scope(self.identity),
                         self.identity.resource_id,
                         startup_duration_ms,
                         phase_timings,
@@ -668,6 +676,7 @@ class DockerComputeEngine(ComputeEngine):
                 },
                 "labels": labels,
                 "network": settings.engine_docker_network,
+                "cpu_shares": _COMPUTE_ENGINE_CPU_SHARES,
                 "mem_limit": resources["max_memory_mb"] * _MIB if resources["max_memory_mb"] else None,
                 "pids_limit": 256,
                 "cap_drop": ["ALL"],

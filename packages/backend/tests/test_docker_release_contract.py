@@ -2,10 +2,12 @@
 
 from __future__ import annotations
 
+import re
 from pathlib import Path
 
 ROOT = Path(__file__).resolve().parents[3]
 COMPOSE = ROOT / 'docker' / 'compose.yaml'
+COMPOSE_E2E = ROOT / 'docker' / 'compose.e2e.yaml'
 COMPOSE_DEV = ROOT / 'docker' / 'compose.dev.yaml'
 PROD_ENV = ROOT / 'docker' / 'env' / 'prod.env'
 DEV_ENV = ROOT / 'docker' / 'env' / 'dev.env'
@@ -31,6 +33,52 @@ def test_compose_wires_worker_data_plane_across_containers() -> None:
     worker_service = text.split('\n  worker:\n', 1)[1].split('\n  scheduler:\n', 1)[0]
     assert 'WORKER_DATA_PLANE_GRPC_HOST: 0.0.0.0' in worker_service
     assert 'WORKER_DATA_PLANE_GRPC_PORT: "50052"' in worker_service
+
+
+def test_runtime_inherits_api_database_pool_settings_without_overrides() -> None:
+    for compose in (COMPOSE, COMPOSE_E2E):
+        text = compose.read_text()
+        api_service = text.split('\n  api:\n', 1)[1].split('\n  runtime:\n', 1)[0]
+        runtime_service = text.split('\n  runtime:\n', 1)[1].split('\n  worker:\n', 1)[0]
+
+        assert 'environment: &api-env' in api_service
+        assert 'DATABASE_POOL_SIZE:' in api_service
+        assert 'DATABASE_MAX_OVERFLOW:' in api_service
+        assert '<<: *api-env' in runtime_service
+        assert 'DATABASE_POOL_SIZE:' not in runtime_service
+        assert 'DATABASE_MAX_OVERFLOW:' not in runtime_service
+
+
+def test_compose_services_define_relative_cpu_shares_without_changing_cpu_limits() -> None:
+    expected = {
+        'postgres': 2048,
+        'api': 2048,
+        'runtime': 2048,
+        'worker': 2048,
+        'scheduler': 1024,
+        'rustfs': 512,
+    }
+    for compose in (COMPOSE, COMPOSE_E2E):
+        text = compose.read_text()
+        for service, shares in expected.items():
+            service_match = re.search(rf'^  {re.escape(service)}:\n(.*?)(?=^  [\w-]+:\n|\Z)', text, re.M | re.S)
+            assert service_match is not None
+            assert f'cpu_shares: {shares}' in service_match.group(1)
+
+    prod_text = COMPOSE.read_text()
+    assert 'cpus: ${DF_API_CPUS:-0}' in prod_text
+    assert 'cpus: ${DF_RUNTIME_CPUS:-0}' in prod_text
+    assert 'cpus: ${DF_WORKER_CPUS:-0}' in prod_text
+
+    e2e_text = COMPOSE_E2E.read_text()
+    fixture_match = re.search(r'^  openai-fixture:\n(.*?)(?=^  [\w-]+:\n|\Z)', e2e_text, re.M | re.S)
+    assert fixture_match is not None
+    assert 'cpu_shares: 512' in fixture_match.group(1)
+
+    dev_text = COMPOSE_DEV.read_text()
+    frontend_match = re.search(r'^  frontend:\n(.*?)(?=^  [\w-]+:\n|\Z)', dev_text, re.M | re.S)
+    assert frontend_match is not None
+    assert 'cpu_shares: 512' in frontend_match.group(1)
 
 
 def test_prod_env_uses_published_images_and_placeholder_secrets() -> None:

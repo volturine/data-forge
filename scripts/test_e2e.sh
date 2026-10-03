@@ -2,16 +2,20 @@
 # E2E harness for the containerized application stack.
 #
 # Exactly one app stack (postgres, rustfs, api, runtime, worker, scheduler) exists per
-# run. CI runs Playwright containers on the Compose network; local runs use the
-# host browser through its Tailscale address so Chromium does not compete with
-# the stack for Docker Desktop VM CPU. The 50-tab probe has its own runner and
-# spreads pages across Chromium processes to avoid a single-client bottleneck.
+# run. Playwright runs in bounded Linux containers on the same private Docker network.
+# The 50-tab probe has its own runner and spreads pages across Chromium processes.
 #
-# Usage:
-#   test_e2e.sh              # stack up, parallel Playwright shards, stack down
-#   test_e2e.sh stack-down   # stop and remove a leftover stack
+# The outer test runner owns the daemon lifecycle; this script always removes its stack.
 set -euo pipefail
-set -a; source docker/env/e2e.env; set +a
+if [[ "${DATAFORGE_TEST_CONTAINER:-}" != "1" || "${DOCKER_HOST:-}" != "tcp://docker:2375" ]]; then
+    echo "Run E2E through the containerized runner (DATAFORGE_TEST_CONTAINER=1, DOCKER_HOST=tcp://docker:2375)." >&2
+    exit 2
+fi
+ROOT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
+set -a; source "${ROOT_DIR}/docker/env/e2e.env"; set +a
+source "${ROOT_DIR}/scripts/e2e/test_selection.sh"
+E2E_PLAYWRIGHT_BASE_URL="http://api:8000"
+E2E_OPENAI_FIXTURE_URL="http://openai-fixture:8001/v1"
 # Just passes `browsers=50` as a positional recipe argument when callers use
 # the documented `just test-e2e-concurrency browsers=50` form. Accept that
 # spelling here as well as the plain environment value.
@@ -24,25 +28,18 @@ fi
 unset NO_COLOR
 unset VIRTUAL_ENV
 
-ROOT_DIR="$(pwd)"
 if [[ -n "${E2E_ARTIFACTS_DIR:-}" && "${E2E_ARTIFACTS_DIR}" != /* ]]; then
     E2E_ARTIFACTS_DIR="${ROOT_DIR}/${E2E_ARTIFACTS_DIR}"
 fi
-if [[ -n "${E2E_STACK_ID:-}" ]]; then
-    E2E_STACK_ID_EXPLICIT=1
-else
+if [[ -z "${E2E_STACK_ID:-}" ]]; then
     E2E_STACK_ID="run-$(date +%Y%m%d%H%M%S)-$$"
-    E2E_STACK_ID_EXPLICIT=0
 fi
 if [[ ! "${E2E_STACK_ID}" =~ ^[a-z0-9][a-z0-9_-]{0,31}$ ]]; then
     echo "E2E_STACK_ID must be 1-32 lowercase letters, digits, underscores, or hyphens, starting with a letter or digit" >&2
     exit 2
 fi
-E2E_ARTIFACTS_DIR="${E2E_ARTIFACTS_DIR:-${ROOT_DIR}/.e2e-artifacts/${E2E_STACK_ID}}"
-E2E_ARTIFACTS_CONTAINER_DIR="${E2E_ARTIFACTS_CONTAINER_DIR:-/work/.e2e-artifacts/${E2E_STACK_ID}}"
-if [[ "${E2E_ARTIFACTS_CONTAINER_DIR}" != /* ]]; then
-    E2E_ARTIFACTS_CONTAINER_DIR="/work/${E2E_ARTIFACTS_CONTAINER_DIR#./}"
-fi
+E2E_ARTIFACTS_DIR="${E2E_ARTIFACTS_DIR:-${ROOT_DIR}/.test-artifacts/e2e/${E2E_STACK_ID}}"
+E2E_ARTIFACTS_CONTAINER_DIR="${E2E_ARTIFACTS_CONTAINER_DIR:-/work/.test-artifacts/e2e/${E2E_STACK_ID}}"
 LOG_DIR="${E2E_LOG_DIR:-${E2E_ARTIFACTS_DIR}/logs}"
 if [[ -n "${LOG_DIR}" && "${LOG_DIR}" != /* ]]; then
     LOG_DIR="${ROOT_DIR}/${LOG_DIR}"
@@ -83,22 +80,28 @@ PLAYWRIGHT_VERSION="$(node -p "require('./packages/frontend/node_modules/playwri
 PLAYWRIGHT_IMAGE="mcr.microsoft.com/playwright:v${PLAYWRIGHT_VERSION}-noble"
 
 playwright_artifacts_root() {
-    if [ -n "${CI:-}" ]; then
-        printf '%s' "${E2E_ARTIFACTS_CONTAINER_DIR}"
-    else
-        printf '%s' "${E2E_ARTIFACTS_DIR}"
-    fi
+    printf '%s' "${E2E_ARTIFACTS_CONTAINER_DIR}"
 }
 
 run_playwright() {
     local timeout_seconds="$1"
     local grace_seconds="$2"
     local runner_name="$3"
+    local cpu_limit=""
     shift 3
     local env_args=()
     while [ "$#" -gt 0 ] && [ "$1" != "--" ]; do
-        env_args+=("$1")
-        shift
+        if [ "$1" = "--cpu-limit" ]; then
+            if [ "$#" -lt 2 ]; then
+                echo "run_playwright --cpu-limit requires a value" >&2
+                return 2
+            fi
+            cpu_limit="$2"
+            shift 2
+        else
+            env_args+=("$1")
+            shift
+        fi
     done
     if [ "$#" -eq 0 ]; then
         echo "run_playwright requires '--' before Playwright arguments" >&2
@@ -109,47 +112,69 @@ run_playwright() {
     if [ "$#" -gt 0 ]; then
         playwright_command+=("$@")
     fi
-    local runner_command=()
-    if [ -n "${CI:-}" ]; then
-        runner_command=(
-            docker run --rm --init --shm-size=1gb
-            --name "$runner_name"
-            --network "$E2E_DOCKER_NETWORK"
-            -v "${ROOT_DIR}:/work"
-            -w /work/packages/frontend
-            -e "CI=${CI}"
-        )
-        local env_arg
-        for env_arg in "${env_args[@]}"; do
-            runner_command+=(-e "$env_arg")
-        done
-        runner_command+=("${PLAYWRIGHT_IMAGE}" "${playwright_command[@]}")
-    else
-        if [ ! -x ./node_modules/.bin/playwright ]; then
-            echo "Local Playwright is not installed; run 'just install' first" >&2
-            return 2
-        fi
-        runner_command=(env "${env_args[@]}" "${playwright_command[@]}")
+    local runner_command=(
+        docker run --init --shm-size=1gb
+        --pids-limit=4096
+        --group-add "${DOCKER_SOCKET_GID}"
+        --name "$runner_name"
+        --network "$E2E_DOCKER_NETWORK"
+        -v "${ROOT_DIR}:/work"
+        # Bind sources resolve in the private dind container, not on the host.
+        -v /usr/local/bin/docker:/usr/local/bin/docker:ro
+        -v /var/run/docker.sock:/var/run/docker.sock
+        -w /work/packages/frontend
+        -e "CI=true"
+        -e "DOCKER_HOST=unix:///var/run/docker.sock"
+        -e "E2E_DEPLOYMENT_ID=${E2E_DEPLOYMENT_ID}"
+    )
+    if [ -n "$cpu_limit" ]; then
+        runner_command+=(--cpus "$cpu_limit")
     fi
+    local env_arg
+    for env_arg in "${env_args[@]}"; do
+        runner_command+=(-e "$env_arg")
+    done
+    runner_command+=("${PLAYWRIGHT_IMAGE}" "${playwright_command[@]}")
+    local status=0
     python3 "${ROOT_DIR}/scripts/run_with_timeout.py" \
         --timeout-seconds "$timeout_seconds" \
         --grace-seconds "$grace_seconds" \
-        -- "${runner_command[@]}"
+        -- "${runner_command[@]}" || status=$?
+    if [ "$status" -ne 0 ]; then
+        echo "Playwright runner diagnostics: ${runner_name}" >&2
+        docker inspect --format 'state={{.State.Status}} exit={{.State.ExitCode}} oom_killed={{.State.OOMKilled}} error={{.State.Error}}' "$runner_name" >&2 || true
+        docker logs --timestamps "$runner_name" >&2 || true
+    fi
+    docker rm -f "$runner_name" >/dev/null 2>&1 || true
+    return "$status"
+}
+
+build_image() {
+    local target="$1"
+    local image="$2"
+    local log_file="${LOG_DIR}/image-build-${target}.log"
+    mkdir -p "${LOG_DIR}"
+    if DOCKER_BUILDKIT=1 docker build --progress=plain -f docker/Dockerfile --target "$target" -t "$image" . >"$log_file" 2>&1; then
+        return 0
+    else
+        local status=$?
+        echo "Failed to build E2E image target=${target}; full log: ${log_file}" >&2
+        tail -n 160 "$log_file" >&2
+        return "$status"
+    fi
 }
 
 build_images() {
     echo "Building e2e images"
     for target in api scheduler runtime worker; do
         # BuildKit layer cache keeps rebuilds cheap when a target is unchanged.
-        DOCKER_BUILDKIT=1 docker build -q -f docker/Dockerfile --target "$target" -t "data-forge-${target}:e2e" . >/dev/null
+        build_image "$target" "data-forge-${target}:e2e"
     done
-    DOCKER_BUILDKIT=1 docker build -q -f docker/Dockerfile --target engine -t "${ENGINE_IMAGE}" . >/dev/null
+    build_image engine "${ENGINE_IMAGE}"
 }
 
 resolve_docker_socket_gid() {
-    # The gid the runtime coordinator needs is the one *containers* see: on Docker Desktop
-    # the daemon runs in a VM where the socket is root-owned, which does not
-    # match the host inode. Ask the worker image instead of stat-ing the host.
+    # The private daemon resolves this socket path inside its own container.
     DOCKER_SOCKET_GID="$(docker run --rm -v /var/run/docker.sock:/var/run/docker.sock \
         --entrypoint stat "${WORKER_IMAGE}" -c %g /var/run/docker.sock)"
     export DOCKER_SOCKET_GID
@@ -168,56 +193,7 @@ stack_up() {
         dump_service_logs startup
         return 1
     fi
-    resolve_playwright_base_url
-    resolve_openai_fixture_urls
     echo "E2E stack is ready"
-}
-
-resolve_playwright_base_url() {
-    if [ -n "${CI:-}" ]; then
-        # CI runners address their isolated Compose network directly; no
-        # service is running on this Mac in that environment.
-        E2E_PLAYWRIGHT_BASE_URL="http://api:8000"
-    else
-        local tailscale_ip host_port published_port
-        tailscale_ip="$(dig +short A rolands-mac-mini.bee-justice.ts.net | awk 'NF {print; exit}')"
-        if [ -z "${tailscale_ip}" ]; then
-            echo "Could not resolve this Mac's Tailscale IPv4 address" >&2
-            return 1
-        fi
-        published_port="$("${COMPOSE[@]}" port api 8000)"
-        host_port="${published_port##*:}"
-        if [[ ! "${host_port}" =~ ^[0-9]+$ ]]; then
-            echo "Could not resolve the published E2E API port from: ${published_port}" >&2
-            return 1
-        fi
-        E2E_PLAYWRIGHT_BASE_URL="http://${tailscale_ip}:${host_port}"
-    fi
-    export E2E_PLAYWRIGHT_BASE_URL
-    echo "Playwright API address: ${E2E_PLAYWRIGHT_BASE_URL}"
-}
-
-resolve_openai_fixture_urls() {
-    E2E_OPENAI_FIXTURE_URL="http://openai-fixture:8001/v1"
-    if [ -n "${CI:-}" ]; then
-        E2E_OPENAI_FIXTURE_HOST_URL="${E2E_OPENAI_FIXTURE_URL}"
-    else
-        local tailscale_ip host_port published_port
-        tailscale_ip="$(dig +short A rolands-mac-mini.bee-justice.ts.net | awk 'NF {print; exit}')"
-        if [ -z "${tailscale_ip}" ]; then
-            echo "Could not resolve this Mac's Tailscale IPv4 address for the OpenAI fixture" >&2
-            return 1
-        fi
-        published_port="$("${COMPOSE[@]}" port openai-fixture 8001)"
-        host_port="${published_port##*:}"
-        if [[ ! "${host_port}" =~ ^[0-9]+$ ]]; then
-            echo "Could not resolve the published OpenAI fixture port from: ${published_port}" >&2
-            return 1
-        fi
-        E2E_OPENAI_FIXTURE_HOST_URL="http://${tailscale_ip}:${host_port}/v1"
-    fi
-    export E2E_OPENAI_FIXTURE_URL E2E_OPENAI_FIXTURE_HOST_URL
-    echo "OpenAI fixture endpoint: ${E2E_OPENAI_FIXTURE_HOST_URL}"
 }
 
 stack_down() {
@@ -233,21 +209,6 @@ stack_down() {
     docker ps -aq --filter "label=io.dataforge.deployment=${E2E_DEPLOYMENT_ID}" | xargs -r docker rm -f >/dev/null 2>&1 || true
     "${COMPOSE[@]}" down -v --remove-orphans >/dev/null 2>&1 || true
     docker network rm "${E2E_DOCKER_NETWORK}" >/dev/null 2>&1 || true
-}
-
-normalize_e2e_artifact_ownership() {
-    if [ -z "${CI:-}" ] || [ ! -d "${E2E_ARTIFACTS_DIR}" ]; then
-        return
-    fi
-
-    docker run --rm --network none \
-        -v "${ROOT_DIR}:/work" \
-        -e "ARTIFACT_UID=$(id -u)" \
-        -e "ARTIFACT_GID=$(id -g)" \
-        -e "E2E_ARTIFACTS_DIR=${E2E_ARTIFACTS_CONTAINER_DIR}" \
-        -e "PLAYWRIGHT_ARTIFACTS_DIR=/work/packages/frontend/tests/.artifacts" \
-        --entrypoint sh "${PLAYWRIGHT_IMAGE}" \
-        -c 'for path in "$E2E_ARTIFACTS_DIR" "$PLAYWRIGHT_ARTIFACTS_DIR"; do if [ -d "$path" ]; then chown -R "$ARTIFACT_UID:$ARTIFACT_GID" "$path"; fi; done'
 }
 
 dump_service_logs() {
@@ -381,14 +342,16 @@ start_load_probe_resource_sampler() {
     if [ -z "$LOG_DIR" ] || [ -n "$LOAD_PROBE_RESOURCE_SAMPLER_PID" ]; then
         return
     fi
-    local phase_dir="${LOG_DIR}/load-probe"
+    local phase="${1:-load-probe}"
+    local runner_name="${2:-dataforge-e2e-${E2E_STACK_ID}-playwright-load-probe}"
+    local phase_dir="${LOG_DIR}/${phase}"
     mkdir -p "$phase_dir"
     python3 "${ROOT_DIR}/scripts/e2e/resource_sampler.py" \
         "dataforge-e2e-${E2E_STACK_ID}" \
         "$E2E_DEPLOYMENT_ID" \
-        "dataforge-e2e-${E2E_STACK_ID}-playwright-load-probe" \
+        "$runner_name" \
         "$$" \
-        "$phase_dir/host-resource.tsv" \
+        "$phase_dir/runner-resource.tsv" \
         >"$phase_dir/resource-sampler.log" 2>&1 &
     LOAD_PROBE_RESOURCE_SAMPLER_PID=$!
 }
@@ -502,7 +465,11 @@ run_playwright_concurrency_probe() {
         timeout_seconds=600
     fi
     mkdir -p "${artifacts_dir}/test-results" "${artifacts_dir}/playwright-report"
-    echo "Starting isolated Playwright load probe (${E2E_CONCURRENCY_BROWSERS:-50} tabs, up to 10 tabs per Chromium process)"
+    if [[ ! "${E2E_LOAD_PROBE_CPUS:-}" =~ ^[0-9]+([.][0-9]+)?$ ]]; then
+        echo "Invalid or missing derived E2E_LOAD_PROBE_CPUS: ${E2E_LOAD_PROBE_CPUS:-unset}" >&2
+        return 2
+    fi
+    echo "Starting isolated Playwright load probe (${E2E_CONCURRENCY_BROWSERS:-50} tabs, account-isolated contexts across a bounded Chromium process pool, CPU limit ${E2E_LOAD_PROBE_CPUS} vCPU)"
     local runner_env=(
         "E2E_CONCURRENCY_BROWSERS=${E2E_CONCURRENCY_BROWSERS:-50}"
         "E2E_GLOBAL_RUN_STAMP=${E2E_GLOBAL_RUN_STAMP}"
@@ -519,6 +486,7 @@ run_playwright_concurrency_probe() {
     )
     run_playwright "$timeout_seconds" "${E2E_TIMEOUT_GRACE_SECONDS:-30}" \
         "dataforge-e2e-${E2E_STACK_ID}-playwright-load-probe" \
+        --cpu-limit "$E2E_LOAD_PROBE_CPUS" \
         "${runner_env[@]}" -- tests/concurrency.test.ts
 }
 
@@ -534,6 +502,7 @@ run_playwright_architecture_tests() {
     echo "Running serialized runtime architecture regressions"
     local runner_env=(
         "PW_E2E_WORKERS=1"
+        "E2E_API_WORKERS=${E2E_API_WORKERS:-${WORKERS:-4}}"
         "DEFAULT_NAMESPACE=${DEFAULT_NAMESPACE}"
         "E2E_GLOBAL_RUN_STAMP=${E2E_GLOBAL_RUN_STAMP}"
         "E2E_ARTIFACTS_DIR=$(playwright_artifacts_root)"
@@ -545,7 +514,6 @@ run_playwright_architecture_tests() {
         "PLAYWRIGHT_JSON_REPORT=${output_dir}/playwright-report.json"
         "PLAYWRIGHT_REQUEST_TRACE_DIR=${request_trace_root}/runtime-architecture"
         "E2E_OPENAI_FIXTURE_URL=${E2E_OPENAI_FIXTURE_URL}"
-        "E2E_OPENAI_FIXTURE_HOST_URL=${E2E_OPENAI_FIXTURE_HOST_URL}"
     )
     if [ -n "${PLAYWRIGHT_GREP:-}" ]; then
         runner_env+=("PLAYWRIGHT_GREP=${PLAYWRIGHT_GREP}")
@@ -557,6 +525,53 @@ run_playwright_architecture_tests() {
     run_playwright "${E2E_ARCHITECTURE_TIMEOUT_SECONDS:-1200}" "${E2E_TIMEOUT_GRACE_SECONDS:-30}" \
         "dataforge-e2e-${E2E_STACK_ID}-runtime-architecture" \
         "${runner_env[@]}" -- "${playwright_args[@]}"
+}
+
+run_connected_session_probe() {
+    local sessions="$1"
+    local run_index="$2"
+    local runner_name="dataforge-e2e-${E2E_STACK_ID}-session-capacity-${run_index}"
+    local probe_script="${ROOT_DIR}/scripts/e2e/connected_session_probe.py"
+    local run_status=0
+    local probe_cpu_limit=1.0
+    if awk -v ratio="${E2E_SESSION_ACTIVE_RATIO:-0}" 'BEGIN { exit !(ratio > 0) }'; then
+        probe_cpu_limit=2.0
+    fi
+
+    echo "Starting connected-session capacity probe ${run_index}/${E2E_SESSION_REPEATS:-3} (${sessions} unique accounts, active_ratio=${E2E_SESSION_ACTIVE_RATIO:-0}, probe_cpu=${probe_cpu_limit})"
+    start_load_probe_resource_sampler "session-capacity-${run_index}" "$runner_name"
+    python3 "${ROOT_DIR}/scripts/run_with_timeout.py" \
+        --timeout-seconds "${E2E_SESSION_PROBE_TIMEOUT_SECONDS:-900}" \
+        --grace-seconds "${E2E_TIMEOUT_GRACE_SECONDS:-30}" \
+        -- \
+        docker run --init --shm-size=128m --pids-limit=4096 \
+            --name "$runner_name" \
+            --label "io.dataforge.deployment=${E2E_DEPLOYMENT_ID}" \
+            --network "$E2E_DOCKER_NETWORK" \
+            --cpus="$probe_cpu_limit" --memory=768m \
+            -v "${probe_script}:/connected_session_probe.py:ro" \
+            --entrypoint python3 \
+            data-forge-api:e2e \
+            /connected_session_probe.py \
+            --sessions "$sessions" \
+            --api-url http://api:8000 \
+            --namespace "$DEFAULT_NAMESPACE" \
+            --run-id "${E2E_GLOBAL_RUN_STAMP}-session-${run_index}" \
+            --duration-seconds "${E2E_SESSION_DURATION_SECONDS:-60}" \
+            --active-ratio "${E2E_SESSION_ACTIVE_RATIO:-0}" \
+            --heartbeat-seconds "${E2E_SESSION_HEARTBEAT_SECONDS:-10}" \
+            --registration-concurrency "${E2E_SESSION_REGISTRATION_CONCURRENCY:-16}" \
+            --connect-concurrency "${E2E_SESSION_CONNECT_CONCURRENCY:-64}" || run_status=$?
+    stop_load_probe_resource_sampler
+
+    if [ "$run_status" -ne 0 ]; then
+        echo "Connected-session probe failed; capturing its container diagnostics" >&2
+        docker inspect --format 'state={{.State.Status}} exit={{.State.ExitCode}} oom_killed={{.State.OOMKilled}} error={{.State.Error}}' \
+            "$runner_name" >&2 || true
+        docker logs --timestamps "$runner_name" >&2 || true
+    fi
+    docker rm -f "$runner_name" >/dev/null 2>&1 || true
+    return "$run_status"
 }
 
 prepare_playwright_selection() {
@@ -573,18 +588,14 @@ prepare_playwright_selection() {
         # Keep architecture and load cases out of normal shards by file path.
         RUN_CONCURRENCY_PROBE=1
         RUN_ARCHITECTURE_TESTS=1
+        local listed_files
+        if ! listed_files="$(select_default_playwright_tests "${ROOT_DIR}/packages/frontend")"; then
+            return 1
+        fi
         local test_file
         while IFS= read -r test_file; do
-            case "$test_file" in
-                tests/runtime-architecture.test.ts|tests/datasource-compute-isolation.test.ts)
-                    ;;
-                tests/concurrency.test.ts)
-                    ;;
-                *)
-                    NORMAL_TEST_FILES+=("$test_file")
-                    ;;
-            esac
-        done < <(cd "${ROOT_DIR}/packages/frontend" && rg --files tests -g '*.test.ts' | sort)
+            NORMAL_TEST_FILES+=("$test_file")
+        done <<<"$listed_files"
         return
     fi
 
@@ -637,23 +648,61 @@ bootstrap_shared_fixtures() (
 
 action="${1:-all}"
 case "$action" in
+    capacity)
+        sessions="${E2E_SESSION_CONNECTIONS:-2000}"
+        repeats="${E2E_SESSION_REPEATS:-3}"
+        active_ratio="${E2E_SESSION_ACTIVE_RATIO:-0}"
+        if [[ ! "$sessions" =~ ^[1-9][0-9]*$ ]] || [ "${#sessions}" -gt 6 ]; then
+            echo "E2E_SESSION_CONNECTIONS must be a positive integer no greater than 999999; got '${sessions}'." >&2
+            exit 2
+        fi
+        if [[ ! "$repeats" =~ ^[1-9][0-9]*$ ]] || [ "${#repeats}" -gt 3 ]; then
+            echo "E2E_SESSION_REPEATS must be a positive integer no greater than 999; got '${repeats}'." >&2
+            exit 2
+        fi
+        if [[ ! "$active_ratio" =~ ^([0-9]+([.][0-9]*)?|[.][0-9]+)$ ]] || \
+            ! awk -v value="$active_ratio" 'BEGIN { exit !(value >= 0 && value <= 1) }'; then
+            echo "E2E_SESSION_ACTIVE_RATIO must be between 0 and 1 inclusive; got '${active_ratio}'." >&2
+            exit 2
+        fi
+        active_http_sessions=$(awk -v sessions="$sessions" -v ratio="$active_ratio" 'BEGIN { print int(sessions * ratio + 0.999999) }')
+        minimum_connections=$((sessions + (2 * active_http_sessions) + 64))
+        if [ "$WORKER_CONNECTIONS" -lt "$minimum_connections" ]; then
+            WORKER_CONNECTIONS="$minimum_connections"
+        fi
+        export WORKER_CONNECTIONS
+        echo "Connected-session profile: sessions=${sessions} active_ratio=${active_ratio} WORKER_CONNECTIONS=${WORKER_CONNECTIONS} (at least ${sessions} WebSocket + $((2 * active_http_sessions)) active HTTP + 64) API_WORKERS=${WORKERS}"
+        cleanup_capacity() {
+            status=$?
+            stop_load_probe_resource_sampler
+            stop_database_activity_sampler
+            stack_down
+            exit "$status"
+        }
+        trap cleanup_capacity EXIT
+        trap 'exit 130' INT
+        trap 'exit 143' TERM
+        mkdir -p "${E2E_ARTIFACTS_DIR}/session-capacity"
+        stack_up
+        start_database_activity_sampler session-capacity
+        probe_status=0
+        for run_index in $(seq 1 "$repeats"); do
+            run_connected_session_probe "$sessions" "$run_index" || probe_status=$?
+            dump_service_logs "session-capacity-${run_index}" "$probe_status"
+            dump_slow_requests "session-capacity-${run_index}"
+            if [ "$probe_status" -ne 0 ]; then
+                break
+            fi
+        done
+        stop_database_activity_sampler
+        exit "$probe_status"
+        ;;
     all)
-        keep_stack="${E2E_KEEP_STACK:-0}"
         cleanup() {
             status=$?
             stop_load_probe_resource_sampler
             stop_database_activity_sampler
-            if ! normalize_e2e_artifact_ownership; then
-                echo "Failed to restore ownership of E2E artifacts for the next checkout" >&2
-                if [ "$status" -eq 0 ]; then
-                    status=1
-                fi
-            fi
-            if [ "$keep_stack" != "1" ]; then
-                stack_down
-            else
-                echo "E2E_KEEP_STACK=1: leaving the stack running for inspection"
-            fi
+            stack_down
             exit "$status"
         }
         trap cleanup EXIT
@@ -666,7 +715,7 @@ case "$action" in
 
         shards="${E2E_SHARDS:-3}"
         # Runner output lives under this run's unique artifact root. Never
-        # delete shared/local test artifacts as part of a CI/E2E invocation.
+        # delete shared test artifacts as part of an E2E invocation.
         mkdir -p "${PLAYWRIGHT_SHARD_ARTIFACTS_DIR}"
         mkdir -p "${E2E_ARTIFACTS_DIR}/playwright-load-probe/test-results" \
             "${E2E_ARTIFACTS_DIR}/playwright-load-probe/playwright-report"
@@ -674,7 +723,13 @@ case "$action" in
             mkdir -p "${PLAYWRIGHT_SHARD_ARTIFACTS_DIR}/shard${shard}/test-results" "${PLAYWRIGHT_SHARD_ARTIFACTS_DIR}/shard${shard}/playwright-report"
         done
         prepare_playwright_selection
-        bootstrap_shared_fixtures
+        bootstrap_status=0
+        bootstrap_shared_fixtures || bootstrap_status=$?
+        dump_service_logs shared-fixture-bootstrap "$bootstrap_status"
+        dump_slow_requests shared-fixture-bootstrap
+        if [ "$bootstrap_status" -ne 0 ]; then
+            exit "$bootstrap_status"
+        fi
         only_concurrency_probe=0
         if [ "${#NORMAL_TEST_FILES[@]}" -eq 0 ] && [ -n "${PLAYWRIGHT_TEST_FILES:-}" ] \
             && [ "$RUN_CONCURRENCY_PROBE" -eq 1 ] && [ "$RUN_ARCHITECTURE_TESTS" -eq 0 ]; then
@@ -708,11 +763,9 @@ case "$action" in
             for pid in "${pids[@]}"; do
                 wait "$pid" || failed=1
             done
+            dump_service_logs full-suite "$failed"
         fi
         stop_database_activity_sampler
-        if [ "$failed" -ne 0 ]; then
-            dump_service_logs full-suite
-        fi
         if [ "$RUN_ARCHITECTURE_TESTS" -eq 1 ]; then
             start_database_activity_sampler runtime-architecture
             run_playwright_architecture_tests || failed=1
@@ -739,14 +792,10 @@ case "$action" in
             stop_load_probe_resource_sampler
             stop_database_activity_sampler
         fi
-        if [ "$RUN_CONCURRENCY_PROBE" -eq 1 ] || [ "$failed" -ne 0 ]; then
+        if [ "$RUN_CONCURRENCY_PROBE" -eq 1 ]; then
             # Keep successful load-probe evidence too: latency can be poor
             # without producing a failed browser assertion.
-            log_phase=full-suite
-            if [ "$RUN_CONCURRENCY_PROBE" -eq 1 ]; then
-                log_phase=load-probe
-            fi
-            dump_service_logs "$log_phase" "$failed"
+            dump_service_logs load-probe "$failed"
         fi
         set -e
         wait_for_runtime_drain
@@ -757,15 +806,8 @@ case "$action" in
         fi
         exit "$failed"
         ;;
-    stack-down)
-        if [ "$E2E_STACK_ID_EXPLICIT" -ne 1 ]; then
-            echo "Set E2E_STACK_ID to the exact run id printed by test_e2e.sh before stopping a retained stack." >&2
-            exit 2
-        fi
-        stack_down
-        ;;
     *)
-        echo "usage: test_e2e.sh [all|stack-down]" >&2
+        echo "usage: test_e2e.sh" >&2
         exit 1
         ;;
 esac

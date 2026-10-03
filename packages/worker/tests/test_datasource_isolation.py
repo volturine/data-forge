@@ -1,12 +1,11 @@
 from __future__ import annotations
 
+import contextlib
 import io
 import json
 import multiprocessing
 import os
-import shutil
 import socket
-from types import SimpleNamespace
 
 import grpc
 import polars as pl
@@ -22,11 +21,9 @@ from runtime.engine_server import ENGINE_PROTOCOL_VERSION, run_engine_server
 from runtime.exceptions import StaleComputeInputError
 from runtime.worker_runtime_client import DatasourceMetadata
 
-MAC_HOST = "rolands-mac-mini.bee-justice.ts.net"
-
 
 def _run_engine(port: int) -> None:
-    run_engine_server(host="0.0.0.0", port=port, engine_identity="source-1", token="engine-test-token", heartbeat_timeout_seconds=60)
+    run_engine_server(host="127.0.0.1", port=port, engine_identity="source-1", token="engine-test-token", heartbeat_timeout_seconds=60)
 
 
 def test_datasource_schema_executes_in_separate_engine_pid_and_survives_engine_crash(tmp_path, monkeypatch) -> None:
@@ -38,11 +35,11 @@ def test_datasource_schema_executes_in_separate_engine_pid_and_survives_engine_c
 
     monkeypatch.setattr(execution, "get_datasource_schema_from_metadata", fail_manager_schema)
     with socket.socket() as listener:
-        listener.bind(("0.0.0.0", 0))
+        listener.bind(("127.0.0.1", 0))
         port = listener.getsockname()[1]
     process = multiprocessing.get_context("spawn").Process(target=_run_engine, args=(port,))
     process.start()
-    channel = grpc.insecure_channel(f"{MAC_HOST}:{port}")
+    channel = grpc.insecure_channel(f"127.0.0.1:{port}")
     try:
         grpc.channel_ready_future(channel).result(timeout=30)
         stub = engine_runtime_pb2_grpc.PolarsEngineServiceStub(channel)
@@ -111,8 +108,11 @@ def test_frozen_revision_change_fails_before_any_engine_submission() -> None:
 
 
 @pytest.mark.parametrize("empty_first_batch", [False, True])
-def test_staging_streams_multiple_arrow_batches_without_whole_source_collection(monkeypatch, empty_first_batch: bool) -> None:
+def test_staging_streams_multiple_parquet_batches_without_whole_source_collection(monkeypatch, empty_first_batch: bool) -> None:
+    import pyarrow.parquet as pq
+
     uploads = []
+    saved_manifests = []
 
     class Upload:
         def __init__(self, *_args, **_kwargs):
@@ -137,121 +137,201 @@ def test_staging_streams_multiple_arrow_batches_without_whole_source_collection(
     monkeypatch.setattr(execution, "MultipartObjectUpload", Upload)
     monkeypatch.setattr(execution, "iter_datasource_batches", batches)
     monkeypatch.setattr(execution, "load_datasource", lambda *_args: pytest.fail("Whole source loaded"))
+    monkeypatch.setattr(execution, "upload_bytes", lambda data, url, **_kwargs: saved_manifests.append((data, url)))
     result = execution.stage_datasource_to_object_store(
         {"source_type": "file"},
-        artifact_url="s3://default/runtime-staging/job/data.arrow",
+        table_path="s3://default/clean/source__claim_attempt/master",
+        manifest_url="s3://default/runtime-staging/datasource-stage/request-1/1/manifest.json",
         progress_callback=lambda _event: None,
     )
-    reader = pa.ipc.open_stream(uploads[0].buffer.getvalue())
-    chunks = list(reader)
-    expected_schema = pl.DataFrame(schema={"value": pl.Null}).with_columns(pl.col("value").cast(pl.String)).to_arrow().schema
+    parquet = pq.read_table(pa.BufferReader(uploads[0].buffer.getvalue()))
     assert uploads[0].committed
-    assert reader.schema.equals(expected_schema, check_metadata=True)
-    assert all(chunk.schema.equals(reader.schema, check_metadata=True) for chunk in chunks)
-    assert reader.schema.field("value").type == pa.large_string()
-    assert [chunk.num_rows for chunk in chunks] == ([] if empty_first_batch else [1]) + [16, 16]
-    assert chunks[-2].column("value").to_pylist()[0] == "0"
+    assert parquet.schema.names == ["value"]
+    assert parquet.num_rows == (32 if empty_first_batch else 33)
+    assert "0" in parquet.column("value").to_pylist()
     assert result["row_count"] == (32 if empty_first_batch else 33)
+    assert result["file_paths"] == ["s3://default/clean/source__claim_attempt/master/data.parquet"]
+    assert isinstance(result["arrow_schema"], str)
+    assert saved_manifests[0][1].endswith("/manifest.json")
+    assert json.loads(saved_manifests[0][0]) == result
 
 
-def test_manager_atomically_replaces_existing_table_one_record_batch_at_a_time(tmp_path, monkeypatch) -> None:
-    source = tmp_path / "source.arrow"
-    schema = pa.schema([pa.field("value", pa.int64()), pa.field("added", pa.string())])
-    with pa.ipc.new_stream(source, schema) as writer:
-        for batch_index in range(3):
-            batch_rows = range(batch_index * 32, (batch_index + 1) * 32)
-            writer.write_batch(pa.record_batch([list(batch_rows), [f"new-{row}" for row in batch_rows]], schema=schema))
+def test_empty_datasource_writes_schema_manifest_without_zero_row_parquet(monkeypatch) -> None:
+    saved_manifests = []
 
-    class Table:
-        def __init__(self):
-            self.rows = pa.table({"value": pa.array([-1], type=pa.int32()), "removed": ["old"]})
-            self.arrow_schema = pa.schema([pa.field("value", pa.int32()), pa.field("removed", pa.string())])
-            self.commits = 0
-            self.refreshes = 0
+    class UnexpectedUpload:
+        def __init__(self, *_args, **_kwargs):
+            pytest.fail("Empty datasource must not upload a zero-row Parquet object")
 
-        def transaction(self):
-            return Transaction(self)
+    monkeypatch.setattr(execution, "MultipartObjectUpload", UnexpectedUpload)
 
-        def refresh(self):
-            self.refreshes += 1
+    def no_batches(*_args, **_kwargs):
+        yield from ()
 
-    class Transaction:
-        def __init__(self, table):
-            self.table = table
-            self.appended = []
-            self.deleted = False
-            self.table_metadata = self
+    monkeypatch.setattr(execution, "iter_datasource_batches", no_batches)
+    monkeypatch.setattr(execution, "load_datasource", lambda *_args: pl.DataFrame(schema={"empty": pl.String}).lazy())
+    monkeypatch.setattr(execution, "upload_bytes", lambda data, url, **_kwargs: saved_manifests.append((json.loads(data), url)))
 
-        def schema(self):
-            return SimpleNamespace(fields=[SimpleNamespace(name=name) for name in self.table.arrow_schema.names])
-
-        def update_schema(self):
-            return UpdateSchema(self)
-
-        def delete(self, *, delete_filter):
-            assert str(delete_filter) == "AlwaysTrue()"
-            self.deleted = True
-
-        def append(self, batch):
-            assert self.table.rows.column("value").to_pylist() == [-1]
-            assert batch.num_rows == 32
-            self.appended.append(batch)
-
-        def __enter__(self):
-            return self
-
-        def __exit__(self, exc_type, _exc_value, _traceback):
-            if exc_type is None:
-                assert self.deleted
-                self.table.rows = pa.concat_tables(self.appended)
-                self.table.arrow_schema = self.appended[0].schema
-                self.table.commits += 1
-
-    class UpdateSchema:
-        def __init__(self, transaction):
-            self.transaction = transaction
-            self.deleted_columns = []
-            self.new_schema = None
-
-        def delete_column(self, name):
-            self.deleted_columns.append(name)
-            return self
-
-        def union_by_name(self, new_schema):
-            self.new_schema = new_schema
-            return self
-
-        def commit(self):
-            assert self.deleted_columns == ["removed"]
-            assert self.new_schema == schema
-
-    table = Table()
-
-    class Catalog:
-        def create_namespace_if_not_exists(self, _namespace):
-            pass
-
-        def table_exists(self, identifier):
-            assert identifier == "clean.source_claim_1"
-            return True
-
-        def load_table(self, identifier):
-            assert identifier == "clean.source_claim_1"
-            return table
-
-        def create_table(self, _identifier, **_kwargs):
-            pytest.fail("An existing output table must be replaced, not recreated")
-
-    monkeypatch.setattr(execution, "download_file", lambda _url, target: shutil.copyfile(source, target))
-    monkeypatch.setattr(execution, "load_runtime_catalog", lambda *_args, **_kwargs: Catalog())
-    result = execution.import_staged_arrow_artifact(
-        "s3://default/runtime-staging/data.arrow", table_path="s3://default/clean/source_claim_1/master", database_url="catalog-credentials-stay-in-manager"
+    manifest = execution.stage_datasource_to_object_store(
+        {"source_type": "file"},
+        table_path="s3://default/clean/empty__claim_attempt/master",
+        manifest_url="s3://default/runtime-staging/datasource-stage/request-1/1/manifest.json",
+        progress_callback=lambda _event: None,
     )
-    assert result is table
-    assert table.commits == 1
-    assert table.refreshes == 1
-    assert table.arrow_schema == schema
-    assert table.rows.to_pylist() == [{"value": row, "added": f"new-{row}"} for row in range(96)]
+
+    assert manifest["row_count"] == 0
+    assert manifest["file_paths"] == []
+    assert manifest["columns"] == [{"name": "empty", "dtype": "String", "nullable": True}]
+    assert saved_manifests[0][0] == manifest
+
+
+@pytest.mark.parametrize("existing_table", [False, True])
+def test_manager_commits_staged_parquet_files_and_replaces_existing_table_atomically(tmp_path, monkeypatch, existing_table: bool) -> None:
+    import base64
+
+    import pyarrow.parquet as pq
+    from pyiceberg.catalog.memory import InMemoryCatalog
+
+    schema = pa.schema([pa.field("value", pa.int64()), pa.field("added", pa.string())])
+    table_path = (tmp_path / "source_claim_1" / "master").as_uri()
+    parquet_path = tmp_path / "source_claim_1" / "master" / "data.parquet"
+    parquet_path.parent.mkdir(parents=True)
+    rows = pa.table({"value": list(range(96)), "added": [f"new-{row}" for row in range(96)]}, schema=schema)
+    pq.write_table(rows, parquet_path)
+    catalog = InMemoryCatalog("datasource-import-tests", warehouse=(tmp_path / "warehouse").as_uri())
+    catalog.create_namespace("clean")
+    monkeypatch.setattr(execution, "load_runtime_catalog", lambda *_args, **_kwargs: catalog)
+    monkeypatch.setattr(execution, "object_store_storage_options", lambda: {})
+    monkeypatch.setattr(execution, "object_store_url", lambda *_args, **_kwargs: (tmp_path / "warehouse").as_uri())
+    monkeypatch.setattr(execution, "get_namespace", lambda: "default")
+
+    if existing_table:
+        old_schema = pa.schema([pa.field("value", pa.int32()), pa.field("removed", pa.string())])
+        old_path = tmp_path / "source_claim_1" / "master" / "old.parquet"
+        pq.write_table(pa.table({"value": [-1], "removed": ["old"]}, schema=old_schema), old_path)
+        old_table = catalog.create_table("clean.source_claim_1", schema=old_schema, location=table_path)
+        old_table.append(pa.table({"value": [-1], "removed": ["old"]}, schema=old_schema))
+        previous_snapshot_id = old_table.current_snapshot().snapshot_id
+
+    manifest = {
+        "file_paths": [parquet_path.as_uri()],
+        "arrow_schema": base64.b64encode(schema.serialize().to_pybytes()).decode("ascii"),
+        "row_count": 96,
+    }
+    table = execution.import_staged_parquet_files(manifest, table_path=table_path, database_url="catalog-credentials-stay-in-manager")
+
+    assert table.current_snapshot() is not None
+    assert table.current_snapshot().summary["added-records"] == "96"
+    assert table.scan().to_arrow().to_pylist() == rows.to_pylist()
+    committed_schema = table.schema().as_arrow()
+    assert committed_schema.names == schema.names
+    assert pa.types.is_int64(committed_schema.field("value").type)
+    assert pa.types.is_large_string(committed_schema.field("added").type)
+    if existing_table:
+        assert table.current_snapshot().snapshot_id != previous_snapshot_id
+        assert "removed" not in committed_schema.names
+
+
+@pytest.mark.parametrize(
+    "invalid_path",
+    [
+        "s3://default/clean/another_claim/master/data.parquet",
+        "s3://default/clean/current_claim/master/../published/data.parquet",
+    ],
+)
+def test_manager_rejects_stale_manifest_outside_claim_prefix_before_catalog_access(monkeypatch, invalid_path: str) -> None:
+    import base64
+
+    schema = pa.schema([pa.field("value", pa.int64())])
+    manifest = {
+        "file_paths": ["s3://default/clean/current_claim/master/valid.parquet", invalid_path],
+        "arrow_schema": base64.b64encode(schema.serialize().to_pybytes()).decode("ascii"),
+    }
+    monkeypatch.setattr(
+        execution,
+        "load_runtime_catalog",
+        lambda *_args, **_kwargs: pytest.fail("A stale manifest must be rejected before catalog access"),
+    )
+
+    with pytest.raises(ValueError, match="claim-scoped table prefix"):
+        execution.import_staged_parquet_files(
+            manifest,
+            table_path="s3://default/clean/current_claim/master",
+            database_url="catalog-credentials-stay-in-manager",
+        )
+
+
+def test_scheduled_ingest_uses_the_same_manifest_commit_path_as_manual_ingest(monkeypatch) -> None:
+    from runtime.domain.datasource.source_types import DataSourceType
+    from runtime.worker_runtime_client import DatasourceMetadata
+
+    manifest = {"file_paths": ["s3://default/clean/source__claim_schedule/master/data.parquet"], "row_count": 4, "columns": []}
+    metadata = DatasourceMetadata(
+        found=True,
+        id="source",
+        name="Source",
+        source_type="iceberg",
+        config={"source": {"source_type": "file"}, "branch": "master"},
+        schema_cache=None,
+        is_hidden=False,
+        revision=3,
+        created_by="import",
+    )
+    calls = []
+
+    class Engine:
+        def datasource_job(self, kind, payload):
+            assert kind == "datasource_stage"
+            assert payload["table_path"] == "s3://default/clean/source__claim_claim_schedule/master"
+            assert payload["manifest_url"].endswith("/manifest.json")
+            return "stage-job"
+
+    class Manager:
+        @contextlib.contextmanager
+        def acquire_engine(self, _identity):
+            yield Engine()
+
+    class Client:
+        def register_datasource_stage(self, **kwargs):
+            calls.append(("register", kwargs))
+
+        def publish_datasource_ingest(self, **kwargs):
+            calls.append(("publish", kwargs))
+            return execution.DataSourceRecord(id="source", name="Source", source_type="iceberg", config=kwargs["config"])
+
+        def update_engine_run(self, **_kwargs):
+            return None
+
+    table = type("Table", (), {"current_snapshot": lambda _self: None, "metadata_location": None})()
+    monkeypatch.setattr(execution, "_require_metadata", lambda *_args, **_kwargs: metadata)
+    monkeypatch.setattr(execution, "_external_source", lambda _metadata: ({"source_type": "file"}, DataSourceType.FILE))
+    monkeypatch.setattr(execution, "import_staged_parquet_files", lambda received, **kwargs: (calls.append(("import", received, kwargs)), table)[1])
+    monkeypatch.setattr("runtime.compute_utils.await_engine_result", lambda *_args, **_kwargs: {"data": manifest})
+    monkeypatch.setattr("runtime.object_store.delete_object", lambda _path: None)
+
+    execution.ingest_datasource_for_schedule(
+        Client(),
+        manager=Manager(),
+        namespace="default",
+        database_url="catalog-credentials-stay-in-manager",
+        datasource_id="source",
+        staging_key="claim-schedule",
+        worker_id="worker",
+        claim_token="claim-schedule",
+        lease_generation=4,
+        job_id="job-1",
+        build_id="build-1",
+    )
+
+    registration = calls[0][1]
+    imported_manifest, import_kwargs = calls[1][1:]
+    assert registration["prefix_url"] == "s3://default/clean/source__claim_claim_schedule/master"
+    assert imported_manifest == manifest
+    assert import_kwargs == {
+        "table_path": registration["prefix_url"],
+        "database_url": "catalog-credentials-stay-in-manager",
+    }
+    assert calls[-1][0] == "publish"
 
 
 def test_excel_ingestion_uses_bounded_batches_with_consistent_mixed_column_types(tmp_path) -> None:

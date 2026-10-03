@@ -4,7 +4,7 @@ from collections.abc import Sequence
 from dataclasses import dataclass
 from datetime import UTC, datetime, timedelta
 
-from sqlalchemy import func, or_, select, text
+from sqlalchemy import delete, func, or_, select, text
 from sqlmodel import Session
 
 from backend_core import notification_delivery, runtime_ipc, runtime_work_service
@@ -13,9 +13,14 @@ from backend_core.config import settings
 from backend_core.domain.runtime.events import RuntimePayloadKind
 from backend_core.namespace import get_namespace
 from backend_core.notification_delivery import redact_secrets_in_text
-from backend_core.persistence.runtime_events.models import NotificationDeliveryReceipt, RuntimeOutboxEvent, RuntimeOutboxStatus
+from backend_core.persistence.runtime_events.models import (
+    NotificationDeliveryPartReceipt,
+    NotificationDeliveryReceipt,
+    RuntimeOutboxEvent,
+    RuntimeOutboxStatus,
+)
 from backend_core.runtime_work_service import RuntimeWorkKind
-from backend_core.sqlmodel_typing import sa
+from backend_core.sqlmodel_typing import col, sa
 from backend_core.transactions import committed
 
 _SENSITIVE_ERROR_FIELDS = frozenset(
@@ -70,6 +75,7 @@ class OutboxClaim:
     event_kind: str
     payload: dict[str, object]
     already_delivered: bool = False
+    completed_parts: frozenset[str] = frozenset()
 
 
 def _redact_payload_secrets(message: str, payload: dict[str, object]) -> str:
@@ -288,6 +294,41 @@ def finalize_external_delivery(session: Session, claim: OutboxClaim, *, error: s
     return finalized == 1
 
 
+def record_external_delivery_part(session: Session, claim: OutboxClaim, *, part_key: str) -> bool:
+    """Persist one accepted Telegram part while the same outbox lease is current.
+
+    Provider acceptance and this commit cannot be atomic. A crash in between
+    remains at-least-once, but confirmed earlier parts are skipped on retries.
+    """
+    if claim.event_kind != notification_delivery.TELEGRAM_DELIVERY_KIND:
+        raise ValueError('Per-part progress is only supported for Telegram deliveries')
+    if not part_key or len(part_key) > 128:
+        raise ValueError('Telegram delivery part key is invalid')
+
+    event = session.get(RuntimeOutboxEvent, claim.event_id, with_for_update=True, populate_existing=True)
+    now = _database_now(session, wall_clock=True)
+    if (
+        event is None
+        or event.kind != notification_delivery.TELEGRAM_DELIVERY_KIND
+        or event.status != RuntimeOutboxStatus.DISPATCHING
+        or event.claim_token != claim.claim_token
+        or event.lease_generation != claim.lease_generation
+        or event.lease_expires_at is None
+        or (event.lease_expires_at if event.lease_expires_at.tzinfo is not None else event.lease_expires_at.replace(tzinfo=UTC)) <= now
+    ):
+        session.rollback()
+        return False
+
+    receipt_id = (event.id, part_key)
+    if session.get(NotificationDeliveryPartReceipt, receipt_id) is None:
+        session.add(NotificationDeliveryPartReceipt(event_id=event.id, part_key=part_key, delivered_at=now))
+    event.lease_expires_at = now + timedelta(seconds=settings.runtime_outbox_claim_ttl_seconds)
+    event.updated_at = now
+    session.add(event)
+    session.commit()
+    return True
+
+
 def _claim_next_events(
     session: Session,
     *,
@@ -317,6 +358,17 @@ def _claim_next_events(
         session.rollback()
         return []
 
+    telegram_event_ids = [event.id for event in events if event.kind == notification_delivery.TELEGRAM_DELIVERY_KIND]
+    completed_parts_by_event: dict[str, set[str]] = {event_id: set() for event_id in telegram_event_ids}
+    if telegram_event_ids:
+        completed_part_rows = session.execute(
+            select(col(NotificationDeliveryPartReceipt.event_id), col(NotificationDeliveryPartReceipt.part_key)).where(
+                col(NotificationDeliveryPartReceipt.event_id).in_(telegram_event_ids)
+            )
+        ).all()
+        for event_id, part_key in completed_part_rows:
+            completed_parts_by_event[str(event_id)].add(str(part_key))
+
     claims: list[OutboxClaim] = []
     for event in events:
         claim_token = str(uuid.uuid4())
@@ -334,6 +386,7 @@ def _claim_next_events(
                 event_kind=event.kind,
                 payload=dict(event.payload_json),
                 already_delivered=(event.kind in _EXTERNAL_DELIVERY_KINDS and session.get(NotificationDeliveryReceipt, event.id) is not None),
+                completed_parts=frozenset(completed_parts_by_event.get(event.id, ())),
             )
         )
         session.add(event)
@@ -404,6 +457,8 @@ def _finalize_claims(
             receipt = session.get(NotificationDeliveryReceipt, event.id)
             if receipt is None:
                 session.add(NotificationDeliveryReceipt(event_id=event.id, kind=event.kind, delivered_at=now))
+        if error is None and event.kind == notification_delivery.TELEGRAM_DELIVERY_KIND:
+            session.execute(delete(NotificationDeliveryPartReceipt).where(NotificationDeliveryPartReceipt.event_id == event.id))
         poisoned = error is not None and event.kind != STORAGE_CLEANUP_KIND and event.attempts >= settings.runtime_outbox_max_attempts
         event.status = RuntimeOutboxStatus.DISPATCHED if error is None else RuntimeOutboxStatus.POISONED if poisoned else RuntimeOutboxStatus.FAILED
         event.claim_token = None

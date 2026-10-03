@@ -1,7 +1,7 @@
 """Turn lifecycle regressions that do not require running services."""
 
 import asyncio
-from collections.abc import Generator
+from collections.abc import Callable, Generator
 from dataclasses import replace
 from pathlib import Path
 from threading import Event
@@ -28,6 +28,11 @@ from modules.chat.sessions import session_store
 from modules.chat.store import ChatClaimRevoked, ChatTurnStore, TurnClaim, _verify_claim
 from modules.mcp.models import MCPHttpMethod, MCPToolDefinition
 from runtime_coordinator import _supervise_epoch
+
+
+def _claim_batches_then_idle(*batches: list[TurnClaim]) -> Callable[..., list[TurnClaim]]:
+    remaining = iter(batches)
+    return lambda *_args, **_kwargs: next(remaining, [])
 
 
 @pytest.fixture(autouse=True)
@@ -223,7 +228,7 @@ async def test_consumer_handles_actual_removed_or_revoked_store_row(monkeypatch:
 async def test_revoked_turn_does_not_stop_later_turn_or_grpc_actor(monkeypatch: pytest.MonkeyPatch, operation: str) -> None:
     store = create_autospec(ChatTurnStore, instance=True)
     store.recover.return_value = 0
-    store.claim_batch.side_effect = [[_claim()], [_claim('later')], []]
+    store.claim_batch.side_effect = _claim_batches_then_idle([_claim()], [_claim('later')], [])
     store.control_state.return_value = (False, None)
     store.append_event.return_value = 1
     loop = asyncio.get_running_loop()
@@ -290,22 +295,34 @@ async def test_revoked_turn_does_not_stop_later_turn_or_grpc_actor(monkeypatch: 
 async def test_infrastructure_failures_still_fail_closed(monkeypatch: pytest.MonkeyPatch, phase: str, error: Exception) -> None:
     store = create_autospec(ChatTurnStore, instance=True)
     store.recover.return_value = 0
-    store.claim_batch.side_effect = [[_claim()], []]
+    store.claim_batch.side_effect = _claim_batches_then_idle([_claim()], [])
     store.control_state.return_value = (False, None)
     store.append_event.return_value = 1
     if phase == 'agent':
         store.set_checkpoint.side_effect = error
     if phase == 'watcher':
-        store.control_state.side_effect = [(False, None), error]
+        initial_control_state_pending = True
+
+        def control_state_side_effect(*_args: object, **_kwargs: object) -> tuple[bool, None]:
+            nonlocal initial_control_state_pending
+            if initial_control_state_pending:
+                initial_control_state_pending = False
+                return False, None
+            raise error
+
+        store.control_state.side_effect = control_state_side_effect
 
     async def load_turn(claim: TurnClaim, app: FastAPI, registry: tuple) -> TurnRuntime:
         if phase == 'load':
             raise error
         return TurnRuntime(claim, app, registry, [])
 
+    async def wait_for_watcher(*_args: object, **_kwargs: object) -> None:
+        await asyncio.Event().wait()
+
     monkeypatch.setattr(consumer_module, 'chat_turn_store', store)
     monkeypatch.setattr(consumer_module, '_load_turn', load_turn)
-    monkeypatch.setattr(routes_module, 'chat_with_tools', AsyncMock(return_value={'choices': [{'message': {'content': ''}, 'finish_reason': 'stop'}]}))
+    monkeypatch.setattr(routes_module, 'chat_with_tools', AsyncMock(side_effect=wait_for_watcher))
     stop = asyncio.Event()
     consumer_task = asyncio.create_task(ChatTurnConsumer(FastAPI(), 1).run(stop), name='chat-turn-consumer')
     process_stop = asyncio.create_task(stop.wait())

@@ -1,7 +1,7 @@
 from fastapi import Depends
-from sqlmodel import Session
 
-from backend_core.database import get_db_async
+from backend_core.api_execution_budget import run_api_blocking
+from backend_core.database import run_db
 from backend_core.domain.scheduler import schemas
 from backend_core.error_handlers import handle_errors
 from backend_core.validation import (
@@ -18,20 +18,20 @@ router = MCPRouter(prefix='/schedules', tags=['schedules'], dependencies=[Depend
 
 @router.get('', response_model=list[schemas.ScheduleResponse], mcp=True)
 @handle_errors(operation='list schedules')
-def list_schedules(
+async def list_schedules(
     datasource_id: DataSourceId | None = None,
     search: str | None = None,
     limit: int = 100,
     offset: int = 0,
-    session: Session = Depends(get_db_async),
 ):
     """List all schedules. Optionally filter by datasource_id to see schedules for a specific output.
 
     Supports text search across schedule fields, datasource names, and analysis names.
     Returns schedule details including resolved analysis name and tab name.
     """
-    return service.list_schedules(
-        session,
+    return await run_api_blocking(
+        run_db,
+        service.list_schedules,
         datasource_id=datasource_id,
         search=search,
         limit=limit,
@@ -41,7 +41,7 @@ def list_schedules(
 
 @router.post('', response_model=schemas.ScheduleResponse, mcp=True)
 @handle_errors(operation='create schedule')
-def create_schedule(payload: schemas.ScheduleCreate, session: Session = Depends(get_db_async)):
+async def create_schedule(payload: schemas.ScheduleCreate):
     """Create a build schedule for an analysis output datasource.
 
     Requires datasource_id (must be an analysis-output datasource from GET /datasource)
@@ -49,22 +49,21 @@ def create_schedule(payload: schemas.ScheduleCreate, session: Session = Depends(
     Optional: depends_on (another schedule ID to run after), trigger_on_datasource_id
     (run when that datasource is updated instead of on cron).
     """
-    return commands.create_schedule(session, payload)
+    return await run_api_blocking(run_db, commands.create_schedule, payload)
 
 
 @router.put('/{schedule_id}', response_model=schemas.ScheduleResponse, mcp=True)
 @handle_errors(operation='update schedule')
-def update_schedule(
+async def update_schedule(
     schedule_id: ScheduleId,
     payload: schemas.ScheduleUpdate,
-    session: Session = Depends(get_db_async),
 ):
     """Update a schedule's cron expression, enabled state, or dependencies. Use GET /schedules to find schedule IDs."""
-    return commands.update_schedule(session, parse_schedule_id(schedule_id), payload)
+    return await run_api_blocking(run_db, commands.update_schedule, parse_schedule_id(schedule_id), payload)
 
 
 @router.delete('/{schedule_id}', status_code=204, mcp=True)
 @handle_errors(operation='delete schedule')
-def delete_schedule(schedule_id: ScheduleId, session: Session = Depends(get_db_async)):
+async def delete_schedule(schedule_id: ScheduleId):
     """Delete a schedule by ID. Use GET /schedules to find schedule IDs."""
-    commands.delete_schedule(session, parse_schedule_id(schedule_id))
+    await run_api_blocking(run_db, commands.delete_schedule, parse_schedule_id(schedule_id))

@@ -7,17 +7,17 @@ from collections import deque
 from collections.abc import Callable
 from typing import Protocol
 
-from pyiceberg.exceptions import NoSuchTableError
+from pyiceberg.exceptions import NoSuchNamespaceError, NoSuchTableError
+from sqlalchemy import text
 
 from dataforge_protocol import compute_pb2, enums_pb2
 from runtime.compute_manager import ProcessManager
-from runtime.config import settings
 from runtime.executors import _run_cleanup_in_thread, run_control_in_thread
 from runtime.iceberg_catalog import load_runtime_catalog
 from runtime.live_hubs import VersionHub
-from runtime.object_store import delete_object, delete_prefix, object_store_storage_options, object_store_url
+from runtime.object_store import delete_object, delete_prefix, object_store_storage_options
 from runtime.worker_runtime import RuntimeNamespaceDirectory
-from runtime.worker_runtime_client import StorageCleanupClaim, client_from_env
+from runtime.worker_runtime_client import StorageCleanupClaim, async_client_from_env
 
 logger = logging.getLogger(__name__)
 storage_cleanup_hub: VersionHub[str] = VersionHub()
@@ -25,25 +25,76 @@ _RECOVERY_SECONDS = 5.0
 _RID_SLOT_WAIT_SECONDS = 0.05
 
 
+def _sql_catalog_tables_with_prefix(catalog, *, namespace: str, family_prefix: str) -> list[str]:
+    escaped_prefix = family_prefix.replace("/", "//").replace("%", "/%").replace("_", "/_")
+    statement = text(
+        """
+        SELECT table_name
+        FROM iceberg_tables
+        WHERE catalog_name = :catalog_name
+          AND table_namespace = :namespace
+          AND table_name LIKE :family_pattern ESCAPE '/'
+        ORDER BY table_name
+        """
+    )
+    with catalog.engine.connect() as connection:
+        return list(
+            connection.execute(
+                statement,
+                {
+                    "catalog_name": catalog.name,
+                    "namespace": namespace,
+                    "family_pattern": f"{escaped_prefix}%",
+                },
+            ).scalars()
+        )
+
+
 class StorageCleanupClient(Protocol):
-    def claim_storage_cleanups(self, *, namespace: str, limit: int = 1) -> list[StorageCleanupClaim]: ...
+    async def claim_storage_cleanups_async(self, *, namespace: str, limit: int = 1) -> list[StorageCleanupClaim]: ...
 
-    def authorize_storage_cleanup(self, claim: StorageCleanupClaim) -> bool: ...
+    async def authorize_storage_cleanup_async(self, claim: StorageCleanupClaim) -> bool: ...
 
-    def complete_storage_cleanup(self, claim: StorageCleanupClaim, *, error: str | None = None) -> bool: ...
+    async def complete_storage_cleanup_async(self, claim: StorageCleanupClaim, *, error: str | None = None) -> bool: ...
 
 
 def delete_cleanup_target(claim: StorageCleanupClaim) -> None:
     if claim.catalog_identifier is not None:
+        if not claim.catalog_type or not claim.catalog_uri or not claim.warehouse or not claim.catalog_namespace or not claim.catalog_table:
+            raise ValueError("Storage cleanup claim is missing its exact Iceberg catalog identity")
+        expected_identifier = f"{claim.catalog_namespace}.{claim.catalog_table}"
+        if claim.catalog_identifier != expected_identifier:
+            raise ValueError("Storage cleanup catalog identifier does not match its structured identity")
         catalog = load_runtime_catalog(
             "local",
-            type="sql",
-            uri=settings.database_url,
-            warehouse=object_store_url("clean", namespace=claim.namespace),
+            type=claim.catalog_type,
+            uri=claim.catalog_uri,
+            warehouse=claim.warehouse,
             **object_store_storage_options(),
         )
-        with contextlib.suppress(NoSuchTableError):
-            catalog.drop_table(claim.catalog_identifier)
+        identifiers = {claim.catalog_identifier}
+        if claim.catalog_family_prefix is not None:
+            if claim.catalog_type == "sql":
+                table_names = _sql_catalog_tables_with_prefix(
+                    catalog,
+                    namespace=claim.catalog_namespace,
+                    family_prefix=claim.catalog_family_prefix,
+                )
+            else:
+                try:
+                    catalog_tables = catalog.list_tables(claim.catalog_namespace)
+                except NoSuchNamespaceError:
+                    catalog_tables = []
+                table_names = []
+                for identifier in catalog_tables:
+                    if not isinstance(identifier, (tuple, list)) or not identifier or not isinstance(identifier[-1], str):
+                        continue
+                    if catalog.namespace_to_string(identifier[:-1]) == claim.catalog_namespace:
+                        table_names.append(identifier[-1])
+            identifiers.update(f"{claim.catalog_namespace}.{table_name}" for table_name in table_names if table_name.startswith(claim.catalog_family_prefix))
+        for identifier in sorted(identifiers):
+            with contextlib.suppress(NoSuchNamespaceError, NoSuchTableError):
+                catalog.drop_table(identifier)
     if claim.is_prefix:
         delete_prefix(claim.url)
         return
@@ -57,34 +108,42 @@ async def process_cleanup(manager: ProcessManager, client: StorageCleanupClient,
         resource_id=claim.resource_id,
         datasource_id=claim.resource_id,
     )
-    info = manager.get_engine_info(identity, namespace=claim.namespace)
-    if info is not None and (info.active_reservations or info.engine.current_job_id):
-        await run_control_in_thread(client.complete_storage_cleanup, claim, error="Datasource writer has not settled")
+    if await run_control_in_thread(_has_active_datasource_writer, manager, identity, namespace=claim.namespace):
+        await client.complete_storage_cleanup_async(claim, error="Datasource writer has not settled")
         return False
     try:
         async with asyncio.timeout(_RID_SLOT_WAIT_SECONDS):
             await manager.await_engine_job_slot(identity, namespace=claim.namespace)
     except TimeoutError:
-        await run_control_in_thread(client.complete_storage_cleanup, claim, error="Datasource RID slot is busy; retry eligibility")
+        await client.complete_storage_cleanup_async(claim, error="Datasource RID slot is busy; retry eligibility")
         return False
     try:
-        info = manager.get_engine_info(identity, namespace=claim.namespace)
-        if info is not None and (info.active_reservations or info.engine.current_job_id):
-            await run_control_in_thread(client.complete_storage_cleanup, claim, error="Datasource writer has not settled")
+        if await run_control_in_thread(_has_active_datasource_writer, manager, identity, namespace=claim.namespace):
+            await client.complete_storage_cleanup_async(claim, error="Datasource writer has not settled")
             return False
-        authorized = await run_control_in_thread(client.authorize_storage_cleanup, claim)
+        authorized = await client.authorize_storage_cleanup_async(claim)
         if not authorized:
-            await run_control_in_thread(client.complete_storage_cleanup, claim, error="Cleanup is referenced, active, or fenced; retry eligibility")
+            await client.complete_storage_cleanup_async(
+                claim,
+                error="Cleanup is referenced, active, or fenced; retry eligibility",
+            )
             return False
         error = None
         try:
             await _run_cleanup_in_thread(delete_cleanup_target, claim)
         except Exception as exc:
-            logger.warning("Storage cleanup failed namespace=%s event_id=%s", claim.namespace, claim.event_id, exc_info=True)
-            error = str(exc)
-        return await run_control_in_thread(client.complete_storage_cleanup, claim, error=error) and error is None
+            # Catalog and object-store exceptions can embed configured URIs.
+            # Keep detailed identity in the durable intent, not in logs/errors.
+            error = f"{type(exc).__name__}: storage cleanup failed"
+            logger.warning("Storage cleanup failed namespace=%s event_id=%s error_type=%s", claim.namespace, claim.event_id, type(exc).__name__)
+        return await client.complete_storage_cleanup_async(claim, error=error) and error is None
     finally:
-        manager.release_engine_job_slot(identity, namespace=claim.namespace)
+        await run_control_in_thread(manager.release_engine_job_slot, identity, namespace=claim.namespace)
+
+
+def _has_active_datasource_writer(manager: ProcessManager, identity: compute_pb2.EngineIdentity, *, namespace: str) -> bool:
+    info = manager.get_engine_info(identity, namespace=namespace)
+    return info is not None and (info.active_reservations > 0 or bool(info.engine.current_job_id))
 
 
 async def storage_cleanup_loop(
@@ -94,7 +153,7 @@ async def storage_cleanup_loop(
     namespace_directory: RuntimeNamespaceDirectory | None = None,
     on_progress: Callable[[], None] | None = None,
 ) -> None:
-    client = client_from_env()
+    client = await async_client_from_env()
     directory = namespace_directory or RuntimeNamespaceDirectory(client, refresh_seconds=_RECOVERY_SECONDS, work_kinds=("storage_cleanup",))
     pending: deque[str] = deque()
     last_seen = storage_cleanup_hub.version()
@@ -103,7 +162,7 @@ async def storage_cleanup_loop(
     namespace: str | None = None
 
     async def dispatch(target_namespace: str) -> bool | None:
-        claims = await run_control_in_thread(client.claim_storage_cleanups, namespace=target_namespace, limit=1)
+        claims = await client.claim_storage_cleanups_async(namespace=target_namespace, limit=1)
         if not claims:
             return None
         return await process_cleanup(manager, client, claims[0])
@@ -149,4 +208,3 @@ async def storage_cleanup_loop(
             if not in_flight.done():
                 in_flight.cancel()
             await asyncio.gather(in_flight, return_exceptions=True)
-        await run_control_in_thread(client.close)

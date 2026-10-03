@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+from io import BytesIO
 from pathlib import Path
 
 import grpc
@@ -126,6 +127,24 @@ def test_upload_object_file_streams_beyond_former_unary_limit(tmp_path: Path) ->
     assert stub.total_bytes > 128 * 1024 * 1024
     assert stub.max_chunk_bytes <= _OBJECT_TRANSFER_CHUNK_BYTES
     assert result == 's3://analytics/uploads/large-artifact.bin'
+
+
+def test_upload_object_fileobj_streams_without_taking_ownership_of_source() -> None:
+    class Stub:
+        def UploadObject(self, requests, **_kwargs):
+            self.frames = list(requests)
+            return object_store_pb2.ObjectStoreUrl(url='s3://analytics/uploads/multipart.bin')
+
+    stub = Stub()
+    source = BytesIO(b'upload body')
+    client = _client_with_object_store(stub)
+
+    result = client.upload_object_fileobj(source, 's3://analytics/uploads/multipart.bin', max_bytes=1024)
+
+    assert result == 's3://analytics/uploads/multipart.bin'
+    assert [frame.WhichOneof('frame') for frame in stub.frames] == ['start', 'chunk', 'commit']
+    assert stub.frames[1].chunk.data == b'upload body'
+    assert not source.closed
 
 
 def test_closing_upload_request_generator_does_not_yield_abort_during_generator_exit() -> None:

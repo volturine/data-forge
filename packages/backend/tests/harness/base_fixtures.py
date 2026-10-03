@@ -24,6 +24,8 @@ from tests.harness.postgres_harness import (
     cleanup_stale_test_postgres,
     cleanup_stale_test_rustfs,
     docker_available,
+    docker_service_host,
+    process_host,
     require_docker,
 )
 
@@ -33,12 +35,19 @@ if TYPE_CHECKING:
 
 
 def pytest_sessionstart(session: pytest.Session) -> None:
+    if os.environ.get('DATAFORGE_TEST_CONTAINER') != '1':
+        raise RuntimeError('Backend tests must run in the containerized test runner')
+    process_host()
+    docker_service_host()
+    if not os.environ.get('DOCKER_HOST'):
+        raise RuntimeError('DOCKER_HOST must identify the Docker service daemon')
     os.environ.pop('POLARS_CORES_AVAILABLE', None)
     os.environ.pop('POLARS_MAX_THREADS', None)  # Polars native; keep tests isolated
     os.environ.pop('POLARS_STREAMING_CHUNK_SIZE', None)
     os.environ.setdefault('ENV_FILE', '')
     os.environ.setdefault('SETTINGS_ENCRYPTION_KEY', 'test-key')
-    os.environ.setdefault('DATABASE_URL', 'postgresql+psycopg://dataforge:dataforge@127.0.0.1:5432/dataforge')
+    if not os.environ.get('DATABASE_URL'):
+        os.environ['DATABASE_URL'] = f'postgresql+psycopg://dataforge:dataforge@{docker_service_host()}:5432/dataforge'
     if getattr(session.config, 'workerinput', None) is not None:
         return
     if os.environ.get('TEST_POSTGRES_URL'):
@@ -79,7 +88,7 @@ def _register_sqlmodel_metadata() -> None:
     from backend_core.persistence.analysis.models import Analysis, AnalysisDataSource, AnalysisFavorite
     from backend_core.persistence.analysis_versions.models import AnalysisVersion
     from backend_core.persistence.build_jobs.models import BuildJob
-    from backend_core.persistence.build_runs.models import BuildEvent, BuildRun
+    from backend_core.persistence.build_runs.models import BuildEvent, BuildRun, BuildRunDatasource
     from backend_core.persistence.datasource.models import DataSource, DataSourceColumnMetadata
     from backend_core.persistence.engine_instances.models import EngineInstance
     from backend_core.persistence.engine_runs.models import EngineRun
@@ -102,6 +111,7 @@ def _register_sqlmodel_metadata() -> None:
     del BuildEvent
     del BuildJob
     del BuildRun
+    del BuildRunDatasource
     del DataSource
     del DataSourceColumnMetadata
     del EngineInstance
@@ -354,6 +364,32 @@ class _TestWorkerDataPlaneClient:
                 raise ValueError(f'object upload exceeds {bounded_limit} byte limit')
             self._ensure_bucket_exists(bucket)
             self._s3().upload_fileobj(source, bucket, key, ExtraArgs=extra_args)
+        return target_url
+
+    def upload_object_fileobj(
+        self,
+        source,
+        target_url: str,
+        *,
+        max_bytes: int,
+        content_type: str | None = None,
+    ) -> str:
+        from backend_core.data_plane_client import _MAX_OBJECT_TRANSFER_BYTES
+
+        bounded_limit = min(max_bytes or _MAX_OBJECT_TRANSFER_BYTES, _MAX_OBJECT_TRANSFER_BYTES)
+        position = source.tell()
+        source.seek(0, os.SEEK_END)
+        size = source.tell()
+        source.seek(position)
+        if size - position > bounded_limit:
+            raise ValueError(f'object upload exceeds {bounded_limit} byte limit')
+
+        bucket, key = self._parse_object_url(target_url)
+        extra_args: dict[str, str] = {}
+        if content_type is not None:
+            extra_args['ContentType'] = content_type
+        self._ensure_bucket_exists(bucket)
+        self._s3().upload_fileobj(source, bucket, key, ExtraArgs=extra_args)
         return target_url
 
     def download_object_bytes(self, source_url: str) -> bytes:

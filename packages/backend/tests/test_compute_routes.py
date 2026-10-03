@@ -1,11 +1,26 @@
 import asyncio
+import json
 import threading
+from concurrent.futures import ThreadPoolExecutor
+from datetime import UTC, datetime
 from typing import Any, cast
 
 import pytest
+from fastapi import WebSocket
 from sqlalchemy import select
 
-from backend_core import database, datasource_delete_service, dependencies, engine_runs_service as engine_run_service
+from backend_core import (
+    database,
+    datasource_delete_service,
+    dependencies,
+    engine_runs_service as engine_run_service,
+    websocket as websocket_core,
+)
+from backend_core.api_execution_budget import (
+    ApiWorkAdmissionFull,
+    install_api_blocking_executor,
+    remove_api_blocking_executor,
+)
 from backend_core.dependencies import get_manager, get_runtime_availability_probe
 from backend_core.domain.compute import schemas as compute_schemas
 from backend_core.domain.datasource.models import DataSourceCreatedBy
@@ -24,11 +39,101 @@ from main import app
 from modules.compute import executor_client, routes as compute_routes
 
 
+def _make_test_websocket(sent, receive) -> WebSocket:
+    async def send(message):
+        sent.append(message)
+
+    return WebSocket(
+        {
+            'type': 'websocket',
+            'asgi': {'version': '3.0', 'spec_version': '2.3'},
+            'http_version': '1.1',
+            'scheme': 'ws',
+            'server': ('test', 80),
+            'client': ('test', 1234),
+            'root_path': '',
+            'path': '/ws',
+            'raw_path': b'/ws',
+            'query_string': b'',
+            'headers': [],
+            'subprotocols': [],
+            'state': {},
+            'extensions': {},
+        },
+        receive,
+        send,
+    )
+
+
+@pytest.mark.asyncio
+async def test_engine_websocket_reports_auth_overload_without_reusing_thread_pool(monkeypatch) -> None:
+    submissions = []
+
+    async def reject_auth_submission(function, *args, **kwargs):
+        submissions.append((function, args, kwargs))
+        raise ApiWorkAdmissionFull()
+
+    monkeypatch.setattr(compute_routes, 'run_api_blocking', reject_auth_submission)
+
+    async def receive():
+        return {'type': 'websocket.connect'}
+
+    sent: list[dict[str, Any]] = []
+    websocket = _make_test_websocket(sent, receive)
+    await compute_routes.engine_list_stream(websocket)
+
+    assert len(submissions) == 1
+    assert [message['type'] for message in sent] == ['websocket.accept', 'websocket.send', 'websocket.close']
+    assert json.loads(sent[1]['text']) == {
+        'type': 'error',
+        'error': 'API execution capacity is full',
+        'status_code': 503,
+    }
+
+
+@pytest.mark.asyncio
+async def test_websocket_error_send_after_close_is_a_noop() -> None:
+    sent: list[dict[str, Any]] = []
+
+    async def receive():
+        return {'type': 'websocket.connect'}
+
+    websocket = _make_test_websocket(sent, receive)
+
+    await websocket.accept()
+    await websocket_core.safe_close_websocket(websocket)
+    result = await websocket_core.safe_send_json_error(websocket, {'error': 'late error'})
+
+    assert result is False
+    assert [message['type'] for message in sent] == ['websocket.accept', 'websocket.close']
+
+
+@pytest.mark.asyncio
+async def test_websocket_close_after_client_disconnect_is_a_noop() -> None:
+    sent: list[dict[str, Any]] = []
+
+    async def receive():
+        return {'type': 'websocket.connect'} if not sent else {'type': 'websocket.disconnect', 'code': 1000}
+
+    websocket = _make_test_websocket(sent, receive)
+
+    await websocket.accept()
+    await websocket.receive()
+    result = await websocket_core.safe_send_json_error(websocket, {'error': 'late error'})
+    await websocket_core.safe_close_websocket(websocket)
+
+    assert result is False
+    assert [message['type'] for message in sent] == ['websocket.accept']
+
+
 @pytest.mark.asyncio
 async def test_websocket_auth_uses_the_bounded_api_executor(monkeypatch) -> None:
+    loop = asyncio.get_running_loop()
     loop_thread = threading.get_ident()
     auth_threads: list[int] = []
     user = cast(Any, object())
+    executor = ThreadPoolExecutor(max_workers=1)
+    install_api_blocking_executor(loop, executor, workers=1, max_pending=0)
 
     def resolve_user(_websocket):
         auth_threads.append(threading.get_ident())
@@ -36,7 +141,11 @@ async def test_websocket_auth_uses_the_bounded_api_executor(monkeypatch) -> None
 
     monkeypatch.setattr(compute_routes, '_resolve_websocket_user', resolve_user)
 
-    resolved = await compute_routes._require_websocket_user(cast(Any, object()))
+    try:
+        resolved = await compute_routes._require_websocket_user(cast(Any, object()))
+    finally:
+        remove_api_blocking_executor(loop)
+        executor.shutdown(wait=True)
 
     assert resolved is user
     assert len(auth_threads) == 1
@@ -466,19 +575,29 @@ def test_start_build_recreates_deleted_output_placeholder(client, test_db_sessio
     api_loop_threads: list[int] = []
     notification_threads: list[int] = []
     notify_calls: list[str] = []
-    run_in_threadpool = compute_routes.run_in_threadpool
+    run_api_blocking = compute_routes.run_api_blocking
 
     def notify_build_job(namespace: str) -> None:
         notify_calls.append(namespace)
         notification_threads.append(threading.get_ident())
 
-    async def track_threadpool(function, *args, **kwargs):
+    async def track_api_blocking(function, *args, **kwargs):
         api_loop_threads.append(threading.get_ident())
-        return await run_in_threadpool(function, *args, **kwargs)
+        return await run_api_blocking(function, *args, **kwargs)
 
     monkeypatch.setattr(compute_routes.runtime_ipc, 'notify_build_job', notify_build_job)
-    monkeypatch.setattr(compute_routes, 'run_in_threadpool', track_threadpool)
+    monkeypatch.setattr(compute_routes, 'run_api_blocking', track_api_blocking)
     app.dependency_overrides[get_runtime_availability_probe] = _AvailableRuntimeProbe
+    test_db_session.add(
+        DataSource(
+            id='source-1',
+            name='External build source',
+            source_type=DataSourceType.FILE.value,
+            config={'file_path': 's3://default/uploads/source-1.csv', 'file_type': 'csv'},
+            created_at=datetime.now(UTC),
+        )
+    )
+    test_db_session.commit()
     try:
         response = client.post(
             '/api/v1/compute/builds',

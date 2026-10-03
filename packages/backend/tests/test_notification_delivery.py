@@ -5,6 +5,7 @@ import httpx
 import pytest
 
 from backend_core import notification_delivery
+from backend_core.notification_delivery import DeliveryProgress
 
 
 def test_email_delivery_uses_stable_message_id(monkeypatch) -> None:
@@ -109,3 +110,59 @@ def test_telegram_status_error_redacts_bot_token_from_url(monkeypatch) -> None:
     message = str(exc_info.value)
     assert '12345:SECRET-TOKEN' not in message
     assert '[REDACTED]' in message
+
+
+def test_telegram_retry_skips_parts_with_durable_progress(monkeypatch) -> None:
+    monkeypatch.setattr(notification_delivery, 'get_resolved_telegram_settings', lambda: {'enabled': True, 'token': 'default-token'})
+    calls: list[str] = []
+    failed_attachment_once = True
+    completed_parts: set[str] = set()
+
+    def post(url: str, **kwargs: object) -> SimpleNamespace:
+        nonlocal failed_attachment_once
+        if url.endswith('/sendMessage'):
+            calls.append('message')
+        else:
+            files = kwargs['files']
+            assert isinstance(files, dict)
+            document = files['document']
+            assert isinstance(document, tuple)
+            filename = str(document[0])
+            calls.append(filename)
+            if filename == 'two.csv' and failed_attachment_once:
+                failed_attachment_once = False
+                raise ConnectionError('temporary provider failure')
+        return SimpleNamespace(raise_for_status=lambda: None)
+
+    def record_part(part_key: str) -> bool:
+        completed_parts.add(part_key)
+        return True
+
+    monkeypatch.setattr(notification_delivery.http_client, 'post', post)
+    payload: dict[str, object] = {
+        'kind': notification_delivery.TELEGRAM_DELIVERY_KIND,
+        'chat_id': '123',
+        'message': 'Ready',
+        'bot_token': 'subscriber-token',
+        'attachments': [
+            {'filename': 'one.csv', 'content_base64': 'YQ==', 'content_type': 'text/csv'},
+            {'filename': 'two.csv', 'content_base64': 'Yg==', 'content_type': 'text/csv'},
+        ],
+    }
+
+    with pytest.raises(RuntimeError, match='Telegram delivery failed'):
+        notification_delivery.deliver(
+            payload,
+            event_id='delivery-partial',
+            progress=DeliveryProgress(record_completed_part=record_part),
+        )
+
+    assert completed_parts == {'message', 'attachment:0'}
+    notification_delivery.deliver(
+        payload,
+        event_id='delivery-partial',
+        progress=DeliveryProgress(completed_parts=frozenset(completed_parts), record_completed_part=record_part),
+    )
+
+    assert calls == ['message', 'one.csv', 'two.csv', 'two.csv']
+    assert completed_parts == {'message', 'attachment:0', 'attachment:1'}

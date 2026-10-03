@@ -126,6 +126,21 @@ def enqueue_detection(
     return request_id
 
 
+def _notify_detection_result(session: Session, request_id: str) -> None:
+    if session.get_bind().dialect.name != 'postgresql':
+        return
+    session.execute(
+        text('SELECT pg_notify(:channel, :payload)'),
+        {
+            'channel': _RUNTIME_CHANNEL,
+            'payload': json.dumps(
+                {'kind': 'telegram_detection_result', 'request_id': request_id},
+                separators=(',', ':'),
+            ),
+        },
+    )
+
+
 def recover_detection_requests(session: Session, *, generation: int) -> None:
     require_generation(session, generation)
     now = datetime.now(UTC)
@@ -141,6 +156,7 @@ def recover_detection_requests(session: Session, *, generation: int) -> None:
         request.error = 'Telegram chat detection deadline expired'
         request.updated_at = now
         session.add(request)
+        _notify_detection_result(session, request.id)
 
     abandoned = session.execute(
         select(TelegramDetectionRequest)
@@ -216,6 +232,7 @@ def complete_detection(
     request.token_encrypted = ''
     request.updated_at = now
     session.add(request)
+    _notify_detection_result(session, request.id)
     session.commit()
     return True
 
@@ -238,6 +255,7 @@ def fail_detection(session: Session, *, claim: TelegramDetectionClaim, error: st
     request.token_encrypted = ''
     request.updated_at = datetime.now(UTC)
     session.add(request)
+    _notify_detection_result(session, request.id)
     session.commit()
     return True
 
@@ -270,6 +288,7 @@ def time_out_detection(session: Session, *, request_id: str, request_user_id: st
     request.error = 'Telegram chat detection deadline expired'
     request.updated_at = datetime.now(UTC)
     session.add(request)
+    _notify_detection_result(session, request.id)
     session.commit()
 
 

@@ -1,16 +1,15 @@
-import asyncio
 import logging
 import time
 from collections.abc import Callable
-from concurrent.futures import Executor, Future, ThreadPoolExecutor
+from concurrent.futures import Future
 from functools import partial
 
 from fastapi import Depends, Query
 from pydantic import BaseModel, Field
-from sqlmodel import Session
 
+from backend_core.api_execution_budget import BoundedThreadPoolExecutor, run_api_blocking, run_in_bounded_executor
 from backend_core.data_plane_client import client_from_settings
-from backend_core.database import get_settings_db_async, initialize_namespace_db, namespace_provision_lock, run_settings_db
+from backend_core.database import initialize_namespace_db, namespace_provision_lock, run_settings_db
 from backend_core.error_handlers import handle_errors
 from backend_core.namespace import list_namespaces, namespace_paths, normalize_namespace
 from backend_core.namespace_credentials_service import provision_namespace_engine_credentials
@@ -23,20 +22,23 @@ router = MCPRouter(prefix='/namespaces', tags=['namespaces'])
 # Namespace creation performs bucket and credential-provider RPCs. Keep those
 # external calls out of the event loop, but do not turn a browser burst into
 # dozens of DB sessions and object-store admin calls.
-_NAMESPACE_EXECUTOR = ThreadPoolExecutor(
+_NAMESPACE_EXECUTOR = BoundedThreadPoolExecutor(
     max_workers=2,
+    max_pending=2,
     thread_name_prefix='namespace-runtime',
 )
-_NAMESPACE_PROVISION_EXECUTOR = ThreadPoolExecutor(
+_NAMESPACE_PROVISION_EXECUTOR = BoundedThreadPoolExecutor(
     max_workers=3,
+    # At most two namespace jobs run concurrently; each can submit one bucket,
+    # credentials, and migration task, so six outstanding operations suffice.
+    max_pending=3,
     thread_name_prefix='namespace-provision',
 )
 logger = logging.getLogger(__name__)
 
 
-async def _run_namespace[**P, T](executor: Executor, function: Callable[P, T], *args: P.args, **kwargs: P.kwargs) -> T:
-    loop = asyncio.get_running_loop()
-    return await loop.run_in_executor(executor, partial(function, *args, **kwargs))
+async def _run_namespace[**P, T](executor: BoundedThreadPoolExecutor, function: Callable[P, T], *args: P.args, **kwargs: P.kwargs) -> T:
+    return await run_in_bounded_executor(executor, work=partial(function, *args, **kwargs))
 
 
 class NamespaceListResponse(BaseModel):
@@ -179,12 +181,14 @@ def _create_namespace_locked(name: str) -> NamespaceResponse:
 
 @router.get('', response_model=NamespaceListResponse, mcp=True)
 @handle_errors(operation='list namespaces')
-def list_namespaces_endpoint(
-    session: Session = Depends(get_settings_db_async),
-) -> NamespaceListResponse:
+async def list_namespaces_endpoint() -> NamespaceListResponse:
     """List namespaces. Each name is an S3 bucket."""
-    names = {*list_namespaces(), *list_runtime_namespaces(session)}
-    return NamespaceListResponse(namespaces=sorted(names))
+
+    def load_names() -> list[str]:
+        names = {*list_namespaces(), *run_settings_db(list_runtime_namespaces)}
+        return sorted(names)
+
+    return NamespaceListResponse(namespaces=await run_api_blocking(load_names))
 
 
 @router.get('/storage-plan', response_model=NamespaceStoragePlanResponse, mcp=True)

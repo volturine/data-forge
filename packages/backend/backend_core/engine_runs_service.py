@@ -317,7 +317,8 @@ def stage_update_engine_run(
     progress: float | _UnsetType = _UNSET,
     current_step: str | None | _UnsetType = _UNSET,
     triggered_by: str | None | _UnsetType = _UNSET,
-) -> EngineRunResponseSchema:
+    serialize_response: bool = True,
+) -> EngineRunResponseSchema | bool:
     table = EngineRun.metadata.tables[EngineRun.__tablename__]
     run = session.execute(select(EngineRun).where(table.c.id == run_id).where(table.c.namespace == get_namespace()).with_for_update()).scalars().first()
     if run is None:
@@ -329,6 +330,8 @@ def stage_update_engine_run(
         rejected = requested_status is not None and requested_status != current_status
         if rejected:
             logger.warning('Rejected terminal status transition from %s to %s for run %s', current_status, requested_status, run_id)
+        if not serialize_response:
+            return not rejected
         serialized = _serialize_run(run)
         serialized.applied = not rejected
         return serialized
@@ -378,10 +381,15 @@ def stage_update_engine_run(
 
     session.add(run)
     session.flush()
-    return _serialize_run(run)
+    return _serialize_run(run) if serialize_response else True
 
 
-update_engine_run = committed(stage_update_engine_run)
+@committed
+def update_engine_run(session: Session, run_id: str, **changes: Any) -> EngineRunResponseSchema:
+    result = stage_update_engine_run(session, run_id, **changes)
+    if isinstance(result, bool):
+        raise ValueError('Engine-run response serialization cannot be disabled on the committed update path')
+    return result
 
 
 def create_engine_run_payload(

@@ -1,14 +1,15 @@
 from __future__ import annotations
 
 import logging
+import time
 from collections.abc import Callable
-from dataclasses import asdict
 from threading import Condition, Thread
 
 from runtime.domain.compute.base import EngineStatusInfo
 from runtime.worker_runtime_client import WorkerRuntimeClient, client_from_env
 
 logger = logging.getLogger(__name__)
+_SLOW_SNAPSHOT_PUBLISH_SECONDS = 1.0
 
 
 def worker_runtime_client() -> WorkerRuntimeClient:
@@ -25,7 +26,7 @@ def persist_engine_snapshot(
         client.persist_engine_snapshot(
             worker_id=worker_id,
             namespace=namespace,
-            statuses=[asdict(status) for status in statuses],
+            statuses=statuses,
         )
 
 
@@ -78,6 +79,7 @@ class EngineSnapshotPublisher:
                 namespace = next(iter(self._pending))
                 statuses = self._pending.pop(namespace)
 
+            started = time.perf_counter()
             try:
                 self._persist(namespace, statuses)
             except Exception:
@@ -90,6 +92,14 @@ class EngineSnapshotPublisher:
                 if first_failure:
                     logger.warning("Failed to publish engine snapshot for namespace %s; retrying", namespace, exc_info=True)
             else:
+                elapsed = time.perf_counter() - started
+                if elapsed >= _SLOW_SNAPSHOT_PUBLISH_SECONDS:
+                    logger.warning(
+                        "Slow engine snapshot publish namespace=%s engine_count=%s duration_ms=%.1f",
+                        namespace,
+                        len(statuses),
+                        elapsed * 1000,
+                    )
                 with self._condition:
                     self._reported_failures.discard(namespace)
 

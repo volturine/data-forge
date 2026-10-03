@@ -9,6 +9,7 @@
 # Test artifacts (package-local)
 packages/*/tests/.artifacts/
 .artifacts/
+.test-artifacts/
 /.e2e-artifacts*/
 /.e2e-logs*/
 

@@ -13,7 +13,7 @@ from backend_core import notification_delivery, runtime_outbox_service
 from backend_core.database import run_db, run_settings_db
 from backend_core.live_hubs import VersionHub
 from backend_core.namespace import reset_namespace, set_namespace_context
-from backend_core.notification_delivery import EMAIL_DELIVERY_KIND, TELEGRAM_DELIVERY_KIND
+from backend_core.notification_delivery import EMAIL_DELIVERY_KIND, TELEGRAM_DELIVERY_KIND, DeliveryProgress
 from backend_core.runtime_outbox_dispatcher import OUTBOX_WAKE_HUB
 from backend_core.runtime_outbox_service import OutboxClaim
 
@@ -28,7 +28,7 @@ T = TypeVar('T')
 
 ClaimDelivery = Callable[[str, int], list[OutboxClaim]]
 FinalizeDelivery = Callable[[str, OutboxClaim, str | None], bool]
-Deliver = Callable[[dict[str, object], str], None]
+Deliver = Callable[[dict[str, object], str, DeliveryProgress], None]
 
 
 def wake(namespace: str) -> None:
@@ -128,8 +128,12 @@ class IntegrationDeliveryDispatcher:
     async def _deliver_and_finalize(self, namespace: str, claim: OutboxClaim) -> int:
         error: str | None = None
         if not claim.already_delivered:
+            progress = DeliveryProgress(
+                completed_parts=claim.completed_parts,
+                record_completed_part=partial(self._record_delivery_part, namespace, claim),
+            )
             try:
-                await self._run_blocking(self._deliver, {**claim.payload, 'event_id': claim.event_id}, claim.event_id)
+                await self._run_blocking(self._deliver, {**claim.payload, 'event_id': claim.event_id}, claim.event_id, progress)
             except Exception as exc:  # noqa: BLE001 - persist provider failures for retry/backoff.
                 error = str(exc)
         finalized = await self._run_blocking(self._finalize_delivery, namespace, claim, error)
@@ -172,7 +176,34 @@ class IntegrationDeliveryDispatcher:
     async def _run_blocking(self, function: Callable[..., T], *args: object) -> T:
         loop = asyncio.get_running_loop()
         context = contextvars.copy_context()
-        return await loop.run_in_executor(self._executor, context.run, partial(function, *args))
+        operation_name = getattr(function, '__qualname__', type(function).__qualname__)
+        operation = loop.run_in_executor(self._executor, context.run, partial(function, *args))
+        try:
+            return await asyncio.shield(operation)
+        except asyncio.CancelledError:
+            # A claim may already be committing in the DB thread. Do not let
+            # its coordinator actor finish until this exact operation settles.
+            task = asyncio.current_task()
+            while not operation.done():
+                try:
+                    await asyncio.shield(operation)
+                except asyncio.CancelledError:
+                    if task is not None:
+                        task.uncancel()
+                except BaseException:
+                    break
+            try:
+                operation.result()
+            except BaseException as exc:
+                if not isinstance(exc, asyncio.CancelledError):
+                    logger.warning(
+                        'Integration delivery operation failed after its caller was cancelled kind=%s operation=%s exception=%s',
+                        self._kind,
+                        operation_name,
+                        type(exc).__name__,
+                        exc_info=(type(exc), exc, exc.__traceback__),
+                    )
+            raise
 
     def _claim_delivery_in_database(self, namespace: str, limit: int) -> list[OutboxClaim]:
         token = set_namespace_context(namespace)
@@ -188,9 +219,16 @@ class IntegrationDeliveryDispatcher:
         finally:
             reset_namespace(token)
 
+    def _record_delivery_part(self, namespace: str, claim: OutboxClaim, part_key: str) -> bool:
+        token = set_namespace_context(namespace)
+        try:
+            return run_db(lambda session: runtime_outbox_service.record_external_delivery_part(session, claim, part_key=part_key))
+        finally:
+            reset_namespace(token)
+
     @staticmethod
-    def _deliver_notification(payload: dict[str, object], event_id: str) -> None:
-        notification_delivery.deliver(payload, event_id=event_id)
+    def _deliver_notification(payload: dict[str, object], event_id: str, progress: DeliveryProgress) -> None:
+        notification_delivery.deliver(payload, event_id=event_id, progress=progress)
 
     async def _wait_for_wakeup_or_stop(
         self,

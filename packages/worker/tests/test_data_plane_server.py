@@ -10,6 +10,7 @@ import pytest
 
 from dataforge_protocol import common_pb2, iceberg_pb2, object_store_pb2
 from runtime.config import settings
+from runtime.worker_runtime_client import BackendWorkerRpcError
 from worker_grpc import data_plane_server
 from worker_grpc.data_plane_server import IcebergServicer, ObjectStoreServicer
 
@@ -266,6 +267,45 @@ async def test_object_store_build_url_namespace_is_bucket(monkeypatch: pytest.Mo
         context,
     )
     assert built.url == "s3://analytics/uploads/file.csv"
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize(
+    ("method", "rpc_message"),
+    [
+        ("ListSnapshots", iceberg_pb2.IcebergTableRef(namespace="analytics", datasource_id="datasource-1")),
+        (
+            "DeleteSnapshot",
+            iceberg_pb2.IcebergSnapshotDeleteRequest(namespace="analytics", datasource_id="datasource-1", snapshot_id="1"),
+        ),
+    ],
+)
+async def test_iceberg_servicers_preserve_nested_runtime_deadline_status(
+    method: str,
+    rpc_message: iceberg_pb2.IcebergTableRef | iceberg_pb2.IcebergSnapshotDeleteRequest,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    context = _context(monkeypatch)
+
+    async def allow_request(_context) -> None:
+        return None
+
+    async def fail_blocking(_lane, _function, *_args, **kwargs):
+        assert kwargs["request_namespace"] == "analytics"
+        raise BackendWorkerRpcError(
+            status_code=504,
+            error="Datasource metadata lookup exceeded its deadline",
+            error_code=grpc.StatusCode.DEADLINE_EXCEEDED.name,
+        )
+
+    monkeypatch.setattr(data_plane_server, "_require_internal_token", allow_request)
+    monkeypatch.setattr(data_plane_server, "_run_blocking", fail_blocking)
+
+    with pytest.raises(
+        RuntimeError,
+        match="DEADLINE_EXCEEDED: Datasource metadata lookup exceeded its deadline",
+    ):
+        await getattr(IcebergServicer(), method)(rpc_message, context)
 
 
 @pytest.mark.asyncio

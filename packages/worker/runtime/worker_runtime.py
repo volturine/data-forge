@@ -12,7 +12,6 @@ from collections import deque
 from collections.abc import Awaitable, Callable
 
 from runtime.domain.runtime_workers.models import RuntimeWorkerKind
-from runtime.executors import run_control_in_thread, run_lease_in_thread
 from runtime.worker_runtime_client import (
     BuildJobLeaseLost,
     ClaimedBuildJob,
@@ -86,12 +85,9 @@ class RuntimeNamespaceDirectory:
         now = asyncio.get_running_loop().time()
         if now >= self._next_refresh:
             if self._work_kinds:
-                namespaces = await run_control_in_thread(
-                    self._client.pending_runtime_work_namespaces,
-                    work_kinds=self._work_kinds,
-                )
+                namespaces = await self._client.pending_runtime_work_namespaces_async(work_kinds=self._work_kinds)
             else:
-                namespaces = await run_control_in_thread(self._client.pending_runtime_work_namespaces)
+                namespaces = await self._client.pending_runtime_work_namespaces_async()
             self._namespaces = list(dict.fromkeys(namespace for namespace in namespaces if namespace))
             self._cursor = self._cursor % len(self._namespaces) if self._namespaces else 0
             self._next_refresh = now + self._refresh_seconds
@@ -122,7 +118,7 @@ class RuntimeNamespaceDirectory:
 class NamespaceRecovery:
     """Rate-limit one durable recovery operation per namespace."""
 
-    def __init__(self, operation: Callable[..., int], *, work_name: str, interval_seconds: float) -> None:
+    def __init__(self, operation: Callable[..., Awaitable[int]], *, work_name: str, interval_seconds: float) -> None:
         self._operation = operation
         self._work_name = work_name
         self._interval_seconds = max(float(interval_seconds), 0.1)
@@ -137,7 +133,7 @@ class NamespaceRecovery:
                 return
             self._last_attempt[namespace] = now
         try:
-            reconciled = await run_control_in_thread(self._operation, namespace=namespace)
+            reconciled = await self._operation(namespace=namespace)
         except Exception as exc:
             logger.warning("%s recovery failed for namespace %s: %s", self._work_name, namespace, exc)
             return
@@ -175,8 +171,7 @@ async def build_worker_loop(
             process_idle_signal(True)
 
     if announce_worker:
-        await run_control_in_thread(
-            client.register_worker,
+        await client.register_worker_async(
             worker_id=worker_id,
             kind=RuntimeWorkerKind.BUILD_WORKER.value,
             hostname=socket.gethostname(),
@@ -234,7 +229,7 @@ async def build_worker_loop(
         else:
             active_job.clear()
             mark_process_idle()
-        await run_control_in_thread(client.heartbeat_worker, worker_id=worker_id, active_jobs=active_job_count)
+        await client.heartbeat_worker_async(worker_id=worker_id, active_jobs=active_job_count)
 
     try:
         while not stop_event.is_set() and (max_jobs is None or handled_jobs < max_jobs):
@@ -251,7 +246,7 @@ async def build_worker_loop(
                     if recovery is not None:
                         await recovery.reconcile(namespace)
                     claim_started = asyncio.get_running_loop().time()
-                    job = await run_control_in_thread(client.claim_build_job, worker_id=worker_id, namespace=namespace)
+                    job = await client.claim_build_job_async(worker_id=worker_id, namespace=namespace)
                     if on_progress is not None:
                         on_progress()
                     if job is None:
@@ -269,7 +264,7 @@ async def build_worker_loop(
                     )
                     active_tasks[task] = namespace
                     active_job.set()
-                    await run_control_in_thread(client.heartbeat_worker, worker_id=worker_id, active_jobs=len(active_tasks))
+                    await client.heartbeat_worker_async(worker_id=worker_id, active_jobs=len(active_tasks))
                 except Exception as exc:
                     logger.error("Build worker loop error: %s", exc, exc_info=True)
                     await asyncio.sleep(0.1)
@@ -324,10 +319,10 @@ async def build_worker_loop(
         stop_event.set()
         heartbeat_stop.set()
         if heartbeat_thread is not None:
-            heartbeat_thread.join()
+            await asyncio.to_thread(heartbeat_thread.join)
         if announce_worker:
             with contextlib.suppress(Exception):
-                await run_control_in_thread(client.stop_worker, worker_id=worker_id, timeout_seconds=2.0)
+                await client.stop_worker_async(worker_id=worker_id, timeout_seconds=2.0)
 
 
 async def _run_claimed_build_job(
@@ -353,8 +348,7 @@ async def _run_claimed_build_job(
         return
     except Exception as exc:
         logger.error("Build job %s failed: %s", job.build_id, exc, exc_info=True)
-        failed = await run_control_in_thread(
-            client.fail_build_job,
+        failed = await client.fail_build_job_async(
             job_id=job.job_id,
             build_id=job.build_id,
             namespace=job.namespace,
@@ -367,8 +361,7 @@ async def _run_claimed_build_job(
             logger.info("Build job %s failure was rejected because its lease is no longer active", job.build_id)
         raise
 
-    finalized = await run_control_in_thread(
-        client.finalize_build_job,
+    finalized = await client.finalize_build_job_async(
         job_id=job.job_id,
         build_id=job.build_id,
         namespace=job.namespace,
@@ -436,8 +429,7 @@ async def _renew_lease(
             raise BuildJobLeaseLost(f"Build job {job.job_id} lease renewal was not confirmed before expiry")
         renewal_started = clock()
         try:
-            lease_ttl_seconds = await run_lease_in_thread(
-                client.renew_build_job_lease,
+            lease_ttl_seconds = await client.renew_build_job_lease_async(
                 job_id=job.job_id,
                 namespace=job.namespace,
                 worker_id=worker_id,

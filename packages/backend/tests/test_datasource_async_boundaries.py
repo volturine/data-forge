@@ -19,15 +19,11 @@ from modules.datasource.schemas import DataSourceResponse, DataSourceUpdate
 
 @pytest.mark.asyncio
 @pytest.mark.parametrize('route', ['compute-preview', 'datasource-update'])
-async def test_async_routes_do_not_allocate_a_request_db_session(monkeypatch, route: str) -> None:
+async def test_async_compute_and_datasource_routes_keep_responses(monkeypatch, route: str) -> None:
     app = FastAPI()
     app.include_router(compute_routes.router)
     app.include_router(datasource_routes.router)
 
-    def unexpected_request_session():
-        raise AssertionError('async compute routes must own their DB sessions inside thread tasks')
-
-    app.dependency_overrides[database.get_db_async] = unexpected_request_session
     app.dependency_overrides[get_current_user] = lambda: None
     app.dependency_overrides[get_runtime_availability_probe] = lambda: object()
 

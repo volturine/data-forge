@@ -7,6 +7,7 @@ from fastapi import Depends, HTTPException, WebSocket, WebSocketDisconnect
 from pydantic import ValidationError
 
 from backend_core import runtime_ipc
+from backend_core.api_execution_budget import run_api_blocking
 from backend_core.config import settings
 from backend_core.database import run_db, run_settings_db
 from backend_core.dependencies import get_lock_owner_id, resolve_lock_owner_id
@@ -25,7 +26,7 @@ logger = logging.getLogger(__name__)
 
 
 async def _run_lock[**P, T](function: Callable[P, T], *args: P.args, **kwargs: P.kwargs) -> T:
-    return await asyncio.to_thread(function, *args, **kwargs)
+    return await run_api_blocking(function, *args, **kwargs)
 
 
 router = MCPRouter(prefix='/locks', tags=['locks'])
