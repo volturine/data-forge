@@ -1,3 +1,5 @@
+// Node 24 has no Temporal; polyfill must load before any app module
+import 'temporal-polyfill/global';
 import '@testing-library/jest-dom/vitest';
 import { afterEach } from 'vitest';
 import { overlayStack } from '$lib/stores/overlay.svelte';
