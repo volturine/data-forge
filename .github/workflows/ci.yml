@@ -23,7 +23,7 @@ jobs:
     steps:
       - uses: actions/checkout@v7
 
-      - uses: astral-sh/setup-uv@v10.0.1
+      - uses: astral-sh/setup-uv@v10.1.0
         with:
           version: "0.10.4"
 
@@ -62,129 +62,6 @@ jobs:
       - name: Canonical verification
         run: just verify
 
-  python-tests:
-    name: ${{ matrix.suite }}
-    runs-on: ubuntu-latest
-    strategy:
-      fail-fast: false
-      matrix:
-        suite: [backend-unit, backend-integration, worker, scheduler]
-    steps:
-      - uses: actions/checkout@v7
-
-      - uses: taiki-e/install-action@v2
-        with:
-          tool: just@1.51.0
-
-      - name: Run suite
-        run: just test-${{ matrix.suite }}
-
-      - name: Upload test artifacts
-        if: always()
-        uses: actions/upload-artifact@v7
-        with:
-          name: test-artifacts-${{ matrix.suite }}-${{ github.run_id }}
-          if-no-files-found: warn
-          include-hidden-files: true
-          path: .test-artifacts/**
-
-  backend:
-    name: backend
-    runs-on: ubuntu-latest
-    needs: [verify, python-tests]
-    if: always()
-    steps:
-      - name: Require verification and every Python suite to pass
-        env:
-          VERIFY_RESULT: ${{ needs.verify.result }}
-          PYTHON_TESTS_RESULT: ${{ needs.python-tests.result }}
-        run: |
-          if [[ "$VERIFY_RESULT" != "success" || "$PYTHON_TESTS_RESULT" != "success" ]]; then
-            echo "Verification: $VERIFY_RESULT; Python test matrix: $PYTHON_TESTS_RESULT" >&2
-            exit 1
-          fi
-
-  frontend:
-    name: frontend
-    runs-on: ubuntu-latest
-    steps:
-      - uses: actions/checkout@v7
-
-      - uses: taiki-e/install-action@v2
-        with:
-          tool: just@1.51.0
-
-      - name: Frontend unit tests
-        run: just test-frontend
-
-      - name: Upload test artifacts
-        if: always()
-        uses: actions/upload-artifact@v7
-        with:
-          name: test-artifacts-frontend-${{ github.run_id }}
-          if-no-files-found: warn
-          include-hidden-files: true
-          path: .test-artifacts/**
-
-  e2e:
-    name: e2e
-    runs-on: [self-hosted, linux, x64]
-    if: ${{ always() && github.event_name == 'pull_request' && github.base_ref == 'master' }}
-    timeout-minutes: 35
-    permissions:
-      contents: read
-    steps:
-      - uses: actions/checkout@v7
-
-      - uses: taiki-e/install-action@v2
-        with:
-          tool: just@1.51.0
-
-      - name: Runner diagnostics before E2E
-        run: |
-          echo '--- host memory ---'
-          free -h 2>&1 | head -n 8 || true
-          sed -n '1,8p' /proc/meminfo 2>/dev/null || true
-          echo '--- host load ---'
-          uptime 2>&1 | head -n 2 || true
-          echo '--- Docker daemon ---'
-          docker info --format 'Containers={{.Containers}} Running={{.ContainersRunning}} Paused={{.ContainersPaused}} Stopped={{.ContainersStopped}} Images={{.Images}} MemTotal={{.MemTotal}} CPUs={{.NCPU}}' 2>&1 | head -n 5 || true
-          echo '--- Docker containers ---'
-          docker ps -a --no-trunc 2>&1 | head -n 35 || true
-          echo '--- Docker resource use ---'
-          docker stats --no-stream 2>&1 | head -n 25 || true
-          echo '--- readable kernel OOM messages ---'
-          (dmesg --ctime 2>/dev/null || journalctl -k --no-pager -n 250 2>/dev/null) | grep -Ei 'out of memory|oom-kill|killed process' | tail -n 30 || true
-
-      - name: Run end-to-end tests
-        run: just test-e2e
-
-      - name: Runner diagnostics after E2E
-        if: always()
-        run: |
-          echo '--- host memory ---'
-          free -h 2>&1 | head -n 8 || true
-          sed -n '1,8p' /proc/meminfo 2>/dev/null || true
-          echo '--- host load ---'
-          uptime 2>&1 | head -n 2 || true
-          echo '--- Docker daemon ---'
-          docker info --format 'Containers={{.Containers}} Running={{.ContainersRunning}} Paused={{.ContainersPaused}} Stopped={{.ContainersStopped}} Images={{.Images}} MemTotal={{.MemTotal}} CPUs={{.NCPU}}' 2>&1 | head -n 5 || true
-          echo '--- Docker containers ---'
-          docker ps -a --no-trunc 2>&1 | head -n 35 || true
-          echo '--- Docker resource use ---'
-          docker stats --no-stream 2>&1 | head -n 25 || true
-          echo '--- readable kernel OOM messages ---'
-          (dmesg --ctime 2>/dev/null || journalctl -k --no-pager -n 250 2>/dev/null) | grep -Ei 'out of memory|oom-kill|killed process' | tail -n 30 || true
-
-      - name: Upload test artifacts
-        if: always()
-        uses: actions/upload-artifact@v7
-        with:
-          name: test-artifacts-e2e-${{ github.run_id }}
-          if-no-files-found: warn
-          include-hidden-files: true
-          path: .test-artifacts/**
-
   publish-images:
     if: github.event_name == 'push' && (github.ref_name == 'dev' || github.ref_name == 'master')
     runs-on: ubuntu-latest
@@ -201,6 +78,8 @@ jobs:
             target: scheduler
           - image_name: data-forge-runtime
             target: runtime
+          - image_name: data-forge-worker
+            target: worker
           - image_name: data-forge-polars-engine
             target: engine
     steps:
@@ -256,6 +135,8 @@ jobs:
             target: scheduler
           - image_name: data-forge-runtime
             target: runtime
+          - image_name: data-forge-worker
+            target: worker
     steps:
       - uses: actions/checkout@v7
 

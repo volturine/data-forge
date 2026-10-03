@@ -4,6 +4,12 @@
 
 [![License: MIT](https://img.shields.io/badge/License-MIT-yellow.svg)](LICENSE)
 [![CI](https://github.com/volturine/data-forge/actions/workflows/ci.yml/badge.svg)](https://github.com/volturine/data-forge/actions/workflows/ci.yml)
+[![Backend unit](https://github.com/volturine/data-forge/actions/workflows/backend-unit.yml/badge.svg)](https://github.com/volturine/data-forge/actions/workflows/backend-unit.yml)
+[![Backend integration](https://github.com/volturine/data-forge/actions/workflows/backend-integration.yml/badge.svg)](https://github.com/volturine/data-forge/actions/workflows/backend-integration.yml)
+[![Worker](https://github.com/volturine/data-forge/actions/workflows/worker.yml/badge.svg)](https://github.com/volturine/data-forge/actions/workflows/worker.yml)
+[![Scheduler](https://github.com/volturine/data-forge/actions/workflows/scheduler.yml/badge.svg)](https://github.com/volturine/data-forge/actions/workflows/scheduler.yml)
+[![Frontend](https://github.com/volturine/data-forge/actions/workflows/frontend.yml/badge.svg)](https://github.com/volturine/data-forge/actions/workflows/frontend.yml)
+[![E2E](https://github.com/volturine/data-forge/actions/workflows/e2e.yml/badge.svg)](https://github.com/volturine/data-forge/actions/workflows/e2e.yml)
 [![Python 3.14+](https://img.shields.io/badge/python-3.14%2B-blue.svg)](https://www.python.org/)
 [![Bun](https://img.shields.io/badge/runtime-Bun-black.svg)](https://bun.sh)
 
@@ -238,7 +244,8 @@ recipes sequentially, so each suite gets a fresh enclave. Install Docker with a
 daemon that permits privileged containers, plus `just`; Python, Bun, protocol
 compiler, and browser dependencies are installed inside the test images. Test
 logs and diagnostics are exported under `.test-artifacts/<run-id>` on success
-and failure.
+and failure. GitHub Actions reports backend unit, backend integration, worker,
+scheduler, frontend, and E2E suites as separate workflows.
 
 ```bash
 # Standard validation workflow
