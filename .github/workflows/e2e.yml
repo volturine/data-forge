@@ -25,6 +25,17 @@ jobs:
       PW_E2E_WORKERS: "2"
     steps:
       - uses: actions/checkout@v7
+        with:
+          # Older E2E runs wrote this ignored tree as root. Defer cleanup until
+          # the job can remove that stale output through Docker.
+          clean: false
+
+      - name: Remove stale E2E artifacts from the self-hosted workspace
+        run: |
+          docker run --rm --user 0:0 --entrypoint sh \
+            --volume "${GITHUB_WORKSPACE}:/workspace" \
+            docker:29.7.2-dind \
+            -c 'rm -rf /workspace/.e2e-artifacts'
 
       - uses: taiki-e/install-action@v2
         with:
