@@ -14,9 +14,7 @@ concurrency:
   cancel-in-progress: true
 
 jobs:
-  backend:
-    # GitHub-hosted runner. Docker is available here for the engine image build.
-    # Only the e2e job uses the self-hosted runner.
+  verify:
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v7
@@ -63,8 +61,133 @@ jobs:
       - name: Canonical verification
         run: just verify
 
-      - name: Canonical tests
-        run: just test
+  backend:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v7
+
+      - uses: astral-sh/setup-uv@v10.2.0
+        with:
+          version: "0.10.4"
+
+      - uses: actions/setup-python@v7
+        with:
+          python-version: "3.14.2"
+
+      - uses: oven-sh/setup-bun@v2
+        with:
+          bun-version: "1.3.11"
+
+      - uses: taiki-e/install-action@v2
+        with:
+          tool: just@1.51.0
+
+      - name: Generate protocol code
+        run: just generate-protocol
+
+      - name: Install backend dependencies
+        working-directory: packages/backend
+        run: uv sync
+
+      - name: Backend unit tests
+        working-directory: packages/backend
+        run: python ../../scripts/scan_warnings.py --cwd packages/backend -- env -u VIRTUAL_ENV uv run python -m pytest -c pyproject.toml -q tests --ignore=tests/integration
+
+  worker:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v7
+
+      - uses: astral-sh/setup-uv@v10.2.0
+        with:
+          version: "0.10.4"
+
+      - uses: actions/setup-python@v7
+        with:
+          python-version: "3.14.2"
+
+      - uses: oven-sh/setup-bun@v2
+        with:
+          bun-version: "1.3.11"
+
+      - uses: taiki-e/install-action@v2
+        with:
+          tool: just@1.51.0
+
+      - name: Generate protocol code
+        run: just generate-protocol
+
+      - name: Install worker dependencies
+        working-directory: packages/worker
+        run: uv sync
+
+      - name: Worker tests
+        working-directory: packages/worker
+        run: python ../../scripts/scan_warnings.py --cwd packages/worker -- env -u VIRTUAL_ENV uv run python -m pytest -c pyproject.toml -q tests --ignore=tests/integration
+
+  scheduler:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v7
+
+      - uses: astral-sh/setup-uv@v10.2.0
+        with:
+          version: "0.10.4"
+
+      - uses: actions/setup-python@v7
+        with:
+          python-version: "3.14.2"
+
+      - uses: oven-sh/setup-bun@v2
+        with:
+          bun-version: "1.3.11"
+
+      - uses: taiki-e/install-action@v2
+        with:
+          tool: just@1.51.0
+
+      - name: Generate protocol code
+        run: just generate-protocol
+
+      - name: Install scheduler dependencies
+        working-directory: packages/scheduler
+        run: uv sync
+
+      - name: Scheduler tests
+        working-directory: packages/scheduler
+        run: python ../../scripts/scan_warnings.py --cwd packages/scheduler -- env -u VIRTUAL_ENV uv run python -m pytest -c pyproject.toml -q tests
+
+  integration:
+    # GitHub-hosted runner. Docker is available here for the engine image build.
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v7
+
+      - uses: astral-sh/setup-uv@v10.2.0
+        with:
+          version: "0.10.4"
+
+      - uses: actions/setup-python@v7
+        with:
+          python-version: "3.14.2"
+
+      - uses: oven-sh/setup-bun@v2
+        with:
+          bun-version: "1.3.11"
+
+      - uses: taiki-e/install-action@v2
+        with:
+          tool: just@1.51.0
+
+      - name: Generate protocol code
+        run: just generate-protocol
+
+      - name: Install backend dependencies
+        working-directory: packages/backend
+        run: uv sync
+
+      - name: Backend integration tests
+        run: python scripts/scan_warnings.py -- bash -c 'docker build -f docker/Dockerfile --target engine -t data-forge-polars-engine:integration . && cd packages/backend && env -u VIRTUAL_ENV uv run python -m pytest -c pyproject.toml -q tests/integration'
 
   frontend:
     name: frontend
@@ -104,12 +227,11 @@ jobs:
         run: bun run panda:codegen && bun run check && bun run lint
 
       - name: Frontend unit tests
-        working-directory: packages/frontend
-        run: bun run test:unit
+        run: python scripts/scan_warnings.py --cwd packages/frontend -- bun run test:unit
 
   e2e:
     name: e2e
-    needs: [backend, frontend]
+    # Only the e2e job uses the self-hosted runner.
     runs-on: [self-hosted, linux, x64]
     if: github.event_name == 'pull_request' && github.base_ref == 'master'
     timeout-minutes: 35
