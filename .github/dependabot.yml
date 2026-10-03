@@ -1,31 +1,40 @@
 version: 2
+
+# One open pull request for every ecosystem and directory. The group schedule
+# replaces the per-ecosystem schedule.
+multi-ecosystem-groups:
+  weekly-batch:
+    schedule:
+      interval: weekly
+    open-pull-requests-limit: 1
+    labels:
+      - dependencies
+
 updates:
   - package-ecosystem: github-actions
     directory: /
-    schedule:
-      interval: weekly
-    groups:
-      weekly-batch:
-        patterns:
-          - "*"
+    patterns:
+      - "*"
+    multi-ecosystem-group: weekly-batch
 
   - package-ecosystem: docker
     directory: /docker
-    schedule:
-      interval: weekly
-    groups:
-      weekly-batch:
-        patterns:
-          - "*"
+    patterns:
+      - "*"
+    multi-ecosystem-group: weekly-batch
+
+  - package-ecosystem: docker-compose
+    directory: /docker
+    patterns:
+      - "*"
+    multi-ecosystem-group: weekly-batch
 
   - package-ecosystem: bun
-    directory: /packages/frontend
-    schedule:
-      interval: weekly
-    groups:
-      weekly-batch:
-        patterns:
-          - "*"
+    directories:
+      - /packages/frontend
+      - /packages/protocol
+    patterns:
+      - "*"
     ignore:
       # TypeScript 7 needs svelte-check --tsgo plus both TS 6 and TS 7
       # installed, and typescript-eslint (<6.1.0) / @sveltejs/kit (^5 || ^6)
@@ -33,16 +42,14 @@ updates:
       - dependency-name: typescript
         versions:
           - ">=7"
+    multi-ecosystem-group: weekly-batch
 
   - package-ecosystem: uv
     directories:
       - /packages/backend
+      - /packages/protocol
       - /packages/scheduler
       - /packages/worker
-    schedule:
-      interval: weekly
-    groups:
-      weekly-batch:
-        group-by: dependency-name
-        patterns:
-          - "*"
+    patterns:
+      - "*"
+    multi-ecosystem-group: weekly-batch
