@@ -15,7 +15,9 @@ concurrency:
 
 jobs:
   backend:
-    runs-on: [self-hosted, linux, x64]
+    # GitHub-hosted runner. Docker is available here for the engine image build.
+    # Only the e2e job uses the self-hosted runner.
+    runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v7
 
@@ -62,21 +64,11 @@ jobs:
         run: just verify
 
       - name: Canonical tests
-        run: |
-          # Self-hosted runners retain resources from prior jobs. The engine
-          # integration tests build an image, so reclaim all unused Docker
-          # state instead of retaining a day's build cache.
-          docker container prune --force
-          docker volume prune --force
-          docker builder prune --all --force
-          docker image prune --force
-          docker system df
-          df -h
-          just test
+        run: just test
 
   frontend:
     name: frontend
-    runs-on: [self-hosted, linux, x64]
+    runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v7
 
