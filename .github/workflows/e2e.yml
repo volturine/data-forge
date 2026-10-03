@@ -18,6 +18,11 @@ jobs:
   e2e:
     runs-on: [self-hosted, linux, x64]
     timeout-minutes: 35
+    env:
+      E2E_SHARDS: "3"
+      E2E_API_WORKERS: "4"
+      # Leave compute headroom for previews and cleanup during browser tests.
+      PW_E2E_WORKERS: "2"
     steps:
       - uses: actions/checkout@v7
 
