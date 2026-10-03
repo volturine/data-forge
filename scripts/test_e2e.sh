@@ -171,6 +171,10 @@ build_images() {
         build_image "$target" "data-forge-${target}:e2e"
     done
     build_image engine "${ENGINE_IMAGE}"
+    # This enclave is discarded after the run. Reclaim its intermediate layers
+    # before pulling the large Playwright image into the same daemon.
+    echo "Pruning temporary BuildKit cache before pulling the Playwright image"
+    docker builder prune --all --force
 }
 
 resolve_docker_socket_gid() {
