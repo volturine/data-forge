@@ -4,12 +4,11 @@ from datetime import datetime
 
 from sqlmodel import Session
 
-from backend_core import build_jobs_service, build_runs_service, engine_runs_service, runtime_outbox_service
+from backend_core import build_datasource_dependencies, build_jobs_service, build_runs_service, engine_runs_service, runtime_outbox_service
 from backend_core.domain.compute import schemas
 from backend_core.persistence.build_runs.models import BuildEvent
 from backend_core.transactions import committed
 from modules.datasource import service as datasource_service
-from modules.scheduler import service as scheduler_service
 
 
 class BuildCancellationConflict(RuntimeError):
@@ -46,6 +45,17 @@ class StartBuildCommand:
 
 @committed
 def start_build(session: Session, command: StartBuildCommand) -> None:
+    pipeline_data = command.request_json.get('analysis_pipeline')
+    if not isinstance(pipeline_data, dict):
+        raise ValueError('Build request is missing its analysis pipeline snapshot')
+    pipeline = schemas.AnalysisPipelinePayload.model_validate(pipeline_data)
+    datasource_ids = build_datasource_dependencies.external_datasource_ids(pipeline)
+    build_datasource_dependencies.lock_active_datasources(
+        session,
+        namespace=command.namespace,
+        datasource_ids=datasource_ids,
+    )
+
     for placeholder in command.placeholders:
         datasource_service.create_placeholder_output_datasource(
             session,
@@ -72,6 +82,7 @@ def start_build(session: Session, command: StartBuildCommand) -> None:
         current_output_id=command.current_output_id,
         current_output_name=command.current_output_name,
         total_tabs=command.total_tabs,
+        datasource_ids=datasource_ids,
         created_at=command.started_at,
         started_at=command.started_at,
     )
@@ -114,5 +125,4 @@ def cancel_build(
                     detail.current_engine_run_id,
                     cancelled_by=event.cancelled_by,
                 )
-    scheduler_service.apply_schedule_run_reconciliation(session, build_id=detail.build_id)
     return event_row

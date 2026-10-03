@@ -19,8 +19,10 @@ from backend_core.domain.compute.schemas import (
     BuildTabStatus,
     ComputeRunStatus,
     StepPreviewRequest,
+    StepPreviewResponse,
 )
-from dataforge_protocol import analysis_pb2, compute_pb2, enums_pb2, errors_pb2
+from backend_core.domain.compute_requests.models import response_payload
+from dataforge_protocol import analysis_pb2, compute_pb2, enums_pb2, errors_pb2, worker_runtime_pb2
 
 
 def test_build_tab_result_status_is_enum_backed() -> None:
@@ -174,6 +176,55 @@ def test_proto_compute_response_uses_typed_engine_ack_and_error_oneofs() -> None
     assert engine_response.response.WhichOneof('response') == 'engine_status'
     assert ack_response.response.WhichOneof('response') == 'ack'
     assert error_response.response.WhichOneof('response') == 'error'
+
+
+def test_worker_accepts_empty_preview_result() -> None:
+    request = worker_runtime_pb2.WorkerCompleteComputeRequestRequest(
+        namespace='default',
+        request_id='request-1',
+        worker_id='worker-1',
+        claim_token='claim-1',
+        lease_generation=1,
+        response_envelope=compute_pb2.ComputeResponseEnvelope(
+            kind=enums_pb2.COMPUTE_REQUEST_KIND_PREVIEW,
+            version=1,
+            correlation_id='request-1',
+            status=enums_pb2.COMPUTE_REQUEST_STATUS_COMPLETED,
+            response=compute_pb2.ComputeResponse(
+                preview=compute_pb2.StepPreviewResult(
+                    step_id='step-1',
+                    total_rows=0,
+                    page=1,
+                    page_size=0,
+                )
+            ),
+        ),
+    )
+
+    Validator().validate(request)
+
+
+def test_empty_proto_preview_response_preserves_zero_page_size() -> None:
+    envelope = compute_pb2.ComputeResponseEnvelope(
+        kind=enums_pb2.COMPUTE_REQUEST_KIND_PREVIEW,
+        version=1,
+        correlation_id='request-1',
+        status=enums_pb2.COMPUTE_REQUEST_STATUS_COMPLETED,
+        response=compute_pb2.ComputeResponse(
+            preview=compute_pb2.StepPreviewResult(
+                step_id='step-1',
+                columns=['id'],
+                total_rows=0,
+                page=1,
+            )
+        ),
+    )
+
+    response = StepPreviewResponse.model_validate(response_payload(envelope))
+
+    assert response.data == []
+    assert response.total_rows == 0
+    assert response.page_size == 0
 
 
 def test_build_event_type_enum_values_are_explicit() -> None:

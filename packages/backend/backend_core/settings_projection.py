@@ -1,26 +1,17 @@
 from __future__ import annotations
 
-import logging
-import weakref
 from dataclasses import dataclass
-from threading import Lock
-from typing import Any
 
 from sqlmodel import Session
 
 from backend_core.persistence.settings.models import AppSettings
 from backend_core.secrets import decrypt_secret
 
-logger = logging.getLogger(__name__)
-
 DEFAULT_SMTP_PORT = 587
 DEFAULT_OPENAI_ENDPOINT_URL = 'https://api.openai.com'
 DEFAULT_OPENAI_MODEL = 'gpt-4o-mini'
 DEFAULT_OLLAMA_ENDPOINT_URL = 'http://localhost:11434'
 DEFAULT_OLLAMA_MODEL = 'llama3.2'
-
-_RESOLVED_LOCK = Lock()
-_RESOLVED_CACHE: weakref.WeakKeyDictionary[Any, ResolvedSettingsSnapshot] = weakref.WeakKeyDictionary()
 
 
 @dataclass(frozen=True, slots=True)
@@ -95,11 +86,6 @@ class ResolvedSettingsSnapshot:
         return self.openrouter_default_model if self.exists else ''
 
 
-def invalidate_resolved_settings_cache() -> None:
-    with _RESOLVED_LOCK:
-        _RESOLVED_CACHE.clear()
-
-
 def _read_secret(row: AppSettings, field: str) -> str:
     stored = str(getattr(row, field, '') or '')
     if not stored:
@@ -115,18 +101,11 @@ def _load_resolved_snapshot(session: Session) -> ResolvedSettingsSnapshot:
 
 
 def _get_resolved_snapshot() -> ResolvedSettingsSnapshot:
-    from backend_core.database import get_settings_engine, run_settings_db
+    from backend_core.database import run_settings_db
 
-    engine = get_settings_engine()
-    with _RESOLVED_LOCK:
-        cached = _RESOLVED_CACHE.get(engine)
-    if cached is not None:
-        return cached
-
-    snapshot = run_settings_db(_load_resolved_snapshot)
-    with _RESOLVED_LOCK:
-        _RESOLVED_CACHE[engine] = snapshot
-    return snapshot
+    # Read at each action boundary. A process-local snapshot can outlive a
+    # settings update committed by another API child.
+    return run_settings_db(_load_resolved_snapshot)
 
 
 def get_resolved_smtp() -> dict[str, object]:

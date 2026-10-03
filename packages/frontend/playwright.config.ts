@@ -26,10 +26,18 @@ function shardSuffixFromArgs(): string {
 	return `-shard-${current}-of-${total}`;
 }
 
-const port = parseInt(process.env.FRONTEND_PORT || '3000', 10);
-const baseURL = process.env.PLAYWRIGHT_BASE_URL || `http://localhost:${port}`;
-const ciArgs = process.env.CI ? ['--disable-dev-shm-usage', '--disable-gpu'] : [];
-const artifactsRoot = path.resolve(process.cwd(), 'tests', '.artifacts');
+const baseURL = process.env.PLAYWRIGHT_BASE_URL;
+if (!baseURL) {
+	throw new Error('PLAYWRIGHT_BASE_URL must be set before running Playwright e2e tests');
+}
+const ciArgs = process.env.CI ? ['--disable-gpu'] : [];
+// Keep concurrent shard output outside testDir. Every shard bind-mounts the
+// same repository, and Playwright's test discovery can race another runner's
+// output cleanup when generated files live below ./tests.
+const artifactsRoot = process.env.E2E_ARTIFACTS_DIR
+	? path.resolve(process.env.E2E_ARTIFACTS_DIR)
+	: path.resolve(process.cwd(), 'tests', '.artifacts');
+const testDir = process.env.E2E_BOOTSTRAP_SHARED_FIXTURES === '1' ? './e2e' : './tests';
 const shardSuffix = shardSuffixFromArgs();
 const jsonReport = process.env.PLAYWRIGHT_JSON_REPORT;
 const reporter: ReporterDescription[] = [['line']];
@@ -37,12 +45,21 @@ if (jsonReport) {
 	reporter.push(['json', { outputFile: jsonReport }]);
 }
 const workers = resolveE2eWorkers();
+const testTimeoutMs = (() => {
+	const raw = process.env.PLAYWRIGHT_TEST_TIMEOUT_MS;
+	if (!raw) return 120_000;
+	const timeout = Number.parseInt(raw, 10);
+	if (!Number.isInteger(timeout) || timeout < 1_000 || timeout.toString() !== raw) {
+		throw new Error(`PLAYWRIGHT_TEST_TIMEOUT_MS must be an integer >= 1000, got "${raw}"`);
+	}
+	return timeout;
+})();
 
 export default defineConfig({
-	testDir: './tests',
-	timeout: 120_000,
+	testDir,
+	timeout: testTimeoutMs,
 	expect: { timeout: process.env.CI ? 10_000 : 5_000 },
-	fullyParallel: false,
+	fullyParallel: true,
 	globalSetup: './tests/global-setup.ts',
 	workers,
 	retries: 0,
@@ -53,9 +70,11 @@ export default defineConfig({
 	use: {
 		baseURL,
 		// Fail stuck clicks/gotos in seconds instead of sitting until the 120s
-		// test wall (default 0 = unlimited until test timeout).
-		actionTimeout: 15_000,
-		navigationTimeout: 15_000,
+		// test wall (default 0 = unlimited until test timeout). 30s also bounds
+		// response waits on runtime flows (engine spawn + preview) that
+		// legitimately take 11-23s under parallel load.
+		actionTimeout: 30_000,
+		navigationTimeout: 30_000,
 		trace: 'on-first-retry',
 		screenshot: 'only-on-failure'
 	},

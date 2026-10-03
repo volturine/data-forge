@@ -1,0 +1,255 @@
+# E2E services and Playwright runners share one private Docker network.
+# The api image serves the built SPA, so there is no separate frontend service.
+#
+# Variable values come from scripts/test_e2e.sh, which sources
+# docker/env/e2e.env and exports E2E_DOCKER_NETWORK / DOCKER_SOCKET_GID /
+# E2E_DEPLOYMENT_ID before invoking compose. Docker resolves the socket bind
+# from the private daemon container, keeping worker access inside that daemon.
+
+# cpu_shares are relative scheduling weights, not CPU quotas. API, runtime,
+# PostgreSQL, and the worker manager use 2048; supporting services use lower
+# weights. Each compute container uses 128 and can still consume idle CPU.
+services:
+  openai-fixture:
+    image: data-forge-api:e2e
+    cpu_shares: 512
+    command: ["python3", "/e2e/openai_fixture.py"]
+    volumes:
+      - ../scripts/e2e/openai_fixture.py:/e2e/openai_fixture.py:ro
+    healthcheck:
+      test:
+        [
+          "CMD-SHELL",
+          'python3 -c "import sys,urllib.request; sys.exit(0 if urllib.request.urlopen(''http://openai-fixture:8001/health'').status==200 else 1)"',
+        ]
+      interval: 5s
+      timeout: 5s
+      retries: 12
+
+  postgres:
+    image: postgres:18-alpine
+    cpu_shares: 2048
+    command: ["postgres", "-c", "max_connections=500"]
+    environment:
+      POSTGRES_DB: dataforge
+      POSTGRES_USER: dataforge
+      POSTGRES_PASSWORD: dataforge
+    volumes:
+      - pg-data:/var/lib/postgresql
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U dataforge -d dataforge"]
+      interval: 5s
+      timeout: 5s
+      retries: 20
+
+  rustfs:
+    image: rustfs/rustfs:1.0.0-rc.1
+    cpu_shares: 512
+    environment:
+      RUSTFS_ACCESS_KEY: ${OBJECT_STORE_ACCESS_KEY}
+      RUSTFS_SECRET_KEY: ${OBJECT_STORE_SECRET_KEY}
+    command: ["/data"]
+    volumes:
+      - rustfs-data:/data
+
+  api:
+    image: data-forge-api:e2e
+    cpu_shares: 2048
+    depends_on:
+      postgres:
+        condition: service_healthy
+      runtime:
+        condition: service_healthy
+      worker:
+        condition: service_healthy
+    environment: &api-env
+      ENV_FILE: ""
+      PGAPPNAME: dataforge-api
+      APP_NAME: ${APP_NAME}
+      APP_VERSION: ${APP_VERSION}
+      DEBUG: ${DEBUG}
+      PROD_MODE_ENABLED: "true"
+      DATA_DIR: /app/data
+      DATABASE_URL: ${DATABASE_URL}
+      DISTRIBUTED_RUNTIME_ENABLED: "true"
+      INTERNAL_API_TOKEN: ${INTERNAL_API_TOKEN}
+      INTERNAL_GRPC_HOST: 0.0.0.0
+      INTERNAL_GRPC_PORT: ${INTERNAL_GRPC_PORT}
+      RUNTIME_COORDINATOR_TARGET: ${RUNTIME_COORDINATOR_TARGET}
+      WORKER_DATA_PLANE_GRPC_TARGET: worker:50052
+      DATABASE_POOL_SIZE: ${DATABASE_POOL_SIZE}
+      DATABASE_MAX_OVERFLOW: ${DATABASE_MAX_OVERFLOW}
+      DATABASE_POOL_TIMEOUT: ${DATABASE_POOL_TIMEOUT}
+      DEFAULT_NAMESPACE: ${DEFAULT_NAMESPACE}
+      OBJECT_STORE_ENDPOINT: ${OBJECT_STORE_ENDPOINT}
+      OBJECT_STORE_REGION: ${OBJECT_STORE_REGION}
+      OBJECT_STORE_ACCESS_KEY: ${OBJECT_STORE_ACCESS_KEY}
+      OBJECT_STORE_SECRET_KEY: ${OBJECT_STORE_SECRET_KEY}
+      POLARS_CORES_AVAILABLE: ${POLARS_CORES_AVAILABLE}
+      POLARS_MAX_MEMORY_MB: ${POLARS_MAX_MEMORY_MB}
+      POLARS_STREAMING_CHUNK_SIZE: ${POLARS_STREAMING_CHUNK_SIZE}
+      WORKERS: ${WORKERS}
+      WORKER_CONNECTIONS: ${WORKER_CONNECTIONS}
+      LOG_LEVEL: ${LOG_LEVEL}
+      UVICORN_ACCESS_LOG: ${UVICORN_ACCESS_LOG}
+      LOG_QUEUE_OVERFLOW: ${LOG_QUEUE_OVERFLOW}
+      LOG_REQUESTS_ENABLED: ${LOG_REQUESTS_ENABLED}
+      LOG_MAX_BODY_SIZE: ${LOG_MAX_BODY_SIZE}
+      PERSIST_PREVIEW_RUNS: ${PERSIST_PREVIEW_RUNS}
+      SETTINGS_ENCRYPTION_KEY: ${SETTINGS_ENCRYPTION_KEY}
+      AUTH_REQUIRED: ${AUTH_REQUIRED}
+      VERIFY_EMAIL_ADDRESS: ${VERIFY_EMAIL_ADDRESS}
+      DEFAULT_USER_EMAIL: ${DEFAULT_USER_EMAIL}
+      DEFAULT_USER_PASSWORD: ${DEFAULT_USER_PASSWORD}
+      DEFAULT_USER_NAME: ${DEFAULT_USER_NAME}
+      AUTH_FRONTEND_URL: ${AUTH_FRONTEND_URL}
+      CORS_ORIGINS: ${CORS_ORIGINS}
+      TIMEZONE: ${TIMEZONE}
+      NORMALIZE_TZ: ${NORMALIZE_TZ}
+    volumes:
+      - data:/app/data
+    healthcheck:
+      test:
+        [
+          "CMD-SHELL",
+          'python -c "import sys,urllib.request; sys.exit(0 if urllib.request.urlopen(''http://api:8000/health/ready'').status==200 else 1)"',
+        ]
+      interval: 5s
+      timeout: 5s
+      retries: 30
+      start_period: 20s
+
+  runtime:
+    image: data-forge-runtime:e2e
+    cpu_shares: 2048
+    depends_on:
+      postgres:
+        condition: service_healthy
+    environment:
+      <<: *api-env
+      PGAPPNAME: dataforge-runtime
+      COMPUTE_WORKERS: ${COMPUTE_WORKERS}
+      WORKERS: "1"
+      DATAFORGE_DEPLOYMENT_ID: ${E2E_DEPLOYMENT_ID}
+    command: ["python3", "runtime_coordinator.py"]
+    volumes:
+      - data:/app/data
+    healthcheck:
+      test:
+        [
+          "CMD-SHELL",
+          'python3 -c "import grpc,os; from dataforge_protocol import common_pb2,runtime_coordinator_pb2_grpc; c=grpc.insecure_channel(''127.0.0.1:50051''); r=runtime_coordinator_pb2_grpc.RuntimeCoordinatorServiceStub(c).GetCoordinatorGeneration(common_pb2.EmptyRequest(),timeout=3,metadata=((''x-internal-token'',os.environ[''INTERNAL_API_TOKEN'']),)); c.close(); exit(0 if r.generation>0 else 1)"',
+        ]
+      interval: 5s
+      timeout: 5s
+      retries: 30
+      start_period: 10s
+
+  worker:
+    image: data-forge-worker:e2e
+    cpu_shares: 2048
+    depends_on:
+      postgres:
+        condition: service_healthy
+      rustfs:
+        condition: service_started
+      runtime:
+        condition: service_healthy
+    environment:
+      ENV_FILE: ""
+      PGAPPNAME: dataforge-worker
+      APP_NAME: ${APP_NAME}
+      APP_VERSION: ${APP_VERSION}
+      DEBUG: ${DEBUG}
+      PROD_MODE_ENABLED: "true"
+      DATA_DIR: /app/data
+      DATABASE_URL: ${DATABASE_URL}
+      INTERNAL_API_TOKEN: ${INTERNAL_API_TOKEN}
+      INTERNAL_GRPC_TARGET: runtime:50051
+      WORKER_DATA_PLANE_GRPC_HOST: 0.0.0.0
+      WORKER_DATA_PLANE_GRPC_PORT: ${WORKER_DATA_PLANE_GRPC_PORT}
+      DEFAULT_NAMESPACE: ${DEFAULT_NAMESPACE}
+      OBJECT_STORE_ENDPOINT: ${OBJECT_STORE_ENDPOINT}
+      OBJECT_STORE_REGION: ${OBJECT_STORE_REGION}
+      OBJECT_STORE_ACCESS_KEY: ${OBJECT_STORE_ACCESS_KEY}
+      OBJECT_STORE_SECRET_KEY: ${OBJECT_STORE_SECRET_KEY}
+      POLARS_CORES_AVAILABLE: ${POLARS_CORES_AVAILABLE}
+      POLARS_MAX_MEMORY_MB: ${POLARS_MAX_MEMORY_MB}
+      POLARS_STREAMING_CHUNK_SIZE: ${POLARS_STREAMING_CHUNK_SIZE}
+      TIMEZONE: ${TIMEZONE}
+      NORMALIZE_TZ: ${NORMALIZE_TZ}
+      PERSIST_PREVIEW_RUNS: ${PERSIST_PREVIEW_RUNS}
+      COMPUTE_WORKERS: ${COMPUTE_WORKERS}
+      COMPUTE_WARM_WORKERS: ${COMPUTE_WARM_WORKERS}
+      RUNTIME_RECONCILIATION_POLL_INTERVAL_SECONDS: ${RUNTIME_RECONCILIATION_POLL_INTERVAL_SECONDS:-5}
+      ENGINE_DOCKER_HOST: unix:///var/run/docker.sock
+      ENGINE_DOCKER_NETWORK: ${E2E_DOCKER_NETWORK}
+      ENGINE_IMAGE: data-forge-polars-engine:e2e
+      ENGINE_OBJECT_STORE_ENDPOINT: http://rustfs:9000
+      ENGINE_RPC_PORT: "50053"
+      ENGINE_START_TIMEOUT_SECONDS: ${E2E_ENGINE_START_TIMEOUT_SECONDS}
+      ENGINE_SHUTDOWN_GRACE_SECONDS: "10"
+      ENGINE_HEARTBEAT_INTERVAL_SECONDS: "5"
+      ENGINE_IDLE_TTL_SECONDS: ${E2E_ENGINE_IDLE_TTL_SECONDS}
+      ENGINE_IDLE_REAP_INTERVAL_SECONDS: ${E2E_ENGINE_IDLE_REAP_INTERVAL_SECONDS}
+      DATAFORGE_DEPLOYMENT_ID: ${E2E_DEPLOYMENT_ID}
+      LOG_LEVEL: ${LOG_LEVEL}
+    volumes:
+      - data:/app/data
+      - /var/run/docker.sock:/var/run/docker.sock
+    group_add:
+      - "${DOCKER_SOCKET_GID}"
+    healthcheck:
+      test: ["CMD", "python3", "-m", "runtime.dispatcher_health"]
+      interval: 5s
+      timeout: 5s
+      retries: 30
+      start_period: 10s
+
+  scheduler:
+    image: data-forge-scheduler:e2e
+    cpu_shares: 1024
+    depends_on:
+      postgres:
+        condition: service_healthy
+      runtime:
+        condition: service_healthy
+    environment:
+      ENV_FILE: ""
+      PGAPPNAME: dataforge-scheduler
+      APP_NAME: ${APP_NAME}
+      APP_VERSION: ${APP_VERSION}
+      DEBUG: ${DEBUG}
+      PROD_MODE_ENABLED: "true"
+      DATA_DIR: /app/data
+      DATABASE_URL: ${DATABASE_URL}
+      DISTRIBUTED_RUNTIME_ENABLED: "true"
+      INTERNAL_API_TOKEN: ${INTERNAL_API_TOKEN}
+      INTERNAL_GRPC_TARGET: runtime:50051
+      DEFAULT_NAMESPACE: ${DEFAULT_NAMESPACE}
+      OBJECT_STORE_ENDPOINT: ${OBJECT_STORE_ENDPOINT}
+      OBJECT_STORE_REGION: ${OBJECT_STORE_REGION}
+      OBJECT_STORE_ACCESS_KEY: ${OBJECT_STORE_ACCESS_KEY}
+      OBJECT_STORE_SECRET_KEY: ${OBJECT_STORE_SECRET_KEY}
+      WORKERS: "1"
+      SCHEDULER_CHECK_INTERVAL: ${SCHEDULER_CHECK_INTERVAL}
+      LOG_LEVEL: ${LOG_LEVEL}
+      SETTINGS_ENCRYPTION_KEY: ${SETTINGS_ENCRYPTION_KEY}
+      TIMEZONE: ${TIMEZONE}
+    volumes:
+      - data:/app/data
+    healthcheck:
+      test: ["CMD", "python3", "-m", "scheduler_grpc.health"]
+      interval: 10s
+      timeout: 5s
+      retries: 30
+      start_period: 10s
+
+volumes:
+  data:
+  pg-data:
+  rustfs-data:
+
+networks:
+  default:
+    name: ${E2E_DOCKER_NETWORK}

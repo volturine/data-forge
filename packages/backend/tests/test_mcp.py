@@ -150,8 +150,42 @@ class TestMCPCallPreview:
 
 
 class TestMCPConfirm:
+    def test_pending_action_is_encrypted_and_consumed_once_across_store_instances(self, client: TestClient, test_user) -> None:
+        from concurrent.futures import ThreadPoolExecutor
+        from hashlib import sha256
+
+        from backend_core.database import run_settings_db
+        from backend_core.persistence.mcp_pending.models import McpPendingAction
+        from modules.mcp.models import MCPHttpMethod
+        from modules.mcp.pending import PendingStore
+
+        args = {'password': 'sensitive-test-value'}
+        token = PendingStore().create(
+            'test_tool',
+            MCPHttpMethod.POST,
+            '/api/v1/test',
+            args,
+            namespace='default',
+            owner_id=test_user.id,
+        )
+        action = run_settings_db(lambda session: session.get(McpPendingAction, sha256(token.encode()).hexdigest()))
+
+        assert action is not None
+        assert action.token_hash != token
+        assert 'sensitive-test-value' not in action.args_encrypted
+        entry = PendingStore().get(token, owner_id=test_user.id)
+        assert entry is not None
+        assert entry.args == args
+
+        with ThreadPoolExecutor(max_workers=2) as executor:
+            results = list(executor.map(lambda _: PendingStore().pop(token, owner_id=test_user.id), range(2)))
+
+        consumed = [entry for entry in results if entry is not None]
+        assert len(consumed) == 1
+        assert consumed[0].args == args
+
     def test_confirm_executes_pending_action(self, client: TestClient, test_user) -> None:
-        from modules.mcp.pending import pending_store
+        from modules.mcp.pending import PendingStore
 
         response = client.get('/api/v1/mcp/tools')
         tools = response.json()
@@ -164,9 +198,9 @@ class TestMCPConfirm:
 
         call_resp = client.post('/api/v1/mcp/call', json={'tool_id': post_tool['id'], 'args': {}})
         token = call_resp.json()['token']
-        pending = pending_store.get(token, owner_id=test_user.id)
+        pending = PendingStore().get(token, owner_id=test_user.id)
         assert pending is not None
-        assert pending.context['headers']['X-Namespace'] == 'default'
+        assert pending.namespace == 'default'
 
         confirm_resp = client.post('/api/v1/mcp/confirm', json={'token': token})
         assert confirm_resp.status_code == 200
@@ -203,7 +237,7 @@ class TestMCPConfirm:
     def test_pending_token_is_bound_to_creating_user(self, client: TestClient, test_user) -> None:
         import uuid
 
-        from modules.mcp.pending import pending_store
+        from modules.mcp.pending import PendingStore, pending_store
 
         post_tool = self._post_tool_without_required_args(client)
         if post_tool is None:
@@ -215,7 +249,8 @@ class TestMCPConfirm:
         assert pending_store.get(token, owner_id=test_user.id) is not None
         assert pending_store.get(token, owner_id=uuid.uuid4().hex) is None
         assert pending_store.pop(token, owner_id='someone-else') is None
-        assert pending_store.pop(token, owner_id=test_user.id) is not None
+        assert PendingStore().pop(token, owner_id=test_user.id) is not None
+        assert pending_store.get(token, owner_id=test_user.id) is None
 
     def test_confirm_rejects_token_presented_by_other_user(self, client: TestClient, test_user) -> None:
         import uuid
@@ -1553,6 +1588,7 @@ class TestStartupEnforcement:
 
         app = FastAPI()
 
-        get_registry(app)
-        get_registry(app)
+        first = get_registry(app)
+        second = get_registry(app)
         assert len(build_calls) == 1
+        assert second is first

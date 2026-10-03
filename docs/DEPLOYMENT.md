@@ -1,7 +1,8 @@
 # Deployment
 
-Data-Forge has one production architecture: PostgreSQL and S3-compatible object
-storage support three fixed application roles—API, scheduler, and worker. Docker
+The current production architecture uses PostgreSQL and S3-compatible object
+storage with four application roles—API, runtime coordinator, scheduler, and
+worker. Docker
 Compose is the recommended deployment method. Running the same roles from source
 is supported when the infrastructure is managed separately.
 
@@ -20,37 +21,64 @@ Production requires:
   encryption secrets;
 - a reverse proxy with TLS for any host exposed outside a trusted network.
 
-Keep the API, scheduler, and worker on the same release. They share database and
-gRPC contracts and must be upgraded together.
+Keep the API, runtime coordinator, scheduler, worker, and engine images on the
+same release. They share protocol contracts and must be upgraded together.
 
 ## Docker Compose (recommended)
 
-The checked-in stack runs five services:
+The checked-in stack runs six services:
 
 ```text
 PostgreSQL ─┐
-RustFS ─────┼── API (HTTP + internal gRPC) ◄── Scheduler
-            │         │                    ◄── Worker
+RustFS ─────┼── API (HTTP) ◄── Runtime coordinator (internal gRPC)
+            │       │                         ▲
+            │       └── worker data-plane     ├── Scheduler
+            │                                 └── Worker (engine owner)
             │         └── worker data-plane gRPC
 Browser ────┘
 ```
 
-The API serves the built frontend and HTTP API on port 8000. The scheduler and
-worker reach the API gRPC endpoint only through the Compose network. The API
-reaches the worker data-plane gRPC the same way for object-store operations
-such as file upload.
+The API processes serve the built frontend and HTTP API on port 8000, including
+WebSocket/SSE delivery and durable enqueue-and-wait request paths. They retain
+disposable process-local caches, projections, and waiters; these are not
+authoritative durable runtime state. They do not own compute dispatch, Telegram
+polling, or engine lifecycle. One active fenced runtime
+coordinator owns internal gRPC/dispatch, durable chat processing, Telegram
+polling, and independent durable email/Telegram delivery lanes. One worker
+manager owns Docker and isolated compute containers; each assigned worker is
+bound to one exact analysis or datasource RID. Identical full commands share
+durable results, while distinct commands for one RID are serialized. Increasing
+`WORKERS` scales API processes inside that container only. The Compose API
+service publishes one fixed host port, so adding API containers also requires
+an ingress/load-balancer topology. See [Capacity-First Runtime Optimization](prd/active/elastic-runtime-scale-out.md)
+for the 1×1 baseline and evidence-gated scale path.
+
+External notification delivery claims durable outbox metadata before making
+email or Telegram network calls; those calls run outside the database
+transaction. Compute parsing and Polars-heavy work remain in isolated engine
+containers managed by the worker service.
+
+Engine cancellation targets the exact job ID, remembers requests made before
+the job starts, and waits for the actual execution thread to settle before
+releasing its admission. SMTP tests admit one thread; a deadline while sending
+can return before that thread settles, so the provider may already have accepted
+the email. Admission remains occupied until the thread finishes; a deadline is
+not proof that no email was sent.
+
+The API reaches the worker data-plane gRPC for object-store operations such as
+file upload.
 
 ### Image channels
 
 CI publishes every role image to GHCR on three channels:
 
-| Channel | Trigger | Tags | Platforms |
-| --- | --- | --- | --- |
-| Dev / PR preview | pull request, push to `master` | `dev-pr-<number>`, `dev-master` | `linux/amd64` |
-| Release | tag `v*` | `<version>`, semver aliases, `latest` | `linux/amd64`, `linux/arm64` |
+| Channel          | Trigger                        | Tags                                  | Platforms                    |
+| ---------------- | ------------------------------ | ------------------------------------- | ---------------------------- |
+| Dev / PR preview | pull request, push to `master` | `dev-pr-<number>`, `dev-master`       | `linux/amd64`                |
+| Release          | tag `v*`                       | `<version>`, semver aliases, `latest` | `linux/amd64`, `linux/arm64` |
 
 Dev-channel images feed PR-preview deployments; release images are pinned in
-production. Keep all four `DF_*_IMAGE` values on the same channel and commit.
+production. Keep all five `DF_*_IMAGE` values on the same channel and commit.
 
 ### Naming, ports, and collision rules
 
@@ -75,7 +103,7 @@ compose files mirror this directory's topology and follow the same registry.
 ### Configure and start
 
 1. Review `docker/env/prod.env` and replace every `replace-with-...` value.
-2. Set the four image variables to tags published from the same release. `DF_ENGINE_IMAGE` must be available to the local Docker daemon before the worker starts.
+2. Set the five image variables to tags published from the same release. `DF_ENGINE_IMAGE` must be available to the local Docker daemon before the worker starts. Pin it to a `repository@sha256:<digest>` reference when engines must stay byte-identical across launches; a tag is accepted (and logged as unpinned) so custom engine images with extra libraries can be used.
 3. Set `DF_AUTH_FRONTEND_URL`, OAuth callback URLs, and `DF_CORS_ORIGINS` to the
    public HTTPS origin.
 4. Set `DF_DOCKER_SOCKET_PATH` and `DF_DOCKER_GID` for the deployment host. The worker is the only service with Docker access; this permission is equivalent to administrative host access.
@@ -144,10 +172,10 @@ Edit `docker/env/prod.env`:
 
 - set `DATABASE_URL` to PostgreSQL;
 - set the four `OBJECT_STORE_*` values (endpoint, region, access key, secret).
-  Each product namespace is an S3 bucket (name == bucket);
-- provision separate namespace reader and builder object-store identities and
-  set `ENGINE_OBJECT_STORE_CREDENTIALS_JSON`; production rejects the platform
-  object-store credentials for engine containers;
+  Each product namespace is an S3 bucket (name == bucket). The backend
+  provisions namespace-scoped reader/builder engine identities and serves them
+  to workers over the authenticated internal gRPC API — no per-namespace
+  object-store configuration is required;
 - replace `INTERNAL_API_TOKEN` and `SETTINGS_ENCRYPTION_KEY`;
 - set `DATA_DIR` to a writable, durable local directory for process scratch;
 - set the public auth and OAuth URLs;
@@ -160,7 +188,8 @@ just prod
 ```
 
 The recipe generates protocol bindings, builds the static frontend, loads
-`docker/env/prod.env`, and runs the API, scheduler, and worker in the foreground.
+`docker/env/prod.env`, and runs the API, runtime coordinator, scheduler, and
+worker in the foreground.
 If one role exits, the recipe stops the others and exits unsuccessfully. Run it
 under a process supervisor that restarts the whole group and forwards `SIGTERM`;
 do not start only the API.
@@ -218,11 +247,11 @@ available. For either proxy, set `AUTH_FRONTEND_URL` and OAuth callback URLs to
 
 Use the unauthenticated root health endpoints:
 
-| Endpoint | Purpose | Healthy response |
-| --- | --- | --- |
-| `/health` | Liveness: the API process can answer HTTP | `200` |
-| `/health/ready` | Readiness: PostgreSQL and required local directories are available | `200`; otherwise `503` |
-| `/health/startup` | Startup: application settings initialized | `200` |
+| Endpoint          | Purpose                                                                               | Healthy response       |
+| ----------------- | ------------------------------------------------------------------------------------- | ---------------------- |
+| `/health`         | Liveness: the API process can answer HTTP                                             | `200`                  |
+| `/health/ready`   | Readiness: PostgreSQL, required local directories, and the object-store probe succeed | `200`; otherwise `503` |
+| `/health/startup` | Startup: application settings initialized                                             | `200`                  |
 
 Example:
 
@@ -230,9 +259,28 @@ Example:
 curl --fail --silent https://dataforge.example.com/health/ready
 ```
 
-The Compose health check uses `/health/ready`. Also monitor PostgreSQL and object
-store capacity, application-role restarts, error logs, and backup age; the API
-readiness endpoint is not a complete infrastructure monitor.
+The API Compose health check uses `/health/ready` to verify API dependencies.
+Worker and scheduler Docker probes query PID1's private Unix socket through
+`python3 -m runtime.dispatcher_health` and `python3 -m scheduler_grpc.health`,
+respectively. They require that process's actual registration and fresh progress
+on every configured dispatch lane. Worker lanes cover compute execution and
+shutdown, builds, datasource deletion, and outbox cleanup. A database registry
+row or independent heartbeat cannot mask a stalled lane. API readiness does not establish
+coordinator dispatch progress. Also monitor PostgreSQL and object-store capacity,
+application-role restarts, error logs, and backup age.
+
+## Private storage cleanup
+
+Storage GC uses the existing durable outbox and an independent worker I/O lane.
+It records durable source intents before staging and retirement, then
+cleans exact managed objects/prefixes and associated catalog IDs idempotently.
+Busy RIDs defer cleanup. Referenced targets become `PUBLISHED` and retain their
+data; abandoned targets require fenced `AUTHORIZED` grants before deletion.
+Published snapshots keep their existing retention policy. Cleanup uses durable
+intents and indexed source references rather than blob discovery; it introduces
+no additional service or public configuration. See the
+[private GC contract](prd/active/elastic-runtime-scale-out.md#private-storage-gc)
+for authorization, ownership transfer, and acknowledgement rules.
 
 ## Backup and restore
 
@@ -242,7 +290,7 @@ A recoverable deployment needs a point-in-time-consistent set containing:
 2. the entire configured object-store bucket/prefix;
 3. the local `DATA_DIR` volume, which contains local runtime files and logs.
 
-Pause writes or stop API, scheduler, and worker while taking coordinated backups.
+Pause writes or stop API, runtime coordinator, scheduler, and worker while taking coordinated backups.
 Use provider-native snapshots/versioning for managed PostgreSQL and S3 whenever
 available, and test restores regularly.
 

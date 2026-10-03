@@ -4,18 +4,21 @@ import { apiRequest } from './client';
 import type { ApiError } from './client';
 import type { Udf, UdfClone, UdfCreate, UdfExport, UdfImport, UdfUpdate } from '$lib/types/udf';
 
-export function listUdfs(params?: {
-	q?: string;
-	dtype_key?: string;
-	tag?: string;
-}): ResultAsync<Udf[], ApiError> {
+export function listUdfs(
+	params?: {
+		q?: string;
+		dtype_key?: string;
+		tag?: string;
+	},
+	options?: RequestInit
+): ResultAsync<Udf[], ApiError> {
 	const search = new URLSearchParams();
 	if (params?.q) search.set('q', params.q);
 	if (params?.dtype_key) search.set('dtype_key', params.dtype_key);
 	if (params?.tag) search.set('tag', params.tag);
 	const query = search.toString();
 	const endpoint = query ? `/v1/udf?${query}` : '/v1/udf';
-	return apiRequest<Udf[]>(endpoint);
+	return apiRequest<Udf[]>(endpoint, options);
 }
 
 export function getUdf(id: string): ResultAsync<Udf, ApiError> {

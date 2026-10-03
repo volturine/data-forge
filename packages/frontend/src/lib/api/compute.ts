@@ -1,6 +1,5 @@
 import type {
 	EngineDefaults,
-	EngineIdentityPayload,
 	EngineResourceConfig,
 	EngineScope,
 	EngineStatusResponse
@@ -21,7 +20,7 @@ import type { ApiError } from './client';
 import { createStream, type StreamHandle } from './websocket';
 import { computeActivityStore } from '$lib/stores/compute-activity.svelte';
 import { isNamespaceReady, requireNamespace } from '$lib/stores/namespace.svelte';
-import { shareInFlight } from './in-flight';
+import { shareInFlight, shareInFlightWithSignal, type SharedInFlight } from './in-flight';
 
 type Field<T, K extends keyof T> = NonNullable<T[K]>;
 type StringField<T, K extends keyof T> = Extract<Field<T, K>, string>;
@@ -35,7 +34,7 @@ type Int64HttpNumber<T, K extends keyof T> = Field<T, K> extends string ? number
 
 export interface StepPreviewRequest {
 	analysis_id?: OptionalStringField<ProtocolStepPreviewCommandJson, 'analysisId'>;
-	engine_identity?: EngineIdentityPayload | null;
+	datasource_id?: string | null;
 	target_step_id: StringField<ProtocolStepPreviewCommandJson, 'targetStepId'>;
 	analysis_pipeline: AnalysisPipelinePayload;
 	tab_id?: OptionalStringField<ProtocolStepPreviewCommandJson, 'tabId'>;
@@ -56,10 +55,21 @@ export interface StepPreviewResponse {
 }
 
 const previewInFlight = new Map<string, ResultAsync<StepPreviewResponse, ApiError>>();
+const previewSignalInFlight = new Map<string, SharedInFlight<StepPreviewResponse, ApiError>>();
 const schemaInFlight = new Map<string, ResultAsync<StepSchemaResponse, ApiError>>();
+const schemaSignalInFlight = new Map<string, SharedInFlight<StepSchemaResponse, ApiError>>();
 const rowCountInFlight = new Map<string, ResultAsync<StepRowCountResponse, ApiError>>();
+const rowCountSignalInFlight = new Map<string, SharedInFlight<StepRowCountResponse, ApiError>>();
 const spawnInFlight = new Map<string, ResultAsync<EngineStatusResponse, ApiError>>();
 const shutdownInFlight = new Map<string, ResultAsync<void, ApiError>>();
+
+export interface ComputeRequestOptions {
+	signal?: AbortSignal;
+}
+
+function cancelledComputeError(): ApiError {
+	return { type: 'network', message: 'Compute request cancelled' };
+}
 
 function namespaceKey(): string {
 	if (!isNamespaceReady()) return '';
@@ -71,16 +81,26 @@ function requestKey(endpoint: string, body?: string): string {
 }
 
 export function previewStepData(
-	request: StepPreviewRequest
+	request: StepPreviewRequest,
+	options?: ComputeRequestOptions
 ): ResultAsync<StepPreviewResponse, ApiError> {
 	const body = JSON.stringify(request);
-	return shareInFlight(previewInFlight, requestKey('/v1/compute/preview', body), () =>
+	const key = requestKey('/v1/compute/preview', body);
+	const factory = (signal?: AbortSignal) =>
 		computeActivityStore.track(
 			apiRequest<StepPreviewResponse>('/v1/compute/preview', {
 				method: 'POST',
-				body
+				body,
+				...(signal ? { signal } : {})
 			})
-		)
+		);
+	if (!options?.signal) return shareInFlight(previewInFlight, key, () => factory());
+	return shareInFlightWithSignal(
+		previewSignalInFlight,
+		key,
+		(signal) => factory(signal),
+		options.signal,
+		cancelledComputeError
 	);
 }
 
@@ -133,8 +153,13 @@ export function shutdownEngineByIdentity(
 	);
 }
 
-export function getEngineDefaults(): ResultAsync<EngineDefaults, ApiError> {
-	return apiRequest<EngineDefaults>('/v1/compute/defaults');
+export function getEngineDefaults(
+	options?: ComputeRequestOptions
+): ResultAsync<EngineDefaults, ApiError> {
+	return apiRequest<EngineDefaults>(
+		'/v1/compute/defaults',
+		options?.signal ? { signal: options.signal } : undefined
+	);
 }
 
 export interface DownloadRequest {
@@ -188,16 +213,26 @@ export interface StepSchemaResponse {
 }
 
 export function getStepSchema(
-	request: StepSchemaRequest
+	request: StepSchemaRequest,
+	options?: ComputeRequestOptions
 ): ResultAsync<StepSchemaResponse, ApiError> {
 	const body = JSON.stringify(request);
-	return shareInFlight(schemaInFlight, requestKey('/v1/compute/schema', body), () =>
+	const factory = (signal?: AbortSignal) =>
 		computeActivityStore.track(
 			apiRequest<StepSchemaResponse>('/v1/compute/schema', {
 				method: 'POST',
-				body
+				body,
+				...(signal ? { signal } : {})
 			})
-		)
+		);
+	const key = requestKey('/v1/compute/schema', body);
+	if (!options?.signal) return shareInFlight(schemaInFlight, key, () => factory());
+	return shareInFlightWithSignal(
+		schemaSignalInFlight,
+		key,
+		(signal) => factory(signal),
+		options.signal,
+		cancelledComputeError
 	);
 }
 
@@ -209,17 +244,34 @@ export interface StepRowCountResponse {
 }
 
 export function getStepRowCount(
-	request: StepRowCountRequest
+	request: StepRowCountRequest,
+	options?: ComputeRequestOptions
 ): ResultAsync<StepRowCountResponse, ApiError> {
 	const body = JSON.stringify(request);
-	return shareInFlight(rowCountInFlight, requestKey('/v1/compute/row-count', body), () =>
+	const factory = (signal?: AbortSignal) =>
 		computeActivityStore.track(
 			apiRequest<StepRowCountResponse>('/v1/compute/row-count', {
 				method: 'POST',
-				body
+				body,
+				...(signal ? { signal } : {})
 			})
-		)
+		);
+	const key = requestKey('/v1/compute/row-count', body);
+	if (!options?.signal) return shareInFlight(rowCountInFlight, key, () => factory());
+	return shareInFlightWithSignal(
+		rowCountSignalInFlight,
+		key,
+		(signal) => factory(signal),
+		options.signal,
+		cancelledComputeError
 	);
+}
+
+export function throwIfAborted(signal: AbortSignal): void {
+	if (!signal.aborted) return;
+	const error = new Error('Compute request cancelled');
+	error.name = 'AbortError';
+	throw error;
 }
 
 export interface CancelBuildResponse {
@@ -233,7 +285,7 @@ export interface CancelBuildResponse {
 
 export interface BuildRequest {
 	analysis_pipeline: AnalysisPipelinePayload;
-	tab_id?: string | null;
+	tab_id: string;
 }
 
 export type EnginesSnapshotMessage = {

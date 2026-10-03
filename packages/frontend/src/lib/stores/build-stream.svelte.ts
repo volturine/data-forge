@@ -28,7 +28,10 @@ const MAX_LOGS = 500;
 const MAX_RESOURCE_HISTORY = 120;
 const RECONNECT_DELAY_MS = 1_000;
 const MAX_RECONNECT_ATTEMPTS = 5;
-const BUILD_REFRESH_MS = 250;
+// WebSocket events are the immediate update path. This REST poll is only a
+// durable-state reconciliation fallback and must not turn every open build
+// preview into four full-detail requests per second.
+const BUILD_REFRESH_MS = 5_000;
 
 export class BuildStreamStore {
 	status = $state<BuildStatus>('disconnected');
@@ -300,8 +303,16 @@ export class BuildStreamStore {
 	}
 
 	applySnapshot(build: BuildRunDetail, lastSequence = 0): void {
+		const incomingStatus = buildResultStatusFromLifecycle(build.status);
+		// A REST refresh can race the websocket terminal event and return an
+		// older running snapshot. Do not let that snapshot rewrite a terminal
+		// build back into an active-looking state or replace its terminal data.
+		if (isTerminalBuildStatus(this.status) && !isTerminalBuildStatus(incomingStatus)) {
+			return;
+		}
+
 		this.buildId = build.build_id;
-		this.lastSequence = lastSequence;
+		this.lastSequence = Math.max(this.lastSequence, lastSequence);
 		this.engineRunId = build.current_engine_run_id ?? null;
 		this.analysisId = build.analysis_id;
 		this.progress = build.progress;
@@ -337,10 +348,6 @@ export class BuildStreamStore {
 		this.results = build.results ?? [];
 		this.duration = build.duration_ms ?? null;
 		this.error = build.error ?? null;
-		const incomingStatus = buildResultStatusFromLifecycle(build.status);
-		if (isTerminalBuildStatus(this.status) && !isTerminalBuildStatus(incomingStatus)) {
-			return;
-		}
 		this.status = incomingStatus;
 		if (this.done) {
 			this.shouldReconnect = false;
@@ -352,6 +359,13 @@ export class BuildStreamStore {
 	}
 
 	applyEvent(event: BuildEvent): void {
+		// Reconnect/replay and a late watcher event can deliver an older event
+		// after the terminal event has already updated the UI. Sequences are
+		// durable per build; terminal state is also monotonic when an event does
+		// not carry a sequence (for example, a unit-test or legacy producer).
+		if (event.sequence !== null && event.sequence <= this.lastSequence) return;
+		if (isTerminalBuildStatus(this.status)) return;
+
 		this.buildId = event.build_id;
 		this.lastSequence = event.sequence ?? this.lastSequence;
 		if (event.engine_run_id) this.engineRunId = event.engine_run_id;

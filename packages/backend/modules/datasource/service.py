@@ -1,23 +1,14 @@
-import contextlib
 import logging
 import re
-import tempfile
 import uuid
-from collections.abc import Iterator
-from dataclasses import dataclass
 from datetime import UTC, datetime
-from pathlib import Path
 from typing import Any
 
-from openpyxl import load_workbook
-from openpyxl.utils.cell import get_column_letter, range_boundaries
-from sqlalchemy import inspect, select
+from sqlalchemy import inspect, select, text
 from sqlalchemy.orm import defer
 from sqlmodel import Session
 
-from backend_core import datasource_delete_service
-from backend_core.data_plane_client import client_from_settings
-from backend_core.datasource_storage import cleanup_datasource_storage
+from backend_core import datasource_delete_service, storage_cleanup_service
 from backend_core.domain.build_runs.models import BuildRunStatus
 from backend_core.domain.datasource.models import DataSourceCreatedBy
 from backend_core.domain.datasource.source_types import DataSourceFileType, DataSourceType
@@ -106,21 +97,72 @@ class InternalPostgresOnboarding:
             matches.append(datasource)
         return matches
 
+    def _onboarded_table_keys(self) -> tuple[set[str], set[tuple[str, str]]]:
+        """Load onboarding metadata once for the internal-table listing.
+
+        The old list implementation called ``matching_datasources`` for every
+        physical table. That method loaded every datasource on each call, so a
+        namespace-heavy test run turned this endpoint into an O(tables ×
+        datasources) query loop. Keep both matching rules, but materialize the
+        two lookup sets once per request.
+        """
+        canonical_names: set[str] = set()
+        query_sources: set[tuple[str, str]] = set()
+        connection_string = self.connection_string()
+        datasources = self.session.execute(select(DataSource)).scalars().all()
+        for datasource in datasources:
+            canonical_names.add(datasource.name)
+            query, datasource_connection = datasource.query_and_connection()
+            if datasource_connection != connection_string:
+                continue
+            source = self.query_schema_and_table(query)
+            if source is not None:
+                query_sources.add(source)
+        return canonical_names, query_sources
+
     def list_tables(self) -> list[InternalPostgresTable]:
         rows: list[InternalPostgresTable] = []
-        for schema_name in sorted(self.inspector.get_schema_names()):
-            if schema_name.startswith('pg_') or schema_name == 'information_schema':
-                continue
-            for table_name in sorted(self.inspector.get_table_names(schema=schema_name)):
-                if table_name in _INTERNAL_POSTGRES_EXCLUDED_TABLES:
-                    continue
-                rows.append(
-                    InternalPostgresTable(
-                        schema_name=schema_name,
-                        table_name=table_name,
-                        is_onboarded=bool(self.matching_datasources(schema_name, table_name)),
+        canonical_names, query_sources = self._onboarded_table_keys()
+        bind = self.session.get_bind()
+        physical_tables: list[tuple[str, str]]
+        if bind.dialect.name == 'postgresql':
+            physical_tables = [
+                (str(schema_name), str(table_name))
+                for schema_name, table_name in self.session.execute(
+                    text(
+                        """
+                    SELECT namespace.nspname, relation.relname
+                    FROM pg_catalog.pg_namespace AS namespace
+                    JOIN pg_catalog.pg_class AS relation
+                      ON relation.relnamespace = namespace.oid
+                    WHERE namespace.nspname NOT LIKE 'pg_%'
+                      AND namespace.nspname <> 'information_schema'
+                      AND relation.relkind IN ('r', 'p', 'f')
+                      AND relation.relname <> :excluded_table
+                    ORDER BY namespace.nspname, relation.relname
+                    """
                     ),
+                    {'excluded_table': next(iter(_INTERNAL_POSTGRES_EXCLUDED_TABLES))},
                 )
+                .tuples()
+                .all()
+            ]
+        else:
+            physical_tables = [
+                (schema_name, table_name)
+                for schema_name in sorted(self.inspector.get_schema_names())
+                if not schema_name.startswith('pg_') and schema_name != 'information_schema'
+                for table_name in sorted(self.inspector.get_table_names(schema=schema_name))
+                if table_name not in _INTERNAL_POSTGRES_EXCLUDED_TABLES
+            ]
+        for schema_name, table_name in physical_tables:
+            rows.append(
+                InternalPostgresTable(
+                    schema_name=schema_name,
+                    table_name=table_name,
+                    is_onboarded=(self.datasource_name_for(schema_name, table_name) in canonical_names or (schema_name, table_name) in query_sources),
+                ),
+            )
         return rows
 
     def table_query(self, schema_name: str, table_name: str) -> str:
@@ -328,8 +370,17 @@ def create_placeholder_output_datasource(
         if config is not None:
             next_config = {**config, **next_config}
         next_config['analysis_tab_id'] = analysis_tab_id
+        next_source_type = DataSourceType.require(source_type).value
+        changed = (
+            next_config != existing.config
+            or existing.source_type != next_source_type
+            or existing.created_by_analysis_id != analysis_id
+            or existing.created_by != DataSourceCreatedBy.ANALYSIS.value
+        )
+        if changed:
+            existing.revision += 1
         existing.config = next_config
-        existing.source_type = DataSourceType.require(source_type).value
+        existing.source_type = next_source_type
         existing.created_by_analysis_id = analysis_id
         existing.created_by = DataSourceCreatedBy.ANALYSIS.value
         session.add(existing)
@@ -414,380 +465,6 @@ def create_analysis_datasource(
     session.refresh(datasource)
 
     return DataSourceResponse.model_validate(datasource)
-
-
-@dataclass
-class ExcelPreviewResult:
-    preview: list[list[str | None]]
-    detected_end_row: int | None
-    sheet_name: str
-    start_row: int
-    start_col: int
-    end_col: int
-    end_row: int
-
-
-@dataclass
-class _ExcelBounds:
-    sheet_name: str
-    start_row: int
-    start_col: int
-    end_col: int
-    end_row: int | None
-
-
-class ExcelPreviewBuilder:
-    def __init__(self, file_path: Path) -> None:
-        self.file_path = file_path
-
-    def build_preview(
-        self,
-        sheet_name: str,
-        start_row: int,
-        start_col: int,
-        end_col: int,
-        end_row: int | None,
-        *,
-        table_name: str | None = None,
-        named_range: str | None = None,
-        cell_range: str | None = None,
-        preview_rows: int = 100,
-    ) -> ExcelPreviewResult:
-        workbook = self._open_workbook(table_name=table_name)
-        try:
-            resolved = self._resolve_bounds(
-                workbook,
-                sheet_name,
-                start_row,
-                start_col,
-                end_col,
-                end_row,
-                table_name,
-                named_range,
-                cell_range,
-            )
-            sheet = workbook[resolved.sheet_name]
-            end_row_value = resolved.end_row
-            if end_row_value is None:
-                end_row_value = self._detect_end_row(sheet, resolved.start_row, resolved.start_col, resolved.end_col)
-            self._validate_bounds(
-                sheet,
-                resolved.start_row,
-                resolved.start_col,
-                resolved.end_col,
-                end_row_value,
-            )
-            preview_end_row = min(resolved.start_row + preview_rows - 1, end_row_value)
-            rows = self._collect_preview_rows(
-                sheet,
-                resolved.start_row,
-                resolved.start_col,
-                resolved.end_col,
-                preview_end_row,
-            )
-            return ExcelPreviewResult(
-                preview=rows,
-                detected_end_row=end_row_value,
-                sheet_name=resolved.sheet_name,
-                start_row=resolved.start_row,
-                start_col=resolved.start_col,
-                end_col=resolved.end_col,
-                end_row=end_row_value,
-            )
-        finally:
-            workbook.close()
-
-    def resolve_selection(
-        self,
-        sheet_name: str | None,
-        start_row: int,
-        start_col: int,
-        end_col: int,
-        end_row: int | None,
-        *,
-        table_name: str | None = None,
-        named_range: str | None = None,
-        cell_range: str | None = None,
-    ) -> tuple[str, int, int, int, int]:
-        try:
-            workbook = self._open_workbook(table_name=table_name)
-            try:
-                target_sheet = sheet_name or (workbook.sheetnames[0] if workbook.sheetnames else None)
-                if not target_sheet:
-                    raise ValueError('No sheets found in file')
-                resolved = self._resolve_bounds(
-                    workbook,
-                    target_sheet,
-                    start_row,
-                    start_col,
-                    end_col,
-                    end_row,
-                    table_name,
-                    named_range,
-                    cell_range,
-                )
-                sheet = workbook[resolved.sheet_name]
-                end_row_value = resolved.end_row
-                if end_row_value is None:
-                    end_row_value = self._detect_end_row(sheet, resolved.start_row, resolved.start_col, resolved.end_col)
-                self._validate_bounds(
-                    sheet,
-                    resolved.start_row,
-                    resolved.start_col,
-                    resolved.end_col,
-                    end_row_value,
-                )
-                return (
-                    resolved.sheet_name,
-                    resolved.start_row,
-                    resolved.start_col,
-                    resolved.end_col,
-                    end_row_value,
-                )
-            finally:
-                workbook.close()
-        except ValueError as exc:
-            raise DataSourceValidationError(str(exc), details={'file_path': str(self.file_path)}) from exc
-
-    def _open_workbook(self, *, table_name: str | None) -> Any:
-        # Table metadata is unavailable in openpyxl read_only mode.
-        return load_workbook(self.file_path, read_only=table_name is None, data_only=True)
-
-    def _resolve_bounds(
-        self,
-        workbook: Any,
-        sheet_name: str,
-        start_row: int,
-        start_col: int,
-        end_col: int,
-        end_row: int | None,
-        table_name: str | None,
-        named_range: str | None,
-        cell_range: str | None,
-    ) -> _ExcelBounds:
-        if table_name:
-            sheet = workbook[sheet_name]
-            tables = getattr(sheet, 'tables', None)
-            if not tables:
-                raise ValueError(f'No tables available in sheet: {sheet_name}')
-            table = tables.get(table_name)
-            if not table:
-                raise ValueError(f'Table not found: {table_name}')
-            min_col, min_row, max_col, max_row = range_boundaries(table.ref)
-            if min_col is None or min_row is None or max_col is None or max_row is None:
-                raise ValueError(f'Invalid table range: {table_name}')
-            return _ExcelBounds(sheet_name, int(min_row) - 1, int(min_col) - 1, int(max_col) - 1, int(max_row) - 1)
-        if named_range:
-            defined = workbook.defined_names.get(named_range)
-            if not defined:
-                raise ValueError(f'Named range not found: {named_range}')
-            destinations = list(defined.destinations)
-            if not destinations:
-                raise ValueError(f'Named range has no destinations: {named_range}')
-            dest_sheet, coord = destinations[0]
-            min_col, min_row, max_col, max_row = range_boundaries(coord)
-            if min_col is None or min_row is None or max_col is None or max_row is None:
-                raise ValueError(f'Invalid named range: {named_range}')
-            return _ExcelBounds(dest_sheet, int(min_row) - 1, int(min_col) - 1, int(max_col) - 1, int(max_row) - 1)
-        if cell_range:
-            return self._parse_cell_range(workbook, cell_range, sheet_name)
-        resolved_start_row = max(start_row, 0)
-        resolved_start_col = max(start_col, 0)
-        resolved_end_col = end_col
-        if resolved_end_col <= resolved_start_col:
-            sheet = workbook[sheet_name]
-            resolved_end_col = self._detect_end_col(sheet, resolved_start_row, resolved_start_col)
-        resolved_end_col = max(resolved_end_col, resolved_start_col)
-        end_row_value = end_row
-        if end_row_value is not None:
-            end_row_value = max(end_row_value, resolved_start_row)
-        return _ExcelBounds(
-            sheet_name,
-            resolved_start_row,
-            resolved_start_col,
-            resolved_end_col,
-            end_row_value,
-        )
-
-    def _parse_cell_range(self, workbook: Any, cell_range: str, default_sheet: str | None) -> _ExcelBounds:
-        raw = cell_range.strip()
-        if not raw:
-            raise ValueError('Cell range cannot be empty')
-        target_sheet = default_sheet
-        coord = raw
-        if '!' in raw:
-            sheet_part, coord_part = raw.split('!', maxsplit=1)
-            sheet_part = sheet_part.strip()
-            if sheet_part.startswith("'") and sheet_part.endswith("'"):
-                sheet_part = sheet_part[1:-1]
-            if not sheet_part:
-                raise ValueError(f'Invalid cell range sheet: {cell_range}')
-            target_sheet = sheet_part
-            coord = coord_part.strip()
-        if not target_sheet:
-            target_sheet = workbook.sheetnames[0] if workbook.sheetnames else None
-        if not target_sheet or target_sheet not in workbook.sheetnames:
-            raise ValueError(f'Sheet not found for cell range: {target_sheet}')
-        min_col, min_row, max_col, max_row = range_boundaries(coord)
-        if min_col is None or min_row is None or max_col is None or max_row is None:
-            raise ValueError(f'Invalid cell range: {cell_range}')
-        return _ExcelBounds(
-            target_sheet,
-            int(min_row) - 1,
-            int(min_col) - 1,
-            int(max_col) - 1,
-            int(max_row) - 1,
-        )
-
-    @staticmethod
-    def format_cell_range(sheet_name: str, start_row: int, start_col: int, end_row: int, end_col: int) -> str:
-        start_cell = f'{get_column_letter(start_col + 1)}{start_row + 1}'
-        end_cell = f'{get_column_letter(end_col + 1)}{end_row + 1}'
-        return f'{sheet_name}!{start_cell}:{end_cell}'
-
-    @staticmethod
-    def _validate_bounds(sheet: Any, start_row: int, start_col: int, end_col: int, end_row: int) -> None:
-        if start_row < 0 or start_col < 0:
-            raise ValueError('Excel bounds must be non-negative')
-        if end_row < start_row or end_col < start_col:
-            raise ValueError('Excel bounds are invalid')
-        max_row = sheet.max_row or 0
-        max_col = sheet.max_column or 0
-        if max_row <= 0 or max_col <= 0:
-            raise ValueError('Excel sheet has no data')
-        if start_row >= max_row or end_row >= max_row:
-            raise ValueError('Excel row bounds exceed sheet size')
-        if start_col >= max_col or end_col >= max_col:
-            raise ValueError('Excel column bounds exceed sheet size')
-
-    @staticmethod
-    def _detect_end_col(sheet: Any, start_row: int, start_col: int) -> int:
-        max_col = sheet.max_column or 0
-        if max_col <= start_col:
-            return start_col
-        last_col = start_col
-        for cell in sheet.iter_rows(
-            min_row=start_row + 1,
-            max_row=start_row + 1,
-            min_col=start_col + 1,
-            max_col=max_col,
-        ):
-            for item in cell:
-                if item.value is None:
-                    continue
-                if str(item.value).strip() == '':
-                    continue
-                last_col = item.column - 1
-        return last_col
-
-    @staticmethod
-    def _detect_end_row(sheet: Any, start_row: int, start_col: int, end_col: int) -> int:
-        max_row = sheet.max_row or 0
-        if max_row <= start_row:
-            return start_row
-        for row_index in range(start_row + 1, max_row + 1):
-            values: list[object | None] = []
-            for cell in sheet.iter_rows(
-                min_row=row_index,
-                max_row=row_index,
-                min_col=start_col + 1,
-                max_col=end_col + 1,
-            ):
-                values = [item.value for item in cell]
-            if all(value is None or str(value).strip() == '' for value in values):
-                return max(start_row, row_index - 2)
-        return max_row - 1
-
-    @staticmethod
-    def _collect_preview_rows(
-        sheet: Any,
-        start_row: int,
-        start_col: int,
-        end_col: int,
-        preview_end_row: int,
-    ) -> list[list[str | None]]:
-        rows: list[list[str | None]] = []
-        for row in sheet.iter_rows(
-            min_row=start_row + 1,
-            max_row=preview_end_row + 1,
-            min_col=start_col + 1,
-            max_col=end_col + 1,
-        ):
-            values = [cell.value for cell in row]
-            rows.append([str(value) if value is not None else None for value in values])
-        return rows
-
-
-def build_excel_preview(
-    file_path: Path,
-    sheet_name: str,
-    start_row: int,
-    start_col: int,
-    end_col: int,
-    end_row: int | None,
-    has_header: bool,
-    table_name: str | None = None,
-    named_range: str | None = None,
-    cell_range: str | None = None,
-    preview_rows: int = 100,
-) -> ExcelPreviewResult:
-    del has_header
-    return ExcelPreviewBuilder(file_path).build_preview(
-        sheet_name,
-        start_row,
-        start_col,
-        end_col,
-        end_row,
-        table_name=table_name,
-        named_range=named_range,
-        cell_range=cell_range,
-        preview_rows=preview_rows,
-    )
-
-
-def resolve_excel_selection(
-    file_path: Path,
-    sheet_name: str | None,
-    start_row: int,
-    start_col: int,
-    end_col: int,
-    end_row: int | None,
-    table_name: str | None = None,
-    named_range: str | None = None,
-    cell_range: str | None = None,
-) -> tuple[str, int, int, int, int]:
-    return ExcelPreviewBuilder(file_path).resolve_selection(
-        sheet_name,
-        start_row,
-        start_col,
-        end_col,
-        end_row,
-        table_name=table_name,
-        named_range=named_range,
-        cell_range=cell_range,
-    )
-
-
-@contextlib.contextmanager
-def _excel_selection_source(file_path: str) -> Iterator[Path]:
-    data_plane = client_from_settings()
-    if not data_plane.classify_object_url(file_path).is_object_store:
-        yield Path(file_path)
-        return
-    with tempfile.TemporaryDirectory() as temp_dir:
-        local_path = Path(temp_dir) / 'workbook.xlsx'
-        local_path.write_bytes(data_plane.download_object_bytes(file_path))
-        yield local_path
-
-
-def format_excel_cell_range(
-    sheet_name: str,
-    start_row: int,
-    start_col: int,
-    end_row: int,
-    end_col: int,
-) -> str:
-    return ExcelPreviewBuilder.format_cell_range(sheet_name, start_row, start_col, end_row, end_col)
 
 
 def _get_column_metadata_map(session: Session, datasource_id: str) -> dict[str, str | None]:
@@ -929,23 +606,35 @@ def update_datasource(
     session: Session,
     datasource_id: str,
     update: DataSourceUpdate,
+    *,
+    resolved_excel_selection: tuple[str, int, int, int, int] | None = None,
+    expected_revision: int | None = None,
 ) -> DataSourceResponse:
-    datasource = datasource_delete_service.get_active_datasource(session, datasource_id)
+    datasource = datasource_delete_service.get_active_datasource(session, datasource_id, for_update=True)
+    if expected_revision is not None and datasource.revision != expected_revision:
+        raise DataSourceValidationError('Datasource changed while Excel selection was being resolved', details={'datasource_id': datasource_id})
+    changed = False
 
     # Update name if provided
-    if update.name is not None:
+    if update.name is not None and update.name != datasource.name:
         datasource.name = update.name
+        changed = True
 
     if 'description' in update.model_fields_set:
-        datasource.description = DataSourceDescriptionModel.normalize_description(update.description)
+        description = DataSourceDescriptionModel.normalize_description(update.description)
+        if description != datasource.description:
+            datasource.description = description
+            changed = True
 
     # Update is_hidden if provided
-    if update.is_hidden is not None:
+    if update.is_hidden is not None and update.is_hidden != datasource.is_hidden:
         datasource.is_hidden = update.is_hidden
+        changed = True
 
     # Update freshness threshold if provided
-    if 'freshness_threshold_minutes' in update.model_fields_set:
+    if 'freshness_threshold_minutes' in update.model_fields_set and update.freshness_threshold_minutes != datasource.freshness_threshold_minutes:
         datasource.freshness_threshold_minutes = update.freshness_threshold_minutes
+        changed = True
 
     # Update config if provided
     if update.config is not None:
@@ -1026,39 +715,12 @@ def update_datasource(
                     'Excel datasource requires file_path',
                     details={'datasource_id': datasource_id},
                 )
-            start_row = next_config.get('start_row')
-            if start_row is None:
-                start_row = 0
-            start_col = next_config.get('start_col')
-            if start_col is None:
-                start_col = 0
-            end_col = next_config.get('end_col')
-            if end_col is None:
-                end_col = 0
-            try:
-                with _excel_selection_source(str(file_path)) as local_path:
-                    (
-                        resolved_sheet,
-                        resolved_start_row,
-                        resolved_start_col,
-                        resolved_end_col,
-                        resolved_end_row,
-                    ) = resolve_excel_selection(
-                        local_path,
-                        next_config.get('sheet_name'),
-                        int(start_row),
-                        int(start_col),
-                        int(end_col),
-                        next_config.get('end_row'),
-                        next_config.get('table_name'),
-                        next_config.get('named_range'),
-                        next_config.get('cell_range'),
-                    )
-            except Exception as exc:
+            if resolved_excel_selection is None:
                 raise DataSourceValidationError(
-                    str(exc),
+                    'Excel selection must be resolved by the datasource compute worker',
                     details={'datasource_id': datasource_id},
-                ) from exc
+                )
+            resolved_sheet, resolved_start_row, resolved_start_col, resolved_end_col, resolved_end_row = resolved_excel_selection
             next_config = {
                 **next_config,
                 'sheet_name': resolved_sheet,
@@ -1069,10 +731,17 @@ def update_datasource(
             }
 
         # Merge new config with existing config
-        datasource.config = next_config
-        if parsing_changed:
+        config_changed = next_config != datasource.config
+        if config_changed:
+            datasource.config = next_config
+            changed = True
+        if parsing_changed and config_changed:
             datasource.schema_cache = None
 
+    if changed:
+        datasource.revision += 1
+        session.add(datasource)
+        storage_cleanup_service.settle_publication(session, datasource.config)
     session.commit()
     session.refresh(datasource)
 
@@ -1085,10 +754,8 @@ def update_datasource(
 
 
 def delete_datasource(session: Session, datasource_id: str) -> None:
-    datasource = datasource_delete_service.get_datasource(session, datasource_id)
-    if not datasource:
-        raise datasource_not_found(datasource_id)
-    cleanup_datasource_storage(datasource)
-    session.delete(datasource)
-    session.commit()
+    # Keep internal onboarding deletion on the same tombstone/drain path as
+    # the datasource API. The worker finalizes the row after active RID work
+    # has settled and atomically records managed-storage cleanup intents.
+    datasource_delete_service.request_delete(session, datasource_id)
     logger.info(f'Deleted datasource {datasource_id}')

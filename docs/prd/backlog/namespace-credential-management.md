@@ -1,6 +1,8 @@
 # PRD: Namespace Credential Management
 
-> **Status:** Backlog — follow-up to the implemented [Containerized Polars Engines](../implemented/containerized-polars-engines.md) PRD.
+> **Status:** Partially implemented — provisioning, encrypted persistence, and
+> authenticated worker access shipped; rotation, revocation, and audit remain
+> backlog. Follow-up to the implemented [Containerized Polars Engines](../implemented/containerized-polars-engines.md) PRD.
 > **Portfolio:** [PRD index](../README.md)
 
 ## Summary
@@ -9,9 +11,22 @@ Replace the current operator-provided `ENGINE_OBJECT_STORE_CREDENTIALS_JSON` dep
 
 ## Current Boundary
 
-The containerized engine architecture is implemented. Operators currently provide a complete namespace reader/builder credential map through a protected worker deployment secret. The worker validates it at startup, selects the namespace and role, and bootstraps the engine through a temporary secret `tmpfs`.
+**Implemented (2026-09):** the operator map is gone. The backend provisions
+per-namespace reader/builder object-store identities at namespace creation
+(MinIO-compatible admin API), stores their secrets encrypted with the existing
+application encryption, and serves them to workers through the authenticated
+internal `GetEngineCredentials` gRPC RPC, scoped to namespace and role. The
+worker has no broader-credential fallback. The `default` namespace is
+provisioned at API startup.
 
-This is intentionally operational configuration, not product-managed credential lifecycle. Adding or rotating a namespace credential requires changing deployment configuration and restarting the worker.
+**Still open:** rotation, revocation/expiry lifecycle, audit records, warm-engine
+renewal, and the explicit import mode for legacy operator maps.
+
+The original boundary below is kept for context.
+
+Operators previously provided a complete namespace reader/builder credential map through a protected worker deployment secret. The worker validated it at startup, selected the namespace and role, and bootstrapped the engine through a temporary secret `tmpfs`.
+
+This was intentionally operational configuration, not product-managed credential lifecycle: adding or rotating a namespace credential required changing deployment configuration and restarting the worker.
 
 ## Problem
 

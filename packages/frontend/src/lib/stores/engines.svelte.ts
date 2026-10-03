@@ -60,18 +60,19 @@ export class EnginesStore {
 	async shutdownEngine(engine: EngineStatusResponse): Promise<void> {
 		const key = engineIdentityKey(engine);
 		this.shuttingDown.add(key);
-		this.engines = this.engines.filter((item) => engineIdentityKey(item) !== key);
 		await shutdownEngineByIdentity(
 			engine.scope ?? 'analysis_interactive',
 			engine.resource_id
 		).match(
 			() => {
+				this.engines = this.engines.filter((item) => engineIdentityKey(item) !== key);
 				this.error = null;
 			},
 			(err) => {
 				this.shuttingDown.delete(key);
 				// Already reaped / never existed — treat as success for the UI.
 				if (err.status === 404) {
+					this.engines = this.engines.filter((item) => engineIdentityKey(item) !== key);
 					this.error = null;
 					return;
 				}

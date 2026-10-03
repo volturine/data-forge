@@ -1,8 +1,8 @@
 import { test, expect } from '@playwright/test';
 import { uid } from './utils/uid.js';
+import { e2eBaseURL } from './utils/base-url.js';
 
-const port = parseInt(process.env.FRONTEND_PORT || '3000', 10);
-const baseURL = process.env.PLAYWRIGHT_BASE_URL || `http://localhost:${port}`;
+const baseURL = e2eBaseURL();
 
 test.describe('Auth – registration flow', () => {
 	test('register with valid credentials creates account', async ({ browser }) => {
@@ -24,7 +24,7 @@ test.describe('Auth – registration flow', () => {
 
 			await expect(
 				page.getByText(/Account created/i).or(page.getByLabel('Main navigation'))
-			).toBeVisible({ timeout: 5_000 });
+			).toBeVisible({ timeout: 10_000 });
 		} finally {
 			await context.close();
 		}

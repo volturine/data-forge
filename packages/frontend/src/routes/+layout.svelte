@@ -156,10 +156,10 @@
 
 	let namespaceOpen = $state(false);
 	let namespaceTrigger = $state<HTMLButtonElement>();
+	let namespaceError = $state<string | null>(null);
 	const namespaceDraft = $derived(namespaceState.value);
 
 	async function handleNamespaceSelect(value: string) {
-		namespaceOpen = false;
 		await switchNamespace(value, {
 			async beforeCommit() {
 				if (currentPath === '/datasources' && page.url.searchParams.has('id')) {
@@ -172,23 +172,36 @@
 				}
 				await appLifecycle.releaseNamespace();
 			},
-			async afterCommit() {
+			afterCommit() {
 				const nextUrl = new URL(page.url);
 				if (nextUrl.pathname === '/datasources') {
 					nextUrl.searchParams.delete('id');
 				}
-				await goto(resolve(`${nextUrl.pathname}${nextUrl.search}${nextUrl.hash}` as '/'), {
-					invalidateAll: true,
-					replaceState: true
-				});
+				// The namespace value is already committed and all old namespace
+				// services have been reset. Activate the new scope synchronously so
+				// the shell reflects the selection immediately; waiting for SvelteKit
+				// to invalidate page data here leaves the namespace control disabled
+				// while unrelated page queries drain.
 				appLifecycle.activateNamespace();
 				bindNamespaceServices();
+				void goto(resolve(`${nextUrl.pathname}${nextUrl.search}${nextUrl.hash}` as '/'), {
+					invalidateAll: false,
+					replaceState: true
+				}).catch((error: unknown) => {
+					namespaceError = error instanceof Error ? error.message : String(error);
+				});
 			}
 		});
 	}
 
 	function openNamespace() {
+		if (namespaceState.switching) return;
+		namespaceError = null;
 		namespaceOpen = true;
+	}
+
+	function handleNamespaceError(message: string): void {
+		namespaceError = message;
 	}
 
 	async function handleSignOut() {
@@ -209,7 +222,7 @@
 			queries: {
 				staleTime: 30_000,
 				refetchOnWindowFocus: false,
-				retry: 1
+				retry: false
 			}
 		}
 	});
@@ -358,6 +371,7 @@
 			</div>
 
 			<main
+				data-app-route={currentPath}
 				class={css({
 					position: 'relative',
 					minHeight: '0',
@@ -367,6 +381,37 @@
 					backgroundColor: 'bg.secondary'
 				})}
 			>
+				{#if namespaceError}
+					<div
+						class={css({
+							position: 'absolute',
+							top: '3',
+							right: '3',
+							zIndex: 'toast',
+							display: 'flex',
+							alignItems: 'center',
+							gap: '2',
+							maxWidth: 'lg',
+							borderWidth: '1',
+							borderColor: 'border.error',
+							backgroundColor: 'bg.primary',
+							paddingX: '3',
+							paddingY: '2',
+							color: 'error',
+							fontSize: 'sm'
+						})}
+						role="alert"
+					>
+						<span>Namespace switch failed: {namespaceError}</span>
+						<button
+							class={css({ color: 'fg.muted', fontSize: 'xs' })}
+							onclick={() => (namespaceError = null)}
+							type="button"
+						>
+							Dismiss
+						</button>
+					</div>
+				{/if}
 				{#if configStore.publicIdbDebug}
 					<div
 						class={css({
@@ -393,6 +438,7 @@
 			open={namespaceOpen}
 			selected={namespaceDraft}
 			onSelect={handleNamespaceSelect}
+			onSelectError={handleNamespaceError}
 			onClose={() => (namespaceOpen = false)}
 			anchor={namespaceTrigger}
 		/>

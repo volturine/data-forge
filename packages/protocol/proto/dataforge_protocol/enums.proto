@@ -205,6 +205,14 @@ enum ComputeRequestKind {
   COMPUTE_REQUEST_KIND_SPAWN_ENGINE = 13;
   COMPUTE_REQUEST_KIND_CONFIGURE_ENGINE = 14;
   COMPUTE_REQUEST_KIND_SHUTDOWN_ENGINE = 15;
+  COMPUTE_REQUEST_KIND_DATASOURCE_PREFLIGHT = 16;
+}
+
+enum DatasourcePreflightAction {
+  DATASOURCE_PREFLIGHT_ACTION_UNSPECIFIED = 0;
+  DATASOURCE_PREFLIGHT_ACTION_INITIAL = 1;
+  DATASOURCE_PREFLIGHT_ACTION_PREVIEW = 2;
+  DATASOURCE_PREFLIGHT_ACTION_RESOLVE_SELECTION = 3;
 }
 
 enum ComputeRequestStatus {
@@ -328,6 +336,7 @@ enum RuntimePayloadKind {
   RUNTIME_PAYLOAD_KIND_JOB = 3 [(dataforge_token) = "job"];
   RUNTIME_PAYLOAD_KIND_COMPUTE_REQUEST = 4 [(dataforge_token) = "compute_request"];
   RUNTIME_PAYLOAD_KIND_COMPUTE_RESPONSE = 5 [(dataforge_token) = "compute_response"];
+  RUNTIME_PAYLOAD_KIND_DATASOURCE_DELETE = 6 [(dataforge_token) = "datasource_delete"];
 }
 
 enum RuntimeWorkerKind {
@@ -336,6 +345,7 @@ enum RuntimeWorkerKind {
   RUNTIME_WORKER_KIND_BUILD_MANAGER = 2 [(dataforge_token) = "build_manager"];
   RUNTIME_WORKER_KIND_BUILD_WORKER = 3 [(dataforge_token) = "build_worker"];
   RUNTIME_WORKER_KIND_SCHEDULER = 4 [(dataforge_token) = "scheduler"];
+  RUNTIME_WORKER_KIND_COORDINATOR = 5 [(dataforge_token) = "coordinator"];
 }
 
 enum FilterValueType {

@@ -1,16 +1,26 @@
+import json
 import uuid
+from collections.abc import Sequence
+from dataclasses import dataclass
 from datetime import UTC, datetime, timedelta
 
-from sqlalchemy import func, or_, select
+from sqlalchemy import delete, func, or_, select, text
 from sqlmodel import Session
 
-from backend_core import notification_delivery, runtime_ipc
+from backend_core import notification_delivery, runtime_ipc, runtime_work_service
 from backend_core.claiming import with_for_update_skip_locked
 from backend_core.config import settings
 from backend_core.domain.runtime.events import RuntimePayloadKind
+from backend_core.namespace import get_namespace
 from backend_core.notification_delivery import redact_secrets_in_text
-from backend_core.persistence.runtime_events.models import NotificationDeliveryReceipt, RuntimeOutboxEvent, RuntimeOutboxStatus
-from backend_core.sqlmodel_typing import sa
+from backend_core.persistence.runtime_events.models import (
+    NotificationDeliveryPartReceipt,
+    NotificationDeliveryReceipt,
+    RuntimeOutboxEvent,
+    RuntimeOutboxStatus,
+)
+from backend_core.runtime_work_service import RuntimeWorkKind
+from backend_core.sqlmodel_typing import col, sa
 from backend_core.transactions import committed
 
 _SENSITIVE_ERROR_FIELDS = frozenset(
@@ -27,6 +37,45 @@ _SENSITIVE_ERROR_FIELDS = frozenset(
         'token',
     }
 )
+_OUTBOX_PENDING_QUERY = """
+    SELECT 1
+    FROM runtime_outbox_events
+    WHERE kind <> 'storage_cleanup' AND ((status IN ('pending', 'failed') AND available_at <= statement_timestamp())
+       OR (
+            status = 'dispatching'
+            AND lease_expires_at <= statement_timestamp()
+            AND available_at <= statement_timestamp()
+       ))
+"""
+_OUTBOX_DUE_QUERY = """
+    SELECT min(next_attempt_at)
+    FROM (
+        SELECT available_at AS next_attempt_at
+        FROM runtime_outbox_events
+        WHERE kind <> 'storage_cleanup' AND status IN ('pending', 'failed')
+        UNION ALL
+        SELECT greatest(available_at, lease_expires_at) AS next_attempt_at
+        FROM runtime_outbox_events
+        WHERE kind <> 'storage_cleanup' AND status = 'dispatching' AND lease_expires_at IS NOT NULL
+    ) AS scheduled_events
+    WHERE next_attempt_at > statement_timestamp()
+"""
+OUTBOX_WAKE_KIND = 'runtime_outbox_wakeup'
+_RUNTIME_EVENTS_CHANNEL = 'runtime_events'
+_EXTERNAL_DELIVERY_KINDS = notification_delivery.EXTERNAL_DELIVERY_KINDS
+STORAGE_CLEANUP_KIND = 'storage_cleanup'
+_ISOLATED_DELIVERY_KINDS = _EXTERNAL_DELIVERY_KINDS | {STORAGE_CLEANUP_KIND}
+
+
+@dataclass(frozen=True, slots=True)
+class OutboxClaim:
+    event_id: str
+    claim_token: str
+    lease_generation: int
+    event_kind: str
+    payload: dict[str, object]
+    already_delivered: bool = False
+    completed_parts: frozenset[str] = frozenset()
 
 
 def _redact_payload_secrets(message: str, payload: dict[str, object]) -> str:
@@ -34,8 +83,9 @@ def _redact_payload_secrets(message: str, payload: dict[str, object]) -> str:
     return redact_secrets_in_text(message, *secrets)
 
 
-def _database_now(session: Session) -> datetime:
-    value = session.execute(select(func.current_timestamp())).scalar_one()
+def _database_now(session: Session, *, wall_clock: bool = False) -> datetime:
+    clock = func.clock_timestamp() if wall_clock and session.get_bind().dialect.name == 'postgresql' else func.current_timestamp()
+    value = session.execute(select(clock)).scalar_one()
     if not isinstance(value, datetime):
         raise TypeError('Database CURRENT_TIMESTAMP did not return a datetime')
     if value.tzinfo is None:
@@ -60,12 +110,16 @@ def enqueue_runtime_event(session: Session, payload: dict[str, object]) -> Runti
     )
     session.add(event)
     session.flush()
+    payload_namespace = payload.get('namespace')
+    namespace = payload_namespace if isinstance(payload_namespace, str) and payload_namespace else get_namespace()
+    _mark_namespace_pending(session, namespace=namespace)
+    _notify_dispatcher(session, namespace=namespace)
     return event
 
 
 def enqueue_notification_delivery(session: Session, payload: dict[str, object]) -> RuntimeOutboxEvent:
     kind = payload.get('kind')
-    if kind not in {notification_delivery.EMAIL_DELIVERY_KIND, notification_delivery.TELEGRAM_DELIVERY_KIND}:
+    if kind not in _EXTERNAL_DELIVERY_KINDS:
         raise ValueError(f'Unsupported notification delivery kind: {kind!r}')
     now = _database_now(session)
     event = RuntimeOutboxEvent(
@@ -80,7 +134,40 @@ def enqueue_notification_delivery(session: Session, payload: dict[str, object]) 
     )
     session.add(event)
     session.flush()
+    namespace = get_namespace()
+    _mark_namespace_pending(session, namespace=namespace)
+    _notify_dispatcher(session, namespace=namespace)
     return event
+
+
+def _notify_dispatcher(session: Session, *, namespace: str) -> None:
+    """Wake API outbox dispatchers after this transaction commits.
+
+    PostgreSQL delivers NOTIFY only after the surrounding transaction commits,
+    so a rolled-back event cannot wake a dispatcher for work that does not
+    exist. The five-second dispatcher poll remains the durable recovery path
+    for a lost listener connection or an event committed during startup.
+    SQLite-backed unit tests do not have PostgreSQL NOTIFY and simply use the
+    direct request-path dispatchers.
+    """
+    bind = session.get_bind()
+    if getattr(getattr(bind, 'dialect', None), 'name', None) != 'postgresql':
+        return
+    payload = json.dumps({'kind': OUTBOX_WAKE_KIND, 'namespace': namespace})
+    session.execute(
+        text('SELECT pg_notify(:channel, :payload)'),
+        {'channel': _RUNTIME_EVENTS_CHANNEL, 'payload': payload},
+    )
+
+
+def _mark_namespace_pending(session: Session, *, namespace: str) -> None:
+    """Persist a recovery hint in the same transaction as the outbox event."""
+    runtime_work_service.append_wake(session, namespace=namespace, kind=RuntimeWorkKind.OUTBOX)
+
+
+def list_pending_outbox_namespaces(session: Session) -> list[str]:
+    """Read only namespaces with durable outbox work, using the public index."""
+    return runtime_work_service.list_pending_namespaces(session, kinds=(RuntimeWorkKind.OUTBOX,))
 
 
 enqueue_notification_delivery_command = committed(enqueue_notification_delivery, refresh=True)
@@ -99,64 +186,157 @@ def enqueue_api_build_notification(session: Session, *, namespace: str, build_id
 
 
 def enqueue_build_job_notification(session: Session) -> RuntimeOutboxEvent:
-    return enqueue_runtime_event(session, {'kind': RuntimePayloadKind.JOB.value})
+    return enqueue_runtime_event(session, {'kind': RuntimePayloadKind.JOB.value, 'namespace': get_namespace()})
 
 
-def enqueue_compute_request_notification(session: Session, *, request_id: str) -> RuntimeOutboxEvent:
+def enqueue_datasource_delete_notification(session: Session, *, datasource_id: str) -> RuntimeOutboxEvent:
     return enqueue_runtime_event(
         session,
-        {'kind': RuntimePayloadKind.COMPUTE_REQUEST.value, 'request_id': request_id},
+        {
+            'kind': RuntimePayloadKind.DATASOURCE_DELETE.value,
+            'namespace': get_namespace(),
+            'datasource_id': datasource_id,
+        },
     )
 
 
-def enqueue_compute_response_notification(session: Session, *, request_id: str) -> RuntimeOutboxEvent:
-    return enqueue_runtime_event(
-        session,
-        {'kind': RuntimePayloadKind.COMPUTE_RESPONSE.value, 'request_id': request_id},
-    )
+def dispatch_pending_events(session: Session, *, limit: int = 1) -> int:
+    """Dispatch runtime wakes; external deliveries have isolated consumers."""
+    bind = session.get_bind()
+    if settings.distributed_runtime_enabled and getattr(getattr(bind, 'dialect', None), 'name', None) == 'postgresql':
+        return _dispatch_postgres_runtime_events(session, limit=max(int(limit), 0))
 
-
-def dispatch_pending_events(session: Session, *, limit: int = 100) -> int:
     dispatched = 0
-    for _ in range(limit):
-        claim = _claim_next_event(session)
-        if claim is None:
+    for _ in range(max(int(limit), 0)):
+        claims = _claim_next_events(session, limit=1)
+        if not claims:
             break
-        event_id, claim_token, lease_generation, event_kind, payload = claim
-        delivery_payload = {**payload, 'event_id': event_id}
+        claim = claims[0]
         try:
-            if event_kind in {notification_delivery.EMAIL_DELIVERY_KIND, notification_delivery.TELEGRAM_DELIVERY_KIND}:
-                if not _notification_was_delivered(session, event_id):
-                    notification_delivery.deliver(delivery_payload, event_id=event_id)
-                    _record_notification_delivery(session, event_id=event_id, kind=event_kind)
-            else:
-                runtime_ipc.notify_runtime_payload(delivery_payload)
+            runtime_ipc.notify_runtime_payload({**claim.payload, 'event_id': claim.event_id})
         except Exception as exc:  # noqa: BLE001 - outbox must preserve retry state for transport failures.
-            _finalize_claim(
-                session,
-                event_id,
-                claim_token=claim_token,
-                lease_generation=lease_generation,
-                error=_redact_payload_secrets(str(exc), payload),
-            )
+            _finalize_claims(session, [(claim, _redact_payload_secrets(str(exc), claim.payload))])
             continue
-        if _finalize_claim(session, event_id, claim_token=claim_token, lease_generation=lease_generation, error=None):
+        finalized, _dispatched = _finalize_claims(session, [(claim, None)])
+        if finalized:
             dispatched += 1
+    _clear_namespace_pending_if_idle(session)
+    session.commit()
     return dispatched
 
 
-def _notification_was_delivered(session: Session, event_id: str) -> bool:
-    return session.get(NotificationDeliveryReceipt, event_id) is not None
+def _dispatch_postgres_runtime_events(session: Session, *, limit: int) -> int:
+    """Claim runtime wakes in batches and commit each batch with its NOTIFYs."""
+    dispatched = 0
+    processed = 0
+    while processed < limit:
+        claims = _claim_next_events(session, limit=limit - processed)
+        if not claims:
+            break
+        processed += len(claims)
 
+        outcomes = [(claim, None) for claim in claims]
+        try:
+            _finalized, delivered = _finalize_claims(session, outcomes)
+        except Exception as exc:  # noqa: BLE001 - roll back notify+finalize, then persist retry state.
+            session.rollback()
+            failures = [(claim, _redact_payload_secrets(str(exc), claim.payload)) for claim in claims]
+            _finalized, delivered = _finalize_claims(session, failures)
+        dispatched += delivered
 
-def _record_notification_delivery(session: Session, *, event_id: str, kind: str) -> None:
-    if _notification_was_delivered(session, event_id):
-        return
-    session.add(NotificationDeliveryReceipt(event_id=event_id, kind=kind, delivered_at=_database_now(session)))
+    _clear_namespace_pending_if_idle(session)
     session.commit()
+    return dispatched
 
 
-def _claim_next_event(session: Session) -> tuple[str, str, int, str, dict[str, object]] | None:
+def _clear_namespace_pending_if_idle(session: Session) -> None:
+    """Clear a marker only after every active event in this tenant is gone."""
+    runtime_work_service.refresh_pending_work(
+        session,
+        namespace=get_namespace(),
+        kind=RuntimeWorkKind.OUTBOX,
+        pending_query=_OUTBOX_PENDING_QUERY,
+        due_query=_OUTBOX_DUE_QUERY,
+    )
+
+
+def claim_external_deliveries(session: Session, *, kind: str, limit: int = 1) -> list[OutboxClaim]:
+    """Claim work for one provider lane; the caller closes the session before sending."""
+    if kind not in _EXTERNAL_DELIVERY_KINDS:
+        raise ValueError(f'Unsupported external delivery kind: {kind!r}')
+    return _claim_next_events(session, limit=limit, event_kinds=(kind,))
+
+
+def claim_storage_cleanups(session: Session, *, limit: int = 1) -> list[OutboxClaim]:
+    return _claim_next_events(session, limit=min(max(limit, 1), 16), event_kinds=(STORAGE_CLEANUP_KIND,))
+
+
+def finalize_storage_cleanup(session: Session, claim: OutboxClaim, *, error: str | None = None) -> bool:
+    finalized, _dispatched = _finalize_claims(session, [(claim, error)])
+    return finalized == 1
+
+
+def finalize_external_delivery(session: Session, claim: OutboxClaim, *, error: str | None = None) -> bool:
+    """Persist a provider result only while its claim token and generation are current.
+
+    Provider delivery and the receipt transaction cannot be atomic. A process
+    failure after provider acceptance and before this commit can cause a retry.
+    """
+    redacted_error = _redact_payload_secrets(error, claim.payload) if error is not None else None
+    finalized, _delivered = _finalize_claims(
+        session,
+        [(claim, redacted_error)],
+        record_external_receipt=error is None and not claim.already_delivered,
+    )
+    if finalized:
+        _clear_namespace_pending_if_idle(session)
+        session.commit()
+    return finalized == 1
+
+
+def record_external_delivery_part(session: Session, claim: OutboxClaim, *, part_key: str) -> bool:
+    """Persist one accepted Telegram part while the same outbox lease is current.
+
+    Provider acceptance and this commit cannot be atomic. A crash in between
+    remains at-least-once, but confirmed earlier parts are skipped on retries.
+    """
+    if claim.event_kind != notification_delivery.TELEGRAM_DELIVERY_KIND:
+        raise ValueError('Per-part progress is only supported for Telegram deliveries')
+    if not part_key or len(part_key) > 128:
+        raise ValueError('Telegram delivery part key is invalid')
+
+    event = session.get(RuntimeOutboxEvent, claim.event_id, with_for_update=True, populate_existing=True)
+    now = _database_now(session, wall_clock=True)
+    if (
+        event is None
+        or event.kind != notification_delivery.TELEGRAM_DELIVERY_KIND
+        or event.status != RuntimeOutboxStatus.DISPATCHING
+        or event.claim_token != claim.claim_token
+        or event.lease_generation != claim.lease_generation
+        or event.lease_expires_at is None
+        or (event.lease_expires_at if event.lease_expires_at.tzinfo is not None else event.lease_expires_at.replace(tzinfo=UTC)) <= now
+    ):
+        session.rollback()
+        return False
+
+    receipt_id = (event.id, part_key)
+    if session.get(NotificationDeliveryPartReceipt, receipt_id) is None:
+        session.add(NotificationDeliveryPartReceipt(event_id=event.id, part_key=part_key, delivered_at=now))
+    event.lease_expires_at = now + timedelta(seconds=settings.runtime_outbox_claim_ttl_seconds)
+    event.updated_at = now
+    session.add(event)
+    session.commit()
+    return True
+
+
+def _claim_next_events(
+    session: Session,
+    *,
+    limit: int,
+    event_kinds: Sequence[str] | None = None,
+) -> list[OutboxClaim]:
+    if limit < 1:
+        return []
     now = _database_now(session)
     table = RuntimeOutboxEvent.metadata.tables[RuntimeOutboxEvent.__tablename__]
     base = (
@@ -169,23 +349,57 @@ def _claim_next_event(session: Session) -> tuple[str, str, int, str, dict[str, o
         )
         .where(sa(RuntimeOutboxEvent.available_at <= now))
         .order_by(sa(RuntimeOutboxEvent.available_at), sa(RuntimeOutboxEvent.created_at), sa(RuntimeOutboxEvent.id))
-        .limit(1)
+        .limit(limit)
     )
+    base = base.where(table.c.kind.not_in(_ISOLATED_DELIVERY_KINDS)) if event_kinds is None else base.where(table.c.kind.in_(event_kinds))
     stmt = with_for_update_skip_locked(session, base)
-    event = session.execute(stmt).scalars().first()
-    if event is None:
+    events = list(session.execute(stmt).scalars().all())
+    if not events:
         session.rollback()
-        return None
-    claim_token = str(uuid.uuid4())
-    event.status = RuntimeOutboxStatus.DISPATCHING
-    event.claim_token = claim_token
-    event.lease_generation += 1
-    event.lease_expires_at = now + timedelta(seconds=settings.runtime_outbox_claim_ttl_seconds)
-    event.attempts += 1
-    event.updated_at = now
-    session.add(event)
+        return []
+
+    telegram_event_ids = [event.id for event in events if event.kind == notification_delivery.TELEGRAM_DELIVERY_KIND]
+    completed_parts_by_event: dict[str, set[str]] = {event_id: set() for event_id in telegram_event_ids}
+    if telegram_event_ids:
+        completed_part_rows = session.execute(
+            select(col(NotificationDeliveryPartReceipt.event_id), col(NotificationDeliveryPartReceipt.part_key)).where(
+                col(NotificationDeliveryPartReceipt.event_id).in_(telegram_event_ids)
+            )
+        ).all()
+        for event_id, part_key in completed_part_rows:
+            completed_parts_by_event[str(event_id)].add(str(part_key))
+
+    claims: list[OutboxClaim] = []
+    for event in events:
+        claim_token = str(uuid.uuid4())
+        event.status = RuntimeOutboxStatus.DISPATCHING
+        event.claim_token = claim_token
+        event.lease_generation += 1
+        event.lease_expires_at = now + timedelta(seconds=settings.runtime_outbox_claim_ttl_seconds)
+        event.attempts += 1
+        event.updated_at = now
+        claims.append(
+            OutboxClaim(
+                event_id=event.id,
+                claim_token=claim_token,
+                lease_generation=event.lease_generation,
+                event_kind=event.kind,
+                payload=dict(event.payload_json),
+                already_delivered=(event.kind in _EXTERNAL_DELIVERY_KINDS and session.get(NotificationDeliveryReceipt, event.id) is not None),
+                completed_parts=frozenset(completed_parts_by_event.get(event.id, ())),
+            )
+        )
+        session.add(event)
     session.commit()
-    return event.id, claim_token, event.lease_generation, event.kind, dict(event.payload_json)
+    return claims
+
+
+def _claim_next_event(session: Session) -> tuple[str, str, int, str, dict[str, object]] | None:
+    claims = _claim_next_events(session, limit=1)
+    if not claims:
+        return None
+    claim = claims[0]
+    return claim.event_id, claim.claim_token, claim.lease_generation, claim.event_kind, claim.payload
 
 
 def pending_event_count(session: Session) -> int:
@@ -206,28 +420,59 @@ def _finalize_claim(
     lease_generation: int,
     error: str | None,
 ) -> bool:
+    claim = OutboxClaim(
+        event_id=event_id,
+        claim_token=claim_token,
+        lease_generation=lease_generation,
+        event_kind='',
+        payload={},
+    )
+    finalized, _dispatched = _finalize_claims(session, [(claim, error)])
+    return finalized == 1
+
+
+def _finalize_claims(
+    session: Session,
+    outcomes: Sequence[tuple[OutboxClaim, str | None]],
+    *,
+    record_external_receipt: bool = False,
+) -> tuple[int, int]:
+    if not outcomes:
+        return 0, 0
+
     now = _database_now(session)
     table = RuntimeOutboxEvent.metadata.tables[RuntimeOutboxEvent.__tablename__]
-    statement = (
-        select(RuntimeOutboxEvent)
-        .where(table.c.id == event_id)
-        .where(table.c.status == RuntimeOutboxStatus.DISPATCHING)
-        .where(table.c.claim_token == claim_token)
-        .where(table.c.lease_generation == lease_generation)
-        .with_for_update()
-    )
-    event = session.execute(statement).scalars().first()
-    if event is None:
+    claims_by_id = {claim.event_id: (claim, error) for claim, error in outcomes}
+    statement = select(RuntimeOutboxEvent).where(table.c.id.in_(claims_by_id)).where(table.c.status == RuntimeOutboxStatus.DISPATCHING).with_for_update()
+    events = list(session.execute(statement).scalars().all())
+    finalized = 0
+    dispatched = 0
+    for event in events:
+        claim, error = claims_by_id[event.id]
+        if event.claim_token != claim.claim_token or event.lease_generation != claim.lease_generation:
+            continue
+        if error is None and event.kind not in _ISOLATED_DELIVERY_KINDS:
+            runtime_ipc.notify_runtime_payload_on_commit(session, {**event.payload_json, 'event_id': event.id})
+        if record_external_receipt and error is None and event.kind in _EXTERNAL_DELIVERY_KINDS:
+            receipt = session.get(NotificationDeliveryReceipt, event.id)
+            if receipt is None:
+                session.add(NotificationDeliveryReceipt(event_id=event.id, kind=event.kind, delivered_at=now))
+        if error is None and event.kind == notification_delivery.TELEGRAM_DELIVERY_KIND:
+            session.execute(delete(NotificationDeliveryPartReceipt).where(NotificationDeliveryPartReceipt.event_id == event.id))
+        poisoned = error is not None and event.kind != STORAGE_CLEANUP_KIND and event.attempts >= settings.runtime_outbox_max_attempts
+        event.status = RuntimeOutboxStatus.DISPATCHED if error is None else RuntimeOutboxStatus.POISONED if poisoned else RuntimeOutboxStatus.FAILED
+        event.claim_token = None
+        event.lease_expires_at = None
+        event.last_error = error[:1000] if error is not None else None
+        event.available_at = now + timedelta(seconds=settings.runtime_outbox_retry_seconds) if error is not None and not poisoned else now
+        event.dispatched_at = now if error is None else None
+        event.updated_at = now
+        session.add(event)
+        finalized += 1
+        if error is None:
+            dispatched += 1
+    if finalized == 0:
         session.rollback()
-        return False
-    poisoned = error is not None and event.attempts >= settings.runtime_outbox_max_attempts
-    event.status = RuntimeOutboxStatus.DISPATCHED if error is None else RuntimeOutboxStatus.POISONED if poisoned else RuntimeOutboxStatus.FAILED
-    event.claim_token = None
-    event.lease_expires_at = None
-    event.last_error = error[:1000] if error is not None else None
-    event.available_at = now + timedelta(seconds=settings.runtime_outbox_retry_seconds) if error is not None and not poisoned else now
-    event.dispatched_at = now if error is None else None
-    event.updated_at = now
-    session.add(event)
+        return 0, 0
     session.commit()
-    return True
+    return finalized, dispatched

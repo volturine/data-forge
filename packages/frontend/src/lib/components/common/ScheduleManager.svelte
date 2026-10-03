@@ -128,8 +128,14 @@
 			if (result.isErr()) throw new Error(result.error.message);
 			return result.value;
 		},
-		onSuccess: () => {
-			queryClient.invalidateQueries({ queryKey: ['schedules'] });
+		onSuccess: (_, deletedId) => {
+			// Remove the row from every schedule list immediately. Refetching only
+			// after the mutation leaves the old row visible while the list request
+			// is in flight, which makes a successful delete look stuck to the user.
+			queryClient.setQueriesData<Schedule[]>({ queryKey: ['schedules'] }, (current) =>
+				current?.filter((schedule) => schedule.id !== deletedId)
+			);
+			void queryClient.invalidateQueries({ queryKey: ['schedules'] });
 		}
 	}));
 

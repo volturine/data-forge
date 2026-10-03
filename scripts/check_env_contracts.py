@@ -8,7 +8,7 @@ from pathlib import Path
 ROOT = Path(__file__).resolve().parents[1]
 
 # One env file per environment, consumed two ways:
-#   - `docker compose --env-file <file>` reads the DF_* variables
+#   - `docker compose --env-file <file>` reads compose and runtime variables
 #   - Justfile/scripts source the same file for runtime variables
 ENV_FILES: dict[Path, tuple[Path, ...]] = {
     ROOT / 'docker/env/dev.env': (
@@ -28,7 +28,10 @@ EXTRA_RUNTIME_KEYS = {
     'E2E_PYTHON_VERSION',
     'E2E_TIMEOUT_SECONDS',
     'E2E_TIMEOUT_GRACE_SECONDS',
+    'E2E_FIXTURE_BOOTSTRAP_TIMEOUT_SECONDS',
     'E2E_LOG_DIR',
+    'E2E_SHARDS',
+    'E2E_NAMESPACE',
     'PW_E2E_WORKERS',
     'DB_USERNAME',
     'DB_PASSWORD',
@@ -37,10 +40,13 @@ EXTRA_RUNTIME_KEYS = {
     'WORKER_DATA_PLANE_GRPC_PORT',
     'WORKER_DATA_PLANE_GRPC_TARGET',
     'GRPC_ENABLE_FORK_SUPPORT',
-    'ENGINE_ALLOW_GLOBAL_OBJECT_STORE_CREDENTIALS',
-    'ENGINE_OBJECT_STORE_CREDENTIALS_JSON',
     'ENGINE_OBJECT_STORE_ENDPOINT',
-    'ENGINE_WARM_POOL_SIZE',
+    'COMPUTE_WARM_WORKERS',
+    'COMPUTE_WORKERS',
+    'E2E_ENGINE_START_TIMEOUT_SECONDS',
+    'E2E_ENGINE_IDLE_TTL_SECONDS',
+    'E2E_ENGINE_IDLE_REAP_INTERVAL_SECONDS',
+    'E2E_CONCURRENCY_BROWSERS',
 }
 
 ENV_KEY_RE = re.compile(r'^[A-Z][A-Z0-9_]*$')
@@ -157,12 +163,12 @@ def main() -> int:
             )
 
         referenced, required = _compose_vars(compose_paths)
-        df_keys = [item for item in parsed if item.key.startswith('DF_')]
-        for item in df_keys:
+        compose_keys = [item for item in parsed if item.key.startswith('DF_')]
+        for item in compose_keys:
             if item.key not in referenced:
                 errors.append(f'{env_path.relative_to(ROOT)}:{item.line}: docker env key is not referenced by compose files: {item.key}')
 
-        missing = sorted(required - {item.key for item in df_keys})
+        missing = sorted(required - {item.key for item in parsed})
         for key in missing:
             errors.append(f'{env_path.relative_to(ROOT)}: missing required compose variable: {key}')
 

@@ -4,15 +4,36 @@ import {
 	gotoAuthedRoute,
 	gotoMonitoringTab,
 	gotoNewAnalysis,
+	readyTimeoutMs,
 	waitForDatasourceList,
 	waitForUdfList
 } from './readiness.js';
 
 export const E2E_PASSWORD = 'E2eTestPw12345';
 
-const SAMPLE_CSV = 'id,name,age,city\n1,Alice,30,London\n2,Bob,25,Paris\n3,Charlie,35,Berlin\n';
+const SAMPLE_CSV = [
+	'id,name,age,city,month,category,value,score',
+	'1,Alice,30,London,January,alpha,12,1.2',
+	'2,Bob,25,Paris,February,beta,18,2.4',
+	'3,Charlie,35,Berlin,March,alpha,9,0.7',
+	''
+].join('\n');
 const DATE_CSV =
 	'id,name,event_date,amount\n1,Alice,2024-01-15,100\n2,Bob,2024-03-22,250\n3,Charlie,2024-06-10,75\n';
+
+export const CHART_CSV = [
+	'city,month,category,value,score',
+	'London,2024-01-01T00:00:00,alpha,12,1.2',
+	'London,2024-02-01T00:00:00,beta,18,2.4',
+	'London,2024-03-01T00:00:00,alpha,9,0.7',
+	'Paris,2024-01-01T00:00:00,beta,14,1.9',
+	'Paris,2024-02-01T00:00:00,alpha,22,3.1',
+	'Paris,2024-03-01T00:00:00,beta,6,0.4',
+	'Berlin,2024-01-01T00:00:00,alpha,30,2.2',
+	'Berlin,2024-02-01T00:00:00,alpha,11,1.1',
+	'Berlin,2024-03-01T00:00:00,beta,17,2.8',
+	''
+].join('\n');
 
 function generateLargeCsv(rows: number): string {
 	const names = ['Alice', 'Bob', 'Charlie', 'Diana', 'Eve', 'Frank', 'Grace', 'Hank'];
@@ -30,6 +51,9 @@ export async function registerViaUi(page: Page, email: string, name: string): Pr
 	await page.goto('/register');
 	await expect(page.getByRole('heading', { name: 'Create account' })).toBeVisible({
 		timeout: 5_000
+	});
+	await expect(page.locator('form[data-auth-form-ready="true"]')).toBeVisible({
+		timeout: readyTimeoutMs()
 	});
 	const nameInput = page.locator('#name');
 	const emailInput = page.locator('#email');
@@ -85,7 +109,8 @@ export async function uploadDatasourceViaUi(
 			response.url().includes('/api/v1/datasource/upload') &&
 			!response.url().includes('/bulk') &&
 			response.request().method() === 'POST' &&
-			response.status() !== 0
+			response.status() !== 0,
+		{ timeout: readyTimeoutMs() }
 	);
 	await uploadBtn.click();
 	const uploadResponse = await uploadResponsePromise;
@@ -106,9 +131,13 @@ export async function uploadDatasourceViaUi(
 	if (!datasourceId) {
 		throw new Error(`Could not extract browser-visible datasource id after upload for ${name}`);
 	}
-	await waitForDatasourceList(page, 5_000);
-	const row = page.locator(`[data-ds-row="${name}"]`);
-	await expect(row).toBeVisible({ timeout: 5_000 });
+	await waitForDatasourceList(page, readyTimeoutMs());
+	const row = page.locator(`[data-ds-id="${datasourceId}"]`);
+	await expect(row).toBeVisible({ timeout: readyTimeoutMs() });
+	await expect(
+		page.locator(`[data-ds-row="${name}"]`),
+		`Datasource name "${name}" must identify exactly one created resource`
+	).toHaveCount(1, { timeout: readyTimeoutMs() });
 	return { id: datasourceId };
 }
 
@@ -141,6 +170,7 @@ export async function createAnalysisViaUi(
 	await page.getByRole('button', { name: /Create Analysis/i }).click();
 	const analysisId = await waitForCurrentAnalysisEditor(page);
 	registerAnalysis(analysisId, analysisName);
+	await gotoAuthedRoute(page, '/');
 	return analysisId;
 }
 
@@ -195,6 +225,10 @@ export async function importAnalysisViaUi(
 	}
 	const analysisId = await waitForCurrentAnalysisEditor(page);
 	registerAnalysis(analysisId, options.name);
+	// Setup pages are reused by a worker, while the test page owns the actual
+	// editor interaction. Leave the editor before returning so setup cannot keep
+	// a second lock websocket on the analysis and rotate the test page's token.
+	await gotoAuthedRoute(page, '/');
 	return analysisId;
 }
 

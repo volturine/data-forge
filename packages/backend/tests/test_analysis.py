@@ -1,9 +1,13 @@
 import json
+import threading
 import uuid
 from datetime import UTC, datetime, timedelta
+from types import SimpleNamespace
 from typing import Any, cast
+from unittest.mock import Mock
 
 import pytest
+from fastapi import Response
 from sqlalchemy import select
 from sqlmodel import Session
 
@@ -13,11 +17,87 @@ from backend_core.persistence.locks.models import ResourceLock
 from backend_core.sqlmodel_typing import sa
 from dataforge_protocol import compute_pb2
 from main import app
-from modules.analysis import service as analysis_service
+from modules.analysis import routes as analysis_routes, service as analysis_service
 from modules.analysis.schemas import AnalysisResponseSchema
 from modules.auth.dependencies import get_optional_user
 from modules.compute import executor_client
 from tests.http_client import TestClient
+
+
+@pytest.mark.asyncio
+async def test_validate_analysis_offloads_database_work(monkeypatch) -> None:
+    event_loop_thread = threading.get_ident()
+    database_thread: list[int] = []
+
+    def run_validation(function, data):
+        assert function is analysis_routes.service.validate_analysis
+        assert data == {}
+        database_thread.append(threading.get_ident())
+        return {'valid': True, 'payload': {'tabs': []}}
+
+    monkeypatch.setattr(analysis_routes, 'run_db', run_validation)
+    response = await analysis_routes.validate_analysis(cast(Any, {}))
+
+    assert response.status_code == 200
+    assert response.body == b'{"valid":true,"payload":{"tabs":[]}}'
+    assert database_thread
+    assert database_thread[0] != event_loop_thread
+
+
+@pytest.mark.asyncio
+async def test_update_analysis_checks_revision_and_mutates_in_one_db_session(monkeypatch) -> None:
+    analysis_id = str(uuid.uuid4())
+    session = object()
+    analysis = SimpleNamespace(id=analysis_id, revision=1)
+    updated = SimpleNamespace(id=analysis_id, revision=2)
+    events: list[tuple[str, object]] = []
+
+    def run_db(function, *args, **kwargs):
+        events.append(('run_db', function))
+        return function(session, *args, **kwargs)
+
+    async def run_api_blocking(function, *args, **kwargs):
+        assert function is analysis_routes.run_db
+        events.append(('run_api_blocking', function))
+        return function(*args, **kwargs)
+
+    def check_revision(requested_id, if_match, actual_session, owner_id, user_id):
+        assert actual_session is session
+        assert (requested_id, if_match, owner_id, user_id) == (analysis_id, f'"analysis-{analysis_id}-1"', 'lock-owner', 'user-id')
+        events.append(('revision', actual_session))
+        return analysis
+
+    def update(actual_session, requested_id, data):
+        assert actual_session is session
+        assert requested_id == analysis_id
+        assert data.name == 'Updated'
+        analysis.revision = 2
+        events.append(('mutation', actual_session))
+        return updated
+
+    async def json_response(value, *, headers=None):
+        assert value is updated
+        return Response(content='updated', headers=headers)
+
+    monkeypatch.setattr(analysis_routes, 'run_db', run_db)
+    monkeypatch.setattr(analysis_routes, 'run_api_blocking', run_api_blocking)
+    monkeypatch.setattr(analysis_routes, 'require_analysis_revision', check_revision)
+    monkeypatch.setattr(analysis_routes.service, 'update_analysis', update)
+    monkeypatch.setattr(analysis_routes.executor_client, 'json_response', json_response)
+
+    response = await analysis_routes.update_analysis(
+        analysis_id=analysis_id,
+        data=analysis_routes.schemas.AnalysisUpdateSchema(name='Updated'),
+        if_match=f'"analysis-{analysis_id}-1"',
+        owner_id='lock-owner',
+        user_id='user-id',
+    )
+
+    assert response.status_code == 200
+    assert response.headers['ETag'] == f'"analysis-{analysis_id}-2"'
+    assert response.headers['X-Analysis-Version'] == '2'
+    assert [name for name, _ in events] == ['run_api_blocking', 'run_db', 'revision', 'mutation']
+    assert events[2][1] is events[3][1] is session
 
 
 @pytest.fixture(autouse=True)
@@ -561,6 +641,16 @@ class TestAnalysisCreate:
 
 
 class TestAnalysisGet:
+    def test_analysis_etag_selects_only_revision(self, sample_analysis: Analysis) -> None:
+        session = Mock()
+        session.execute.return_value.scalar_one_or_none.return_value = sample_analysis.revision
+
+        etag = analysis_service.get_analysis_etag(session, sample_analysis.id)
+
+        statement = session.execute.call_args.args[0]
+        assert tuple(statement.selected_columns.keys()) == ('revision',)
+        assert etag == f'"analysis-{sample_analysis.id}-{sample_analysis.revision}"'
+
     def test_get_analysis_success(self, client, sample_analysis: Analysis):
         response = client.get(f'/api/v1/analysis/{sample_analysis.id}')
 
@@ -797,6 +887,7 @@ class TestAnalysisList:
 
         assert item['id'] == sample_analysis.id
         assert item['name'] == sample_analysis.name
+        assert item['revision'] == sample_analysis.revision
         assert item['is_favorite'] is False
 
 
@@ -1253,6 +1344,7 @@ class TestAnalysisDelete:
             submitted.append(kwargs)
 
         monkeypatch.setattr(executor_client, '_submit', submit)
+        monkeypatch.setattr(executor_client.compute_requests_service, 'cancel_active_requests_for_engine', lambda *args, **kwargs: 0)
 
         executor_client.request_engine_shutdown(
             cast(Session, object()),
@@ -1261,7 +1353,7 @@ class TestAnalysisDelete:
         )
 
         assert len(submitted) == 1
-        assert submitted[0]['dispatch'] is False
+        assert 'dispatch' not in submitted[0]
 
     def test_delete_analysis_queues_engine_shutdown_without_waiting(self, client, sample_analysis: Analysis, monkeypatch):
         shutdown_calls: list[compute_pb2.EngineIdentity] = []
@@ -1307,6 +1399,28 @@ class TestAnalysisDelete:
         result = test_db_session.execute(select(AnalysisDataSource).where(sa(AnalysisDataSource.analysis_id == analysis_id)))
         links_after = result.scalars().all()
         assert len(links_after) == 0
+
+    def test_delete_analysis_stages_hidden_outputs_for_drain(self, client, sample_analysis: Analysis, test_db_session) -> None:
+        output_id = str(uuid.uuid4())
+        output = DataSource(
+            id=output_id,
+            name='Owned output',
+            source_type='analysis',
+            config={'analysis_tab_id': 'tab1'},
+            created_by_analysis_id=sample_analysis.id,
+            is_hidden=True,
+            created_at=datetime.now(UTC),
+        )
+        test_db_session.add(output)
+        test_db_session.commit()
+
+        response = client.delete(f'/api/v1/analysis/{sample_analysis.id}')
+
+        assert response.status_code == 204
+        stored = test_db_session.get(DataSource, output_id)
+        assert stored is not None
+        assert stored.is_pending_delete is True
+        assert stored.is_hidden is True
 
 
 class TestStepTypes:

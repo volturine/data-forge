@@ -1,0 +1,19 @@
+syntax = "proto3";
+
+package dataforge.runtime;
+
+import "buf/validate/validate.proto";
+import "dataforge_protocol/common.proto";
+
+service RuntimeCoordinatorService {
+  rpc GetCoordinatorGeneration(EmptyRequest) returns (RuntimeCoordinatorGenerationResponse);
+  rpc AssertCoordinatorGeneration(RuntimeCoordinatorGenerationRequest) returns (RuntimeCoordinatorGenerationResponse);
+}
+
+message RuntimeCoordinatorGenerationRequest {
+  int64 generation = 1 [(buf.validate.field).int64.gt = 0];
+}
+
+message RuntimeCoordinatorGenerationResponse {
+  int64 generation = 1 [(buf.validate.field).int64.gt = 0];
+}

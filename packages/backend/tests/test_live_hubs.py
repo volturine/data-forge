@@ -2,6 +2,8 @@ import asyncio
 
 import pytest
 
+from backend_core import live_hubs
+from backend_core.domain.build_runs.live import BuildNotification, BuildNotificationHub
 from backend_core.live_hubs import DEFAULT_MAX_WAITERS, KeyedVersionHub, VersionHub
 
 
@@ -126,22 +128,27 @@ async def test_keyed_hub_prunes_done_waiters_per_key() -> None:
     assert 'a' not in hub._waiters
 
 
-async def test_keyed_hub_total_cap_spans_keys_oldest_first() -> None:
-    hub = KeyedVersionHub(max_waiters=4)
-    first = asyncio.create_task(hub.wait('k0'))
+async def test_keyed_hub_does_not_cancel_durable_waiters_at_the_former_cap() -> None:
+    hub = KeyedVersionHub()
+    tasks = [asyncio.create_task(hub.wait('shared-request')) for _ in range(DEFAULT_MAX_WAITERS + 1)]
     await _drain()
-    later_tasks = []
-    for index in range(4):
-        later_tasks.append(asyncio.create_task(hub.wait(f'k{index % 2}')))
-        await _drain()
 
-    assert hub.waiter_count() <= 4
-    with pytest.raises(asyncio.CancelledError):
-        await first
+    assert hub.waiter_count() == DEFAULT_MAX_WAITERS + 1
 
-    for task in later_tasks:
-        task.cancel()
-    await asyncio.gather(*later_tasks, return_exceptions=True)
+    hub.publish('shared-request')
+
+    assert await asyncio.gather(*tasks) == [1] * (DEFAULT_MAX_WAITERS + 1)
+    assert hub.waiter_count() == 0
+
+
+def test_keyed_hub_bounds_wakeup_version_memory(monkeypatch) -> None:
+    monkeypatch.setattr(live_hubs, '_MAX_KEYED_VERSIONS', 2)
+    hub = KeyedVersionHub()
+
+    for key in ('a', 'b', 'c'):
+        hub.publish(key)
+
+    assert hub._versions == {'b': 1, 'c': 1}
 
 
 async def test_keyed_hub_clear_cancels_waiters() -> None:
@@ -151,3 +158,13 @@ async def test_keyed_hub_clear_cancels_waiters() -> None:
     await hub.clear()
     with pytest.raises(asyncio.CancelledError):
         await task
+
+
+async def test_build_notifications_do_not_regress_when_outbox_delivery_is_reordered() -> None:
+    hub = BuildNotificationHub()
+    await hub.publish(BuildNotification(namespace='default', build_id='build-1', latest_sequence=5))
+    await hub.publish(BuildNotification(namespace='default', build_id='build-1', latest_sequence=3))
+
+    latest = await asyncio.wait_for(hub.wait_for_build('build-1', last_sequence=4), timeout=0.1)
+
+    assert latest.latest_sequence == 5

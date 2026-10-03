@@ -8,14 +8,9 @@ from typing import Any, Never
 
 from fastapi import HTTPException, Request
 from fastapi.exceptions import RequestValidationError
-from fastapi.responses import JSONResponse
+from fastapi.responses import JSONResponse, Response
 
-from backend_core.exceptions import (
-    AppError,
-    DataSourceSnapshotError,
-    InvalidIdError,
-    PipelineValidationError,
-)
+from backend_core.exceptions import AppError, ClientDisconnectedError, PipelineExecutionCancelledError
 from dataforge_protocol import errors_pb2
 
 logger = logging.getLogger(__name__)
@@ -79,19 +74,21 @@ def _error_body(message: str, error_code: str | None = None, details: dict | Non
 def _log_app_error(exc: AppError, status: int) -> None:
     msg = f'{type(exc).__name__}: {exc.message}'
     extra = {'error_code': exc.error_code, 'details': exc.details}
-    if status >= 500:
-        logger.error(msg, extra=extra, exc_info=True)
-    elif status == 404 or isinstance(
-        exc,
-        (
-            InvalidIdError,
-            DataSourceSnapshotError,
-            PipelineValidationError,
-        ),
-    ):
+    if isinstance(exc, PipelineExecutionCancelledError):
+        # Engine shutdown retires in-flight requests as part of normal
+        # lifecycle cleanup. It is not an application failure and should not
+        # produce a traceback or trip the E2E error scanner.
         logger.info(msg, extra=extra)
-    else:
+    elif status >= 500:
+        logger.error(msg, extra=extra, exc_info=True)
+    elif status in (401, 403):
+        # Authentication and authorization failures stay visible: repeated
+        # rejections are a signal worth reading in the logs.
         logger.warning(msg, extra=extra)
+    else:
+        # Other 4xx (not found, validation) are normal app behavior: the
+        # client asked for something invalid and was told so.
+        logger.info(msg, extra=extra)
 
 
 def _raise_http(exc: Exception, operation: str, value_error_status: int | None) -> Never:
@@ -113,6 +110,10 @@ def handle_errors(operation: str = 'operation', value_error_status: int | None =
             async def async_wrapper(*args: Any, **kwargs: Any) -> Any:
                 try:
                     return await func(*args, **kwargs)
+                except ClientDisconnectedError:
+                    # The client is already gone. Keep deliberate durable
+                    # request cancellation out of the ASGI traceback log.
+                    return Response(status_code=499)
                 except Exception as e:
                     _raise_http(e, operation, value_error_status)
 
@@ -164,7 +165,12 @@ async def validation_error_handler(_request: Request, exc: RequestValidationErro
     )
 
 
-async def generic_error_handler(_request: Request, exc: Exception) -> JSONResponse:
+async def client_disconnect_handler(_request: Request, _exc: Exception) -> Response:
+    """Treat an abandoned request body as normal client cancellation."""
+    return Response(status_code=499)
+
+
+async def generic_error_handler(_request: Request, exc: Exception) -> Response:
     """Global fallback handler — never leaks internal details."""
     logger.error('Unhandled exception: %s', type(exc).__name__, exc_info=True)
     return JSONResponse(

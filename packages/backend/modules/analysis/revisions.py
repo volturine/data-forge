@@ -1,26 +1,37 @@
+from dataclasses import dataclass
 from typing import Protocol
 
-from fastapi import Depends, Header, HTTPException, Response
+from fastapi import HTTPException, Response
 from sqlalchemy import select
 from sqlmodel import Session
 
-from backend_core.database import get_db
-from backend_core.dependencies import get_optional_lock_owner_id
 from backend_core.persistence.analysis.models import Analysis
 from backend_core.sqlmodel_typing import sa
 from backend_core.validation import AnalysisId, parse_analysis_id
 from modules.analysis.ownership import ensure_mutation_allowed
-from modules.auth.dependencies import get_optional_user_id
 from modules.locks import service as lock_service
 
 
 class RevisionedAnalysis(Protocol):
+    @property
+    def id(self) -> str: ...
+
+    @property
+    def revision(self) -> int: ...
+
+
+@dataclass(frozen=True)
+class AnalysisRevisionSnapshot:
     id: str
     revision: int
 
 
 def etag(analysis: RevisionedAnalysis) -> str:
-    return f'"analysis-{analysis.id}-{analysis.revision}"'
+    return etag_for(analysis.id, analysis.revision)
+
+
+def etag_for(analysis_id: str, revision: int) -> str:
+    return f'"analysis-{analysis_id}-{revision}"'
 
 
 def version(analysis: RevisionedAnalysis) -> str:
@@ -56,13 +67,14 @@ def validate(current_revision: int, analysis_id: str, if_match: str | None) -> N
     raise HTTPException(status_code=412, detail='Analysis version mismatch')
 
 
-async def require(
+def require(
     analysis_id: AnalysisId,
-    if_match: str | None = Header(default=None, alias='If-Match'),
-    session: Session = Depends(get_db),
-    owner_id: str | None = Depends(get_optional_lock_owner_id),
-    user_id: str | None = Depends(get_optional_user_id),
+    if_match: str | None,
+    session: Session,
+    owner_id: str | None,
+    user_id: str | None,
 ) -> Analysis:
+    """Validate a mutation against its caller-owned transaction/session."""
     parsed_id = parse_analysis_id(analysis_id)
     try:
         lock_service.ensure_mutation_lock(session, 'analysis', parsed_id, owner_id)

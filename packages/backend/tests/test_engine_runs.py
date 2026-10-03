@@ -1,6 +1,8 @@
 import uuid
 from datetime import UTC, datetime, timedelta
 
+import pytest
+
 from backend_core import build_runs_service, engine_runs_service as engine_run_service
 from backend_core.domain.build_runs.models import BuildRunStatus
 from backend_core.domain.engine_runs.schemas import EngineRunKind, EngineRunStatus
@@ -40,6 +42,36 @@ def test_create_engine_run_persists(test_db_session):
     assert run.kind == EngineRunKind.PREVIEW
     assert run.status == EngineRunStatus.SUCCESS
     assert run.analysis_id == 'analysis-1'
+
+
+def test_create_engine_run_is_idempotent_for_the_same_request(test_db_session):
+    payload = engine_run_service.create_engine_run_payload(
+        analysis_id='analysis-idempotent',
+        datasource_id='ds-idempotent',
+        kind=EngineRunKind.PREVIEW,
+        status=EngineRunStatus.RUNNING,
+        request_json={'target_step_id': 'source'},
+        result_json={'row_count': 0},
+        created_at=datetime.now(UTC),
+        idempotency_key='preview-request-idempotent',
+    )
+
+    first = engine_run_service.create_engine_run(test_db_session, payload)
+    retry = engine_run_service.create_engine_run(test_db_session, payload)
+
+    assert first.id == retry.id == payload.id
+    assert test_db_session.get(EngineRun, payload.id) is not None
+
+    conflicting = engine_run_service.create_engine_run_payload(
+        analysis_id='analysis-idempotent',
+        datasource_id='ds-idempotent',
+        kind=EngineRunKind.PREVIEW,
+        status=EngineRunStatus.RUNNING,
+        request_json={'target_step_id': 'different'},
+        idempotency_key='preview-request-idempotent',
+    )
+    with pytest.raises(ValueError, match='reused for a different request'):
+        engine_run_service.create_engine_run(test_db_session, conflicting)
 
 
 def test_create_engine_run_persists_execution_entries(test_db_session):

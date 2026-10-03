@@ -6,6 +6,7 @@
 		AnalysisTabNotificationConfig,
 		AnalysisTabOutput
 	} from '$lib/types/analysis';
+	import type { DataSource } from '$lib/types/datasource';
 	import type { Subscriber } from '$lib/api/settings';
 	import { getSubscribers } from '$lib/api/settings';
 	import { cancelBuild } from '$lib/api/compute';
@@ -154,8 +155,8 @@
 	const hasReservedOutputId = $derived(isUuid(outputDatasourceId));
 	const datasourcesMembershipQuery = createQuery(() => ({
 		queryKey: ['datasources', ns.value, true],
-		queryFn: async () => {
-			const result = await listDatasources(true, { cache: 'no-store' });
+		queryFn: async ({ signal }) => {
+			const result = await listDatasources(true, { cache: 'no-store', signal });
 			if (result.isErr()) throw new Error(result.error.message);
 			return result.value;
 		},
@@ -172,7 +173,7 @@
 	const canUseOutput = $derived(hasReservedOutputId && outputExists);
 
 	const outputDatasourceQuery = createQuery(() => ({
-		queryKey: ['datasource', outputDatasourceId],
+		queryKey: ['datasource', ns.value, outputDatasourceId],
 		queryFn: async () => {
 			if (!outputDatasourceId) return null;
 			const result = await getDatasource(outputDatasourceId);
@@ -180,8 +181,8 @@
 			return result.value;
 		},
 		enabled: canUseOutput,
-		// Optional enrichment — do not keep retrying forever if the data-plane is degraded.
-		retry: 1
+		// Optional enrichment has a terminal error state and must not delay output state.
+		retry: false
 	}));
 	const hidden = $derived(
 		hiddenOverrideId === outputDatasourceId
@@ -421,23 +422,29 @@
 
 	async function toggleHidden() {
 		if (readOnly) return;
-		if (!outputDatasourceId || toggling) return;
-		const current =
-			outputDatasourceQuery.data ?? (await outputDatasourceQuery.refetch()).data ?? null;
-		if (!current) {
-			error = 'Build this output before changing visibility.';
-			return;
-		}
-		const nextHidden = !current.is_hidden;
+		if (!outputDatasourceId || !outputExists || toggling) return;
+		const currentHidden = hidden;
+		const nextHidden = !currentHidden;
 		hiddenOverride = nextHidden;
 		hiddenOverrideId = outputDatasourceId;
 		toggling = true;
 		const result = await updateDatasource(outputDatasourceId, { is_hidden: nextHidden });
 		result.match(
 			(datasource) => {
-				queryClient.setQueryData(['datasource', outputDatasourceId], datasource);
-				hiddenOverride = null;
-				void queryClient.invalidateQueries({ queryKey: ['datasources'] });
+				queryClient.setQueryData(['datasource', ns.value, outputDatasourceId], datasource);
+				queryClient.setQueriesData<DataSource[]>(
+					{ queryKey: ['datasources', ns.value] },
+					(currentList) =>
+						currentList?.map((item) =>
+							item.id === datasource.id ? { ...item, ...datasource } : item
+						)
+				);
+				// Keep the committed value as the immediate source of truth until the
+				// membership query observes the same response. A second click can
+				// otherwise read the old list value and send the first mutation again,
+				// leaving the button visibly stuck on "visible".
+				hiddenOverride = datasource.is_hidden;
+				hiddenOverrideId = datasource.id;
 				toggling = false;
 			},
 			(err) => {
@@ -450,6 +457,33 @@
 
 	function unpausePreviews(): void {
 		analysisStore.previews.paused = false;
+	}
+
+	async function reconcileBuiltOutput(outputId: string, namespace: string): Promise<void> {
+		// Build completion already identifies the exact output resource. Refresh
+		// that row directly instead of rescanning every datasource in the
+		// namespace; the membership cache is updated from the same response.
+		const result = await getDatasource(outputId);
+		if (result.isErr() || ns.value !== namespace) return;
+
+		const output = result.value;
+		const hiddenDatasources = queryClient.getQueryData<DataSource[]>([
+			'datasources',
+			namespace,
+			true
+		]);
+		if (hiddenDatasources) {
+			const nextDatasources = [
+				...hiddenDatasources.filter((datasource) => datasource.id !== outputId),
+				output
+			];
+			queryClient.setQueryData(['datasources', namespace, true], nextDatasources);
+			queryClient.setQueryData(
+				['datasources', namespace, false],
+				nextDatasources.filter((datasource) => !datasource.is_hidden)
+			);
+		}
+		queryClient.setQueryData(['datasource', namespace, outputId], output);
 	}
 
 	async function handleManualBuild() {
@@ -491,15 +525,20 @@
 			buildStarting = false;
 			return;
 		}
+		if (!activeTab) {
+			unpausePreviews();
+			error = 'No active tab to build.';
+			buildStarting = false;
+			return;
+		}
 		buildStore.onSettled = (status) => {
 			unpausePreviews();
 			if (status !== 'completed' || !outputDatasourceId) return;
-			void queryClient.invalidateQueries({ queryKey: ['datasources'] });
-			void queryClient.invalidateQueries({ queryKey: ['datasource', outputDatasourceId] });
+			void reconcileBuiltOutput(outputDatasourceId, ns.value);
 		};
 		buildStore.start({
 			analysis_pipeline: pipeline,
-			tab_id: activeTab?.id ?? null
+			tab_id: activeTab.id
 		});
 		buildStarting = false;
 	}
@@ -845,7 +884,7 @@
 								_hover: { color: 'fg.primary' }
 							})}
 							onclick={toggleHidden}
-							disabled={readOnly || toggling || !outputDatasourceId}
+							disabled={readOnly || toggling || !outputDatasourceId || !outputExists}
 							data-testid="output-visibility-toggle"
 							data-output-datasource-id={outputDatasourceId}
 							title={hidden

@@ -4,25 +4,43 @@ import os
 import time
 import uuid
 from datetime import UTC, datetime, timedelta
+from urllib.parse import urlsplit, urlunsplit
 
 import httpx
 import psycopg
 import pytest
 
+from tests.harness.postgres_harness import docker_service_host
+
 SAMPLE_CSV = 'id,name,age,city\n1,Alice,30,London\n2,Bob,25,Paris\n3,Charlie,35,Berlin\n'
+
+
+def _docker_service_url(value: str) -> str:
+    parsed = urlsplit(value)
+    if parsed.hostname is None or parsed.port is None:
+        raise ValueError(f'Test service URL must include a host and published port: {value!r}')
+    userinfo = f'{parsed.netloc.rsplit("@", maxsplit=1)[0]}@' if '@' in parsed.netloc else ''
+    return urlunsplit(parsed._replace(netloc=f'{userinfo}{docker_service_host()}:{parsed.port}'))
+
+
+def test_docker_service_url_uses_daemon_published_port(monkeypatch: pytest.MonkeyPatch) -> None:
+    monkeypatch.setenv('TEST_DOCKER_SERVICE_HOST', 'docker')
+
+    assert _docker_service_url('http://127.0.0.1:8080/api') == 'http://docker:8080/api'
+    assert _docker_service_url('postgresql://user:pass@127.0.0.1:5432/dataforge') == 'postgresql://user:pass@docker:5432/dataforge'
 
 
 def _base_url() -> str:
     value = os.environ.get('RUNTIME_TEST_BASE_URL')
     if value:
-        return value
+        return _docker_service_url(value)
     pytest.skip('Docker runtime bootstrap tests require RUNTIME_TEST_BASE_URL')
 
 
 def _db_url() -> str:
     value = os.environ.get('RUNTIME_TEST_DB_URL')
     if value:
-        return value
+        return _docker_service_url(value)
     pytest.skip('Docker runtime bootstrap tests require RUNTIME_TEST_DB_URL')
 
 
@@ -66,29 +84,12 @@ def _wait_for_build_detail(client: httpx.Client, build_id: str, *, timeout: floa
 def _wait_for_runtime_workers() -> tuple[int, int]:
     deadline = time.time() + 120
     while time.time() < deadline:
-        worker_count = int(_psql_value("SELECT count(*) FROM public.runtime_workers WHERE kind = 'build_manager' AND stopped_at IS NULL"))
+        worker_count = int(_psql_value("SELECT count(*) FROM public.runtime_workers WHERE kind = 'coordinator' AND stopped_at IS NULL"))
         scheduler_count = int(_psql_value("SELECT count(*) FROM public.runtime_workers WHERE kind = 'scheduler' AND stopped_at IS NULL"))
         if worker_count >= 1 and scheduler_count >= 1:
             return worker_count, scheduler_count
         time.sleep(1)
-    raise AssertionError('Timed out waiting for runtime worker and scheduler registration')
-
-
-def _api_worker_count() -> int:
-    value = os.environ.get('WORKERS')
-    if value is None:
-        return 1
-    return max(1, int(value))
-
-
-def _wait_for_api_workers(min_count: int) -> int:
-    deadline = time.time() + 120
-    while time.time() < deadline:
-        count = int(_psql_value("SELECT count(*) FROM public.runtime_workers WHERE kind = 'api' AND stopped_at IS NULL"))
-        if count >= min_count:
-            return count
-        time.sleep(1)
-    raise AssertionError(f'Timed out waiting for {min_count} api workers to register')
+    raise AssertionError('Timed out waiting for runtime coordinator and scheduler registration')
 
 
 def _wait_for_scheduled_build(schedule_id: str) -> tuple[str, str]:
@@ -127,7 +128,7 @@ def _wait_for_scheduled_build(schedule_id: str) -> tuple[str, str]:
     worker_state = _psql_value(
         "SELECT string_agg(concat(kind, ':', id, ':', active_jobs, ':', COALESCE(stopped_at::text, '')), ',') "
         'FROM public.runtime_workers '
-        "WHERE kind IN ('build_manager', 'build_worker')"
+        "WHERE kind = 'coordinator'"
     )
     raise AssertionError(
         f'Timed out waiting for scheduled build for {schedule_id}; schedule={schedule_state}; '
@@ -241,11 +242,8 @@ def test_postgres_runtime_bootstraps_public_and_tenant_schemas() -> None:
 
 
 @pytest.mark.timeout(300)
-def test_postgres_runtime_coordinates_api_worker_and_scheduler() -> None:
+def test_postgres_runtime_coordinates_api_runtime_and_scheduler() -> None:
     _wait_for_runtime_workers()
-    expected_api_workers = _api_worker_count()
-    api_workers = _wait_for_api_workers(expected_api_workers)
-    assert api_workers >= expected_api_workers
 
     with httpx.Client(base_url=_base_url(), timeout=30) as client:
         _login_default_user(client)

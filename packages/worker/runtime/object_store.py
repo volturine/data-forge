@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import re
+from collections.abc import Generator
 from datetime import datetime
 from pathlib import Path
 from threading import Lock
@@ -16,6 +17,14 @@ _S3_CLIENT = None
 _S3_CLIENT_LOCK = Lock()
 _BUCKETS_READY: set[str] = set()
 _BUCKETS_READY_LOCK = Lock()
+_BUCKET_LOCKS: dict[str, Lock] = {}
+_BUCKET_LOCKS_LOCK = Lock()
+# Object-store calls are also issued by durable request runners. Do not let a
+# generous request setting silently create a second oversized pool; the queue
+# and the bounded worker executors already provide burst absorption.
+_OBJECT_STORE_MAX_POOL_CONNECTIONS = max(4, min(8, settings.compute_workers))
+MAX_TRANSFER_BYTES = 2 * 1024 * 1024 * 1024
+_MULTIPART_PART_SIZE = 8 * 1024 * 1024
 
 # Namespace name == bucket name. No rewriting.
 # Lowercase letters, digits, hyphens, underscores; start/end alphanumeric.
@@ -144,7 +153,10 @@ def _client():
                 aws_access_key_id=settings.object_store_access_key,
                 aws_secret_access_key=settings.object_store_secret_key,
                 aws_session_token=settings.object_store_session_token or None,
-                config=BotoConfig(s3={"addressing_style": "path"}),
+                config=BotoConfig(
+                    max_pool_connections=_OBJECT_STORE_MAX_POOL_CONNECTIONS,
+                    s3={"addressing_style": "path"},
+                ),
             )
         return _S3_CLIENT
 
@@ -158,6 +170,21 @@ def reset_object_store_client() -> None:
         _BUCKETS_READY.clear()
 
 
+def _bucket_is_ready(bucket: str) -> bool:
+    with _BUCKETS_READY_LOCK:
+        return bucket in _BUCKETS_READY
+
+
+def _bucket_lock(bucket: str) -> Lock:
+    """Return the lock for one bucket without serializing other buckets."""
+    with _BUCKET_LOCKS_LOCK:
+        lock = _BUCKET_LOCKS.get(bucket)
+        if lock is None:
+            lock = Lock()
+            _BUCKET_LOCKS[bucket] = lock
+        return lock
+
+
 def ensure_bucket_exists(bucket: str | None = None) -> str:
     """Ensure a namespace bucket exists. Defaults to the current namespace bucket."""
     if bucket is None:
@@ -166,10 +193,10 @@ def ensure_bucket_exists(bucket: str | None = None) -> str:
         resolved = namespace_bucket(get_namespace())
     else:
         resolved = namespace_bucket(bucket.strip())
-    if resolved in _BUCKETS_READY:
+    if _bucket_is_ready(resolved):
         return resolved
-    with _BUCKETS_READY_LOCK:
-        if resolved in _BUCKETS_READY:
+    with _bucket_lock(resolved):
+        if _bucket_is_ready(resolved):
             return resolved
         client = _client()
         try:
@@ -180,7 +207,8 @@ def ensure_bucket_exists(bucket: str | None = None) -> str:
             if code not in {"404", "NoSuchBucket", "NotFound"}:
                 raise
             client.create_bucket(Bucket=resolved)
-        _BUCKETS_READY.add(resolved)
+        with _BUCKETS_READY_LOCK:
+            _BUCKETS_READY.add(resolved)
     return resolved
 
 
@@ -200,6 +228,85 @@ def upload_bytes(data: bytes, target_url: str, *, content_type: str | None = Non
         kwargs["ContentType"] = content_type
     _client().put_object(**kwargs)
     return target_url
+
+
+class MultipartObjectUpload:
+    """Bounded multipart writer; the RPC owner must abort every uncommitted upload.
+
+    Successful completion is the point of no return. If RPC cancellation races
+    completion, the object remains committed; abort only removes an incomplete
+    multipart upload.
+    """
+
+    def __init__(self, target_url: str, *, content_type: str | None, max_bytes: int = MAX_TRANSFER_BYTES) -> None:
+        self.target_url = target_url
+        self.bucket, self.key = parse_object_store_url(target_url)
+        ensure_bucket_exists(self.bucket)
+        self._client = _client()
+        self._content_type = content_type
+        self._max_bytes = min(max_bytes, MAX_TRANSFER_BYTES)
+        self._total_bytes = 0
+        self._buffer = bytearray()
+        self._parts: list[dict[str, object]] = []
+        self._upload_id = self._client.create_multipart_upload(
+            Bucket=self.bucket,
+            Key=self.key,
+            **({"ContentType": content_type} if content_type is not None else {}),
+        )["UploadId"]
+        self._finished = False
+
+    def write(self, data: bytes) -> None:
+        if self._finished:
+            raise RuntimeError("multipart object upload is already finished")
+        if self._total_bytes + len(data) > self._max_bytes:
+            raise ValueError(f"object upload exceeds {self._max_bytes} byte limit")
+        self._total_bytes += len(data)
+        self._buffer.extend(data)
+        while len(self._buffer) >= _MULTIPART_PART_SIZE:
+            self._upload_part(_MULTIPART_PART_SIZE)
+
+    def commit(self) -> str:
+        """Complete the object; the caller aborts this upload if completion fails."""
+        if self._finished:
+            raise RuntimeError("multipart object upload is already finished")
+        if not self._total_bytes:
+            self.abort()
+            kwargs: dict[str, object] = {"Bucket": self.bucket, "Key": self.key, "Body": b""}
+            if self._content_type is not None:
+                kwargs["ContentType"] = self._content_type
+            self._client.put_object(**kwargs)
+            self._finished = True
+            return self.target_url
+        if self._buffer:
+            self._upload_part(len(self._buffer))
+        self._client.complete_multipart_upload(
+            Bucket=self.bucket,
+            Key=self.key,
+            UploadId=self._upload_id,
+            MultipartUpload={"Parts": self._parts},
+        )
+        self._finished = True
+        return self.target_url
+
+    def abort(self) -> None:
+        if self._finished:
+            return
+        try:
+            self._client.abort_multipart_upload(Bucket=self.bucket, Key=self.key, UploadId=self._upload_id)
+        finally:
+            self._finished = True
+
+    def _upload_part(self, size: int) -> None:
+        data = bytes(self._buffer[:size])
+        part = self._client.upload_part(
+            Bucket=self.bucket,
+            Key=self.key,
+            UploadId=self._upload_id,
+            PartNumber=len(self._parts) + 1,
+            Body=data,
+        )
+        self._parts.append({"PartNumber": len(self._parts) + 1, "ETag": part["ETag"]})
+        del self._buffer[:size]
 
 
 def presigned_put_url(
@@ -239,6 +346,16 @@ def download_bytes(source_url: str) -> bytes:
     response = _client().get_object(Bucket=bucket, Key=key)
     body = response["Body"]
     return body.read()
+
+
+def download_chunks(source_url: str, *, chunk_size: int) -> Generator[bytes]:
+    bucket, key = parse_object_store_url(source_url)
+    body = _client().get_object(Bucket=bucket, Key=key)["Body"]
+    try:
+        while chunk := body.read(chunk_size):
+            yield chunk
+    finally:
+        body.close()
 
 
 def download_file(source_url: str, target_path: Path) -> Path:
@@ -331,7 +448,11 @@ def delete_prefix(prefix_url: str) -> None:
                 continue
             delete_batch.append({"Key": object_key})
             if len(delete_batch) == 1000:
-                _client().delete_objects(Bucket=bucket, Delete={"Objects": delete_batch})
+                response = _client().delete_objects(Bucket=bucket, Delete={"Objects": delete_batch})
+                if response.get("Errors"):
+                    raise RuntimeError(f"Object prefix cleanup returned deletion errors: {response['Errors']}")
                 delete_batch = []
     if delete_batch:
-        _client().delete_objects(Bucket=bucket, Delete={"Objects": delete_batch})
+        response = _client().delete_objects(Bucket=bucket, Delete={"Objects": delete_batch})
+        if response.get("Errors"):
+            raise RuntimeError(f"Object prefix cleanup returned deletion errors: {response['Errors']}")

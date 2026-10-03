@@ -2,7 +2,11 @@ import { test, expect } from './fixtures.js';
 import { createDatasource, createAnalysis } from './utils/api.js';
 import { deleteAnalysisViaUI, deleteDatasourceViaUI } from './utils/ui-cleanup.js';
 import { uid } from './utils/uid.js';
-import { gotoAuthedRoute, waitForAnalysisLoadError } from './utils/readiness.js';
+import {
+	gotoAuthedRoute,
+	waitForAnalysisLoadError,
+	waitForDatasourcePreviewReady
+} from './utils/readiness.js';
 
 /**
  * E2E tests for analysis editor error states.
@@ -17,7 +21,9 @@ test.describe('Analysis – error states', () => {
 		const dsId = await createDatasource(request, dsName);
 		const aId = await createAnalysis(request, aName, dsId);
 		try {
-			// Delete the datasource via UI first
+			// Exercise the real datasource lifecycle before deleting the dependency.
+			await page.goto(`/datasources?id=${dsId}`);
+			await waitForDatasourcePreviewReady(page);
 			await deleteDatasourceViaUI(page, dsName);
 
 			// Now open the analysis that used this datasource
@@ -32,8 +38,11 @@ test.describe('Analysis – error states', () => {
 				timeout: 5_000
 			});
 		} finally {
-			// Clean up analysis if it still exists
-			await deleteAnalysisViaUI(page, aName);
+			// Clean up only the exact resources created by this test. The datasource
+			// deletion is part of the scenario, but may not have completed if the
+			// assertion failed while the UI was still processing it.
+			await deleteAnalysisViaUI(page, aName, { id: aId }).catch(() => undefined);
+			await deleteDatasourceViaUI(page, dsName, { id: dsId }).catch(() => undefined);
 		}
 	});
 

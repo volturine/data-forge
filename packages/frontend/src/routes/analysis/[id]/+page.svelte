@@ -28,15 +28,16 @@
 	import AnalysisEditorVersionModal from '$lib/components/analysis-editor/AnalysisEditorVersionModal.svelte';
 	import {
 		setupEngineDefaultsEffect,
-		setupEngineWarmupEffect,
 		setupInferredSchemaHydrationEffect,
 		setupSourceSchemaLoadingEffect
 	} from '$lib/components/analysis-editor/analysis-editor-schema-effects.svelte';
 	import { createEditorLockController } from '$lib/components/analysis-editor/analysis-editor-lock.svelte';
 	import { createAnalysisEditorActions } from '$lib/components/analysis-editor/analysis-editor-actions.svelte';
 	import { createDraftController } from '$lib/components/analysis-editor/analysis-editor-draft.svelte';
+	import { useNamespace } from '$lib/stores/namespace.svelte';
 
 	const queryClient = useQueryClient();
+	const ns = useNamespace();
 	const analysisId = $derived($page.params.id ?? null);
 	const validAnalysisId = $derived(analysisId && isUuid(analysisId) ? analysisId : null);
 
@@ -48,6 +49,7 @@
 	});
 	let isSaving = $state(false);
 	let saveError = $state('');
+	let forceAnalysisServerSync = false;
 
 	const isDirty = $derived(analysisStore.isDirty());
 	let lastLoadedVersion = $state<string | null>(null);
@@ -103,6 +105,7 @@
 		actions.clearTabErrorTimer();
 		buildStore.close();
 		lock.stop();
+		cancelEditorServices();
 		draft.flush();
 	});
 
@@ -199,8 +202,9 @@
 	const analysisQuery = createQuery(() => ({
 		queryKey: analysisQueryKey(analysisId ?? ''),
 		enabled: !!analysisId,
-		staleTime: 0,
-		queryFn: async (): Promise<AnalysisDetail> => {
+		staleTime: Infinity,
+		refetchOnWindowFocus: false,
+		queryFn: async ({ signal }): Promise<AnalysisDetail> => {
 			if (!analysisId) throw new Error('Analysis ID is required');
 			if (!validAnalysisId) throw new Error('Invalid analysis ID format');
 			const cached = queryClient.getQueryData<AnalysisDetail>(analysisQueryKey(validAnalysisId));
@@ -209,16 +213,32 @@
 				analysisStore.currentRevision = cached.version;
 				lastLoadedVersion = cached.version;
 			}
-			const detail = await fetchAnalysis(validAnalysisId, cached?.etag);
+			const detail = await fetchAnalysis(validAnalysisId, cached?.etag, { signal });
 			if ('notModified' in detail) {
 				if (!cached) throw new Error('Analysis cache is empty after 304');
+				if (forceAnalysisServerSync) {
+					analysisStore.applyAnalysis(cached.analysis);
+					analysisStore.currentRevision = cached.version;
+					lastLoadedVersion = cached.version;
+				}
+				forceAnalysisServerSync = false;
 				draft.hydrate();
 				sourceSchemaLoader.load();
 				return cached;
 			}
-			analysisStore.applyAnalysis(detail.analysis);
-			analysisStore.currentRevision = detail.version;
-			lastLoadedVersion = detail.version;
+			// Query refetches must not overwrite an editor's unsaved working copy.
+			// The store is the working state; only the initial load or an explicit
+			// remote-lock sync may replace it with server data.
+			if (
+				forceAnalysisServerSync ||
+				analysisStore.current?.id !== validAnalysisId ||
+				!analysisStore.isDirty()
+			) {
+				analysisStore.applyAnalysis(detail.analysis);
+				analysisStore.currentRevision = detail.version;
+				lastLoadedVersion = detail.version;
+			}
+			forceAnalysisServerSync = false;
 			draft.hydrate();
 			sourceSchemaLoader.load();
 			return detail;
@@ -248,6 +268,7 @@
 	);
 
 	function snapBackFromRemoteLock(): void {
+		forceAnalysisServerSync = true;
 		lock.setRemoteSyncPending(true);
 		lock.setRemoteSyncFailed(false);
 
@@ -296,9 +317,10 @@
 	});
 
 	const datasourcesQuery = createQuery(() => ({
-		queryKey: ['datasources'],
-		queryFn: async () => {
-			const result = await listDatasources(false);
+		queryKey: ['datasources', ns.value],
+		enabled: !ns.switching,
+		queryFn: async ({ signal }) => {
+			const result = await listDatasources(false, { signal });
 			if (result.isErr()) {
 				datasourceStore.loaded = true;
 				throw new Error(result.error.message);
@@ -311,7 +333,6 @@
 	}));
 
 	const loadEngineDefaults = setupEngineDefaultsEffect(() => validAnalysisId);
-	const engineWarmup = setupEngineWarmupEffect(() => validAnalysisId);
 	const hydrateInferredSchemas = setupInferredSchemaHydrationEffect(() => validAnalysisId);
 
 	const activeTab = $derived(analysisStore.activeTab);
@@ -337,9 +358,25 @@
 
 	function refreshEditorServices(): void {
 		loadEngineDefaults();
-		engineWarmup.start();
 		hydrateInferredSchemas();
 		sourceSchemaLoader.load();
+	}
+
+	function cancelEditorServices(): void {
+		loadEngineDefaults.cancel();
+		hydrateInferredSchemas.cancel();
+		sourceSchemaLoader.cancel();
+	}
+
+	let synchronizedEditorRoute: string | null = null;
+	function syncEditorRoute(): void {
+		const routeKey = `${ns.value}:${analysisId ?? ''}`;
+		if (synchronizedEditorRoute === routeKey) return;
+		synchronizedEditorRoute = routeKey;
+		cancelEditorServices();
+		resetForAnalysisId(analysisId);
+		lock.sync(validAnalysisId);
+		refreshEditorServices();
 	}
 
 	const currentDatasource = $derived.by(() => {
@@ -347,6 +384,14 @@
 		const data = datasourcesQuery.data;
 		if (!data) return null;
 		return data.find((ds) => ds.id === datasourceId) ?? null;
+	});
+	const missingDatasource = $derived.by(() => {
+		if (!datasourcesQuery.data) return null;
+		const tab = activeTab;
+		if (!tab || tab.datasource.analysis_tab_id || !tab.datasource.id) return null;
+		if (datasourcesQuery.data.some((datasource) => datasource.id === tab.datasource.id))
+			return null;
+		return tab.datasource.id;
 	});
 	const analysisTabName = $derived.by(() => {
 		const tab = activeTab;
@@ -370,7 +415,7 @@
 			isSaving = false;
 			return;
 		}
-		analysisStore.save().match(
+		await analysisStore.save().match(
 			() => {
 				selectedStepId = null;
 				isSaving = false;
@@ -397,12 +442,19 @@
 	async function discardChanges() {
 		if (!analysisId) return;
 		if (isSaving || editorReadOnly) return;
+		saveError = '';
 		if (storageKey) {
-			void idbDelete(storageKey);
+			draft.flush();
+			await idbDelete(storageKey);
+		}
+		const currentTabId = analysisStore.activeTabId;
+		if (analysisStore.current?.id === analysisId && analysisStore.restoreSavedSnapshot()) {
+			selectedStepId = null;
+			return;
 		}
 		if (analysisQuery.data) {
-			const currentTabId = analysisStore.activeTabId;
 			await analysisStore.loadAnalysis(analysisId);
+			selectedStepId = null;
 			// Restore the tab that was active before discarding changes
 			if (currentTabId && analysisStore.tabs.some((t) => t.id === currentTabId)) {
 				analysisStore.activeTabId = currentTabId;
@@ -445,20 +497,15 @@
 	}
 
 	onMount(() => {
-		resetForAnalysisId(analysisId);
-		lock.sync(validAnalysisId);
-		refreshEditorServices();
+		syncEditorRoute();
 		const unbindPane = bindPaneMedia();
 		return () => {
 			unbindPane();
-			engineWarmup.stop();
 		};
 	});
 
 	afterNavigate(() => {
-		resetForAnalysisId(analysisId);
-		lock.sync(validAnalysisId);
-		refreshEditorServices();
+		syncEditorRoute();
 	});
 
 	async function toggleFavorite() {
@@ -476,9 +523,22 @@
 			...currentAnalysis,
 			is_favorite: result.value.is_favorite
 		};
-		void queryClient.invalidateQueries({ queryKey: ['analyses'] });
-		void queryClient.invalidateQueries({ queryKey: ['favorite-analyses'] });
-		void queryClient.invalidateQueries({ queryKey: analysisQueryKey(validAnalysisId) });
+		const isFavorite = result.value.is_favorite;
+		queryClient.setQueriesData<Analysis[]>({ queryKey: ['analyses'] }, (current) =>
+			current?.map((analysis) =>
+				analysis.id === validAnalysisId ? { ...analysis, is_favorite: isFavorite } : analysis
+			)
+		);
+		queryClient.setQueriesData<Analysis[]>({ queryKey: ['favorite-analyses'] }, (current) => {
+			if (!current) return current;
+			const withoutCurrent = current.filter((analysis) => analysis.id !== validAnalysisId);
+			return isFavorite
+				? [...withoutCurrent, { ...currentAnalysis, is_favorite: true }]
+				: withoutCurrent;
+		});
+		queryClient.setQueryData<AnalysisDetail>(analysisQueryKey(validAnalysisId), (current) =>
+			current ? { ...current, analysis: { ...current.analysis, is_favorite: isFavorite } } : current
+		);
 	}
 
 	function openDescriptionModal() {
@@ -576,6 +636,13 @@
 		{#if saveError}
 			<div class={css({ paddingX: '4', paddingY: '2' })} data-testid="save-error">
 				<Callout tone="error">{saveError}</Callout>
+			</div>
+		{/if}
+		{#if missingDatasource}
+			<div class={css({ paddingX: '4', paddingY: '2' })} data-testid="analysis-datasource-error">
+				<Callout tone="error">
+					Datasource not found: {missingDatasource}. Select another datasource for this tab.
+				</Callout>
 			</div>
 		{/if}
 

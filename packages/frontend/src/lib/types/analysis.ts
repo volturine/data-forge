@@ -99,6 +99,7 @@ export interface AnalysisGalleryItem {
 	thumbnail: string | null;
 	created_at: string;
 	updated_at: string;
+	revision: number;
 	is_favorite?: boolean;
 }
 

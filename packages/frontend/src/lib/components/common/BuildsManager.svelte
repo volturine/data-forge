@@ -1,6 +1,7 @@
 <script lang="ts">
 	import { createQuery } from '@tanstack/svelte-query';
 	import { cancelBuild, type CancelBuildResponse } from '$lib/api/compute';
+	import { connectBuildListStream } from '$lib/api/build-stream';
 	import { getBuild } from '$lib/api/builds';
 	import { getDatasource, listDatasources } from '$lib/api/datasource';
 	import { listAnalyses } from '$lib/api/analysis';
@@ -35,6 +36,8 @@
 	import ConfirmDialog from '$lib/components/common/ConfirmDialog.svelte';
 	import DurationTrendChart from '$lib/components/common/DurationTrendChart.svelte';
 	import { BuildStreamStore } from '$lib/stores/build-stream.svelte';
+	import { ReconnectionManager } from '$lib/stores/reconnection-manager';
+	import type { StreamHandle } from '$lib/api/websocket';
 	import { useNamespace } from '$lib/stores/namespace.svelte';
 	import { getDurationStats } from '$lib/api/engine-runs';
 	import { formatDateTimeDisplay, toEpochDisplay } from '$lib/utils/datetime';
@@ -85,7 +88,8 @@
 	const detailPayloads = new SvelteMap<string, BuildPayloadData>();
 	const pendingCancelled = new SvelteMap<string, CancelBuildResponse>();
 	const limit = 50;
-	const HISTORY_AUTO_REFRESH_MS = 2_000;
+	const HISTORY_STREAM_RECONNECT_MS = 1_000;
+	const HISTORY_REFRESH_DEBOUNCE_MS = 150;
 
 	const queryParams = $derived({
 		analysis_id: (pageState.url.searchParams.get('analysis_id') ?? undefined) || undefined,
@@ -99,10 +103,80 @@
 
 	const buildsStore = new BuildsStore();
 	const ns = useNamespace();
+	const historyReconnect = new ReconnectionManager(HISTORY_STREAM_RECONNECT_MS);
+	let historyConnection: StreamHandle | null = null;
+	let historyStreamGeneration = 0;
+	let historyStreamMounted = false;
+	let historyStreamNamespace: string | null = null;
+	let historyRefreshTimer: ReturnType<typeof setTimeout> | null = null;
 
 	function applyListQuery(): void {
 		buildsStore.load(queryParams);
 	}
+
+	function stopHistoryStream(): void {
+		historyStreamGeneration += 1;
+		historyReconnect.clear();
+		if (historyRefreshTimer !== null) {
+			clearTimeout(historyRefreshTimer);
+			historyRefreshTimer = null;
+		}
+		historyConnection?.close();
+		historyConnection = null;
+		historyStreamNamespace = null;
+	}
+
+	function scheduleHistoryRefresh(): void {
+		if (historyRefreshTimer !== null) return;
+		historyRefreshTimer = setTimeout(() => {
+			historyRefreshTimer = null;
+			buildsStore.silentRefresh();
+		}, HISTORY_REFRESH_DEBOUNCE_MS);
+	}
+
+	function startHistoryStream(): void {
+		if (!historyStreamMounted || historyConnection || !ns.ready || ns.switching) return;
+		const namespace = ns.value;
+		historyStreamNamespace = namespace;
+		const generation = historyStreamGeneration;
+		try {
+			historyConnection = connectBuildListStream({
+				onSnapshot: () => {
+					// The list stream is an invalidation channel. The REST request
+					// remains the source of truth for the active filters and includes
+					// terminal history rows that are not part of the stream snapshot.
+					scheduleHistoryRefresh();
+				},
+				onError: (message) => {
+					if (/not authenticated/i.test(message)) stopHistoryStream();
+				},
+				onClose: () => {
+					historyConnection = null;
+					if (!historyStreamMounted || generation !== historyStreamGeneration) return;
+					historyReconnect.schedule(() => startHistoryStream());
+				}
+			});
+		} catch {
+			// Namespace initialization can finish just after mount. The normal
+			// reconnect path retries the transport without disturbing the page.
+			historyReconnect.schedule(() => startHistoryStream());
+		}
+	}
+
+	$effect(() => {
+		const ready = ns.ready;
+		const switching = ns.switching;
+		if (!historyStreamMounted) return;
+		if (!ready || switching) {
+			if (historyStreamNamespace !== null) stopHistoryStream();
+			return;
+		}
+		const namespace = ns.value;
+		if (historyStreamNamespace !== namespace) {
+			stopHistoryStream();
+			startHistoryStream();
+		}
+	});
 
 	const datasourcesQuery = createQuery(() => ({
 		queryKey: ['datasources-lookup', ns.value],
@@ -393,13 +467,6 @@
 		return run.status;
 	}
 
-	const hasActiveBuild = $derived(
-		runs.some((run) => {
-			const status = currentStatus(run);
-			return status === 'running' || status === 'queued';
-		})
-	);
-
 	function cancelledAt(run: BuildRunSummary): string | null {
 		return pendingCancelled.get(run.build_id)?.cancelled_at ?? run.cancelled_at ?? null;
 	}
@@ -433,11 +500,11 @@
 	}
 
 	const cancelDialogOpen = $derived.by(() => {
-		const target = cancelTarget;
-		if (!target) return false;
-		const latest = runs.find((run) => run.build_id === target.id);
-		if (!latest) return false;
-		return canCancelBuildLifecycleStatus(latest.status);
+		// Keep the dialog mounted for the duration of the cancellation request.
+		// Deriving visibility from a background history refresh can remove the
+		// button between pointerdown and click, leaving a visible but unclickable
+		// confirmation dialog under load.
+		return cancelTarget !== null;
 	});
 
 	function updateCancelledRun(buildId: string, cancelled: CancelBuildResponse): void {
@@ -456,14 +523,16 @@
 	async function confirmCancelRun(): Promise<void> {
 		const target = cancelTarget;
 		if (!target || cancelPending) return;
-		cancelTarget = null;
 		cancelPending = true;
 		cancelError = null;
 		const result = await cancelBuild(target.id);
 		result.match(
 			(cancelled) => {
 				updateCancelledRun(target.id, cancelled);
-				buildsStore.refresh();
+				cancelTarget = null;
+				// Keep the terminal row on screen while history refreshes; a foreground
+				// refresh marks the list as connecting and temporarily hides the table.
+				buildsStore.silentRefresh();
 			},
 			(err) => {
 				cancelError = err.message;
@@ -572,17 +641,25 @@
 		);
 	}
 
+	// SvelteKit keeps this component mounted when only the monitoring query
+	// string changes. The URL filters are therefore a live input, not a
+	// mount-time option: reload the store whenever they change so switching
+	// between an analysis-scoped view and the global history cannot leave stale
+	// rows on screen.
+	$effect(() => {
+		buildsStore.load(queryParams);
+	});
+
 	onMount(() => {
-		applyListQuery();
+		historyStreamMounted = true;
+		startHistoryStream();
 		const elapsed = setInterval(() => {
 			nowMs = Date.now();
 		}, 1000);
-		const poll = setInterval(() => {
-			if (hasActiveBuild) buildsStore.silentRefresh();
-		}, HISTORY_AUTO_REFRESH_MS);
 		return () => {
+			historyStreamMounted = false;
+			stopHistoryStream();
 			clearInterval(elapsed);
-			clearInterval(poll);
 			buildsStore.close();
 		};
 	});

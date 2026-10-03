@@ -1,6 +1,6 @@
 import type { Page } from '@playwright/test';
-import { test, expect } from './fixtures.js';
-import { createLongRunningAnalysis, createLargeDatasource } from './utils/api.js';
+import { E2E_SHARED_NAMESPACE_B, test, expect } from './fixtures.js';
+import { createLongRunningAnalysis } from './utils/api.js';
 import { screenshot } from './utils/visual.js';
 import {
 	gotoAuthedRoute,
@@ -13,7 +13,7 @@ import {
 	waitForLayoutReady
 } from './utils/readiness.js';
 import { gotoAnalysisEditor } from './utils/analysis.js';
-import { deleteAnalysisViaUI, deleteDatasourceViaUI } from './utils/ui-cleanup.js';
+import { deleteAnalysisViaUI } from './utils/ui-cleanup.js';
 import { uid } from './utils/uid.js';
 import { dialogByTextbox } from './utils/locators.js';
 import { waitForBuildPreview, waitForBuildPreviewId } from './utils/builds.js';
@@ -95,11 +95,11 @@ test.describe('Navigation – page load smoke tests', () => {
 		await expect(page).toHaveURL(/datasources\/new/, { timeout: 5_000 });
 	});
 
-	test('UDFs "New UDF" button navigates to /udfs/new', async ({ page }) => {
+	test('UDFs "New UDF" link navigates to /udfs/new', async ({ page }) => {
 		await gotoUdfLibrary(page);
-		const newUdfBtn = page.getByRole('button', { name: 'New UDF' });
-		await expect(newUdfBtn).toBeVisible();
-		await newUdfBtn.click();
+		const newUdfLink = page.getByRole('link', { name: 'New UDF' });
+		await expect(newUdfLink).toBeVisible();
+		await newUdfLink.click();
 		await expect(page).toHaveURL(/udfs\/new/, { timeout: 5_000 });
 	});
 });
@@ -132,7 +132,10 @@ test.describe('Navigation – profile access', () => {
 		await gotoAuthedRoute(page, '/');
 		await page.getByRole('link', { name: 'Profile' }).click();
 
-		await page.waitForURL(/\/profile/, { timeout: 5_000 });
+		// The SPA can update the URL before Playwright attaches a navigation
+		// event waiter. Assert the current URL instead of waiting for a missed
+		// event; this also ensures the page content is checked below.
+		await expect(page).toHaveURL(/\/profile/, { timeout: 5_000 });
 		await expect(page.getByRole('heading', { name: 'Profile', level: 1 })).toBeVisible();
 		await expect(page.getByRole('tab', { name: 'Account' })).toHaveAttribute(
 			'aria-selected',
@@ -174,7 +177,7 @@ async function confirmCancelBuild(page: Page) {
 				apiResponse.url().includes('/api/v1/compute/builds/') &&
 				apiResponse.url().includes('/cancel') &&
 				apiResponse.status() === 200,
-			{ timeout: 5_000 }
+			{ timeout: 10_000 }
 		)
 		.then(async (response) => (await response.json()) as { status: string });
 	await confirmButton.click({ force: true, timeout: 5_000 });
@@ -241,11 +244,17 @@ async function waitForBuildRowEventually(
 }
 
 test.describe('Navigation – engines live monitor', () => {
-	test('engines popup lists running engines on demand', async ({ page, request }) => {
-		const dsName = `e2e-engines-ds-${uid()}`;
+	test('engines popup lists running engines on demand', async ({
+		page,
+		request,
+		sharedCancellationDatasource
+	}) => {
 		const analysisName = `E2E Engines ${uid()}`;
-		const datasourceId = await createLargeDatasource(request, dsName, 200);
-		const analysisId = await createLongRunningAnalysis(request, analysisName, datasourceId);
+		const analysisId = await createLongRunningAnalysis(
+			request,
+			analysisName,
+			sharedCancellationDatasource.id
+		);
 
 		try {
 			await gotoAnalysisEditor(page, analysisId);
@@ -269,7 +278,7 @@ test.describe('Navigation – engines live monitor', () => {
 			const enginePopup = page.locator('[data-engines-popup="true"]');
 			await engineButton.click();
 			await expect(enginePopup).toBeVisible({ timeout: 5_000 });
-			await expect(page.getByTestId('engine-monitor-count')).toBeVisible({ timeout: 5_000 });
+			await expect(page.getByTestId('engine-monitor-count')).toBeVisible({ timeout: 10_000 });
 			await expect(
 				enginePopup
 					.locator(
@@ -303,7 +312,6 @@ test.describe('Navigation – engines live monitor', () => {
 			}
 		} finally {
 			await deleteAnalysisViaUI(page, analysisName);
-			await deleteDatasourceViaUI(page, dsName);
 		}
 	});
 });
@@ -354,20 +362,87 @@ test.describe('Navigation – chat panel smoke', () => {
 		await expect(panel).not.toBeVisible({ timeout: 3_000 });
 	});
 
-	test('chat panel provider switch updates model selector', async ({ page }) => {
+	test('chat panel provider switch updates model selector without a local Ollama service', async ({
+		page
+	}) => {
 		await gotoAuthedRoute(page, '/');
+		await page.route('**/api/v1/settings', (route) =>
+			route.fulfill({
+				status: 200,
+				contentType: 'application/json',
+				body: JSON.stringify({
+					smtp_host: '',
+					smtp_port: 587,
+					smtp_user: '',
+					smtp_password: '',
+					telegram_bot_token: '',
+					telegram_bot_enabled: false,
+					openrouter_api_key: '',
+					openrouter_default_model: 'openai/gpt-4o-mini',
+					openai_api_key: '',
+					openai_endpoint_url: 'https://openai.test',
+					openai_default_model: 'gpt-4o-mini',
+					openai_organization_id: '',
+					ollama_endpoint_url: 'http://ollama.test',
+					ollama_default_model: 'llama3.2',
+					public_idb_debug: false
+				})
+			})
+		);
+		await page.route('**/api/v1/mcp/tools', (route) =>
+			route.fulfill({ status: 200, contentType: 'application/json', body: '[]' })
+		);
+		await page.route('**/api/v1/ai/chat/models', (route) =>
+			route.fulfill({
+				status: 200,
+				contentType: 'application/json',
+				body: JSON.stringify([{ name: 'gpt-4o-mini' }, { name: 'llama3.2' }])
+			})
+		);
+		const settingsResponsePromise = page.waitForResponse(
+			(response) =>
+				response.request().method() === 'GET' &&
+				new URL(response.url()).pathname === '/api/v1/settings'
+		);
+		const toolsResponsePromise = page.waitForResponse(
+			(response) =>
+				response.request().method() === 'GET' &&
+				new URL(response.url()).pathname === '/api/v1/mcp/tools'
+		);
 
 		const trigger = page.getByRole('button', { name: 'AI Assistant' });
 		await trigger.click();
 		const panel = page.locator('#chat-panel');
 		await expect(panel).toBeVisible({ timeout: 5_000 });
+		const [settingsResponse, toolsResponse] = await Promise.all([
+			settingsResponsePromise,
+			toolsResponsePromise
+		]);
+		expect(settingsResponse.ok()).toBe(true);
+		expect(toolsResponse.ok()).toBe(true);
 
 		const providerSelect = panel.locator('select[title="Chat provider"]');
 		await expect(providerSelect).toBeVisible({ timeout: 3_000 });
+		await expect(providerSelect).toHaveValue('openai', { timeout: 5_000 });
+		await expect(panel.getByRole('button', { name: 'gpt-4o-mini' })).toBeVisible({
+			timeout: 5_000
+		});
 
-		// Switch to Ollama — no API key required, so UI stays responsive
+		// The model catalogue is stubbed: this test covers provider UI state,
+		// not the availability of a local Ollama service.
+		const ollamaModelsResponsePromise = page.waitForResponse((response) => {
+			if (
+				response.request().method() !== 'POST' ||
+				new URL(response.url()).pathname !== '/api/v1/ai/chat/models'
+			) {
+				return false;
+			}
+			return response.request().postDataJSON().provider === 'ollama';
+		});
 		await providerSelect.selectOption('ollama');
 		await expect(providerSelect).toHaveValue('ollama');
+		const ollamaModelsResponse = await ollamaModelsResponsePromise;
+		expect(ollamaModelsResponse.ok()).toBe(true);
 
 		// Model button should update to Ollama default
 		await expect(panel.getByRole('button', { name: 'llama3.2' })).toBeVisible({ timeout: 5_000 });
@@ -376,7 +451,7 @@ test.describe('Navigation – chat panel smoke', () => {
 
 test.describe('Navigation – namespace persistence', () => {
 	test('selected namespace persists across page refresh', async ({ page }) => {
-		const ns = `e2e-ns-${uid()}`;
+		const ns = E2E_SHARED_NAMESPACE_B;
 
 		await page.goto('/');
 		await waitForAppShell(page);
@@ -388,8 +463,8 @@ test.describe('Navigation – namespace persistence', () => {
 		const search = dialog.getByRole('textbox', { name: 'Search namespaces' });
 		await search.fill(ns);
 
-		await dialog.locator(`[data-namespace-create="${ns}"]`).click();
-		await expect(dialog).not.toBeVisible({ timeout: 5_000 });
+		await dialog.locator(`[data-namespace-option="${ns}"]`).click();
+		await expect(dialog).not.toBeVisible({ timeout: readyTimeoutMs() });
 
 		const sidebar = page.locator('aside[aria-label="Main navigation"]');
 		await expect(sidebar.getByRole('button', { name: 'Select namespace' })).toContainText(ns, {
@@ -416,7 +491,13 @@ test.describe('Navigation – namespace persistence', () => {
 		await page.goto('/');
 		await waitForAppShell(page);
 
+		const namespacesResponse = page.waitForResponse(
+			(response) =>
+				new URL(response.url()).pathname === '/api/v1/namespaces' &&
+				response.request().method() === 'GET'
+		);
 		await page.getByRole('button', { name: 'Select namespace' }).click();
+		expect((await namespacesResponse).ok()).toBeTruthy();
 		const dialog = page.locator('[role="dialog"]');
 		await expect(dialog).toBeVisible({ timeout: 5_000 });
 

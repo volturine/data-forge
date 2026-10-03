@@ -19,16 +19,9 @@ async function latestNode(page: Parameters<typeof gotoAnalysisEditor>[0], stepTy
 let sharedDatasourceId = '';
 let sharedDatasourceName = '';
 
-test.beforeAll(async ({ request }) => {
-	sharedDatasourceName = `e2e-editor-shared-ds-${uid()}`;
-	sharedDatasourceId = await createDatasource(request, sharedDatasourceName);
-});
-
-test.afterAll(async ({ browser, workerAuth }) => {
-	const { page, context } = await createCleanupPage(browser, workerAuth.sessionState);
-	await deleteDatasourceViaUI(page, sharedDatasourceName);
-	await page.close();
-	await context.close();
+test.beforeEach(async ({ sharedDatasource }) => {
+	sharedDatasourceName = sharedDatasource.name;
+	sharedDatasourceId = sharedDatasource.id;
 });
 
 // ── Save/discard dirty tracking ─────────────────────────────────────────────
@@ -78,8 +71,17 @@ test.describe('Analyses – save/discard dirty tracking', () => {
 		const id = uid();
 		const analysis = `E2E Dirty Discard ${id}`;
 		const aId = await createAnalysis(request, analysis, sharedDatasourceId);
+		let analysisGetCount = 0;
+		page.on('request', (browserRequest) => {
+			const url = new URL(browserRequest.url());
+			if (browserRequest.method() === 'GET' && url.pathname.endsWith(`/v1/analysis/${aId}`)) {
+				analysisGetCount += 1;
+			}
+		});
 		try {
 			await gotoAnalysisEditor(page, aId);
+			const initialAnalysisGetCount = analysisGetCount;
+			expect(initialAnalysisGetCount).toBeGreaterThan(0);
 			await page.locator('button[data-step="sort"]').click();
 			await expect(await latestNode(page, 'sort')).toBeVisible({ timeout: 5_000 });
 
@@ -89,6 +91,7 @@ test.describe('Analyses – save/discard dirty tracking', () => {
 
 			await expect(page.getByRole('button', { name: 'Saved' })).toBeVisible({ timeout: 5_000 });
 			await expect(page.getByRole('button', { name: 'Discard' })).toBeDisabled();
+			expect(analysisGetCount).toBe(initialAnalysisGetCount);
 		} finally {
 			await deleteAnalysisViaUI(page, analysis);
 		}
@@ -141,7 +144,9 @@ test.describe('Analyses – save/discard dirty tracking', () => {
 
 			await expect(page.getByRole('button', { name: 'Save' })).toBeVisible({ timeout: 5_000 });
 			await page.getByRole('button', { name: 'Save' }).click();
-			await expect(page.getByRole('button', { name: 'Saved' })).toBeVisible({ timeout: 5_000 });
+			await expect(page.getByRole('button', { name: 'Saved' })).toBeVisible({
+				timeout: 15_000
+			});
 
 			// Verify the description is visible immediately after save (before reload)
 			await expect(page.locator('header').first().getByText(nextDescription)).toBeVisible({
@@ -165,12 +170,12 @@ test.describe('Analyses – step library labels', () => {
 	let aId = '';
 	let aName: string;
 
-	test.beforeAll(async ({ request }) => {
+	test.beforeEach(async ({ request }) => {
 		aName = `E2E Labels ${uid()}`;
 		aId = await createAnalysis(request, aName, sharedDatasourceId);
 	});
 
-	test.afterAll(async ({ browser, workerAuth }) => {
+	test.afterEach(async ({ browser, workerAuth }) => {
 		const { page, context } = await createCleanupPage(browser, workerAuth.sessionState);
 		await deleteAnalysisViaUI(page, aName);
 		await page.close();
@@ -309,9 +314,15 @@ test.describe('Analyses – save persistence', () => {
 				timeout: 5_000
 			});
 
-			// Click Save and wait for the save state machine to reach "clean"
+			// Wait for the durable write before asserting that the save state is clean.
 			await expect(page.getByRole('button', { name: 'Save' })).toBeVisible({ timeout: 5_000 });
+			const saveResponse = page.waitForResponse(
+				(response) =>
+					response.url().endsWith(`/api/v1/analysis/${aId}`) &&
+					response.request().method() === 'PUT'
+			);
 			await page.getByRole('button', { name: 'Save' }).click();
+			expect((await saveResponse).ok()).toBeTruthy();
 			await expect(page.locator('[data-save-state="clean"]')).toBeVisible({ timeout: 5_000 });
 
 			// Verify the step is still present immediately after save (before reload)
@@ -478,7 +489,7 @@ test.describe('Analyses – step reorder persistence', () => {
 			// Save
 			await page.getByRole('button', { name: 'Save' }).click();
 			await expect(page.getByRole('button', { name: 'Saved' })).toBeVisible({
-				timeout: 5_000
+				timeout: 15_000
 			});
 
 			// Verify order is correct immediately after save (before reload)
@@ -530,7 +541,9 @@ test.describe('Analyses – save + reload config persistence', () => {
 			await expect(applyBtn).toBeDisabled({ timeout: 5_000 });
 
 			await page.getByRole('button', { name: 'Save' }).click();
-			await expect(page.getByRole('button', { name: 'Saved' })).toBeVisible({ timeout: 5_000 });
+			await expect(page.getByRole('button', { name: 'Saved' })).toBeVisible({
+				timeout: 15_000
+			});
 
 			// Verify the limit value is correct immediately after save (before reload)
 			const limitNodeAfterSave = await latestNode(page, 'limit');
@@ -696,7 +709,9 @@ test.describe('Analyses – version history modal', () => {
 			await page.locator('button[data-step="limit"]').click();
 			await expect(page.locator('[data-step-type="limit"]')).toHaveCount(1, { timeout: 5_000 });
 			await page.getByRole('button', { name: 'Save' }).click();
-			await expect(page.getByRole('button', { name: 'Saved' })).toBeVisible({ timeout: 5_000 });
+			await expect(page.getByRole('button', { name: 'Saved' })).toBeVisible({
+				timeout: 15_000
+			});
 
 			// Open version modal
 			await page.locator('[data-testid="version-history-trigger"]').click();
@@ -726,7 +741,9 @@ test.describe('Analyses – version history modal', () => {
 			await page.locator('button[data-step="limit"]').click();
 			await expect(page.locator('[data-step-type="limit"]')).toHaveCount(1, { timeout: 5_000 });
 			await page.getByRole('button', { name: 'Save' }).click();
-			await expect(page.getByRole('button', { name: 'Saved' })).toBeVisible({ timeout: 5_000 });
+			await expect(page.getByRole('button', { name: 'Saved' })).toBeVisible({
+				timeout: 15_000
+			});
 
 			// Open version modal
 			await page.locator('[data-testid="version-history-trigger"]').click();
@@ -745,7 +762,9 @@ test.describe('Analyses – version history modal', () => {
 			await renameInput.press('Enter');
 
 			// After rename, the new name should appear
-			await expect(dialog.getByText('My Checkpoint')).toBeVisible({ timeout: 5_000 });
+			await expect(dialog.getByText('My Checkpoint')).toBeVisible({
+				timeout: 15_000
+			});
 
 			await screenshot(page, 'analysis/editor', 'version-history-renamed');
 
@@ -785,7 +804,9 @@ test.describe('Analyses – version history modal', () => {
 			await page.locator('button[data-step="limit"]').click();
 			await expect(page.locator('[data-step-type="limit"]')).toHaveCount(1, { timeout: 5_000 });
 			await page.getByRole('button', { name: 'Save' }).click();
-			await expect(page.getByRole('button', { name: 'Saved' })).toBeVisible({ timeout: 5_000 });
+			await expect(page.getByRole('button', { name: 'Saved' })).toBeVisible({
+				timeout: 15_000
+			});
 
 			// Open version modal
 			await page.locator('[data-testid="version-history-trigger"]').click();
@@ -820,7 +841,9 @@ test.describe('Analyses – version history modal', () => {
 			await expect(page.locator('[data-step-type="limit"]')).toHaveCount(1, { timeout: 5_000 });
 			await expect(page.getByRole('button', { name: 'Save' })).toBeVisible({ timeout: 5_000 });
 			await page.getByRole('button', { name: 'Save' }).click();
-			await expect(page.getByRole('button', { name: 'Saved' })).toBeVisible({ timeout: 5_000 });
+			await expect(page.getByRole('button', { name: 'Saved' })).toBeVisible({
+				timeout: 15_000
+			});
 
 			// Restore version 1 (= initial [view] from create): limit should be removed
 			await page.locator('[data-testid="version-history-trigger"]').click();

@@ -49,7 +49,11 @@ def stage_output_datasource(
         if active_claim is None:
             raise OutputPublicationClaimLost('Build job lease is no longer active')
 
-    datasource = session.get(DataSource, result_id)
+    # Output result IDs are stable across rebuilds. A delete request only marks
+    # the row pending until the preview engine drains, so a rebuild can race
+    # that finalizer. Serialize publication with deletion on this exact row and
+    # make publication the explicit owner of reactivating it.
+    datasource = session.get(DataSource, result_id, with_for_update=True)
     if datasource is None:
         datasource = DataSource(
             id=result_id,
@@ -63,6 +67,7 @@ def stage_output_datasource(
             created_at=datetime.now(UTC),
         )
     else:
+        datasource.revision += 1
         datasource.name = name
         datasource.source_type = source_type
         datasource.config = config
@@ -70,6 +75,8 @@ def stage_output_datasource(
             datasource.schema_cache = schema_cache
         datasource.created_by_analysis_id = analysis_id
         datasource.created_by = DataSourceCreatedBy.ANALYSIS.value
+        datasource.is_pending_delete = False
+        datasource.delete_requested_at = None
         if is_hidden is not None:
             datasource.is_hidden = is_hidden
     session.add(datasource)

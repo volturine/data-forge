@@ -1,7 +1,7 @@
 import { test, expect } from './fixtures.js';
 import type { Page } from '@playwright/test';
-import { createLargeDatasource, createLongRunningAnalysis } from './utils/api.js';
-import { deleteAnalysisViaUI, deleteDatasourceViaUI } from './utils/ui-cleanup.js';
+import { createLongRunningAnalysis } from './utils/api.js';
+import { deleteAnalysisViaUI } from './utils/ui-cleanup.js';
 import { readyTimeoutMs, waitForLayoutReady } from './utils/readiness.js';
 import { gotoAnalysisEditor } from './utils/analysis.js';
 import { waitForBuildPreviewId } from './utils/builds.js';
@@ -126,12 +126,15 @@ test.describe('Cancel Build – e2e', () => {
 
 	test('cancel from build preview marks run as cancelled with details', async ({
 		page,
-		request
+		request,
+		sharedCancellationDatasource
 	}) => {
-		const dsName = `e2e-cancel-preview-ds-${uid()}`;
 		const analysisName = `E2E Cancel Preview ${uid()}`;
-		const dsId = await createLargeDatasource(request, dsName, 200);
-		const analysisId = await createLongRunningAnalysis(request, analysisName, dsId);
+		const analysisId = await createLongRunningAnalysis(
+			request,
+			analysisName,
+			sharedCancellationDatasource.id
+		);
 		try {
 			await startBuildFromAnalysisPage(page, analysisId);
 			const preview = page.locator('[data-testid="build-preview"]');
@@ -157,15 +160,20 @@ test.describe('Cancel Build – e2e', () => {
 			});
 		} finally {
 			await deleteAnalysisViaUI(page, analysisName).catch(() => undefined);
-			await deleteDatasourceViaUI(page, dsName).catch(() => undefined);
 		}
 	});
 
-	test('cancel from monitoring build history row works', async ({ page, request }) => {
-		const dsName = `e2e-cancel-history-ds-${uid()}`;
+	test('cancel from monitoring build history row works', async ({
+		page,
+		request,
+		sharedCancellationDatasource
+	}) => {
 		const analysisName = `E2E Cancel History ${uid()}`;
-		const dsId = await createLargeDatasource(request, dsName, 200);
-		const analysisId = await createLongRunningAnalysis(request, analysisName, dsId);
+		const analysisId = await createLongRunningAnalysis(
+			request,
+			analysisName,
+			sharedCancellationDatasource.id
+		);
 		let buildId: string | undefined;
 		try {
 			// Skip preview so we reach Monitoring while the long-running build is still active.
@@ -212,7 +220,6 @@ test.describe('Cancel Build – e2e', () => {
 			await expect(cancelledRow.getByText('Cancelled')).toBeVisible();
 		} finally {
 			await deleteAnalysisViaUI(page, analysisName).catch(() => undefined);
-			await deleteDatasourceViaUI(page, dsName).catch(() => undefined);
 		}
 	});
 });

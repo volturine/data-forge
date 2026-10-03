@@ -753,6 +753,7 @@ class TestDataSourceDelete:
         assert response.status_code == 202
         assert client_from_settings().object_exists(file_path)
 
+        test_db_session.expire_all()
         stored = test_db_session.get(DataSource, datasource_id)
         assert stored is not None
         assert stored.is_pending_delete is True

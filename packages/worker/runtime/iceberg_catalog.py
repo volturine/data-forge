@@ -6,13 +6,32 @@ from typing import Any
 
 import psycopg
 from pyiceberg.catalog import load_catalog
-from sqlalchemy.exc import ProgrammingError
+from sqlalchemy.exc import IntegrityError, ProgrammingError
 
 logger = logging.getLogger(__name__)
 
 _SQL_CATALOG_BOOTSTRAP_LOCK_KEY = 4815162343
 _sql_catalog_bootstrapped_uris: set[str] = set()
 _sql_catalog_bootstrapped_uris_guard = threading.Lock()
+
+
+def _is_concurrent_namespace_create(error: IntegrityError) -> bool:
+    original = error.orig
+    diagnostic = getattr(original, "diag", None)
+    return (
+        getattr(original, "sqlstate", None) == "23505"
+        and getattr(diagnostic, "table_name", None) == "iceberg_namespace_properties"
+        and getattr(diagnostic, "constraint_name", None) == "iceberg_namespace_properties_pkey"
+    )
+
+
+def ensure_catalog_namespace(catalog: Any, namespace: str) -> None:
+    try:
+        catalog.create_namespace_if_not_exists(namespace)
+    except IntegrityError as exc:
+        if not _is_concurrent_namespace_create(exc) or not catalog.namespace_exists(namespace):
+            raise
+        logger.info("Namespace %s was created concurrently; continuing", namespace)
 
 
 def _normalized_database_url(database_url: str) -> str:

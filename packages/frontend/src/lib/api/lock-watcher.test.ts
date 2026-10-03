@@ -19,6 +19,7 @@ class MockWebSocket {
 	url: string;
 	readyState = MockWebSocket.OPEN;
 	sent: string[] = [];
+	closeCalls = 0;
 	private listeners = new Map<string, Listener[]>();
 
 	constructor(url: string) {
@@ -35,6 +36,7 @@ class MockWebSocket {
 	}
 
 	close() {
+		this.closeCalls += 1;
 		this.emit('close', { code: 1000, reason: '' });
 	}
 
@@ -202,6 +204,41 @@ describe('openLockSession', () => {
 		session.close();
 		vi.advanceTimersByTime(10_000);
 		expect(socket.sent).toHaveLength(1);
+	});
+
+	test('close releases an owned lock before closing the websocket', () => {
+		const session = openLockSession({
+			resourceType: 'analysis',
+			resourceId: 'a-5-release',
+			onStatus: () => {}
+		});
+
+		const socket = MockWebSocket.instances[0];
+		socket.emit('open');
+		session.acquire();
+		socket.emit('message', {
+			data: JSON.stringify({
+				type: 'status',
+				resource_type: 'analysis',
+				resource_id: 'a-5-release',
+				lock: { owner_id: 'client-1', lock_token: 'tok-release' }
+			})
+		});
+
+		session.close();
+
+		expect(JSON.parse(socket.sent[2])).toEqual({ action: 'release', lock_token: 'tok-release' });
+		expect(socket.closeCalls).toBe(0);
+
+		socket.emit('message', {
+			data: JSON.stringify({
+				type: 'status',
+				resource_type: 'analysis',
+				resource_id: 'a-5-release',
+				lock: null
+			})
+		});
+		expect(socket.closeCalls).toBe(1);
 	});
 
 	test('reconnects and re-watches after a transient close', () => {

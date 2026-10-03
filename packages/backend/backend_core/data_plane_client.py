@@ -1,8 +1,12 @@
 from __future__ import annotations
 
-from collections.abc import Callable
+import os
+import tempfile
+import threading
+from collections.abc import Callable, Generator, Iterable
 from dataclasses import dataclass
-from typing import TypeVar, cast
+from pathlib import Path
+from typing import BinaryIO, TypeVar, cast
 
 import grpc
 from google.protobuf import json_format
@@ -12,6 +16,36 @@ from dataforge_protocol import common_pb2, iceberg_pb2, iceberg_pb2_grpc, object
 
 _TOKEN_METADATA_KEY = 'x-internal-token'
 _MAX_DATA_PLANE_MESSAGE_BYTES = 128 * 1024 * 1024
+_MAX_OBJECT_TRANSFER_BYTES = 2 * 1024 * 1024 * 1024
+_OBJECT_TRANSFER_CHUNK_BYTES = 8 * 1024 * 1024
+# Keep bounded in-memory artifacts aligned with worker runtime.compute_service.MAX_DOWNLOAD_BYTES.
+_MAX_IN_MEMORY_OBJECT_BYTES = 10 * 1024 * 1024
+
+_channel_lock = threading.Lock()
+_channels: dict[str, grpc.Channel] = {}
+
+
+def _shared_channel(target: str) -> grpc.Channel:
+    """One channel per target for the whole process.
+
+    A client is constructed per request handler; gRPC channels are thread-safe
+    and multiplex concurrent calls, so building one per client charged every
+    request a DNS, TCP and HTTP/2 handshake.
+    """
+    with _channel_lock:
+        channel = _channels.get(target)
+        if channel is None:
+            channel = grpc.insecure_channel(
+                target,
+                options=(
+                    ('grpc.max_send_message_length', _MAX_DATA_PLANE_MESSAGE_BYTES),
+                    ('grpc.max_receive_message_length', _MAX_DATA_PLANE_MESSAGE_BYTES),
+                ),
+            )
+            _channels[target] = channel
+        return channel
+
+
 _T = TypeVar('_T')
 
 
@@ -59,13 +93,7 @@ class WorkerDataPlaneClient:
         self._token = token if token is not None else settings.internal_api_token
         self._timeout_seconds = timeout_seconds
         self._trivial_timeout_seconds = trivial_timeout_seconds
-        self._channel = grpc.insecure_channel(
-            self._target,
-            options=(
-                ('grpc.max_send_message_length', _MAX_DATA_PLANE_MESSAGE_BYTES),
-                ('grpc.max_receive_message_length', _MAX_DATA_PLANE_MESSAGE_BYTES),
-            ),
-        )
+        self._channel = _shared_channel(self._target)
         self._object_store = object_store_pb2_grpc.ObjectStoreServiceStub(self._channel)
         self._iceberg = iceberg_pb2_grpc.IcebergServiceStub(self._channel)
 
@@ -109,16 +137,151 @@ class WorkerDataPlaneClient:
         )
 
     def upload_object_bytes(self, data: bytes, target_url: str, *, content_type: str | None = None) -> str:
-        request = object_store_pb2.ObjectStoreBytes(target=object_store_pb2.ObjectStoreUrl(url=target_url), data=data)
-        if content_type is not None:
-            request.content_type = content_type
-        return self._call(lambda: self._object_store.UploadBytes(request, timeout=self._timeout_seconds, metadata=self._metadata())).url
+        if len(data) > _MAX_IN_MEMORY_OBJECT_BYTES:
+            raise ValueError(f'in-memory object uploads are limited to {_MAX_IN_MEMORY_OBJECT_BYTES} bytes')
+        chunks = (data[offset : offset + _OBJECT_TRANSFER_CHUNK_BYTES] for offset in range(0, len(data), _OBJECT_TRANSFER_CHUNK_BYTES))
+        return self.upload_object_stream(chunks, target_url, content_type=content_type)
+
+    def upload_object_file(
+        self,
+        path: Path,
+        target_url: str,
+        *,
+        max_bytes: int,
+        content_type: str | None = None,
+    ) -> str:
+        def chunks() -> Generator[bytes]:
+            with path.open('rb') as source:
+                while chunk := source.read(_OBJECT_TRANSFER_CHUNK_BYTES):
+                    yield chunk
+
+        stream = chunks()
+        try:
+            return self.upload_object_stream(stream, target_url, max_bytes=max_bytes, content_type=content_type)
+        finally:
+            stream.close()
+
+    def upload_object_fileobj(
+        self,
+        source: BinaryIO,
+        target_url: str,
+        *,
+        max_bytes: int,
+        content_type: str | None = None,
+    ) -> str:
+        def chunks() -> Generator[bytes]:
+            while chunk := source.read(_OBJECT_TRANSFER_CHUNK_BYTES):
+                yield chunk
+
+        stream = chunks()
+        try:
+            return self.upload_object_stream(stream, target_url, max_bytes=max_bytes, content_type=content_type)
+        finally:
+            stream.close()
+
+    def upload_object_stream(
+        self,
+        chunks: Iterable[bytes],
+        target_url: str,
+        *,
+        max_bytes: int = _MAX_OBJECT_TRANSFER_BYTES,
+        content_type: str | None = None,
+    ) -> str:
+        bounded_limit = min(max_bytes or _MAX_OBJECT_TRANSFER_BYTES, _MAX_OBJECT_TRANSFER_BYTES)
+
+        def requests() -> Generator[object_store_pb2.ObjectStoreUploadRequest]:
+            start = object_store_pb2.ObjectStoreUploadStart(
+                target=object_store_pb2.ObjectStoreUrl(url=target_url),
+                max_bytes=bounded_limit,
+            )
+            if content_type is not None:
+                start.content_type = content_type
+            yield object_store_pb2.ObjectStoreUploadRequest(start=start)
+            total = 0
+            try:
+                for chunk in chunks:
+                    if not chunk:
+                        continue
+                    if len(chunk) > _OBJECT_TRANSFER_CHUNK_BYTES:
+                        raise ValueError(f'object upload chunks must not exceed {_OBJECT_TRANSFER_CHUNK_BYTES} bytes')
+                    total += len(chunk)
+                    if total > bounded_limit:
+                        raise ValueError(f'object upload exceeds {bounded_limit} byte limit')
+                    yield object_store_pb2.ObjectStoreUploadRequest(chunk=object_store_pb2.ObjectStoreUploadChunk(data=chunk))
+            except Exception:
+                yield object_store_pb2.ObjectStoreUploadRequest(abort=object_store_pb2.ObjectStoreUploadAbort())
+                raise
+            yield object_store_pb2.ObjectStoreUploadRequest(commit=object_store_pb2.ObjectStoreUploadCommit())
+
+        request_stream = requests()
+        request_lock = threading.Lock()
+
+        class RequestIterator:
+            def __iter__(self) -> RequestIterator:
+                return self
+
+            def __next__(self) -> object_store_pb2.ObjectStoreUploadRequest:
+                with request_lock:
+                    return next(request_stream)
+
+            def close(self) -> None:
+                with request_lock:
+                    request_stream.close()
+
+        request_iterator = RequestIterator()
+        try:
+            return self._call(lambda: self._object_store.UploadObject(request_iterator, timeout=self._timeout_seconds, metadata=self._metadata())).url
+        finally:
+            request_iterator.close()
 
     def download_object_bytes(self, source_url: str) -> bytes:
-        response = self._call(
-            lambda: self._object_store.DownloadBytes(object_store_pb2.ObjectStoreUrl(url=source_url), timeout=self._timeout_seconds, metadata=self._metadata())
+        chunks: list[bytes] = []
+        total = 0
+        stream = self.download_object_stream(source_url)
+        try:
+            for chunk in stream:
+                total += len(chunk)
+                if total > _MAX_IN_MEMORY_OBJECT_BYTES:
+                    raise ValueError(f'in-memory object downloads are limited to {_MAX_IN_MEMORY_OBJECT_BYTES} bytes')
+                chunks.append(chunk)
+        finally:
+            stream.close()
+        return b''.join(chunks)
+
+    def download_object_file(self, source_url: str, path: Path) -> Path:
+        path.parent.mkdir(parents=True, exist_ok=True)
+        descriptor, partial_name = tempfile.mkstemp(prefix=f'.{path.name}.', suffix='.partial', dir=path.parent)
+        os.close(descriptor)
+        partial_path = Path(partial_name)
+        stream = self.download_object_stream(source_url)
+        try:
+            with partial_path.open('wb') as destination:
+                for chunk in stream:
+                    destination.write(chunk)
+            os.replace(partial_path, path)
+            return path
+        finally:
+            try:
+                stream.close()
+            finally:
+                partial_path.unlink(missing_ok=True)
+
+    def download_object_stream(self, source_url: str) -> Generator[bytes]:
+        responses = self._call(
+            lambda: self._object_store.DownloadObject(object_store_pb2.ObjectStoreUrl(url=source_url), timeout=self._timeout_seconds, metadata=self._metadata())
         )
-        return bytes(response.data)
+        completed = False
+        try:
+            for response in responses:
+                yield bytes(response.data)
+            completed = True
+        except grpc.RpcError as exc:
+            code = exc.code()
+            details = exc.details() or f'Worker data-plane call to {self._target} failed'
+            raise WorkerDataPlaneError(target=self._target, code=code, details=details) from exc
+        finally:
+            if not completed:
+                responses.cancel()
 
     def delete_object(self, source_url: str) -> None:
         self._call(
@@ -239,7 +402,7 @@ class WorkerDataPlaneClient:
         return ((_TOKEN_METADATA_KEY, self._token),)
 
     def close(self) -> None:
-        self._channel.close()
+        """Release the client. The channel is process-shared and stays open."""
 
     def __enter__(self) -> WorkerDataPlaneClient:
         return self

@@ -1,13 +1,15 @@
 import uuid
 from datetime import UTC, datetime
+from typing import Any
 
 import pytest
-from sqlmodel import Session
+from sqlmodel import Session, select
 
 from backend_core.domain.datasource.source_types import DataSourceType
+from backend_core.exceptions import AppError
 from backend_core.persistence.datasource.models import DataSource
 from dataforge_protocol import datasource_pb2
-from modules.datasource import publication_service
+from modules.datasource import commands as datasource_commands, publication_service
 
 
 def test_create_datasource_persists_metadata(test_db_session: Session) -> None:
@@ -31,6 +33,25 @@ def test_create_datasource_persists_metadata(test_db_session: Session) -> None:
     stored = test_db_session.get(DataSource, datasource_id)
     assert stored is not None
     assert stored.revision == 1
+
+
+def test_create_datasource_replay_returns_existing_row(test_db_session: Session) -> None:
+    datasource_id = str(uuid.uuid4())
+    kwargs: dict[str, Any] = {
+        'datasource_id': datasource_id,
+        'name': 'Replay-safe',
+        'description': 'desc',
+        'source_type': DataSourceType.ICEBERG.value,
+        'config': {'metadata_path': 's3://bucket/clean/replay/master', 'branch': 'master'},
+        'owner_id': None,
+    }
+
+    first = publication_service.create_datasource(test_db_session, **kwargs)
+    replay = publication_service.create_datasource(test_db_session, **kwargs)
+
+    rows = test_db_session.exec(select(DataSource).where(DataSource.id == datasource_id)).all()
+    assert replay.id == first.id == datasource_id
+    assert len(rows) == 1
 
 
 def test_publish_ingest_fences_on_revision(test_db_session: Session) -> None:
@@ -85,9 +106,109 @@ def test_publish_schema_cache(test_db_session: Session) -> None:
         columns=[datasource_pb2.ColumnSchema(name='x', dtype='Utf8', nullable=True, sample_value='a')],
         row_count=2,
     )
-    published = publication_service.publish_schema_cache(test_db_session, datasource_id=datasource_id, schema_info=schema)
+    published = publication_service.publish_schema_cache(
+        test_db_session,
+        datasource_id=datasource_id,
+        expected_revision=1,
+        schema_info=schema,
+        publication_guard=lambda _session: None,
+    )
     assert published.row_count == 2
     stored = test_db_session.get(DataSource, datasource_id)
     assert stored is not None
     assert stored.schema_cache is not None
     assert stored.schema_cache['row_count'] == 2
+
+
+def test_publish_schema_cache_rejects_datasource_pending_delete(test_db_session: Session) -> None:
+    datasource_id = str(uuid.uuid4())
+    test_db_session.add(
+        DataSource(
+            id=datasource_id,
+            name='Pending schema',
+            source_type=DataSourceType.ICEBERG.value,
+            config={'metadata_path': 's3://bucket/ds'},
+            is_pending_delete=True,
+            created_at=datetime.now(UTC),
+        )
+    )
+    test_db_session.commit()
+
+    with pytest.raises(AppError, match=f'DataSource {datasource_id} not found'):
+        publication_service.publish_schema_cache(
+            test_db_session,
+            datasource_id=datasource_id,
+            expected_revision=1,
+            schema_info=datasource_pb2.SchemaInfo(row_count=1),
+            publication_guard=lambda _session: None,
+        )
+
+
+def test_publish_schema_cache_rejects_schema_from_outdated_source_revision(test_db_session: Session) -> None:
+    datasource_id = str(uuid.uuid4())
+    test_db_session.add(
+        DataSource(
+            id=datasource_id,
+            name='Changed while schema was loading',
+            source_type=DataSourceType.FILE.value,
+            config={'file_path': 's3://bucket/new.csv'},
+            revision=2,
+            schema_cache={'columns': [{'name': 'new_column', 'dtype': 'Int64', 'nullable': True}]},
+            created_at=datetime.now(UTC),
+        )
+    )
+    test_db_session.commit()
+
+    with pytest.raises(publication_service.DatasourcePublicationRevisionChanged, match='revision changed'):
+        publication_service.publish_schema_cache(
+            test_db_session,
+            datasource_id=datasource_id,
+            expected_revision=1,
+            schema_info=datasource_pb2.SchemaInfo(columns=[datasource_pb2.ColumnSchema(name='old_column', dtype='String', nullable=True)]),
+            publication_guard=lambda _session: None,
+        )
+
+    stored = test_db_session.get(DataSource, datasource_id)
+    assert stored is not None
+    assert stored.revision == 2
+    assert stored.schema_cache == {'columns': [{'name': 'new_column', 'dtype': 'Int64', 'nullable': True}]}
+
+
+def test_output_publication_reactivates_pending_delete_row(test_db_session: Session) -> None:
+    datasource_id = str(uuid.uuid4())
+    test_db_session.add(
+        DataSource(
+            id=datasource_id,
+            name='Pending output',
+            source_type=DataSourceType.ICEBERG.value,
+            config={'metadata_path': 's3://bucket/old'},
+            schema_cache={'row_count': 1},
+            is_hidden=True,
+            is_pending_delete=True,
+            delete_requested_at=datetime.now(UTC),
+            created_at=datetime.now(UTC),
+        )
+    )
+    test_db_session.commit()
+
+    published = datasource_commands.upsert_output_datasource(
+        test_db_session,
+        result_id=datasource_id,
+        name='Republished output',
+        source_type=DataSourceType.ICEBERG.value,
+        config={'metadata_path': 's3://bucket/new'},
+        schema_cache={'row_count': 2},
+        keep_schema_cache=False,
+        analysis_id='analysis-1',
+        is_hidden=True,
+        claim=None,
+        notification_deliveries=[],
+    )
+
+    assert published.id == datasource_id
+    stored = test_db_session.get(DataSource, datasource_id)
+    assert stored is not None
+    assert stored.is_pending_delete is False
+    assert stored.delete_requested_at is None
+    assert stored.config == {'metadata_path': 's3://bucket/new'}
+    assert stored.revision == 2

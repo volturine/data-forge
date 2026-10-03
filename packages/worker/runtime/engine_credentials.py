@@ -1,10 +1,11 @@
 from __future__ import annotations
 
-import json
+import threading
+from concurrent.futures import Future
 from dataclasses import dataclass
 
 from dataforge_protocol import compute_pb2, enums_pb2
-from runtime.config import settings
+from runtime.worker_runtime_client import client_from_env
 
 
 @dataclass(frozen=True, slots=True)
@@ -14,65 +15,54 @@ class ObjectStoreCredentials:
     session_token: str | None = None
 
 
+# Engine launches are latency-critical and every launch needs the namespace's
+# credential. The backend provisions each namespace role once and never
+# rewrites it, so the resolved identity is cached for the worker's lifetime.
+_cache: dict[tuple[str, str], ObjectStoreCredentials] = {}
+_inflight: dict[tuple[str, str], Future[ObjectStoreCredentials]] = {}
+_cache_lock = threading.Lock()
+
+
 def _credential_role(identity: compute_pb2.EngineIdentity) -> str:
-    return "builder" if identity.scope == enums_pb2.ENGINE_SCOPE_BUILD else "reader"
-
-
-def _configured_credentials(namespace: str, role: str) -> ObjectStoreCredentials | None:
-    raw = settings.engine_object_store_credentials_json.strip()
-    if not raw:
-        return None
-    try:
-        document = json.loads(raw)
-        values = document[namespace][role]
-        access_key = values["access_key"]
-        secret_key = values["secret_key"]
-        session_token = values.get("session_token")
-    except (KeyError, TypeError, json.JSONDecodeError) as exc:
-        raise RuntimeError(f"Missing valid {role} object-store credentials for namespace {namespace!r}") from exc
-    if not isinstance(access_key, str) or not access_key or not isinstance(secret_key, str) or not secret_key:
-        raise RuntimeError(f"Missing valid {role} object-store credentials for namespace {namespace!r}")
-    if session_token is not None and not isinstance(session_token, str):
-        raise RuntimeError(f"Invalid session token for namespace {namespace!r}")
-    return ObjectStoreCredentials(access_key=access_key, secret_key=secret_key, session_token=session_token)
-
-
-def validate_configured_engine_credentials() -> None:
-    """Validate the complete static namespace credential map at worker startup."""
-    raw = settings.engine_object_store_credentials_json.strip()
-    if not raw:
-        if settings.prod_mode_enabled:
-            raise RuntimeError("ENGINE_OBJECT_STORE_CREDENTIALS_JSON is required in production")
-        return
-    try:
-        document = json.loads(raw)
-    except json.JSONDecodeError as exc:
-        raise RuntimeError("ENGINE_OBJECT_STORE_CREDENTIALS_JSON must be valid JSON") from exc
-    if not isinstance(document, dict) or not document:
-        raise RuntimeError("ENGINE_OBJECT_STORE_CREDENTIALS_JSON must contain at least one namespace")
-    for namespace, roles in document.items():
-        if not isinstance(namespace, str) or not namespace or not isinstance(roles, dict):
-            raise RuntimeError("Each engine credential entry must map a namespace to reader and builder roles")
-        for role in ("reader", "builder"):
-            credentials = _configured_credentials(namespace, role)
-            if settings.prod_mode_enabled and (
-                credentials is None or credentials.access_key == settings.object_store_access_key or credentials.secret_key == settings.object_store_secret_key
-            ):
-                raise RuntimeError(f"Production {role} credentials for namespace {namespace!r} must not reuse platform credentials")
+    return "builder" if identity.scope in {enums_pb2.ENGINE_SCOPE_BUILD, enums_pb2.ENGINE_SCOPE_DATASOURCE_PREVIEW} else "reader"
 
 
 def resolve_engine_credentials(namespace: str, identity: compute_pb2.EngineIdentity) -> ObjectStoreCredentials:
-    """Resolve only namespace-scoped credentials for an engine launch."""
-    credentials = _configured_credentials(namespace, _credential_role(identity))
-    if credentials is None:
-        if not settings.engine_allow_global_object_store_credentials or settings.prod_mode_enabled:
-            raise RuntimeError(f"Namespace-scoped object-store credentials are required for engine namespace {namespace!r}")
-        credentials = ObjectStoreCredentials(
-            access_key=settings.object_store_access_key,
-            secret_key=settings.object_store_secret_key,
-        )
-    if settings.prod_mode_enabled and (
-        credentials.access_key == settings.object_store_access_key or credentials.secret_key == settings.object_store_secret_key
-    ):
-        raise RuntimeError("Production engine credentials must not reuse platform object-store credentials")
+    """Fetch namespace-scoped engine credentials from the backend.
+
+    The backend provisions one reader and one builder identity per namespace.
+    Datasource containers need the builder role to stream claim-scoped staging
+    artifacts; both roles remain confined to their namespace bucket. A missing
+    record fails the launch; there is no broader-credential fallback.
+    """
+    role = _credential_role(identity)
+    key = (namespace, role)
+    with _cache_lock:
+        cached = _cache.get(key)
+        if cached is not None:
+            return cached
+        flight = _inflight.get(key)
+        if flight is None:
+            flight = Future()
+            _inflight[key] = flight
+            owns_flight = True
+        else:
+            owns_flight = False
+
+    if not owns_flight:
+        return flight.result()
+
+    try:
+        response = client_from_env().engine_credentials(namespace=namespace, role=role)
+        credentials = ObjectStoreCredentials(access_key=response.access_key, secret_key=response.secret_key)
+    except BaseException as exc:
+        with _cache_lock:
+            _inflight.pop(key, None)
+        flight.set_exception(exc)
+        raise
+
+    with _cache_lock:
+        _cache[key] = credentials
+        _inflight.pop(key, None)
+    flight.set_result(credentials)
     return credentials

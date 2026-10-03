@@ -9,6 +9,9 @@
 # Test artifacts (package-local)
 packages/*/tests/.artifacts/
 .artifacts/
+.test-artifacts/
+/.e2e-artifacts*/
+/.e2e-logs*/
 
 # Protocol code generated from packages/protocol.
 packages/backend/buf/
@@ -30,3 +33,5 @@ node_modules/
 .docker-home/
 
 *__pycache__/
+.reqtrace/
+pi-session-*.html

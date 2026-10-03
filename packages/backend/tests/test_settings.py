@@ -1,7 +1,12 @@
 """Tests for the settings module — GET/PUT settings, test SMTP/Telegram."""
 
+import asyncio
+import gc
+import threading
 import uuid
-from concurrent.futures import ThreadPoolExecutor
+from collections.abc import AsyncIterator
+from concurrent.futures import Future, ThreadPoolExecutor
+from typing import Any, cast
 from unittest.mock import MagicMock, patch
 
 import httpx
@@ -11,6 +16,40 @@ from sqlmodel import Session, create_engine
 
 from backend_core.secrets import MASKED_SECRET, decrypt_secret, encrypt_secret
 from tests.http_client import TestClient
+
+
+@pytest.fixture
+async def smtp_loop_errors() -> AsyncIterator[list[dict[str, object]]]:
+    loop = asyncio.get_running_loop()
+    previous_handler = loop.get_exception_handler()
+    errors: list[dict[str, object]] = []
+
+    def _record_error(_loop: asyncio.AbstractEventLoop, context: dict[str, object]) -> None:
+        errors.append(context)
+
+    loop.set_exception_handler(_record_error)
+    try:
+        yield errors
+        # Drain result propagation after the tests join their SMTP worker threads.
+        await asyncio.sleep(0)
+        await asyncio.sleep(0)
+        gc.collect()
+        assert errors == []
+    finally:
+        loop.set_exception_handler(previous_handler)
+
+
+async def _smtp_settings_lookup(_operation: object) -> dict[str, object]:
+    return {'host': 'smtp.test.com', 'port': 587, 'user': 'user@test.com', 'password': 'pw'}
+
+
+def _use_smtp_test_executor(monkeypatch, executor: object, deadline: float = 12.0) -> None:
+    from modules.settings import routes
+
+    monkeypatch.setattr(routes, 'run_api_blocking', _smtp_settings_lookup)
+    monkeypatch.setattr(routes, '_SMTP_TEST_EXECUTOR', executor)
+    monkeypatch.setattr(routes, '_SMTP_TEST_CAPACITY', threading.BoundedSemaphore(1))
+    monkeypatch.setattr(routes, '_SMTP_TEST_DEADLINE', deadline)
 
 
 def _make_postgres_engine(prefix: str = 'settings'):
@@ -29,15 +68,6 @@ def _make_postgres_engine(prefix: str = 'settings'):
         connection.execute(text(f'CREATE SCHEMA IF NOT EXISTS "{schema}"'))
         SQLModel.metadata.create_all(connection)
     return engine, schema
-
-
-@pytest.fixture(autouse=True)
-def stub_telegram_bot_lifecycle():
-    with (
-        patch('modules.telegram.bot.telegram_bot.start'),
-        patch('modules.telegram.bot.telegram_bot.stop'),
-    ):
-        yield
 
 
 class TestGetSettings:
@@ -79,49 +109,63 @@ class TestGetSettings:
 
 
 class TestConfigRoute:
-    def test_frontend_config_cache_expires_and_invalidates(self, monkeypatch: pytest.MonkeyPatch) -> None:
-        from modules.config.routes import FrontendConfig, FrontendConfigCache
+    def test_config_endpoint_reads_current_persisted_settings(self, client: TestClient, monkeypatch) -> None:
+        from backend_core.database import run_settings_db
+        from backend_core.settings_schemas import SettingsUpdate
+        from backend_core.settings_store import update_settings
 
-        clock = iter((100.0, 100.0, 111.0, 111.0, 112.0))
-        monkeypatch.setattr('modules.config.routes.time.monotonic', lambda: next(clock))
-        cache = FrontendConfigCache(ttl=10.0)
-        calls = 0
+        monkeypatch.setenv('SETTINGS_ENCRYPTION_KEY', 'test-key')
+        initial = client.get('/api/v1/config')
+        assert initial.status_code == 200
+        assert initial.json()['public_idb_debug'] is False
 
-        def create() -> FrontendConfig:
-            nonlocal calls
-            calls += 1
-            return FrontendConfig(
-                timezone='UTC',
-                normalize_tz=False,
-                log_client_batch_size=1,
-                log_client_flush_interval_ms=1,
-                log_client_dedupe_window_ms=1,
-                log_client_flush_cooldown_ms=1,
-                log_queue_max_size=1,
-                public_idb_debug=False,
-                smtp_enabled=False,
-                telegram_enabled=False,
-                default_namespace='public',
-                auth_required=False,
-                verify_email_address=False,
-            )
+        run_settings_db(
+            update_settings,
+            SettingsUpdate(
+                smtp_host='mail.example.com',
+                smtp_user='user@example.com',
+                telegram_bot_enabled=True,
+                telegram_bot_token='bot123:abc',
+                public_idb_debug=True,
+            ),
+        )
 
-        first = cache.get_or_create(create)
-        assert cache.get_or_create(create) is first
-        assert cache.get_or_create(create) is not first
-        cache.invalidate()
-        assert cache.get_or_create(create) is not first
-        assert calls == 3
-
-    def test_config_endpoint_returns_cached_frontend_config(self, client: TestClient) -> None:
         resp = client.get('/api/v1/config')
         assert resp.status_code == 200
         data = resp.json()
+        assert data['public_idb_debug'] is True
+        assert data['smtp_enabled'] is True
+        assert data['telegram_enabled'] is True
         assert 'default_namespace' in data
         assert 'auth_required' in data
 
 
 class TestNamespaceDatabaseConcurrency:
+    def test_pool_snapshot_identifies_checked_out_connection_owner(self, monkeypatch, tmp_path) -> None:
+        from backend_core import database
+
+        engine = database._create_engine(f'sqlite:///{tmp_path / "pool.db"}', pool_name='tenant')
+        monkeypatch.setattr(database, 'tenant_engine', engine)
+        monkeypatch.setattr(database, 'settings_engine', None)
+        monkeypatch.setattr(database, '_engine_override', None)
+        monkeypatch.setattr(database, '_settings_engine_override', None)
+        try:
+            with engine.connect():
+                snapshot = database.database_pool_snapshot()
+                assert snapshot['tenant_checkedout'] == 1
+                oldest_ms = snapshot['tenant_checkout_oldest_ms']
+                owners = snapshot['tenant_checkout_owners']
+                assert isinstance(oldest_ms, int) and oldest_ms >= 0
+                assert isinstance(owners, str)
+                assert 'MainThread' in owners
+                assert 'test_settings.py' in owners
+                assert 'connection.py' not in owners
+
+            snapshot = database.database_pool_snapshot()
+            assert 'tenant_checkout_owners' not in snapshot
+        finally:
+            engine.dispose()
+
     def test_run_db_is_safe_across_concurrent_threads(self) -> None:
         from backend_core.database import run_db
         from backend_core.namespace import reset_namespace, set_namespace_context
@@ -143,6 +187,19 @@ class TestNamespaceDatabaseConcurrency:
 
 class TestUpdateSettings:
     """PUT /v1/settings — upserts the singleton row."""
+
+    def test_ai_provider_update_does_not_reconfigure_telegram_runtime(self, client: TestClient, monkeypatch) -> None:
+        from backend_core import settings_store
+
+        def unexpected_telegram_lookup():
+            raise AssertionError('AI-only settings updates must not load Telegram settings')
+
+        monkeypatch.setattr(settings_store, 'get_resolved_telegram_settings', unexpected_telegram_lookup)
+
+        response = client.put('/api/v1/settings', json={'openai_default_model': 'e2e-model'})
+
+        assert response.status_code == 200
+        assert response.json()['openai_default_model'] == 'e2e-model'
 
     def test_update_smtp(self, client: TestClient, monkeypatch) -> None:
         monkeypatch.setenv('SETTINGS_ENCRYPTION_KEY', 'test-key')
@@ -355,6 +412,222 @@ class TestTestSmtp:
         data = resp.json()
         assert 'refused' in data['detail'].lower()
 
+    @pytest.mark.asyncio
+    async def test_slow_provider_does_not_block_event_loop(self, monkeypatch) -> None:
+        from backend_core.settings_schemas import TestSmtpRequest
+        from modules.settings.routes import test_smtp
+
+        started = threading.Event()
+        release = threading.Event()
+
+        def _slow_send(*_args, **_kwargs) -> None:
+            started.set()
+            assert release.wait(timeout=2)
+
+        monkeypatch.setattr('modules.settings.routes.send_smtp_message', _slow_send)
+        with ThreadPoolExecutor(max_workers=1) as executor:
+            _use_smtp_test_executor(monkeypatch, executor)
+            request = asyncio.create_task(test_smtp(TestSmtpRequest(to='recipient@test.com')))
+            assert await asyncio.to_thread(started.wait, 1)
+            release.set()
+            result = await request
+
+        assert result.success is True
+
+    @pytest.mark.asyncio
+    async def test_busy_while_provider_call_is_running(self, monkeypatch) -> None:
+        from fastapi import HTTPException
+
+        from backend_core.settings_schemas import TestSmtpRequest
+        from modules.settings.routes import test_smtp
+
+        started = threading.Event()
+        release = threading.Event()
+        calls = 0
+
+        def _slow_send(*_args, **_kwargs) -> None:
+            nonlocal calls
+            calls += 1
+            started.set()
+            assert release.wait(timeout=2)
+
+        monkeypatch.setattr('modules.settings.routes.send_smtp_message', _slow_send)
+        with ThreadPoolExecutor(max_workers=1) as executor:
+            _use_smtp_test_executor(monkeypatch, executor, deadline=1)
+            request = TestSmtpRequest(to='recipient@test.com')
+            first = asyncio.create_task(test_smtp(request))
+            assert await asyncio.to_thread(started.wait, 1)
+            with pytest.raises(HTTPException, match='busy') as exc_info:
+                await test_smtp(request)
+            assert exc_info.value.status_code == 429
+
+            release.set()
+            await first
+
+        assert calls == 1
+
+    @pytest.mark.asyncio
+    async def test_cancellation_before_submission_does_not_consume_capacity(self, monkeypatch, smtp_loop_errors) -> None:
+        from backend_core.settings_schemas import TestSmtpRequest
+        from modules.settings import routes
+
+        waiting = asyncio.Event()
+        continue_lookup = asyncio.Event()
+        sent = threading.Event()
+
+        async def _blocked_lookup(_operation):
+            waiting.set()
+            await continue_lookup.wait()
+            return {'host': 'smtp.test.com', 'port': 587, 'user': 'user@test.com', 'password': 'pw'}
+
+        with ThreadPoolExecutor(max_workers=1) as executor:
+            _use_smtp_test_executor(monkeypatch, executor)
+            monkeypatch.setattr(routes, 'run_api_blocking', _blocked_lookup)
+            monkeypatch.setattr(routes, 'send_smtp_message', lambda *_args, **_kwargs: sent.set())
+            request = asyncio.create_task(routes.test_smtp(TestSmtpRequest(to='recipient@test.com')))
+            await waiting.wait()
+            request.cancel()
+            with pytest.raises(asyncio.CancelledError):
+                await request
+
+            continue_lookup.set()
+            result = await routes.test_smtp(TestSmtpRequest(to='recipient@test.com'))
+
+        assert result.success is True
+        assert sent.is_set()
+
+    @pytest.mark.asyncio
+    async def test_deadline_cancels_executor_work_that_has_not_started(self, monkeypatch, smtp_loop_errors) -> None:
+        from fastapi import HTTPException
+
+        from backend_core.settings_schemas import TestSmtpRequest
+        from modules.settings import routes
+
+        class DelayedExecutor:
+            def __init__(self) -> None:
+                self.future: Future[None] = Future()
+
+            def submit(self, *_args: object, **_kwargs: object) -> Future[None]:
+                return self.future
+
+        executor = DelayedExecutor()
+        sent = threading.Event()
+        monkeypatch.setattr(routes, 'send_smtp_message', lambda *_args, **_kwargs: sent.set())
+        monkeypatch.setattr(routes, 'run_api_blocking', _smtp_settings_lookup)
+        monkeypatch.setattr(routes, '_SMTP_TEST_EXECUTOR', executor)
+        monkeypatch.setattr(routes, '_SMTP_TEST_CAPACITY', threading.BoundedSemaphore(1))
+        monkeypatch.setattr(routes, '_SMTP_TEST_DEADLINE', 0.01)
+
+        with pytest.raises(HTTPException) as exc_info:
+            await routes.test_smtp(TestSmtpRequest(to='recipient@test.com'))
+
+        assert exc_info.value.status_code == 504
+        assert 'not sent' in exc_info.value.detail
+        assert executor.future.cancelled()
+        assert not executor.future.set_running_or_notify_cancel()
+        assert not sent.is_set()
+
+    @pytest.mark.asyncio
+    async def test_timeout_keeps_admission_occupied_until_worker_settles(self, monkeypatch, smtp_loop_errors) -> None:
+        from fastapi import HTTPException
+
+        from backend_core.settings_schemas import TestSmtpRequest
+        from modules.settings.routes import test_smtp
+
+        started = threading.Event()
+        release = threading.Event()
+        finished = threading.Event()
+        calls = 0
+
+        def _slow_send(*_args, **_kwargs) -> None:
+            nonlocal calls
+            calls += 1
+            started.set()
+            if calls == 1:
+                assert release.wait(timeout=5)
+                finished.set()
+
+        monkeypatch.setattr('modules.settings.routes.send_smtp_message', _slow_send)
+        with ThreadPoolExecutor(max_workers=1) as executor:
+            _use_smtp_test_executor(monkeypatch, executor, deadline=0.05)
+            request = TestSmtpRequest(to='recipient@test.com')
+            first = asyncio.create_task(test_smtp(request))
+            assert await asyncio.to_thread(started.wait, 1)
+            with pytest.raises(HTTPException) as exc_info:
+                await first
+            assert exc_info.value.status_code == 504
+            assert 'may have accepted' in exc_info.value.detail
+
+            with pytest.raises(HTTPException) as busy:
+                await test_smtp(request)
+            assert busy.value.status_code == 429
+
+            release.set()
+            assert await asyncio.to_thread(finished.wait, 1)
+
+            loop = asyncio.get_running_loop()
+            admission_deadline = loop.time() + 1
+            while True:
+                try:
+                    result = await test_smtp(request)
+                except HTTPException as exc:
+                    assert exc.status_code == 429
+                    assert loop.time() < admission_deadline
+                    await asyncio.sleep(0.01)
+                    continue
+                break
+
+        assert result.success is True
+        assert calls == 2
+
+    @pytest.mark.asyncio
+    @pytest.mark.parametrize('cancel_request', [False, True])
+    async def test_ended_request_observes_late_smtp_error(self, monkeypatch, smtp_loop_errors, cancel_request: bool) -> None:
+        from fastapi import HTTPException
+
+        from backend_core.settings_schemas import TestSmtpRequest
+        from modules.settings.routes import test_smtp
+
+        started = threading.Event()
+        finished = threading.Event()
+        release = threading.Event()
+
+        def _late_failure(*_args, **_kwargs) -> None:
+            started.set()
+            assert release.wait(timeout=2)
+            try:
+                raise RuntimeError('late SMTP failure')
+            finally:
+                finished.set()
+
+        monkeypatch.setattr('modules.settings.routes.send_smtp_message', _late_failure)
+        with ThreadPoolExecutor(max_workers=1) as executor:
+            _use_smtp_test_executor(monkeypatch, executor, deadline=0.05)
+            request = TestSmtpRequest(to='recipient@test.com')
+            sending = asyncio.create_task(test_smtp(request))
+            assert await asyncio.to_thread(started.wait, 1)
+            if cancel_request:
+                sending.cancel()
+                with pytest.raises(asyncio.CancelledError):
+                    await sending
+            else:
+                with pytest.raises(HTTPException) as exc_info:
+                    await sending
+                assert exc_info.value.status_code == 504
+                assert 'may have accepted' in exc_info.value.detail
+
+            with pytest.raises(HTTPException) as busy:
+                await test_smtp(request)
+            assert busy.value.status_code == 429
+
+            release.set()
+            assert await asyncio.to_thread(finished.wait, 1)
+
+        await asyncio.sleep(0)
+        await asyncio.sleep(0)
+        gc.collect()
+        assert smtp_loop_errors == []
+
 
 class TestTestTelegram:
     """POST /v1/settings/test-telegram — test Telegram sending."""
@@ -379,7 +652,7 @@ class TestTestTelegram:
         assert data['success'] is False
         assert 'not configured' in data['message'].lower()
 
-    @patch('modules.settings.routes.http_client.post')
+    @patch('modules.settings.routes.httpx.AsyncClient.post')
     def test_success(self, mock_post: MagicMock, client: TestClient, monkeypatch) -> None:
         monkeypatch.setenv('SETTINGS_ENCRYPTION_KEY', 'test-key')
         mock_resp = MagicMock()
@@ -404,7 +677,7 @@ class TestTestTelegram:
         data = resp.json()
         assert data['success'] is True
 
-    @patch('modules.settings.routes.http_client.post')
+    @patch('modules.settings.routes.httpx.AsyncClient.post')
     def test_api_error(self, mock_post: MagicMock, client: TestClient, monkeypatch) -> None:
         monkeypatch.setenv('SETTINGS_ENCRYPTION_KEY', 'test-key')
         mock_resp = MagicMock()
@@ -431,7 +704,7 @@ class TestTestTelegram:
         assert data['success'] is False
         assert 'chat not found' in data['message'].lower()
 
-    @patch('modules.settings.routes.http_client.post')
+    @patch('modules.settings.routes.httpx.AsyncClient.post')
     def test_transport_failure(self, mock_post: MagicMock, client: TestClient, monkeypatch) -> None:
         monkeypatch.setenv('SETTINGS_ENCRYPTION_KEY', 'test-key')
         mock_post.side_effect = httpx.ConnectError('Connection refused')
@@ -538,241 +811,51 @@ class TestGenerateUuid:
 
 
 class TestDetectTelegramChat:
-    """POST /v1/settings/detect-telegram-chat — detect chat IDs via getUpdates."""
+    def test_not_configured(self, client: TestClient) -> None:
+        client.put('/api/v1/settings', json={'telegram_bot_token': '', 'telegram_bot_enabled': False})
+        response = client.post('/api/v1/settings/detect-telegram-chat')
+        assert response.status_code == 200
+        assert response.json()['success'] is False
+        assert response.json()['chats'] == []
 
-    def test_not_configured(self, client: TestClient, monkeypatch) -> None:
-        monkeypatch.setenv('SETTINGS_ENCRYPTION_KEY', 'test-key')
-        client.put(
-            '/api/v1/settings',
-            json={
-                'smtp_host': '',
-                'smtp_port': 587,
-                'smtp_user': '',
-                'smtp_password': '',
-                'telegram_bot_token': '',
-                'telegram_bot_enabled': False,
-                'public_idb_debug': False,
-            },
-        )
-        resp = client.post('/api/v1/settings/detect-telegram-chat')
-        assert resp.status_code == 200
-        data = resp.json()
-        assert data['success'] is False
-        assert 'not configured' in data['message'].lower()
-        assert data['chats'] == []
-
-    @patch('modules.telegram.bot.http_client.get')
-    def test_success_with_chats(self, mock_get: MagicMock, client: TestClient, monkeypatch) -> None:
-        monkeypatch.setenv('SETTINGS_ENCRYPTION_KEY', 'test-key')
-        mock_resp = MagicMock()
-        mock_resp.status_code = 200
-        mock_resp.json.return_value = {
-            'ok': True,
-            'result': [
-                {
-                    'update_id': 1,
-                    'message': {
-                        'chat': {
-                            'id': 123,
-                            'first_name': 'Test User',
-                            'type': 'private',
-                        },
-                        'text': 'hello',
-                    },
-                },
-                {
-                    'update_id': 2,
-                    'message': {
-                        'chat': {'id': 456, 'title': 'Test Group', 'type': 'group'},
-                        'text': 'hi',
-                    },
-                },
-            ],
+    @patch('modules.settings.routes.request_chat_detection')
+    def test_detects_through_owner(self, request_detection, client: TestClient) -> None:
+        request_detection.return_value = {
+            'success': True,
+            'message': 'Found 1 chat(s)',
+            'chats': [{'chat_id': '123', 'title': 'Test User'}],
         }
-        mock_get.return_value = mock_resp
+        client.put('/api/v1/settings', json={'telegram_bot_token': 'bot123:abc', 'telegram_bot_enabled': True})
+        response = client.post('/api/v1/settings/detect-telegram-chat')
+        assert response.status_code == 200
+        assert response.json()['chats'] == [{'chat_id': '123', 'title': 'Test User'}]
+        assert request_detection.await_args.kwargs['token'] == 'bot123:abc'
+        assert request_detection.await_args.kwargs['request_user_id']
+        assert request_detection.await_args.kwargs['namespace']
 
-        client.put(
-            '/api/v1/settings',
-            json={
-                'smtp_host': '',
-                'smtp_port': 587,
-                'smtp_user': '',
-                'smtp_password': '',
-                'telegram_bot_token': 'bot123:abc',
-                'telegram_bot_enabled': True,
-                'public_idb_debug': False,
-            },
-        )
-        resp = client.post('/api/v1/settings/detect-telegram-chat')
-        assert resp.status_code == 200
-        data = resp.json()
-        assert data['success'] is True
-        assert len(data['chats']) == 2
-        ids = {c['chat_id'] for c in data['chats']}
-        assert ids == {'123', '456'}
+    @patch('modules.settings.routes.request_chat_detection')
+    def test_custom_token_uses_authenticated_owner_request(self, request_detection, client: TestClient) -> None:
+        request_detection.return_value = {'success': True, 'message': 'Found 0 chat(s)', 'chats': []}
+        response = client.post('/api/v1/settings/detect-chat-custom', json={'bot_token': 'custom:secret'})
+        assert response.status_code == 200
+        assert request_detection.await_args.kwargs['token'] == 'custom:secret'
+        assert request_detection.await_args.kwargs['request_user_id']
 
-    @patch('modules.telegram.bot.http_client.get')
-    def test_no_updates(self, mock_get: MagicMock, client: TestClient, monkeypatch) -> None:
-        monkeypatch.setenv('SETTINGS_ENCRYPTION_KEY', 'test-key')
-        mock_resp = MagicMock()
-        mock_resp.status_code = 200
-        mock_resp.json.return_value = {'ok': True, 'result': []}
-        mock_get.return_value = mock_resp
+    @pytest.mark.parametrize('failure,status', [('busy', 429), ('timeout', 504), ('transport', 502)])
+    @patch('modules.settings.routes.request_chat_detection')
+    def test_bounded_error_responses(self, request_detection, client: TestClient, failure: str, status: int) -> None:
+        from modules.telegram.runtime import TelegramDetectionFailed, TelegramDetectionTimedOut
+        from modules.telegram.store import DetectionQueueFull
 
-        client.put(
-            '/api/v1/settings',
-            json={
-                'smtp_host': '',
-                'smtp_port': 587,
-                'smtp_user': '',
-                'smtp_password': '',
-                'telegram_bot_token': 'bot123:abc',
-                'telegram_bot_enabled': True,
-                'public_idb_debug': False,
-            },
-        )
-        resp = client.post('/api/v1/settings/detect-telegram-chat')
-        assert resp.status_code == 200
-        data = resp.json()
-        assert data['success'] is True
-        assert len(data['chats']) == 0
-
-    @patch('modules.telegram.bot.http_client.get')
-    def test_deduplicates_chats(self, mock_get: MagicMock, client: TestClient, monkeypatch) -> None:
-        monkeypatch.setenv('SETTINGS_ENCRYPTION_KEY', 'test-key')
-        mock_resp = MagicMock()
-        mock_resp.status_code = 200
-        mock_resp.json.return_value = {
-            'ok': True,
-            'result': [
-                {
-                    'update_id': 1,
-                    'message': {
-                        'chat': {'id': 123, 'first_name': 'User', 'type': 'private'},
-                        'text': 'msg1',
-                    },
-                },
-                {
-                    'update_id': 2,
-                    'message': {
-                        'chat': {'id': 123, 'first_name': 'User', 'type': 'private'},
-                        'text': 'msg2',
-                    },
-                },
-            ],
+        errors = {
+            'busy': DetectionQueueFull('Detection queue is busy'),
+            'timeout': TelegramDetectionTimedOut('Detection deadline expired'),
+            'transport': TelegramDetectionFailed('Provider unavailable'),
         }
-        mock_get.return_value = mock_resp
-
-        client.put(
-            '/api/v1/settings',
-            json={
-                'smtp_host': '',
-                'smtp_port': 587,
-                'smtp_user': '',
-                'smtp_password': '',
-                'telegram_bot_token': 'bot123:abc',
-                'telegram_bot_enabled': True,
-                'public_idb_debug': False,
-            },
-        )
-        resp = client.post('/api/v1/settings/detect-telegram-chat')
-        assert resp.status_code == 200
-        data = resp.json()
-        assert data['success'] is True
-        assert len(data['chats']) == 1
-        assert data['chats'][0]['chat_id'] == '123'
-
-    @patch('modules.telegram.bot.http_client.get')
-    def test_channel_post(self, mock_get: MagicMock, client: TestClient, monkeypatch) -> None:
-        monkeypatch.setenv('SETTINGS_ENCRYPTION_KEY', 'test-key')
-        mock_resp = MagicMock()
-        mock_resp.status_code = 200
-        mock_resp.json.return_value = {
-            'ok': True,
-            'result': [
-                {
-                    'update_id': 1,
-                    'channel_post': {
-                        'chat': {
-                            'id': -100123,
-                            'title': 'My Channel',
-                            'type': 'channel',
-                        },
-                        'text': 'post',
-                    },
-                },
-            ],
-        }
-        mock_get.return_value = mock_resp
-
-        client.put(
-            '/api/v1/settings',
-            json={
-                'smtp_host': '',
-                'smtp_port': 587,
-                'smtp_user': '',
-                'smtp_password': '',
-                'telegram_bot_token': 'bot123:abc',
-                'telegram_bot_enabled': True,
-                'public_idb_debug': False,
-            },
-        )
-        resp = client.post('/api/v1/settings/detect-telegram-chat')
-        assert resp.status_code == 200
-        data = resp.json()
-        assert data['success'] is True
-        assert len(data['chats']) == 1
-        assert data['chats'][0]['title'] == 'My Channel'
-
-    @patch('modules.telegram.bot.http_client.get')
-    def test_api_error(self, mock_get: MagicMock, client: TestClient, monkeypatch) -> None:
-        monkeypatch.setenv('SETTINGS_ENCRYPTION_KEY', 'test-key')
-        mock_resp = MagicMock()
-        mock_resp.status_code = 401
-        mock_resp.text = 'Unauthorized'
-        mock_get.return_value = mock_resp
-
-        client.put(
-            '/api/v1/settings',
-            json={
-                'smtp_host': '',
-                'smtp_port': 587,
-                'smtp_user': '',
-                'smtp_password': '',
-                'telegram_bot_token': 'bad-token',
-                'telegram_bot_enabled': True,
-                'public_idb_debug': False,
-            },
-        )
-        resp = client.post('/api/v1/settings/detect-telegram-chat')
-        assert resp.status_code == 200
-        data = resp.json()
-        assert data['success'] is False
-        assert 'error' in data['message'].lower()
-        assert data['chats'] == []
-
-    @patch('modules.telegram.bot.http_client.get')
-    def test_transport_failure(self, mock_get: MagicMock, client: TestClient, monkeypatch) -> None:
-        monkeypatch.setenv('SETTINGS_ENCRYPTION_KEY', 'test-key')
-        mock_get.side_effect = httpx.ConnectError('Connection refused')
-
-        client.put(
-            '/api/v1/settings',
-            json={
-                'smtp_host': '',
-                'smtp_port': 587,
-                'smtp_user': '',
-                'smtp_password': '',
-                'telegram_bot_token': 'bot123:abc',
-                'telegram_bot_enabled': True,
-                'public_idb_debug': False,
-            },
-        )
-
-        resp = client.post('/api/v1/settings/detect-telegram-chat')
-        assert resp.status_code == 502
-        data = resp.json()
-        assert 'refused' in data['detail'].lower()
+        request_detection.side_effect = errors[failure]
+        response = client.post('/api/v1/settings/detect-chat-custom', json={'bot_token': 'custom:secret'})
+        assert response.status_code == status
+        assert 'custom:secret' not in response.text
 
 
 class TestSeedSettingsFromEnv:
@@ -979,7 +1062,7 @@ class TestSeedSettingsFromEnv:
             assert row.env_bootstrap_complete is True
 
 
-class TestSettingsRuntimeCaches:
+class TestSettingsRuntimeReads:
     def _make_engine(self):
         engine, _schema = _make_postgres_engine('settings')
         return engine
@@ -1014,21 +1097,29 @@ class TestSettingsRuntimeCaches:
         assert first.url.drivername.startswith('postgresql')
         first.dispose()
 
-    def test_resolved_settings_cache_invalidates_after_update(self, monkeypatch) -> None:
+    def test_resolved_settings_reflect_external_database_update(self, monkeypatch) -> None:
+        from backend_core import settings_store
         from backend_core.database import (
             clear_settings_engine_override,
             set_settings_engine_override,
         )
+        from backend_core.persistence.settings.models import AppSettings
         from backend_core.settings_schemas import SettingsUpdate
-        from backend_core.settings_store import get_resolved_smtp, update_settings
+        from backend_core.settings_store import get_resolved_smtp
 
         monkeypatch.setenv('SETTINGS_ENCRYPTION_KEY', 'test-key')
+        notifications: list[dict[str, object]] = []
+        monkeypatch.setattr(
+            settings_store,
+            '_notify_settings_changed',
+            lambda _session: notifications.append({'kind': 'settings_changed'}),
+        )
         engine = self._make_engine()
         set_settings_engine_override(engine)
 
         try:
             with Session(engine) as session:
-                update_settings(
+                settings_store.update_settings(
                     session,
                     SettingsUpdate(
                         smtp_host='smtp.one.test',
@@ -1038,6 +1129,8 @@ class TestSettingsRuntimeCaches:
                     ),
                 )
 
+            assert notifications == [{'kind': 'settings_changed'}]
+
             assert get_resolved_smtp() == {
                 'host': 'smtp.one.test',
                 'port': 587,
@@ -1045,27 +1138,87 @@ class TestSettingsRuntimeCaches:
                 'password': 'pw-one',
             }
 
-            with Session(engine) as session:
-                update_settings(
-                    session,
-                    SettingsUpdate(
-                        smtp_host='smtp.two.test',
-                        smtp_port=465,
-                        smtp_user='second',
-                        smtp_password='pw-two',
-                    ),
+            # Simulate another API child committing a settings change.
+            with engine.begin() as connection:
+                connection.execute(
+                    cast(Any, AppSettings).__table__.update().where(AppSettings.id == 1).values(smtp_host='smtp.two.test', smtp_port=465, smtp_user='second')
                 )
 
             assert get_resolved_smtp() == {
                 'host': 'smtp.two.test',
                 'port': 465,
                 'user': 'second',
-                'password': 'pw-two',
+                'password': 'pw-one',
             }
         finally:
             clear_settings_engine_override()
 
-    def test_resolved_settings_cache_invalidates_after_bootstrap(self, monkeypatch) -> None:
+    def test_settings_save_and_bootstrap_do_not_write_tenant_outbox(self, monkeypatch) -> None:
+        import psycopg
+        from sqlalchemy import MetaData
+
+        from backend_core.config import settings as app_settings
+        from backend_core.database import clear_settings_engine_override, set_settings_engine_override
+        from backend_core.persistence.runtime_events.models import RuntimeOutboxEvent
+        from backend_core.persistence.settings.models import AppSettings
+        from backend_core.settings_schemas import SettingsUpdate
+        from backend_core.settings_store import seed_settings_from_env, update_settings
+
+        settings_schema = f'public_settings_{uuid.uuid4().hex}'
+        tenant_schema = f'tenant_settings_{uuid.uuid4().hex}'
+        database_url = __import__('os').environ['TEST_POSTGRES_URL']
+        admin_engine = create_engine(database_url)
+        engine = create_engine(
+            database_url,
+            connect_args={'options': f'-c search_path={settings_schema}'},
+        )
+        listener = None
+
+        try:
+            with admin_engine.begin() as connection:
+                connection.execute(text(f'CREATE SCHEMA "{settings_schema}"'))
+                connection.execute(text(f'CREATE SCHEMA "{tenant_schema}"'))
+            tenant_outbox = cast(Any, RuntimeOutboxEvent).__table__.to_metadata(MetaData(), schema=tenant_schema)
+            with engine.begin() as connection:
+                cast(Any, AppSettings).__table__.create(connection)
+                tenant_outbox.create(connection)
+            listener = psycopg.connect(
+                database_url.replace('postgresql+psycopg://', 'postgresql://'),
+                autocommit=True,
+            )
+            listener.execute('LISTEN runtime_events')
+
+            monkeypatch.setenv('SETTINGS_ENCRYPTION_KEY', 'test-key')
+            monkeypatch.setattr(app_settings, 'smtp_host', 'bootstrap.test', raising=False)
+            set_settings_engine_override(engine)
+
+            with Session(engine) as session:
+                seed_settings_from_env(session)
+            with Session(engine) as session:
+                update_settings(session, SettingsUpdate(smtp_host='saved.test'))
+            notifications = [message.payload for message in listener.notifies(timeout=1, stop_after=100)]
+            assert notifications.count('{"kind":"settings_changed"}') == 2
+
+            with engine.connect() as connection:
+                assert connection.execute(text("SELECT to_regclass('runtime_outbox_events')")).scalar_one() is None
+                assert (
+                    connection.execute(
+                        text('SELECT to_regclass(:table_name)'),
+                        {'table_name': f'{tenant_schema}.runtime_outbox_events'},
+                    ).scalar_one()
+                    is not None
+                )
+        finally:
+            clear_settings_engine_override()
+            if listener is not None:
+                listener.close()
+            engine.dispose()
+            with admin_engine.begin() as connection:
+                connection.execute(text(f'DROP SCHEMA IF EXISTS "{settings_schema}" CASCADE'))
+                connection.execute(text(f'DROP SCHEMA IF EXISTS "{tenant_schema}" CASCADE'))
+            admin_engine.dispose()
+
+    def test_resolved_settings_reflect_bootstrap(self, monkeypatch) -> None:
         from backend_core.config import settings as app_settings
         from backend_core.database import (
             clear_settings_engine_override,

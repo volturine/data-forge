@@ -35,6 +35,8 @@ const TABLE_EXEMPTIONS: string[] = [
 	'DATA_SOURCE_LOAD_TYPE_TOKENS',
 	'DATA_SOURCE_TARGET_KIND_TOKENS',
 	'DATA_SOURCE_TYPE_TOKENS',
+	// Datasource preflight actions are internal backend actions with no frontend consumer.
+	'DATASOURCE_PREFLIGHT_ACTION_TOKENS',
 	'ENGINE_RUN_STATUS_TOKENS',
 	'HEALTH_CHECK_TYPE_TOKENS',
 	'ICEBERG_READER_TOKENS',

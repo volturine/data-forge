@@ -4,6 +4,12 @@
 
 [![License: MIT](https://img.shields.io/badge/License-MIT-yellow.svg)](LICENSE)
 [![CI](https://github.com/volturine/data-forge/actions/workflows/ci.yml/badge.svg)](https://github.com/volturine/data-forge/actions/workflows/ci.yml)
+[![Backend unit](https://github.com/volturine/data-forge/actions/workflows/backend-unit.yml/badge.svg)](https://github.com/volturine/data-forge/actions/workflows/backend-unit.yml)
+[![Backend integration](https://github.com/volturine/data-forge/actions/workflows/backend-integration.yml/badge.svg)](https://github.com/volturine/data-forge/actions/workflows/backend-integration.yml)
+[![Worker](https://github.com/volturine/data-forge/actions/workflows/worker.yml/badge.svg)](https://github.com/volturine/data-forge/actions/workflows/worker.yml)
+[![Scheduler](https://github.com/volturine/data-forge/actions/workflows/scheduler.yml/badge.svg)](https://github.com/volturine/data-forge/actions/workflows/scheduler.yml)
+[![Frontend](https://github.com/volturine/data-forge/actions/workflows/frontend.yml/badge.svg)](https://github.com/volturine/data-forge/actions/workflows/frontend.yml)
+[![E2E](https://github.com/volturine/data-forge/actions/workflows/e2e.yml/badge.svg)](https://github.com/volturine/data-forge/actions/workflows/e2e.yml)
 [![Python 3.14+](https://img.shields.io/badge/python-3.14%2B-blue.svg)](https://www.python.org/)
 [![Bun](https://img.shields.io/badge/runtime-Bun-black.svg)](https://bun.sh)
 
@@ -64,20 +70,20 @@ Data-Forge is a **local-first**, **no-code** data transformation tool. Build mul
 
 ## Tech Stack
 
-| Layer | Technology |
-|-------|-----------|
-| **Backend Runtime** | Python 3.14+ with [uv](https://github.com/astral-sh/uv) |
-| **API Framework** | FastAPI (async) |
-| **Data Engine** | [Polars](https://pola.rs) + DuckDB |
-| **Storage** | Apache Iceberg via [PyIceberg](https://py.iceberg.apache.org) |
-| **Database** | PostgreSQL 18+ |
-| **Schema Validation** | Pydantic V2 |
-| **Frontend Runtime** | [Bun](https://bun.sh) |
-| **UI Framework** | [SvelteKit 2](https://kit.svelte.dev) + [Svelte 5](https://svelte.dev) (runes mode) |
-| **Type System** | TypeScript |
-| **Styling** | [Panda CSS](https://panda-css.com) |
-| **Data Fetching** | [TanStack Query](https://tanstack.com/query) |
-| **Container** | Docker + Docker Compose |
+| Layer                 | Technology                                                                          |
+| --------------------- | ----------------------------------------------------------------------------------- |
+| **Backend Runtime**   | Python 3.14+ with [uv](https://github.com/astral-sh/uv)                             |
+| **API Framework**     | FastAPI (async)                                                                     |
+| **Data Engine**       | [Polars](https://pola.rs) + DuckDB                                                  |
+| **Storage**           | Apache Iceberg via [PyIceberg](https://py.iceberg.apache.org)                       |
+| **Database**          | PostgreSQL 18+                                                                      |
+| **Schema Validation** | Pydantic V2                                                                         |
+| **Frontend Runtime**  | [Bun](https://bun.sh)                                                               |
+| **UI Framework**      | [SvelteKit 2](https://kit.svelte.dev) + [Svelte 5](https://svelte.dev) (runes mode) |
+| **Type System**       | TypeScript                                                                          |
+| **Styling**           | [Panda CSS](https://panda-css.com)                                                  |
+| **Data Fetching**     | [TanStack Query](https://tanstack.com/query)                                        |
+| **Container**         | Docker + Docker Compose                                                             |
 
 ---
 
@@ -88,7 +94,7 @@ Data-Forge is a **local-first**, **no-code** data transformation tool. Build mul
 Docker has one production topology:
 
 ```text
-postgres + RustFS + api + scheduler + worker
+postgres + RustFS + api + runtime coordinator + scheduler + worker
 ```
 
 The API container serves both the backend API and the built frontend on port 8000.
@@ -120,7 +126,7 @@ just install
 just prod
 ```
 
-`just prod` builds the frontend and runs API, scheduler, and worker as one
+`just prod` builds the frontend and runs API, runtime coordinator, scheduler, and worker as one
 foreground process group. Standalone binaries from the old single-process
 runtime are not supported by the current architecture.
 
@@ -143,7 +149,6 @@ just dev
 - API Docs: http://localhost:8000/docs
 - Background runtime: scheduler + dynamic build workers supervised by the local app runtime
 
-
 ---
 
 ## Configuration
@@ -159,14 +164,34 @@ docker compose --env-file docker/env/prod.env \
 ```
 
 The repository defaults are tuned for concurrent clients:
-- Docker production defaults to `4` API workers in the `api` service
-- build throughput scales in the `worker` service up to `DF_BUILD_WORKER_MAX_PROCESSES`
-- zero warm build workers are kept by default; worker subprocesses spawn on demand and exit when idle
+
+- Docker production defaults to `1` API process inside one `api` container;
+  one fenced `runtime` coordinator owns gRPC/dispatch, durable chat processing,
+  Telegram polling, and independent durable email/Telegram delivery lanes. One
+  Docker-owning worker manager owns isolated compute containers. API processes
+  serve HTTP, WebSocket/SSE, and durable enqueue-and-wait requests; their local
+  caches, projections, and waiters are disposable. Increasing API process count
+  does not scale authoritative runtime dispatch or compute.
+- `COMPUTE_WORKERS` bounds previews, datasource jobs, builds, and assigned
+  workers in the current single-manager topology; queued work stays durable
+- `COMPUTE_WARM_WORKERS` keeps ready, unassigned workers in reserve. These are
+  the same worker containers as assigned workers, just not yet bound to a
+  resource identity; claiming one binds it to that exact identity and starts
+  its replacement. This reserve is additional to active `COMPUTE_WORKERS`.
+- Each assigned compute worker serves one exact analysis or datasource RID.
+  Identical full commands share durable results; distinct commands for that RID
+  are serialized. Keep synchronous database and blocking integration work in
+  bounded threads; Polars-heavy parsing and execution stay in compute containers.
+- Durable external notification metadata is recorded in the outbox; email and
+  Telegram network delivery runs outside the database transaction.
+- The capacity-first optimization plan and measured scale gates are in
+  [Capacity-First Runtime Optimization](docs/prd/active/elastic-runtime-scale-out.md).
 
 ### Development (local runtime)
 
 Vite dev server on port 3000 proxies `/api` to FastAPI on port 8000. `just dev`
-starts one supervised app runtime that runs API, scheduler, and dynamic build workers so queued builds do not run inside the API process.
+starts the API, runtime coordinator, scheduler, and one worker manager; the
+manager starts isolated compute containers for queued work.
 
 ```bash
 just dev
@@ -174,15 +199,15 @@ just dev
 
 ### Key Variables
 
-| Variable | Default | Description |
-|----------|---------|-------------|
-| `DEBUG` | `false` | Enable debug logging and SQL echo |
-| `PROD_MODE_ENABLED` | `false` | Serve static frontend from `packages/frontend/build` |
-| `AUTH_REQUIRED` | `false` | Require login before accessing routes |
-| `DATA_DIR` | — | Base directory for all data storage |
-| `DATABASE_URL` | PostgreSQL connection URL | Runtime database connection |
-| `DISTRIBUTED_RUNTIME_ENABLED` | `false` | Enables supported Postgres distributed runtime mode |
-| `DEFAULT_NAMESPACE` | `default` | Default data namespace |
+| Variable                      | Default                   | Description                                          |
+| ----------------------------- | ------------------------- | ---------------------------------------------------- |
+| `DEBUG`                       | `false`                   | Enable debug logging and SQL echo                    |
+| `PROD_MODE_ENABLED`           | `false`                   | Serve static frontend from `packages/frontend/build` |
+| `AUTH_REQUIRED`               | `false`                   | Require login before accessing routes                |
+| `DATA_DIR`                    | —                         | Base directory for all data storage                  |
+| `DATABASE_URL`                | PostgreSQL connection URL | Runtime database connection                          |
+| `DISTRIBUTED_RUNTIME_ENABLED` | `false`                   | Enables supported Postgres distributed runtime mode  |
+| `DEFAULT_NAMESPACE`           | `default`                 | Default data namespace                               |
 
 See [Environment Variables](docs/ENV_VARIABLES.md) for the complete reference
 and [Deployment](docs/DEPLOYMENT.md) for production operations.
@@ -213,12 +238,32 @@ just prod           # Build frontend and start production server
 
 ### Running Tests
 
+Each public test recipe invocation gets its own private Docker Compose
+enclave, daemon, network, and volumes. `just test` runs the public per-suite
+recipes sequentially, so each suite gets a fresh enclave. Install Docker with a
+daemon that permits privileged containers, plus `just`; Python, Bun, protocol
+compiler, and browser dependencies are installed inside the test images. Test
+logs and diagnostics are exported under `.test-artifacts/<run-id>` on success
+and failure. GitHub Actions reports backend unit, backend integration, worker,
+scheduler, frontend, and E2E suites as separate workflows.
+
 ```bash
 # Standard validation workflow
 just verify
 just test
 just test-e2e
 ```
+
+`TEST_MEMORY_MB` and `TEST_CPUS` optionally cap the total memory and CPU budget
+per test recipe invocation, shared between its runner and isolated Docker
+daemon. Without `TEST_MEMORY_MB`, Python and Vitest invocations budget 75% of
+memory available to Docker; E2E budgets 90%. The E2E controller receives 512
+MiB and a CPU allocation of at least 0.5 CPUs or 20% of the total budget,
+whichever is greater; the isolated daemon receives the remainder, including
+all browser containers. Concurrent invocations each receive their own cap,
+so their combined use can exceed available host capacity. These limits do not
+reserve host resources; all containers and other workloads still share the
+machine's finite CPU and memory.
 
 For code or config changes, run all three commands before opening a PR. For targeted local work, the tests live under `packages/backend/tests/`, `packages/scheduler/tests/`, `packages/worker/tests/`, and `packages/frontend/tests/` (unit) plus `packages/frontend/src/**/*.test.ts` (Vitest).
 
@@ -258,15 +303,26 @@ data-forge/
 
 Production and local development use the same role split:
 
-- **API** — FastAPI HTTP/WebSocket surface, auth, metadata, build enqueue
+- **API** — HTTP/WebSocket/SSE surface, auth, metadata, durable enqueue/wait, and disposable local caches/projections/waiters
+- **Runtime coordinator** — fenced internal gRPC/dispatch, durable chat, Telegram polling, and independent external delivery lanes
 - **Scheduler** — evaluates cron/dependency/event schedules and enqueues builds
-- **Worker** — claims build/compute work, runs Polars engines, Iceberg I/O, data-plane gRPC
+- **Worker manager** — sole Docker owner, claims build/compute work, manages exact-RID engine containers and the warm reserve, and serves data-plane gRPC
 
 Coordination is Postgres-backed (claims, leases, outbox, run history). Process-to-process control uses internal gRPC; product data lives in S3-compatible object storage (Iceberg tables, uploads, exports).
 
+API/coordinator notification receivers use dedicated native async LISTEN connections
+and durable recovery callbacks; publication remains synchronous database/thread
+work. Short database units open and close their own sessions in bounded threads.
+Private storage cleanup reuses the outbox and an independent worker I/O lane to
+retire abandoned source/staging data; published snapshots retain their existing
+retention policy. The [runtime contracts](docs/prd/active/elastic-runtime-scale-out.md#implemented-runtime-contracts)
+describe mutation, cancellation, recovery, and cleanup boundaries.
+
 ### Compute Engine
 
-Each analysis preview or build runs in an **isolated engine subprocess** owned by a worker. That provides:
+Analysis and datasource compute runs in **isolated engine containers** owned by
+the worker manager. Each assigned worker serves one exact RID and serializes its
+commands; identical full commands share durable results. That provides:
 
 - Memory isolation between analyses
 - Configurable resource limits per engine
@@ -338,6 +394,7 @@ If you discover a security vulnerability, please report it privately to the proj
 - [AGENTS.md](AGENTS.md) — Developer guidelines
 - [STYLE_GUIDE.md](STYLE_GUIDE.md) — Code style
 - [docs/prd/implemented/mcp-tool-contract.md](docs/prd/implemented/mcp-tool-contract.md) — How API routes are exposed as MCP tools
+
 ---
 
 ## License

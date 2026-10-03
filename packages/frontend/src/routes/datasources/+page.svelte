@@ -27,6 +27,7 @@
 	import { css, spinner } from '$lib/styles/panda';
 	import { useNamespace } from '$lib/stores/namespace.svelte';
 	import { datasourceIsAnalysisOutput, datasourceNeedsExternalIngest } from '$lib/types/datasource';
+	import type { DataSource } from '$lib/types/datasource';
 
 	const queryClient = useQueryClient();
 	const ns = useNamespace();
@@ -40,20 +41,22 @@
 	let snapshotConfig = $state<Record<string, unknown> | null>(null);
 
 	const selectedId = $derived(page.url.searchParams.get('id'));
-	const activeSelectedId = $derived(!ns.switching ? selectedId : null);
+	const namespaceReady = $derived(ns.ready);
+	const namespaceKey = $derived(namespaceReady ? ns.value : 'pending');
+	const activeSelectedId = $derived(namespaceReady && !ns.switching ? selectedId : null);
 
 	const query = createQuery(() => ({
-		queryKey: ['datasources', ns.value, showHidden],
+		queryKey: ['datasources', namespaceKey, showHidden],
 		queryFn: async () => {
 			const result = await listDatasources(showHidden);
 			if (result.isErr()) throw new Error(result.error.message);
 			return result.value;
 		},
-		enabled: !ns.switching
+		enabled: namespaceReady && !ns.switching
 	}));
 
 	const selectedDatasourceQuery = createQuery(() => ({
-		queryKey: ['datasource', ns.value, activeSelectedId],
+		queryKey: ['datasource', namespaceKey, activeSelectedId],
 		queryFn: async () => {
 			if (!activeSelectedId) return null;
 			const result = await getDatasource(activeSelectedId);
@@ -63,7 +66,7 @@
 			}
 			return result.value;
 		},
-		enabled: !!activeSelectedId,
+		enabled: namespaceReady && !!activeSelectedId,
 		refetchOnMount: false,
 		retry: false
 	}));
@@ -73,12 +76,25 @@
 			const result = await deleteDatasource(id);
 			if (result.isErr()) throw new Error(result.error.message);
 		},
-		onSuccess: () => {
-			queryClient.invalidateQueries({ queryKey: ['datasources'] });
-			if (activeSelectedId === mutatingId) {
+		onSuccess: async (_data, deletedId) => {
+			// Remove the exact resource from every namespace-local list immediately.
+			// The refetch below confirms the server state, but the UI must not depend
+			// on a navigation or a full reload to stop showing a deleted row.
+			queryClient.setQueriesData<DataSource[]>({ queryKey: ['datasources', ns.value] }, (current) =>
+				current?.filter((datasource) => datasource.id !== deletedId)
+			);
+			queryClient.removeQueries({
+				queryKey: ['datasource', ns.value, deletedId],
+				exact: true
+			});
+			if (activeSelectedId === deletedId) {
 				selectDatasource(null);
 			}
-			mutatingId = null;
+			if (mutatingId === deletedId) mutatingId = null;
+			await queryClient.invalidateQueries({ queryKey: ['datasources', ns.value] });
+		},
+		onError: (_error, failedId) => {
+			if (mutatingId === failedId) mutatingId = null;
 		}
 	}));
 
@@ -95,10 +111,17 @@
 			: datasources
 	);
 	const selectedDatasource = $derived.by(() => {
-		if (!activeSelectedId || ns.switching) return null;
-		return (
-			selectedDatasourceQuery.data ?? datasources.find((d) => d.id === activeSelectedId) ?? null
-		);
+		if (!activeSelectedId || !namespaceReady || ns.switching) return null;
+		const listedDatasource = datasources.find((d) => d.id === activeSelectedId);
+		const detailedDatasource = selectedDatasourceQuery.data;
+		if (!detailedDatasource) return listedDatasource ?? null;
+		if (!listedDatasource) return detailedDatasource;
+		return {
+			...listedDatasource,
+			...detailedDatasource,
+			row_count: detailedDatasource.row_count ?? listedDatasource.row_count,
+			schema_cache: detailedDatasource.schema_cache ?? listedDatasource.schema_cache
+		};
 	});
 	const previewDatasource = $derived(selectedDatasource);
 	const effectiveConfig = $derived.by(() => snapshotConfig ?? previewDatasource?.config ?? null);
@@ -135,8 +158,16 @@
 
 	function confirmDelete() {
 		if (!deletingId) return;
-		mutatingId = deletingId;
-		deleteMutation.mutate(deletingId);
+		const deletedId = deletingId;
+		mutatingId = deletedId;
+		// The API marks a datasource hidden/pending before asynchronous storage
+		// cleanup. Reflect that committed state immediately; waiting for cleanup
+		// would leave a visibly dead row until the request happens to finish.
+		queryClient.setQueriesData<DataSource[]>({ queryKey: ['datasources', ns.value] }, (current) =>
+			current?.filter((datasource) => datasource.id !== deletedId)
+		);
+		if (activeSelectedId === deletedId) selectDatasource(null);
+		deleteMutation.mutate(deletedId);
 		deletingId = null;
 	}
 
@@ -247,7 +278,6 @@
 							borderWidth: '1',
 							borderColor: 'border.accent'
 						})}
-						data-sveltekit-reload
 					>
 						<Plus size={14} />
 						Add
@@ -295,7 +325,9 @@
 
 		<!-- Datasource List -->
 		<div class={css({ flex: '1', overflowY: 'auto' })}>
-			{#if query.isLoading}
+			{#if ns.status === 'failed'}
+				<Callout tone="error">Namespace is unavailable: {ns.error ?? 'Unknown error'}</Callout>
+			{:else if !namespaceReady || query.isPending || query.isLoading || (query.isFetching && !query.data)}
 				<div
 					class={css({
 						display: 'flex',
@@ -330,7 +362,6 @@
 							color: 'fg.inverse',
 							borderWidth: '1'
 						})}
-						data-sveltekit-reload
 					>
 						Create your first data source
 					</a>

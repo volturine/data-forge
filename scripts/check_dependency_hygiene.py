@@ -24,6 +24,11 @@ LOCAL_RUNTIME_DISTRIBUTIONS = {
     'dataforge-scheduler',
     'dataforge-worker',
 }
+PACKAGE_DISTRIBUTIONS = {
+    'backend': 'dataforge-backend',
+    'scheduler': 'dataforge-scheduler',
+    'worker': 'dataforge-worker',
+}
 
 LEGACY_TEST_ARTIFACT_PATH_TOKENS = (
     'tests/playwright-report',
@@ -85,10 +90,9 @@ def main() -> int:
         if removed_deps:
             errors.append(f'{pyproject_path.relative_to(ROOT)} depends on removed split packages: {", ".join(removed_deps)}')
 
-        local_runtime_deps = sorted(set(normalized) & LOCAL_RUNTIME_DISTRIBUTIONS)
-
-        if package_name in {'scheduler', 'worker'} and local_runtime_deps:
-            errors.append(f'{pyproject_path.relative_to(ROOT)} {package_name} must not depend on local runtime packages: {", ".join(local_runtime_deps)}')
+        local_runtime_deps = sorted(set(normalized) & LOCAL_RUNTIME_DISTRIBUTIONS - {PACKAGE_DISTRIBUTIONS[package_name]})
+        if local_runtime_deps:
+            errors.append(f'{pyproject_path.relative_to(ROOT)} must not depend on another local runtime package: {", ".join(local_runtime_deps)}')
 
     if errors:
         print('Dependency hygiene violations:')

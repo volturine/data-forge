@@ -49,15 +49,16 @@ Browser  ──►  Vite dev server (FRONTEND_PORT 3000)
 
 Repo-level local runtime:
   - backend/main.py API process
+  - backend/runtime_coordinator.py fenced coordinator process
   - scheduler/main.py scheduler process
-  - worker/main.py worker process
-  - dynamically spawned build-worker subprocesses
+  - worker/main.py Docker-owning worker manager
+  - dynamically assigned isolated compute containers
 ```
 
 - `PROD_MODE_ENABLED=false` (default) — FastAPI does not serve static files; the
   Vite dev server handles all browser requests and proxies `/api` to FastAPI.
-- `just dev` starts the three package entrypoints from the repo root. The
-  worker manager then spawns build workers on demand.
+- `just dev` starts the four application roles from the repo root. The
+  worker manager then assigns compute containers on demand.
 - Because the browser origin (`:3000`) differs from the API origin (`:8000`),
   FastAPI's `CORS_ORIGINS` **must** include the dev-server origin.
 - `FRONTEND_PORT`, `BACKEND_HOST`, and `BACKEND_PORT` wire the Vite
@@ -81,7 +82,9 @@ If you only want the high-value knobs, start with these:
 - `CORS_ORIGINS` — allowed browser origins (only needed in dev or multi-origin setups)
 - `AUTH_REQUIRED` — turn login on/off
 - `SETTINGS_ENCRYPTION_KEY` — strongly recommended when auth is enabled
-- `POLARS_CORES_AVAILABLE`, `POLARS_MAX_MEMORY_MB`, `MAX_CONCURRENT_ENGINES` — performance limits
+- `COMPUTE_WORKERS` — the active compute capacity for the current single worker-manager topology
+- `COMPUTE_WARM_WORKERS` — additional ready workers reserved before assignment; they are the same worker type, not a second execution pool
+- `POLARS_CORES_AVAILABLE`, `POLARS_MAX_MEMORY_MB` — per-engine resource limits
 - **Dev-only:** `BACKEND_HOST`, `BACKEND_PORT`, `FRONTEND_PORT` — Vite proxy wiring (Bun/Vite only, not exposed to browser)
 
 ## How configuration is loaded
@@ -116,10 +119,46 @@ docker compose --env-file docker/env/prod.env \
 `docker/env/prod.env` is its production env template. GHCR-published images are
 for production releases only.
 `docker/compose.yaml` uses published fixed-role images and does not build application images during `up`.
-The compose topology uses separate `api`, `scheduler`, and `worker` containers from the same codebase release.
+The compose topology uses separate `api`, `runtime`, `scheduler`, and `worker` containers from the same codebase release.
 The checked-in Docker topology still includes `postgres` because the supported Docker runtime path is Postgres-backed. `DF_DATABASE_URL` in the Docker env files points at that service.
 
-The checked-in Docker production env defaults to `DF_WORKERS=4` for the API process pool in the `api` service, `DF_BUILD_WORKER_MIN_PROCESSES=0`, and dynamic build-worker spawn up to `DF_BUILD_WORKER_MAX_PROCESSES` in the `worker` service.
+The checked-in Docker production env defaults to `DF_WORKERS=1`, the API
+process count within the API container. API processes serve HTTP,
+WebSocket/SSE, and durable enqueue-and-wait paths; they do not own compute
+dispatch, Telegram polling, or engine lifecycle. One active fenced `runtime`
+coordinator owns gRPC/dispatch, durable chat processing, Telegram polling, and
+independent durable email/Telegram delivery lanes. The single `worker` service
+owns Docker and isolated compute containers. In this topology,
+`COMPUTE_WORKERS` bounds concurrent jobs/assigned workers and
+`COMPUTE_WARM_WORKERS` bounds ready-but-unassigned reserve; an assigned worker
+is bound to one exact analysis or datasource RID. Identical full commands share
+durable results and distinct commands for one RID are serialized. API caches,
+projections, and waiters are process-local and disposable; PostgreSQL remains
+authoritative for durable work. Work remains durable while waiting. These are
+not cluster-wide leases across multiple manager containers; horizontal
+worker-service scaling is unsupported until
+distributed identity ownership and capacity grants are implemented and
+load-tested in the
+[capacity-first runtime plan](prd/active/elastic-runtime-scale-out.md).
+Active and warm starts are bounded by their configured budgets; there is no
+host-CPU-derived startup cap.
+
+Synchronous SQLAlchemy work runs as a complete, short unit that opens and closes
+its own session inside bounded threads. Async compute waits carry no unused
+session or database dependency. Blocking Docker, storage/catalog, and SMTP work
+also stays off async event loops; native async network I/O and waits stay on their
+owning loop. Parsing and Polars-heavy execution happen in compute containers.
+API/coordinator PostgreSQL receivers use dedicated `psycopg.AsyncConnection`
+listeners and continuous `notifies()` generators with explicit durable recovery
+callbacks. This is receive-only; publication remains synchronous DB/thread
+work. Recovery targets active projections, reads build/lock projections in
+batches of at most 128, and wakes durable chat/settings consumers.
+Worker/scheduler health probes require PID1 registration and fresh progress on
+every dispatch lane; the API health endpoint
+checks API dependencies. Durable external delivery metadata is stored in the
+outbox, and network delivery runs outside database transactions. Private storage
+cleanup reuses that outbox and an independent worker I/O lane; published snapshot
+retention uses the existing policy, with no new service or public tunables.
 
 ### Production — bare-metal (`just prod`)
 
@@ -130,8 +169,11 @@ just prod
 ```
 
 `just prod` generates protocol bindings, builds the frontend, and runs the API,
-scheduler, and worker together. The checked-in `docker/env/prod.env` defaults to
-`WORKERS=4` and dynamic build-worker scaling with zero warm workers.
+runtime coordinator, scheduler, and worker as separate processes. The checked-in
+`docker/env/prod.env` defaults to `WORKERS=1`. This controls API processes in
+the API container; it does not add runtime coordinator or worker-manager
+capacity. For the current supported topology and the future scale-out target,
+see [Deployment](DEPLOYMENT.md) and [Capacity-First Runtime Optimization](prd/active/elastic-runtime-scale-out.md).
 
 ### Local development
 
@@ -144,32 +186,29 @@ just dev
 
 ### Application and files
 
-| Variable                     | Default                                                                                   | Notes                                                                                                                                                         |
-| ---------------------------- | ----------------------------------------------------------------------------------------- | ------------------------------------------------------------------------------------------------------------------------------------------------------------- |
-| `ENV_FILE`                   | `.env`                                                                                    | Path to the backend env file.                                                                                                                                 |
-| `APP_NAME`                   | `Data-Forge Analysis Platform`                                                            | Application name for UI/logging metadata.                                                                                                                     |
-| `APP_VERSION`                | `1.0.0`                                                                                   | Application version string.                                                                                                                                   |
-| `DEBUG`                      | `false`                                                                                   | Enables verbose/debug behavior.                                                                                                                               |
-| `PROD_MODE_ENABLED`          | `false`                                                                                   | Must be `true` in production. Enables static-file serving from `packages/frontend/build/`. In dev, leave `false` so FastAPI does not try to serve the frontend. |
-| `PORT`                       | `8000`                                                                                    | Backend HTTP port.                                                                                                                                            |
-| `DATA_DIR`                   | system temp dir + `/data-forge`                                                           | Base writable directory for app data.                                                                                                                         |
-| `DATABASE_URL`               | none                                                                                      | Full backend PostgreSQL database URL. Required.                                                                                                                |
-| `DF_API_IMAGE`              | `ghcr.io/volturine/data-forge-api:1.0.0`                                                  | Docker compose production image tag for the `api` service. Pull this image before `docker compose up`.                                                         |
-| `DF_SCHEDULER_IMAGE`        | `ghcr.io/volturine/data-forge-scheduler:1.0.0`                                            | Docker compose production image tag for the `scheduler` service.                                                                                                 |
-| `DF_WORKER_IMAGE`           | `ghcr.io/volturine/data-forge-worker:1.0.0`                                               | Docker compose production image tag for the `worker` service.                                                                                                    |
-| `DF_ENGINE_IMAGE`           | `ghcr.io/volturine/data-forge-polars-engine:1.0.0`                                        | Polars engine image used for dynamically-created engine containers.                                                                                            |
-| `DF_ENGINE_DOCKER_HOST`     | `unix:///var/run/docker.sock`                                                              | Docker API endpoint available only to the worker service.                                                                                                       |
-| `DF_ENGINE_DOCKER_NETWORK`  | `dataforge-prod-engine-runtime`                                                            | Dedicated network joining the worker, RustFS, and dynamic engine containers.                                                                                    |
-| `DF_ENGINE_OBJECT_STORE_CREDENTIALS_JSON` | empty | Namespace-scoped reader/builder credentials passed to one engine at launch; required in production. |
-| `DF_ENGINE_ALLOW_GLOBAL_OBJECT_STORE_CREDENTIALS` | `false` | Development-only global credential opt-in; production always rejects it. |
-| `DF_ENGINE_HEARTBEAT_INTERVAL_SECONDS` | `5` | Engine liveness lease heartbeat interval. |
-| `DF_DOCKER_SOCKET_PATH`     | `/var/run/docker.sock`                                                                     | Host Docker socket bind-mounted into the worker. Docker daemon access is administrative host access.                                                             |
-| `DF_DOCKER_GID`             | `0`                                                                                        | Group ID permitted to access the mounted Docker socket; set this to the socket's host group ID.                                                                  |
-| `DISTRIBUTED_RUNTIME_ENABLED`| `false`                                                                                   | Enables supported distributed runtime behavior when `DATABASE_URL` is Postgres.                                                                                |
-| `DEFAULT_NAMESPACE`          | `default`                                                                                 | Namespace used when no namespace is selected.                                                                                                                 |
-| `CORS_ORIGINS`               | `http://localhost:3000,http://127.0.0.1:3000,http://localhost:5173,http://127.0.0.1:5173` | Comma-separated allowed browser origins. Required in dev (Vite server is cross-origin). In prod (single port) same-origin applies and this can be left unset. |
-| `UPLOAD_CHUNK_SIZE`          | `5242880`                                                                                 | Upload chunk size in bytes. Valid range: `1024` to `104857600`.                                                                                               |
-| `UPLOAD_MAX_FILE_SIZE_BYTES` | `2147483648`                                                                              | Maximum upload size in bytes.                                                                                                                                 |
+| Variable                               | Default                                                                                   | Notes                                                                                                                                                                                                                                                            |
+| -------------------------------------- | ----------------------------------------------------------------------------------------- | ---------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| `ENV_FILE`                             | `.env`                                                                                    | Path to the backend env file.                                                                                                                                                                                                                                    |
+| `APP_NAME`                             | `Data-Forge Analysis Platform`                                                            | Application name for UI/logging metadata.                                                                                                                                                                                                                        |
+| `APP_VERSION`                          | `1.0.0`                                                                                   | Application version string.                                                                                                                                                                                                                                      |
+| `DEBUG`                                | `false`                                                                                   | Enables verbose/debug behavior.                                                                                                                                                                                                                                  |
+| `PROD_MODE_ENABLED`                    | `false`                                                                                   | Must be `true` in production. Enables static-file serving from `packages/frontend/build/`. In dev, leave `false` so FastAPI does not try to serve the frontend.                                                                                                  |
+| `PORT`                                 | `8000`                                                                                    | Backend HTTP port.                                                                                                                                                                                                                                               |
+| `DATA_DIR`                             | system temp dir + `/data-forge`                                                           | Base writable directory for app data.                                                                                                                                                                                                                            |
+| `DATABASE_URL`                         | none                                                                                      | Full backend PostgreSQL database URL. Required.                                                                                                                                                                                                                  |
+| `DF_API_IMAGE`                         | `ghcr.io/volturine/data-forge-api:1.0.0`                                                  | Docker compose production image tag for the `api` service. Pull this image before `docker compose up`.                                                                                                                                                           |
+| `DF_SCHEDULER_IMAGE`                   | `ghcr.io/volturine/data-forge-scheduler:1.0.0`                                            | Docker compose production image tag for the `scheduler` service.                                                                                                                                                                                                 |
+| `DF_WORKER_IMAGE`                      | `ghcr.io/volturine/data-forge-worker:1.0.0`                                               | Docker compose production image tag for the `worker` service.                                                                                                                                                                                                    |
+| `DF_ENGINE_IMAGE`                      | `ghcr.io/volturine/data-forge-polars-engine:1.0.0`                                        | Polars engine image used for dynamically-created engine containers. A `repository@sha256:<digest>` reference keeps every launch byte-identical and is recommended; tags are supported for custom engine environments.                                            |
+| `DF_ENGINE_DOCKER_HOST`                | `unix:///var/run/docker.sock`                                                             | Docker API endpoint available only to the worker service.                                                                                                                                                                                                        |
+| `DF_ENGINE_DOCKER_NETWORK`             | `dataforge-prod-engine-runtime`                                                           | Dedicated network joining the worker, RustFS, and dynamic engine containers.                                                                                                                                                                                     |
+| `DF_ENGINE_HEARTBEAT_INTERVAL_SECONDS` | `5`                                                                                       | Engine liveness lease heartbeat interval.                                                                                                                                                                                                                        |
+| `DF_DOCKER_SOCKET_PATH`                | `/var/run/docker.sock`                                                                    | Host Docker socket bind-mounted into the worker. Docker daemon access is administrative host access.                                                                                                                                                             |
+| `DF_DOCKER_GID`                        | `0`                                                                                       | Group ID permitted to access the mounted Docker socket; set this to the socket's host group ID.                                                                                                                                                                  |
+| `DISTRIBUTED_RUNTIME_ENABLED`          | `false`                                                                                   | Enables supported distributed runtime behavior when `DATABASE_URL` is Postgres.                                                                                                                                                                                  |
+| `DEFAULT_NAMESPACE`                    | `default`                                                                                 | Namespace used when no namespace is selected.                                                                                                                                                                                                                    |
+| `CORS_ORIGINS`                         | `http://localhost:3000,http://127.0.0.1:3000,http://localhost:5173,http://127.0.0.1:5173` | Comma-separated allowed browser origins. Required in dev (Vite server is cross-origin). In prod (single port) same-origin applies and this can be left unset.                                                                                                    |
+| `UPLOAD_MAX_FILE_SIZE_BYTES`           | `2147483648`                                                                              | Configurable upload size limit in bytes, from `0` to `2147483648` (2 GiB). Values above 2 GiB are rejected because the worker data-plane transport has a hard 2 GiB ceiling. `0` disables the configurable soft cap but does not disable that transport ceiling. |
 
 ### Object storage
 
@@ -191,91 +230,94 @@ rejected; nothing is rewritten.
 
 `DATA_DIR` remains a local directory for process scratch only.
 
-| Variable | Default | Notes |
-| --- | --- | --- |
-| `OBJECT_STORE_ENDPOINT` | `http://127.0.0.1:9000` | S3-compatible HTTP(S) endpoint. Use the internal service URL from every application role. |
-| `OBJECT_STORE_REGION` | `us-east-1` | S3 signing region. Must match the provider configuration. |
-| `OBJECT_STORE_ACCESS_KEY` | `rustfsadmin` | Access key with read, write, list, delete, and bucket-creation permissions for namespace buckets. Replace the development default in production. |
-| `OBJECT_STORE_SECRET_KEY` | `rustfsadmin` | Secret key paired with `OBJECT_STORE_ACCESS_KEY`. Replace the development default in production. |
-| `ENGINE_OBJECT_STORE_CREDENTIALS_JSON` | empty | Namespace-to-role credential map consumed only by the worker. Each namespace must define `reader` and `builder` access/secret key pairs before production engines can start. |
-| `ENGINE_OBJECT_STORE_ENDPOINT` | empty | Optional engine-container endpoint for the same object store. Set this when the worker uses a host-published URL but engines should use private Docker DNS. |
-| `ENGINE_ALLOW_GLOBAL_OBJECT_STORE_CREDENTIALS` | `false` | Development/test-only escape hatch. Production rejects platform credentials even when this is enabled. |
-| `ENGINE_HEARTBEAT_INTERVAL_SECONDS` | `5` | Worker-to-engine heartbeat interval. Engines stop themselves after three missed intervals. |
+| Variable                            | Default                 | Notes                                                                                                                                                                                                                                                                         |
+| ----------------------------------- | ----------------------- | ----------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| `OBJECT_STORE_ENDPOINT`             | `http://127.0.0.1:9000` | S3-compatible HTTP(S) endpoint. Use the internal service URL from every application role.                                                                                                                                                                                     |
+| `OBJECT_STORE_REGION`               | `us-east-1`             | S3 signing region. Must match the provider configuration.                                                                                                                                                                                                                     |
+| `OBJECT_STORE_ACCESS_KEY`           | `rustfsadmin`           | Access key with read, write, list, delete, and bucket-creation permissions for namespace buckets. Replace the development default in production.                                                                                                                              |
+| `OBJECT_STORE_SECRET_KEY`           | `rustfsadmin`           | Secret key paired with `OBJECT_STORE_ACCESS_KEY`. Replace the development default in production.                                                                                                                                                                              |
+| `ENGINE_OBJECT_STORE_ENDPOINT`      | empty                   | Optional engine-container endpoint for the same object store. Set this when the worker uses a host-published URL but engines should use private Docker DNS.                                                                                                                   |
+| `ENGINE_HEARTBEAT_INTERVAL_SECONDS` | `5`                     | Worker-to-engine heartbeat interval. Engines stop themselves after three missed intervals.                                                                                                                                                                                    |
+| `COMPUTE_WARM_WORKERS`              | `0`                     | Additional ready, unassigned compute workers. A claimed worker is bound to one resource identity and immediately replaced. Checked-in dev/prod environments set this to `2`; E2E sets it to `4` for the 30-analysis probe. These workers are outside active compute capacity. |
 
 All object-store settings are process-start configuration. Change them for the
 API, scheduler, and worker together, then restart the complete runtime.
 
 ### Internal runtime (gRPC)
 
-These variables configure the internal gRPC control plane between API, scheduler, and worker. Scheduler and worker clients connect to the API. The API also connects to the worker data-plane for object-store operations such as file upload.
+These variables configure the internal gRPC control plane between the runtime coordinator, scheduler, and worker. Scheduler and worker clients connect to `runtime`. The API also connects to the worker data-plane for object-store operations such as file upload.
 
-Same-host processes can keep the loopback defaults. Split Docker roles must bind the servers on `0.0.0.0` and point clients at Compose DNS (`api:50051`, `worker:50052`).
+Same-host processes can keep the loopback defaults. Split Docker roles must bind the coordinator/data-plane servers on `0.0.0.0` and point clients at Compose DNS (`runtime:50051`, `worker:50052`).
 
-| Variable               | Default                   | Notes                                                                                                 |
-| ---------------------- | ------------------------- | ----------------------------------------------------------------------------------------------------- |
-| `INTERNAL_API_TOKEN`   | empty                     | Shared secret used to authenticate internal gRPC calls between scheduler, worker, and API. Required when distributed runtime is enabled. |
-| `INTERNAL_GRPC_HOST`   | `127.0.0.1`               | Host the API gRPC server binds to.                                                                    |
-| `INTERNAL_GRPC_PORT`   | `50051`                   | Port the API gRPC server listens on.                                                                    |
-| `INTERNAL_GRPC_TARGET` | `127.0.0.1:50051`         | Full `host:port` target string that scheduler and worker clients connect to.                          |
-| `WORKER_DATA_PLANE_GRPC_HOST` | `127.0.0.1`          | Host the worker data-plane gRPC server binds to.                                                      |
-| `WORKER_DATA_PLANE_GRPC_PORT` | `50052`              | Port the worker data-plane gRPC server listens on.                                                    |
-| `WORKER_DATA_PLANE_GRPC_TARGET` | `127.0.0.1:50052`  | Full `host:port` target string that the API uses to reach the worker data-plane.                      |
+| Variable                        | Default           | Notes                                                                                                                                                                                                                               |
+| ------------------------------- | ----------------- | ----------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| `INTERNAL_API_TOKEN`            | empty             | Shared secret used to authenticate internal gRPC calls between scheduler, worker, and API. Required when distributed runtime is enabled.                                                                                            |
+| `INTERNAL_GRPC_HOST`            | `127.0.0.1`       | Host the dedicated runtime coordinator gRPC server binds to.                                                                                                                                                                        |
+| `INTERNAL_GRPC_PORT`            | `50051`           | Port the dedicated runtime coordinator gRPC server listens on.                                                                                                                                                                      |
+| `INTERNAL_GRPC_TARGET`          | `127.0.0.1:50051` | Full `host:port` target string that scheduler and worker clients connect to.                                                                                                                                                        |
+| `RUNTIME_COORDINATOR_TARGET`    | empty             | Deployment target for the single dedicated coordinator; required when API `WORKERS > 1`. API processes do not own runtime gRPC, dispatch, Telegram polling, or engine lifecycle. This does not enable multiple active coordinators. |
+| `WORKER_DATA_PLANE_GRPC_HOST`   | `127.0.0.1`       | Host the worker data-plane gRPC server binds to.                                                                                                                                                                                    |
+| `WORKER_DATA_PLANE_GRPC_PORT`   | `50052`           | Port the worker data-plane gRPC server listens on.                                                                                                                                                                                  |
+| `WORKER_DATA_PLANE_GRPC_TARGET` | `127.0.0.1:50052` | Full `host:port` target string that the API uses to reach the worker data-plane.                                                                                                                                                    |
 
 ### Engine, scheduling, and resource limits
 
-| Variable                          | Default | Notes                                                           |
-| --------------------------------- | ------- | --------------------------------------------------------------- |
-| `SCHEDULER_CHECK_INTERVAL`        | `60`    | Seconds between scheduler polls.                                |
-| `LOCK_TTL_SECONDS`                | `30`    | Lock lease duration.                                            |
-| `LOCK_HEARTBEAT_INTERVAL_SECONDS` | `10`    | Must stay lower than `LOCK_TTL_SECONDS`.                        |
-| `POLARS_CORES_AVAILABLE`          | `0`     | Total cores for analysis engines; `0` = all host logical CPUs. Not Polars' native `POLARS_MAX_THREADS`. |
-| `POLARS_MAX_MEMORY_MB`            | `0`     | `0` means unlimited.                                            |
-| `POLARS_STREAMING_CHUNK_SIZE`     | `0`     | `0` means automatic chunk sizing.                               |
-| `MAX_CONCURRENT_ENGINES`          | `10`    | Caps live engines (`1`–`100`). Excess spawns FIFO-queue until a slot frees (idle eviction or shutdown); they do not hard-fail. |
-| `WORKERS`                         | `1`     | Valid range: `0` to `32`; `0` means auto in deployment scripts. The checked-in production env templates currently set this to `4`. |
-| `WORKER_CONNECTIONS`              | `1000`  | Maximum connections per worker.                                 |
-| `BUILD_WORKER_MIN_PROCESSES`      | `0`     | Minimum warm build-worker subprocesses to keep alive.           |
-| `BUILD_WORKER_MAX_PROCESSES`      | `10`    | Maximum dynamic build-worker subprocesses. Must be <= `MAX_CONCURRENT_ENGINES`. |
-| `BUILD_WORKER_IDLE_EXIT_SECONDS`  | `30`    | Seconds an idle build worker waits before exiting.              |
-| `DATABASE_POOL_SIZE`              | `10`    | SQLAlchemy pool size for Postgres runtime.                      |
-| `DATABASE_MAX_OVERFLOW`           | `20`    | Extra Postgres connections allowed above pool size.             |
-| `DATABASE_POOL_TIMEOUT`           | `30`    | Seconds to wait for a Postgres pooled connection.               |
+| Variable                          | Default | Notes                                                                                                                                                                                                                                                                                                                                                            |
+| --------------------------------- | ------- | ---------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| `SCHEDULER_CHECK_INTERVAL`        | `60`    | Seconds between scheduler polls.                                                                                                                                                                                                                                                                                                                                 |
+| `LOCK_TTL_SECONDS`                | `30`    | Lock lease duration.                                                                                                                                                                                                                                                                                                                                             |
+| `LOCK_HEARTBEAT_INTERVAL_SECONDS` | `10`    | Must stay lower than `LOCK_TTL_SECONDS`.                                                                                                                                                                                                                                                                                                                         |
+| `POLARS_CORES_AVAILABLE`          | `0`     | Total cores for analysis engines; `0` = all host logical CPUs. Not Polars' native `POLARS_MAX_THREADS`.                                                                                                                                                                                                                                                          |
+| `POLARS_MAX_MEMORY_MB`            | `0`     | `0` means unlimited.                                                                                                                                                                                                                                                                                                                                             |
+| `POLARS_STREAMING_CHUNK_SIZE`     | `0`     | `0` means automatic chunk sizing.                                                                                                                                                                                                                                                                                                                                |
+| `COMPUTE_WORKERS`                 | `14`    | Current single-manager active capacity (`1`–`100` in this implementation): concurrent compute jobs and assigned workers. Builds, previews, and datasource operations share it; excess work remains durable and waits. Each assigned worker is bound to one exact analysis/datasource identity. Cluster-wide grants across multiple managers are not implemented. |
+| `WORKERS`                         | `1`     | Valid range: `0` to `32`; `0` means auto in deployment scripts. Values above `1` require the dedicated runtime coordinator service and scale API processes only, not compute capacity.                                                                                                                                                                           |
+| `WORKER_CONNECTIONS`              | `4096`  | Coarse maximum concurrent HTTP/WebSocket connections per Uvicorn process. Thread counts and blocking-work queue bounds are derived independently from database capacity; saturation returns overload responses instead of growing those queues with this connection limit.                                                                                                                                                                                                  |
+| `DATABASE_POOL_SIZE`              | `8`     | SQLAlchemy pool size per process and per engine. The runtime coordinator inherits this bounded value; it is independent of `COMPUTE_WORKERS`. The API requires `DATABASE_POOL_SIZE + DATABASE_MAX_OVERFLOW >= 3` for its general, synchronous-handler, and protected bootstrap lanes. |
+| `DATABASE_MAX_OVERFLOW`           | `4`     | Extra Postgres connections allowed above each process's pool size. API processes and the runtime coordinator use this same bound; it must not scale with `COMPUTE_WORKERS`.                                                                                  |
+| `DATABASE_POOL_TIMEOUT`           | `30`    | Seconds to wait for a Postgres pooled connection.                                                                                                                                                                                                                                                                                                                |
+
+The runtime coordinator's pending RPC queue is bounded from `COMPUTE_WORKERS`
+(`max(8, 2 × COMPUTE_WORKERS)` per RPC lane). Active RPC threads are still
+bounded by its database pool; the queue bound allows compute bursts to wait
+without making a database pool the admission limit. Work beyond the queue is
+rejected explicitly while accepted compute requests remain durable.
 
 ### Logging and time handling
 
-| Variable                            | Default            | Notes                                                                                                                    |
-| ----------------------------------- | ------------------ | ------------------------------------------------------------------------------------------------------------------------ |
-| `LOG_LEVEL`                         | `info`             | One of `debug`, `info`, `warning`, `error`, `critical`.                                                                  |
-| `UVICORN_ACCESS_LOG`                | `true`             | Enables uvicorn access logs.                                                                                             |
-| `TIMEZONE`                          | `UTC`              | Must be a valid IANA timezone.                                                                                           |
-| `NORMALIZE_TZ`                      | `false`            | Normalizes datetime values to `TIMEZONE`.                                                                                |
-| `LOG_CLIENT_BATCH_SIZE`             | `20`               | Client audit batch size.                                                                                                 |
-| `LOG_CLIENT_FLUSH_INTERVAL_MS`      | `5000`             | Client audit flush interval.                                                                                             |
-| `LOG_CLIENT_DEDUPE_WINDOW_MS`       | `500`              | Dedupe window for repeated client events.                                                                                |
-| `LOG_CLIENT_FLUSH_COOLDOWN_MS`      | `3000`             | Cooldown before repeating client flush-failure logs.                                                                     |
-| `LOG_FLUSH_INTERVAL_SECONDS`        | `5`                | Flush interval for database-backed server logs.                                                                          |
-| `LOG_QUEUE_MAX_SIZE`                | `2000`             | Max queued log batches.                                                                                                  |
-| `LOG_QUEUE_OVERFLOW`                | `drop`             | One of `block` or `drop`.                                                                                                |
-| `LOG_MAX_BODY_SIZE`                 | `65536`            | Max request/response body bytes to log. `0` means unlimited.                                                             |
-| `PUBLIC_IDB_DEBUG`                  | `false`            | Enables IndexedDB debug panels in the frontend. Seeded via the backend config API endpoint — not a Vite/browser env var. |
+| Variable                       | Default | Notes                                                                                                                                        |
+| ------------------------------ | ------- | -------------------------------------------------------------------------------------------------------------------------------------------- |
+| `LOG_LEVEL`                    | `info`  | One of `debug`, `info`, `warning`, `error`, `critical`.                                                                                      |
+| `UVICORN_ACCESS_LOG`           | `true`  | Enables uvicorn access logs.                                                                                                                 |
+| `TIMEZONE`                     | `UTC`   | Must be a valid IANA timezone.                                                                                                               |
+| `NORMALIZE_TZ`                 | `false` | Normalizes datetime values to `TIMEZONE`.                                                                                                    |
+| `LOG_CLIENT_BATCH_SIZE`        | `20`    | Client audit batch size.                                                                                                                     |
+| `LOG_CLIENT_FLUSH_INTERVAL_MS` | `5000`  | Client audit flush interval.                                                                                                                 |
+| `LOG_CLIENT_DEDUPE_WINDOW_MS`  | `500`   | Dedupe window for repeated client events.                                                                                                    |
+| `LOG_CLIENT_FLUSH_COOLDOWN_MS` | `3000`  | Cooldown before repeating client flush-failure logs.                                                                                         |
+| `LOG_FLUSH_INTERVAL_SECONDS`   | `5`     | Flush interval for database-backed server logs.                                                                                              |
+| `LOG_QUEUE_MAX_SIZE`           | `2000`  | Max queued log batches.                                                                                                                      |
+| `LOG_QUEUE_OVERFLOW`           | `drop`  | One of `block` or `drop`.                                                                                                                    |
+| `LOG_MAX_BODY_SIZE`            | `65536` | Max explicitly sized request/response body bytes to log. `0` disables body logging; unknown-size request bodies are never buffered for logs. |
+| `PUBLIC_IDB_DEBUG`             | `false` | Enables IndexedDB debug panels in the frontend. Seeded via the backend config API endpoint — not a Vite/browser env var.                     |
 
 ### AI and provider settings
 
-| Variable                      | Default                  | Notes                                             |
-| ----------------------------- | ------------------------ | ------------------------------------------------- |
-| `OLLAMA_BASE_URL`             | `http://localhost:11434` | Base URL for Ollama.                              |
-| `OLLAMA_DEFAULT_MODEL`        | `llama3.2`               | Default Ollama chat model.                        |
-| `OPENAI_API_KEY`              | empty                    | OpenAI API key.                                   |
-| `OPENAI_BASE_URL`             | `https://api.openai.com` | OpenAI-compatible API base URL.                   |
-| `OPENAI_DEFAULT_MODEL`        | `gpt-4o-mini`            | Default OpenAI model.                             |
-| `OPENAI_ORGANIZATION_ID`      | empty                    | Optional OpenAI org id.                           |
-| `OPENROUTER_API_KEY`          | empty                    | Seeded into DB on first run if DB field is empty. |
-| `OPENROUTER_DEFAULT_MODEL`    | empty                    | Seeded into DB on first run if DB field is empty. |
-| `OPENAI_DEFAULT_MODEL_DB`     | empty                    | DB-seeded default model override.                 |
-| `OPENAI_ENDPOINT_URL_DB`      | empty                    | DB-seeded endpoint override.                      |
-| `OPENAI_ORGANIZATION_ID_DB`   | empty                    | DB-seeded organization override.                  |
-| `OLLAMA_ENDPOINT_URL_DB`      | empty                    | DB-seeded Ollama endpoint override.               |
-| `OLLAMA_DEFAULT_MODEL_DB`     | empty                    | DB-seeded Ollama model override.                  |
+| Variable                    | Default                  | Notes                                             |
+| --------------------------- | ------------------------ | ------------------------------------------------- |
+| `OLLAMA_BASE_URL`           | `http://localhost:11434` | Base URL for Ollama.                              |
+| `OLLAMA_DEFAULT_MODEL`      | `llama3.2`               | Default Ollama chat model.                        |
+| `OPENAI_API_KEY`            | empty                    | OpenAI API key.                                   |
+| `OPENAI_BASE_URL`           | `https://api.openai.com` | OpenAI-compatible API base URL.                   |
+| `OPENAI_DEFAULT_MODEL`      | `gpt-4o-mini`            | Default OpenAI model.                             |
+| `OPENAI_ORGANIZATION_ID`    | empty                    | Optional OpenAI org id.                           |
+| `OPENROUTER_API_KEY`        | empty                    | Seeded into DB on first run if DB field is empty. |
+| `OPENROUTER_DEFAULT_MODEL`  | empty                    | Seeded into DB on first run if DB field is empty. |
+| `OPENAI_DEFAULT_MODEL_DB`   | empty                    | DB-seeded default model override.                 |
+| `OPENAI_ENDPOINT_URL_DB`    | empty                    | DB-seeded endpoint override.                      |
+| `OPENAI_ORGANIZATION_ID_DB` | empty                    | DB-seeded organization override.                  |
+| `OLLAMA_ENDPOINT_URL_DB`    | empty                    | DB-seeded Ollama endpoint override.               |
+| `OLLAMA_DEFAULT_MODEL_DB`   | empty                    | DB-seeded Ollama model override.                  |
 
 ### Notifications and encrypted settings
 
@@ -300,7 +342,7 @@ Same-host processes can keep the loopback defaults. Split Docker roles must bind
 | `DEFAULT_USER_NAME`     | `Default User`                                      | Default env-managed account name.                                                                                                                                                                                         |
 | `AUTH_FRONTEND_URL`     | `http://localhost:5173`                             | Frontend URL used by auth redirects. In prod (single port) set to the backend URL (e.g. `http://your-server:8000`). In dev set to the Vite dev-server URL — must match `FRONTEND_PORT` (default `http://localhost:3000`). |
 | `SESSION_MAX_AGE_DAYS`  | `30`                                                | Session lifetime in days.                                                                                                                                                                                                 |
-| `TRUSTED_PROXY_HOPS`    | `0`                                                 | Number of trusted reverse proxies in front of the app. `0` means ignore `X-Forwarded-For` and use the direct client socket.                                                                                           |
+| `TRUSTED_PROXY_HOPS`    | `0`                                                 | Number of trusted reverse proxies in front of the app. `0` means ignore `X-Forwarded-For` and use the direct client socket.                                                                                               |
 | `GOOGLE_CLIENT_ID`      | empty                                               | Google OAuth client id.                                                                                                                                                                                                   |
 | `GOOGLE_CLIENT_SECRET`  | empty                                               | Google OAuth client secret.                                                                                                                                                                                               |
 | `GOOGLE_REDIRECT_URI`   | `http://localhost:8000/api/v1/auth/google/callback` | Google OAuth callback.                                                                                                                                                                                                    |
@@ -316,17 +358,30 @@ Same-host processes can keep the loopback defaults. Split Docker roles must bind
 > In production the Vite dev server is not running, so none of these have any
 > effect on the deployed application.
 
-| Variable        | Default     | Notes                                                   |
-| --------------- | ----------- | ------------------------------------------------------- |
-| `FRONTEND_PORT` | `3000`      | Local Vite dev-server port.  Must match `AUTH_FRONTEND_URL`. |
+| Variable        | Default     | Notes                                                                                 |
+| --------------- | ----------- | ------------------------------------------------------------------------------------- |
+| `FRONTEND_PORT` | `3000`      | Local Vite dev-server port. Must match `AUTH_FRONTEND_URL`.                           |
 | `BACKEND_HOST`  | `127.0.0.1` | Backend hostname used by the Vite proxy (Bun/Vite only, not exposed to browser code). |
-| `BACKEND_PORT`  | `PORT`      | Backend port used by the Vite proxy. Defaults to `PORT` when unset. |
+| `BACKEND_PORT`  | `PORT`      | Backend port used by the Vite proxy. Defaults to `PORT` when unset.                   |
 
 ## Test and tooling variables
 
-| Variable         | Default | Notes                                |
-| ---------------- | ------- | ------------------------------------ |
-| `PW_E2E_WORKERS` | `2`     | Playwright workers per e2e shard. CI may lower this for smaller runners. |
+| Variable         | Default | Notes                                                                                                                                                                                                              |
+| ---------------- | ------- | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------ |
+| `PW_E2E_WORKERS` | `5`     | Playwright workers per E2E shard (3×5 validated). The checked-in E2E topology uses four API processes, one active runtime coordinator, one worker manager, a 32-worker compute budget, and four prewarmed workers. |
+| `TEST_MEMORY_MB` | derived | Optional total memory budget in MiB per test recipe invocation. When unset, Python/Vitest uses 75% and E2E uses 90% of memory available to Docker. Explicit values must be at least `1024` MiB and no greater than Docker's available memory. E2E allocates 512 MiB to its controller and the remainder to its isolated DinD daemon, which runs all browser containers. |
+| `TEST_CPUS`      | unset   | Optional total CPU budget per test recipe invocation; when set, it must be at least `0.1`. Without it, the invocation uses the Docker-reported CPU capacity. E2E allocates at least 0.5 CPUs or 20% of the total to its controller, whichever is greater, and gives the remainder to DinD; its total must leave CPU for both. Concurrent invocations each get their own cap. |
+
+Every public per-suite recipe creates a fresh daemon, network, and volumes in
+its own private Compose enclave. `just test` runs the per-suite recipes
+sequentially, while independent recipe invocations such as CI matrix jobs may
+run concurrently. `TEST_MEMORY_MB` and `TEST_CPUS` are per invocation, not a
+global host budget: concurrent caps add together and the host's CPU and memory
+remain finite and shared. Budgets do not change service counts or test
+concurrency. Recipes require Docker with privileged-container
+support and `just` on the host. See [Docker test setup](../docker/README.md#containerized-tests)
+for enclave lifecycle and security limits. Test logs and diagnostics are
+exported to `.test-artifacts/<run-id>`.
 
 ## Recommended additions to consider later
 

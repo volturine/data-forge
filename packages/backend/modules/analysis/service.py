@@ -13,6 +13,7 @@ from sqlalchemy.orm import defer
 from sqlalchemy.orm.attributes import flag_modified
 from sqlmodel import Session
 
+from backend_core import datasource_delete_service
 from backend_core.ai_clients import AIError, ai_provider_name, get_ai_client, require_ai_provider
 from backend_core.analysis_cycles import assert_no_analysis_cycle
 from backend_core.domain.analysis.models import AnalysisStatus
@@ -655,11 +656,11 @@ def get_analysis(
 
 
 def get_analysis_etag(session: Session, analysis_id: str) -> str:
-    """Return the revision-based ETag without building the full response payload."""
-    analysis = session.get(Analysis, analysis_id)
-    if not analysis:
+    """Return the revision-based ETag without loading the pipeline JSON."""
+    revision = session.execute(select(col(Analysis.revision)).where(col(Analysis.id) == analysis_id)).scalar_one_or_none()
+    if revision is None:
         raise analysis_not_found(analysis_id)
-    return revisions.etag(analysis)
+    return revisions.etag_for(analysis_id, revision)
 
 
 def list_analyses(
@@ -685,6 +686,7 @@ def list_analyses(
                 'thumbnail': analysis.thumbnail,
                 'created_at': analysis.created_at,
                 'updated_at': analysis.updated_at,
+                'revision': analysis.revision,
                 'is_favorite': False,
             }
         )
@@ -719,6 +721,7 @@ def list_favorite_analyses(
                 'thumbnail': analysis.thumbnail,
                 'created_at': analysis.created_at,
                 'updated_at': analysis.updated_at,
+                'revision': analysis.revision,
                 'is_favorite': True,
             }
         )
@@ -1036,9 +1039,9 @@ def update_analysis(
     analysis.updated_at = datetime.now(UTC).replace(tzinfo=None)
     analysis.revision += 1
 
+    response = _to_response(analysis)
     session.commit()
-    session.refresh(analysis)
-    return _to_response(analysis)
+    return response
 
 
 def set_favorite(
@@ -1073,8 +1076,6 @@ def delete_analysis(
     session: Session,
     analysis_id: str,
 ) -> None:
-    from modules.datasource.service import cleanup_datasource_storage
-
     analysis = session.get(Analysis, analysis_id)
 
     if not analysis:
@@ -1090,8 +1091,11 @@ def delete_analysis(
 
     for ds in created_datasources:
         if ds.is_hidden:
-            cleanup_datasource_storage(ds)
-            session.delete(ds)
+            # Keep owned outputs visible to the datasource-delete worker until
+            # all preview/schema/stats requests drain. Direct row deletion here
+            # let an in-flight schema request reach the worker after its source
+            # disappeared, producing a durable "datasource not found" error.
+            datasource_delete_service.stage_delete(session, ds.id)
 
     session.execute(delete(AnalysisDataSource).where(col(AnalysisDataSource.analysis_id) == analysis_id))
 

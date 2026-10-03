@@ -6,19 +6,21 @@ fenced metadata. No dataframe loading or Iceberg table writes belong here.
 
 from __future__ import annotations
 
-from collections.abc import Mapping
+from collections.abc import Callable, Mapping
 from datetime import UTC, datetime
 from typing import Any, cast
 
 from sqlalchemy import update
 from sqlalchemy.engine import CursorResult
+from sqlalchemy.exc import IntegrityError
 from sqlmodel import Session, select
 
+from backend_core import storage_cleanup_service
 from backend_core.domain.datasource.models import DataSourceCreatedBy
 from backend_core.domain.datasource.source_types import DataSourceType
 from backend_core.exceptions import datasource_not_found
 from backend_core.persistence.datasource.models import DataSource, DataSourceColumnMetadata
-from backend_core.sqlmodel_typing import sa
+from backend_core.sqlmodel_typing import col, sa
 from dataforge_protocol import datasource_pb2
 from modules.datasource.schema_protocol import schema_info_payload
 from modules.datasource.schemas import (
@@ -29,6 +31,10 @@ from modules.datasource.schemas import (
 
 class DatasourcePublicationClaimLost(RuntimeError):
     """Raised when a fenced ingest publication loses ownership before commit."""
+
+
+class DatasourcePublicationRevisionChanged(RuntimeError):
+    """Raised when schema work was computed from an obsolete datasource revision."""
 
 
 def _schema_cache_payload(schema_info: datasource_pb2.SchemaInfo | None) -> dict[str, Any] | None:
@@ -57,8 +63,24 @@ def create_datasource(
     config: Mapping[str, object],
     owner_id: str | None,
     schema_info: datasource_pb2.SchemaInfo | None = None,
+    publication_guard: Callable[[Session], None] | None = None,
 ) -> DataSourceResponse:
+    if publication_guard is not None:
+        publication_guard(session)
     resolved_type = DataSourceType.require(source_type)
+    existing = session.get(DataSource, datasource_id)
+    if existing is not None:
+        # Compute requests are retried at least once when a worker loses its
+        # response connection after committing the publication. The request
+        # ID is the datasource ID for create requests, so replaying the same
+        # request must return the committed row instead of inserting another
+        # row with the same user-visible name.
+        if existing.name != name or existing.source_type != resolved_type or existing.owner_id != owner_id:
+            raise ValueError(f'Datasource publication ID {datasource_id} is already in use')
+        storage_cleanup_service.settle_publication(session, existing.config)
+        session.commit()
+        return _response(existing)
+
     datasource = DataSource(
         id=datasource_id,
         name=name,
@@ -71,7 +93,24 @@ def create_datasource(
         created_at=datetime.now(UTC).replace(tzinfo=None),
     )
     session.add(datasource)
-    session.commit()
+    try:
+        storage_cleanup_service.settle_publication(session, config)
+        session.commit()
+    except IntegrityError:
+        # Another replay may have committed the same request between the
+        # existence check and this insert. Treat that race exactly like the
+        # already-committed case above.
+        session.rollback()
+        existing = session.get(DataSource, datasource_id)
+        if existing is None:
+            raise
+        if existing.name != name or existing.source_type != resolved_type or existing.owner_id != owner_id:
+            raise ValueError(f'Datasource publication ID {datasource_id} is already in use')
+        if publication_guard is not None:
+            publication_guard(session)
+        storage_cleanup_service.settle_publication(session, existing.config)
+        session.commit()
+        return _response(existing)
     session.refresh(datasource)
     return _response(datasource)
 
@@ -83,7 +122,7 @@ def publish_ingest(
     config: Mapping[str, object],
     expected_revision: int,
     schema_info: datasource_pb2.SchemaInfo | None,
-    publication_guard: Any | None = None,
+    publication_guard: Callable[[Session], None] | None = None,
 ) -> DataSourceResponse:
     datasource = session.get(DataSource, datasource_id)
     if datasource is None:
@@ -98,25 +137,48 @@ def publish_ingest(
         values['schema_cache'] = _schema_cache_payload(schema_info)
     else:
         values['schema_cache'] = None
-    statement = update(DataSource).where(sa(DataSource.id == datasource_id), sa(DataSource.revision == expected_revision)).values(**values)
+    statement = (
+        update(DataSource)
+        .where(sa(DataSource.id == datasource_id), sa(DataSource.revision == expected_revision), col(DataSource.is_pending_delete).is_(False))
+        .values(**values)
+    )
     publication = cast(CursorResult[Any], session.execute(statement))
     if publication.rowcount != 1:
         session.rollback()
         raise DatasourcePublicationClaimLost(f'Datasource {datasource_id} publication fence was replaced')
+    storage_cleanup_service.settle_publication(session, config)
     session.commit()
     session.expire(datasource)
     session.refresh(datasource)
     return _response(datasource)
 
 
-def publish_schema_cache(session: Session, *, datasource_id: str, schema_info: datasource_pb2.SchemaInfo) -> datasource_pb2.SchemaInfo:
-    datasource = session.get(DataSource, datasource_id)
-    if datasource is None:
-        raise datasource_not_found(datasource_id)
-    datasource.schema_cache = _schema_cache_payload(schema_info)
-    session.add(datasource)
+def publish_schema_cache(
+    session: Session,
+    *,
+    datasource_id: str,
+    expected_revision: int,
+    schema_info: datasource_pb2.SchemaInfo,
+    publication_guard: Any,
+) -> datasource_pb2.SchemaInfo:
+    publication_guard(session)
+    statement = (
+        update(DataSource)
+        .where(
+            sa(DataSource.id == datasource_id),
+            sa(DataSource.revision == expected_revision),
+            col(DataSource.is_pending_delete).is_(False),
+        )
+        .values(schema_cache=_schema_cache_payload(schema_info))
+    )
+    publication = cast(CursorResult[Any], session.execute(statement))
+    if publication.rowcount != 1:
+        session.rollback()
+        datasource = session.get(DataSource, datasource_id)
+        if datasource is None or datasource.is_pending_delete:
+            raise datasource_not_found(datasource_id)
+        raise DatasourcePublicationRevisionChanged(f'Datasource {datasource_id} revision changed before schema publication')
     session.commit()
-    session.refresh(datasource)
     return attach_column_descriptions(session, datasource_id, schema_info)
 
 

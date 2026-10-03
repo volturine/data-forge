@@ -37,10 +37,36 @@ async function withStore<T>(
 		const transaction = db.transaction(config.store, mode);
 		const store = transaction.objectStore(config.store);
 		const request = fn(store);
-		request.onsuccess = () => resolve(request.result as T);
-		request.onerror = () => reject(request.error ?? new Error('IndexedDB request failed'));
-		transaction.oncomplete = () => db.close();
-		transaction.onerror = () => db.close();
+		let result: T;
+		let settled = false;
+		const fail = (error: unknown) => {
+			if (settled) return;
+			settled = true;
+			db.close();
+			reject(error instanceof Error ? error : new Error('IndexedDB transaction failed'));
+		};
+
+		request.onsuccess = () => {
+			result = request.result as T;
+		};
+		request.onerror = () => {
+			fail(request.error ?? new Error('IndexedDB request failed'));
+		};
+		// A request's success event only means the operation was accepted by the
+		// transaction. Resolve after `complete` so callers that navigate or reload
+		// immediately after idbSet cannot observe the previous value.
+		transaction.oncomplete = () => {
+			if (settled) return;
+			settled = true;
+			db.close();
+			resolve(result);
+		};
+		transaction.onerror = () => {
+			fail(transaction.error ?? new Error('IndexedDB transaction failed'));
+		};
+		transaction.onabort = () => {
+			fail(transaction.error ?? new Error('IndexedDB transaction aborted'));
+		};
 	});
 }
 

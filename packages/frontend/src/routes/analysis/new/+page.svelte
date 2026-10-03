@@ -581,6 +581,15 @@
 		);
 	}
 
+	async function navigateToCreatedAnalysis(analysisId: string): Promise<void> {
+		try {
+			await goto(resolve(`/analysis/${analysisId}`), { invalidateAll: false });
+		} catch (err) {
+			error = err instanceof Error ? err.message : 'Failed to open the created analysis';
+			creating = false;
+		}
+	}
+
 	async function handleCreate(): Promise<void> {
 		creating = true;
 		error = '';
@@ -590,15 +599,12 @@
 				return;
 			}
 			const result = await createAnalysis(payload);
-			result.match(
-				(analysis) => {
-					goto(resolve(`/analysis/${analysis.id}`), { invalidateAll: true });
-				},
-				(err) => {
-					error = err.message;
-					creating = false;
-				}
-			);
+			if (result.isErr()) {
+				error = result.error.message;
+				creating = false;
+				return;
+			}
+			await navigateToCreatedAnalysis(result.value.id);
 			return;
 		}
 		if (mode === 'clone') {
@@ -606,15 +612,12 @@
 				name: name.trim() || `Copy of ${cloneSourceName}`,
 				description: description.trim() || null
 			});
-			result.match(
-				(analysis) => {
-					goto(resolve(`/analysis/${analysis.id}`), { invalidateAll: true });
-				},
-				(err) => {
-					error = err.message;
-					creating = false;
-				}
-			);
+			if (result.isErr()) {
+				error = result.error.message;
+				creating = false;
+				return;
+			}
+			await navigateToCreatedAnalysis(result.value.id);
 			return;
 		}
 		if (mode === 'import' && importedPipeline) {
@@ -624,15 +627,12 @@
 				pipeline: importedPipeline,
 				datasource_remap: datasourceRemap
 			});
-			result.match(
-				(analysis) => {
-					goto(resolve(`/analysis/${analysis.id}`), { invalidateAll: true });
-				},
-				(err) => {
-					error = err.message;
-					creating = false;
-				}
-			);
+			if (result.isErr()) {
+				error = result.error.message;
+				creating = false;
+				return;
+			}
+			await navigateToCreatedAnalysis(result.value.id);
 			return;
 		}
 		creating = false;

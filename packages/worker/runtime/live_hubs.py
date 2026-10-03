@@ -2,18 +2,21 @@ from __future__ import annotations
 
 import asyncio
 import threading
+from collections import deque
 
 
-class VersionHub:
+class VersionHub[T]:
     def __init__(self) -> None:
         self._version = 0
+        self._history: deque[tuple[int, T | None]] = deque(maxlen=2048)
         self._waiters: list[tuple[asyncio.AbstractEventLoop, asyncio.Future[int]]] = []
         self._lock = threading.Lock()
 
-    def publish(self) -> None:
+    def publish(self, payload: T | None = None) -> None:
         with self._lock:
             self._version += 1
             version = self._version
+            self._history.append((version, payload))
             waiters = self._waiters
             self._waiters = []
         for loop, future in waiters:
@@ -24,6 +27,27 @@ class VersionHub:
     def version(self) -> int:
         with self._lock:
             return self._version
+
+    def payloads_since(self, last_seen: int) -> list[T | None]:
+        """Return namespace payloads published after ``last_seen``.
+
+        A bounded history lets every claim lane observe every namespace from a
+        burst without making the notification itself a global queue. If the
+        history was overrun, returning the newest payload leaves the durable
+        recovery poll to find anything older without reintroducing a tenant
+        scan on the claim path.
+        """
+        with self._lock:
+            if last_seen >= self._version:
+                return []
+            if not self._history or self._history[0][0] > last_seen + 1:
+                return [self._history[-1][1]] if self._history else []
+            payloads: list[T | None] = []
+            for version, payload in self._history:
+                if version <= last_seen or payload in payloads:
+                    continue
+                payloads.append(payload)
+            return payloads
 
     async def wait(self, last_seen: int | None = None) -> int:
         with self._lock:
@@ -47,6 +71,7 @@ class VersionHub:
             waiters = self._waiters
             self._waiters = []
             self._version = 0
+            self._history.clear()
         for loop, future in waiters:
             if future.done():
                 continue

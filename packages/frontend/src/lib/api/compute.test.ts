@@ -1,4 +1,5 @@
 import { afterEach, beforeEach, describe, expect, test, vi } from 'vitest';
+import { ResultAsync } from 'neverthrow';
 
 const mockTrack = vi.fn();
 const mockApiRequest = vi.fn();
@@ -99,6 +100,51 @@ describe('compute api activity tracking', () => {
 		expect(second).toBe(result);
 		expect(mockApiRequest).toHaveBeenCalledTimes(1);
 		expect(mockRetain).toHaveBeenCalledTimes(1);
+	});
+
+	test('previewStepData aborts the shared fetch after its last observer leaves', async () => {
+		const pending = ResultAsync.fromSafePromise(new Promise<unknown>(() => {}));
+		mockApiRequest.mockReturnValue(pending);
+		const firstController = new AbortController();
+		const secondController = new AbortController();
+		const request = {
+			target_step_id: 'step-with-signal',
+			analysis_pipeline: { analysis_id: 'analysis-1', tabs: [] }
+		};
+
+		const first = compute.previewStepData(request, { signal: firstController.signal });
+		const second = compute.previewStepData(request, { signal: secondController.signal });
+		const sharedSignal = mockApiRequest.mock.calls[0][1].signal as AbortSignal;
+
+		firstController.abort();
+		const firstResult = await first;
+		expect(firstResult.isErr()).toBe(true);
+		expect(sharedSignal.aborted).toBe(false);
+
+		secondController.abort();
+		const secondResult = await second;
+		expect(secondResult.isErr()).toBe(true);
+		expect(sharedSignal.aborted).toBe(true);
+	});
+
+	test('previewStepData treats repeated evaluations from one owner as one observer', async () => {
+		const pending = ResultAsync.fromSafePromise(new Promise<unknown>(() => {}));
+		mockApiRequest.mockReturnValue(pending);
+		const controller = new AbortController();
+		const request = {
+			target_step_id: 'step-repeated-owner',
+			analysis_pipeline: { analysis_id: 'analysis-1', tabs: [] }
+		};
+
+		const first = compute.previewStepData(request, { signal: controller.signal });
+		const second = compute.previewStepData(request, { signal: controller.signal });
+		const sharedSignal = mockApiRequest.mock.calls[0][1].signal as AbortSignal;
+
+		expect(mockApiRequest).toHaveBeenCalledTimes(1);
+		controller.abort();
+		expect((await first).isErr()).toBe(true);
+		expect((await second).isErr()).toBe(true);
+		expect(sharedSignal.aborted).toBe(true);
 	});
 
 	test('getStepSchema tracks compute activity', () => {

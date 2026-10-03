@@ -60,6 +60,19 @@ def upgrade() -> None:
         sa.PrimaryKeyConstraint('name'),
     )
     op.create_table(
+        'namespace_engine_credentials',
+        sa.Column('id', sa.String(), nullable=False),
+        sa.Column('namespace', sa.String(), nullable=False),
+        sa.Column('role', sa.String(), nullable=False),
+        sa.Column('access_key', sa.String(), nullable=False),
+        sa.Column('secret_key_encrypted', sa.String(), nullable=False),
+        sa.Column('created_at', sa.DateTime(), nullable=False),
+        sa.PrimaryKeyConstraint('id'),
+        sa.UniqueConstraint('access_key'),
+        sa.UniqueConstraint('namespace', 'role', name='uq_namespace_engine_credentials_role'),
+    )
+    op.create_index('ix_namespace_engine_credentials_namespace', 'namespace_engine_credentials', ['namespace'])
+    op.create_table(
         'runtime_workers',
         sa.Column('id', sa.String(), nullable=False),
         sa.Column('kind', sa.String(), nullable=False),
@@ -125,4 +138,6 @@ def downgrade() -> None:
     op.drop_index('ix_runtime_workers_kind', table_name='runtime_workers')
     op.drop_table('runtime_workers')
     op.drop_table('runtime_namespaces')
+    op.drop_index('ix_namespace_engine_credentials_namespace', table_name='namespace_engine_credentials')
+    op.drop_table('namespace_engine_credentials')
     op.drop_table('app_settings')

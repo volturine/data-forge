@@ -1,11 +1,16 @@
 from __future__ import annotations
 
 import asyncio
+import contextlib
 import logging
 import threading
+import time
+import weakref
 from collections.abc import Awaitable, Callable
+from concurrent.futures import Executor, Future as ConcurrentFuture, ThreadPoolExecutor
 from datetime import UTC, datetime
-from typing import Any, cast
+from functools import partial
+from typing import Any, Never, cast
 
 import grpc
 import pyarrow as pa  # type: ignore[import-untyped]
@@ -18,15 +23,111 @@ from dataforge_protocol import common_pb2, iceberg_pb2, iceberg_pb2_grpc, object
 from runtime import compute_service, iceberg_metadata, iceberg_snapshot_reader, object_store
 from runtime.config import settings
 from runtime.json_values import dict_to_struct
+from runtime.worker_runtime_client import BackendWorkerRpcError
 
 logger = logging.getLogger(__name__)
 _TOKEN_METADATA_KEY = "x-internal-token"
 _MAX_DATA_PLANE_MESSAGE_BYTES = 128 * 1024 * 1024
+_OBJECT_TRANSFER_CHUNK_BYTES = 8 * 1024 * 1024
+_VALIDATION_WORKERS = 2
+_SLOW_VALIDATION_SECONDS = 0.25
+_VALIDATION_QUEUE_WARNING_SECONDS = 0.1
+_VALIDATION_EXECUTOR = ThreadPoolExecutor(
+    max_workers=_VALIDATION_WORKERS,
+    thread_name_prefix="data-plane-validation",
+)
+_VALIDATOR_LOCAL = threading.local()
+_OBJECT_STORE_WORKERS = max(4, min(8, settings.compute_workers))
+_OBJECT_STORE_EXECUTOR = ThreadPoolExecutor(
+    max_workers=_OBJECT_STORE_WORKERS,
+    thread_name_prefix="data-plane-object-store",
+)
+_ICEBERG_WORKERS = max(2, min(4, settings.compute_workers // 2 or 1))
+_ICEBERG_EXECUTOR = ThreadPoolExecutor(
+    max_workers=_ICEBERG_WORKERS,
+    thread_name_prefix="data-plane-iceberg",
+)
+
+
+class _BlockingLane:
+    def __init__(self, executor: Executor, max_in_flight: int) -> None:
+        self.executor = executor
+        self.max_in_flight = max_in_flight
+        self._semaphores: weakref.WeakKeyDictionary[asyncio.AbstractEventLoop, asyncio.Semaphore] = weakref.WeakKeyDictionary()
+        self._lock = threading.Lock()
+
+    def semaphore(self, loop: asyncio.AbstractEventLoop) -> asyncio.Semaphore:
+        with self._lock:
+            semaphore = self._semaphores.get(loop)
+            if semaphore is None:
+                semaphore = asyncio.Semaphore(self.max_in_flight)
+                self._semaphores[loop] = semaphore
+            return semaphore
+
+
+_OBJECT_STORE_LANE = _BlockingLane(_OBJECT_STORE_EXECUTOR, _OBJECT_STORE_WORKERS * 2)
+_ICEBERG_LANE = _BlockingLane(_ICEBERG_EXECUTOR, _ICEBERG_WORKERS * 2)
+
+
+async def _run_blocking[**P, T](lane: _BlockingLane, function: Callable[P, T], *args: P.args, **kwargs: P.kwargs) -> T:
+    loop = asyncio.get_running_loop()
+    semaphore = lane.semaphore(loop)
+    await semaphore.acquire()
+    call = partial(function, *args, **kwargs)
+    try:
+        future = lane.executor.submit(call)
+    except BaseException:
+        semaphore.release()
+        raise
+
+    def release_admission(_future: ConcurrentFuture[T]) -> None:
+        with contextlib.suppress(RuntimeError):
+            loop.call_soon_threadsafe(semaphore.release)
+
+    future.add_done_callback(release_admission)
+    wrapped = asyncio.wrap_future(future, loop=loop)
+    try:
+        return await asyncio.shield(wrapped)
+    except asyncio.CancelledError:
+        while not wrapped.done():
+            try:
+                await asyncio.shield(wrapped)
+            except asyncio.CancelledError:
+                continue
+            except BaseException:
+                break
+        raise
+
+
+async def _run_blocking_to_completion[**P, T](lane: _BlockingLane, function: Callable[P, T], *args: P.args, **kwargs: P.kwargs) -> T:
+    return await _run_blocking(lane, function, *args, **kwargs)
+
+
+def _validate_proto(request: Message, method: str) -> None:
+    started = time.perf_counter()
+    try:
+        validator = getattr(_VALIDATOR_LOCAL, "validator", None)
+        if validator is None:
+            validator = Validator()
+            _VALIDATOR_LOCAL.validator = validator
+        validator.validate(request)
+    finally:
+        elapsed = time.perf_counter() - started
+        slow = elapsed >= _SLOW_VALIDATION_SECONDS
+        log_validation = logger.warning if slow else logger.debug
+        log_validation(
+            "Slow worker request validation method=%s request_type=%s validation_ms=%.1f"
+            if slow
+            else "Worker request validation method=%s request_type=%s validation_ms=%.1f",
+            method,
+            type(request).__name__,
+            elapsed * 1000,
+        )
 
 
 class _WorkerRequestValidationInterceptor(grpc.aio.ServerInterceptor):
     def __init__(self) -> None:
-        self._validator = Validator()
+        self._validation_slots = asyncio.Semaphore(_VALIDATION_WORKERS)
 
     async def intercept_service(
         self,
@@ -37,10 +138,27 @@ class _WorkerRequestValidationInterceptor(grpc.aio.ServerInterceptor):
         if handler is None or handler.unary_unary is None:
             return handler
         unary_unary = cast(Callable[[Message, grpc.aio.ServicerContext], Awaitable[Any]], handler.unary_unary)
+        method = getattr(handler_call_details, "method", None) or "-"
 
         async def validate_request(request: Message, context: grpc.aio.ServicerContext) -> Any:
+            queued_at = time.perf_counter()
+            await self._validation_slots.acquire()
+            queue_ms = (time.perf_counter() - queued_at) * 1000
+            if queue_ms >= _VALIDATION_QUEUE_WARNING_SECONDS * 1000:
+                logger.warning(
+                    "Worker request validation queued method=%s request_type=%s queue_ms=%.1f",
+                    method,
+                    type(request).__name__,
+                    queue_ms,
+                )
             try:
-                self._validator.validate(request)
+                future = asyncio.get_running_loop().run_in_executor(_VALIDATION_EXECUTOR, _validate_proto, request, method)
+            except BaseException:
+                self._validation_slots.release()
+                raise
+            future.add_done_callback(lambda _future: self._validation_slots.release())
+            try:
+                await asyncio.shield(future)
             except ValidationError as exc:
                 await context.abort(grpc.StatusCode.INVALID_ARGUMENT, str(exc))
             return await unary_unary(request, context)
@@ -85,9 +203,16 @@ class ThreadedDataPlaneServer:
 
     async def stop(self, *, grace: float = 1.0) -> None:
         future = asyncio.run_coroutine_threadsafe(self._server.stop(grace=grace), self._loop)
-        await asyncio.to_thread(future.result)
-        self._loop.call_soon_threadsafe(self._loop.stop)
-        await asyncio.to_thread(self._thread.join)
+        try:
+            await asyncio.wait_for(asyncio.wrap_future(future), timeout=grace + 5.0)
+        except TimeoutError:
+            logger.error("Worker data-plane gRPC server did not stop within %.1f seconds", grace + 5.0)
+            future.cancel()
+        finally:
+            self._loop.call_soon_threadsafe(self._loop.stop)
+            await asyncio.to_thread(self._thread.join, 5.0)
+            if self._thread.is_alive():
+                logger.error("Worker data-plane gRPC thread did not stop within 5 seconds")
 
 
 async def _require_internal_token(context: grpc.aio.ServicerContext) -> None:
@@ -97,6 +222,11 @@ async def _require_internal_token(context: grpc.aio.ServicerContext) -> None:
     metadata = {key: value for key, value in invocation_metadata}
     if metadata.get(_TOKEN_METADATA_KEY) != settings.internal_api_token:
         await context.abort(grpc.StatusCode.UNAUTHENTICATED, "Invalid worker data-plane token")
+
+
+async def _abort_backend_worker_rpc_error(context: grpc.aio.ServicerContext, error: BackendWorkerRpcError) -> Never:
+    status_code = next((status for status in grpc.StatusCode if status.name == error.error_code), grpc.StatusCode.UNKNOWN)
+    await context.abort(status_code, error.error)
 
 
 class ObjectStoreServicer(object_store_pb2_grpc.ObjectStoreServiceServicer):
@@ -142,30 +272,92 @@ class ObjectStoreServicer(object_store_pb2_grpc.ObjectStoreServiceServicer):
 
     async def EnsureBucket(self, request: object_store_pb2.ObjectStoreBucket, context: grpc.aio.ServicerContext) -> common_pb2.EmptyRequest:
         await _require_internal_token(context)
-        await asyncio.to_thread(object_store.ensure_bucket_exists, request.name)
+        await _run_blocking(_OBJECT_STORE_LANE, object_store.ensure_bucket_exists, request.name)
         return common_pb2.EmptyRequest()
 
-    async def UploadBytes(self, request: object_store_pb2.ObjectStoreBytes, context: grpc.aio.ServicerContext) -> object_store_pb2.ObjectStoreUrl:
+    async def UploadObject(self, request_iterator, context: grpc.aio.ServicerContext) -> object_store_pb2.ObjectStoreUrl:
         await _require_internal_token(context)
-        content_type = request.content_type if request.HasField("content_type") else None
-        url = await asyncio.to_thread(object_store.upload_bytes, request.data, request.target.url, content_type=content_type)
-        return object_store_pb2.ObjectStoreUrl(url=url)
+        upload: object_store.MultipartObjectUpload | None = None
+        commit_requested = False
+        try:
+            async for frame in request_iterator:
+                kind = frame.WhichOneof("frame")
+                if kind == "start":
+                    if upload is not None or commit_requested:
+                        await context.abort(grpc.StatusCode.INVALID_ARGUMENT, "Upload start frame must be first and occur once")
+                    start = frame.start
+                    content_type = start.content_type if start.HasField("content_type") else None
+                    requested_limit = start.max_bytes or object_store.MAX_TRANSFER_BYTES
+                    create_task = asyncio.create_task(
+                        _run_blocking(
+                            _OBJECT_STORE_LANE,
+                            object_store.MultipartObjectUpload,
+                            start.target.url,
+                            content_type=content_type,
+                            max_bytes=min(requested_limit, object_store.MAX_TRANSFER_BYTES),
+                        )
+                    )
+                    try:
+                        upload = await asyncio.shield(create_task)
+                    except asyncio.CancelledError:
+                        upload = await create_task
+                        with contextlib.suppress(Exception):
+                            await _run_blocking_to_completion(_OBJECT_STORE_LANE, upload.abort)
+                        raise
+                    continue
+                if upload is None:
+                    await context.abort(grpc.StatusCode.INVALID_ARGUMENT, "Upload start frame is required before transfer frames")
+                if kind == "chunk":
+                    data = bytes(frame.chunk.data)
+                    if len(data) > _OBJECT_TRANSFER_CHUNK_BYTES:
+                        await context.abort(grpc.StatusCode.RESOURCE_EXHAUSTED, "Upload chunk exceeds the 8 MiB transfer limit")
+                    await _run_blocking_to_completion(_OBJECT_STORE_LANE, upload.write, data)
+                    continue
+                if kind == "commit":
+                    if commit_requested:
+                        await context.abort(grpc.StatusCode.INVALID_ARGUMENT, "Upload commit frame may occur only once")
+                    commit_requested = True
+                    continue
+                if kind == "abort":
+                    await _run_blocking_to_completion(_OBJECT_STORE_LANE, upload.abort)
+                    upload = None
+                    await context.abort(grpc.StatusCode.CANCELLED, "Upload was aborted by the client")
+                await context.abort(grpc.StatusCode.INVALID_ARGUMENT, "Unknown upload transfer frame")
 
-    async def DownloadBytes(self, request: object_store_pb2.ObjectStoreUrl, context: grpc.aio.ServicerContext) -> object_store_pb2.ObjectStoreBytes:
+            if upload is None or not commit_requested:
+                await context.abort(grpc.StatusCode.INVALID_ARGUMENT, "Upload stream ended before an explicit commit")
+            url = await _run_blocking_to_completion(_OBJECT_STORE_LANE, upload.commit)
+            upload = None
+            return object_store_pb2.ObjectStoreUrl(url=url)
+        finally:
+            if upload is not None:
+                with contextlib.suppress(Exception):
+                    await _run_blocking_to_completion(_OBJECT_STORE_LANE, upload.abort)
+
+    async def DownloadObject(self, request: object_store_pb2.ObjectStoreUrl, context: grpc.aio.ServicerContext):
         await _require_internal_token(context)
-        data = await asyncio.to_thread(object_store.download_bytes, request.url)
-        return object_store_pb2.ObjectStoreBytes(target=request, data=data)
+        chunks = object_store.download_chunks(request.url, chunk_size=_OBJECT_TRANSFER_CHUNK_BYTES)
+        total = 0
+        try:
+            while chunk := await _run_blocking_to_completion(_OBJECT_STORE_LANE, lambda: next(chunks, b"")):
+                total += len(chunk)
+                if total > object_store.MAX_TRANSFER_BYTES:
+                    await context.abort(grpc.StatusCode.RESOURCE_EXHAUSTED, "Object download exceeds the 2 GiB transfer limit")
+                yield object_store_pb2.ObjectStoreTransferChunk(data=chunk)
+        finally:
+            with contextlib.suppress(Exception):
+                await _run_blocking_to_completion(_OBJECT_STORE_LANE, chunks.close)
 
     async def DeleteObject(self, request: object_store_pb2.ObjectStoreUrl, context: grpc.aio.ServicerContext) -> common_pb2.EmptyRequest:
         await _require_internal_token(context)
         if not object_store.is_managed_object_store_url(request.url):
             await context.abort(grpc.StatusCode.PERMISSION_DENIED, "Object is outside the worker-managed storage prefix")
-        await asyncio.to_thread(object_store.delete_object, request.url)
+        await _run_blocking(_OBJECT_STORE_LANE, object_store.delete_object, request.url)
         return common_pb2.EmptyRequest()
 
     async def Exists(self, request: object_store_pb2.ObjectStoreUrl, context: grpc.aio.ServicerContext) -> object_store_pb2.ObjectStoreExistsResponse:
         await _require_internal_token(context)
-        exists = await asyncio.to_thread(object_store.object_exists, request.url)
+        exists = await _run_blocking(_OBJECT_STORE_LANE, object_store.object_exists, request.url)
         return object_store_pb2.ObjectStoreExistsResponse(exists=exists)
 
     async def ListPrefixes(
@@ -174,7 +366,7 @@ class ObjectStoreServicer(object_store_pb2_grpc.ObjectStoreServiceServicer):
         context: grpc.aio.ServicerContext,
     ) -> object_store_pb2.ObjectStorePrefixesResponse:
         await _require_internal_token(context)
-        prefixes = await asyncio.to_thread(object_store.list_prefixes, request.url)
+        prefixes = await _run_blocking(_OBJECT_STORE_LANE, object_store.list_prefixes, request.url)
         return object_store_pb2.ObjectStorePrefixesResponse(prefixes=prefixes)
 
     async def ListMetadataFiles(
@@ -183,14 +375,14 @@ class ObjectStoreServicer(object_store_pb2_grpc.ObjectStoreServiceServicer):
         context: grpc.aio.ServicerContext,
     ) -> object_store_pb2.ObjectStoreMetadataFilesResponse:
         await _require_internal_token(context)
-        files = await asyncio.to_thread(object_store.list_metadata_files, request.url)
+        files = await _run_blocking(_OBJECT_STORE_LANE, object_store.list_metadata_files, request.url)
         return object_store_pb2.ObjectStoreMetadataFilesResponse(files=[object_store_pb2.ObjectStoreUrl(url=file) for file in files])
 
     async def DeletePrefix(self, request: object_store_pb2.ObjectStoreUrl, context: grpc.aio.ServicerContext) -> common_pb2.EmptyRequest:
         await _require_internal_token(context)
         if not object_store.is_managed_object_store_url(request.url):
             await context.abort(grpc.StatusCode.PERMISSION_DENIED, "Prefix is outside the worker-managed storage prefix")
-        await asyncio.to_thread(object_store.delete_prefix, request.url)
+        await _run_blocking(_OBJECT_STORE_LANE, object_store.delete_prefix, request.url)
         return common_pb2.EmptyRequest()
 
 
@@ -203,7 +395,8 @@ class IcebergServicer(iceberg_pb2_grpc.IcebergServiceServicer):
         await _require_internal_token(context)
         if not request.HasField("metadata_path"):
             await context.abort(grpc.StatusCode.INVALID_ARGUMENT, "metadata_path is required")
-        path = await asyncio.to_thread(
+        path = await _run_blocking(
+            _ICEBERG_LANE,
             iceberg_metadata.resolve_iceberg_metadata_path,
             request.metadata_path,
             namespace_name=request.namespace,
@@ -219,7 +412,8 @@ class IcebergServicer(iceberg_pb2_grpc.IcebergServiceServicer):
         if not request.HasField("metadata_path"):
             await context.abort(grpc.StatusCode.INVALID_ARGUMENT, "metadata_path is required")
         branch = request.branch if request.HasField("branch") else None
-        path = await asyncio.to_thread(
+        path = await _run_blocking(
+            _ICEBERG_LANE,
             iceberg_metadata.resolve_iceberg_branch_metadata_path,
             request.metadata_path,
             branch,
@@ -233,12 +427,13 @@ class IcebergServicer(iceberg_pb2_grpc.IcebergServiceServicer):
             schema = _arrow_schema_from_proto(request.arrow_schema)
         except (TypeError, ValueError) as exc:
             await context.abort(grpc.StatusCode.INVALID_ARGUMENT, str(exc))
-        table = await asyncio.to_thread(
+        table = await _run_blocking(
+            _ICEBERG_LANE,
             StaticTable.from_metadata,
             request.metadata_path,
             properties=object_store.object_store_storage_options(),
         )
-        await asyncio.to_thread(iceberg_metadata.sync_iceberg_schema, table, schema)
+        await _run_blocking(_ICEBERG_LANE, iceberg_metadata.sync_iceberg_schema, table, schema)
         return common_pb2.EmptyRequest()
 
     async def ListSnapshots(
@@ -250,7 +445,17 @@ class IcebergServicer(iceberg_pb2_grpc.IcebergServiceServicer):
         if not request.HasField("datasource_id"):
             await context.abort(grpc.StatusCode.INVALID_ARGUMENT, "datasource_id is required")
         branch = request.branch if request.HasField("branch") else None
-        response = await asyncio.to_thread(compute_service.list_iceberg_snapshots, None, request.datasource_id, branch)
+        try:
+            response = await _run_blocking(
+                _ICEBERG_LANE,
+                compute_service.list_iceberg_snapshots,
+                None,
+                request.datasource_id,
+                branch,
+                request_namespace=request.namespace,
+            )
+        except BackendWorkerRpcError as exc:
+            await _abort_backend_worker_rpc_error(context, exc)
         return iceberg_pb2.IcebergSnapshotsResponse(
             datasource_id=response.datasource_id,
             table_path=response.table_path,
@@ -277,9 +482,13 @@ class IcebergServicer(iceberg_pb2_grpc.IcebergServiceServicer):
         except ValueError:
             await context.abort(grpc.StatusCode.INVALID_ARGUMENT, "snapshot_id must be an integer")
         limit = request.limit if request.HasField("limit") else None
-        frame = await asyncio.to_thread(iceberg_snapshot_reader.scan_iceberg_snapshot, request.metadata_path, snapshot_id, None)
-        rows = await asyncio.to_thread(lambda: frame.limit(limit).collect().to_dicts() if limit is not None else frame.collect().to_dicts())
-        return iceberg_pb2.IcebergSnapshotScanResponse(rows=dict_to_struct({"rows": rows}))
+
+        def scan_and_serialize() -> iceberg_pb2.IcebergSnapshotScanResponse:
+            frame = iceberg_snapshot_reader.scan_iceberg_snapshot(request.metadata_path, snapshot_id, None)
+            rows = frame.limit(limit).collect().to_dicts() if limit is not None else frame.collect().to_dicts()
+            return iceberg_pb2.IcebergSnapshotScanResponse(rows=dict_to_struct({"rows": rows}))
+
+        return await _run_blocking(_ICEBERG_LANE, scan_and_serialize)
 
     async def DeleteSnapshot(
         self,
@@ -287,7 +496,17 @@ class IcebergServicer(iceberg_pb2_grpc.IcebergServiceServicer):
         context: grpc.aio.ServicerContext,
     ) -> iceberg_pb2.IcebergSnapshotDeleteResponse:
         await _require_internal_token(context)
-        response = await asyncio.to_thread(compute_service.delete_iceberg_snapshot, None, request.datasource_id, request.snapshot_id)
+        try:
+            response = await _run_blocking(
+                _ICEBERG_LANE,
+                compute_service.delete_iceberg_snapshot,
+                None,
+                request.datasource_id,
+                request.snapshot_id,
+                request_namespace=request.namespace,
+            )
+        except BackendWorkerRpcError as exc:
+            await _abort_backend_worker_rpc_error(context, exc)
         return iceberg_pb2.IcebergSnapshotDeleteResponse(datasource_id=response.datasource_id, snapshot_id=response.snapshot_id)
 
 
@@ -310,6 +529,12 @@ def _arrow_schema_from_proto(payload: iceberg_pb2.ArrowSchemaIpc) -> pa.Schema:
 
 
 async def start_data_plane_grpc_server() -> grpc.aio.Server:
+    # Starting ThreadPoolExecutor workers is synchronous in the submitting
+    # event loop. Do it before serving RPCs, not on the first burst of large
+    # protobuf requests.
+    barrier = threading.Barrier(_VALIDATION_WORKERS)
+    loop = asyncio.get_running_loop()
+    await asyncio.gather(*(loop.run_in_executor(_VALIDATION_EXECUTOR, barrier.wait, 10.0) for _ in range(_VALIDATION_WORKERS)))
     server = grpc.aio.server(
         interceptors=(_WorkerRequestValidationInterceptor(),),
         options=(

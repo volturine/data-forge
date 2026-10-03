@@ -25,7 +25,7 @@ vi.mock('./websocket', () => ({
 	closeOwnedWebSocket: vi.fn()
 }));
 
-const { connectBuildDetailStream } = await import('./build-stream');
+const { connectBuildDetailStream, connectBuildListStream } = await import('./build-stream');
 
 function dispatchMessage(data: string): void {
 	const msg = options.parse(data);
@@ -111,5 +111,50 @@ describe('connectBuildDetailStream', () => {
 		expect(onEvent).toHaveBeenCalledWith(
 			expect.objectContaining({ type: 'progress', progress: 50 } satisfies Partial<BuildEvent>)
 		);
+	});
+});
+
+describe('connectBuildListStream', () => {
+	test('delivers namespace snapshots to the history invalidation callback', () => {
+		const onSnapshot = vi.fn();
+		connectBuildListStream({
+			onSnapshot,
+			onError: vi.fn(),
+			onClose: vi.fn()
+		});
+
+		const builds = [
+			{
+				build_id: 'build-1',
+				analysis_id: '',
+				analysis_name: '',
+				namespace: 'default',
+				status: 'running',
+				started_at: '2026-01-01T00:00:00Z',
+				starter: { user_id: null, display_name: null, email: null, triggered_by: 'user' },
+				resource_config: null,
+				progress: 0.5,
+				elapsed_ms: 100,
+				estimated_remaining_ms: null,
+				current_step: null,
+				current_step_index: null,
+				total_steps: 0,
+				current_kind: 'build',
+				current_datasource_id: 'datasource-1',
+				current_tab_id: null,
+				current_tab_name: null,
+				current_output_id: null,
+				current_output_name: null,
+				current_engine_run_id: null,
+				total_tabs: 0,
+				cancelled_at: null,
+				cancelled_by: null,
+				result_json: null
+			}
+		];
+
+		dispatchMessage(JSON.stringify({ type: 'snapshot', builds }));
+
+		expect(onSnapshot).toHaveBeenCalledWith(builds);
 	});
 });

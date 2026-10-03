@@ -1,6 +1,7 @@
-import asyncio
 import secrets
-import time
+from collections.abc import Callable
+from functools import partial
+from typing import Concatenate
 from urllib.parse import urlencode
 
 from fastapi import APIRouter, Depends, HTTPException, Request, Response
@@ -8,9 +9,10 @@ from fastapi.responses import RedirectResponse
 from sqlmodel import Session
 
 from backend_core import http as http_client
+from backend_core.api_execution_budget import run_api_blocking, run_bootstrap_settings_db
 from backend_core.auth_config import settings as auth_settings
 from backend_core.auth_exceptions import OAuthError
-from backend_core.database import get_settings_db, run_settings_db
+from backend_core.database import run_settings_db
 from backend_core.error_handlers import handle_errors
 from backend_core.proxy import client_ip, request_scheme
 from modules.auth import commands, service as auth_service
@@ -41,31 +43,13 @@ from modules.auth.service import (
 router = APIRouter(prefix='/auth', tags=['auth'])
 
 
+async def _run_auth_db[**P, T](function: Callable[Concatenate[Session, P], T], *args: P.args, **kwargs: P.kwargs) -> T:
+    work = partial(run_settings_db, function, *args, **kwargs)
+    return await run_api_blocking(work)
+
+
 async def send_verification_email(user_email: str, token: str) -> bool:
     return await auth_service.send_verification_email(user_email, token)
-
-
-_me_cache: dict[str, tuple[float, UserPublic]] = {}
-_ME_CACHE_TTL: float = 10.0
-_ME_CACHE_MAX_SIZE: int = 200
-
-
-def _evict_me_cache() -> None:
-    """Remove expired entries if cache exceeds max size."""
-    if len(_me_cache) <= _ME_CACHE_MAX_SIZE:
-        return
-    now = time.monotonic()
-    expired = [k for k, (ts, _) in _me_cache.items() if now - ts >= _ME_CACHE_TTL]
-    for k in expired:
-        del _me_cache[k]
-
-
-def invalidate_me_cache(token: str | None = None) -> None:
-    """Clear cached /me response. If token given, clear only that entry."""
-    if token:
-        _me_cache.pop(token, None)
-    else:
-        _me_cache.clear()
 
 
 _OAUTH_STATE_MAX_AGE_SECONDS = 600
@@ -142,17 +126,80 @@ def _request_ip_address(request: Request) -> str | None:
     return client_ip(request)
 
 
+def _register_user(
+    session: Session,
+    *,
+    email: str,
+    password: str,
+    display_name: str,
+    email_verified: bool,
+    device_info: str | None,
+    ip_address: str | None,
+) -> tuple[UserPublic, str, str | None]:
+    result = commands.register_user(
+        session,
+        email=email,
+        password=password,
+        display_name=display_name,
+        email_verified=email_verified,
+        device_info=device_info,
+        ip_address=ip_address,
+    )
+    return _build_user_public(session, result.user), result.user_session.id, result.verification_token
+
+
+def _login_user(
+    session: Session,
+    *,
+    email: str,
+    password: str,
+    device_info: str | None,
+    ip_address: str | None,
+) -> tuple[UserPublic, str]:
+    result = commands.login_user(
+        session,
+        email=email,
+        password=password,
+        device_info=device_info,
+        ip_address=ip_address,
+    )
+    return _build_user_public(session, result.user), result.user_session.id
+
+
+def _authenticate_oauth_user(
+    session: Session,
+    *,
+    provider: AuthProviderName,
+    provider_subject: str,
+    email: str,
+    display_name: str,
+    avatar_url: str | None,
+    device_info: str | None,
+    ip_address: str | None,
+) -> str:
+    result = commands.authenticate_oauth_user(
+        session,
+        provider=provider,
+        provider_subject=provider_subject,
+        email=email,
+        display_name=display_name,
+        avatar_url=avatar_url,
+        device_info=device_info,
+        ip_address=ip_address,
+    )
+    return result.user_session.id
+
+
 @router.post('/register', response_model=UserPublic)
 @handle_errors(operation='register')
 async def register(
     body: RegisterRequest,
     request: Request,
     response: Response,
-    session: Session = Depends(get_settings_db),
 ) -> UserPublic:
     needs_verification = auth_settings.verify_email_address
-    result = commands.register_user(
-        session,
+    user_public, session_token, verification_token = await _run_auth_db(
+        _register_user,
         email=body.email,
         password=body.password,
         display_name=body.display_name,
@@ -160,10 +207,10 @@ async def register(
         device_info=_request_device_info(request),
         ip_address=_request_ip_address(request),
     )
-    if result.verification_token is not None:
-        await send_verification_email(result.user.email, result.verification_token)
-    _set_session_cookie(response, result.user_session.id, secure=request_scheme(request) == 'https')
-    return _build_user_public(session, result.user)
+    if verification_token is not None:
+        await send_verification_email(user_public.email, verification_token)
+    _set_session_cookie(response, session_token, secure=request_scheme(request) == 'https')
+    return user_public
 
 
 @router.post('/login', response_model=UserPublic)
@@ -172,26 +219,25 @@ async def login(
     body: LoginRequest,
     request: Request,
     response: Response,
-    session: Session = Depends(get_settings_db),
 ) -> UserPublic:
-    result = commands.login_user(
-        session,
+    user, session_token = await run_api_blocking(
+        run_settings_db,
+        _login_user,
         email=body.email,
         password=body.password,
         device_info=_request_device_info(request),
         ip_address=_request_ip_address(request),
     )
-    _set_session_cookie(response, result.user_session.id, secure=request_scheme(request) == 'https')
-    return _build_user_public(session, result.user)
+    _set_session_cookie(response, session_token, secure=request_scheme(request) == 'https')
+    return user
 
 
 @router.post('/logout')
 @handle_errors(operation='logout')
-async def logout(request: Request, response: Response, session: Session = Depends(get_settings_db)) -> dict[str, bool]:
+async def logout(request: Request, response: Response) -> dict[str, bool]:
     token = request.cookies.get('session_token') or request.headers.get('X-Session-Token')
     if token:
-        commands.revoke_session(session, token)
-        invalidate_me_cache(token)
+        await run_api_blocking(run_settings_db, commands.revoke_session, token)
     _clear_session_cookie(response)
     return {'success': True}
 
@@ -201,18 +247,16 @@ async def logout(request: Request, response: Response, session: Session = Depend
 async def delete_account_route(
     response: Response,
     current_user: User = Depends(get_current_user),
-    session: Session = Depends(get_settings_db),
 ) -> dict[str, bool]:
-    commands.delete_user_account(session, current_user.id)
-    invalidate_me_cache()
+    await run_api_blocking(run_settings_db, commands.delete_user_account, current_user.id)
     _clear_session_cookie(response)
     return {'success': True}
 
 
 @router.post('/verify-email', response_model=MessageResponse)
 @handle_errors(operation='verify email')
-async def verify_email(body: VerifyEmailRequest, session: Session = Depends(get_settings_db)) -> MessageResponse:
-    commands.verify_email(session, body.token)
+async def verify_email(body: VerifyEmailRequest) -> MessageResponse:
+    await _run_auth_db(commands.verify_email, body.token)
     return MessageResponse(message='Email verified successfully')
 
 
@@ -220,9 +264,8 @@ async def verify_email(body: VerifyEmailRequest, session: Session = Depends(get_
 @handle_errors(operation='resend verification')
 async def resend_verification_route(
     current_user: User = Depends(get_current_user),
-    session: Session = Depends(get_settings_db),
 ) -> MessageResponse:
-    delivery = commands.prepare_resend_verification(session, current_user.id)
+    delivery = await _run_auth_db(commands.prepare_resend_verification, current_user.id)
     if delivery is not None:
         email, token = delivery
         await send_verification_email(email, token)
@@ -231,8 +274,8 @@ async def resend_verification_route(
 
 @router.post('/forgot-password', response_model=MessageResponse)
 @handle_errors(operation='forgot password')
-async def forgot_password(body: ForgotPasswordRequest, session: Session = Depends(get_settings_db)) -> MessageResponse:
-    token = commands.create_password_reset_token(session, body.email)
+async def forgot_password(body: ForgotPasswordRequest) -> MessageResponse:
+    token = await _run_auth_db(commands.create_password_reset_token, body.email)
     if token:
         await send_password_reset_email(body.email.strip().lower(), token)
     return MessageResponse(message='If the email exists, a password reset link has been sent')
@@ -240,13 +283,13 @@ async def forgot_password(body: ForgotPasswordRequest, session: Session = Depend
 
 @router.post('/reset-password', response_model=MessageResponse)
 @handle_errors(operation='reset password')
-async def reset_password_route(body: ResetPasswordRequest, session: Session = Depends(get_settings_db)) -> MessageResponse:
-    commands.reset_password(session, body.token, body.new_password)
+async def reset_password_route(body: ResetPasswordRequest) -> MessageResponse:
+    await _run_auth_db(commands.reset_password, body.token, body.new_password)
     return MessageResponse(message='Password reset successful')
 
 
 def _resolve_me(session: Session, token: str | None) -> UserPublic:
-    """Resolve the current user inside a settings DB session (runs in threadpool on cache miss)."""
+    """Resolve the current user inside a settings DB session."""
     if token:
         user = validate_session(session, token)
         if user:
@@ -257,35 +300,17 @@ def _resolve_me(session: Session, token: str | None) -> UserPublic:
     raise HTTPException(status_code=401, detail='Not authenticated')
 
 
-@router.get('/me', response_model=UserPublic)
-@handle_errors(operation='get current user')
-async def me(request: Request) -> UserPublic:
-    token = request.cookies.get('session_token') or request.headers.get('X-Session-Token')
-
+def _update_profile(session: Session, token: str | None, body: UpdateProfileRequest) -> UserPublic:
+    """Authenticate and update the profile on the dedicated auth DB executor."""
     if token:
-        cached = _me_cache.get(token)
-        if cached is not None:
-            ts, result = cached
-            if time.monotonic() - ts < _ME_CACHE_TTL:
-                return result
-            del _me_cache[token]
+        current_user = validate_session(session, token)
+        if current_user is None:
+            raise HTTPException(status_code=401, detail='Not authenticated')
+    elif not auth_settings.auth_required:
+        current_user = ensure_default_user(session)
+    else:
+        raise HTTPException(status_code=401, detail='Not authenticated')
 
-    result = await asyncio.to_thread(run_settings_db, _resolve_me, token)
-
-    if token:
-        _evict_me_cache()
-        _me_cache[token] = (time.monotonic(), result)
-
-    return result
-
-
-@router.put('/profile', response_model=UserPublic)
-@handle_errors(operation='update profile')
-async def update_profile_route(
-    body: UpdateProfileRequest,
-    current_user: User = Depends(get_current_user),
-    session: Session = Depends(get_settings_db),
-) -> UserPublic:
     updated = commands.update_profile(
         session,
         user_id=current_user.id,
@@ -293,8 +318,24 @@ async def update_profile_route(
         avatar_url=body.avatar_url,
         preferences=body.preferences,
     )
-    invalidate_me_cache()
     return _build_user_public(session, updated)
+
+
+@router.get('/me', response_model=UserPublic)
+@handle_errors(operation='get current user')
+async def me(request: Request) -> UserPublic:
+    token = request.cookies.get('session_token') or request.headers.get('X-Session-Token')
+    return await run_bootstrap_settings_db(_resolve_me, token)
+
+
+@router.put('/profile', response_model=UserPublic)
+@handle_errors(operation='update profile')
+async def update_profile_route(
+    request: Request,
+    body: UpdateProfileRequest,
+) -> UserPublic:
+    token = request.cookies.get('session_token') or request.headers.get('X-Session-Token')
+    return await _run_auth_db(_update_profile, token, body)
 
 
 @router.put('/password')
@@ -302,10 +343,14 @@ async def update_profile_route(
 async def change_password_route(
     body: ChangePasswordRequest,
     current_user: User = Depends(get_current_user),
-    session: Session = Depends(get_settings_db),
 ) -> dict[str, bool]:
-    commands.change_password(session, current_user.id, body.current_password, body.new_password)
-    invalidate_me_cache()
+    await run_api_blocking(
+        run_settings_db,
+        commands.change_password,
+        current_user.id,
+        body.current_password,
+        body.new_password,
+    )
     return {'success': True}
 
 
@@ -315,22 +360,21 @@ async def revoke_all_sessions_route(
     request: Request,
     response: Response,
     current_user: User = Depends(get_current_user),
-    session: Session = Depends(get_settings_db),
 ) -> dict[str, bool]:
     current_token = request.cookies.get('session_token') or request.headers.get('X-Session-Token')
-    commands.revoke_all_user_sessions(
-        session,
+    await run_api_blocking(
+        run_settings_db,
+        commands.revoke_all_user_sessions,
         user_id=current_user.id,
         current_session_id=current_token,
     )
-    invalidate_me_cache()
     _clear_session_cookie(response)
     return {'success': True}
 
 
 @router.get('/google')
 @handle_errors(operation='google oauth start')
-async def google_oauth_start(request: Request) -> RedirectResponse:
+def google_oauth_start(request: Request) -> RedirectResponse:
     state = secrets.token_urlsafe(32)
     params = {
         'client_id': auth_settings.google_client_id,
@@ -357,7 +401,6 @@ async def google_oauth_start(request: Request) -> RedirectResponse:
 async def google_oauth_callback(
     request: Request,
     params: OAuthCallbackParams = Depends(),
-    session: Session = Depends(get_settings_db),
 ) -> RedirectResponse:
     redirect_url = f'{auth_settings.auth_frontend_url}/callback'
     response = RedirectResponse(url=redirect_url)
@@ -389,8 +432,8 @@ async def google_oauth_callback(
     email = info.get('email')
     if not isinstance(subject, str) or not isinstance(email, str):
         raise OAuthError('Google user info missing id or email')
-    result = commands.authenticate_oauth_user(
-        session,
+    result = await _run_auth_db(
+        _authenticate_oauth_user,
         provider=AuthProviderName.GOOGLE,
         provider_subject=subject,
         email=email,
@@ -399,13 +442,13 @@ async def google_oauth_callback(
         device_info=_request_device_info(request),
         ip_address=_request_ip_address(request),
     )
-    _set_session_cookie(response, result.user_session.id, secure=request_scheme(request) == 'https')
+    _set_session_cookie(response, result, secure=request_scheme(request) == 'https')
     return response
 
 
 @router.get('/github')
 @handle_errors(operation='github oauth start')
-async def github_oauth_start(request: Request) -> RedirectResponse:
+def github_oauth_start(request: Request) -> RedirectResponse:
     state = secrets.token_urlsafe(32)
     params = {
         'client_id': auth_settings.github_client_id,
@@ -429,7 +472,6 @@ async def github_oauth_start(request: Request) -> RedirectResponse:
 async def github_oauth_callback(
     request: Request,
     params: OAuthCallbackParams = Depends(),
-    session: Session = Depends(get_settings_db),
 ) -> RedirectResponse:
     redirect_url = f'{auth_settings.auth_frontend_url}/callback'
     response = RedirectResponse(url=redirect_url)
@@ -477,8 +519,9 @@ async def github_oauth_callback(
         email = next((item.get('email') for item in emails if item.get('verified')), None)
     if not isinstance(email, str):
         raise OAuthError('GitHub account has no verified email')
-    result = commands.authenticate_oauth_user(
-        session,
+    result = await run_api_blocking(
+        run_settings_db,
+        _authenticate_oauth_user,
         provider=AuthProviderName.GITHUB,
         provider_subject=str(subject),
         email=email,
@@ -487,7 +530,7 @@ async def github_oauth_callback(
         device_info=_request_device_info(request),
         ip_address=_request_ip_address(request),
     )
-    _set_session_cookie(response, result.user_session.id, secure=request_scheme(request) == 'https')
+    _set_session_cookie(response, result, secure=request_scheme(request) == 'https')
     return response
 
 
@@ -496,7 +539,6 @@ async def github_oauth_callback(
 async def unlink_provider_route(
     provider: str,
     current_user: User = Depends(get_current_user),
-    session: Session = Depends(get_settings_db),
 ) -> dict[str, bool]:
     try:
         provider_name = AuthProviderName(provider)
@@ -504,5 +546,5 @@ async def unlink_provider_route(
         raise HTTPException(status_code=400, detail='Unsupported provider') from exc
     if provider_name not in {AuthProviderName.GOOGLE, AuthProviderName.GITHUB}:
         raise HTTPException(status_code=400, detail='Unsupported provider')
-    commands.unlink_provider(session, current_user.id, provider_name)
+    await run_api_blocking(run_settings_db, commands.unlink_provider, current_user.id, provider_name)
     return {'success': True}

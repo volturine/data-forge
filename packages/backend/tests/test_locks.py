@@ -1,3 +1,4 @@
+import asyncio
 from datetime import UTC, datetime, timedelta
 
 import pytest
@@ -11,6 +12,13 @@ from modules.auth.service import ensure_default_user
 class TestLockRoutes:
     def test_acquire_heartbeat_release_status_flow(self, client, test_db_session, monkeypatch) -> None:
         monkeypatch.setattr('backend_core.auth_config.settings.auth_required', False)
+        monkeypatch.setattr('backend_core.config.settings.distributed_runtime_enabled', True)
+        monkeypatch.setattr('backend_core.config.settings.workers', 2)
+        notifications = []
+        monkeypatch.setattr(
+            'backend_core.runtime_ipc.notify_api_lock',
+            lambda *args: notifications.append(args),
+        )
         owner = run_settings_db(ensure_default_user)
         acquire = client.post(
             '/api/v1/locks',
@@ -44,6 +52,12 @@ class TestLockRoutes:
         assert release.json() == {'released': True}
 
         assert test_db_session.get(ResourceLock, ('analysis', 'analysis-1')) is None
+        assert [item[:3] for item in notifications] == [
+            ('default', 'analysis', 'analysis-1'),
+            ('default', 'analysis', 'analysis-1'),
+            ('default', 'analysis', 'analysis-1'),
+        ]
+        assert notifications[-1][-1].lock is None
 
     def test_no_auth_reacquire_ignores_client_id(self, client, monkeypatch) -> None:
         monkeypatch.setattr('backend_core.auth_config.settings.auth_required', False)
@@ -440,6 +454,50 @@ class TestLockWebsocket:
             assert acquired['lock'] is not None
 
         assert test_db_session.get(ResourceLock, ('analysis', 'analysis-ws-disconnect')) is None
+
+    @pytest.mark.asyncio
+    async def test_cancelled_acquire_records_committed_token_before_unshielding(self, monkeypatch) -> None:
+        from modules.locks import routes
+        from modules.locks.schemas import LockStatusResponse
+
+        started = asyncio.Event()
+        finish = asyncio.Event()
+        now = datetime.now(UTC)
+        committed_lock = LockStatusResponse(
+            resource_type='analysis',
+            resource_id='analysis-cancelled-acquire',
+            owner_id='owner-1',
+            lock_token='committed-token',
+            acquired_at=now,
+            expires_at=now + timedelta(seconds=30),
+            last_heartbeat=now,
+            is_expired=False,
+        )
+
+        async def delayed_acquire(*args, **kwargs):
+            started.set()
+            await finish.wait()
+            return committed_lock
+
+        monkeypatch.setattr(routes, '_run_lock', delayed_acquire)
+        recorded_tokens: list[str] = []
+        task = asyncio.create_task(
+            routes._acquire_lock(
+                'analysis',
+                committed_lock.resource_id,
+                committed_lock.owner_id,
+                None,
+                on_acquired=lambda lock: recorded_tokens.append(lock.lock_token),
+            )
+        )
+
+        await started.wait()
+        task.cancel()
+        finish.set()
+        with pytest.raises(asyncio.CancelledError):
+            await task
+
+        assert recorded_tokens == ['committed-token']
 
     def test_watch_with_lock_token_heartbeats_default_owner_without_client_id(
         self,

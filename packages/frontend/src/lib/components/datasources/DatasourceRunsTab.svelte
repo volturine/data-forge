@@ -1,4 +1,5 @@
 <script lang="ts">
+	import { SvelteMap } from 'svelte/reactivity';
 	import { resolve } from '$app/paths';
 	import {
 		CircleAlert,
@@ -35,6 +36,7 @@
 	interface Props {
 		datasourceId: string;
 		builds: BuildRunSummary[];
+		onboardingBuilds?: BuildRunSummary[];
 		status: PaginatedStatus;
 		error: string | null;
 		showPreviews?: boolean;
@@ -44,6 +46,7 @@
 	let {
 		datasourceId,
 		builds,
+		onboardingBuilds = [],
 		status,
 		error,
 		showPreviews = false,
@@ -51,7 +54,12 @@
 	}: Props = $props();
 
 	const filteredRuns = $derived.by((): DatasourceRunRow[] => {
-		const buildRows = builds.map((run: BuildRunSummary) => ({
+		// The normal list is capped at 50 newest runs. A busy datasource can
+		// therefore push its initial ingest out behind previews. Keep the
+		// explicitly fetched onboarding row in the same deterministic list.
+		const uniqueBuilds = new SvelteMap<string, BuildRunSummary>();
+		for (const run of [...builds, ...onboardingBuilds]) uniqueBuilds.set(run.build_id, run);
+		const buildRows = [...uniqueBuilds.values()].map((run: BuildRunSummary) => ({
 			id: run.build_id,
 			kind: run.current_kind ?? 'build',
 			status: run.status,

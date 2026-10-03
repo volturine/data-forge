@@ -169,6 +169,6 @@ describe('AppBootstrap', () => {
 
 	test('loading until start settles', () => {
 		expect(bootstrap.phase(false)).toBe('loading');
-		expect(bootstrap.phase(true)).toBe('loading');
+		expect(bootstrap.phase(true)).toBe('auth');
 	});
 });

@@ -451,6 +451,8 @@ def _datasource_command(kind: enums_pb2.ComputeRequestKind, payload: dict[str, o
         command.column_stats.CopyFrom(_parse_proto_message(datasource_pb2.DatasourceColumnStatsCommand, payload))
     elif kind == enums_pb2.COMPUTE_REQUEST_KIND_COMPARE_ICEBERG_SNAPSHOTS:
         command.compare_iceberg_snapshots.CopyFrom(_parse_proto_message(datasource_pb2.CompareIcebergSnapshotsCommand, payload))
+    elif kind == enums_pb2.COMPUTE_REQUEST_KIND_DATASOURCE_PREFLIGHT:
+        command.preflight.CopyFrom(_parse_proto_message(datasource_pb2.DatasourcePreflightCommand, payload))
     else:
         raise ValueError(f'Unsupported datasource compute request kind: {compute_request_kind_name(kind)}')
     return command
@@ -482,6 +484,7 @@ def command_from_payload(kind: enums_pb2.ComputeRequestKind, payload: dict[str, 
         enums_pb2.COMPUTE_REQUEST_KIND_DATASOURCE_SCHEMA,
         enums_pb2.COMPUTE_REQUEST_KIND_DATASOURCE_COLUMN_STATS,
         enums_pb2.COMPUTE_REQUEST_KIND_COMPARE_ICEBERG_SNAPSHOTS,
+        enums_pb2.COMPUTE_REQUEST_KIND_DATASOURCE_PREFLIGHT,
     }:
         command.datasource.CopyFrom(_datasource_command(kind, payload))
     return command
@@ -520,6 +523,8 @@ def _datasource_result(kind: enums_pb2.ComputeRequestKind, payload: dict[str, ob
         result.column_stats.CopyFrom(_parse_proto_message(datasource_pb2.ColumnStatsResult, payload))
     elif kind == enums_pb2.COMPUTE_REQUEST_KIND_COMPARE_ICEBERG_SNAPSHOTS:
         result.snapshot_compare.CopyFrom(_parse_proto_message(datasource_pb2.SnapshotCompareResult, _snapshot_compare_payload_for_proto(payload)))
+    elif kind == enums_pb2.COMPUTE_REQUEST_KIND_DATASOURCE_PREFLIGHT:
+        result.preflight.CopyFrom(_parse_proto_message(datasource_pb2.DatasourcePreflightResult, payload))
     else:
         raise ValueError(f'Unsupported datasource response kind: {compute_request_kind_name(kind)}')
     return result
@@ -650,6 +655,7 @@ def response_payload(envelope: compute_pb2.ComputeResponseEnvelope) -> dict[str,
         rows = payload.pop('rows', [])
         payload['data'] = rows
         payload.setdefault('total_rows', 0)
+        payload.setdefault('page_size', 0)
         _restore_int64(payload, 'total_rows')
     if selected == 'row_count':
         payload.setdefault('row_count', 0)
@@ -702,6 +708,9 @@ def response_payload(envelope: compute_pb2.ComputeResponseEnvelope) -> dict[str,
                         _restore_int64(bin_payload, 'count')
         if result_field == 'snapshot_compare':
             for key in ('row_count_a', 'row_count_b', 'row_count_delta'):
+                _restore_int64(datasource_payload, key)
+        if result_field == 'preflight':
+            for key in ('start_row', 'start_col', 'end_col', 'detected_end_row'):
                 _restore_int64(datasource_payload, key)
         return datasource_payload
     return payload

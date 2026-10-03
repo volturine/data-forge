@@ -174,7 +174,7 @@ class TestFreshnessThreshold:
         assert item.freshness_threshold_minutes == 720
 
     def test_update_sets_threshold(self, test_db_session: Session) -> None:
-        _insert_datasource(test_db_session, datasource_id='ds-update-threshold')
+        datasource = _insert_datasource(test_db_session, datasource_id='ds-update-threshold')
 
         response = datasource_service.update_datasource(
             test_db_session,
@@ -183,9 +183,11 @@ class TestFreshnessThreshold:
         )
 
         assert response.freshness_threshold_minutes == 60
+        test_db_session.refresh(datasource)
+        assert datasource.revision == 2
 
     def test_update_clears_threshold(self, test_db_session: Session) -> None:
-        _insert_datasource(
+        datasource = _insert_datasource(
             test_db_session,
             datasource_id='ds-clear-threshold',
             freshness_threshold_minutes=60,
@@ -198,6 +200,43 @@ class TestFreshnessThreshold:
         )
 
         assert response.freshness_threshold_minutes is None
+        test_db_session.refresh(datasource)
+        assert datasource.revision == 2
+
+    def test_noop_update_does_not_advance_source_revision(self, test_db_session: Session) -> None:
+        datasource = _insert_datasource(
+            test_db_session,
+            datasource_id='ds-noop-update',
+            freshness_threshold_minutes=60,
+        )
+
+        datasource_service.update_datasource(
+            test_db_session,
+            datasource.id,
+            DataSourceUpdate(freshness_threshold_minutes=60),
+        )
+
+        test_db_session.refresh(datasource)
+        assert datasource.revision == 1
+
+    def test_analysis_output_placeholder_update_advances_source_revision(self, test_db_session: Session) -> None:
+        datasource = _insert_datasource(
+            test_db_session,
+            datasource_id='11111111-1111-4111-8111-111111111112',
+            source_type='analysis',
+            created_by='analysis',
+            created_by_analysis_id='analysis-1',
+        )
+
+        datasource_service.create_placeholder_output_datasource(
+            test_db_session,
+            datasource.id,
+            'analysis-1',
+            'tab-2',
+        )
+
+        test_db_session.refresh(datasource)
+        assert datasource.revision == 2
 
     def test_update_rejects_non_positive_threshold(self) -> None:
         from pydantic import ValidationError

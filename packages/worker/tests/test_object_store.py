@@ -1,5 +1,8 @@
 from __future__ import annotations
 
+from concurrent.futures import ThreadPoolExecutor
+from threading import Barrier, Lock
+
 import pytest
 
 from runtime import object_store
@@ -66,3 +69,122 @@ def test_presigned_put_uses_engine_visible_endpoint_and_signed_content_type(monk
         },
         "expires": 3600,
     }
+
+
+def test_bucket_readiness_does_not_serialize_different_buckets(monkeypatch) -> None:
+    started = Barrier(2)
+    state_lock = Lock()
+    active = 0
+    max_active = 0
+    calls: list[str] = []
+
+    class Client:
+        def head_bucket(self, *, Bucket):
+            nonlocal active, max_active
+            with state_lock:
+                active += 1
+                max_active = max(max_active, active)
+                calls.append(Bucket)
+            try:
+                started.wait(timeout=1)
+            finally:
+                with state_lock:
+                    active -= 1
+
+    client = Client()
+    monkeypatch.setattr(object_store, "_client", lambda: client)
+    object_store.reset_object_store_client()
+
+    with ThreadPoolExecutor(max_workers=2) as executor:
+        results = list(executor.map(object_store.ensure_bucket_exists, ("alpha", "bravo")))
+
+    assert results == ["alpha", "bravo"]
+    assert sorted(calls) == ["alpha", "bravo"]
+    assert max_active == 2
+
+
+def test_prefix_cleanup_retries_partial_s3_deletion_errors(monkeypatch) -> None:
+    failed = True
+
+    class Paginator:
+        def paginate(self, **_kwargs):
+            yield {"Contents": [{"Key": "clean/attempt/master/data.parquet"}]}
+
+    class Client:
+        def get_paginator(self, _operation):
+            return Paginator()
+
+        def delete_objects(self, **_kwargs):
+            if failed:
+                return {"Errors": [{"Key": "clean/attempt/master/data.parquet", "Code": "AccessDenied"}]}
+            return {"Deleted": [{"Key": "clean/attempt/master/data.parquet"}]}
+
+    monkeypatch.setattr(object_store, "_client", Client)
+    with pytest.raises(RuntimeError, match="deletion errors"):
+        object_store.delete_prefix("s3://default/clean/attempt/master")
+    failed = False
+    object_store.delete_prefix("s3://default/clean/attempt/master")
+
+
+def test_multipart_object_upload_streams_bounded_parts_and_commits(monkeypatch) -> None:
+    calls: list[tuple[str, dict[str, object]]] = []
+
+    class Client:
+        def create_multipart_upload(self, **kwargs):
+            calls.append(("create", kwargs))
+            return {"UploadId": "upload-1"}
+
+        def upload_part(self, **kwargs):
+            calls.append(("part", kwargs))
+            return {"ETag": f'"{kwargs["PartNumber"]}"'}
+
+        def complete_multipart_upload(self, **kwargs):
+            calls.append(("complete", kwargs))
+
+    monkeypatch.setattr(object_store, "ensure_bucket_exists", lambda _bucket: None)
+    monkeypatch.setattr(object_store, "_client", lambda: Client())
+    monkeypatch.setattr(object_store, "_MULTIPART_PART_SIZE", 4)
+
+    upload = object_store.MultipartObjectUpload("s3://analytics/uploads/data.csv", content_type="text/csv", max_bytes=6)
+    upload.write(b"abcd")
+    upload.write(b"ef")
+    result = upload.commit()
+    upload.abort()
+
+    assert result == "s3://analytics/uploads/data.csv"
+    assert [call[1]["Body"] for call in calls if call[0] == "part"] == [b"abcd", b"ef"]
+    assert calls[-1] == (
+        "complete",
+        {
+            "Bucket": "analytics",
+            "Key": "uploads/data.csv",
+            "UploadId": "upload-1",
+            "MultipartUpload": {
+                "Parts": [
+                    {"PartNumber": 1, "ETag": '"1"'},
+                    {"PartNumber": 2, "ETag": '"2"'},
+                ]
+            },
+        },
+    )
+
+
+def test_multipart_object_upload_aborts_after_limit_exceeded(monkeypatch) -> None:
+    calls: list[str] = []
+
+    class Client:
+        def create_multipart_upload(self, **_kwargs):
+            return {"UploadId": "upload-1"}
+
+        def abort_multipart_upload(self, **_kwargs):
+            calls.append("abort")
+
+    monkeypatch.setattr(object_store, "ensure_bucket_exists", lambda _bucket: None)
+    monkeypatch.setattr(object_store, "_client", lambda: Client())
+    upload = object_store.MultipartObjectUpload("s3://analytics/uploads/data.csv", content_type=None, max_bytes=3)
+
+    with pytest.raises(ValueError, match="exceeds 3 byte limit"):
+        upload.write(b"four")
+    upload.abort()
+
+    assert calls == ["abort"]

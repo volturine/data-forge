@@ -1,9 +1,12 @@
 """Authorization enforcement: router-level auth, ws auth, namespace middleware, object ownership."""
 
+import importlib
 import uuid
 from datetime import UTC, datetime
 
 import pytest
+from fastapi import APIRouter
+from fastapi.routing import iter_route_contexts
 
 from backend_core.database import run_settings_db
 from backend_core.domain.analysis.models import AnalysisStatus
@@ -55,15 +58,130 @@ def _require_unauthenticated(monkeypatch: pytest.MonkeyPatch) -> None:
 
 
 class TestRouterLevelAuth:
+    def test_startup_auth_audit_rejects_an_unguarded_route(self, monkeypatch: pytest.MonkeyPatch) -> None:
+        router_module = importlib.import_module('api.v1.router')
+        unguarded = APIRouter()
+        unguarded.add_api_route('/unprotected', lambda: None, methods=['GET'])
+        root = APIRouter(prefix='/v1')
+        root.include_router(unguarded, prefix='/nested')
+        monkeypatch.setattr(router_module, 'router', root)
+
+        with pytest.raises(RuntimeError, match='GET /v1/nested/unprotected'):
+            router_module.verify_v1_auth_coverage()
+
+    def test_startup_auth_audit_fails_closed_when_route_path_is_missing(self, monkeypatch: pytest.MonkeyPatch) -> None:
+        router_module = importlib.import_module('api.v1.router')
+        monkeypatch.setattr(router_module, 'router', type('Router', (), {'routes': [object()]})())
+
+        with pytest.raises(RuntimeError, match='cannot resolve a path'):
+            router_module.verify_v1_auth_coverage()
+
+    def test_startup_auth_audit_rejects_an_unauthenticated_nested_websocket(self, monkeypatch: pytest.MonkeyPatch) -> None:
+        router_module = importlib.import_module('api.v1.router')
+        unguarded = APIRouter()
+        unguarded.add_api_websocket_route('/socket', lambda _websocket: None)
+        root = APIRouter(prefix='/v1')
+        root.include_router(unguarded, prefix='/nested')
+        monkeypatch.setattr(router_module, 'router', root)
+
+        with pytest.raises(RuntimeError, match='WS /v1/nested/socket'):
+            router_module.verify_v1_auth_coverage()
+
+    def test_v1_route_audit_resolves_latest_fastapi_nested_route_contexts(self) -> None:
+        router_module = importlib.import_module('api.v1.router')
+
+        routes = list(iter_route_contexts(router_module.router.routes))
+        paths = [router_module._route_path(route) for route in routes]
+
+        assert routes
+        assert all(path is not None for path in paths)
+        assert all(path.startswith('/v1/') for path in paths if path is not None)
+
+    def test_direct_production_mount_preserves_aggregate_api_paths(self) -> None:
+        from fastapi import FastAPI
+        from fastapi.routing import APIRoute
+
+        from api.router import _ApiRouteDispatcher, include_api_routes, router
+
+        aggregate_app = FastAPI()
+        aggregate_app.include_router(router)
+        direct_app = FastAPI()
+        include_api_routes(direct_app)
+
+        def route_path(route) -> str | None:
+            path = route.path
+            if path:
+                return path
+            effective_route = getattr(route, '_effective_route', None)
+            websocket_route = getattr(effective_route, 'starlette_route', None)
+            return getattr(websocket_route, 'path', None)
+
+        def api_paths(app: FastAPI) -> set[tuple[str, str]]:
+            return {
+                (method, path)
+                for route in iter_route_contexts(app.routes)
+                if (path := route_path(route)) and path.startswith('/api/v1')
+                for method in (route.methods or {'WS'})
+            }
+
+        assert api_paths(direct_app) == api_paths(aggregate_app)
+
+        dispatcher = next(route for route in direct_app.routes if isinstance(route, _ApiRouteDispatcher))
+        api_route_count = sum(1 for route in direct_app.routes if isinstance(route, APIRoute) and (route.path or '').startswith('/api/v1'))
+        assert dispatcher.candidate_count('/api/v1/compute/preview') < api_route_count
+        assert dispatcher.candidate_count('/prefix/api/v1/compute/preview', root_path='/prefix') == dispatcher.candidate_count('/api/v1/compute/preview')
+
+        from modules.mcp.router import get_mcp_route_meta
+
+        def mcp_routes(app: FastAPI) -> list[tuple[str | None, str, dict[str, object]]]:
+            return [
+                (route.path, route.name or '', metadata)
+                for route in iter_route_contexts(app.routes)
+                if isinstance(route.original_route, APIRoute) and isinstance((metadata := get_mcp_route_meta(route.original_route)), dict)
+            ]
+
+        assert mcp_routes(direct_app) == mcp_routes(aggregate_app)
+
+    def test_api_route_dispatcher_preserves_path_and_method_matching(self) -> None:
+        from fastapi import FastAPI
+
+        from api.router import _ApiRouteDispatcher
+
+        direct_app = FastAPI()
+
+        @direct_app.get('/api/v1/test/{item_id}')
+        def read_item(item_id: str) -> dict[str, str]:
+            return {'item_id': item_id}
+
+        api_routes = [route for route in direct_app.router.routes if (getattr(route, 'path', '') or '').startswith('/api/')]
+        insert_at = direct_app.router.routes.index(api_routes[0])
+        direct_app.router.routes.insert(insert_at, _ApiRouteDispatcher(api_routes))
+        client = TestClient(direct_app)
+
+        assert client.get('/api/v1/test/item-1').json() == {'item_id': 'item-1'}
+        assert client.post('/api/v1/test/item-1').status_code == 405
+        assert client.get('/api/v1/test/unknown/extra').status_code == 404
+
     def test_unauthenticated_requests_rejected_per_router(self, client: TestClient, monkeypatch: pytest.MonkeyPatch) -> None:
         _require_unauthenticated(monkeypatch)
 
         assert client.get('/api/v1/analysis').status_code == 401
         assert client.get(f'/api/v1/analysis/{uuid.uuid4()}/versions').status_code == 401
+        assert client.get('/api/v1/datasource').status_code == 401
+        assert client.post('/api/v1/ai/providers').status_code == 401
+        assert client.get('/api/v1/locks/analysis/test').status_code == 401
         assert client.get('/api/v1/schedules').status_code == 401
         assert client.get('/api/v1/healthchecks/all').status_code == 401
         assert client.post('/api/v1/namespaces', json={'name': 'authcheck'}).status_code == 401
         assert client.post('/api/v1/compute/preview', json={}).status_code == 401
+
+    def test_lock_websocket_rejects_unauthenticated_connection(self, client: TestClient, monkeypatch: pytest.MonkeyPatch) -> None:
+        _require_unauthenticated(monkeypatch)
+
+        with client.websocket_connect('/api/v1/locks/ws') as websocket:
+            message = websocket.receive_json()
+
+        assert message['status_code'] == 401
 
     def test_namespaces_list_stays_open_when_auth_required(self, client: TestClient, monkeypatch: pytest.MonkeyPatch) -> None:
         _require_unauthenticated(monkeypatch)
@@ -84,6 +202,20 @@ class TestEngineWebsocketAuth:
 
 
 class TestNamespaceMiddleware:
+    def test_headerless_health_does_not_register_implicit_namespace_when_auth_is_disabled(self, client: TestClient, monkeypatch: pytest.MonkeyPatch) -> None:
+        import main
+
+        monkeypatch.setattr('backend_core.auth_config.settings.auth_required', False)
+
+        async def reject_namespace_database_work(*_args, **_kwargs):
+            raise AssertionError('Headerless process health must not access the namespace database')
+
+        monkeypatch.setattr(main, '_run_namespace_middleware', reject_namespace_database_work)
+
+        response = client.get('/health')
+
+        assert response.status_code == 200
+
     def test_rejects_unknown_namespace_without_session(self, client: TestClient, monkeypatch: pytest.MonkeyPatch) -> None:
         monkeypatch.setattr('backend_core.auth_config.settings.auth_required', True)
         namespace = f'ghost-{uuid.uuid4().hex[:8]}'

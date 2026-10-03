@@ -68,15 +68,61 @@ PACKAGE_FORBIDDEN_IMPORT_ROOTS = {
         'data_plane_object_store',
         'datasources',
         'operations',
+        'packages_scheduler',
+        'packages_worker',
         'runtime',
         'scheduler_service',
+        'worker_grpc',
         'worker_models',
     },
-    'scheduler': {'api', 'backend_contracts', 'backend_core', 'builds', 'datasources', 'modules', 'operations', 'runtime', 'shared', 'worker_models'},
-    'worker': {'api', 'backend_contracts', 'backend_core', 'modules', 'scheduler_service', 'shared', 'sqlmodel', 'worker_models'},
+    'scheduler': {
+        'api',
+        'backend_contracts',
+        'backend_core',
+        'builds',
+        'datasources',
+        'modules',
+        'operations',
+        'packages_backend',
+        'packages_worker',
+        'runtime',
+        'shared',
+        'worker_grpc',
+        'worker_models',
+    },
+    'worker': {
+        'api',
+        'backend_contracts',
+        'backend_core',
+        'backend_grpc',
+        'modules',
+        'packages_backend',
+        'packages_scheduler',
+        'scheduler_service',
+        'shared',
+        'sqlmodel',
+        'worker_models',
+    },
 }
 
 LEGACY_IMPORT_ROOTS = {'backend_contracts', 'worker_models'}
+FORBIDDEN_PACKAGE_COUPLING = {
+    Path('Justfile'): {
+        'uv pip install --python packages/backend/.venv/bin/python packages/worker': 'worker dependencies must stay in the worker virtualenv',
+        'packages/backend:$PWD/packages/worker': 'backend and worker source paths must not share a Python process',
+    },
+    Path('docker/Dockerfile'): {
+        'uv pip install --python /app/packages/backend/.venv/bin/python /app/packages/worker': 'worker dependencies must stay in the worker image',
+        'PYTHONPATH="/app/packages/worker:/app/packages/backend"': 'backend and worker source paths must not share a Python process',
+    },
+    Path('docker/compose.dev.yaml'): {
+        '../packages/:/app/packages/': 'development services must mount only their owned Python package',
+    },
+    Path('packages/backend/tests/harness/postgres_harness.py'): {
+        "env['PYTHONPATH'] =": 'runtime integration processes must not share private package source paths',
+        'env["PYTHONPATH"] =': 'runtime integration processes must not share private package source paths',
+    },
+}
 FORBIDDEN_SOURCE_TOKENS = {
     'backend_contracts': 'deleted legacy backend contract package',
     'backend_core.contracts': 'renamed backend-owned domain package',
@@ -253,6 +299,7 @@ PROTO_STRUCT_ALLOWLIST = {
     'proto/dataforge_protocol/datasource.proto:CreateIcebergDatasourceCommand.source': 'Iceberg source descriptors are provider-specific JSON escape hatches',
     'proto/dataforge_protocol/datasource.proto:DatasourceColumnStatsCommand.datasource_config': 'column stats run against datasource config JSON persisted at the boundary',
     'proto/dataforge_protocol/datasource.proto:DataSourceRecord.config': 'datasource records expose provider/user-defined config JSON',
+    'proto/dataforge_protocol/datasource.proto:DatasourcePreflightResult.preview_rows': 'preflight preview rows are arbitrary datasource result objects',
     'proto/dataforge_protocol/datasource.proto:SnapshotPreview.rows': 'snapshot previews contain arbitrary row objects',
     'proto/dataforge_protocol/datasource.proto:ColumnStatsResult.top_values': 'top-value stats contain arbitrary value/count records by column type',
     'proto/dataforge_protocol/errors.proto:ErrorInfo.details': 'error details are intentionally extensible diagnostics',
@@ -348,12 +395,26 @@ def iter_python_files(package: str):
 def imported_roots(path: Path) -> set[str]:
     tree = ast.parse(path.read_text(), filename=str(path))
     roots: set[str] = set()
+
+    def add_module(module: str) -> None:
+        parts = module.split('.')
+        roots.add(parts[0])
+        if len(parts) > 1 and parts[0] == 'packages' and parts[1] in EXPECTED_PACKAGES:
+            roots.add(f'packages_{parts[1]}')
+
     for node in ast.walk(tree):
         if isinstance(node, ast.Import):
             for alias in node.names:
-                roots.add(alias.name.split('.')[0])
+                add_module(alias.name)
         elif isinstance(node, ast.ImportFrom) and node.level == 0 and node.module:
-            roots.add(node.module.split('.')[0])
+            add_module(node.module)
+        elif isinstance(node, ast.Call):
+            func = node.func
+            is_dynamic_import = isinstance(func, ast.Name) and func.id in {'__import__', 'import_module'}
+            is_dynamic_import = is_dynamic_import or isinstance(func, ast.Attribute) and func.attr == 'import_module'
+            module_name = node.args[0] if node.args else next((keyword.value for keyword in node.keywords if keyword.arg == 'name'), None)
+            if is_dynamic_import and isinstance(module_name, ast.Constant) and isinstance(module_name.value, str) and not module_name.value.startswith('.'):
+                add_module(module_name.value)
     return roots
 
 
@@ -635,6 +696,15 @@ def main() -> int:
             if token in content:
                 rel = path.relative_to(ROOT)
                 errors.append(f'{rel} contains {reason}: {token}')
+
+    for rel_path, forbidden_tokens in FORBIDDEN_PACKAGE_COUPLING.items():
+        path = ROOT / rel_path
+        if not path.exists():
+            continue
+        content = path.read_text()
+        for token, reason in forbidden_tokens.items():
+            if token in content:
+                errors.append(f'{rel_path} contains {reason}: {token}')
 
     if errors:
         print('Package boundary violations:')

@@ -19,15 +19,20 @@ service WorkerRuntimeService {
   rpc ClaimBuildJob(RuntimeWorkerRequest) returns (WorkerClaimBuildJobResponse);
   rpc RenewBuildJobLease(WorkerBuildJobClaimRequest) returns (WorkerRenewBuildJobLeaseResponse);
   rpc ClaimComputeRequest(RuntimeWorkerRequest) returns (WorkerClaimComputeRequestResponse);
-  rpc RenewComputeRequestLease(WorkerComputeRequestClaimRequest) returns (WorkerRenewComputeRequestLeaseResponse);
+  rpc RenewComputeRequestLeases(WorkerRenewComputeRequestLeasesRequest) returns (WorkerRenewComputeRequestLeasesResponse);
   rpc CompleteComputeRequest(WorkerCompleteComputeRequestRequest) returns (RuntimeWorkerResponse);
   rpc FailComputeRequest(WorkerFailComputeRequestRequest) returns (RuntimeWorkerResponse);
 
   rpc PublishDatasourceCreate(WorkerPublishDatasourceCreateRequest) returns (WorkerPublishDatasourceCreateResponse);
   rpc PublishDatasourceIngest(WorkerPublishDatasourceIngestRequest) returns (WorkerPublishDatasourceIngestResponse);
   rpc PublishDatasourceSchemaCache(WorkerPublishDatasourceSchemaCacheRequest) returns (WorkerPublishDatasourceSchemaCacheResponse);
+  rpc RegisterDatasourceStage(WorkerRegisterDatasourceStageRequest) returns (BoolResponse);
+  rpc ClaimStorageCleanup(WorkerClaimStorageCleanupRequest) returns (WorkerStorageCleanupClaimsResponse);
+  rpc AuthorizeStorageCleanup(WorkerStorageCleanupClaimRequest) returns (BoolResponse);
+  rpc CompleteStorageCleanup(WorkerCompleteStorageCleanupRequest) returns (BoolResponse);
   rpc GetDatasourceMetadata(WorkerDatasourceMetadataRequest) returns (WorkerDatasourceMetadataResponse);
   rpc GetUdfCodes(WorkerUdfCodesRequest) returns (WorkerUdfCodesResponse);
+  rpc GetEngineCredentials(WorkerEngineCredentialsRequest) returns (WorkerEngineCredentialsResponse);
   rpc GetAnalysisMetadata(WorkerAnalysisMetadataRequest) returns (WorkerAnalysisMetadataResponse);
   rpc GetBuildCancelStatus(WorkerBuildCancelStatusRequest) returns (WorkerBuildCancelStatusResponse);
   rpc UpdateBuildResult(WorkerUpdateBuildResultRequest) returns (RuntimeWorkerResponse);
@@ -44,9 +49,10 @@ service WorkerRuntimeService {
   rpc FinalizeBuildJob(WorkerFinalizeBuildJobRequest) returns (BoolResponse);
   rpc ReleaseBuildWorkerJobs(RuntimeWorkerRequest) returns (CountResponse);
   rpc GetQueuedBuildJobCount(EmptyRequest) returns (CountResponse);
-  rpc DispatchRuntimeOutbox(EmptyRequest) returns (CountResponse);
+  rpc ReconcileExpiredBuildJobs(EmptyRequest) returns (CountResponse);
+  rpc ReconcileExpiredComputeRequests(EmptyRequest) returns (CountResponse);
   rpc GetIdleBuildWorkerPids(EmptyRequest) returns (WorkerIdlePidsResponse);
-  rpc ListRuntimeNamespaces(EmptyRequest) returns (WorkerNamespacesResponse);
+  rpc ListPendingRuntimeWorkNamespaces(WorkerPendingRuntimeWorkNamespacesRequest) returns (WorkerNamespacesResponse);
   rpc PersistBuildEvent(WorkerPersistBuildEventRequest) returns (WorkerPersistBuildEventResponse);
   rpc StartBuildRun(WorkerStartBuildRunRequest) returns (WorkerStartBuildRunResponse);
   rpc PersistEngineSnapshot(WorkerPersistEngineSnapshotRequest) returns (CountResponse);
@@ -92,6 +98,10 @@ message WorkerClaimBuildJobResponse {
   optional WorkerClaimedBuildJob job = 1;
 }
 
+message WorkerPendingRuntimeWorkNamespacesRequest {
+  repeated string kinds = 1;
+}
+
 message WorkerBuildJobClaimRequest {
   string job_id = 1 [(buf.validate.field).string.min_len = 1];
   string namespace = 2 [(buf.validate.field).string.pattern = "^[a-zA-Z0-9_-]+$"];
@@ -128,18 +138,29 @@ message WorkerClaimComputeRequestResponse {
   optional WorkerClaimedComputeRequest request = 1;
 }
 
-message WorkerComputeRequestClaimRequest {
+message WorkerComputeRequestLeaseRenewal {
   string request_id = 1 [(buf.validate.field).string.min_len = 1];
-  string namespace = 2 [(buf.validate.field).string.pattern = "^[a-zA-Z0-9_-]+$"];
-  string claim_token = 3 [(buf.validate.field).string.min_len = 1];
-  int64 lease_generation = 4 [(buf.validate.field).int64.gte = 1];
-  string worker_id = 5 [(buf.validate.field).string.min_len = 1];
+  string claim_token = 2 [(buf.validate.field).string.min_len = 1];
+  int64 lease_generation = 3 [(buf.validate.field).int64.gte = 1];
 }
 
-message WorkerRenewComputeRequestLeaseResponse {
-  bool renewed = 1;
-  optional google.protobuf.Timestamp lease_expires_at = 2;
+message WorkerRenewComputeRequestLeasesRequest {
+  string namespace = 1 [(buf.validate.field).string.pattern = "^[a-zA-Z0-9_-]+$"];
+  string worker_id = 2 [(buf.validate.field).string.min_len = 1];
+  repeated WorkerComputeRequestLeaseRenewal renewals = 3 [(buf.validate.field).repeated = {
+    min_items: 1
+    max_items: 256
+  }];
+}
+
+message WorkerComputeRequestLeaseRenewalResult {
+  string request_id = 1 [(buf.validate.field).string.min_len = 1];
+  bool renewed = 2;
   optional int32 lease_ttl_seconds = 3 [(buf.validate.field).int32.gte = 1];
+}
+
+message WorkerRenewComputeRequestLeasesResponse {
+  repeated WorkerComputeRequestLeaseRenewalResult renewals = 1;
 }
 
 message WorkerCompleteComputeRequestRequest {
@@ -155,6 +176,7 @@ message WorkerCompleteComputeRequestRequest {
   string worker_id = 8 [(buf.validate.field).string.min_len = 1];
   string claim_token = 9 [(buf.validate.field).string.min_len = 1];
   int64 lease_generation = 10 [(buf.validate.field).int64.gte = 1];
+  optional WorkerEngineRunFinalization engine_run_finalization = 11;
 }
 
 message WorkerFailComputeRequestRequest {
@@ -168,6 +190,62 @@ message WorkerFailComputeRequestRequest {
   string worker_id = 6 [(buf.validate.field).string.min_len = 1];
   string claim_token = 7 [(buf.validate.field).string.min_len = 1];
   int64 lease_generation = 8 [(buf.validate.field).int64.gte = 1];
+  optional WorkerEngineRunFinalization engine_run_finalization = 9;
+}
+
+message WorkerRegisterDatasourceStageRequest {
+  string namespace = 1 [(buf.validate.field).string.pattern = "^[a-zA-Z0-9_-]+$"];
+  string datasource_id = 2 [(buf.validate.field).string.min_len = 1];
+  string worker_id = 3 [(buf.validate.field).string.min_len = 1];
+  string claim_token = 4 [(buf.validate.field).string.min_len = 1];
+  int64 lease_generation = 5 [(buf.validate.field).int64.gte = 1];
+  oneof owner {
+    option (buf.validate.oneof).required = true;
+    string compute_request_id = 6 [(buf.validate.field).string.min_len = 1];
+    string job_id = 7 [(buf.validate.field).string.min_len = 1];
+  }
+  optional string build_id = 8 [(buf.validate.field).string.min_len = 1];
+  string prefix_url = 9 [(buf.validate.field).string.min_len = 1];
+  string artifact_url = 10 [(buf.validate.field).string.min_len = 1];
+  string catalog_identifier = 11 [(buf.validate.field).string.min_len = 1];
+}
+
+message WorkerClaimStorageCleanupRequest {
+  string namespace = 1 [(buf.validate.field).string.pattern = "^[a-zA-Z0-9_-]+$"];
+  int32 limit = 2 [(buf.validate.field).int32 = {
+    gte: 1
+    lte: 16
+  }];
+}
+
+message WorkerStorageCleanupClaimRequest {
+  string namespace = 1 [(buf.validate.field).string.pattern = "^[a-zA-Z0-9_-]+$"];
+  string event_id = 2 [(buf.validate.field).string.min_len = 1];
+  string claim_token = 3 [(buf.validate.field).string.min_len = 1];
+  int64 lease_generation = 4 [(buf.validate.field).int64.gte = 1];
+}
+
+message WorkerStorageCleanupClaim {
+  WorkerStorageCleanupClaimRequest claim = 1 [(buf.validate.field).required = true];
+  string resource_id = 2 [(buf.validate.field).string.min_len = 1];
+  string url = 3 [(buf.validate.field).string.min_len = 1];
+  bool is_prefix = 4;
+  optional string catalog_identifier = 5 [(buf.validate.field).string.min_len = 1];
+  optional string catalog_type = 6 [(buf.validate.field).string.min_len = 1];
+  optional string catalog_uri = 7 [(buf.validate.field).string.min_len = 1];
+  optional string warehouse = 8 [(buf.validate.field).string.min_len = 1];
+  optional string catalog_namespace = 9 [(buf.validate.field).string.min_len = 1];
+  optional string catalog_table = 10 [(buf.validate.field).string.min_len = 1];
+  optional string catalog_family_prefix = 11 [(buf.validate.field).string.min_len = 1];
+}
+
+message WorkerStorageCleanupClaimsResponse {
+  repeated WorkerStorageCleanupClaim cleanups = 1;
+}
+
+message WorkerCompleteStorageCleanupRequest {
+  WorkerStorageCleanupClaimRequest claim = 1 [(buf.validate.field).required = true];
+  optional string error = 2 [(buf.validate.field).string.min_len = 1];
 }
 
 message WorkerPublishDatasourceCreateRequest {
@@ -182,6 +260,10 @@ message WorkerPublishDatasourceCreateRequest {
   google.protobuf.Struct config = 6 [(buf.validate.field).required = true];
   optional string owner_id = 7 [(buf.validate.field).string.min_len = 1];
   SchemaInfo schema_info = 8;
+  string compute_request_id = 9 [(buf.validate.field).string.min_len = 1];
+  string worker_id = 10 [(buf.validate.field).string.min_len = 1];
+  string claim_token = 11 [(buf.validate.field).string.min_len = 1];
+  int64 lease_generation = 12 [(buf.validate.field).int64.gte = 1];
 }
 
 message WorkerPublishDatasourceCreateResponse {
@@ -210,6 +292,11 @@ message WorkerPublishDatasourceSchemaCacheRequest {
   string namespace = 1 [(buf.validate.field).string.pattern = "^[a-zA-Z0-9_-]+$"];
   string datasource_id = 2 [(buf.validate.field).string.min_len = 1];
   SchemaInfo schema_info = 3 [(buf.validate.field).required = true];
+  int64 expected_revision = 4 [(buf.validate.field).int64.gte = 1];
+  string compute_request_id = 5 [(buf.validate.field).string.min_len = 1];
+  string worker_id = 6 [(buf.validate.field).string.min_len = 1];
+  string claim_token = 7 [(buf.validate.field).string.min_len = 1];
+  int64 lease_generation = 8 [(buf.validate.field).int64.gte = 1];
 }
 
 message WorkerPublishDatasourceSchemaCacheResponse {
@@ -248,6 +335,21 @@ message WorkerUdfCodesRequest {
 
 message WorkerUdfCodesResponse {
   map<string, string> codes = 1;
+}
+
+message WorkerEngineCredentialsRequest {
+  string namespace = 1 [(buf.validate.field).string.pattern = "^[a-zA-Z0-9_-]+$"];
+  string role = 2 [(buf.validate.field).string = {
+    in: [
+      "reader",
+      "builder"
+    ]
+  }];
+}
+
+message WorkerEngineCredentialsResponse {
+  string access_key = 1;
+  string secret_key = 2;
 }
 
 message WorkerAnalysisMetadataRequest {
@@ -394,6 +496,7 @@ message WorkerCreateEngineRunRequest {
   optional string triggered_by = 17 [(buf.validate.field).string.min_len = 1];
   map<string, double> timing_by_key = 18;
   repeated EngineRunExecutionEntry execution_entry = 19;
+  optional string idempotency_key = 20 [(buf.validate.field).string.min_len = 1];
 }
 
 message EngineRunStepTimings {
@@ -430,6 +533,12 @@ message WorkerEngineRunUpdateFields {
   optional string current_step = 14 [(buf.validate.field).string.min_len = 1];
   optional string triggered_by = 15 [(buf.validate.field).string.min_len = 1];
   bool clear_current_step = 16;
+}
+
+message WorkerEngineRunFinalization {
+  string run_id = 1 [(buf.validate.field).string.min_len = 1];
+  bool merge_result = 2;
+  WorkerEngineRunUpdateFields update = 3 [(buf.validate.field).required = true];
 }
 
 message WorkerUpdateEngineRunRequest {

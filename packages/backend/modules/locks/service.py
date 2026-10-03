@@ -2,7 +2,7 @@ import uuid
 from datetime import datetime, timedelta
 from typing import Any, cast
 
-from sqlalchemy import or_, update
+from sqlalchemy import delete, or_, update
 from sqlalchemy.engine import CursorResult
 from sqlalchemy.exc import IntegrityError
 from sqlalchemy.orm.exc import StaleDataError
@@ -48,11 +48,7 @@ def lookup_lock_status(session: Session, resource_type: str, resource_id: str) -
         return None, False
     now = _utcnow()
     if lock.is_expired(now=now):
-        session.delete(lock)
-        try:
-            session.commit()
-        except StaleDataError:
-            _reset_session_after_conflict(session)
+        _delete_expired_lock(session, resource_type, resource_id, now)
         return None, True
     return _status(lock, now), False
 
@@ -64,6 +60,25 @@ def get_lock_status(session: Session, resource_type: str, resource_id: str) -> L
 
 def _lock_table():
     return ResourceLock.metadata.tables[ResourceLock.__tablename__]
+
+
+def _delete_expired_lock(session: Session, resource_type: str, resource_id: str, now: datetime) -> bool:
+    """Delete an expired row without assuming the ORM identity is still current.
+
+    Lock cleanup races with heartbeat, reacquire, and websocket disconnects. A
+    conditional Core DELETE is idempotent when one of those operations wins the
+    race and does not emit SQLAlchemy's stale-row warning.
+    """
+    table = _lock_table()
+    statement = (
+        delete(ResourceLock)
+        .where(table.c.resource_type == resource_type)
+        .where(table.c.resource_id == resource_id)
+        .where(table.c.expires_at <= ResourceLock.as_utc(now))
+    )
+    result = cast(CursorResult[Any], session.execute(statement))
+    session.commit()
+    return result.rowcount == 1
 
 
 def acquire_lock(
@@ -181,25 +196,24 @@ def release_lock(
     rather than raising API conflicts.
     """
     now = _utcnow()
-    lock = get_lock(session, resource_type, resource_id)
-    if lock is None:
-        return False
-    if lock.is_expired(now=now):
-        session.delete(lock)
-        try:
-            session.commit()
-        except StaleDataError:
-            _reset_session_after_conflict(session)
-        return False
-    if lock.owner_id != owner_id or lock.lock_token != lock_token:
-        return False
-    session.delete(lock)
-    try:
-        session.commit()
-    except StaleDataError:
-        _reset_session_after_conflict(session)
-        return False
-    return True
+    table = _lock_table()
+    statement = (
+        delete(ResourceLock)
+        .where(table.c.resource_type == resource_type)
+        .where(table.c.resource_id == resource_id)
+        .where(table.c.owner_id == owner_id)
+        .where(table.c.lock_token == lock_token)
+        .where(table.c.expires_at > ResourceLock.as_utc(now))
+    )
+    result = cast(CursorResult[Any], session.execute(statement))
+    session.commit()
+    if result.rowcount == 1:
+        return True
+
+    # Preserve the old idempotent behavior for an expired lock, while never
+    # deleting a newer active lock that replaced it.
+    _delete_expired_lock(session, resource_type, resource_id, now)
+    return False
 
 
 def ensure_mutation_lock(session: Session, resource_type: str, resource_id: str, owner_id: str | None) -> None:
@@ -208,11 +222,7 @@ def ensure_mutation_lock(session: Session, resource_type: str, resource_id: str,
     if lock is None:
         return
     if lock.is_expired(now=now):
-        session.delete(lock)
-        try:
-            session.commit()
-        except StaleDataError:
-            _reset_session_after_conflict(session)
+        _delete_expired_lock(session, resource_type, resource_id, now)
         return
     if owner_id != lock.owner_id:
         raise ValueError(f'{resource_type} {resource_id} is locked by another owner')

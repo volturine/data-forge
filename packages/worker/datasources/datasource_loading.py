@@ -2,6 +2,7 @@ from __future__ import annotations
 
 import os
 import tempfile
+from collections.abc import Generator
 from pathlib import Path
 from typing import Any, Literal
 
@@ -9,6 +10,7 @@ import polars as pl
 import psycopg
 from openpyxl import load_workbook
 
+from runtime.config import settings
 from runtime.domain.datasource.source_types import DataSourceFileType, DataSourceLoadType, IcebergReader
 from runtime.iceberg_metadata import resolve_iceberg_branch_metadata_path
 from runtime.iceberg_snapshot_reader import scan_iceberg_snapshot
@@ -147,6 +149,20 @@ def _download_object_store_file(path: str) -> Path:
     return temp_path
 
 
+def _polars_storage_options() -> dict[str, str]:
+    options = {
+        "aws_access_key_id": settings.object_store_access_key,
+        "aws_secret_access_key": settings.object_store_secret_key,
+        "aws_endpoint_url": settings.object_store_endpoint,
+        "aws_region": settings.object_store_region,
+        "aws_allow_http": str(settings.object_store_endpoint.startswith("http://")).lower(),
+        "aws_virtual_hosted_style_request": "false",
+    }
+    if settings.object_store_session_token:
+        options["aws_session_token"] = settings.object_store_session_token
+    return options
+
+
 def load_datasource_frame(config: dict[str, Any]) -> pl.LazyFrame:
     source_type = str(config.get("source_type") or "")
     if source_type == DataSourceLoadType.FILE.value:
@@ -159,6 +175,13 @@ def load_datasource_frame(config: dict[str, Any]) -> pl.LazyFrame:
             opts = {}
         opts = _merge_excel_opts(config, opts)
         if is_object_store_url(str(file_path)):
+            storage = _polars_storage_options()
+            if file_type == DataSourceFileType.CSV:
+                return pl.scan_csv(file_path, storage_options=storage, **_csv_opts(opts))
+            if file_type == DataSourceFileType.PARQUET:
+                return pl.scan_parquet(file_path, storage_options=storage)
+            if file_type == DataSourceFileType.NDJSON:
+                return pl.scan_ndjson(file_path, storage_options=storage)
             temp_path = _download_object_store_file(str(file_path))
             local_path = str(temp_path)
             local_config = {**config, "file_path": local_path}
@@ -270,3 +293,47 @@ def load_datasource_frame(config: dict[str, Any]) -> pl.LazyFrame:
 
 # Public alias used by execution and pipeline loaders.
 load_datasource = load_datasource_frame
+
+
+def iter_datasource_batches(config: dict[str, Any], *, batch_size: int) -> Generator[pl.DataFrame]:
+    from datasources.excel_batches import iter_excel_batches
+
+    source_type = str(config.get("source_type") or "")
+    if source_type == DataSourceLoadType.DATABASE.value:
+        connection_string = config.get("connection_string")
+        query = config.get("query")
+        if not isinstance(connection_string, str) or not isinstance(query, str):
+            raise ValueError("Database source requires connection details and query")
+        _assert_select_only(query)
+        if not connection_string.lower().startswith("postgresql://"):
+            raise ValueError("Database datasource connection string must be PostgreSQL")
+        with psycopg.connect(connection_string) as connection:
+            connection.execute("SET TRANSACTION ISOLATION LEVEL REPEATABLE READ READ ONLY")
+            with connection.cursor(name="dataforge_ingest") as cursor:
+                batches = pl.read_database(query, cursor, iter_batches=True, batch_size=batch_size)
+                yield from batches
+        return
+    file_path = config.get("file_path")
+    if source_type == DataSourceLoadType.FILE.value and isinstance(file_path, str) and is_object_store_url(file_path):
+        if DataSourceFileType.read(config.get("file_type"), default=None) in {
+            DataSourceFileType.CSV,
+            DataSourceFileType.PARQUET,
+            DataSourceFileType.NDJSON,
+        }:
+            yield from load_datasource_frame(config).collect_batches(chunk_size=batch_size, engine="streaming")
+            return
+        path = _download_object_store_file(file_path)
+        try:
+            local_config = {**config, "file_path": str(path)}
+            if DataSourceFileType.read(config.get("file_type"), default=None) == DataSourceFileType.EXCEL:
+                yield from iter_excel_batches(local_config, batch_size=batch_size)
+                return
+            lazy = load_datasource_frame(local_config)
+            yield from lazy.collect_batches(chunk_size=batch_size, engine="streaming")
+        finally:
+            path.unlink(missing_ok=True)
+        return
+    if source_type == DataSourceLoadType.FILE.value and DataSourceFileType.read(config.get("file_type"), default=None) == DataSourceFileType.EXCEL:
+        yield from iter_excel_batches(config, batch_size=batch_size)
+        return
+    yield from load_datasource_frame(config).collect_batches(chunk_size=batch_size, engine="streaming")

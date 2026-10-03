@@ -1,9 +1,8 @@
 <script lang="ts">
 	import { createMutation, createQuery, useQueryClient } from '@tanstack/svelte-query';
-	import { goto } from '$app/navigation';
 	import { resolve } from '$app/paths';
 	import { listUdfs, deleteUdf, exportUdfs, importUdfs, cloneUdf } from '$lib/api/udf';
-	import type { UdfExport } from '$lib/types/udf';
+	import type { Udf, UdfExport } from '$lib/types/udf';
 	import { Plus, Upload, Download, Copy, Trash2, Pencil, X } from '@lucide/svelte';
 	import ColumnTypeBadge from '$lib/components/common/ColumnTypeBadge.svelte';
 	import BaseModal from '$lib/components/ui/BaseModal.svelte';
@@ -33,8 +32,8 @@
 
 	const query = createQuery(() => ({
 		queryKey: ['udfs', search],
-		queryFn: async () => {
-			const result = await listUdfs(search ? { q: search } : undefined);
+		queryFn: async ({ signal }) => {
+			const result = await listUdfs(search ? { q: search } : undefined, { signal });
 			if (result.isErr()) throw new Error(result.error.message);
 			return result.value;
 		}
@@ -45,8 +44,10 @@
 			const result = await deleteUdf(id);
 			if (result.isErr()) throw new Error(result.error.message);
 		},
-		onSuccess: () => {
-			queryClient.invalidateQueries({ queryKey: ['udfs'] });
+		onSuccess: (_data, deletedId) => {
+			queryClient.setQueriesData<Udf[]>({ queryKey: ['udfs'] }, (current) =>
+				current?.filter((udf) => udf.id !== deletedId)
+			);
 		}
 	}));
 
@@ -100,8 +101,16 @@
 				importError = result.error.message;
 				return;
 			}
+			if (!search) {
+				const importedIds = new Set(result.value.map((udf) => udf.id));
+				queryClient.setQueryData<Udf[]>(['udfs', search], (current) =>
+					current
+						? [...current.filter((udf) => !importedIds.has(udf.id)), ...result.value]
+						: current
+				);
+			}
 			closeImport();
-			queryClient.invalidateQueries({ queryKey: ['udfs'] });
+			void queryClient.invalidateQueries({ queryKey: ['udfs'] });
 		} finally {
 			importing = false;
 		}
@@ -111,9 +120,14 @@
 		deletingId = id;
 	}
 
-	function confirmDelete(id: string) {
-		deleteMutation.mutate(id);
-		deletingId = null;
+	async function confirmDelete(id: string) {
+		try {
+			await deleteMutation.mutateAsync(id);
+			deletingId = null;
+		} catch {
+			// The mutation error is rendered by the existing query/error state; keep
+			// the inline confirmation open so a failed delete is actionable.
+		}
 	}
 
 	function cancelDelete() {
@@ -123,14 +137,6 @@
 	function handleClone(id: string) {
 		cloningId = id;
 		cloneMutation.mutate(id);
-	}
-
-	function openNew() {
-		goto(resolve('/udfs/new'), { invalidateAll: true });
-	}
-
-	function editUdf(id: string) {
-		goto(resolve(`/udfs/${id}`), { invalidateAll: true });
 	}
 </script>
 
@@ -166,10 +172,10 @@
 					<Download size={16} />
 					Export
 				</button>
-				<button class={button({ variant: 'primary' })} onclick={openNew}>
+				<a class={button({ variant: 'primary' })} href={resolve('/udfs/new')}>
 					<Plus size={16} />
 					New UDF
-				</button>
+				</a>
 			</div>
 			{#if exportError}
 				<Callout tone="error">
@@ -233,8 +239,8 @@
 				})}
 			>
 				<p>No UDFs yet.</p>
-				<button class={button({ variant: 'primary' })} onclick={openNew}
-					>Create your first UDF</button
+				<a class={button({ variant: 'primary' })} href={resolve('/udfs/new')}
+					>Create your first UDF</a
 				>
 			</div>
 		{:else}
@@ -296,13 +302,10 @@
 							{/if}
 						</div>
 						<div class={css({ display: 'flex', alignItems: 'center', gap: '2' })}>
-							<button
-								class={button({ variant: 'ghost', size: 'sm' })}
-								onclick={() => editUdf(udf.id)}
-							>
+							<a class={button({ variant: 'ghost', size: 'sm' })} href={resolve(`/udfs/${udf.id}`)}>
 								<Pencil size={14} />
 								Edit
-							</button>
+							</a>
 							<button
 								class={button({ variant: 'ghost', size: 'sm' })}
 								onclick={() => handleClone(udf.id)}

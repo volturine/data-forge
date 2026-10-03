@@ -11,6 +11,7 @@ class RuntimeWorkerKind(DomainEnumValue):
     BUILD_MANAGER: ClassVar[Self]
     BUILD_WORKER: ClassVar[Self]
     SCHEDULER: ClassVar[Self]
+    COORDINATOR: ClassVar[Self]
 
 
 RuntimeWorkerKind.API = RuntimeWorkerKind(enums_pb2.RUNTIME_WORKER_KIND_API, domain_token("RuntimeWorkerKind", enums_pb2.RUNTIME_WORKER_KIND_API))
@@ -22,4 +23,7 @@ RuntimeWorkerKind.BUILD_WORKER = RuntimeWorkerKind(
 )
 RuntimeWorkerKind.SCHEDULER = RuntimeWorkerKind(
     enums_pb2.RUNTIME_WORKER_KIND_SCHEDULER, domain_token("RuntimeWorkerKind", enums_pb2.RUNTIME_WORKER_KIND_SCHEDULER)
+)
+RuntimeWorkerKind.COORDINATOR = RuntimeWorkerKind(
+    enums_pb2.RUNTIME_WORKER_KIND_COORDINATOR, domain_token("RuntimeWorkerKind", enums_pb2.RUNTIME_WORKER_KIND_COORDINATOR)
 )

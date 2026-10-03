@@ -36,7 +36,7 @@ export interface EngineDefaults {
 }
 
 export interface EngineStatusResponse {
-	analysis_id: StringField<ProtocolEngineStatusResultJson, 'analysisId'>;
+	analysis_id: OptionalStringField<ProtocolEngineStatusResultJson, 'analysisId'>;
 	resource_id: StringField<ProtocolEngineStatusResultJson, 'resourceId'>;
 	status: EngineStatus;
 	container_id: OptionalStringField<ProtocolEngineStatusResultJson, 'containerId'>;

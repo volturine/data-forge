@@ -1,16 +1,33 @@
 import { expect, type Page } from '@playwright/test';
-import { waitForAppShell, waitForDatasourceList } from './readiness.js';
+import { readyTimeoutMs, waitForAppShell, waitForDatasourceList } from './readiness.js';
 import { dialogByTextbox } from './locators.js';
 
 const SIDEBAR = 'aside[aria-label="Main navigation"]';
+
+/**
+ * The namespace every test runs in.
+ *
+ * All Playwright shards share one app stack and one namespace: tests isolate
+ * themselves by unique resource names, not by namespace. Namespaces are a
+ * product feature, exercised by namespace-isolation.test.ts alone.
+ */
+export const DEFAULT_NAMESPACE = process.env.DEFAULT_NAMESPACE?.trim() || 'default';
 
 /**
  * Switch to a namespace via the sidebar picker.
  * If the namespace doesn't exist yet, creates it inline.
  * Preserves the current route — waits for sidebar to reflect the new namespace.
  */
-export async function switchNamespace(page: Page, name: string): Promise<void> {
-	await page.getByRole('button', { name: 'Select namespace' }).click();
+export async function switchNamespace(
+	page: Page,
+	name: string,
+	provisioningTimeoutMs = readyTimeoutMs()
+): Promise<void> {
+	await waitForAppShell(page);
+	const picker = page.getByRole('button', { name: 'Select namespace' });
+	if ((await picker.textContent())?.trim() === name) return;
+
+	await picker.click();
 	const dialog = dialogByTextbox(page, 'Search namespaces');
 	await expect(dialog).toBeVisible({ timeout: 5_000 });
 
@@ -21,7 +38,7 @@ export async function switchNamespace(page: Page, name: string): Promise<void> {
 	const create = dialog.locator(`[data-namespace-create="${name}"]`);
 	// Namespace list is server-filtered after search; under CI load the option
 	// (or create row) can lag behind the fill.
-	await expect(exact.or(create)).toBeVisible({ timeout: 15_000 });
+	await expect(exact.or(create)).toBeVisible({ timeout: readyTimeoutMs() });
 
 	if (await exact.isVisible()) {
 		await exact.click();
@@ -29,8 +46,22 @@ export async function switchNamespace(page: Page, name: string): Promise<void> {
 		await create.click();
 	}
 
-	await expect(dialog).not.toBeVisible({ timeout: 5_000 });
-	await expect(page.locator(SIDEBAR).getByText(name)).toBeVisible({ timeout: 15_000 });
+	await expect
+		.poll(
+			async () => {
+				if (!(await dialog.isVisible().catch(() => false))) return 'closed';
+				const alert = dialog.getByRole('alert');
+				if (await alert.isVisible().catch(() => false)) {
+					throw new Error(`Namespace switch failed: ${await alert.innerText()}`);
+				}
+				return 'provisioning';
+			},
+			{ timeout: provisioningTimeoutMs, message: `Namespace ${name} did not finish switching` }
+		)
+		.toBe('closed');
+	await expect(page.locator(SIDEBAR).getByText(name)).toBeVisible({
+		timeout: provisioningTimeoutMs
+	});
 	await waitForAppShell(page);
 }
 
@@ -44,9 +75,10 @@ export async function expectNamespace(page: Page, name: string): Promise<void> {
 /** Restore the shared worker context after a test that changes namespace. */
 export async function restoreDefaultNamespace(page: Page): Promise<void> {
 	await waitForAppShell(page);
+	const target = DEFAULT_NAMESPACE;
 	const picker = page.getByRole('button', { name: 'Select namespace' });
-	if ((await picker.textContent())?.trim() === 'default') return;
-	await switchNamespace(page, 'default');
+	if ((await picker.textContent())?.trim() === target) return;
+	await switchNamespace(page, target);
 }
 
 /**

@@ -1,5 +1,4 @@
 import {
-	expect,
 	type APIRequestContext,
 	type Browser,
 	type BrowserContext,
@@ -15,11 +14,13 @@ import {
 	E2E_PASSWORD
 } from './user-flows.js';
 import { deleteDatasourceViaUI } from './ui-cleanup.js';
-import { waitForLayoutReady } from './readiness.js';
+import { readyTimeoutMs, waitForLayoutReady } from './readiness.js';
 import { switchNamespace } from './namespace.js';
 
 export const E2E_RUN_STAMP =
 	process.env.E2E_RUN_STAMP || `${Date.now().toString(36)}-${process.pid}`;
+export const E2E_GLOBAL_RUN_STAMP =
+	process.env.E2E_GLOBAL_RUN_STAMP || E2E_RUN_STAMP.replace(/-shard-\d+-of-\d+$/, '');
 
 export { E2E_PASSWORD };
 
@@ -66,20 +67,17 @@ const udfRegistry = new Map<string, { name: string }>();
 
 /**
  * Default app namespace used by helpers unless a test passes another.
- * Read from the visible sidebar namespace control (not /api/v1/config).
- * Memoized per worker after first shell load.
+ * This is configuration, not mutable browser state: the shared helper context
+ * is deliberately reused and may be left on a test-specific namespace.
  */
-let helperDefaultNamespace: string | undefined;
+const helperDefaultNamespace = process.env.DEFAULT_NAMESPACE?.trim() || 'default';
 
-async function resolveHelperDefaultNamespace(page: Page): Promise<string> {
-	if (!helperDefaultNamespace) {
-		await page.goto('/', { waitUntil: 'domcontentloaded', timeout: 15_000 });
-		await waitForLayoutReady(page);
-		const label = page.getByRole('button', { name: 'Select namespace' });
-		await expect(label).toBeVisible({ timeout: 5_000 });
-		const text = (await label.innerText()).trim();
-		helperDefaultNamespace = text || 'default';
-	}
+// Setup helpers run serially within a Playwright worker. Reusing their one
+// authenticated page avoids hard-loading the SPA before every API-created
+// analysis/datasource while keeping the actual test page fresh per test.
+const helperPages = new WeakMap<BrowserContext, Page>();
+
+async function resolveHelperDefaultNamespace(_page: Page): Promise<string> {
 	return helperDefaultNamespace;
 }
 
@@ -91,12 +89,12 @@ async function withAuthedPage<T>(request: E2ERequest, fn: (page: Page) => Promis
 	if (!request.helperContext) {
 		throw new Error(`withAuthedPage requires helperContext (worker ${request.workerIndex})`);
 	}
-	const page = await request.helperContext.newPage();
-	try {
-		return await fn(page);
-	} finally {
-		await page.close();
+	let page = helperPages.get(request.helperContext);
+	if (!page || page.isClosed()) {
+		page = await request.helperContext.newPage();
+		helperPages.set(request.helperContext, page);
 	}
+	return fn(page);
 }
 
 /**
@@ -107,12 +105,23 @@ async function withAuthedPage<T>(request: E2ERequest, fn: (page: Page) => Promis
  */
 async function prepareHelperNamespace(page: Page, namespace?: string): Promise<void> {
 	const target = namespace ?? (await resolveHelperDefaultNamespace(page));
-	await page.goto('/', { waitUntil: 'domcontentloaded', timeout: 15_000 });
-	await waitForLayoutReady(page);
+	// The worker-scoped helper page remains on the last setup route. Only the
+	// first call needs a document navigation; later setup calls can use the
+	// already-hydrated shell and avoid a second bootstrap/API burst.
+	const shell = page.locator('[data-shell-interactive="true"]');
+	if (!(await shell.isVisible().catch(() => false))) {
+		await page.goto('/', { waitUntil: 'domcontentloaded', timeout: readyTimeoutMs() });
+		await waitForLayoutReady(page);
+	}
 	const sidebar = page.locator('aside[aria-label="Main navigation"]');
+	await sidebar.waitFor({ state: 'visible', timeout: readyTimeoutMs() });
 	const active = sidebar.getByText(target, { exact: true });
 	if (await active.isVisible().catch(() => false)) return;
 	await switchNamespace(page, target);
+}
+
+export async function ensureNamespace(request: E2ERequest, namespace: string): Promise<void> {
+	await withAuthedPage(request, (page) => prepareHelperNamespace(page, namespace));
 }
 
 function buildOutput(filename: string) {
@@ -196,7 +205,7 @@ export async function deleteDatasource(
 	if (!entry) return;
 	await withAuthedPage(request, async (page) => {
 		await prepareHelperNamespace(page, namespace ?? entry.namespace);
-		await deleteDatasourceViaUI(page, entry.name);
+		await deleteDatasourceViaUI(page, entry.name, { id });
 	});
 }
 
@@ -399,7 +408,7 @@ export async function createHealthCheck(
 }
 
 export async function spawnEngine(_request: E2ERequest, _analysisId: string): Promise<void> {
-	// Engines are started through visible user actions / analysis prewarm.
+	// Engines are started through visible user actions and compute requests.
 }
 
 export async function waitForNoEngineJob(
@@ -423,6 +432,16 @@ export function findAnalysisIdByName(name: string): string | null {
 
 export function unregisterAnalysis(analysisId: string): void {
 	analysisRegistry.delete(analysisId);
+}
+
+export function findDatasourceIdsByName(name: string): string[] {
+	return [...datasourceRegistry.entries()]
+		.filter(([, entry]) => entry.name === name)
+		.map(([id]) => id);
+}
+
+export function unregisterDatasource(datasourceId: string): void {
+	datasourceRegistry.delete(datasourceId);
 }
 
 export function registeredAnalysisIds(): string[] {

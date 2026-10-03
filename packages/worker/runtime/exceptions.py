@@ -98,6 +98,15 @@ class ComputeError(AppError):
     pass
 
 
+class StaleComputeInputError(ComputeError):
+    def __init__(self, datasource_id: str, *, expected_revision: int, actual_revision: int | None):
+        super().__init__(
+            message=f"Datasource {datasource_id} changed after this compute request was queued",
+            error_code="STALE_COMPUTE_INPUT",
+            details={"datasource_id": datasource_id, "expected_revision": expected_revision, "actual_revision": actual_revision},
+        )
+
+
 class EngineBusyError(ComputeError):
     def __init__(self, analysis_id: str | None = None):
         details = {"analysis_id": analysis_id} if analysis_id is not None else None
@@ -125,6 +134,7 @@ ERROR_CODE_STATUS_MAP: dict[int, int] = {
     errors_pb2.ERROR_CODE_DATASOURCE_SNAPSHOT_ERROR: 409,
     errors_pb2.ERROR_CODE_ENGINE_BUSY: 409,
     errors_pb2.ERROR_CODE_JOB_CANCELLED: 409,
+    errors_pb2.ERROR_CODE_STALE_COMPUTE_INPUT: 409,
     errors_pb2.ERROR_CODE_PIPELINE_EXECUTION_ERROR: 500,
 }
 

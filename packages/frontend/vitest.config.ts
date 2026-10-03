@@ -3,13 +3,13 @@ import { svelte } from '@sveltejs/vite-plugin-svelte';
 import { svelteTesting } from '@testing-library/svelte/vite';
 import { resolve } from 'path';
 
-const stub = resolve(__dirname, 'src/lib/test-utils/stubs');
+const stub = resolve(import.meta.dirname, 'src/lib/test-utils/stubs');
 
 export default defineConfig({
 	plugins: [svelte({ compilerOptions: { runes: true } }), svelteTesting()],
 	resolve: {
 		alias: {
-			$lib: resolve(__dirname, 'src/lib'),
+			$lib: resolve(import.meta.dirname, 'src/lib'),
 			'@lucide/svelte': resolve(stub, 'lucide.ts'),
 			'$app/environment': resolve(stub, 'app-environment.ts'),
 			'$app/paths': resolve(stub, 'app-paths.ts')

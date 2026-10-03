@@ -1,6 +1,11 @@
+# cpu_shares are relative scheduling weights, not CPU quotas. Core progress
+# services use 2048; supporting services use lower weights. Each compute
+# container uses 128, so infrastructure wins contention while idle CPU remains
+# available to compute.
 services:
   postgres:
     image: postgres:18-alpine
+    cpu_shares: 2048
     environment:
       POSTGRES_DB: ${DF_POSTGRES_DB}
       POSTGRES_USER: ${DF_POSTGRES_USER}
@@ -15,6 +20,7 @@ services:
 
   rustfs:
     image: rustfs/rustfs:1.0.0-rc.1
+    cpu_shares: 512
     environment:
       RUSTFS_ACCESS_KEY: ${DF_OBJECT_STORE_ACCESS_KEY}
       RUSTFS_SECRET_KEY: ${DF_OBJECT_STORE_SECRET_KEY}
@@ -27,11 +33,16 @@ services:
 
   api:
     image: ${DF_API_IMAGE}
+    cpu_shares: 2048
     depends_on:
       postgres:
         condition: service_healthy
       rustfs:
         condition: service_started
+      runtime:
+        condition: service_healthy
+      worker:
+        condition: service_healthy
     environment: &api-env
       ENV_FILE: ""
       APP_NAME: ${DF_APP_NAME}
@@ -44,12 +55,12 @@ services:
       INTERNAL_API_TOKEN: ${DF_INTERNAL_API_TOKEN}
       INTERNAL_GRPC_HOST: 0.0.0.0
       INTERNAL_GRPC_PORT: "50051"
+      RUNTIME_COORDINATOR_TARGET: ${DF_RUNTIME_COORDINATOR_TARGET}
       WORKER_DATA_PLANE_GRPC_TARGET: worker:50052
       DATABASE_POOL_SIZE: ${DF_DATABASE_POOL_SIZE}
       DATABASE_MAX_OVERFLOW: ${DF_DATABASE_MAX_OVERFLOW}
       DATABASE_POOL_TIMEOUT: ${DF_DATABASE_POOL_TIMEOUT}
       DEFAULT_NAMESPACE: ${DF_DEFAULT_NAMESPACE}
-      UPLOAD_CHUNK_SIZE: ${DF_UPLOAD_CHUNK_SIZE}
       OBJECT_STORE_ENDPOINT: ${DF_OBJECT_STORE_ENDPOINT}
       OBJECT_STORE_REGION: ${DF_OBJECT_STORE_REGION}
       OBJECT_STORE_ACCESS_KEY: ${DF_OBJECT_STORE_ACCESS_KEY}
@@ -57,12 +68,8 @@ services:
       POLARS_CORES_AVAILABLE: ${DF_POLARS_CORES_AVAILABLE}
       POLARS_MAX_MEMORY_MB: ${DF_POLARS_MAX_MEMORY_MB}
       POLARS_STREAMING_CHUNK_SIZE: ${DF_POLARS_STREAMING_CHUNK_SIZE}
-      MAX_CONCURRENT_ENGINES: ${DF_MAX_CONCURRENT_ENGINES}
       WORKERS: ${DF_WORKERS}
       WORKER_CONNECTIONS: ${DF_WORKER_CONNECTIONS}
-      BUILD_WORKER_MIN_PROCESSES: ${DF_BUILD_WORKER_MIN_PROCESSES}
-      BUILD_WORKER_MAX_PROCESSES: ${DF_BUILD_WORKER_MAX_PROCESSES}
-      BUILD_WORKER_IDLE_EXIT_SECONDS: ${DF_BUILD_WORKER_IDLE_EXIT_SECONDS}
       LOG_LEVEL: ${DF_LOG_LEVEL}
       TRUSTED_PROXY_HOPS: ${DF_TRUSTED_PROXY_HOPS}
       SETTINGS_ENCRYPTION_KEY: ${DF_SETTINGS_ENCRYPTION_KEY}
@@ -96,15 +103,113 @@ services:
       retries: 30
     restart: unless-stopped
 
-  scheduler:
-    image: ${DF_SCHEDULER_IMAGE}
+  runtime:
+    image: ${DF_RUNTIME_IMAGE}
+    cpu_shares: 2048
     depends_on:
       postgres:
         condition: service_healthy
       rustfs:
         condition: service_started
-      api:
+    environment:
+      <<: *api-env
+      COMPUTE_WORKERS: ${COMPUTE_WORKERS:-10}
+      WORKERS: "1"
+      DATAFORGE_DEPLOYMENT_ID: ${DF_DEPLOYMENT_ID}
+    command: ["python3", "runtime_coordinator.py"]
+    volumes:
+      - data:/app/data
+    mem_limit: ${DF_RUNTIME_MEM_LIMIT:-8g}
+    cpus: ${DF_RUNTIME_CPUS:-0}
+    healthcheck:
+      test:
+        [
+          "CMD-SHELL",
+          "python3 -c \"import grpc,os; from dataforge_protocol import common_pb2,runtime_coordinator_pb2_grpc; c=grpc.insecure_channel('127.0.0.1:50051'); r=runtime_coordinator_pb2_grpc.RuntimeCoordinatorServiceStub(c).GetCoordinatorGeneration(common_pb2.EmptyRequest(),timeout=3,metadata=(('x-internal-token',os.environ['INTERNAL_API_TOKEN']),)); c.close(); exit(0 if r.generation>0 else 1)\"",
+        ]
+      interval: 5s
+      timeout: 5s
+      retries: 30
+      start_period: 10s
+    restart: unless-stopped
+
+  worker:
+    image: ${DF_WORKER_IMAGE}
+    cpu_shares: 2048
+    depends_on:
+      postgres:
+        condition: service_healthy
+      rustfs:
         condition: service_started
+      runtime:
+        condition: service_healthy
+    environment:
+      ENV_FILE: ""
+      PGAPPNAME: dataforge-worker
+      APP_NAME: ${DF_APP_NAME}
+      APP_VERSION: ${DF_APP_VERSION}
+      DEBUG: ${DF_DEBUG}
+      PROD_MODE_ENABLED: "true"
+      DATA_DIR: ${DF_DATA_DIR}
+      DATABASE_URL: ${DF_DATABASE_URL}
+      INTERNAL_API_TOKEN: ${DF_INTERNAL_API_TOKEN}
+      INTERNAL_GRPC_TARGET: runtime:50051
+      WORKER_DATA_PLANE_GRPC_HOST: 0.0.0.0
+      WORKER_DATA_PLANE_GRPC_PORT: "50052"
+      DEFAULT_NAMESPACE: ${DF_DEFAULT_NAMESPACE}
+      OBJECT_STORE_ENDPOINT: ${DF_OBJECT_STORE_ENDPOINT}
+      OBJECT_STORE_REGION: ${DF_OBJECT_STORE_REGION}
+      OBJECT_STORE_ACCESS_KEY: ${DF_OBJECT_STORE_ACCESS_KEY}
+      OBJECT_STORE_SECRET_KEY: ${DF_OBJECT_STORE_SECRET_KEY}
+      POLARS_CORES_AVAILABLE: ${DF_POLARS_CORES_AVAILABLE}
+      POLARS_MAX_MEMORY_MB: ${DF_POLARS_MAX_MEMORY_MB}
+      POLARS_STREAMING_CHUNK_SIZE: ${DF_POLARS_STREAMING_CHUNK_SIZE}
+      TIMEZONE: ${TIMEZONE:-UTC}
+      NORMALIZE_TZ: ${NORMALIZE_TZ:-false}
+      PERSIST_PREVIEW_RUNS: ${PERSIST_PREVIEW_RUNS:-true}
+      COMPUTE_WORKERS: ${COMPUTE_WORKERS:-10}
+      COMPUTE_WARM_WORKERS: ${COMPUTE_WARM_WORKERS:-2}
+      RUNTIME_RECONCILIATION_POLL_INTERVAL_SECONDS: ${RUNTIME_RECONCILIATION_POLL_INTERVAL_SECONDS:-5}
+      ENGINE_DOCKER_HOST: ${DF_ENGINE_DOCKER_HOST}
+      ENGINE_DOCKER_NETWORK: ${DF_ENGINE_DOCKER_NETWORK}
+      ENGINE_IMAGE: ${DF_ENGINE_IMAGE}
+      ENGINE_OBJECT_STORE_ENDPOINT: ${DF_ENGINE_OBJECT_STORE_ENDPOINT:-}
+      ENGINE_RPC_PORT: ${DF_ENGINE_RPC_PORT}
+      ENGINE_START_TIMEOUT_SECONDS: ${DF_ENGINE_START_TIMEOUT_SECONDS}
+      ENGINE_SHUTDOWN_GRACE_SECONDS: ${DF_ENGINE_SHUTDOWN_GRACE_SECONDS}
+      ENGINE_HEARTBEAT_INTERVAL_SECONDS: ${DF_ENGINE_HEARTBEAT_INTERVAL_SECONDS}
+      ENGINE_IDLE_TTL_SECONDS: ${ENGINE_IDLE_TTL_SECONDS:-300}
+      ENGINE_IDLE_REAP_INTERVAL_SECONDS: ${ENGINE_IDLE_REAP_INTERVAL_SECONDS:-30}
+      DATAFORGE_DEPLOYMENT_ID: ${DF_DEPLOYMENT_ID}
+      LOG_LEVEL: ${DF_LOG_LEVEL}
+    volumes:
+      - data:/app/data
+      - ${DF_DOCKER_SOCKET_PATH}:/var/run/docker.sock
+    group_add:
+      - "${DF_DOCKER_GID}"
+    networks:
+      - default
+      - engine-runtime
+    mem_limit: ${DF_WORKER_MEM_LIMIT:-8g}
+    cpus: ${DF_WORKER_CPUS:-0}
+    healthcheck:
+      test: ["CMD", "python3", "-m", "runtime.dispatcher_health"]
+      interval: 5s
+      timeout: 5s
+      retries: 30
+      start_period: 10s
+    restart: unless-stopped
+
+  scheduler:
+    image: ${DF_SCHEDULER_IMAGE}
+    cpu_shares: 1024
+    depends_on:
+      postgres:
+        condition: service_healthy
+      rustfs:
+        condition: service_started
+      runtime:
+        condition: service_healthy
     environment: &scheduler-env
       ENV_FILE: ""
       APP_NAME: ${DF_APP_NAME}
@@ -115,7 +220,7 @@ services:
       DATABASE_URL: ${DF_DATABASE_URL}
       DISTRIBUTED_RUNTIME_ENABLED: "true"
       INTERNAL_API_TOKEN: ${DF_INTERNAL_API_TOKEN}
-      INTERNAL_GRPC_TARGET: api:50051
+      INTERNAL_GRPC_TARGET: runtime:50051
       DEFAULT_NAMESPACE: ${DF_DEFAULT_NAMESPACE}
       OBJECT_STORE_ENDPOINT: ${DF_OBJECT_STORE_ENDPOINT}
       OBJECT_STORE_REGION: ${DF_OBJECT_STORE_REGION}
@@ -129,65 +234,6 @@ services:
       - data:/app/data
     mem_limit: ${DF_SCHEDULER_MEM_LIMIT:-1g}
     cpus: ${DF_SCHEDULER_CPUS:-0}
-    restart: unless-stopped
-
-  worker:
-    image: ${DF_WORKER_IMAGE}
-    depends_on:
-      postgres:
-        condition: service_healthy
-      rustfs:
-        condition: service_started
-      api:
-        condition: service_started
-    environment: &worker-env
-      ENV_FILE: ""
-      APP_NAME: ${DF_APP_NAME}
-      APP_VERSION: ${DF_APP_VERSION}
-      DEBUG: ${DF_DEBUG}
-      PROD_MODE_ENABLED: ${DF_PROD_MODE_ENABLED}
-      DATA_DIR: ${DF_DATA_DIR}
-      DATABASE_URL: ${DF_DATABASE_URL}
-      DISTRIBUTED_RUNTIME_ENABLED: "true"
-      INTERNAL_API_TOKEN: ${DF_INTERNAL_API_TOKEN}
-      INTERNAL_GRPC_TARGET: api:50051
-      WORKER_DATA_PLANE_GRPC_HOST: 0.0.0.0
-      WORKER_DATA_PLANE_GRPC_PORT: "50052"
-      DEFAULT_NAMESPACE: ${DF_DEFAULT_NAMESPACE}
-      OBJECT_STORE_ENDPOINT: ${DF_OBJECT_STORE_ENDPOINT}
-      OBJECT_STORE_REGION: ${DF_OBJECT_STORE_REGION}
-      OBJECT_STORE_ACCESS_KEY: ${DF_OBJECT_STORE_ACCESS_KEY}
-      OBJECT_STORE_SECRET_KEY: ${DF_OBJECT_STORE_SECRET_KEY}
-      WORKERS: "1"
-      POLARS_CORES_AVAILABLE: ${DF_POLARS_CORES_AVAILABLE}
-      POLARS_MAX_MEMORY_MB: ${DF_POLARS_MAX_MEMORY_MB}
-      POLARS_STREAMING_CHUNK_SIZE: ${DF_POLARS_STREAMING_CHUNK_SIZE}
-      MAX_CONCURRENT_ENGINES: ${DF_MAX_CONCURRENT_ENGINES}
-      BUILD_WORKER_MIN_PROCESSES: ${DF_BUILD_WORKER_MIN_PROCESSES}
-      BUILD_WORKER_MAX_PROCESSES: ${DF_BUILD_WORKER_MAX_PROCESSES}
-      BUILD_WORKER_IDLE_EXIT_SECONDS: ${DF_BUILD_WORKER_IDLE_EXIT_SECONDS}
-      LOG_LEVEL: ${DF_LOG_LEVEL}
-      SETTINGS_ENCRYPTION_KEY: ${DF_SETTINGS_ENCRYPTION_KEY}
-      ENGINE_DOCKER_HOST: ${DF_ENGINE_DOCKER_HOST}
-      ENGINE_DOCKER_NETWORK: ${DF_ENGINE_DOCKER_NETWORK}
-      ENGINE_IMAGE: ${DF_ENGINE_IMAGE}
-      ENGINE_RPC_PORT: ${DF_ENGINE_RPC_PORT}
-      ENGINE_START_TIMEOUT_SECONDS: ${DF_ENGINE_START_TIMEOUT_SECONDS}
-      ENGINE_SHUTDOWN_GRACE_SECONDS: ${DF_ENGINE_SHUTDOWN_GRACE_SECONDS}
-      ENGINE_HEARTBEAT_INTERVAL_SECONDS: ${DF_ENGINE_HEARTBEAT_INTERVAL_SECONDS}
-      ENGINE_ALLOW_GLOBAL_OBJECT_STORE_CREDENTIALS: ${DF_ENGINE_ALLOW_GLOBAL_OBJECT_STORE_CREDENTIALS}
-      ENGINE_OBJECT_STORE_CREDENTIALS_JSON: ${DF_ENGINE_OBJECT_STORE_CREDENTIALS_JSON}
-      DATAFORGE_DEPLOYMENT_ID: ${DF_DEPLOYMENT_ID}
-    volumes:
-      - data:/app/data
-      - ${DF_DOCKER_SOCKET_PATH}:/var/run/docker.sock
-    group_add:
-      - "${DF_DOCKER_GID}"
-    networks:
-      - default
-      - engine-runtime
-    mem_limit: ${DF_WORKER_MEM_LIMIT:-8g}
-    cpus: ${DF_WORKER_CPUS:-0}
     restart: unless-stopped
 
 volumes:

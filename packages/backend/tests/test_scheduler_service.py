@@ -5,20 +5,25 @@ from datetime import UTC, datetime, timedelta
 from typing import Any
 
 import pytest
+from sqlalchemy import event, select, update
 from sqlmodel import Session
 
 from backend_core import (
     build_jobs_service as build_job_service,
     build_runs_service as build_run_service,
 )
+from backend_core.build_datasource_dependencies import external_datasource_ids
 from backend_core.domain.analysis.models import AnalysisStatus
 from backend_core.domain.build_runs.models import BuildRunStatus
+from backend_core.domain.compute import schemas as compute_schemas
 from backend_core.domain.engine_runs.schemas import EngineRunKind
 from backend_core.domain.scheduler.schemas import ScheduleCreate, ScheduleUpdate
 from backend_core.exceptions import AppError
 from backend_core.persistence.analysis.models import Analysis, AnalysisDataSource
+from backend_core.persistence.build_runs.models import BuildRunDatasource
 from backend_core.persistence.datasource.models import DataSource
 from backend_core.persistence.scheduler.models import Schedule
+from backend_core.sqlmodel_typing import col
 from modules.scheduler.commands import create_schedule, delete_schedule, update_schedule
 from modules.scheduler.service import (
     claim_due_schedules,
@@ -155,8 +160,9 @@ class TestShouldRun:
         assert should_run('0 * * * *', last) is True
 
     def test_not_due_schedule(self):
-        """Schedule that ran 1 second ago with hourly cron should not be due."""
-        last = datetime.now(UTC) - timedelta(seconds=1)
+        """A run after the most recent hourly boundary should not be due."""
+        now = datetime.now(UTC)
+        last = now.replace(minute=30, second=0, microsecond=0)
         assert should_run('0 * * * *', last) is False
 
     def test_every_minute_after_delay(self):
@@ -504,6 +510,22 @@ class TestGetDueSchedules:
         result = get_due_schedules(test_db_session)
         assert len(result) == 0
 
+    def test_future_next_run_is_excluded(self, test_db_session: Session, output_datasource: DataSource):
+        schedule = Schedule(
+            id=str(uuid.uuid4()),
+            datasource_id=output_datasource.id,
+            cron_expression='0 0 * * *',
+            enabled=True,
+            next_run=datetime.now(UTC) + timedelta(days=1),
+            created_at=datetime.now(UTC),
+        )
+        test_db_session.add(schedule)
+        test_db_session.commit()
+
+        result = get_due_schedules(test_db_session)
+
+        assert result == []
+
     def test_dependency_schedule_uses_last_triggered_at(self, test_db_session: Session, output_datasource: DataSource):
         upstream = create_schedule(
             test_db_session,
@@ -536,6 +558,52 @@ class TestGetDueSchedules:
         due = get_due_schedules(test_db_session)
         assert downstream.id not in {schedule.id for schedule in due}
 
+    def test_datasource_trigger_uses_latest_completion_not_latest_creation(
+        self,
+        test_db_session: Session,
+        output_datasource: DataSource,
+    ) -> None:
+        created_old = datetime(2026, 9, 23, 10, 0, tzinfo=UTC)
+        created_new = datetime(2026, 9, 23, 10, 2, tzinfo=UTC)
+        last_triggered = datetime(2026, 9, 23, 10, 3, tzinfo=UTC)
+        build_runs = [
+            (created_old, datetime(2026, 9, 23, 10, 4, tzinfo=UTC)),
+            (created_new, datetime(2026, 9, 23, 10, 2, 30, tzinfo=UTC)),
+        ]
+        for created_at, completed_at in build_runs:
+            run = build_run_service.create_build_run(
+                test_db_session,
+                build_id=str(uuid.uuid4()),
+                namespace='default',
+                analysis_id=str(uuid.uuid4()),
+                analysis_name='Source build',
+                request_json={'analysis_pipeline': {'analysis_id': 'source', 'tabs': []}, 'tab_id': None},
+                starter_json={},
+                status=BuildRunStatus.COMPLETED,
+                current_datasource_id=output_datasource.id,
+                created_at=created_at,
+                started_at=created_at,
+            )
+            run.completed_at = completed_at
+            test_db_session.add(run)
+            test_db_session.commit()
+
+        schedule = Schedule(
+            id=str(uuid.uuid4()),
+            datasource_id=output_datasource.id,
+            cron_expression='0 * * * *',
+            trigger_on_datasource_id=output_datasource.id,
+            last_triggered_at=last_triggered,
+            next_run=datetime(2026, 9, 23, 11, 0, tzinfo=UTC),
+            created_at=created_old,
+        )
+        test_db_session.add(schedule)
+        test_db_session.commit()
+
+        due = get_due_schedules(test_db_session)
+
+        assert schedule.id in {item.id for item in due}
+
 
 # ---------------------------------------------------------------------------
 # mark_schedule_run()
@@ -567,6 +635,135 @@ class TestMarkScheduleRun:
 
 
 class TestScheduleClaiming:
+    @pytest.mark.parametrize('change', ['dependency', 'event', 'cron', 'lease'])
+    def test_claim_reloads_candidate_changed_before_lock(self, test_db_session: Session, output_datasource: DataSource, change: str) -> None:
+        now = datetime.now(UTC).replace(tzinfo=None)
+        dependency = Schedule(id='dependency', datasource_id=output_datasource.id, cron_expression='', enabled=False, created_at=now)
+        first = Schedule(
+            id='candidate-first',
+            datasource_id=output_datasource.id,
+            cron_expression='* * * * *',
+            next_run=now - timedelta(minutes=1),
+            created_at=now,
+        )
+        later = Schedule(
+            id='candidate-later',
+            datasource_id=output_datasource.id,
+            cron_expression='* * * * *',
+            next_run=first.next_run,
+            created_at=now + timedelta(seconds=1),
+        )
+        test_db_session.add_all([dependency, first, later])
+        test_db_session.commit()
+        engine = test_db_session.get_bind()
+        changed = False
+
+        def change_before_lock(_connection, _cursor, statement, _parameters, _context, _executemany) -> None:
+            nonlocal changed
+            if changed or 'FOR UPDATE' not in statement or 'schedules' not in statement:
+                return
+            changed = True
+            values: dict[str, object] = {'depends_on': dependency.id} if change == 'dependency' else {'trigger_on_datasource_id': output_datasource.id}
+            if change == 'cron':
+                values = {'next_run': now + timedelta(hours=1)}
+            if change == 'lease':
+                values = {
+                    'lease_owner': 'scheduler:expired',
+                    'claim_token': 'replaced-token',
+                    'lease_generation': 7,
+                    'lease_expires_at': now - timedelta(seconds=1),
+                }
+            with Session(engine) as other:
+                other.execute(update(Schedule).where(col(Schedule.id) == first.id).values(values))
+                other.commit()
+
+        event.listen(engine, 'before_cursor_execute', change_before_lock)
+        try:
+            claimed = claim_due_schedules(test_db_session, worker_id='scheduler:new', limit=1)
+        finally:
+            event.remove(engine, 'before_cursor_execute', change_before_lock)
+        assert changed
+        assert [schedule.id for schedule in claimed] == [first.id if change == 'lease' else later.id]
+        if change == 'lease':
+            assert claimed[0].lease_owner == 'scheduler:new'
+            assert claimed[0].lease_generation == 8
+            assert claimed[0].claim_token != 'replaced-token'
+        else:
+            stored = test_db_session.get(Schedule, first.id)
+            assert stored is not None and stored.lease_owner is None
+
+    def test_candidate_batches_reach_due_work_after_ineligible_prefix(self, test_db_session: Session, output_datasource: DataSource) -> None:
+        now = datetime.now(UTC).replace(tzinfo=None)
+        dependency = Schedule(
+            id='dependency',
+            datasource_id=output_datasource.id,
+            cron_expression='* * * * *',
+            enabled=False,
+            created_at=now,
+        )
+        test_db_session.add(dependency)
+        prefix = [
+            Schedule(
+                id=f'waiting-{index:03}',
+                datasource_id=output_datasource.id,
+                cron_expression='',
+                depends_on=dependency.id,
+                next_run=None,
+                created_at=now + timedelta(seconds=index),
+            )
+            for index in range(205)
+        ]
+        due = Schedule(
+            id='due-after-prefix',
+            datasource_id=output_datasource.id,
+            cron_expression='* * * * *',
+            next_run=now - timedelta(minutes=1),
+            created_at=now,
+        )
+        test_db_session.add_all([*prefix, due])
+        test_db_session.commit()
+        queries: list[str] = []
+
+        def capture(_connection, _cursor, statement, _parameters, _context, _executemany) -> None:
+            if 'FROM schedules' in statement and 'ORDER BY' in statement:
+                queries.append(statement)
+
+        engine = test_db_session.get_bind()
+        event.listen(engine, 'before_cursor_execute', capture)
+        try:
+            claimed = claim_due_schedules(test_db_session, worker_id='scheduler:fair', limit=1)
+        finally:
+            event.remove(engine, 'before_cursor_execute', capture)
+        assert [schedule.id for schedule in claimed] == [due.id]
+        assert len(queries) >= 4
+        assert all('LIMIT' in query for query in queries)
+        assert any('coalesce(schedules.next_run' in query and ' > ' in query for query in queries)
+        for schedule in prefix:
+            stored = test_db_session.get(Schedule, schedule.id)
+            assert stored is not None and stored.lease_owner is None
+
+    def test_claim_limit_and_lease_order_across_candidate_batches(self, test_db_session: Session, output_datasource: DataSource) -> None:
+        now = datetime.now(UTC).replace(tzinfo=None)
+        schedules = [
+            Schedule(
+                id=f'due-{index:03}',
+                datasource_id=output_datasource.id,
+                cron_expression='* * * * *',
+                next_run=now - timedelta(minutes=1),
+                created_at=now,
+            )
+            for index in range(205)
+        ]
+        test_db_session.add_all(schedules)
+        test_db_session.commit()
+        first = claim_due_schedules(test_db_session, worker_id='scheduler:first', limit=101)
+        second = claim_due_schedules(test_db_session, worker_id='scheduler:second', limit=101)
+        last = claim_due_schedules(test_db_session, worker_id='scheduler:last', limit=101)
+        assert [schedule.id for schedule in first] == [schedule.id for schedule in schedules[:101]]
+        assert [schedule.id for schedule in second] == [schedule.id for schedule in schedules[101:202]]
+        assert [schedule.id for schedule in last] == [schedule.id for schedule in schedules[202:]]
+        assert all(schedule.claim_token is not None and schedule.lease_generation == 1 for schedule in [*first, *second, *last])
+
     def test_concurrent_schedulers_claim_due_schedule_once(
         self,
         test_db_session: Session,
@@ -867,6 +1064,14 @@ class TestEnqueueScheduleRun:
         assert run.schedule_id == schedule.id
         assert run.status == BuildRunStatus.QUEUED
         assert run.current_datasource_id == output.id
+        pipeline = compute_schemas.AnalysisPipelinePayload.model_validate(run.request_json['analysis_pipeline'])
+        source_ids = external_datasource_ids(pipeline)
+        persisted_ids = set(
+            test_db_session.execute(select(col(BuildRunDatasource.datasource_id)).where(col(BuildRunDatasource.build_id) == run.id)).scalars().all()
+        )
+        assert source_ids == (sample_datasource.id,)
+        assert persisted_ids == set(source_ids)
+        assert build_run_service.has_active_build_for_datasource(test_db_session, namespace='default', datasource_id=sample_datasource.id)
         job = build_job_service.get_job_by_build_id(test_db_session, run_id)
         assert job is not None
 
@@ -894,6 +1099,7 @@ class TestEnqueueScheduleRun:
         assert run.schedule_id == schedule.id
         assert run.current_kind == EngineRunKind.BUILD.value
         assert run.status == BuildRunStatus.QUEUED
+        assert build_run_service.has_active_build_for_datasource(test_db_session, namespace='default', datasource_id=sample_datasource.id)
 
     def test_enqueue_schedule_for_raw_datasource_uses_build_kind(self, test_db_session: Session, sample_csv_file):
         raw = DataSource(
@@ -939,6 +1145,7 @@ class TestEnqueueScheduleRun:
         assert run.schedule_id == schedule.id
         assert run.current_kind == EngineRunKind.BUILD.value
         assert run.status == BuildRunStatus.QUEUED
+        assert build_run_service.has_active_build_for_datasource(test_db_session, namespace='default', datasource_id=raw.id)
 
 
 class TestScheduleReconciliation:

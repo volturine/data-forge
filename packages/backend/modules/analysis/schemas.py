@@ -148,6 +148,7 @@ class AnalysisGalleryItemSchema(BaseModel):
     thumbnail: str | None
     created_at: datetime
     updated_at: datetime
+    revision: int
     is_favorite: bool = False
 
 

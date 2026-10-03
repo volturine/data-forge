@@ -1,5 +1,11 @@
 """Tests for process health and readiness endpoints."""
 
+import asyncio
+import threading
+from concurrent.futures import ThreadPoolExecutor
+
+import pytest
+
 from backend_core.config import settings
 
 
@@ -70,3 +76,37 @@ class TestHealthEndpoints:
 
         assert response.status_code == 200
         assert 'strict-transport-security' not in response.headers
+
+
+@pytest.mark.asyncio
+async def test_readiness_probe_coalesces_callers_and_survives_one_cancellation() -> None:
+    from main import ReadinessProbe
+
+    executor = ThreadPoolExecutor(max_workers=1, thread_name_prefix='readiness-coalescing-test')
+    started = threading.Event()
+    release = threading.Event()
+    calls = 0
+
+    def check() -> tuple[dict[str, str], bool]:
+        nonlocal calls
+        calls += 1
+        started.set()
+        if not release.wait(timeout=5):
+            raise TimeoutError('readiness test was not released')
+        return {'database': 'ok'}, True
+
+    probe = ReadinessProbe(executor, check)
+    try:
+        canceled_waiter = asyncio.create_task(probe.run())
+        assert await asyncio.to_thread(started.wait, 1)
+        surviving_waiter = asyncio.create_task(probe.run())
+        canceled_waiter.cancel()
+        with pytest.raises(asyncio.CancelledError):
+            await canceled_waiter
+        release.set()
+
+        assert await surviving_waiter == ({'database': 'ok'}, True)
+        assert calls == 1
+    finally:
+        release.set()
+        executor.shutdown(wait=True, cancel_futures=True)

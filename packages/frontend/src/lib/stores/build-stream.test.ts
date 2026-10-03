@@ -153,12 +153,8 @@ const MINIMAL_BUILD_REQUEST = {
 	analysis_pipeline: {
 		analysis_id: 'analysis-1',
 		tabs: []
-	}
-} satisfies BuildRequest;
-
-const BUILD_REQUEST_WITH_NULL_TAB = {
-	...MINIMAL_BUILD_REQUEST,
-	tab_id: null
+	},
+	tab_id: 'tab-1'
 } satisfies BuildRequest;
 
 function makeDetail(overrides: Partial<BuildRunDetail> = {}): BuildRunDetail {
@@ -237,7 +233,7 @@ describe('BuildStreamStore', () => {
 
 	test('start requests a live build and connects to its detail stream', () => {
 		const store = new BuildStreamStore();
-		store.start(BUILD_REQUEST_WITH_NULL_TAB);
+		store.start(MINIMAL_BUILD_REQUEST);
 
 		expect(mockRetainActivity).toHaveBeenCalledTimes(1);
 		expect(mockStartRuntimeBuild).toHaveBeenCalledWith({
@@ -245,7 +241,7 @@ describe('BuildStreamStore', () => {
 				analysis_id: 'analysis-1',
 				tabs: []
 			},
-			tab_id: null
+			tab_id: 'tab-1'
 		});
 		expect(MockWebSocket.instances).toHaveLength(1);
 		const socket = MockWebSocket.instances[0];
@@ -261,6 +257,20 @@ describe('BuildStreamStore', () => {
 		expect(MockWebSocket.instances[0].url).toContain('/v1/compute/ws/builds/build-2');
 		expect(store.buildId).toBe('build-2');
 		expect(store.status).toBe('connecting');
+	});
+
+	test('uses durable detail polling as a bounded fallback', async () => {
+		const store = new BuildStreamStore();
+		store.watch('build-2');
+		await flushAsyncWork();
+
+		expect(mockGetRuntimeBuild).toHaveBeenCalledTimes(1);
+		await vi.advanceTimersByTimeAsync(4_999);
+		expect(mockGetRuntimeBuild).toHaveBeenCalledTimes(1);
+		await vi.advanceTimersByTimeAsync(1);
+		expect(mockGetRuntimeBuild).toHaveBeenCalledTimes(2);
+
+		store.close();
 	});
 
 	test('watch replaces the previous connection', () => {
@@ -281,7 +291,7 @@ describe('BuildStreamStore', () => {
 		store.watch('build-1');
 		const first = MockWebSocket.instances[0];
 
-		store.start(BUILD_REQUEST_WITH_NULL_TAB);
+		store.start(MINIMAL_BUILD_REQUEST);
 		const second = MockWebSocket.instances[1];
 
 		first.emit('close', { code: 1000, reason: 'stale close' });
@@ -750,6 +760,40 @@ describe('BuildStreamStore', () => {
 		expect(mockReleaseActivity).toHaveBeenCalledTimes(1);
 	});
 
+	test('ignores replayed progress after a terminal event', () => {
+		const store = new BuildStreamStore();
+		store.start(MINIMAL_BUILD_REQUEST);
+
+		const socket = MockWebSocket.instances[0];
+		socket.emit('open');
+		msg(socket, {
+			sequence: 10,
+			type: 'complete',
+			progress: 1,
+			elapsed_ms: 1200,
+			total_steps: 1,
+			tabs_built: 1,
+			results: [],
+			duration_ms: 1100
+		});
+
+		msg(socket, {
+			sequence: 11,
+			type: 'progress',
+			progress: 0.4,
+			elapsed_ms: 400,
+			estimated_remaining_ms: 800,
+			current_step: 'Replayed old event',
+			current_step_index: 0,
+			total_steps: 1
+		});
+
+		expect(store.status).toBe('completed');
+		expect(store.progress).toBe(1);
+		expect(store.elapsed).toBe(1200);
+		expect(store.currentStep).not.toBe('Replayed old event');
+	});
+
 	test('running snapshot with a step error does not mark the build failed', () => {
 		mockStartSuccess(makeDetail({ status: 'running', error: 'step failed before terminal event' }));
 		const store = new BuildStreamStore();
@@ -987,7 +1031,7 @@ describe('BuildStreamStore', () => {
 			})
 		);
 
-		await vi.advanceTimersByTimeAsync(250);
+		await vi.advanceTimersByTimeAsync(5_000);
 		await flushAsyncWork();
 
 		expect(mockGetRuntimeBuild).toHaveBeenCalledWith('build-1');

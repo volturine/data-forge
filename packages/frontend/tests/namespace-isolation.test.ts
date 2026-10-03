@@ -1,9 +1,23 @@
-import { test, expect } from './fixtures.js';
-import { createDatasource } from './utils/api.js';
-import { uid } from './utils/uid.js';
+import {
+	E2E_SHARED_NAMESPACE_A,
+	E2E_SHARED_NAMESPACE_B,
+	E2E_SHARED_NAMESPACE_DATASOURCE,
+	expect,
+	test
+} from './fixtures.js';
 import { screenshot } from './utils/visual.js';
-import { gotoMonitoringTab, waitForAppShell, waitForDatasourceList } from './utils/readiness.js';
-import { switchNamespace, expectNamespace, restoreDefaultNamespace } from './utils/namespace.js';
+import {
+	gotoMonitoringTab,
+	waitForAppShell,
+	waitForDatasourceList,
+	waitForLayoutReady
+} from './utils/readiness.js';
+import {
+	DEFAULT_NAMESPACE,
+	switchNamespace,
+	expectNamespace,
+	restoreDefaultNamespace
+} from './utils/namespace.js';
 
 /**
  * E2E tests for namespace data isolation.
@@ -15,17 +29,15 @@ test.describe('Namespace – data isolation', () => {
 		await restoreDefaultNamespace(page);
 	});
 
-	test('datasource in namespace A is invisible from namespace B', async ({ page, request }) => {
-		const id = uid();
-		const nsA = `e2e-ns-a-${id}`;
-		const nsB = `e2e-ns-b-${id}`;
-		const dsName = `e2e-iso-${id}`;
+	test('datasource in namespace A is invisible from namespace B', async ({ page }) => {
+		const nsA = E2E_SHARED_NAMESPACE_A;
+		const nsB = E2E_SHARED_NAMESPACE_B;
+		const dsName = E2E_SHARED_NAMESPACE_DATASOURCE;
 
 		try {
 			await page.goto('/');
 			await waitForAppShell(page);
 			await switchNamespace(page, nsA);
-			await createDatasource(request, dsName, nsA);
 			await page.goto('/datasources');
 
 			// 1. Datasource should be visible in nsA
@@ -53,7 +65,7 @@ test.describe('Namespace – data isolation', () => {
 	});
 
 	test('selected namespace persists across page refresh', async ({ page }) => {
-		const ns = `e2e-persist-${uid()}`;
+		const ns = E2E_SHARED_NAMESPACE_B;
 
 		await page.goto('/');
 		await waitForAppShell(page);
@@ -69,9 +81,8 @@ test.describe('Namespace – data isolation', () => {
 	});
 
 	test('switching namespace preserves current route', async ({ page }) => {
-		const id = uid();
-		const nsA = `e2e-route-a-${id}`;
-		const nsB = `e2e-route-b-${id}`;
+		const nsA = E2E_SHARED_NAMESPACE_A;
+		const nsB = E2E_SHARED_NAMESPACE_B;
 
 		// Start on /datasources
 		await page.goto('/datasources');
@@ -105,6 +116,7 @@ test.describe('Namespace – data isolation', () => {
 
 		// Navigate to /udfs and switch again
 		await page.goto('/udfs');
+		await waitForLayoutReady(page);
 		await expect(page.getByRole('heading', { name: 'UDF Library' })).toBeVisible({
 			timeout: 5_000
 		});
@@ -115,16 +127,14 @@ test.describe('Namespace – data isolation', () => {
 		await screenshot(page, 'namespace', 'route-preserved-udfs');
 	});
 
-	test('namespace switch clears stale datasource selection', async ({ page, request }) => {
-		const id = uid();
-		const nsA = `e2e-stale-a-${id}`;
-		const nsB = `e2e-stale-b-${id}`;
-		const dsName = `e2e-stale-ds-${id}`;
+	test('namespace switch clears stale datasource selection', async ({ page }) => {
+		const nsA = E2E_SHARED_NAMESPACE_A;
+		const nsB = E2E_SHARED_NAMESPACE_B;
+		const dsName = E2E_SHARED_NAMESPACE_DATASOURCE;
 
 		await page.goto('/');
 		await waitForAppShell(page);
 		await switchNamespace(page, nsA);
-		await createDatasource(request, dsName, nsA);
 		await page.goto('/datasources');
 
 		// 1. Select a datasource in nsA so the URL has ?id=
@@ -142,20 +152,14 @@ test.describe('Namespace – data isolation', () => {
 		await screenshot(page, 'namespace', 'stale-selection-cleared');
 	});
 
-	test('namespace switch with open preview sends no stale compute requests', async ({
-		page,
-		request
-	}) => {
-		const id = uid();
-		const nsA = `e2e-race-a-${id}`;
-		const nsB = `e2e-race-b-${id}`;
-		const dsName = `e2e-race-ds-${id}`;
+	test('namespace switch with open preview sends no stale compute requests', async ({ page }) => {
+		const nsA = E2E_SHARED_NAMESPACE_A;
+		const dsName = E2E_SHARED_NAMESPACE_DATASOURCE;
 
 		try {
 			await page.goto('/');
 			await waitForAppShell(page);
 			await switchNamespace(page, nsA);
-			await createDatasource(request, dsName, nsA);
 			await page.goto('/datasources');
 			await waitForDatasourceList(page);
 			await page.locator(`[data-ds-row="${dsName}"]`).click();
@@ -171,7 +175,9 @@ test.describe('Namespace – data isolation', () => {
 				return route.continue();
 			});
 
-			await switchNamespace(page, nsB);
+			// The default namespace is already provisioned. This scenario tests
+			// leaving an active preview, not a second expensive namespace bootstrap.
+			await switchNamespace(page, DEFAULT_NAMESPACE);
 			await expect(page).toHaveURL(/datasources/, { timeout: 5_000 });
 			await expect(page).not.toHaveURL(/id=/, { timeout: 5_000 });
 			await waitForDatasourceList(page);

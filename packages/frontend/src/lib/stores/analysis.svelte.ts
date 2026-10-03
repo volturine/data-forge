@@ -175,9 +175,28 @@ export class AnalysisStore {
 	private applyTabs(tabs: AnalysisTab[]): void {
 		const sanitized = this.normalizeTabSteps(tabs).map((tab, i) => ensureTabDefaults(tab, i));
 		this.setTabs(sanitized);
-		this.savedTabs = sanitized;
+		this.savedTabs = cloneJson(sanitized);
 		this.loading = false;
 		this.error = null;
+	}
+
+	restoreSavedSnapshot(): boolean {
+		if (!this.current || !this.lastSaved) return false;
+
+		const activeTabId = this.activeTabId;
+		this.current = {
+			...this.current,
+			name: this.lastSaved.name,
+			description: this.lastSaved.description
+		};
+		this.tabs = cloneJson(this.savedTabs);
+		this.activeTabId =
+			activeTabId && this.tabs.some((tab) => tab.id === activeTabId)
+				? activeTabId
+				: (this.tabs[0]?.id ?? null);
+		this.loading = false;
+		this.error = null;
+		return true;
 	}
 
 	private normalizeTabSteps(tabs: AnalysisTab[]): AnalysisTab[] {
@@ -568,13 +587,11 @@ export class AnalysisStore {
 				this.currentRevision = nextVersion;
 				this.lastSaved = { name: updated.name, description: updated.description ?? null };
 				const tabs = (updated.pipeline_definition as { tabs?: AnalysisTab[] })?.tabs ?? [];
-				if (tabs.length) {
-					const sanitized = this.normalizeTabSteps(tabs).map((tab, i) => ensureTabDefaults(tab, i));
-					this.tabs = sanitized;
-					this.savedTabs = sanitized;
-					if (!this.activeTabId || !tabs.some((tab) => tab.id === this.activeTabId)) {
-						this.activeTabId = this.tabs[0]?.id ?? null;
-					}
+				const sanitized = this.normalizeTabSteps(tabs).map((tab, i) => ensureTabDefaults(tab, i));
+				this.tabs = sanitized;
+				this.savedTabs = cloneJson(sanitized);
+				if (!this.activeTabId || !tabs.some((tab) => tab.id === this.activeTabId)) {
+					this.activeTabId = this.tabs[0]?.id ?? null;
 				}
 				this.loading = false;
 				return ok(undefined);

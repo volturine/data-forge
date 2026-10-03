@@ -1,47 +1,16 @@
-"""Excel-bounds updates on datasources must read workbooks from object storage."""
+"""Excel bounds updates consume selections resolved by the compute worker."""
 
 from __future__ import annotations
 
-import io
 from datetime import UTC, datetime
 from pathlib import Path
 
-from openpyxl import Workbook
 from sqlmodel import Session
 
 from backend_core.persistence.datasource.models import DataSource
-from modules.datasource import service as datasource_service
+from modules.datasource import routes as datasource_routes, service as datasource_service
+from modules.datasource.preflight import resolved_selection
 from modules.datasource.schemas import DataSourceUpdate
-
-
-class _Classification:
-    def __init__(self, is_object_store: bool) -> None:
-        self.is_object_store = is_object_store
-        self.is_managed = is_object_store
-
-
-class _FakeDataPlane:
-    def __init__(self, payload: bytes) -> None:
-        self.payload = payload
-        self.downloaded: list[str] = []
-
-    def classify_object_url(self, value: str):
-        return _Classification(value.startswith('s3://'))
-
-    def download_object_bytes(self, source_url: str) -> bytes:
-        self.downloaded.append(source_url)
-        return self.payload
-
-
-def _workbook_bytes() -> bytes:
-    workbook = Workbook()
-    sheet = workbook.active
-    assert sheet is not None
-    sheet['A1'] = 'name'
-    sheet['A2'] = 'alice'
-    buffer = io.BytesIO()
-    workbook.save(buffer)
-    return buffer.getvalue()
 
 
 def _insert_excel_datasource(session: Session, *, datasource_id: str, file_path: str, file_type: str) -> DataSource:
@@ -59,14 +28,11 @@ def _insert_excel_datasource(session: Session, *, datasource_id: str, file_path:
     return ds
 
 
-def test_update_resolves_bounds_via_object_store_download(
+def test_update_uses_worker_resolved_bounds_for_object_store_source(
     test_db_session: Session,
-    monkeypatch,
 ) -> None:
     datasource_id = '22222222-2222-4222-8222-000000000001'
     file_url = 's3://dataforge/uploads/bounds.xlsx'
-    fake = _FakeDataPlane(_workbook_bytes())
-    monkeypatch.setattr(datasource_service, 'client_from_settings', lambda: fake)
     _insert_excel_datasource(
         test_db_session,
         datasource_id=datasource_id,
@@ -78,26 +44,31 @@ def test_update_resolves_bounds_via_object_store_download(
         test_db_session,
         datasource_id,
         DataSourceUpdate(config={'sheet_name': 'Sheet'}),
+        resolved_excel_selection=resolved_selection(
+            {
+                'sheet_name': 'Sheet',
+                'start_row': 0,
+                'start_col': 0,
+                'end_col': 0,
+                'detected_end_row': 1,
+            }
+        ),
     )
 
-    assert fake.downloaded == [file_url]
     assert response.config['sheet_name'] == 'Sheet'
     assert response.config['end_row'] == 1
+    assert response.config['file_path'] == file_url
     row = test_db_session.get(DataSource, datasource_id)
     assert row is not None
     assert row.config['end_row'] == 1
 
 
-def test_update_resolves_bounds_for_local_file_without_download(
+def test_update_uses_worker_resolved_bounds_for_local_file(
     test_db_session: Session,
     tmp_path: Path,
-    monkeypatch,
 ) -> None:
     datasource_id = '22222222-2222-4222-8222-000000000002'
     local_file = tmp_path / 'bounds.xlsx'
-    local_file.write_bytes(_workbook_bytes())
-    fake = _FakeDataPlane(b'')
-    monkeypatch.setattr(datasource_service, 'client_from_settings', lambda: fake)
     _insert_excel_datasource(
         test_db_session,
         datasource_id=datasource_id,
@@ -109,7 +80,85 @@ def test_update_resolves_bounds_for_local_file_without_download(
         test_db_session,
         datasource_id,
         DataSourceUpdate(config={'sheet_name': 'Sheet'}),
+        resolved_excel_selection=resolved_selection(
+            {
+                'sheet_name': 'Sheet',
+                'start_row': 0,
+                'start_col': 0,
+                'end_col': 0,
+                'detected_end_row': 1,
+            }
+        ),
     )
 
-    assert fake.downloaded == []
     assert response.config['end_row'] == 1
+    assert response.config['file_path'] == str(local_file)
+
+
+def test_put_resolves_excel_bounds_on_worker_and_preserves_source(
+    client,
+    test_db_session: Session,
+    monkeypatch,
+) -> None:
+    datasource_id = '22222222-2222-4222-8222-000000000003'
+    file_url = 's3://dataforge/uploads/route-bounds.xlsx'
+    _insert_excel_datasource(test_db_session, datasource_id=datasource_id, file_path=file_url, file_type='excel')
+    calls: list[dict[str, object]] = []
+
+    async def resolve(**kwargs):
+        calls.append(kwargs)
+        return {
+            'sheet_name': 'Sheet',
+            'start_row': 0,
+            'start_col': 0,
+            'end_col': 2,
+            'detected_end_row': 17,
+        }
+
+    monkeypatch.setattr(datasource_routes, 'execute_excel_preflight', resolve)
+    response = client.put(f'/api/v1/datasource/{datasource_id}', json={'config': {'sheet_name': 'Sheet'}})
+
+    assert response.status_code == 200
+    assert response.json()['config']['end_row'] == 17
+    assert response.json()['config']['file_path'] == file_url
+    assert len(calls) == 1
+    assert calls[0]['preflight_id'] != datasource_id
+    assert calls[0]['source_path'] == file_url
+    assert calls[0]['datasource_id'] == datasource_id
+    assert calls[0]['action'] == datasource_routes.enums_pb2.DATASOURCE_PREFLIGHT_ACTION_RESOLVE_SELECTION
+    assert calls[0]['selection'] == {'sheet_name': 'Sheet', 'has_header': True}
+    assert calls[0]['delete_source'] is False
+
+
+def test_put_rejects_excel_update_when_revision_changes_during_resolution(
+    client,
+    test_db_session: Session,
+    monkeypatch,
+) -> None:
+    datasource_id = '22222222-2222-4222-8222-000000000004'
+    _insert_excel_datasource(
+        test_db_session,
+        datasource_id=datasource_id,
+        file_path='s3://dataforge/uploads/stale-bounds.xlsx',
+        file_type='excel',
+    )
+
+    async def resolve(**_kwargs):
+        datasource = test_db_session.get(DataSource, datasource_id)
+        assert datasource is not None
+        datasource.revision += 1
+        test_db_session.add(datasource)
+        test_db_session.commit()
+        return {
+            'sheet_name': 'Sheet',
+            'start_row': 0,
+            'start_col': 0,
+            'end_col': 0,
+            'detected_end_row': 17,
+        }
+
+    monkeypatch.setattr(datasource_routes, 'execute_excel_preflight', resolve)
+    response = client.put(f'/api/v1/datasource/{datasource_id}', json={'config': {'sheet_name': 'Sheet'}})
+
+    assert response.status_code == 400
+    assert 'changed while Excel selection was being resolved' in response.json()['detail']

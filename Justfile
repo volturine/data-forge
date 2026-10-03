@@ -32,17 +32,23 @@ dev:
     just generate-protocol
     set -a; source docker/env/dev.env; set +a
     just engine-image "$DF_ENGINE_IMAGE"
-    # Worker runs on the host: engines are spawned in Docker on a dedicated
-    # network and reached via published host ports (same topology as e2e).
+    # The coordinator and worker run as separate package processes; only the
+    # worker owns Docker access and the engine lifecycle.
+    export ENGINE_DOCKER_HOST="$DF_ENGINE_DOCKER_HOST"
     export ENGINE_IMAGE="$DF_ENGINE_IMAGE"
     export ENGINE_DOCKER_NETWORK="$DF_ENGINE_DOCKER_NETWORK"
+    export ENGINE_RPC_PORT="$DF_ENGINE_RPC_PORT"
+    export ENGINE_START_TIMEOUT_SECONDS="$DF_ENGINE_START_TIMEOUT_SECONDS"
+    export ENGINE_SHUTDOWN_GRACE_SECONDS="$DF_ENGINE_SHUTDOWN_GRACE_SECONDS"
+    export ENGINE_HEARTBEAT_INTERVAL_SECONDS="$DF_ENGINE_HEARTBEAT_INTERVAL_SECONDS"
     export ENGINE_CONNECT_HOST=127.0.0.1
     docker network inspect "$ENGINE_DOCKER_NETWORK" >/dev/null 2>&1 || docker network create "$ENGINE_DOCKER_NETWORK" >/dev/null
     env -u VIRTUAL_ENV uv run --project packages/backend python scripts/ensure_dev_postgres.py
     env -u VIRTUAL_ENV uv run --project packages/backend python scripts/ensure_dev_rustfs.py
     (cd packages/backend && env -u VIRTUAL_ENV uv run --env-file ../../docker/env/dev.env main.py) & \
-    (cd packages/scheduler && env -u VIRTUAL_ENV uv run --env-file ../../docker/env/dev.env main.py) & \
+    (cd packages/backend && env -u VIRTUAL_ENV DATABASE_POOL_SIZE="$COMPUTE_WORKERS" DATABASE_MAX_OVERFLOW=13 uv run --env-file ../../docker/env/dev.env runtime_coordinator.py) & \
     (cd packages/worker && env -u VIRTUAL_ENV uv run --env-file ../../docker/env/dev.env main.py) & \
+    (cd packages/scheduler && env -u VIRTUAL_ENV uv run --env-file ../../docker/env/dev.env main.py) & \
     (cd packages/frontend && bun run dev) & wait
 
 # Ensure the polars engine image exists locally; build it if missing.
@@ -54,7 +60,7 @@ engine-image tag:
         docker build -f docker/Dockerfile --target engine -t "{{tag}}" .
     fi
 
-# Build the frontend and run the three fixed production roles from source.
+# Build the frontend and run the fixed production roles from source.
 prod:
     #!/usr/bin/env bash
     set -euo pipefail
@@ -65,6 +71,14 @@ prod:
     set -a
     source docker/env/prod.env
     set +a
+    export ENGINE_DOCKER_HOST="$DF_ENGINE_DOCKER_HOST"
+    export ENGINE_DOCKER_NETWORK="$DF_ENGINE_DOCKER_NETWORK"
+    export ENGINE_IMAGE="$DF_ENGINE_IMAGE"
+    export ENGINE_RPC_PORT="$DF_ENGINE_RPC_PORT"
+    export ENGINE_START_TIMEOUT_SECONDS="$DF_ENGINE_START_TIMEOUT_SECONDS"
+    export ENGINE_SHUTDOWN_GRACE_SECONDS="$DF_ENGINE_SHUTDOWN_GRACE_SECONDS"
+    export ENGINE_HEARTBEAT_INTERVAL_SECONDS="$DF_ENGINE_HEARTBEAT_INTERVAL_SECONDS"
+    export ENGINE_CONNECT_HOST=127.0.0.1
     pids=()
     shutdown() {
         trap - EXIT INT TERM
@@ -82,9 +96,11 @@ prod:
     trap 'exit 143' TERM
     (cd packages/backend && env -u VIRTUAL_ENV uv run main.py) &
     pids+=("$!")
-    (cd packages/scheduler && env -u VIRTUAL_ENV uv run main.py) &
+    (cd packages/backend && env -u VIRTUAL_ENV DATABASE_POOL_SIZE="$COMPUTE_WORKERS" DATABASE_MAX_OVERFLOW=13 uv run runtime_coordinator.py) &
     pids+=("$!")
     (cd packages/worker && env -u VIRTUAL_ENV uv run main.py) &
+    pids+=("$!")
+    (cd packages/scheduler && env -u VIRTUAL_ENV uv run main.py) &
     pids+=("$!")
     while true; do
         for pid in "${pids[@]}"; do
@@ -248,7 +264,10 @@ verify:
     #!/usr/bin/env bash
     set -euo pipefail
     before="$(git status --porcelain=v1 --untracked-files=all)"
-    env -u VIRTUAL_ENV uv run --project packages/backend python scripts/scan_warnings.py -- just check
+    # svelte-check's clean summary reads "0 ERRORS 0 WARNINGS 0 FILES_WITH_PROBLEMS";
+    # the scanner matches the bare word, and a real failure exits nonzero anyway.
+    env -u VIRTUAL_ENV uv run --project packages/backend python scripts/scan_warnings.py \
+        --ignore-pattern '0 ERRORS 0 WARNINGS 0 FILES_WITH_PROBLEMS' -- just check
     after="$(git status --porcelain=v1 --untracked-files=all)"
     if [ "$before" != "$after" ]; then
         echo 'Verification mutated the worktree:' >&2
@@ -258,30 +277,102 @@ verify:
 
 
 test:
-    cd packages/backend && env -u VIRTUAL_ENV uv run python ../../scripts/scan_warnings.py -- just test-backend-raw
-    cd packages/backend && env -u VIRTUAL_ENV uv run python ../../scripts/scan_warnings.py -- just test-frontend-raw
+    just test-backend-unit
+    just test-backend-integration
+    just test-worker
+    just test-scheduler
+    just test-frontend
 
-test-backend-raw:
+_test-container-guard:
+    #!/usr/bin/env bash
+    set -euo pipefail
+    if [ "${DATAFORGE_TEST_CONTAINER:-}" != "1" ] || [ ! -f /.dockerenv ]; then
+        echo "Raw test recipes may only run inside the containerized test runner." >&2
+        exit 2
+    fi
+
+[private]
+_prepare-test-services: _test-container-guard
+    #!/usr/bin/env bash
+    set -euo pipefail
+    cd packages/backend
+    env -u VIRTUAL_ENV uv run python - <<'PY'
+    import subprocess
+
+    from tests.harness.postgres_harness import PostgresContainer, RustfsContainer
+
+    for image in (PostgresContainer().image, RustfsContainer().image):
+        print(f'Preparing test service image: {image}', flush=True)
+        subprocess.run(['docker', 'pull', image], check=True)
+    PY
+
+test-backend-unit:
+    TEST_TARGET=test-backend-unit scripts/test_container.sh
+
+[private]
+test-backend-unit-raw: _prepare-test-services
     #!/usr/bin/env bash
     set -euo pipefail
     if [ "${DATAFORGE_SKIP_PROTOCOL_GENERATE:-}" != "1" ]; then
         just generate-protocol
     fi
     cd packages/backend
-    {{pytest}} tests --ignore=tests/integration
-    cd ../..
+    {{pytest}} -n auto --maxprocesses=8 --dist=loadfile tests --ignore=tests/integration
+
+test-backend-integration:
+    TEST_TARGET=test-backend-integration scripts/test_container.sh
+
+[private]
+test-backend-integration-raw: _prepare-test-services
+    #!/usr/bin/env bash
+    set -euo pipefail
+    if [ "${DATAFORGE_SKIP_PROTOCOL_GENERATE:-}" != "1" ]; then
+        just generate-protocol
+    fi
     docker build -f docker/Dockerfile --target engine -t data-forge-polars-engine:integration .
     cd packages/backend
-    {{pytest}} tests/integration
-    cd ../worker
-    {{pytest}} tests --ignore=tests/integration
-    cd ../scheduler
+    {{pytest}} -n auto --maxprocesses=4 --dist=loadfile tests/integration
+
+test-worker:
+    TEST_TARGET=test-worker scripts/test_container.sh
+
+[private]
+test-worker-raw: _test-container-guard
+    #!/usr/bin/env bash
+    set -euo pipefail
+    if [ "${DATAFORGE_SKIP_PROTOCOL_GENERATE:-}" != "1" ]; then
+        just generate-protocol
+    fi
+    cd packages/worker
+    {{pytest}} -n auto --maxprocesses=4 --dist=loadfile tests --ignore=tests/integration
+
+test-scheduler:
+    TEST_TARGET=test-scheduler scripts/test_container.sh
+
+[private]
+test-scheduler-raw: _test-container-guard
+    #!/usr/bin/env bash
+    set -euo pipefail
+    if [ "${DATAFORGE_SKIP_PROTOCOL_GENERATE:-}" != "1" ]; then
+        just generate-protocol
+    fi
+    cd packages/scheduler
     {{pytest}} tests
 
-test-frontend-raw:
+[private]
+test-frontend-raw: _test-container-guard
+    #!/usr/bin/env bash
+    set -euo pipefail
     cd packages/frontend && bun run test:unit
 
+test-frontend:
+    TEST_TARGET=test-frontend scripts/test_container.sh
+
 test-runtime-stability repeats='3':
+    TEST_TARGET=test-runtime-stability REPEATS={{quote(repeats)}} scripts/test_container.sh
+
+[private]
+test-runtime-stability-raw repeats='3': _prepare-test-services
     #!/usr/bin/env bash
     set -euo pipefail
     for run in $(seq 1 {{repeats}}); do
@@ -298,12 +389,77 @@ test-runtime-stability repeats='3':
     done
 
 test-e2e:
+    TEST_TARGET=test-e2e scripts/test_container.sh
+
+test-e2e-capacity sessions='2000' repeats='3' duration='60' active_ratio='0' api_workers='1':
+    #!/usr/bin/env bash
+    set -euo pipefail
+    sessions={{ quote(sessions) }}
+    sessions="${sessions#sessions=}"
+    if [[ ! "$sessions" =~ ^[1-9][0-9]*$ ]]; then
+        echo "Expected a positive session count, got: $sessions" >&2
+        exit 2
+    fi
+    duration={{ quote(duration) }}
+    duration="${duration#duration=}"
+    if [[ ! "$duration" =~ ^[1-9][0-9]*$ ]]; then
+        echo "Expected a positive steady-state duration in seconds, got: $duration" >&2
+        exit 2
+    fi
+    repeats={{ quote(repeats) }}
+    repeats="${repeats#repeats=}"
+    if [[ ! "$repeats" =~ ^[1-9][0-9]*$ ]]; then
+        echo "Expected a positive repeat count, got: $repeats" >&2
+        exit 2
+    fi
+    active_ratio={{ quote(active_ratio) }}
+    active_ratio="${active_ratio#active_ratio=}"
+    if [[ ! "$active_ratio" =~ ^([0-9]+([.][0-9]*)?|[.][0-9]+)$ ]] || \
+        ! awk -v value="$active_ratio" 'BEGIN { exit !(value >= 0 && value <= 1) }'; then
+        echo "Expected active_ratio between 0 and 1 inclusive, got: $active_ratio" >&2
+        exit 2
+    fi
+    api_workers={{ quote(api_workers) }}
+    api_workers="${api_workers#api_workers=}"
+    if [[ ! "$api_workers" =~ ^[1-9][0-9]*$ ]]; then
+        echo "Expected a positive API process count, got: $api_workers" >&2
+        exit 2
+    fi
+    WORKERS="$api_workers" E2E_API_WORKERS="$api_workers" E2E_SHARDS=1 PW_E2E_WORKERS=1 \
+        E2E_SESSION_CONNECTIONS="$sessions" E2E_SESSION_REPEATS="$repeats" E2E_SESSION_DURATION_SECONDS="$duration" \
+        E2E_SESSION_ACTIVE_RATIO="$active_ratio" \
+        TEST_TARGET=test-e2e-capacity scripts/test_container.sh
+
+[private]
+test-e2e-raw: _test-container-guard
     #!/usr/bin/env bash
     set -euo pipefail
     if [ "${DATAFORGE_SKIP_PROTOCOL_GENERATE:-}" != "1" ]; then
         just generate-protocol
     fi
-    cd packages/backend && env -u VIRTUAL_ENV uv run python ../../scripts/scan_warnings.py --cwd . --ignore-pattern "InvalidCredentialsError: Invalid email or password" --ignore-pattern "TokenInvalidError: Token is invalid" -- scripts/test_e2e.sh
+    scripts/test_e2e.sh
+
+[private]
+test-e2e-capacity-raw: _test-container-guard
+    #!/usr/bin/env bash
+    set -euo pipefail
+    if [ "${DATAFORGE_SKIP_PROTOCOL_GENERATE:-}" != "1" ]; then
+        just generate-protocol
+    fi
+    scripts/test_e2e.sh capacity
+
+test-e2e-concurrency browsers='50':
+    #!/usr/bin/env bash
+    set -euo pipefail
+    browsers={{quote(browsers)}}
+    browsers="${browsers#browsers=}"
+    if [[ ! "$browsers" =~ ^[1-9][0-9]*$ ]]; then
+        echo "Expected a positive browser count, got: $browsers" >&2
+        exit 2
+    fi
+    DATAFORGE_SKIP_PROTOCOL_GENERATE=1 E2E_SHARDS=1 PW_E2E_WORKERS=1 \
+        E2E_CONCURRENCY_BROWSERS="$browsers" PLAYWRIGHT_TEST_FILES=tests/concurrency.test.ts \
+        TEST_TARGET=test-e2e scripts/test_container.sh
 
 # Containerized dev stack (source mounts + Vite). Uses the same host ports as
 # `just dev` (API 8000, frontend 3000), so run either one, not both.
@@ -329,10 +485,12 @@ docker-prod:
     TAG="${DF_LOCAL_TAG:-local}"
     docker build -f docker/Dockerfile --target api -t "data-forge-api:${TAG}" .
     docker build -f docker/Dockerfile --target scheduler -t "data-forge-scheduler:${TAG}" .
+    docker build -f docker/Dockerfile --target runtime -t "data-forge-runtime:${TAG}" .
     docker build -f docker/Dockerfile --target worker -t "data-forge-worker:${TAG}" .
     docker build -f docker/Dockerfile --target engine -t "data-forge-polars-engine:${TAG}" .
     DF_API_IMAGE="data-forge-api:${TAG}" \
     DF_SCHEDULER_IMAGE="data-forge-scheduler:${TAG}" \
+    DF_RUNTIME_IMAGE="data-forge-runtime:${TAG}" \
     DF_WORKER_IMAGE="data-forge-worker:${TAG}" \
     DF_ENGINE_IMAGE="data-forge-polars-engine:${TAG}" \
     DF_API_PORT="${DF_SMOKE_API_PORT:-8300}" \

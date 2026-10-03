@@ -27,11 +27,12 @@ class TestSettings:
                 'DATABASE_URL',
                 'DATA_DIR',
                 'DEFAULT_NAMESPACE',
-                'UPLOAD_CHUNK_SIZE',
+                'UPLOAD_MAX_FILE_SIZE_BYTES',
                 'LOG_LEVEL',
                 'LOG_ICEBERG_PATH',
                 'PUBLIC_IDB_DEBUG',
                 'WORKERS',
+                'COMPUTE_WORKERS',
             ]:
                 monkeypatch.delenv(key, raising=False)
         _set_isolated_settings_env(monkeypatch, tmp_path)
@@ -42,12 +43,30 @@ class TestSettings:
         assert settings.debug is False
         assert settings.database_url == 'postgresql+psycopg://user:pass@host:5432/db'
         assert settings.data_dir.exists()
-        assert settings.upload_chunk_size == 5 * 1024 * 1024
+        assert settings.upload_max_file_size_bytes == 2 * 1024 * 1024 * 1024
         assert settings.lock_ttl_seconds == 30
         assert settings.lock_heartbeat_interval_seconds == 10
         assert settings.public_idb_debug is False
         assert settings.sql_echo is False
         assert settings.prod_mode_enabled is False
+        assert settings.compute_workers == 14
+
+    def test_compute_workers_from_env(self, monkeypatch, tmp_path):
+        _set_isolated_settings_env(monkeypatch, tmp_path)
+        monkeypatch.setenv('COMPUTE_WORKERS', '32')
+
+        settings = Settings()
+
+        assert settings.compute_workers == 32
+        assert Settings.model_fields['compute_workers'].alias == 'COMPUTE_WORKERS'
+
+    @pytest.mark.parametrize(('value', 'message'), [('0', 'compute_workers must be >= 1'), ('101', 'compute_workers must be <= 100')])
+    def test_compute_workers_must_be_between_one_and_one_hundred(self, monkeypatch, tmp_path, value, message):
+        _set_isolated_settings_env(monkeypatch, tmp_path)
+        monkeypatch.setenv('COMPUTE_WORKERS', value)
+
+        with pytest.raises(ValidationError, match=message):
+            Settings()
 
     def test_custom_settings_from_env(self, monkeypatch, tmp_path):
         data_dir = tmp_path / 'data'
@@ -57,7 +76,6 @@ class TestSettings:
         monkeypatch.setenv('DATABASE_URL', 'postgresql+psycopg://user:pass@host:5433/test')
         monkeypatch.setenv('DATA_DIR', str(data_dir))
         monkeypatch.setenv('DEFAULT_NAMESPACE', 'acme')
-        monkeypatch.setenv('UPLOAD_CHUNK_SIZE', '2000000')
         monkeypatch.setenv('PUBLIC_IDB_DEBUG', 'true')
 
         settings = Settings()
@@ -67,7 +85,6 @@ class TestSettings:
         assert settings.database_url == 'postgresql+psycopg://user:pass@host:5433/test'
         assert settings.data_dir == data_dir
         assert settings.default_namespace == 'acme'
-        assert settings.upload_chunk_size == 2000000
         assert settings.public_idb_debug is True
 
     def test_sql_echo_from_env(self, monkeypatch, tmp_path):
@@ -151,14 +168,14 @@ class TestSettings:
         _set_isolated_settings_env(monkeypatch, tmp_path)
         monkeypatch.setenv('DATABASE_URL', 'postgresql+psycopg://user:pass@host:5432/db')
         monkeypatch.setenv('DISTRIBUTED_RUNTIME_ENABLED', 'true')
-        monkeypatch.setenv('DATABASE_POOL_SIZE', '15')
+        monkeypatch.setenv('DATABASE_POOL_SIZE', '100')
         monkeypatch.setenv('DATABASE_MAX_OVERFLOW', '7')
         monkeypatch.setenv('DATABASE_POOL_TIMEOUT', '12')
 
         settings = Settings()
 
         assert settings.distributed_runtime_enabled is True
-        assert settings.database_pool_size == 15
+        assert settings.database_pool_size == 100
         assert settings.database_max_overflow == 7
         assert settings.database_pool_timeout == 12
 
@@ -167,22 +184,6 @@ class TestSettings:
         monkeypatch.setenv('DATABASE_URL', 'mysql://user:pass@host/db')
 
         with pytest.raises(ValidationError, match='DATABASE_URL must be a PostgreSQL connection string'):
-            Settings()
-
-    def test_build_worker_process_range_rejects_min_above_max(self, monkeypatch, tmp_path):
-        _set_isolated_settings_env(monkeypatch, tmp_path)
-        monkeypatch.setenv('BUILD_WORKER_MIN_PROCESSES', '2')
-        monkeypatch.setenv('BUILD_WORKER_MAX_PROCESSES', '1')
-
-        with pytest.raises(ValidationError, match='BUILD_WORKER_MIN_PROCESSES must be <= BUILD_WORKER_MAX_PROCESSES'):
-            Settings()
-
-    def test_build_worker_process_range_rejects_max_above_engine_limit(self, monkeypatch, tmp_path):
-        _set_isolated_settings_env(monkeypatch, tmp_path)
-        monkeypatch.setenv('MAX_CONCURRENT_ENGINES', '2')
-        monkeypatch.setenv('BUILD_WORKER_MAX_PROCESSES', '3')
-
-        with pytest.raises(ValidationError, match='BUILD_WORKER_MAX_PROCESSES must be <= MAX_CONCURRENT_ENGINES'):
             Settings()
 
     def test_negative_scheduler_interval_rejected(self, monkeypatch, tmp_path):
@@ -203,6 +204,21 @@ class TestSettings:
 
         with pytest.raises(ValidationError, match='port must be <= 65535'):
             Settings()
+
+    def test_upload_max_file_size_matches_data_plane_ceiling(self, monkeypatch, tmp_path):
+        _set_isolated_settings_env(monkeypatch, tmp_path)
+        monkeypatch.setenv('UPLOAD_MAX_FILE_SIZE_BYTES', str(2 * 1024 * 1024 * 1024))
+
+        settings = Settings()
+        assert settings.upload_max_file_size_bytes == 2 * 1024 * 1024 * 1024
+
+        monkeypatch.setenv('UPLOAD_MAX_FILE_SIZE_BYTES', str(2 * 1024 * 1024 * 1024 + 1))
+        with pytest.raises(ValidationError, match='upload_max_file_size_bytes must be <= 2147483648'):
+            Settings()
+
+        monkeypatch.setenv('UPLOAD_MAX_FILE_SIZE_BYTES', '0')
+        settings = Settings()
+        assert settings.upload_max_file_size_bytes == 0
 
     def test_directory_paths_are_path_objects(self, monkeypatch, tmp_path):
         _set_isolated_settings_env(monkeypatch, tmp_path)

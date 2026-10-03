@@ -1,4 +1,3 @@
-import asyncio
 import hashlib
 import hmac
 import logging
@@ -13,6 +12,7 @@ from typing import Any, cast
 from sqlalchemy import inspect, text, update
 from sqlmodel import Session, select
 
+from backend_core.api_execution_budget import run_api_blocking
 from backend_core.auth_config import settings as auth_settings
 from backend_core.auth_exceptions import (
     DefaultUserDeletionError,
@@ -418,6 +418,14 @@ change_password = committed(stage_change_password)
 def stage_create_session(session: Session, user_id: str, device_info: str | None, ip_address: str | None) -> UserSession:
     now = _utcnow()
     expires_at = now + timedelta(days=auth_settings.session_max_age_days)
+    user = get_user_by_id(session, user_id)
+    if user is not None:
+        # Session validation is on the hot path for every browser request and
+        # must remain read-only. Record the login timestamp when the session is
+        # created instead of taking the user's row lock on every /auth/me.
+        user.last_login_at = now
+        user.updated_at = now
+        session.add(user)
     user_session = UserSession(
         id=uuid.uuid4().hex,
         user_id=user_id,
@@ -435,31 +443,25 @@ def stage_create_session(session: Session, user_id: str, device_info: str | None
 create_session = committed(stage_create_session, refresh=True)
 
 
-def stage_validate_session(session: Session, session_id: str) -> User | None:
-    user_session = session.get(UserSession, session_id)
-    if not user_session:
+def validate_session(session: Session, session_id: str) -> User | None:
+    row = session.exec(select(UserSession, User).join(User, sa(User.id == UserSession.user_id)).where(sa(UserSession.id == session_id))).first()
+    if row is None:
         return None
+    user_session, user = row
     now = _utcnow()
     if user_session.revoked:
         return None
     if _naive_utc(user_session.expires_at) <= now:
         user_session.revoked = True
         session.add(user_session)
-        session.flush()
-        return None
-    user = get_user_by_id(session, user_session.user_id)
-    if not user:
+        # Expiry is the one exceptional write on this path. Valid session
+        # validation must remain a read-only transaction because every browser
+        # navigation performs it.
+        session.commit()
         return None
     if user.status == UserStatus.DISABLED:
         return None
-    user.last_login_at = now
-    user.updated_at = now
-    session.add(user)
-    session.flush()
     return user
-
-
-validate_session = committed(stage_validate_session, refresh=True)
 
 
 def stage_revoke_session(session: Session, session_id: str) -> None:
@@ -668,7 +670,7 @@ async def send_verification_email(user_email: str, token: str) -> bool:
     try:
         from backend_core.settings_store import get_resolved_smtp
 
-        smtp = get_resolved_smtp()
+        smtp = await run_api_blocking(get_resolved_smtp)
     except Exception:
         logger.error('Failed to resolve SMTP config for verification email', exc_info=True)
         raise
@@ -689,7 +691,7 @@ async def send_verification_email(user_email: str, token: str) -> bool:
     msg.set_content(f'Please verify your email by opening this link: {verify_url}')
 
     try:
-        await asyncio.to_thread(_send_smtp_message, host, port, smtp_user, password, msg)
+        await run_api_blocking(_send_smtp_message, host, port, smtp_user, password, msg)
     except Exception:
         logger.error('Failed to send verification email', exc_info=True)
         raise
@@ -736,7 +738,7 @@ async def send_password_reset_email(user_email: str, token: str) -> bool:
     try:
         from backend_core.settings_store import get_resolved_smtp
 
-        smtp = get_resolved_smtp()
+        smtp = await run_api_blocking(get_resolved_smtp)
     except Exception:
         logger.error('Failed to resolve SMTP config for password reset email', exc_info=True)
         raise
@@ -754,7 +756,7 @@ async def send_password_reset_email(user_email: str, token: str) -> bool:
     msg['Subject'] = 'Reset your password'
     msg.set_content(f'Use this link to reset your password: {reset_url}')
     try:
-        await asyncio.to_thread(_send_smtp_message, host, port, smtp_user, password, msg)
+        await run_api_blocking(_send_smtp_message, host, port, smtp_user, password, msg)
     except Exception:
         logger.error('Failed to send password reset email', exc_info=True)
         raise

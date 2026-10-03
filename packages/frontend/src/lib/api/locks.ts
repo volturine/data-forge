@@ -2,6 +2,7 @@ import { closeOwnedWebSocket, createOwnedWebSocket, preferHttp } from './websock
 
 const RECONNECT_BASE_DELAY_MS = 1_000;
 const RECONNECT_MAX_DELAY_MS = 30_000;
+const RELEASE_ACK_TIMEOUT_MS = 5_000;
 
 export interface LockStatus {
 	resource_type: string;
@@ -73,12 +74,20 @@ export function openLockSession(options: LockSessionOptions): LockSession {
 	let socket: WebSocket | null = null;
 	let timer: number | null = null;
 	let reconnectTimer: number | null = null;
+	let releaseCloseTimer: number | null = null;
 	let closed = false;
+	let closingAfterRelease = false;
 	let opened = false;
 	let awaitingAcquire = false;
 	let wantsAcquire = false;
 	let attemptedAcquireOnExistingLock = false;
 	let ownedToken: string | null = null;
+	// Keep the logical owner across a websocket reconnect. The server can
+	// deliver the old token after a reconnect has already rotated the token for
+	// this same user; token mismatch alone must not turn that into "locked by
+	// another owner".
+	let ownerId: string | null = null;
+	let releasePending = false;
 	let reconnectAttempt = 0;
 
 	function clearTimer(): void {
@@ -92,6 +101,13 @@ export function openLockSession(options: LockSessionOptions): LockSession {
 		if (reconnectTimer !== null) {
 			window.clearTimeout(reconnectTimer);
 			reconnectTimer = null;
+		}
+	}
+
+	function clearReleaseCloseTimer(): void {
+		if (releaseCloseTimer !== null) {
+			window.clearTimeout(releaseCloseTimer);
+			releaseCloseTimer = null;
 		}
 	}
 
@@ -111,10 +127,19 @@ export function openLockSession(options: LockSessionOptions): LockSession {
 	function cleanup(): void {
 		clearTimer();
 		clearReconnectTimer();
+		clearReleaseCloseTimer();
 		if (socket !== null) {
 			closeOwnedWebSocket(socket);
 			socket = null;
 		}
+	}
+
+	function finishClose(): void {
+		if (closed) return;
+		closed = true;
+		closingAfterRelease = false;
+		releasePending = false;
+		cleanup();
 	}
 
 	function resetOwnership(): void {
@@ -122,6 +147,7 @@ export function openLockSession(options: LockSessionOptions): LockSession {
 		awaitingAcquire = false;
 		attemptedAcquireOnExistingLock = false;
 		ownedToken = null;
+		releasePending = false;
 		options.onStatus(null, false);
 	}
 
@@ -154,14 +180,21 @@ export function openLockSession(options: LockSessionOptions): LockSession {
 			awaitingAcquire = false;
 			attemptedAcquireOnExistingLock = false;
 			ownedToken = null;
+			releasePending = false;
+			if (closingAfterRelease) {
+				finishClose();
+				return;
+			}
 			options.onStatus(null, false);
 			if (wantsAcquire) sendAcquire();
 			return;
 		}
 
 		if (awaitingAcquire) {
+			if (ownerId !== null && lock.owner_id !== ownerId) return;
 			awaitingAcquire = false;
 			attemptedAcquireOnExistingLock = false;
+			ownerId = lock.owner_id;
 			ownedToken = lock.lock_token;
 			options.onStatus(lock, true);
 			return;
@@ -170,6 +203,16 @@ export function openLockSession(options: LockSessionOptions): LockSession {
 		if (ownedToken !== null && lock.lock_token === ownedToken) {
 			attemptedAcquireOnExistingLock = false;
 			options.onStatus(lock, true);
+			return;
+		}
+
+		if (ownerId !== null && lock.owner_id === ownerId) {
+			if (wantsAcquire && !attemptedAcquireOnExistingLock) {
+				attemptedAcquireOnExistingLock = true;
+				ownedToken = null;
+				options.onStatus(null, false);
+				sendAcquire();
+			}
 			return;
 		}
 
@@ -218,7 +261,11 @@ export function openLockSession(options: LockSessionOptions): LockSession {
 		socket.addEventListener('close', () => {
 			clearTimer();
 			socket = null;
-			if (closed) {
+			if (closed || closingAfterRelease) {
+				closed = true;
+				closingAfterRelease = false;
+				releasePending = false;
+				clearReleaseCloseTimer();
 				opened = false;
 				return;
 			}
@@ -229,7 +276,11 @@ export function openLockSession(options: LockSessionOptions): LockSession {
 		socket.addEventListener('error', () => {
 			clearTimer();
 			socket = null;
-			if (closed) {
+			if (closed || closingAfterRelease) {
+				closed = true;
+				closingAfterRelease = false;
+				releasePending = false;
+				clearReleaseCloseTimer();
 				opened = false;
 				return;
 			}
@@ -240,27 +291,37 @@ export function openLockSession(options: LockSessionOptions): LockSession {
 
 	connect();
 
+	function release(): boolean {
+		wantsAcquire = false;
+		attemptedAcquireOnExistingLock = false;
+		if (!opened) return false;
+		awaitingAcquire = false;
+		const token = ownedToken;
+		ownedToken = null;
+		if (!token) return false;
+		releasePending = true;
+		const message: Record<string, unknown> = { action: 'release', lock_token: token };
+		send(message);
+		return true;
+	}
+
 	return {
 		acquire(ttlSeconds?: number) {
+			if (closed || closingAfterRelease) return;
 			wantsAcquire = true;
 			attemptedAcquireOnExistingLock = false;
 			sendAcquire(ttlSeconds);
 		},
-		release() {
-			wantsAcquire = false;
-			attemptedAcquireOnExistingLock = false;
-			if (!opened) return;
-			awaitingAcquire = false;
-			const message: Record<string, unknown> = { action: 'release' };
-			if (ownedToken) {
-				message.lock_token = ownedToken;
-				ownedToken = null;
-			}
-			send(message);
-		},
+		release,
 		close() {
-			closed = true;
-			cleanup();
+			if (closed || closingAfterRelease) return;
+			closingAfterRelease = true;
+			const waitingForRelease = releasePending || release();
+			if (!waitingForRelease) {
+				finishClose();
+				return;
+			}
+			releaseCloseTimer = window.setTimeout(finishClose, RELEASE_ACK_TIMEOUT_MS);
 		}
 	};
 }

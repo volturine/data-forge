@@ -132,7 +132,7 @@
 				<span>Type</span>
 				<span>Description</span>
 			</div>
-			{#each columns as column, index (index)}
+			{#each columns as column, index (column.name)}
 				<div
 					class={css(
 						{

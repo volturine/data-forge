@@ -6,8 +6,9 @@ from fastapi import Depends, HTTPException, Request
 from sqlmodel import Session
 
 from backend_core import runtime_workers_service
+from backend_core.api_execution_budget import run_api_blocking
 from backend_core.auth_config import settings as auth_settings
-from backend_core.database import get_settings_db, run_settings_db
+from backend_core.database import run_settings_db
 from backend_core.domain.runtime_workers.models import RuntimeWorkerKind
 from modules.auth.dependencies import _resolve_session_token
 from modules.auth.service import ensure_default_user, validate_session
@@ -30,7 +31,7 @@ class PersistedRuntimeAvailabilityProbe:
         )
 
 
-def get_manager(request: Request) -> Any:
+async def get_manager(request: Request) -> Any:
     """FastAPI dependency that returns the ProcessManager from app state."""
     return request.app.state.manager
 
@@ -45,14 +46,11 @@ def resolve_lock_owner_id(session: Session, token: str | None) -> str | None:
     return None
 
 
-def get_optional_lock_owner_id(
-    request: Request,
-    session: Session = Depends(get_settings_db),
-) -> str | None:
-    return resolve_lock_owner_id(session, _resolve_session_token(request))
+async def get_optional_lock_owner_id(request: Request) -> str | None:
+    return await run_api_blocking(run_settings_db, resolve_lock_owner_id, _resolve_session_token(request))
 
 
-def get_runtime_availability_probe(
+async def get_runtime_availability_probe(
     request: Request,
 ) -> RuntimeAvailabilityProbe:
     probe = getattr(request.app.state, 'runtime_availability_probe', None)
@@ -61,7 +59,7 @@ def get_runtime_availability_probe(
     return PersistedRuntimeAvailabilityProbe()
 
 
-def get_lock_owner_id(
+async def get_lock_owner_id(
     owner_id: str | None = Depends(get_optional_lock_owner_id),
 ) -> str:
     if owner_id is not None:

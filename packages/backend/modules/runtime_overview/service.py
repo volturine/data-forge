@@ -7,7 +7,7 @@ from sqlmodel import Session, select
 
 from backend_core import runtime_workers_service
 from backend_core.config import settings
-from backend_core.database import run_db, run_settings_db, supports_distributed_runtime
+from backend_core.database import run_db, supports_distributed_runtime
 from backend_core.domain.build_jobs.models import BuildJobStatus
 from backend_core.domain.runtime_workers.models import RuntimeWorkerKind
 from backend_core.namespace import list_namespaces, reset_namespace, set_namespace_context
@@ -114,7 +114,7 @@ def _engine_resource_id(row: EngineInstance) -> str:
     return row.analysis_id
 
 
-def queue_summary() -> schemas.QueueSummary:
+def queue_summary(session: Session) -> schemas.QueueSummary:
     names = [
         settings.default_namespace,
         *[name for name in list_namespaces() if name != settings.default_namespace],
@@ -125,14 +125,14 @@ def queue_summary() -> schemas.QueueSummary:
         if namespace in seen:
             continue
         seen.add(namespace)
-        items.append(_queue_namespace_summary(namespace))
+        items.append(_queue_namespace_summary(session, namespace))
     totals = _queue_totals(items)
     return schemas.QueueSummary(namespaces=items, totals=totals)
 
 
-def _queue_namespace_summary(namespace: str) -> schemas.QueueNamespaceSummary:
-    reclaimable_worker_ids = run_settings_db(
-        runtime_workers_service.reclaimable_worker_ids,
+def _queue_namespace_summary(session: Session, namespace: str) -> schemas.QueueNamespaceSummary:
+    reclaimable_worker_ids = runtime_workers_service.reclaimable_worker_ids(
+        session,
         kind=RuntimeWorkerKind.BUILD_WORKER,
     )
     token = set_namespace_context(namespace)

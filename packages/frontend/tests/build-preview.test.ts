@@ -2,12 +2,8 @@ import type { Locator, Page } from '@playwright/test';
 
 import { test, expect } from './fixtures.js';
 import { gotoAnalysisEditor } from './utils/analysis.js';
-import { createDatasource, createAnalysis } from './utils/api.js';
-import {
-	deleteAnalysisViaUI,
-	deleteDatasourceViaUI,
-	freeWarmEnginesViaUI
-} from './utils/ui-cleanup.js';
+import { createAnalysis } from './utils/api.js';
+import { deleteAnalysisViaUI, freeWarmEngines } from './utils/ui-cleanup.js';
 import { readyTimeoutMs } from './utils/readiness.js';
 import { uid } from './utils/uid.js';
 import { screenshot } from './utils/visual.js';
@@ -21,16 +17,15 @@ async function expectVisibleEventually(locator: Locator) {
 async function cleanupBuildPreviewResources(
 	page: Page,
 	analysisName: string,
-	datasourceName: string,
+	analysisId: string,
 	buildId?: string
 ): Promise<void> {
 	// Free exclusive build engine once if still warm, then gallery deletes
 	// (analysis/datasource delete each shut their engines once — no freeWarm stack).
 	if (buildId) {
-		await freeWarmEnginesViaUI(page, { buildIds: [buildId] }).catch(() => undefined);
+		await freeWarmEngines(page, { buildIds: [buildId] });
 	}
-	await deleteAnalysisViaUI(page, analysisName).catch(() => undefined);
-	await deleteDatasourceViaUI(page, datasourceName).catch(() => undefined);
+	await deleteAnalysisViaUI(page, analysisName, { id: analysisId });
 }
 
 async function startBuildAndCaptureId(page: Page): Promise<string | undefined> {
@@ -55,12 +50,11 @@ async function startBuildAndCaptureId(page: Page): Promise<string | undefined> {
 test.describe('Build Preview – real build lifecycle', () => {
 	test('clicking Build queues the run and the preview opens only from the engine status control', async ({
 		page,
-		request
+		request,
+		sharedDatasource
 	}) => {
-		const dsName = `e2e-bprev-real-ds-${uid()}`;
 		const aName = `E2E BPrev Real ${uid()}`;
-		const dsId = await createDatasource(request, dsName);
-		const aId = await createAnalysis(request, aName, dsId);
+		const aId = await createAnalysis(request, aName, sharedDatasource.id);
 		let buildId: string | undefined;
 		try {
 			await gotoAnalysisEditor(page, aId);
@@ -87,15 +81,17 @@ test.describe('Build Preview – real build lifecycle', () => {
 
 			await screenshot(page, 'build-preview', 'real-build-terminal');
 		} finally {
-			await cleanupBuildPreviewResources(page, aName, dsName, buildId);
+			await cleanupBuildPreviewResources(page, aName, aId, buildId);
 		}
 	});
 
-	test('close button dismisses the Build Preview modal', async ({ page, request }) => {
-		const dsName = `e2e-bprev-close-ds-${uid()}`;
+	test('close button dismisses the Build Preview modal', async ({
+		page,
+		request,
+		sharedDatasource
+	}) => {
 		const aName = `E2E BPrev Close ${uid()}`;
-		const dsId = await createDatasource(request, dsName);
-		const aId = await createAnalysis(request, aName, dsId);
+		const aId = await createAnalysis(request, aName, sharedDatasource.id);
 		let buildId: string | undefined;
 		try {
 			await gotoAnalysisEditor(page, aId);
@@ -116,7 +112,7 @@ test.describe('Build Preview – real build lifecycle', () => {
 
 			await screenshot(page, 'build-preview', 'real-build-modal-closed');
 		} finally {
-			await cleanupBuildPreviewResources(page, aName, dsName, buildId);
+			await cleanupBuildPreviewResources(page, aName, aId, buildId);
 		}
 	});
 });

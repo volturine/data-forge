@@ -2,7 +2,9 @@ import { mkdirSync } from 'fs';
 import { dirname, resolve } from 'path';
 import type { Locator, Page } from '@playwright/test';
 
-const SCREENSHOTS_DIR = resolve(import.meta.dirname, '..', '.artifacts', 'screenshots');
+const SCREENSHOTS_DIR = process.env.E2E_ARTIFACTS_DIR
+	? resolve(process.env.E2E_ARTIFACTS_DIR, 'screenshots')
+	: resolve(import.meta.dirname, '..', '.artifacts', 'screenshots');
 
 function sanitize(raw: string): string {
 	return raw
@@ -59,7 +61,7 @@ interface ScreenshotOptions {
 }
 
 /**
- * Capture a curated screenshot into `frontend/tests/.artifacts/screenshots/<suite>/<name>.png`.
+ * Capture a curated screenshot into `.e2e-artifacts/screenshots/<suite>/<name>.png`.
  *
  * - `suite` groups shots by feature area (e.g. "navigation", "datasources")
  * - `name` is a short descriptor for this specific capture point

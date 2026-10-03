@@ -8,14 +8,17 @@
 	import {
 		previewStepData,
 		getStepRowCount,
+		throwIfAborted,
 		downloadStep,
 		type StepPreviewResponse
 	} from '$lib/api/compute';
 	import { applySteps } from '$lib/utils/pipeline';
 	import { hashPipeline } from '$lib/utils/hash';
+	import { toComputeError } from '$lib/utils/compute-error';
 	import { GripVertical, Hash, RefreshCw, Copy, Trash2 } from '@lucide/svelte';
 	import { analysisStore } from '$lib/stores/analysis.svelte';
 	import { datasourceStore } from '$lib/stores/datasource.svelte';
+	import { isNamespaceReady, requireNamespace } from '$lib/stores/namespace.svelte';
 	import { getStepTypeConfig, isChartStep } from '$lib/components/pipeline/utils';
 	import {
 		buildAnalysisPipelinePayload,
@@ -51,6 +54,7 @@
 	}: Props = $props();
 
 	const isChart = $derived(isChartStep(step.type));
+	const namespace = $derived(isNamespaceReady() ? requireNamespace() : null);
 
 	const chartHeight = $derived(
 		isChart ? (step.config?.chart_height as string | undefined) : undefined
@@ -75,21 +79,6 @@
 	const isApplied = $derived(step.is_applied !== false);
 
 	// Chart preview query (only for chart/plot steps) — run after apply
-	const chartPipeline = $derived(applySteps(allSteps));
-	const chartPipelineKey = $derived(hashPipeline(chartPipeline));
-	const chartDatasourceConfig = $derived.by(() => {
-		if (!isChart) return {};
-		const config = buildDatasourceConfig({
-			analysisId: analysisId ?? null,
-			tab: analysisStore.activeTab ?? null,
-			tabs: analysisStore.tabs,
-			datasources: datasourceStore.datasources
-		});
-		if (config) return config;
-		const active = analysisStore.activeTab;
-		if (!active) return {};
-		return active.datasource.config;
-	});
 	const analysisPipeline = $derived.by(() => {
 		if (!analysisId) return null;
 		return buildAnalysisPipelinePayload(
@@ -98,26 +87,30 @@
 			datasourceStore.datasources
 		);
 	});
-
+	const chartConfigured = $derived(((step.config?.x_column as string | undefined) ?? '') !== '');
+	const chartPreviewRequest = $derived.by(() => {
+		if (!analysisPipeline || !analysisId) return null;
+		return {
+			analysis_id: analysisId,
+			analysis_pipeline: analysisPipeline,
+			tab_id: analysisStore.activeTab?.id ?? null,
+			target_step_id: step.id,
+			row_limit: 5000,
+			page: 1,
+			resource_config: analysisStore.resourceConfig
+		};
+	});
 	const chartQuery = createQuery(() => ({
-		queryKey: [
-			'chart-preview',
-			analysisId,
-			datasourceId,
-			step.id,
-			chartPipelineKey,
-			JSON.stringify(chartDatasourceConfig)
-		],
-		queryFn: async (): Promise<StepPreviewResponse> => {
-			const result = await previewStepData({
-				analysis_pipeline: analysisPipeline!,
-				tab_id: analysisStore.activeTab?.id ?? null,
-				target_step_id: step.id,
-				row_limit: 5000,
-				page: 1,
-				resource_config: analysisStore.resourceConfig
-			});
-			if (result.isErr()) throw new Error(result.error.message);
+		// The request captured in the cache key is also the request executed;
+		// a reactive component update cannot make an older query run a newer command.
+		queryKey: ['chart-preview', namespace, chartPreviewRequest] as const,
+		queryFn: async ({ queryKey }): Promise<StepPreviewResponse> => {
+			const request = queryKey[2];
+			if (!request) throw new Error('Chart preview command is not ready');
+			const signal = previewSignal(request);
+			const result = await previewStepData(request, { signal });
+			throwIfAborted(signal);
+			if (result.isErr()) throw toComputeError(result.error);
 			return result.value;
 		},
 		staleTime: Infinity,
@@ -129,9 +122,22 @@
 			isApplied &&
 			!!datasourceId &&
 			!!analysisId &&
-			!!analysisPipeline &&
-			((step.config?.x_column as string | undefined) ?? '') !== ''
+			namespace !== null &&
+			!!chartPreviewRequest &&
+			!analysisStore.previews.paused &&
+			chartConfigured
 	}));
+	const chartPreviewState = $derived.by(() => {
+		if (!isChart || !isApplied || !chartConfigured) return 'inactive';
+		if (!analysisPipeline || !datasourceId || !analysisId) return 'waiting-for-payload';
+		if (chartQuery.error) return 'error';
+		if (analysisStore.previews.paused || chartQuery.isFetching) return 'loading';
+		if (chartQuery.data) return 'ready';
+		return 'idle';
+	});
+	const chartPreviewError = $derived(
+		chartQuery.error instanceof Error ? chartQuery.error.message : ''
+	);
 
 	const rowCounts = new SvelteMap<string, number>();
 
@@ -169,24 +175,60 @@
 	const tableResetKey = $derived(
 		`${analysisId ?? ''}:${datasourceId ?? ''}:${step.id}:${previewRowLimit}:${rowCountPipelineKey}:${JSON.stringify(rowCountDatasourceConfig)}`
 	);
+	let rowCountAbortController: AbortController | null = null;
+	let previewRequestKey: string | null = null;
+	let previewRequestController = new AbortController();
+
+	function previewSignal(request: Parameters<typeof previewStepData>[0]): AbortSignal {
+		const nextKey = JSON.stringify(request);
+		if (previewRequestKey !== nextKey || previewRequestController.signal.aborted) {
+			if (previewRequestKey !== null && !previewRequestController.signal.aborted) {
+				previewRequestController.abort();
+			}
+			previewRequestKey = nextKey;
+			previewRequestController = new AbortController();
+		}
+		return previewRequestController.signal;
+	}
 
 	async function calculateRowCount() {
 		if (!analysisId || !analysisPipeline) return;
 		if (isLoadingRowCount) return;
-		rowCountLoads.set(rowCountKey, true);
-		rowCountErrors.delete(rowCountKey);
-		const result = await getStepRowCount({
-			analysis_pipeline: analysisPipeline!,
-			tab_id: analysisStore.activeTab?.id ?? null,
-			target_step_id: step.id
-		});
-		rowCountLoads.set(rowCountKey, false);
-		if (result.isErr()) {
-			rowCountErrors.set(rowCountKey, result.error.message);
-			return;
+		const requestKey = rowCountKey;
+		const requestPipeline = analysisPipeline;
+		const requestTabId = analysisStore.activeTab?.id ?? null;
+		const controller = new AbortController();
+		rowCountAbortController?.abort();
+		rowCountAbortController = controller;
+		rowCountLoads.set(requestKey, true);
+		rowCountErrors.delete(requestKey);
+		try {
+			const result = await getStepRowCount(
+				{
+					analysis_pipeline: requestPipeline,
+					tab_id: requestTabId,
+					target_step_id: step.id
+				},
+				{ signal: controller.signal }
+			);
+			throwIfAborted(controller.signal);
+			if (result.isOk()) {
+				rowCounts.set(requestKey, result.value.row_count);
+			} else {
+				rowCounts.delete(requestKey);
+				rowCountErrors.set(requestKey, result.error.message);
+			}
+		} catch (error) {
+			if (!controller.signal.aborted) {
+				rowCounts.delete(requestKey);
+				rowCountErrors.set(requestKey, error instanceof Error ? error.message : String(error));
+			}
+		} finally {
+			if (rowCountAbortController === controller) {
+				rowCountAbortController = null;
+				rowCountLoads.set(requestKey, false);
+			}
 		}
-		rowCounts.set(rowCountKey, result.value.row_count);
-		rowCountErrors.delete(rowCountKey);
 	}
 
 	let copyFeedback = $state(false);
@@ -208,6 +250,8 @@
 	}
 
 	onDestroy(() => {
+		previewRequestController.abort();
+		rowCountAbortController?.abort();
 		if (copyTimer !== null) window.clearTimeout(copyTimer);
 	});
 
@@ -577,7 +621,16 @@
 		{/if}
 
 		{#if isChart && datasourceId && analysisId}
-			<div class={css({ borderTopWidth: '1' })}>
+			<div
+				class={css({ borderTopWidth: '1' })}
+				data-testid="chart-preview-container"
+				data-preview-ready={chartPreviewState === 'ready' ? 'true' : undefined}
+				data-preview-state={chartPreviewState}
+				data-preview-query-status={chartQuery.status}
+				data-preview-fetch-status={chartQuery.fetchStatus}
+				data-preview-has-data={chartQuery.data ? 'true' : 'false'}
+				data-preview-error={chartPreviewError || undefined}
+			>
 				{#if !isApplied}
 					<div
 						class={css({
@@ -598,7 +651,20 @@
 							<span>Apply to preview</span>
 						{/if}
 					</div>
-				{:else if chartQuery.isFetching}
+				{:else if chartQuery.error}
+					<div
+						class={css({
+							borderTopWidth: '1',
+							borderTopColor: 'border.error',
+							backgroundColor: 'bg.error',
+							padding: '3',
+							fontSize: 'xs',
+							color: 'fg.error'
+						})}
+					>
+						{chartQuery.error.message}
+					</div>
+				{:else if analysisStore.previews.paused || chartQuery.isFetching}
 					<div
 						class={css({
 							display: 'flex',
@@ -612,19 +678,6 @@
 					>
 						<span class={spinner({ size: 'sm' })}></span>
 						Loading chart...
-					</div>
-				{:else if chartQuery.error}
-					<div
-						class={css({
-							borderTopWidth: '1',
-							borderTopColor: 'border.error',
-							backgroundColor: 'bg.error',
-							padding: '3',
-							fontSize: 'xs',
-							color: 'fg.error'
-						})}
-					>
-						{chartQuery.error.message}
 					</div>
 				{:else if chartQuery.data}
 					<ChartPreview

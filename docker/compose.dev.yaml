@@ -15,7 +15,25 @@ services:
       CORS_ORIGINS: ${DF_CORS_ORIGINS}
     volumes:
       - data:/app/data
-      - ../packages/:/app/packages/
+      - ../packages/backend:/app/packages/backend
+
+  runtime:
+    environment:
+      DEBUG: "true"
+      PROD_MODE_ENABLED: "false"
+      WORKERS: "1"
+    volumes:
+      - data:/app/data
+      - ../packages/backend:/app/packages/backend
+
+  worker:
+    environment:
+      DEBUG: "true"
+      PROD_MODE_ENABLED: "false"
+    volumes:
+      - data:/app/data
+      - ../packages/worker:/app/packages/worker
+      - ${DF_DOCKER_SOCKET_PATH}:/var/run/docker.sock
 
   scheduler:
     environment:
@@ -25,21 +43,11 @@ services:
       SCHEDULER_CHECK_INTERVAL: ${DF_SCHEDULER_CHECK_INTERVAL}
     volumes:
       - data:/app/data
-      - ../packages/:/app/packages/
-
-  worker:
-    environment:
-      DEBUG: "true"
-      PROD_MODE_ENABLED: "false"
-      WORKERS: "1"
-      BUILD_WORKER_MAX_PROCESSES: ${DF_BUILD_WORKER_MAX_PROCESSES}
-      BUILD_WORKER_IDLE_EXIT_SECONDS: ${DF_BUILD_WORKER_IDLE_EXIT_SECONDS}
-    volumes:
-      - data:/app/data
-      - ../packages/:/app/packages/
+      - ../packages/scheduler:/app/packages/scheduler
 
   frontend:
     image: oven/bun:1
+    cpu_shares: 512
     working_dir: /app/packages/frontend
     depends_on:
       api:

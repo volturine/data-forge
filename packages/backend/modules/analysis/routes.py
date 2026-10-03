@@ -1,20 +1,23 @@
 import contextlib
+import json
+from collections.abc import Callable
 
 from fastapi import Depends, Header, HTTPException, Request, Response
 from pydantic import BaseModel, Field, field_validator
 from sqlmodel import Session
 
-from backend_core.database import get_db
-from backend_core.dependencies import RuntimeAvailabilityProbe, get_runtime_availability_probe
+from backend_core.api_execution_budget import run_api_blocking
+from backend_core.database import run_db
+from backend_core.dependencies import RuntimeAvailabilityProbe, get_optional_lock_owner_id, get_runtime_availability_probe
 from backend_core.domain.analysis.step_types import is_step_type
 from backend_core.domain.compute import schemas as compute_schemas
 from backend_core.error_handlers import handle_errors
-from backend_core.persistence.analysis.models import Analysis
 from backend_core.validation import AnalysisId, parse_analysis_id
 from dataforge_protocol import compute_pb2, enums_pb2
 from modules.analysis import schemas, service
 from modules.analysis.pipeline_compiler import compile_step
 from modules.analysis.revisions import (
+    AnalysisRevisionSnapshot,
     etag as analysis_etag,
     matches_if_none_match,
     require as require_analysis_revision,
@@ -22,7 +25,7 @@ from modules.analysis.revisions import (
     version as analysis_version,
 )
 from modules.analysis.step_schemas import get_step_catalog
-from modules.auth.dependencies import get_current_user, get_current_user_id
+from modules.auth.dependencies import get_current_user, get_current_user_id, get_optional_user_id
 from modules.auth.models import User
 from modules.compute import executor_client
 from modules.export import service as export_service
@@ -31,21 +34,33 @@ from modules.mcp.router import MCPRouter
 router = MCPRouter(prefix='/analysis', tags=['analysis'], dependencies=[Depends(get_current_user)])
 
 
+def _revisioned_operation[T](
+    session: Session,
+    analysis_id: AnalysisId,
+    if_match: str | None,
+    owner_id: str | None,
+    user_id: str | None,
+    operation: Callable[[Session], T],
+) -> tuple[T, AnalysisRevisionSnapshot]:
+    """Check and mutate atomically; analysis mutations advance their revision once."""
+    analysis = require_analysis_revision(analysis_id, if_match, session, owner_id, user_id)
+    revision = AnalysisRevisionSnapshot(id=analysis.id, revision=analysis.revision + 1)
+    result = operation(session)
+    return result, revision
+
+
 @router.post('/validate', mcp=True)
 @handle_errors(operation='validate analysis', value_error_status=400)
-async def validate_analysis(
-    data: schemas.AnalysisCreateSchema,
-    session: Session = Depends(get_db),
-):
+async def validate_analysis(data: schemas.AnalysisCreateSchema):
     """Validate analysis payload without persisting."""
-    return service.validate_analysis(session, data)
+    result = await run_api_blocking(run_db, service.validate_analysis, data)
+    return await executor_client.json_response(result)
 
 
 @router.post('', response_model=schemas.AnalysisResponseSchema, mcp=True)
 @handle_errors(operation='create analysis', value_error_status=400)
 async def create_analysis(
     data: schemas.AnalysisCreateSchema,
-    session: Session = Depends(get_db),
     user: User = Depends(get_current_user),
 ):
     """Create a new analysis pipeline.
@@ -62,12 +77,13 @@ async def create_analysis(
     Use GET /api/v1/analysis/step-types to discover valid step types and their config schemas.
     """
     owner_id = user.id
-    return service.create_analysis(session, data, owner_id=owner_id)
+    result = await run_api_blocking(run_db, service.create_analysis, data, owner_id=owner_id)
+    return await executor_client.json_response(result)
 
 
 @router.get('/templates', response_model=list[schemas.AnalysisTemplateSummarySchema], mcp=True)
 @handle_errors(operation='list analysis templates', value_error_status=404)
-async def list_analysis_templates():
+def list_analysis_templates():
     """List built-in analysis templates available in the guided creation flow."""
     return service.list_analysis_templates()
 
@@ -78,7 +94,7 @@ async def list_analysis_templates():
     mcp=True,
 )
 @handle_errors(operation='get analysis template', value_error_status=404)
-async def get_analysis_template(template_id: str):
+def get_analysis_template(template_id: str):
     """Get one analysis template including the step skeleton used for creation."""
     return service.get_analysis_template(template_id)
 
@@ -87,44 +103,42 @@ async def get_analysis_template(template_id: str):
 @handle_errors(operation='generate analysis pipeline', value_error_status=400)
 async def generate_analysis_pipeline(
     data: schemas.GenerateAnalysisSchema,
-    session: Session = Depends(get_db),
 ):
     """Generate an analysis pipeline skeleton from a natural-language description."""
-    return service.generate_analysis_pipeline(session, data)
+    return await run_api_blocking(run_db, service.generate_analysis_pipeline, data)
 
 
 @router.post('/import', response_model=schemas.AnalysisResponseSchema, mcp=True)
 @handle_errors(operation='import analysis', value_error_status=400)
 async def import_analysis(
     data: schemas.ImportAnalysisSchema,
-    session: Session = Depends(get_db),
     user: User = Depends(get_current_user),
 ):
     """Import an analysis pipeline definition and persist it as a new analysis."""
     owner_id = user.id
-    return service.import_analysis(session, data, owner_id=owner_id)
+    result = await run_api_blocking(run_db, service.import_analysis, data, owner_id=owner_id)
+    return await executor_client.json_response(result)
 
 
 @router.get('', response_model=list[schemas.AnalysisGalleryItemSchema], mcp=True)
 @handle_errors(operation='list analyses')
-async def list_analyses(session: Session = Depends(get_db)):
+async def list_analyses():
     """List all analyses as gallery items with id, name, and thumbnail metadata."""
-    return service.list_analyses(session)
+    analyses = await run_api_blocking(run_db, service.list_analyses)
+    return await executor_client.json_response(analyses)
 
 
 @router.get('/favorites', response_model=list[schemas.AnalysisGalleryItemSchema], mcp=True)
 @handle_errors(operation='list favorite analyses')
-async def list_favorite_analyses(
-    session: Session = Depends(get_db),
-    user: User = Depends(get_current_user),
-):
+async def list_favorite_analyses(user: User = Depends(get_current_user)):
     """List only the current user's favorited analyses."""
-    return service.list_favorite_analyses(session, user.id)
+    analyses = await run_api_blocking(run_db, service.list_favorite_analyses, user.id)
+    return await executor_client.json_response(analyses)
 
 
 @router.get('/step-types', mcp=True)
 @handle_errors(operation='list step types')
-async def list_step_types():
+def list_step_types():
     """List all available pipeline step types with descriptions and config schemas.
 
     Use this to discover what operations are available and what configuration
@@ -137,19 +151,36 @@ async def list_step_types():
 @handle_errors(operation='get analysis', value_error_status=404)
 async def get_analysis(
     analysis_id: AnalysisId,
-    response: Response,
     if_none_match: str | None = Header(default=None),
-    session: Session = Depends(get_db),
 ):
     """Get a single analysis by ID with full pipeline definition including all tabs and steps."""
     parsed_id = parse_analysis_id(analysis_id)
-    current_etag = service.get_analysis_etag(session, parsed_id)
-    if matches_if_none_match(if_none_match, current_etag):
+    current_etag, analysis = await run_api_blocking(
+        run_db,
+        _analysis_response_for_get,
+        parsed_id,
+        if_none_match,
+    )
+    if analysis is None:
         return Response(status_code=304, headers={'ETag': current_etag})
-    analysis = service.get_analysis(session, parsed_id)
-    response.headers['ETag'] = current_etag
-    response.headers['X-Analysis-Version'] = analysis_version(analysis)
-    return analysis
+    return await executor_client.json_response(
+        analysis,
+        headers={
+            'ETag': current_etag,
+            'X-Analysis-Version': analysis_version(analysis),
+        },
+    )
+
+
+def _analysis_response_for_get(
+    session: Session,
+    analysis_id: str,
+    if_none_match: str | None,
+) -> tuple[str, schemas.AnalysisResponseSchema | None]:
+    current_etag = service.get_analysis_etag(session, analysis_id)
+    if matches_if_none_match(if_none_match, current_etag):
+        return current_etag, None
+    return current_etag, service.get_analysis(session, analysis_id)
 
 
 @router.post('/{analysis_id}/duplicate', response_model=schemas.AnalysisResponseSchema, mcp=True)
@@ -157,22 +188,28 @@ async def get_analysis(
 async def duplicate_analysis(
     analysis_id: AnalysisId,
     data: schemas.DuplicateAnalysisSchema,
-    session: Session = Depends(get_db),
     user: User = Depends(get_current_user),
 ):
     """Duplicate an analysis while regenerating output identities and derived references."""
     owner_id = user.id
-    return service.duplicate_analysis(session, parse_analysis_id(analysis_id), data, owner_id=owner_id)
+    result = await run_api_blocking(
+        run_db,
+        service.duplicate_analysis,
+        parse_analysis_id(analysis_id),
+        data,
+        owner_id=owner_id,
+    )
+    return await executor_client.json_response(result)
 
 
 @router.put('/{analysis_id}', response_model=schemas.AnalysisResponseSchema, mcp=True)
 @handle_errors(operation='update analysis')
 async def update_analysis(
     analysis_id: AnalysisId,
-    response: Response,
     data: schemas.AnalysisUpdateSchema,
-    _analysis: Analysis = Depends(require_analysis_revision),
-    session: Session = Depends(get_db),
+    if_match: str | None = Header(default=None, alias='If-Match'),
+    owner_id: str | None = Depends(get_optional_lock_owner_id),
+    user_id: str | None = Depends(get_optional_user_id),
 ):
     """Update an analysis and replace the full tabs array.
 
@@ -180,10 +217,22 @@ async def update_analysis(
     then add steps via POST /analysis/{id}/tabs/{tab_id}/steps.
     """
     analysis_id_value = parse_analysis_id(analysis_id)
-    updated = service.update_analysis(session, analysis_id_value, data)
-    response.headers['ETag'] = analysis_etag(updated)
-    response.headers['X-Analysis-Version'] = analysis_version(updated)
-    return updated
+    updated, revision = await run_api_blocking(
+        run_db,
+        _revisioned_operation,
+        analysis_id_value,
+        if_match,
+        owner_id,
+        user_id,
+        lambda session: service.update_analysis(session, analysis_id_value, data),
+    )
+    return await executor_client.json_response(
+        updated,
+        headers={
+            'ETag': analysis_etag(revision),
+            'X-Analysis-Version': analysis_version(revision),
+        },
+    )
 
 
 @router.post(
@@ -195,10 +244,9 @@ async def update_analysis(
 async def favorite_analysis(
     analysis_id: AnalysisId,
     user_id: str = Depends(get_current_user_id),
-    session: Session = Depends(get_db),
 ):
     """Mark an analysis as favorite for the current user."""
-    return service.set_favorite(session, parse_analysis_id(analysis_id), user_id, True)
+    return await run_api_blocking(run_db, service.set_favorite, parse_analysis_id(analysis_id), user_id, True)
 
 
 @router.delete(
@@ -211,38 +259,43 @@ async def favorite_analysis(
 async def unfavorite_analysis(
     analysis_id: AnalysisId,
     user_id: str = Depends(get_current_user_id),
-    session: Session = Depends(get_db),
 ):
     """Remove an analysis from the current user's favorites."""
-    return service.set_favorite(session, parse_analysis_id(analysis_id), user_id, False)
+    return await run_api_blocking(run_db, service.set_favorite, parse_analysis_id(analysis_id), user_id, False)
 
 
 @router.delete('/{analysis_id}', status_code=204, mcp=True, mcp_confirm_required=True)
 @handle_errors(operation='delete analysis', value_error_status=404)
 async def delete_analysis(
     analysis_id: AnalysisId,
-    _analysis: Analysis = Depends(require_analysis_revision),
-    session: Session = Depends(get_db),
+    if_match: str | None = Header(default=None, alias='If-Match'),
+    owner_id: str | None = Depends(get_optional_lock_owner_id),
+    user_id: str | None = Depends(get_optional_user_id),
     runtime_probe: RuntimeAvailabilityProbe = Depends(get_runtime_availability_probe),
 ):
     """Delete an analysis and its associated data."""
     analysis_id_value = parse_analysis_id(analysis_id)
-    try:
-        service.delete_analysis(session, analysis_id_value)
-    except ValueError as exc:
-        raise HTTPException(status_code=404, detail=str(exc)) from exc
-    # The deletion is committed above; runtime teardown must not delay its response.
-    with contextlib.suppress(HTTPException):
-        executor_client.request_engine_shutdown(
-            session,
-            identity=compute_pb2.EngineIdentity(
-                scope=enums_pb2.ENGINE_SCOPE_ANALYSIS_INTERACTIVE,
-                reuse_policy=enums_pb2.ENGINE_REUSE_POLICY_SHARED,
-                analysis_id=analysis_id_value,
-                resource_id=analysis_id_value,
-            ),
-            runtime_probe=runtime_probe,
-        )
+
+    def delete_and_queue_shutdown(session: Session) -> None:
+        require_analysis_revision(analysis_id_value, if_match, session, owner_id, user_id)
+        try:
+            service.delete_analysis(session, analysis_id_value)
+        except ValueError as exc:
+            raise HTTPException(status_code=404, detail=str(exc)) from exc
+        # The deletion is committed above; runtime teardown must not delay its response.
+        with contextlib.suppress(HTTPException):
+            executor_client.request_engine_shutdown(
+                session,
+                identity=compute_pb2.EngineIdentity(
+                    scope=enums_pb2.ENGINE_SCOPE_ANALYSIS_INTERACTIVE,
+                    reuse_policy=enums_pb2.ENGINE_REUSE_POLICY_SHARED,
+                    analysis_id=analysis_id_value,
+                    resource_id=analysis_id_value,
+                ),
+                runtime_probe=runtime_probe,
+            )
+
+    await run_api_blocking(run_db, delete_and_queue_shutdown)
 
 
 @router.post('/{analysis_id}/preview', mcp=True)
@@ -250,14 +303,13 @@ async def delete_analysis(
 async def preview_analysis(
     analysis_id: AnalysisId,
     request: Request,
-    session: Session = Depends(get_db),
     runtime_probe: RuntimeAvailabilityProbe = Depends(get_runtime_availability_probe),
 ):
     """Preview the analysis pipeline and return results with schema, rows, and row count."""
     analysis_payload = None
     body = None
     with contextlib.suppress(ValueError):
-        body = await request.json()
+        body = await run_api_blocking(json.loads, await request.body())
     if isinstance(body, dict):
         analysis_payload = body.get('pipeline')
 
@@ -265,6 +317,13 @@ async def preview_analysis(
 
     if not isinstance(analysis_payload, dict):
         raise HTTPException(status_code=400, detail='pipeline payload must be provided')
+    payload_analysis_id = analysis_payload.get('analysis_id')
+    if payload_analysis_id is not None and payload_analysis_id != analysis_id_value:
+        raise HTTPException(status_code=400, detail='pipeline analysis_id must match the URL analysis id')
+    # Stored analysis pipeline definitions do not need to duplicate their
+    # owning RID. The URL is authoritative and must become part of the exact
+    # durable preview command used for identity and single-flight deduplication.
+    analysis_payload = {'analysis_id': analysis_id_value, **analysis_payload}
 
     tabs = analysis_payload.get('tabs', [])
     if not isinstance(tabs, list):
@@ -291,24 +350,36 @@ async def preview_analysis(
     if not isinstance(output_config, dict):
         raise HTTPException(status_code=400, detail='Analysis tab output must be a dict')
 
+    analysis_pipeline = await run_api_blocking(
+        compute_schemas.AnalysisPipelinePayload.model_validate,
+        analysis_payload,
+    )
     preview = await executor_client.preview_step(
-        session,
         compute_schemas.StepPreviewRequest(
             analysis_id=analysis_id_value,
+            engine_identity=compute_pb2.EngineIdentity(
+                scope=enums_pb2.ENGINE_SCOPE_ANALYSIS_INTERACTIVE,
+                reuse_policy=enums_pb2.ENGINE_REUSE_POLICY_SHARED,
+                analysis_id=analysis_id_value,
+                resource_id=analysis_id_value,
+            ),
             target_step_id=steps[-1]['id'] if steps else 'source',
-            analysis_pipeline=compute_schemas.AnalysisPipelinePayload.model_validate(analysis_payload),
+            analysis_pipeline=analysis_pipeline,
             row_limit=50,
             page=1,
             tab_id=None,
         ),
         runtime_probe=runtime_probe,
+        http_request=request,
     )
 
-    return {
-        'schema': preview.column_types,
-        'rows': preview.data,
-        'row_count': preview.total_rows,
-    }
+    return await executor_client.json_response(
+        {
+            'schema': preview.column_types,
+            'rows': preview.data,
+            'row_count': preview.total_rows,
+        }
+    )
 
 
 @router.post(
@@ -320,11 +391,11 @@ async def preview_analysis(
 async def export_analysis_code(
     analysis_id: AnalysisId,
     data: schemas.CodeExportRequestSchema,
-    session: Session = Depends(get_db),
 ):
     """Export an analysis (or specific tab) as executable Polars Python or SQL."""
-    return export_service.export_analysis_code(
-        session,
+    return await run_api_blocking(
+        run_db,
+        export_service.export_analysis_code,
         parse_analysis_id(analysis_id),
         format_name=data.format,
         tab_id=data.tab_id,
@@ -367,8 +438,9 @@ async def add_step(
     tab_id: str,
     data: AddStepBody,
     response: Response,
-    _analysis: Analysis = Depends(require_analysis_revision),
-    session: Session = Depends(get_db),
+    if_match: str | None = Header(default=None, alias='If-Match'),
+    owner_id: str | None = Depends(get_optional_lock_owner_id),
+    user_id: str | None = Depends(get_optional_user_id),
 ):
     """Add a new pipeline step to a tab in an analysis.
 
@@ -376,23 +448,36 @@ async def add_step(
     against the step type's schema. Returns the created step with its generated ID.
     Steps are appended to the end by default; use 'position' to insert at a specific index.
     """
-    compiled = compile_step(
-        step_id='new-step',
-        step_type=data.type,
-        config=data.config,
-        depends_on=data.depends_on,
-        is_applied=None,
+    analysis_id_value = parse_analysis_id(analysis_id)
+
+    def add(session: Session):
+        compiled = compile_step(
+            step_id='new-step',
+            step_type=data.type,
+            config=data.config,
+            depends_on=data.depends_on,
+            is_applied=None,
+        )
+        return service.add_step(
+            session,
+            analysis_id_value,
+            tab_id,
+            data.type,
+            compiled.config,
+            data.position,
+            data.depends_on,
+        )
+
+    result, analysis = await run_api_blocking(
+        run_db,
+        _revisioned_operation,
+        analysis_id_value,
+        if_match,
+        owner_id,
+        user_id,
+        add,
     )
-    result = service.add_step(
-        session,
-        parse_analysis_id(analysis_id),
-        tab_id,
-        data.type,
-        compiled.config,
-        data.position,
-        data.depends_on,
-    )
-    set_analysis_revision_headers(response, _analysis)
+    set_analysis_revision_headers(response, analysis)
     return result
 
 
@@ -404,8 +489,9 @@ async def update_step(
     step_id: str,
     data: UpdateStepBody,
     response: Response,
-    _analysis: Analysis = Depends(require_analysis_revision),
-    session: Session = Depends(get_db),
+    if_match: str | None = Header(default=None, alias='If-Match'),
+    owner_id: str | None = Depends(get_optional_lock_owner_id),
+    user_id: str | None = Depends(get_optional_user_id),
 ):
     """Update a pipeline step's type and/or config.
 
@@ -413,44 +499,56 @@ async def update_step(
     If changing type, also provide the new config matching the new type's schema.
     """
     analysis_id_value = parse_analysis_id(analysis_id)
-    normalized_config = data.config
-    if data.type and data.config:
-        normalized_config = compile_step(
-            step_id=step_id,
-            step_type=data.type,
-            config=data.config,
-            depends_on=[],
-            is_applied=None,
-        ).config
-    elif data.type and not data.config:
-        existing = service.get_step(session, analysis_id_value, tab_id, step_id)
-        compile_step(
-            step_id=step_id,
-            step_type=data.type,
-            config=existing.config,
-            depends_on=[],
-            is_applied=None,
-        )
-    elif data.config and not data.type:
-        existing = service.get_step(session, analysis_id_value, tab_id, step_id)
-        existing_type = existing.type
-        if existing_type:
+
+    def update(session: Session):
+        normalized_config = data.config
+        if data.type and data.config:
             normalized_config = compile_step(
                 step_id=step_id,
-                step_type=existing_type,
+                step_type=data.type,
                 config=data.config,
                 depends_on=[],
                 is_applied=None,
             ).config
-    result = service.update_step(
-        session,
+        elif data.type and not data.config:
+            existing = service.get_step(session, analysis_id_value, tab_id, step_id)
+            compile_step(
+                step_id=step_id,
+                step_type=data.type,
+                config=existing.config,
+                depends_on=[],
+                is_applied=None,
+            )
+        elif data.config and not data.type:
+            existing = service.get_step(session, analysis_id_value, tab_id, step_id)
+            existing_type = existing.type
+            if existing_type:
+                normalized_config = compile_step(
+                    step_id=step_id,
+                    step_type=existing_type,
+                    config=data.config,
+                    depends_on=[],
+                    is_applied=None,
+                ).config
+        return service.update_step(
+            session,
+            analysis_id_value,
+            tab_id,
+            step_id,
+            normalized_config,
+            data.type,
+        )
+
+    result, analysis = await run_api_blocking(
+        run_db,
+        _revisioned_operation,
         analysis_id_value,
-        tab_id,
-        step_id,
-        normalized_config,
-        data.type,
+        if_match,
+        owner_id,
+        user_id,
+        update,
     )
-    set_analysis_revision_headers(response, _analysis)
+    set_analysis_revision_headers(response, analysis)
     return result
 
 
@@ -461,17 +559,22 @@ async def remove_step(
     tab_id: str,
     step_id: str,
     response: Response,
-    _analysis: Analysis = Depends(require_analysis_revision),
-    session: Session = Depends(get_db),
+    if_match: str | None = Header(default=None, alias='If-Match'),
+    owner_id: str | None = Depends(get_optional_lock_owner_id),
+    user_id: str | None = Depends(get_optional_user_id),
 ):
     """Remove a pipeline step from a tab. Also cleans up depends_on references in other steps that depended on the removed step."""
-    service.remove_step(
-        session,
-        parse_analysis_id(analysis_id),
-        tab_id,
-        step_id,
+    analysis_id_value = parse_analysis_id(analysis_id)
+    _, analysis = await run_api_blocking(
+        run_db,
+        _revisioned_operation,
+        analysis_id_value,
+        if_match,
+        owner_id,
+        user_id,
+        lambda session: service.remove_step(session, analysis_id_value, tab_id, step_id),
     )
-    set_analysis_revision_headers(response, _analysis)
+    set_analysis_revision_headers(response, analysis)
 
 
 class DeriveTabBody(BaseModel):
@@ -485,16 +588,26 @@ async def derive_tab(
     tab_id: str,
     data: DeriveTabBody,
     response: Response,
-    _analysis: Analysis = Depends(require_analysis_revision),
-    session: Session = Depends(get_db),
+    if_match: str | None = Header(default=None, alias='If-Match'),
+    owner_id: str | None = Depends(get_optional_lock_owner_id),
+    user_id: str | None = Depends(get_optional_user_id),
 ):
     """Create a new tab whose datasource is the given tab's output result_id.
 
     This chains the output of an existing tab into a new tab for further processing.
     The source tab must have a computed output.result_id. The new tab starts with no steps.
     """
-    result = service.derive_tab(session, parse_analysis_id(analysis_id), tab_id, data.name)
-    set_analysis_revision_headers(response, _analysis)
+    analysis_id_value = parse_analysis_id(analysis_id)
+    result, analysis = await run_api_blocking(
+        run_db,
+        _revisioned_operation,
+        analysis_id_value,
+        if_match,
+        owner_id,
+        user_id,
+        lambda session: service.derive_tab(session, analysis_id_value, tab_id, data.name),
+    )
+    set_analysis_revision_headers(response, analysis)
     return result
 
 
@@ -509,14 +622,24 @@ async def duplicate_tab(
     tab_id: str,
     data: DuplicateTabBody,
     response: Response,
-    _analysis: Analysis = Depends(require_analysis_revision),
-    session: Session = Depends(get_db),
+    if_match: str | None = Header(default=None, alias='If-Match'),
+    owner_id: str | None = Depends(get_optional_lock_owner_id),
+    user_id: str | None = Depends(get_optional_user_id),
 ):
     """Duplicate a tab inside the same analysis.
 
     The duplicate is inserted immediately after the source tab, keeps the same datasource and step logic,
     and receives fresh tab/step/output IDs so it can evolve independently.
     """
-    result = service.duplicate_tab(session, parse_analysis_id(analysis_id), tab_id, data.name)
-    set_analysis_revision_headers(response, _analysis)
+    analysis_id_value = parse_analysis_id(analysis_id)
+    result, analysis = await run_api_blocking(
+        run_db,
+        _revisioned_operation,
+        analysis_id_value,
+        if_match,
+        owner_id,
+        user_id,
+        lambda session: service.duplicate_tab(session, analysis_id_value, tab_id, data.name),
+    )
+    set_analysis_revision_headers(response, analysis)
     return result

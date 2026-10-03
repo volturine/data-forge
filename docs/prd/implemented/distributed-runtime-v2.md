@@ -1,13 +1,13 @@
 # PRD: Distributed Runtime v2
 
-> **Status (audited 2026-08-02): Implemented — current distributed-runtime architecture.**
-> **Current truth:** The durable Postgres runtime is now the shipped architecture. Remaining work is mainly observability polish and cleanup, not the original core migration.
+> **Status (audited 2026-09-29): Implemented — single-coordinator distributed-runtime baseline.**
+> **Current truth:** v2 establishes durable PostgreSQL state, fenced work claims, multi-process API safety, and a dedicated runtime coordinator. It does not establish multi-active coordinator/worker-agent scale-out or database sharding. The active [Capacity-First Runtime Optimization](../active/elastic-runtime-scale-out.md) requires measuring the current topology before taking either step.
 > **Portfolio:** [PRD index](../README.md)
 
 
 ## Overview
 
-Move Data-Forge from a single-process live-build runtime to a deliberate distributed runtime. API workers must become stateless, build execution must move behind a durable queue, live build state must be persisted, websocket delivery must become a projection of durable state, and event contracts must be schema-enforced end to end.
+Move Data-Forge from a single-process live-build runtime to a deliberate distributed runtime. API workers must stop owning authoritative build/runtime state; build execution must move behind a durable queue, live build state must be persisted, websocket delivery must become a projection of durable state, and event contracts must be schema-enforced end to end. Disposable per-process caches, websocket connections, and waiters are allowed; the current optional Telegram poller is a known process-owned integration slated for the active scale-out work.
 
 This plan is intentionally not a quick scaling patch. It defines the architecture required before `WORKERS > 1`, multiple API instances, or multi-node deployment can be treated as supported production modes.
 
@@ -31,7 +31,7 @@ That design can work for one API process. It is not safe for multiple Uvicorn wo
 
 | Goal | Description | Success Metric |
 |------|-------------|----------------|
-| G-1 | Stateless API workers | Starting builds, reading active builds, cancelling builds, and websocket streaming work correctly with `WORKERS > 1`. |
+| G-1 | No API-owned authoritative runtime state | Starting builds, reading active builds, cancelling builds, and websocket streaming work correctly with `WORKERS > 1`; disposable local connection/cache state is allowed. |
 | G-2 | Durable build state | A running or recently completed build can be reconstructed from database rows after API restart. |
 | G-3 | Dedicated execution workers | Build execution is owned by worker processes, not by API request handlers. |
 | G-4 | Durable queue | Build jobs are claimed through database leases and cannot be run twice by healthy workers. |
@@ -69,11 +69,18 @@ Browser / frontend app container
   |
   | HTTP requests and DB-backed websocket replay
   v
-API worker(s) / internal gRPC handlers
-  - parse, authorize, and map representations
+API worker(s)
+  - parse, authorize, serialize, and serve HTTP/websockets
   - invoke application commands that own transactions
   - enqueue work and request cancellation
-  - never execute claimed data workloads
+  - never own runtime lifecycle or execute claimed data workloads
+  |
+  | durable request rows + PostgreSQL NOTIFY
+  v
+Runtime coordinator (one fenced owner)
+  - runtime gRPC server and heartbeat registration
+  - runtime job listener and durable outbox dispatcher
+  - reconnect boundary for scheduler/worker clients
   |
   | SQL transactions + LISTEN/NOTIFY wakeups
   v
@@ -86,9 +93,15 @@ PostgreSQL (authoritative state)
   |
   +---- SKIP LOCKED claims ----> scheduler process(es)
   +---- SKIP LOCKED claims ----> build/compute worker process(es)
-  +---- SKIP LOCKED claims ----> outbox dispatcher process(es)
+  +---- SKIP LOCKED claims ----> worker manager / build workers
+  +---- durable outbox dispatch --> API projection listeners
                                       |
-                                      +---- idempotent external notifications
+                                      +---- idempotent notifications
+
+Worker manager owns Docker compute-worker lifecycle, replenishes ready,
+unassigned workers, and enforces the application-wide active capacity budget.
+API children do not bind the runtime gRPC port, register runtime heartbeats, or
+own preview single-flight state.
 
 Worker-owned execution writes fenced publication commands; object data is
 stored in the configured Iceberg catalog/object store and metadata authority
@@ -775,7 +788,7 @@ Tasks:
 - Reject `WORKERS > 1` unless distributed runtime flag is enabled.
 - Remove auto-worker behavior.
 - Document that current release supports one API process.
-- Keep `MAX_CONCURRENT_ENGINES` as the concurrency control.
+- Use `COMPUTE_WORKERS` as the single runtime capacity budget for jobs and active engine identities.
 
 Exit criteria:
 

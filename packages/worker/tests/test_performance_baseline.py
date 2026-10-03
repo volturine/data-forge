@@ -3,7 +3,6 @@ import time
 import uuid
 from unittest.mock import MagicMock, patch
 
-from dataforge_protocol import compute_pb2, enums_pb2
 from runtime import compute_service
 from runtime.compute_engine import PolarsComputeEngine
 from runtime.compute_manager import ProcessManager
@@ -40,12 +39,6 @@ def test_performance_baseline(sample_datasource):
     }
 
     manager = ProcessManager(engine_factory=lambda engine_identity, config: PolarsComputeEngine(engine_identity.resource_id, config))
-    identity = compute_pb2.EngineIdentity(
-        scope=enums_pb2.ENGINE_SCOPE_ANALYSIS_INTERACTIVE,
-        reuse_policy=enums_pb2.ENGINE_REUSE_POLICY_SHARED,
-        analysis_id=analysis_id,
-        resource_id=analysis_id,
-    )
     internal_client = MagicMock()
     internal_client.create_engine_run.return_value = "run-1"
     internal_client.engine_run_state.return_value = {"result_json": {}}
@@ -86,12 +79,11 @@ def test_performance_baseline(sample_datasource):
                 analysis_id=analysis_id,
             )
     finally:
-        if manager.get_engine(identity):
-            manager.shutdown_engine(identity)
+        manager.shutdown_all()
 
     file_bytes, _name, _content_type = export_result
 
-    assert preview_result.total_rows == 5
+    assert preview_result.response.total_rows == 5
     assert schema_result.columns
     assert file_bytes is not None
 
@@ -101,7 +93,7 @@ def test_performance_baseline(sample_datasource):
                 "preview_duration_ms": preview_ms,
                 "schema_duration_ms": schema_ms,
                 "export_duration_ms": export_ms,
-                "preview_rows": preview_result.total_rows,
+                "preview_rows": preview_result.response.total_rows,
             },
         ),
     )

@@ -13,3 +13,7 @@ def configure_logging() -> None:
         level=level,
         format="%(asctime)s %(levelname)s [%(name)s] %(message)s",
     )
+    # The application intentionally uses the existing Iceberg SQL catalog
+    # schema. PyIceberg emits this migration notice on every catalog instance;
+    # keep real catalog errors visible without flooding service diagnostics.
+    logging.getLogger("pyiceberg.catalog.sql").setLevel(logging.ERROR)

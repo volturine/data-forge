@@ -118,6 +118,7 @@
 	}
 
 	async function handleBulkUpload() {
+		if (loading) return;
 		if (selectedFiles.length === 0) {
 			error = 'Please select at least one file';
 			return;
@@ -196,6 +197,7 @@
 	}
 
 	async function handleFileUpload() {
+		if (loading) return;
 		if (!file || !fileName) {
 			error = 'Please select a file and provide a name';
 			return;
@@ -251,6 +253,7 @@
 	}
 
 	async function handleDatabaseConnect() {
+		if (loading) return;
 		if (!dbName || !connectionString || !query) {
 			error = 'Please fill in all fields';
 			return;
@@ -295,7 +298,6 @@
 				textDecoration: 'none',
 				'&:hover:not(:disabled)': { backgroundColor: 'bg.hover', color: 'fg.secondary' }
 			})}
-			data-sveltekit-reload
 		>
 			Cancel
 		</a>
@@ -725,6 +727,7 @@
 				{/if}
 
 				<button
+					type="button"
 					class={button({ variant: 'primary' })}
 					onclick={selectedFiles.length === 1 ? handleFileUpload : handleBulkUpload}
 					disabled={loading ||
@@ -796,6 +799,7 @@
 				</div>
 
 				<button
+					type="button"
 					class={button({ variant: 'primary' })}
 					onclick={handleDatabaseConnect}
 					disabled={loading}

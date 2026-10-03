@@ -1,7 +1,7 @@
 <script lang="ts">
-	import { page } from '$app/state';
+	import { browser } from '$app/environment';
+	import { afterNavigate } from '$app/navigation';
 	import { resolve } from '$app/paths';
-	import { onMount } from 'svelte';
 	import { css, button, spinner } from '$lib/styles/panda';
 	import { verifyEmail, resendVerification } from '$lib/api/auth';
 
@@ -10,13 +10,26 @@
 	let resending = $state(false);
 	let resent = $state(false);
 
-	const token = $derived(page.url.searchParams.get('token'));
+	let token = $state<string | null>(null);
 
-	onMount(() => {
-		if (!token) return;
+	// /verify is prerendered, so reading page.url.searchParams during SSR is
+	// invalid. Read the browser URL after hydration and after every client
+	// navigation so a token link updates the UI without a reload workaround.
+	if (browser) {
+		const updateToken = () => {
+			token = new URL(window.location.href).searchParams.get('token');
+		};
+		updateToken();
+		afterNavigate(updateToken);
+	}
+
+	$effect(() => {
+		const currentToken = token;
+		if (!currentToken) return;
+
 		let aborted = false;
 		status = 'loading';
-		void verifyEmail(token).then((result) => {
+		void verifyEmail(currentToken).then((result) => {
 			if (aborted) return;
 			result.match(
 				(data) => {

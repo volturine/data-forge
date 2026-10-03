@@ -20,9 +20,12 @@ from tests.harness.postgres_harness import (
     ExternalPostgres,
     PostgresContainer,
     RustfsContainer,
+    cleanup_stale_test_engine_networks,
     cleanup_stale_test_postgres,
     cleanup_stale_test_rustfs,
     docker_available,
+    docker_service_host,
+    process_host,
     require_docker,
 )
 
@@ -32,17 +35,34 @@ if TYPE_CHECKING:
 
 
 def pytest_sessionstart(session: pytest.Session) -> None:
+    if os.environ.get('DATAFORGE_TEST_CONTAINER') != '1':
+        raise RuntimeError('Backend tests must run in the containerized test runner')
+    process_host()
+    docker_service_host()
+    if not os.environ.get('DOCKER_HOST'):
+        raise RuntimeError('DOCKER_HOST must identify the Docker service daemon')
     os.environ.pop('POLARS_CORES_AVAILABLE', None)
     os.environ.pop('POLARS_MAX_THREADS', None)  # Polars native; keep tests isolated
     os.environ.pop('POLARS_STREAMING_CHUNK_SIZE', None)
     os.environ.setdefault('ENV_FILE', '')
     os.environ.setdefault('SETTINGS_ENCRYPTION_KEY', 'test-key')
-    os.environ.setdefault('DATABASE_URL', 'postgresql+psycopg://dataforge:dataforge@127.0.0.1:5432/dataforge')
+    if not os.environ.get('DATABASE_URL'):
+        os.environ['DATABASE_URL'] = f'postgresql+psycopg://dataforge:dataforge@{docker_service_host()}:5432/dataforge'
+    if getattr(session.config, 'workerinput', None) is not None:
+        return
     if os.environ.get('TEST_POSTGRES_URL'):
         return
     if docker_available():
+        # Startup cleanup checks each resource's owner before removing it.
         cleanup_stale_test_postgres()
         cleanup_stale_test_rustfs()
+
+
+def cleanup_stale_test_engine_networks_for_controller(session: pytest.Session) -> None:
+    if getattr(session.config, 'workerinput', None) is not None:
+        return
+    if docker_available():
+        cleanup_stale_test_engine_networks()
 
 
 def _settings():
@@ -68,12 +88,13 @@ def _register_sqlmodel_metadata() -> None:
     from backend_core.persistence.analysis.models import Analysis, AnalysisDataSource, AnalysisFavorite
     from backend_core.persistence.analysis_versions.models import AnalysisVersion
     from backend_core.persistence.build_jobs.models import BuildJob
-    from backend_core.persistence.build_runs.models import BuildEvent, BuildRun
+    from backend_core.persistence.build_runs.models import BuildEvent, BuildRun, BuildRunDatasource
     from backend_core.persistence.datasource.models import DataSource, DataSourceColumnMetadata
     from backend_core.persistence.engine_instances.models import EngineInstance
     from backend_core.persistence.engine_runs.models import EngineRun
     from backend_core.persistence.healthchecks.models import HealthCheck, HealthCheckResult
     from backend_core.persistence.locks.models import ResourceLock
+    from backend_core.persistence.mcp_pending.models import McpPendingAction
     from backend_core.persistence.namespaces.models import RuntimeNamespace
     from backend_core.persistence.runtime_events.models import NotificationDeliveryReceipt, RuntimeOutboxEvent
     from backend_core.persistence.runtime_workers.models import RuntimeWorker
@@ -90,12 +111,14 @@ def _register_sqlmodel_metadata() -> None:
     del BuildEvent
     del BuildJob
     del BuildRun
+    del BuildRunDatasource
     del DataSource
     del DataSourceColumnMetadata
     del EngineInstance
     del EngineRun
     del HealthCheck
     del HealthCheckResult
+    del McpPendingAction
     del ResourceLock
     del RuntimeNamespace
     del NotificationDeliveryReceipt
@@ -109,22 +132,25 @@ def _register_sqlmodel_metadata() -> None:
 
 def _settings_tables() -> list[Any]:
     from backend_core.persistence.engine_instances.models import EngineInstance
+    from backend_core.persistence.mcp_pending.models import McpPendingAction
     from backend_core.persistence.namespaces.models import RuntimeNamespace
     from backend_core.persistence.runtime_workers.models import RuntimeWorker
     from backend_core.persistence.settings.models import AppSettings
 
-    table_names = {AppSettings.__tablename__, EngineInstance.__tablename__, RuntimeWorker.__tablename__, RuntimeNamespace.__tablename__}
+    table_names = {
+        AppSettings.__tablename__,
+        EngineInstance.__tablename__,
+        McpPendingAction.__tablename__,
+        RuntimeWorker.__tablename__,
+        RuntimeNamespace.__tablename__,
+    }
     return [table for table in AppSettings.metadata.sorted_tables if table.name in table_names]
 
 
 def _reset_settings_state(engine: Engine) -> None:
-    from backend_core.settings_projection import invalidate_resolved_settings_cache
-
     with engine.begin() as conn:
         for table in reversed(_settings_tables()):
             conn.execute(table.delete())
-
-    invalidate_resolved_settings_cache()
 
 
 @pytest.fixture(scope='session')
@@ -317,6 +343,55 @@ class _TestWorkerDataPlaneClient:
         self._s3().put_object(**kwargs)
         return target_url
 
+    def upload_object_file(
+        self,
+        path: Path,
+        target_url: str,
+        *,
+        max_bytes: int,
+        content_type: str | None = None,
+    ) -> str:
+        from backend_core.data_plane_client import _MAX_OBJECT_TRANSFER_BYTES
+
+        bounded_limit = min(max_bytes or _MAX_OBJECT_TRANSFER_BYTES, _MAX_OBJECT_TRANSFER_BYTES)
+        bucket, key = self._parse_object_url(target_url)
+        extra_args: dict[str, str] = {}
+        if content_type is not None:
+            extra_args['ContentType'] = content_type
+
+        with path.open('rb') as source:
+            if os.fstat(source.fileno()).st_size > bounded_limit:
+                raise ValueError(f'object upload exceeds {bounded_limit} byte limit')
+            self._ensure_bucket_exists(bucket)
+            self._s3().upload_fileobj(source, bucket, key, ExtraArgs=extra_args)
+        return target_url
+
+    def upload_object_fileobj(
+        self,
+        source,
+        target_url: str,
+        *,
+        max_bytes: int,
+        content_type: str | None = None,
+    ) -> str:
+        from backend_core.data_plane_client import _MAX_OBJECT_TRANSFER_BYTES
+
+        bounded_limit = min(max_bytes or _MAX_OBJECT_TRANSFER_BYTES, _MAX_OBJECT_TRANSFER_BYTES)
+        position = source.tell()
+        source.seek(0, os.SEEK_END)
+        size = source.tell()
+        source.seek(position)
+        if size - position > bounded_limit:
+            raise ValueError(f'object upload exceeds {bounded_limit} byte limit')
+
+        bucket, key = self._parse_object_url(target_url)
+        extra_args: dict[str, str] = {}
+        if content_type is not None:
+            extra_args['ContentType'] = content_type
+        self._ensure_bucket_exists(bucket)
+        self._s3().upload_fileobj(source, bucket, key, ExtraArgs=extra_args)
+        return target_url
+
     def download_object_bytes(self, source_url: str) -> bytes:
         bucket, key = self._parse_object_url(source_url)
         response = self._s3().get_object(Bucket=bucket, Key=key)
@@ -484,7 +559,6 @@ def cleanup_namespace_engines():
     from backend_core import database
 
     yield
-    database.clear_namespace_init_cache()
     if database.tenant_engine is not None:
         database.tenant_engine.dispose()
         database.tenant_engine = None

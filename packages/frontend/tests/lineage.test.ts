@@ -1,7 +1,7 @@
 import { test, expect } from './fixtures.js';
-import { createDatasource, createAnalysis } from './utils/api.js';
+import { createAnalysis } from './utils/api.js';
 import { waitForLineageToolbar } from './utils/readiness.js';
-import { deleteAnalysisViaUI, deleteDatasourceViaUI } from './utils/ui-cleanup.js';
+import { deleteAnalysisViaUI } from './utils/ui-cleanup.js';
 import { uid } from './utils/uid.js';
 import { screenshot } from './utils/visual.js';
 
@@ -11,6 +11,7 @@ import { screenshot } from './utils/visual.js';
 test.describe('Lineage – page structure', () => {
 	test('renders Data Lineage heading', async ({ page }) => {
 		await page.goto('/lineage');
+		await waitForLineageToolbar(page);
 		await expect(page.getByRole('heading', { name: 'Data Lineage' })).toBeVisible();
 	});
 
@@ -39,6 +40,7 @@ test.describe('Lineage – page structure', () => {
 
 	test('sidebar shows "Select a node" prompt by default', async ({ page }) => {
 		await page.goto('/lineage');
+		await waitForLineageToolbar(page);
 		await expect(page.getByText('Select a node')).toBeVisible();
 		await expect(page.getByText('Click a node to view details and schedules.')).toBeVisible();
 		await screenshot(page, 'lineage', 'default-state');
@@ -112,13 +114,16 @@ test.describe('Lineage – graph interaction', () => {
 });
 
 test.describe('Lineage – with datasource data', () => {
-	test('lineage graph renders nodes when datasources exist', async ({ page, request }) => {
-		const dsName = `e2e-lineage-ds-${uid()}`;
+	test('lineage graph renders nodes when datasources exist', async ({
+		page,
+		request,
+		sharedDatasource
+	}) => {
 		const aName = `E2E Lineage ${uid()}`;
-		const dsId = await createDatasource(request, dsName);
-		await createAnalysis(request, aName, dsId);
+		await createAnalysis(request, aName, sharedDatasource.id);
 		try {
 			await page.goto('/lineage');
+			await waitForLineageToolbar(page);
 			// The lineage graph area should not show the error state
 			await expect(page.getByText('Failed to load lineage.')).not.toBeVisible();
 			// The graph container should be present and not loading
@@ -126,15 +131,17 @@ test.describe('Lineage – with datasource data', () => {
 			await screenshot(page, 'lineage', 'with-data');
 		} finally {
 			await deleteAnalysisViaUI(page, aName);
-			await deleteDatasourceViaUI(page, dsName);
 		}
 	});
 
-	test('clicking a lineage node opens node details in sidebar', async ({ page, request }) => {
-		const dsName = `e2e-lineage-node-${uid()}`;
+	test('clicking a lineage node opens node details in sidebar', async ({
+		page,
+		request,
+		sharedDatasource
+	}) => {
+		const dsName = sharedDatasource.name;
 		const aName = `E2E Lineage Node ${uid()}`;
-		const dsId = await createDatasource(request, dsName);
-		await createAnalysis(request, aName, dsId);
+		await createAnalysis(request, aName, sharedDatasource.id);
 		try {
 			await page.goto('/lineage');
 			await waitForLineageToolbar(page);
@@ -151,15 +158,17 @@ test.describe('Lineage – with datasource data', () => {
 			await expect(page.locator('aside').getByText(dsName)).toBeVisible({ timeout: 3_000 });
 		} finally {
 			await deleteAnalysisViaUI(page, aName);
-			await deleteDatasourceViaUI(page, dsName);
 		}
 	});
 
-	test('dragging the canvas pans visible lineage nodes', async ({ page, request }) => {
-		const dsName = `e2e-lineage-pan-ds-${uid()}`;
+	test('dragging the canvas pans visible lineage nodes', async ({
+		page,
+		request,
+		sharedDatasource
+	}) => {
+		const dsName = sharedDatasource.name;
 		const aName = `E2E Lineage Pan ${uid()}`;
-		const dsId = await createDatasource(request, dsName);
-		await createAnalysis(request, aName, dsId);
+		await createAnalysis(request, aName, sharedDatasource.id);
 
 		try {
 			await page.goto('/lineage');
@@ -193,7 +202,6 @@ test.describe('Lineage – with datasource data', () => {
 			expect(after.y).toBeGreaterThan(before.y + 40);
 		} finally {
 			await deleteAnalysisViaUI(page, aName);
-			await deleteDatasourceViaUI(page, dsName);
 		}
 	});
 });

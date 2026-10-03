@@ -26,7 +26,8 @@
 		datasourceIsAnalysisOutput,
 		datasourceIsDatabase,
 		datasourceIsFile,
-		datasourceIsIceberg
+		datasourceIsIceberg,
+		datasourceRowCount
 	} from '$lib/types/datasource';
 	import FileTypeBadge from '$lib/components/common/FileTypeBadge.svelte';
 	import FreshnessBadge from '$lib/components/common/FreshnessBadge.svelte';
@@ -85,6 +86,7 @@
 	}
 
 	const isOutputDatasource = $derived(datasourceIsAnalysisOutput(ds));
+	const rowCount = $derived(schema?.row_count ?? datasourceRowCount(ds));
 
 	function getExternalSource(value: DataSource) {
 		return datasourceExternalSourceConfig(value);
@@ -445,19 +447,19 @@
 					>
 					<span class={css({ fontWeight: 'medium' })}>{formatDateDisplay(ds.created_at)}</span>
 				</div>
+				<div class={css({ display: 'flex', alignItems: 'center', gap: '2' })}>
+					<span
+						class={css({
+							textTransform: 'uppercase',
+							letterSpacing: 'wide',
+							color: 'fg.muted'
+						})}>Rows</span
+					>
+					<span data-testid="datasource-row-count" class={css({ fontWeight: 'medium' })}
+						>{rowCount?.toLocaleString() ?? 'Unknown'}</span
+					>
+				</div>
 				{#if schema}
-					<div class={css({ display: 'flex', alignItems: 'center', gap: '2' })}>
-						<span
-							class={css({
-								textTransform: 'uppercase',
-								letterSpacing: 'wide',
-								color: 'fg.muted'
-							})}>Rows</span
-						>
-						<span data-testid="datasource-row-count" class={css({ fontWeight: 'medium' })}
-							>{schema.row_count?.toLocaleString() ?? 'Unknown'}</span
-						>
-					</div>
 					<div class={css({ display: 'flex', alignItems: 'center', gap: '2' })}>
 						<span
 							class={css({

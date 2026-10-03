@@ -9,7 +9,7 @@ router = APIRouter(prefix='/logs', tags=['logs'])
 
 @router.post('/client')
 @handle_errors(operation='ingest client logs')
-async def ingest_client_logs(batch: ClientLogBatch, request: Request):
+def ingest_client_logs(batch: ClientLogBatch, request: Request):
     client_id = request.headers.get('x-client-id')
     session_id = request.headers.get('x-client-session')
     items = [log.with_request_context(client_id=client_id, session_id=session_id) for log in batch.logs]

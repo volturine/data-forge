@@ -9,12 +9,16 @@ on:
 env:
   FORCE_JAVASCRIPT_ACTIONS_TO_NODE24: "true"
 
+permissions:
+  contents: read
+
 concurrency:
   group: ci-${{ github.ref }}
   cancel-in-progress: true
 
 jobs:
   verify:
+    name: verification
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v7
@@ -61,269 +65,6 @@ jobs:
       - name: Canonical verification
         run: just verify
 
-  backend:
-    runs-on: ubuntu-latest
-    steps:
-      - uses: actions/checkout@v7
-
-      - uses: astral-sh/setup-uv@v10.2.0
-        with:
-          version: "0.10.4"
-
-      - uses: actions/setup-python@v7
-        with:
-          python-version: "3.14.2"
-
-      - uses: oven-sh/setup-bun@v2
-        with:
-          bun-version: "1.3.11"
-
-      - uses: taiki-e/install-action@v2
-        with:
-          tool: just@1.51.0
-
-      - name: Generate protocol code
-        run: just generate-protocol
-
-      - name: Install backend dependencies
-        working-directory: packages/backend
-        run: uv sync
-
-      - name: Backend unit tests
-        working-directory: packages/backend
-        run: python ../../scripts/scan_warnings.py --cwd packages/backend -- env -u VIRTUAL_ENV uv run python -m pytest -c pyproject.toml -q tests --ignore=tests/integration
-
-  worker:
-    runs-on: ubuntu-latest
-    steps:
-      - uses: actions/checkout@v7
-
-      - uses: astral-sh/setup-uv@v10.2.0
-        with:
-          version: "0.10.4"
-
-      - uses: actions/setup-python@v7
-        with:
-          python-version: "3.14.2"
-
-      - uses: oven-sh/setup-bun@v2
-        with:
-          bun-version: "1.3.11"
-
-      - uses: taiki-e/install-action@v2
-        with:
-          tool: just@1.51.0
-
-      - name: Generate protocol code
-        run: just generate-protocol
-
-      - name: Install worker dependencies
-        working-directory: packages/worker
-        run: uv sync
-
-      - name: Worker tests
-        working-directory: packages/worker
-        run: python ../../scripts/scan_warnings.py --cwd packages/worker -- env -u VIRTUAL_ENV uv run python -m pytest -c pyproject.toml -q tests --ignore=tests/integration
-
-  scheduler:
-    runs-on: ubuntu-latest
-    steps:
-      - uses: actions/checkout@v7
-
-      - uses: astral-sh/setup-uv@v10.2.0
-        with:
-          version: "0.10.4"
-
-      - uses: actions/setup-python@v7
-        with:
-          python-version: "3.14.2"
-
-      - uses: oven-sh/setup-bun@v2
-        with:
-          bun-version: "1.3.11"
-
-      - uses: taiki-e/install-action@v2
-        with:
-          tool: just@1.51.0
-
-      - name: Generate protocol code
-        run: just generate-protocol
-
-      - name: Install scheduler dependencies
-        working-directory: packages/scheduler
-        run: uv sync
-
-      - name: Scheduler tests
-        working-directory: packages/scheduler
-        run: python ../../scripts/scan_warnings.py --cwd packages/scheduler -- env -u VIRTUAL_ENV uv run python -m pytest -c pyproject.toml -q tests
-
-  integration:
-    # GitHub-hosted runner. Docker is available here for the engine image build.
-    runs-on: ubuntu-latest
-    steps:
-      - uses: actions/checkout@v7
-
-      - uses: astral-sh/setup-uv@v10.2.0
-        with:
-          version: "0.10.4"
-
-      - uses: actions/setup-python@v7
-        with:
-          python-version: "3.14.2"
-
-      - uses: oven-sh/setup-bun@v2
-        with:
-          bun-version: "1.3.11"
-
-      - uses: taiki-e/install-action@v2
-        with:
-          tool: just@1.51.0
-
-      - name: Generate protocol code
-        run: just generate-protocol
-
-      - name: Install backend dependencies
-        working-directory: packages/backend
-        run: uv sync
-
-      - name: Backend integration tests
-        run: python scripts/scan_warnings.py -- bash -c 'docker build -f docker/Dockerfile --target engine -t data-forge-polars-engine:integration . && cd packages/backend && env -u VIRTUAL_ENV uv run python -m pytest -c pyproject.toml -q tests/integration'
-
-  frontend:
-    name: frontend
-    runs-on: ubuntu-latest
-    steps:
-      - uses: actions/checkout@v7
-
-      - uses: astral-sh/setup-uv@v10.2.0
-        with:
-          version: "0.10.4"
-
-      - uses: actions/setup-python@v7
-        with:
-          python-version: "3.14.2"
-
-      - uses: oven-sh/setup-bun@v2
-        with:
-          bun-version: "1.3.11"
-
-      - uses: actions/setup-node@v7
-        with:
-          node-version: "24"
-
-      - uses: taiki-e/install-action@v2
-        with:
-          tool: just@1.51.0
-
-      - name: Generate protocol code
-        run: just generate-protocol
-
-      - name: Install frontend dependencies
-        working-directory: packages/frontend
-        run: bun install --frozen-lockfile
-
-      - name: Frontend static checks
-        working-directory: packages/frontend
-        run: bun run panda:codegen && bun run check && bun run lint
-
-      - name: Frontend unit tests
-        run: python scripts/scan_warnings.py --cwd packages/frontend -- bun run test:unit
-
-  e2e:
-    name: e2e
-    # Only the e2e job uses the self-hosted runner.
-    runs-on: [self-hosted, linux, x64]
-    if: github.event_name == 'pull_request' && github.base_ref == 'master'
-    timeout-minutes: 35
-    permissions:
-      contents: read
-    env:
-      PORT: "8001"
-      FRONTEND_PORT: "3001"
-      # Leave compute headroom for auto-previews and cleanup that overlap the
-      # browser test which initiated them. No Playwright retries.
-      PW_E2E_WORKERS: "2"
-      BUILD_WORKER_MIN_PROCESSES: "4"
-      BUILD_WORKER_MAX_PROCESSES: "4"
-      COMPUTE_REQUEST_CONCURRENCY: "4"
-      MAX_CONCURRENT_ENGINES: "8"
-      POLARS_MAX_MEMORY_MB: "256"
-      E2E_TIMEOUT_SECONDS: "1500"
-      LOG_LEVEL: "warning"
-    steps:
-      - uses: actions/checkout@v7
-
-      - uses: astral-sh/setup-uv@v10.2.0
-        with:
-          enable-cache: false
-          version: "0.10.4"
-
-      - uses: actions/setup-python@v7
-        with:
-          python-version: "3.14.2"
-
-      - uses: actions/setup-node@v7
-        with:
-          node-version: "24"
-
-      - uses: oven-sh/setup-bun@v2
-        with:
-          bun-version: "1.3.11"
-
-      - uses: taiki-e/install-action@v2
-        with:
-          tool: just@1.51.0
-
-      - name: Generate protocol code
-        run: just generate-protocol
-
-      - name: Install backend dependencies
-        working-directory: packages/backend
-        run: uv sync
-
-      - name: Install frontend dependencies
-        working-directory: packages/frontend
-        run: bun install --frozen-lockfile
-
-      - name: Pull isolated Playwright runtime
-        run: |
-          PLAYWRIGHT_VERSION="$(node -p "require('./packages/frontend/node_modules/playwright/package.json').version")"
-          docker pull "mcr.microsoft.com/playwright:v${PLAYWRIGHT_VERSION}-noble"
-
-      - name: Reclaim unused Docker state
-        run: |
-          # Free stopped containers/volumes without wiping the engine image
-          # build cache. A cold 2.5GB engine rebuild dominates e2e wall time.
-          docker container prune --force
-          docker volume prune --force
-          docker image prune --force
-          docker system df
-          df -h
-
-      - name: Run e2e tests
-        run: |
-          set -o pipefail
-          mkdir -p .artifacts/ci/e2e
-          export E2E_LOG_DIR="$PWD/.artifacts/ci/e2e/services"
-          export DATAFORGE_SKIP_PROTOCOL_GENERATE=1
-          just test-e2e 2>&1 | tee .artifacts/ci/e2e/e2e.log
-          status=${PIPESTATUS[0]}
-          if [ "$status" -eq 124 ]; then
-            echo "e2e step hit the harness timeout (E2E_TIMEOUT_SECONDS) before the job timeout"
-          fi
-          exit "$status"
-
-      - name: Upload e2e diagnostics
-        if: always()
-        uses: actions/upload-artifact@v7
-        with:
-          name: e2e-diagnostics-${{ github.run_id }}
-          if-no-files-found: warn
-          include-hidden-files: true
-          path: |
-            .artifacts/ci/e2e/
-            packages/frontend/tests/.artifacts/playwright/
-
   publish-images:
     if: github.event_name == 'push' && (github.ref_name == 'dev' || github.ref_name == 'master')
     runs-on: ubuntu-latest
@@ -338,6 +79,8 @@ jobs:
             target: api
           - image_name: data-forge-scheduler
             target: scheduler
+          - image_name: data-forge-runtime
+            target: runtime
           - image_name: data-forge-worker
             target: worker
           - image_name: data-forge-polars-engine
@@ -393,6 +136,8 @@ jobs:
             target: api
           - image_name: data-forge-scheduler
             target: scheduler
+          - image_name: data-forge-runtime
+            target: runtime
           - image_name: data-forge-worker
             target: worker
     steps:

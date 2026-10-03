@@ -1,8 +1,9 @@
 import uuid
 from collections.abc import Sequence
 from datetime import UTC, datetime, timedelta
+from threading import get_ident
 from typing import cast
-from unittest.mock import AsyncMock
+from unittest.mock import AsyncMock, Mock
 from urllib.parse import parse_qs, urlparse
 
 import pytest
@@ -20,7 +21,6 @@ from backend_core.auth_exceptions import (
 )
 from backend_core.database import (
     clear_settings_engine_override,
-    get_settings_db,
     set_settings_engine_override,
 )
 from backend_core.domain.analysis.models import AnalysisStatus
@@ -30,7 +30,7 @@ from backend_core.persistence.datasource.models import DataSource
 from backend_core.persistence.udfs.models import Udf
 from backend_core.sqlmodel_typing import sa
 from main import app
-from modules.auth import commands as auth_commands
+from modules.auth import commands as auth_commands, routes as auth_routes
 from modules.auth.dependencies import get_current_user, get_optional_user
 from modules.auth.models import (
     AuthProvider,
@@ -41,7 +41,6 @@ from modules.auth.models import (
     VerificationToken,
     VerificationTokenType,
 )
-from modules.auth.routes import invalidate_me_cache
 from modules.auth.schemas import UserPublic
 from modules.auth.service import (
     _DEFAULT_USER_LOCK_ID,
@@ -163,20 +162,14 @@ def auth_db_session(auth_engine):
 def auth_client(auth_db_session: Session, auth_engine, monkeypatch):
     monkeypatch.setattr('backend_core.config.settings.debug', True)
     ensure_default_user(auth_db_session)
-    invalidate_me_cache()
-
-    def override_get_settings_db():
-        yield auth_db_session
 
     if hasattr(app.state, 'mcp_registry'):
         del app.state.mcp_registry
-    app.dependency_overrides[get_settings_db] = override_get_settings_db
     set_settings_engine_override(auth_engine)
     with TestClient(app) as client:
         yield client
     app.dependency_overrides.clear()
     clear_settings_engine_override()
-    invalidate_me_cache()
 
 
 class TestPasswordHashing:
@@ -560,6 +553,67 @@ class TestSessionService:
         assert resolved.id == user.id
         assert resolved.last_login_at is not None
 
+    def test_validate_session_does_not_write_user_login_timestamp(self, auth_db_session: Session) -> None:
+        user = create_user(auth_db_session, 'readonly-session@example.com', 'Password123', 'Read-only Session User')
+        user.last_login_at = None
+        user.updated_at = datetime(2026, 1, 1)
+        auth_db_session.add(user)
+        auth_db_session.commit()
+        user_session = create_session(auth_db_session, user.id, None, None)
+        auth_db_session.expire_all()
+        before = auth_db_session.get(User, user.id)
+        assert before is not None
+        timestamp = before.last_login_at
+        updated_at = before.updated_at
+
+        resolved = validate_session(auth_db_session, user_session.id)
+
+        assert resolved is not None
+        auth_db_session.expire_all()
+        after = auth_db_session.get(User, user.id)
+        assert after is not None
+        assert after.last_login_at == timestamp
+        assert after.updated_at == updated_at
+
+    def test_validate_session_does_not_commit_valid_session(self, auth_db_session: Session, monkeypatch: pytest.MonkeyPatch) -> None:
+        user = create_user(auth_db_session, 'readonly-commit@example.com', 'Password123', 'Read-only Commit User')
+        user_session = create_session(auth_db_session, user.id, None, None)
+        commits = 0
+        original_commit = auth_db_session.commit
+
+        def count_commit() -> None:
+            nonlocal commits
+            commits += 1
+            original_commit()
+
+        monkeypatch.setattr(auth_db_session, 'commit', count_commit)
+
+        assert validate_session(auth_db_session, user_session.id) is not None
+        assert commits == 0
+
+    def test_validate_session_resolves_user_with_one_query(self, auth_db_session: Session) -> None:
+        from sqlalchemy import event
+
+        user = create_user(auth_db_session, 'single-query-session@example.com', 'Password123', 'Single Query User')
+        user_session = create_session(auth_db_session, user.id, None, None)
+        session_id = user_session.id
+        auth_db_session.expire_all()
+        statements: list[str] = []
+        bind = auth_db_session.get_bind()
+
+        def record_statement(_connection, _cursor, statement, _parameters, _context, _executemany) -> None:
+            statements.append(statement)
+
+        event.listen(bind, 'before_cursor_execute', record_statement)
+        try:
+            resolved = validate_session(auth_db_session, session_id)
+        finally:
+            event.remove(bind, 'before_cursor_execute', record_statement)
+
+        assert resolved is not None
+        assert resolved.id == user.id
+        assert len(statements) == 1
+
     def test_validate_session_accepts_timezone_aware_expiry(self, auth_db_session: Session) -> None:
         user = create_user(
             auth_db_session,
@@ -898,10 +952,18 @@ class TestAuthRoutes:
         monkeypatch.setattr('backend_core.auth_config.settings.default_user_name', 'Guest User')
         ensure_default_user(auth_db_session)
 
-        app = FastAPI()
+        close = Mock(wraps=auth_db_session.close)
+        monkeypatch.setattr(auth_db_session, 'close', close)
 
-        def override_get_settings_db():
-            yield auth_db_session
+        def run_auth_db(function, *args, **kwargs):
+            try:
+                return function(auth_db_session, *args, **kwargs)
+            finally:
+                auth_db_session.close()
+
+        monkeypatch.setattr('modules.auth.dependencies.run_settings_db', run_auth_db)
+
+        app = FastAPI()
 
         @app.get('/current')
         async def current(user: User = Depends(get_current_user)) -> dict[str, str]:
@@ -913,7 +975,6 @@ class TestAuthRoutes:
         ) -> dict[str, str | None]:
             return {'email': user.email if user else None}
 
-        app.dependency_overrides[get_settings_db] = override_get_settings_db
         with TestClient(app) as client:
             resp_current = client.get('/current')
             resp_optional = client.get('/optional')
@@ -922,18 +983,15 @@ class TestAuthRoutes:
         assert resp_current.json()['email'] == 'guest@example.com'
         assert resp_optional.status_code == 200
         assert resp_optional.json()['email'] == 'guest@example.com'
+        assert close.call_count >= 2
 
     def test_get_current_user_returns_401_when_auth_required(
         self,
-        auth_db_session: Session,
         monkeypatch: pytest.MonkeyPatch,
     ) -> None:
         monkeypatch.setattr('backend_core.auth_config.settings.auth_required', True)
 
         app = FastAPI()
-
-        def override_get_settings_db():
-            yield auth_db_session
 
         @app.get('/current')
         async def current(user: User = Depends(get_current_user)) -> dict[str, str]:
@@ -945,7 +1003,6 @@ class TestAuthRoutes:
         ) -> dict[str, str | None]:
             return {'email': user.email if user else None}
 
-        app.dependency_overrides[get_settings_db] = override_get_settings_db
         with TestClient(app) as client:
             resp_current = client.get('/current')
             resp_optional = client.get('/optional')
@@ -1086,6 +1143,49 @@ class TestAuthRoutes:
         assert response.json()['email'] == 'login@example.com'
         assert 'session_token' in response.cookies
 
+    def test_login_runs_complete_settings_db_unit_in_bounded_thread(
+        self,
+        auth_client: TestClient,
+        monkeypatch: pytest.MonkeyPatch,
+    ) -> None:
+        auth_client.post(
+            '/api/v1/auth/register',
+            json={
+                'email': 'threaded-login@example.com',
+                'password': 'Password123',
+                'display_name': 'Threaded Login User',
+            },
+        )
+        submissions: list[tuple[int, object, object]] = []
+        command_threads: list[int] = []
+        run_api_blocking = auth_routes.run_api_blocking
+        login_user = auth_commands.login_user
+
+        async def observe_api_work(function, *args, **kwargs):
+            submissions.append((get_ident(), function, args[0]))
+            return await run_api_blocking(function, *args, **kwargs)
+
+        def observe_login_command(*args, **kwargs):
+            command_threads.append(get_ident())
+            return login_user(*args, **kwargs)
+
+        monkeypatch.setattr(auth_routes, 'run_api_blocking', observe_api_work)
+        monkeypatch.setattr(auth_commands, 'login_user', observe_login_command)
+
+        response = auth_client.post(
+            '/api/v1/auth/login',
+            json={'email': 'threaded-login@example.com', 'password': 'Password123'},
+        )
+
+        assert response.status_code == 200
+        assert response.json()['email'] == 'threaded-login@example.com'
+        assert 'session_token' in response.cookies
+        assert len(submissions) == 1
+        route_thread, db_runner, db_callback = submissions[0]
+        assert db_runner is auth_routes.run_settings_db
+        assert db_callback is auth_routes._login_user
+        assert command_threads and command_threads[0] != route_thread
+
     def test_login_wrong_password(self, auth_client: TestClient) -> None:
         auth_client.post(
             '/api/v1/auth/register',
@@ -1219,6 +1319,7 @@ class TestAuthRoutes:
         analysis_id = analysis.id
         udf_id = udf.id
         session_token = current_session.id
+        user_id = user.id
         auth_client.cookies.set('session_token', session_token)
         me_response = auth_client.get('/api/v1/auth/me')
         assert me_response.status_code == 200
@@ -1230,10 +1331,11 @@ class TestAuthRoutes:
         set_cookie = response.headers.get('set-cookie', '')
         assert 'session_token=' in set_cookie
         assert 'Max-Age=0' in set_cookie
-        assert get_user_by_id(auth_db_session, user.id) is None
-        assert auth_db_session.exec(select(AuthProvider).where(sa(AuthProvider.user_id == user.id))).all() == []
-        assert auth_db_session.exec(select(UserSession).where(sa(UserSession.user_id == user.id))).all() == []
-        assert auth_db_session.exec(select(VerificationToken).where(sa(VerificationToken.user_id == user.id))).all() == []
+        auth_db_session.expire_all()
+        assert get_user_by_id(auth_db_session, user_id) is None
+        assert auth_db_session.exec(select(AuthProvider).where(sa(AuthProvider.user_id == user_id))).all() == []
+        assert auth_db_session.exec(select(UserSession).where(sa(UserSession.user_id == user_id))).all() == []
+        assert auth_db_session.exec(select(VerificationToken).where(sa(VerificationToken.user_id == user_id))).all() == []
 
         datasource_owner = auth_db_session.exec(select(DataSource.owner_id).where(sa(DataSource.id == datasource_id))).one_or_none()
         analysis_owner = auth_db_session.exec(select(Analysis.owner_id).where(sa(Analysis.id == analysis_id))).one_or_none()

@@ -29,6 +29,8 @@
         "protobuf>=7.36.0",
         "protovalidate>=2.0.0",
         "polars[rtcompat]>=1.41.2",
+        "miniopy-async>=1.23.5",
+        "aiohttp>=3.14.3",
 ]
 
 [build-system]

@@ -1,0 +1,39 @@
+name: Frontend tests
+
+on:
+  pull_request:
+    branches: [dev, master]
+  push:
+    branches: [dev, master]
+
+env:
+  FORCE_JAVASCRIPT_ACTIONS_TO_NODE24: "true"
+
+permissions:
+  contents: read
+
+concurrency:
+  group: frontend-tests-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  frontend:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v7
+
+      - uses: taiki-e/install-action@v2
+        with:
+          tool: just@1.51.0
+
+      - name: Run frontend unit tests
+        run: just test-frontend
+
+      - name: Upload test artifacts
+        if: always()
+        uses: actions/upload-artifact@v7
+        with:
+          name: test-artifacts-frontend-${{ github.run_id }}
+          if-no-files-found: warn
+          include-hidden-files: true
+          path: .test-artifacts/**

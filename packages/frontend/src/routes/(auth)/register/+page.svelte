@@ -13,6 +13,7 @@
 	let confirm = $state('');
 	let validation = $state<string | null>(null);
 	let registered = $state(false);
+	let submitting = $state(false);
 
 	const valid = $derived(
 		password.length >= 8 && password === confirm && email.length > 0 && name.length > 0
@@ -31,12 +32,21 @@
 			return;
 		}
 
-		const success = await authStore.register(email, password, name);
-		if (success) registered = true;
+		submitting = true;
+		try {
+			const success = await authStore.register(email, password, name);
+			if (success) registered = true;
+		} finally {
+			submitting = false;
+		}
 	}
 
 	const displayed = $derived(validation ?? authStore.error);
 	const verifyEmailAddress = $derived(configStore.verifyEmailAddress);
+	// The public auth form is independent of the optional session probe started
+	// by the root layout. The browser flag only marks client hydration; waiting
+	// for authStore.loading here made a slow probe leave a visible but disabled
+	// registration form.
 	const hydrated = $derived(browser);
 </script>
 
@@ -171,12 +181,8 @@
 				/>
 			</div>
 
-			<button
-				type="submit"
-				class={button({ variant: 'primary' })}
-				disabled={authStore.loading || !valid}
-			>
-				{#if authStore.loading}
+			<button type="submit" class={button({ variant: 'primary' })} disabled={submitting || !valid}>
+				{#if submitting}
 					<div class={spinner({ size: 'sm' })}></div>
 				{/if}
 				Create account

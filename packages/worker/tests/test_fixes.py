@@ -1,9 +1,11 @@
 """Tests for bug fixes and new features."""
 
 import asyncio
+import contextvars
 import logging
 import os
 import tempfile
+import threading
 from datetime import UTC, datetime
 from types import SimpleNamespace
 from typing import Any, cast
@@ -14,6 +16,7 @@ from pydantic import ValidationError
 
 from builds.build_live import RuntimeBuild
 from dataforge_protocol import analysis_pb2, compute_pb2, datasource_pb2, enums_pb2
+from datasources import execution as datasource_execution
 from operations.download import DownloadParams
 from operations.export import ExportParams
 from operations.notification import NotificationHandler, NotificationParams
@@ -21,15 +24,570 @@ from operations.plot import ChartHandler, ChartParams, compute_chart_data
 from operations.step_converter import analysis_pipeline_to_execution_payload
 from runtime import compute_request_runtime, compute_service, datasource_delete_runtime, worker_runtime_client
 from runtime.compute_engine import PolarsComputeEngine
-from runtime.compute_manager import ProcessManager
+from runtime.compute_manager import (
+    ENGINE_ADMISSION_PRIORITY_DATASOURCE,
+    ENGINE_ADMISSION_PRIORITY_INTERACTIVE,
+    ENGINE_ADMISSION_PRIORITY_LIFECYCLE,
+    ProcessManager,
+)
 from runtime.compute_service import ExportDatasourceResult
 from runtime.domain.compute import schemas as compute_schemas
+from runtime.domain.compute.base import EngineStatusInfo
 from runtime.domain.engine_runs.schemas import EngineRunResponseSchema
+from runtime.executors import (
+    CLEANUP_EXECUTOR,
+    COMPUTE_EXECUTOR,
+    CONTROL_EXECUTOR,
+    ENGINE_IO_EXECUTOR,
+    run_compute_in_thread,
+    run_control_in_thread,
+    run_engine_io_in_thread,
+)
 from runtime.worker_runtime_client import BackendWorkerRpcError, PendingDatasourceDelete
 
 # ---------------------------------------------------------------------------
 # Build runtime regressions
 # ---------------------------------------------------------------------------
+
+
+def test_datasource_schema_publication_carries_metadata_revision_and_claim(monkeypatch) -> None:
+    from contextlib import contextmanager
+
+    from runtime.domain.compute.result import EngineResult
+
+    schema_info = datasource_pb2.SchemaInfo(columns=[datasource_pb2.ColumnSchema(name="value", dtype="Int64", nullable=True)])
+    published: dict[str, object] = {}
+    engine_payloads = []
+
+    class Client:
+        def datasource_metadata(self, **_kwargs):
+            return worker_runtime_client.DatasourceMetadata(
+                found=True,
+                id="datasource-1",
+                name="Source",
+                source_type="file",
+                config={"file_path": "s3://default/uploads/source.csv", "file_type": "csv"},
+                schema_cache=None,
+                is_hidden=False,
+                revision=7,
+            )
+
+        def publish_datasource_schema_cache(self, **kwargs):
+            published.update(kwargs)
+            return kwargs["schema_info"]
+
+    class Engine:
+        def datasource_job(self, kind, payload):
+            engine_payloads.append((kind, payload))
+            return "engine-job"
+
+        def get_result(self, **_kwargs):
+            return EngineResult(job_id="engine-job", data={"columns": [{"name": "value", "dtype": "Int64", "nullable": True}]}, error=None)
+
+    class Manager:
+        @contextmanager
+        def acquire_engine(self, identity):
+            assert identity.resource_id == "datasource-1"
+            yield Engine()
+
+    def fail_local_compute(*_args, **_kwargs):
+        raise AssertionError("Datasource schema extraction ran in the manager")
+
+    monkeypatch.setattr(datasource_execution, "_extract_schema_from_metadata", fail_local_compute)
+    command = compute_pb2.ComputeCommand()
+    command.datasource.schema.CopyFrom(datasource_pb2.DatasourceSchemaCommand(datasource_id="datasource-1", refresh=True))
+    command.input_revisions.add(datasource_id="datasource-1", revision=7)
+    claimed = compute_request_runtime.ClaimedComputeRequest(
+        id="request-1",
+        namespace="default",
+        kind=enums_pb2.COMPUTE_REQUEST_KIND_DATASOURCE_SCHEMA,
+        command_envelope=compute_pb2.ComputeCommandEnvelope(command=command),
+        worker_id="worker-1",
+        claim_token="claim-1",
+        lease_generation=3,
+        lease_ttl_seconds=300,
+    )
+    result = compute_request_runtime._execute_datasource_command(Client(), claimed, Manager(), command.datasource)
+    assert result.schema == schema_info
+    assert published == {
+        "namespace": "default",
+        "datasource_id": "datasource-1",
+        "schema_info": schema_info,
+        "expected_revision": 7,
+        "compute_request_id": "request-1",
+        "worker_id": "worker-1",
+        "claim_token": "claim-1",
+        "lease_generation": 3,
+    }
+    assert engine_payloads[0][0] == "datasource_schema"
+    assert engine_payloads[0][1]["datasource_metadata"]["revision"] == 7
+    assert "claim_token" not in engine_payloads[0][1]
+
+
+def test_terminal_compute_completion_retries_after_api_reconnect(monkeypatch) -> None:
+    calls = 0
+
+    class Client:
+        def complete_compute_request(self, **kwargs) -> None:
+            nonlocal calls
+            calls += 1
+            if calls == 1:
+                raise BackendWorkerRpcError(
+                    status_code=503,
+                    error="API unavailable",
+                    error_code="UNAVAILABLE",
+                )
+            assert kwargs["timeout_seconds"] == 15.0
+
+    monkeypatch.setattr(compute_request_runtime.time, "sleep", lambda _seconds: None)
+    claimed = compute_request_runtime.ClaimedComputeRequest(
+        id="terminal-retry",
+        namespace="default",
+        kind=enums_pb2.COMPUTE_REQUEST_KIND_PREVIEW,
+        worker_id="worker-test",
+        claim_token="claim-test",
+        lease_generation=1,
+        lease_ttl_seconds=300,
+        command_envelope=compute_pb2.ComputeCommandEnvelope(),
+    )
+
+    compute_request_runtime._complete_request(
+        Client(),
+        claimed,
+        response=compute_pb2.ComputeResponse(),
+    )
+
+    assert calls == 2
+
+
+@pytest.mark.asyncio
+async def test_claim_hash_survives_client_to_dispatcher_handoff(monkeypatch) -> None:
+    command_hash = "7a4c-hash"
+    claimed_by_client = worker_runtime_client.ClaimedComputeRequest(
+        id="request-with-hash",
+        namespace="default",
+        kind=enums_pb2.COMPUTE_REQUEST_KIND_PREVIEW,
+        command_envelope=_preview_command_envelope(request_id="request-with-hash"),
+        worker_id="worker-test",
+        claim_token="claim-token",
+        lease_generation=1,
+        lease_expires_at=datetime.now(UTC),
+        attempt=1,
+        lease_ttl_seconds=300,
+        command_hash=command_hash,
+    )
+
+    class Client:
+        def __enter__(self):
+            return self
+
+        def __exit__(self, *_args):
+            return None
+
+        async def claim_compute_request_async(self, **_kwargs):
+            return claimed_by_client
+
+    async def execute_request(_claimed, _manager, *, work_semaphore=None) -> None:
+        return None
+
+    async def get_client() -> Client:
+        return Client()
+
+    monkeypatch.setattr(compute_request_runtime, "async_client_from_env", get_client)
+    monkeypatch.setattr(compute_request_runtime, "_execute_request", execute_request)
+
+    claimed = await compute_request_runtime.next_compute_request("worker-test", namespace="default")
+    assert claimed is not None
+    assert claimed.command_hash == command_hash
+    assert await compute_request_runtime._run_once(
+        worker_id="worker-test",
+        manager=cast(Any, SimpleNamespace()),
+        namespace="default",
+    )
+
+
+@pytest.mark.asyncio
+async def test_compute_claim_hash_is_decoded_from_rpc_command(monkeypatch) -> None:
+    import hashlib
+    from datetime import timedelta
+
+    from dataforge_protocol import worker_runtime_pb2
+
+    command_envelope = _preview_command_envelope(request_id="rpc-claim")
+    response = worker_runtime_pb2.WorkerClaimComputeRequestResponse(
+        request=worker_runtime_pb2.WorkerClaimedComputeRequest(
+            id="rpc-claim",
+            namespace="default",
+            kind=enums_pb2.COMPUTE_REQUEST_KIND_PREVIEW,
+            command=command_envelope,
+            claim_token="claim-token",
+            lease_generation=1,
+            attempt=1,
+            lease_ttl_seconds=300,
+        )
+    )
+    response.request.lease_expires_at.FromDatetime(datetime.now(UTC) + timedelta(minutes=5))
+
+    class WorkerStub:
+        def ClaimComputeRequest(self, request, **_kwargs):
+            assert request.worker_id == "worker-test"
+            assert request.target_namespace == "default"
+            return asyncio.sleep(0, result=response)
+
+    client = object.__new__(worker_runtime_client.WorkerRuntimeClient)
+    stub = WorkerStub()
+
+    async def resolve_rpc(call, *, operation):
+        assert operation == "ClaimComputeRequest"
+        return await call
+
+    monkeypatch.setattr(client, "_async_stubs", lambda: (stub, None))
+    monkeypatch.setattr(client, "_call_async", resolve_rpc)
+    monkeypatch.setattr(client, "_control_timeout", lambda: 5.0)
+    monkeypatch.setattr(client, "_metadata", lambda: ())
+
+    async def get_client():
+        return client
+
+    monkeypatch.setattr(compute_request_runtime, "async_client_from_env", get_client)
+
+    claimed = await compute_request_runtime.next_compute_request("worker-test", namespace="default")
+
+    expected_hash = hashlib.sha256(command_envelope.command.SerializeToString(deterministic=True)).hexdigest()
+    assert claimed is not None
+    assert claimed.command_hash == expected_hash
+
+
+@pytest.mark.asyncio
+async def test_compute_request_lease_batcher_coalesces_by_namespace() -> None:
+    batches: list[tuple[str, list[str]]] = []
+
+    class Client:
+        _target = "runtime-coordinator"
+
+        def _metadata(self):
+            return (("x-runtime-coordinator-generation", "1"),)
+
+        async def _renew_compute_request_leases_batch_async(self, *, namespace, worker_id, renewals, timeout_seconds):
+            assert worker_id == "worker-batch"
+            assert timeout_seconds == 10
+            request_ids = [request_id for request_id, _token, _generation in renewals]
+            batches.append((namespace, request_ids))
+            return {request_id: 30 for request_id in request_ids if request_id != "request-stale"}
+
+    batcher = worker_runtime_client._ComputeLeaseRenewalBatcher(batch_window_seconds=0.1)
+    submissions = [("default", f"request-{index}") for index in range(8)] + [("tenant-a", "request-a"), ("tenant-b", "request-b"), ("default", "request-stale")]
+
+    async def renew(namespace: str, request_id: str) -> int | None:
+        return await batcher.renew(
+            Client(),
+            request_id=request_id,
+            namespace=namespace,
+            worker_id="worker-batch",
+            claim_token=f"token-{request_id}",
+            lease_generation=1,
+            timeout_seconds=10,
+        )
+
+    try:
+        results = await asyncio.wait_for(
+            asyncio.gather(*(renew(namespace, request_id) for namespace, request_id in submissions)),
+            timeout=2,
+        )
+    finally:
+        await batcher.close()
+
+    assert results == [30] * 8 + [30, 30, None]
+    assert {namespace: set(request_ids) for namespace, request_ids in batches} == {
+        "default": {*(f"request-{index}" for index in range(8)), "request-stale"},
+        "tenant-a": {"request-a"},
+        "tenant-b": {"request-b"},
+    }
+    assert len(batches) == 3
+
+
+@pytest.mark.asyncio
+async def test_cancelled_compute_lease_follower_does_not_cancel_shared_rpc() -> None:
+    rpc_started = asyncio.Event()
+    release_rpc = asyncio.Event()
+    renewed_ids: list[str] = []
+
+    class Client:
+        _target = "runtime-coordinator"
+
+        def _metadata(self):
+            return (("x-runtime-coordinator-generation", "1"),)
+
+        async def _renew_compute_request_leases_batch_async(self, *, renewals, **_kwargs):
+            renewed_ids.extend(request_id for request_id, _token, _generation in renewals)
+            rpc_started.set()
+            await release_rpc.wait()
+            return {request_id: 30 for request_id in renewed_ids}
+
+    batcher = worker_runtime_client._ComputeLeaseRenewalBatcher(batch_window_seconds=0)
+
+    def submit(request_id: str) -> asyncio.Task[int | None]:
+        return asyncio.create_task(
+            batcher.renew(
+                Client(),
+                request_id=request_id,
+                namespace="default",
+                worker_id="worker-batch",
+                claim_token=f"token-{request_id}",
+                lease_generation=1,
+                timeout_seconds=10,
+            )
+        )
+
+    cancelled = submit("cancelled")
+    follower = submit("follower")
+    try:
+        await asyncio.wait_for(rpc_started.wait(), timeout=1)
+        cancelled.cancel()
+        with pytest.raises(asyncio.CancelledError):
+            await cancelled
+        release_rpc.set()
+        assert await asyncio.wait_for(follower, timeout=1) == 30
+    finally:
+        release_rpc.set()
+        if not cancelled.done():
+            cancelled.cancel()
+        if not follower.done():
+            follower.cancel()
+        await asyncio.gather(cancelled, follower, return_exceptions=True)
+        await batcher.close()
+
+    assert set(renewed_ids) == {"cancelled", "follower"}
+
+
+@pytest.mark.asyncio
+async def test_compute_request_lease_client_routes_through_batcher(monkeypatch) -> None:
+    captured: dict[str, object] = {}
+
+    class Batcher:
+        async def renew(self, client, **kwargs):
+            captured["client"] = client
+            captured.update(kwargs)
+            return 45
+
+    client = cast(Any, object.__new__(worker_runtime_client.WorkerRuntimeClient))
+    monkeypatch.setattr(worker_runtime_client, "_get_compute_lease_batcher", lambda _loop: Batcher())
+
+    renewed_ttl = await client.renew_compute_request_lease(
+        request_id="request-batched",
+        namespace="tenant-a",
+        worker_id="worker-batch",
+        claim_token="claim-token",
+        lease_generation=3,
+        timeout_seconds=20,
+    )
+
+    assert renewed_ttl == 45
+    assert captured == {
+        "client": client,
+        "request_id": "request-batched",
+        "namespace": "tenant-a",
+        "worker_id": "worker-batch",
+        "claim_token": "claim-token",
+        "lease_generation": 3,
+        "timeout_seconds": 20,
+    }
+
+
+@pytest.mark.asyncio
+async def test_compute_claim_lease_is_extended_immediately(monkeypatch) -> None:
+    renewed = asyncio.Event()
+    stop_event = asyncio.Event()
+    calls = 0
+
+    class Client:
+        async def renew_compute_request_lease(self, **_kwargs) -> float:
+            nonlocal calls
+            calls += 1
+            renewed.set()
+            stop_event.set()
+            return 300.0
+
+    client = Client()
+
+    async def get_client() -> Client:
+        return client
+
+    monkeypatch.setattr(compute_request_runtime, "async_client_from_env", get_client)
+    claimed = compute_request_runtime.ClaimedComputeRequest(
+        id="short-delivery-lease",
+        namespace="default",
+        kind=enums_pb2.COMPUTE_REQUEST_KIND_PREVIEW,
+        worker_id="worker-test",
+        claim_token="claim-test",
+        lease_generation=1,
+        lease_ttl_seconds=20,
+        lease_deadline_monotonic=asyncio.get_running_loop().time() + 20,
+        command_envelope=compute_pb2.ComputeCommandEnvelope(),
+    )
+
+    renewal = asyncio.create_task(compute_request_runtime._renew_compute_lease(claimed, stop_event=stop_event))
+    try:
+        await asyncio.wait_for(renewed.wait(), timeout=0.5)
+        await asyncio.wait_for(renewal, timeout=0.5)
+    finally:
+        stop_event.set()
+        if not renewal.done():
+            renewal.cancel()
+        await asyncio.gather(renewal, return_exceptions=True)
+
+    assert calls == 1
+
+
+@pytest.mark.asyncio
+async def test_control_executor_remains_available_when_compute_budget_is_full() -> None:
+    capacity = COMPUTE_EXECUTOR._max_workers
+    release = threading.Event()
+    capacity_reached = threading.Event()
+    started = 0
+    started_lock = threading.Lock()
+
+    def block_control_call() -> None:
+        nonlocal started
+        with started_lock:
+            started += 1
+            if started == capacity:
+                capacity_reached.set()
+        release.wait()
+
+    calls = [asyncio.create_task(run_compute_in_thread(block_control_call)) for _ in range(capacity)]
+    try:
+        assert await asyncio.wait_for(asyncio.to_thread(capacity_reached.wait, 2), timeout=3)
+        control_thread = await asyncio.wait_for(run_control_in_thread(lambda: threading.current_thread().name), timeout=1)
+        assert control_thread.startswith("runtime-control")
+    finally:
+        release.set()
+    await asyncio.gather(*calls)
+
+
+def test_compute_executor_matches_the_single_runtime_work_budget() -> None:
+    workers = compute_request_runtime.compute_request_worker_count()
+    assert COMPUTE_EXECUTOR._max_workers == workers
+    assert ENGINE_IO_EXECUTOR._max_workers == workers
+    assert CONTROL_EXECUTOR._max_workers == min(4, workers)
+    assert CLEANUP_EXECUTOR._max_workers == min(2, workers)
+    assert len({COMPUTE_EXECUTOR, CONTROL_EXECUTOR, CLEANUP_EXECUTOR, ENGINE_IO_EXECUTOR}) == 4
+
+
+@pytest.mark.asyncio
+async def test_engine_io_uses_a_separate_executor_from_runtime_control() -> None:
+    engine_io_thread = await run_engine_io_in_thread(lambda: threading.current_thread().name)
+    control_thread = await run_control_in_thread(lambda: threading.current_thread().name)
+
+    assert engine_io_thread.startswith("engine-io")
+    assert control_thread.startswith("runtime-control")
+
+
+@pytest.mark.asyncio
+async def test_runtime_executor_preserves_request_context() -> None:
+    namespace = contextvars.ContextVar("executor-test-namespace", default="missing")
+    token = namespace.set("tenant-a")
+    try:
+        assert await run_control_in_thread(namespace.get) == "tenant-a"
+    finally:
+        namespace.reset(token)
+
+
+@pytest.mark.asyncio
+async def test_cancelled_compute_keeps_its_slot_until_thread_stops() -> None:
+    thread_started = threading.Event()
+    release_thread = threading.Event()
+    cancellation_started = threading.Event()
+
+    def blocking_work() -> None:
+        thread_started.set()
+        release_thread.wait()
+
+    task = asyncio.create_task(
+        run_compute_in_thread(
+            blocking_work,
+            cancel_work=cancellation_started.set,
+        )
+    )
+    try:
+        assert await asyncio.wait_for(asyncio.to_thread(thread_started.wait, 2), timeout=3)
+        task.cancel()
+        assert await asyncio.wait_for(asyncio.to_thread(cancellation_started.wait, 2), timeout=3)
+        assert not task.done()
+    finally:
+        release_thread.set()
+    with pytest.raises(asyncio.CancelledError):
+        await task
+
+
+def test_engine_admission_prioritizes_shared_datasource_preview() -> None:
+    datasource_identity = compute_pb2.EngineIdentity(
+        scope=enums_pb2.ENGINE_SCOPE_DATASOURCE_PREVIEW,
+        reuse_policy=enums_pb2.ENGINE_REUSE_POLICY_SHARED,
+        datasource_id="datasource-rid",
+        resource_id="datasource-rid",
+    )
+    analysis_identity = compute_pb2.EngineIdentity(
+        scope=enums_pb2.ENGINE_SCOPE_ANALYSIS_INTERACTIVE,
+        reuse_policy=enums_pb2.ENGINE_REUSE_POLICY_SHARED,
+        analysis_id="analysis-rid",
+        resource_id="analysis-rid",
+    )
+
+    assert (
+        compute_request_runtime._engine_admission_priority(
+            enums_pb2.COMPUTE_REQUEST_KIND_PREVIEW,
+            datasource_identity,
+        )
+        == ENGINE_ADMISSION_PRIORITY_DATASOURCE
+    )
+    assert (
+        compute_request_runtime._engine_admission_priority(
+            enums_pb2.COMPUTE_REQUEST_KIND_PREVIEW,
+            analysis_identity,
+        )
+        == ENGINE_ADMISSION_PRIORITY_INTERACTIVE
+    )
+    assert (
+        compute_request_runtime._engine_admission_priority(
+            enums_pb2.COMPUTE_REQUEST_KIND_SPAWN_ENGINE,
+            analysis_identity,
+        )
+        == ENGINE_ADMISSION_PRIORITY_LIFECYCLE
+    )
+
+
+@pytest.mark.asyncio
+async def test_compute_request_claims_share_a_bounded_control_plane(monkeypatch) -> None:
+    active = 0
+    peak = 0
+
+    async def fake_next_request(*_args, **_kwargs):
+        nonlocal active, peak
+        active += 1
+        peak = max(peak, active)
+        await asyncio.sleep(0.02)
+        active -= 1
+        return None
+
+    monkeypatch.setattr(compute_request_runtime, "next_compute_request", fake_next_request)
+    claim_capacity = compute_request_runtime.compute_request_claim_worker_count()
+    assert claim_capacity == min(compute_request_runtime.compute_request_worker_count(), 4)
+    claim_semaphore = asyncio.Semaphore(claim_capacity)
+
+    await asyncio.gather(
+        *(
+            compute_request_runtime._run_once(
+                worker_id=f"worker-{index}",
+                manager=cast(Any, SimpleNamespace()),
+                namespace="default",
+                claim_semaphore=claim_semaphore,
+            )
+            for index in range(8)
+        )
+    )
+
+    assert peak == claim_capacity
 
 
 def test_engine_run_execution_entry_proto_uses_typed_fields() -> None:
@@ -50,6 +608,19 @@ def test_engine_run_execution_entry_proto_uses_typed_fields() -> None:
     assert entry.step_type == enums_pb2.STEP_TYPE_FILTER
     assert entry.duration_ms == 12.5
     assert entry.share_pct == 100.0
+
+
+def test_engine_run_execution_entries_normalize_invalid_timing_metrics() -> None:
+    entries = compute_service._build_execution_entries(
+        step_timings={"filter": -5.0, "join": float("nan")},
+        read_duration_ms=-10.0,
+        collect_duration_ms=250.0,
+        total_duration_ms=1,
+    )
+
+    assert [entry["key"] for entry in entries] == ["compute"]
+    assert entries[0]["duration_ms"] == 250.0
+    assert entries[0]["share_pct"] == 100.0
 
 
 def test_export_operation_params_accept_generated_enum_numbers() -> None:
@@ -108,26 +679,51 @@ def test_engine_run_update_proto_uses_typed_patch_fields() -> None:
     assert update.clear_current_step is True
 
 
+def test_engine_run_finalization_uses_the_existing_typed_update() -> None:
+    finalization = worker_runtime_client._engine_run_finalization_proto(
+        worker_runtime_client.EngineRunFinalization(
+            run_id="run-1",
+            fields={
+                "status": "success",
+                "result_json": {"row_count": 5},
+                "completed_at": datetime.now(UTC),
+            },
+        )
+    )
+
+    assert finalization.run_id == "run-1"
+    assert finalization.merge_result is False
+    assert finalization.update.status == enums_pb2.ENGINE_RUN_STATUS_SUCCESS
+    assert finalization.update.result_json.fields["row_count"].number_value == 5
+    assert finalization.update.HasField("completed_at")
+
+
 def test_engine_status_result_proto_uses_typed_snapshot_fields() -> None:
     status = worker_runtime_client._engine_status_result_proto(
-        {
-            "analysis_id": "analysis-1",
-            "resource_id": "datasource-1",
-            "status": "healthy",
-            "container_id": "container-1234",
-            "image_digest": "sha256:abc",
-            "lifecycle_status": "running",
-            "supervisor_id": "worker-1",
-            "owner_id": "worker-1",
-            "last_activity": datetime.now(UTC).isoformat(),
-            "current_job_id": "job-1",
-            "resource_config": {"max_threads": 2},
-            "effective_resources": {"max_threads": 2, "max_memory_mb": 1024},
-            "defaults": {"max_threads": 2, "max_memory_mb": 1024, "streaming_chunk_size": 500},
-            "scope": "datasource_preview",
-            "reuse_policy": "shared",
-            "datasource_id": "datasource-1",
-        }
+        EngineStatusInfo(
+            analysis_id="analysis-1",
+            resource_id="datasource-1",
+            status="healthy",
+            container_id="container-1234",
+            image_digest="sha256:abc",
+            lifecycle_status="running",
+            termination_reason=None,
+            exit_code=None,
+            oom_killed=None,
+            supervisor_id="worker-1",
+            owner_id="worker-1",
+            last_activity=datetime.now(UTC).isoformat(),
+            current_job_id="job-1",
+            resource_config={"max_threads": 2},
+            effective_resources={"max_threads": 2, "max_memory_mb": 1024},
+            defaults={"max_threads": 2, "max_memory_mb": 1024, "streaming_chunk_size": 500},
+            scope="datasource_preview",
+            reuse_policy="shared",
+            datasource_id="datasource-1",
+            build_id=None,
+            current_build_id=None,
+            current_engine_run_id=None,
+        )
     )
 
     assert status.status == enums_pb2.ENGINE_STATUS_HEALTHY
@@ -338,6 +934,7 @@ def test_analysis_pipeline_protocol_deduplicate_absent_subset_is_not_null() -> N
 
 def test_preview_compute_request_uses_typed_command_not_legacy_payload(monkeypatch) -> None:
     completed: list[compute_pb2.ComputeResponse] = []
+    publication_order: list[str] = []
 
     monkeypatch.setattr(compute_request_runtime, "set_namespace_context", lambda namespace: namespace)
     monkeypatch.setattr(compute_request_runtime, "reset_namespace", lambda token: None)
@@ -349,14 +946,17 @@ def test_preview_compute_request_uses_typed_command_not_legacy_payload(monkeypat
         assert kwargs["page"] == 2
         assert kwargs["analysis_pipeline"]["analysis_id"] == "analysis-from-proto"
         assert kwargs["request_json"]["analysis_id"] == "analysis-from-proto"
+        assert kwargs["command_hash"] == "safe-command-hash"
         assert "legacy_payload" not in kwargs["request_json"]
-        return compute_schemas.StepPreviewResponse(
-            step_id="source",
-            columns=[],
-            data=[],
-            total_rows=0,
-            page=2,
-            page_size=25,
+        return compute_request_runtime.service.PreviewOutcome(
+            response=compute_schemas.StepPreviewResponse(
+                step_id="source",
+                columns=[],
+                data=[],
+                total_rows=0,
+                page=2,
+                page_size=25,
+            )
         )
 
     class _Client:
@@ -364,13 +964,11 @@ def test_preview_compute_request_uses_typed_command_not_legacy_payload(monkeypat
             pass
 
         def complete_compute_request(self, **kwargs):
+            publication_order.append("durable")
             completed.append(kwargs["response"])
 
         def fail_compute_request(self, **_kwargs):
             raise AssertionError("request should not fail")
-
-        def dispatch_runtime_outbox(self):
-            return 0
 
     monkeypatch.setattr(compute_request_runtime, "worker_runtime_client", lambda: _Client())
     monkeypatch.setattr(compute_request_runtime.service, "preview_step", fake_preview_step)
@@ -383,6 +981,7 @@ def test_preview_compute_request_uses_typed_command_not_legacy_payload(monkeypat
         claim_token="claim-test",
         lease_generation=1,
         lease_ttl_seconds=300,
+        command_hash="safe-command-hash",
         command_envelope=_preview_command_envelope(request_id="req-preview"),
     )
 
@@ -391,6 +990,7 @@ def test_preview_compute_request_uses_typed_command_not_legacy_payload(monkeypat
     assert len(completed) == 1
     assert completed[0].WhichOneof("response") == "preview"
     assert completed[0].preview.step_id == "source"
+    assert publication_order == ["durable"]
 
 
 @pytest.mark.asyncio
@@ -399,10 +999,13 @@ async def test_compute_request_renewal_reports_lost_claim(monkeypatch) -> None:
         def close(self):
             pass
 
-        def renew_compute_request_lease(self, **_kwargs):
+        async def renew_compute_request_lease(self, **_kwargs):
             return None
 
-    monkeypatch.setattr(compute_request_runtime, "worker_runtime_client", lambda: _Client())
+    async def get_client() -> _Client:
+        return _Client()
+
+    monkeypatch.setattr(compute_request_runtime, "async_client_from_env", get_client)
     claimed = compute_request_runtime.ClaimedComputeRequest(
         id="req-lost",
         namespace="default",
@@ -418,9 +1021,977 @@ async def test_compute_request_renewal_reports_lost_claim(monkeypatch) -> None:
         await compute_request_runtime._renew_compute_lease(claimed, stop_event=asyncio.Event())
 
 
+@pytest.mark.asyncio
+async def test_compute_waiting_for_worker_admission_does_not_hold_execution_permit(monkeypatch) -> None:
+    admission_started = asyncio.Event()
+    release_admission = asyncio.Event()
+    execution_started = asyncio.Event()
+    work_semaphore = asyncio.Semaphore(1)
+
+    class _Client:
+        def close(self):
+            pass
+
+        async def renew_compute_request_lease(self, **_kwargs):
+            return None
+
+    class _Manager:
+        async def await_engine_request_admission(self, _identity, *, namespace, priority):
+            assert namespace == "tenant-a"
+            assert priority == compute_request_runtime.ENGINE_ADMISSION_PRIORITY_INTERACTIVE
+            admission_started.set()
+            await release_admission.wait()
+            return True
+
+        def reserve_engine_request(self, _identity, *, namespace):
+            assert namespace == "tenant-a"
+
+        def release_engine_request(self, _identity, *, namespace):
+            assert namespace == "tenant-a"
+
+        async def await_engine_job_slot(self, _identity, *, namespace):
+            assert namespace == "tenant-a"
+
+        def release_engine_job_slot(self, _identity, *, namespace):
+            assert namespace == "tenant-a"
+
+        def release_spawn_admission(self, _identity, *, namespace, owned: bool) -> None:
+            assert namespace == "tenant-a"
+            assert owned is True
+
+    async def keep_lease_alive(_claimed, *, stop_event: asyncio.Event, lease_confirmed: asyncio.Event) -> None:
+        lease_confirmed.set()
+        await stop_event.wait()
+
+    async def run_in_thread(function, *args, **kwargs) -> None:
+        del kwargs
+        function(*args)
+
+    monkeypatch.setattr(compute_request_runtime, "worker_runtime_client", lambda: _Client())
+    monkeypatch.setattr(compute_request_runtime, "_renew_compute_lease", keep_lease_alive)
+    monkeypatch.setattr(compute_request_runtime, "run_compute_in_thread", run_in_thread)
+    monkeypatch.setattr(
+        compute_request_runtime,
+        "_execute_request_sync",
+        lambda *_args: execution_started.set(),
+    )
+    claimed = compute_request_runtime.ClaimedComputeRequest(
+        id="req-admission-permit",
+        namespace="tenant-a",
+        kind=enums_pb2.COMPUTE_REQUEST_KIND_PREVIEW,
+        worker_id="worker-test",
+        claim_token="claim-test",
+        lease_generation=1,
+        lease_ttl_seconds=300,
+        command_envelope=_preview_command_envelope(request_id="req-admission-permit"),
+    )
+
+    task = asyncio.create_task(
+        compute_request_runtime._execute_request(
+            claimed,
+            cast(Any, _Manager()),
+            work_semaphore=work_semaphore,
+        )
+    )
+    await asyncio.wait_for(admission_started.wait(), timeout=1)
+    assert await asyncio.wait_for(work_semaphore.acquire(), timeout=0.1)
+    work_semaphore.release()
+    release_admission.set()
+    await asyncio.wait_for(execution_started.wait(), timeout=1)
+    await asyncio.wait_for(task, timeout=1)
+
+
+@pytest.mark.asyncio
+async def test_same_engine_waiter_does_not_hold_global_permit_or_overtake_other_engine(monkeypatch) -> None:
+    work_semaphore = asyncio.Semaphore(2)
+    first_started = asyncio.Event()
+    second_started = asyncio.Event()
+    third_started = asyncio.Event()
+    release_first = asyncio.Event()
+    slots: dict[str, asyncio.Lock] = {}
+
+    class _Client:
+        def close(self):
+            pass
+
+    class _Manager:
+        async def await_engine_request_admission(self, _identity, *, namespace, priority):
+            assert namespace == "tenant-a"
+            return False
+
+        async def await_engine_job_slot(self, identity, *, namespace):
+            assert namespace == "tenant-a"
+            slot = slots.setdefault(identity.resource_id, asyncio.Lock())
+            await slot.acquire()
+
+        def release_engine_job_slot(self, identity, *, namespace):
+            assert namespace == "tenant-a"
+            slots[identity.resource_id].release()
+
+        def reserve_engine_request(self, _identity, *, namespace):
+            assert namespace == "tenant-a"
+
+        def release_engine_request(self, _identity, *, namespace):
+            assert namespace == "tenant-a"
+
+        def release_spawn_admission(self, _identity, *, namespace, owned):
+            assert namespace == "tenant-a"
+            assert owned is False
+
+    async def keep_lease_alive(_claimed, *, stop_event: asyncio.Event, lease_confirmed: asyncio.Event) -> None:
+        lease_confirmed.set()
+        await stop_event.wait()
+
+    async def run_in_thread(function, claimed, manager):
+        if claimed.id == "same-rid-first":
+            first_started.set()
+            await release_first.wait()
+        elif claimed.id == "same-rid-second":
+            second_started.set()
+        else:
+            third_started.set()
+        function(claimed, manager)
+
+    monkeypatch.setattr(compute_request_runtime, "worker_runtime_client", lambda: _Client())
+    monkeypatch.setattr(compute_request_runtime, "_renew_compute_lease", keep_lease_alive)
+    monkeypatch.setattr(compute_request_runtime, "run_compute_in_thread", run_in_thread)
+    monkeypatch.setattr(compute_request_runtime, "_execute_request_sync", lambda *_args: None)
+
+    def claim(request_id: str, analysis_id: str) -> compute_request_runtime.ClaimedComputeRequest:
+        command = _preview_command_envelope(request_id=request_id)
+        command.command.preview.analysis_id = analysis_id
+        command.command.preview.analysis_pipeline.analysis_id = analysis_id
+        return compute_request_runtime.ClaimedComputeRequest(
+            id=request_id,
+            namespace="tenant-a",
+            kind=enums_pb2.COMPUTE_REQUEST_KIND_PREVIEW,
+            worker_id="worker-test",
+            claim_token=f"claim-{request_id}",
+            lease_generation=1,
+            lease_ttl_seconds=300,
+            command_envelope=command,
+        )
+
+    manager = cast(Any, _Manager())
+    first = asyncio.create_task(compute_request_runtime._execute_request(claim("same-rid-first", "analysis-shared"), manager, work_semaphore=work_semaphore))
+    await asyncio.wait_for(first_started.wait(), timeout=1)
+    second = asyncio.create_task(compute_request_runtime._execute_request(claim("same-rid-second", "analysis-shared"), manager, work_semaphore=work_semaphore))
+    await asyncio.sleep(0)
+    third = asyncio.create_task(compute_request_runtime._execute_request(claim("other-rid", "analysis-other"), manager, work_semaphore=work_semaphore))
+    try:
+        await asyncio.wait_for(third_started.wait(), timeout=1)
+        assert not second_started.is_set()
+    finally:
+        release_first.set()
+
+    await asyncio.wait_for(asyncio.gather(first, second, third), timeout=2)
+    assert second_started.is_set()
+
+
+@pytest.mark.asyncio
+async def test_compute_capacity_race_releases_permit_before_rejoining_admission(monkeypatch) -> None:
+    work_semaphore = asyncio.Semaphore(1)
+    race_wait_started = asyncio.Event()
+    race_wait_release = asyncio.Event()
+    admissions = 0
+    releases = 0
+    executions = 0
+
+    class _Manager:
+        async def await_engine_request_admission(self, _identity, *, namespace, priority):
+            nonlocal admissions
+            assert namespace == "tenant-a"
+            admissions += 1
+            return True
+
+        def reserve_engine_request(self, _identity, *, namespace):
+            assert namespace == "tenant-a"
+
+        def release_engine_request(self, _identity, *, namespace):
+            assert namespace == "tenant-a"
+
+        async def await_engine_job_slot(self, _identity, *, namespace):
+            assert namespace == "tenant-a"
+
+        def release_engine_job_slot(self, _identity, *, namespace):
+            assert namespace == "tenant-a"
+
+        def release_spawn_admission(self, _identity, *, namespace, owned: bool) -> None:
+            nonlocal releases
+            assert namespace == "tenant-a"
+            assert owned is True
+            releases += 1
+
+    class _Client:
+        def close(self):
+            pass
+
+    async def keep_lease_alive(_claimed, *, stop_event: asyncio.Event, lease_confirmed: asyncio.Event) -> None:
+        lease_confirmed.set()
+        await stop_event.wait()
+
+    async def run_in_thread(function, *args, **kwargs) -> None:
+        nonlocal executions
+        del kwargs
+        executions += 1
+        if executions == 1:
+            raise compute_request_runtime.EngineCapacityFull("lost admission race")
+        function(*args)
+
+    async def wait_after_capacity_race(_manager) -> None:
+        # The failed attempt has already released its permit and manager slot.
+        assert await asyncio.wait_for(work_semaphore.acquire(), timeout=0.1)
+        work_semaphore.release()
+        race_wait_started.set()
+        await race_wait_release.wait()
+
+    monkeypatch.setattr(compute_request_runtime, "worker_runtime_client", lambda: _Client())
+    monkeypatch.setattr(compute_request_runtime, "_renew_compute_lease", keep_lease_alive)
+    monkeypatch.setattr(compute_request_runtime, "run_compute_in_thread", run_in_thread)
+    monkeypatch.setattr(compute_request_runtime, "_wait_after_engine_capacity_race", wait_after_capacity_race)
+    monkeypatch.setattr(compute_request_runtime, "_execute_request_sync", lambda *_args: None)
+    claimed = compute_request_runtime.ClaimedComputeRequest(
+        id="req-capacity-race",
+        namespace="tenant-a",
+        kind=enums_pb2.COMPUTE_REQUEST_KIND_PREVIEW,
+        worker_id="worker-test",
+        claim_token="claim-test",
+        lease_generation=1,
+        lease_ttl_seconds=300,
+        command_envelope=_preview_command_envelope(request_id="req-capacity-race"),
+    )
+
+    task = asyncio.create_task(
+        compute_request_runtime._execute_request(
+            claimed,
+            cast(Any, _Manager()),
+            work_semaphore=work_semaphore,
+        )
+    )
+    await asyncio.wait_for(race_wait_started.wait(), timeout=1)
+    assert admissions == 1
+    assert releases == 1
+    race_wait_release.set()
+    await asyncio.wait_for(task, timeout=1)
+    assert admissions == 2
+    assert releases == 2
+    assert executions == 2
+
+
+@pytest.mark.asyncio
+async def test_cancelled_compute_holds_permit_until_executor_thread_stops(monkeypatch) -> None:
+    thread_started = threading.Event()
+    release_thread = threading.Event()
+    work_semaphore = asyncio.Semaphore(1)
+    admission_released = asyncio.Event()
+
+    class _Manager:
+        async def await_engine_request_admission(self, _identity, *, namespace, priority):
+            assert namespace == "tenant-a"
+            return False
+
+        def reserve_engine_request(self, _identity, *, namespace):
+            assert namespace == "tenant-a"
+
+        def release_engine_request(self, _identity, *, namespace):
+            assert namespace == "tenant-a"
+
+        async def await_engine_job_slot(self, _identity, *, namespace):
+            assert namespace == "tenant-a"
+
+        def release_engine_job_slot(self, _identity, *, namespace):
+            assert namespace == "tenant-a"
+
+        def release_spawn_admission(self, _identity, *, namespace, owned: bool) -> None:
+            assert namespace == "tenant-a"
+            assert owned is False
+            admission_released.set()
+
+    class _Client:
+        def close(self):
+            pass
+
+    async def keep_lease_alive(_claimed, *, stop_event: asyncio.Event, lease_confirmed: asyncio.Event) -> None:
+        lease_confirmed.set()
+        await stop_event.wait()
+
+    def blocking_execution(*_args) -> None:
+        thread_started.set()
+        release_thread.wait()
+
+    monkeypatch.setattr(compute_request_runtime, "worker_runtime_client", lambda: _Client())
+    monkeypatch.setattr(compute_request_runtime, "_renew_compute_lease", keep_lease_alive)
+    monkeypatch.setattr(compute_request_runtime, "_execute_request_sync", blocking_execution)
+    claimed = compute_request_runtime.ClaimedComputeRequest(
+        id="req-cancel-running",
+        namespace="tenant-a",
+        kind=enums_pb2.COMPUTE_REQUEST_KIND_PREVIEW,
+        worker_id="worker-test",
+        claim_token="claim-test",
+        lease_generation=1,
+        lease_ttl_seconds=300,
+        command_envelope=_preview_command_envelope(request_id="req-cancel-running"),
+    )
+
+    task = asyncio.create_task(
+        compute_request_runtime._execute_request(
+            claimed,
+            cast(Any, _Manager()),
+            work_semaphore=work_semaphore,
+        )
+    )
+    try:
+        assert await asyncio.wait_for(asyncio.to_thread(thread_started.wait, 2), timeout=3)
+        task.cancel()
+        await asyncio.sleep(0.05)
+        assert not task.done()
+        assert not admission_released.is_set()
+        with pytest.raises(TimeoutError):
+            await asyncio.wait_for(work_semaphore.acquire(), timeout=0.05)
+    finally:
+        release_thread.set()
+
+    with pytest.raises(asyncio.CancelledError):
+        await task
+    await asyncio.wait_for(admission_released.wait(), timeout=1)
+    assert await asyncio.wait_for(work_semaphore.acquire(), timeout=1)
+    work_semaphore.release()
+
+
+@pytest.mark.asyncio
+async def test_compute_request_lease_loss_cancels_shared_job_without_stopping_worker(monkeypatch) -> None:
+    cancelled = threading.Event()
+    execution_started = asyncio.Event()
+    cancelled_jobs: list[tuple[str, str | None, str | None]] = []
+    shutdown_calls: list[tuple[str, str | None]] = []
+    loop = asyncio.get_running_loop()
+
+    class _Manager:
+        async def await_engine_request_admission(self, _identity, *, namespace, priority):
+            assert namespace == "tenant-a"
+            assert priority == compute_request_runtime.ENGINE_ADMISSION_PRIORITY_INTERACTIVE
+            return False
+
+        def release_engine_request(self, _identity, *, namespace):
+            assert namespace == "tenant-a"
+
+        async def await_engine_job_slot(self, _identity, *, namespace):
+            assert namespace == "tenant-a"
+
+        def release_engine_job_slot(self, _identity, *, namespace):
+            assert namespace == "tenant-a"
+
+        def release_spawn_admission(self, _identity, *, namespace, owned: bool) -> None:
+            assert namespace == "tenant-a"
+            assert owned is False
+
+        def shutdown_engine(self, identity, *, namespace: str | None = None) -> None:
+            shutdown_calls.append((identity.resource_id, namespace))
+
+        def cancel_engine_job(self, _identity, *, namespace, job_id):
+            cancelled_jobs.append((_identity.resource_id, namespace, job_id))
+            assert namespace == "tenant-a"
+            assert job_id == "req-lease-loss"
+            cancelled.set()
+
+        def shutdown_engine_after_request_lease_loss(self, identity, *, namespace):
+            assert identity.reuse_policy == enums_pb2.ENGINE_REUSE_POLICY_SHARED
+            assert namespace == "tenant-a"
+
+    async def lose_lease(_claimed, *, stop_event: asyncio.Event, lease_confirmed: asyncio.Event) -> None:
+        del stop_event
+        lease_confirmed.set()
+        await execution_started.wait()
+        raise compute_request_runtime.ComputeRequestLeaseLost("lease lost")
+
+    def run_engine(_claimed, _manager, _terminal_publication_started=None) -> None:
+        loop.call_soon_threadsafe(execution_started.set)
+        assert cancelled.wait(timeout=2)
+
+    monkeypatch.setattr(compute_request_runtime, "_renew_compute_lease", lose_lease)
+    monkeypatch.setattr(compute_request_runtime, "_execute_request_sync", run_engine)
+    claimed = compute_request_runtime.ClaimedComputeRequest(
+        id="req-lease-loss",
+        namespace="tenant-a",
+        kind=enums_pb2.COMPUTE_REQUEST_KIND_PREVIEW,
+        worker_id="worker-test",
+        claim_token="claim-test",
+        lease_generation=1,
+        lease_ttl_seconds=300,
+        command_envelope=_preview_command_envelope(request_id="req-lease-loss"),
+    )
+    identity = compute_request_runtime._engine_identity_for_claimed(claimed)
+    assert identity is not None
+    assert identity.reuse_policy == enums_pb2.ENGINE_REUSE_POLICY_SHARED
+
+    with pytest.raises(compute_request_runtime.ComputeRequestLeaseLost, match="lease lost"):
+        await asyncio.wait_for(
+            compute_request_runtime._execute_request(claimed, cast(Any, _Manager())),
+            timeout=2,
+        )
+
+    assert cancelled_jobs == [("analysis-from-proto", "tenant-a", "req-lease-loss")]
+    assert shutdown_calls == []
+
+
+@pytest.mark.asyncio
+async def test_compute_request_waits_for_first_lease_confirmation_before_admission(monkeypatch) -> None:
+    renewal_started = asyncio.Event()
+    allow_renewal = asyncio.Event()
+    admission_started = asyncio.Event()
+
+    class _Manager:
+        async def await_engine_request_admission(self, _identity, *, namespace, priority):
+            assert namespace == "tenant-a"
+            admission_started.set()
+            return False
+
+        async def await_engine_job_slot(self, _identity, *, namespace):
+            assert namespace == "tenant-a"
+
+        def release_engine_job_slot(self, _identity, *, namespace):
+            assert namespace == "tenant-a"
+
+        def release_engine_request(self, _identity, *, namespace):
+            assert namespace == "tenant-a"
+
+        def release_spawn_admission(self, _identity, *, namespace, owned):
+            assert namespace == "tenant-a"
+            assert owned is False
+
+    async def renew_after_gate(_claimed, *, stop_event, lease_confirmed):
+        renewal_started.set()
+        await allow_renewal.wait()
+        lease_confirmed.set()
+        await stop_event.wait()
+
+    async def run_inline(function, *args, **kwargs):
+        return function(*args, **kwargs)
+
+    monkeypatch.setattr(compute_request_runtime, "_renew_compute_lease", renew_after_gate)
+    monkeypatch.setattr(compute_request_runtime, "run_compute_in_thread", run_inline)
+    monkeypatch.setattr(compute_request_runtime, "_execute_request_sync", lambda *_args: None)
+    claimed = compute_request_runtime.ClaimedComputeRequest(
+        id="req-first-lease-confirmation",
+        namespace="tenant-a",
+        kind=enums_pb2.COMPUTE_REQUEST_KIND_PREVIEW,
+        worker_id="worker-test",
+        claim_token="claim-test",
+        lease_generation=1,
+        lease_ttl_seconds=20,
+        command_envelope=_preview_command_envelope(request_id="req-first-lease-confirmation"),
+    )
+
+    task = asyncio.create_task(compute_request_runtime._execute_request(claimed, cast(Any, _Manager())))
+    try:
+        await asyncio.wait_for(renewal_started.wait(), timeout=1)
+        await asyncio.sleep(0)
+        assert not admission_started.is_set()
+
+        allow_renewal.set()
+        await asyncio.wait_for(task, timeout=1)
+        assert admission_started.is_set()
+    finally:
+        allow_renewal.set()
+        if not task.done():
+            task.cancel()
+            await asyncio.gather(task, return_exceptions=True)
+
+
+@pytest.mark.asyncio
+async def test_lease_loss_releases_admission_completed_in_same_turn(monkeypatch) -> None:
+    admission_ready = asyncio.Event()
+    admission_started = asyncio.Event()
+    renewal_ready = asyncio.Event()
+    acquire = asyncio.Event()
+    held_admissions = 0
+    released_admissions: list[bool] = []
+
+    class _Manager:
+        async def await_engine_request_admission(self, _identity, *, namespace, priority):
+            nonlocal held_admissions
+            assert namespace == "tenant-a"
+            admission_started.set()
+            await admission_ready.wait()
+            held_admissions += 1
+            return True
+
+        def reserve_engine_request(self, _identity, *, namespace):
+            assert namespace == "tenant-a"
+
+        def release_engine_request(self, _identity, *, namespace):
+            assert namespace == "tenant-a"
+
+        async def await_engine_job_slot(self, _identity, *, namespace):
+            assert namespace == "tenant-a"
+
+        def release_engine_job_slot(self, _identity, *, namespace):
+            assert namespace == "tenant-a"
+
+        def release_spawn_admission(self, _identity, *, namespace, owned):
+            nonlocal held_admissions
+            assert namespace == "tenant-a"
+            released_admissions.append(owned)
+            if owned:
+                held_admissions -= 1
+
+        def cancel_engine_job(self, _identity, *, namespace, job_id):
+            assert namespace == "tenant-a"
+            assert job_id == "req-admission-handoff"
+
+        def shutdown_engine_after_request_lease_loss(self, _identity, *, namespace):
+            assert namespace == "tenant-a"
+
+        def shutdown_engine(self, _identity, *, namespace):
+            assert namespace == "tenant-a"
+
+    async def lose_lease(_claimed, *, stop_event, lease_confirmed):
+        del stop_event
+        lease_confirmed.set()
+        renewal_ready.set()
+        await acquire.wait()
+        raise compute_request_runtime.ComputeRequestLeaseLost("lease lost during admission")
+
+    manager = _Manager()
+    monkeypatch.setattr(compute_request_runtime, "_renew_compute_lease", lose_lease)
+    claimed = compute_request_runtime.ClaimedComputeRequest(
+        id="req-admission-handoff",
+        namespace="tenant-a",
+        kind=enums_pb2.COMPUTE_REQUEST_KIND_PREVIEW,
+        worker_id="worker-test",
+        claim_token="claim-test",
+        lease_generation=1,
+        lease_ttl_seconds=300,
+        command_envelope=_preview_command_envelope(request_id="req-admission-handoff"),
+    )
+
+    task = asyncio.create_task(compute_request_runtime._execute_request(claimed, cast(Any, manager)))
+    try:
+        await asyncio.wait_for(renewal_ready.wait(), timeout=1)
+        await asyncio.wait_for(admission_started.wait(), timeout=1)
+        # The admission child and lease renewal are released in one event-loop
+        # turn, so cleanup must observe ownership even if renewal wins the wait.
+        admission_ready.set()
+        acquire.set()
+        with pytest.raises(compute_request_runtime.ComputeRequestLeaseLost, match="lease lost during admission"):
+            await asyncio.wait_for(task, timeout=1)
+
+        assert released_admissions == [True]
+        assert held_admissions == 0
+    finally:
+        admission_ready.set()
+        acquire.set()
+        if not task.done():
+            task.cancel()
+            await asyncio.gather(task, return_exceptions=True)
+
+
+@pytest.mark.asyncio
+async def test_lease_loss_releases_engine_lane_acquired_in_same_turn(monkeypatch) -> None:
+    job_slot_started = asyncio.Event()
+    renewal_ready = asyncio.Event()
+    acquire = asyncio.Event()
+    engine_job_locked = False
+    request_reservations = 0
+    released_admissions: list[bool] = []
+
+    class _Manager:
+        async def await_engine_request_admission(self, _identity, *, namespace, priority):
+            assert namespace == "tenant-a"
+            nonlocal request_reservations
+            request_reservations += 1
+            return False
+
+        def release_spawn_admission(self, _identity, *, namespace, owned):
+            assert namespace == "tenant-a"
+            released_admissions.append(owned)
+
+        async def await_engine_job_slot(self, _identity, *, namespace):
+            assert namespace == "tenant-a"
+            job_slot_started.set()
+            await acquire.wait()
+            nonlocal engine_job_locked
+            engine_job_locked = True
+
+        def release_engine_job_slot(self, _identity, *, namespace):
+            assert namespace == "tenant-a"
+            nonlocal engine_job_locked
+            assert engine_job_locked
+            engine_job_locked = False
+
+        def release_engine_request(self, _identity, *, namespace):
+            nonlocal request_reservations
+            assert namespace == "tenant-a"
+            request_reservations -= 1
+
+        def cancel_engine_job(self, _identity, *, namespace, job_id):
+            assert namespace == "tenant-a"
+            assert job_id == "req-engine-lane-handoff"
+
+        def shutdown_engine_after_request_lease_loss(self, _identity, *, namespace):
+            assert namespace == "tenant-a"
+
+        def shutdown_engine(self, _identity, *, namespace):
+            assert namespace == "tenant-a"
+
+    async def lose_lease(_claimed, *, stop_event, lease_confirmed):
+        del stop_event
+        lease_confirmed.set()
+        renewal_ready.set()
+        await acquire.wait()
+        raise compute_request_runtime.ComputeRequestLeaseLost("lease lost during engine lane acquisition")
+
+    manager = _Manager()
+    monkeypatch.setattr(compute_request_runtime, "_renew_compute_lease", lose_lease)
+    claimed = compute_request_runtime.ClaimedComputeRequest(
+        id="req-engine-lane-handoff",
+        namespace="tenant-a",
+        kind=enums_pb2.COMPUTE_REQUEST_KIND_PREVIEW,
+        worker_id="worker-test",
+        claim_token="claim-test",
+        lease_generation=1,
+        lease_ttl_seconds=300,
+        command_envelope=_preview_command_envelope(request_id="req-engine-lane-handoff"),
+    )
+
+    task = asyncio.create_task(
+        compute_request_runtime._execute_request(
+            claimed,
+            cast(Any, manager),
+            work_semaphore=asyncio.Semaphore(0),
+        )
+    )
+    try:
+        await asyncio.wait_for(job_slot_started.wait(), timeout=1)
+        await asyncio.wait_for(renewal_ready.wait(), timeout=1)
+        acquire.set()
+        with pytest.raises(
+            compute_request_runtime.ComputeRequestLeaseLost,
+            match="lease lost during engine lane acquisition",
+        ):
+            await asyncio.wait_for(task, timeout=1)
+
+        assert not engine_job_locked
+        assert request_reservations == 0
+        assert released_admissions == [False]
+    finally:
+        acquire.set()
+        if not task.done():
+            task.cancel()
+            await asyncio.gather(task, return_exceptions=True)
+
+
+@pytest.mark.asyncio
+async def test_parent_cancellation_releases_admission_acquired_before_handoff(monkeypatch) -> None:
+    held_admissions = 0
+    released_admissions: list[bool] = []
+    request_task: asyncio.Task[None] | None = None
+
+    class _Manager:
+        async def await_engine_request_admission(self, _identity, *, namespace, priority):
+            nonlocal held_admissions
+            assert namespace == "tenant-a"
+            held_admissions += 1
+            assert request_task is not None
+            request_task.cancel()
+            return True
+
+        def release_spawn_admission(self, _identity, *, namespace, owned):
+            nonlocal held_admissions
+            assert namespace == "tenant-a"
+            released_admissions.append(owned)
+            if owned:
+                held_admissions -= 1
+
+    async def renew(_claimed, *, stop_event, lease_confirmed):
+        lease_confirmed.set()
+        await stop_event.wait()
+
+    monkeypatch.setattr(compute_request_runtime, "_renew_compute_lease", renew)
+    claimed = compute_request_runtime.ClaimedComputeRequest(
+        id="req-admission-cancel-handoff",
+        namespace="tenant-a",
+        kind=enums_pb2.COMPUTE_REQUEST_KIND_PREVIEW,
+        worker_id="worker-test",
+        claim_token="claim-test",
+        lease_generation=1,
+        lease_ttl_seconds=300,
+        command_envelope=_preview_command_envelope(request_id="req-admission-cancel-handoff"),
+    )
+
+    request_task = asyncio.create_task(compute_request_runtime._execute_request(claimed, cast(Any, _Manager())))
+    with pytest.raises(asyncio.CancelledError):
+        await asyncio.wait_for(request_task, timeout=1)
+
+    assert released_admissions == [True]
+    assert held_admissions == 0
+
+
+@pytest.mark.asyncio
+async def test_parent_cancellation_releases_rid_slot_acquired_before_handoff(monkeypatch) -> None:
+    engine_job_locked = False
+    request_reservations = 0
+    request_task: asyncio.Task[None] | None = None
+
+    class _Manager:
+        async def await_engine_request_admission(self, _identity, *, namespace, priority):
+            nonlocal request_reservations
+            assert namespace == "tenant-a"
+            request_reservations += 1
+            return False
+
+        def release_spawn_admission(self, _identity, *, namespace, owned):
+            assert namespace == "tenant-a"
+            assert owned is False
+
+        async def await_engine_job_slot(self, _identity, *, namespace):
+            nonlocal engine_job_locked
+            assert namespace == "tenant-a"
+            engine_job_locked = True
+            assert request_task is not None
+            request_task.cancel()
+
+        def release_engine_job_slot(self, _identity, *, namespace):
+            nonlocal engine_job_locked
+            assert namespace == "tenant-a"
+            assert engine_job_locked
+            engine_job_locked = False
+
+        def release_engine_request(self, _identity, *, namespace):
+            nonlocal request_reservations
+            assert namespace == "tenant-a"
+            request_reservations -= 1
+
+    async def renew(_claimed, *, stop_event, lease_confirmed):
+        lease_confirmed.set()
+        await stop_event.wait()
+
+    monkeypatch.setattr(compute_request_runtime, "_renew_compute_lease", renew)
+    claimed = compute_request_runtime.ClaimedComputeRequest(
+        id="req-rid-slot-cancel-handoff",
+        namespace="tenant-a",
+        kind=enums_pb2.COMPUTE_REQUEST_KIND_PREVIEW,
+        worker_id="worker-test",
+        claim_token="claim-test",
+        lease_generation=1,
+        lease_ttl_seconds=300,
+        command_envelope=_preview_command_envelope(request_id="req-rid-slot-cancel-handoff"),
+    )
+
+    request_task = asyncio.create_task(compute_request_runtime._execute_request(claimed, cast(Any, _Manager())))
+    with pytest.raises(asyncio.CancelledError):
+        await asyncio.wait_for(request_task, timeout=1)
+
+    assert not engine_job_locked
+    assert request_reservations == 0
+
+
+@pytest.mark.asyncio
+async def test_lease_loss_releases_work_permit_acquired_in_same_turn(monkeypatch) -> None:
+    permit_waiting = asyncio.Event()
+    renewal_ready = asyncio.Event()
+    acquire = asyncio.Event()
+    request_reservations = 0
+    engine_job_locked = False
+
+    class TrackedSemaphore(asyncio.Semaphore):
+        async def acquire(self) -> bool:
+            permit_waiting.set()
+            return await super().acquire()
+
+    work_semaphore = TrackedSemaphore(0)
+
+    class _Manager:
+        async def await_engine_request_admission(self, _identity, *, namespace, priority):
+            assert namespace == "tenant-a"
+            nonlocal request_reservations
+            request_reservations += 1
+            return False
+
+        def release_spawn_admission(self, _identity, *, namespace, owned):
+            assert namespace == "tenant-a"
+            assert owned is False
+
+        async def await_engine_job_slot(self, _identity, *, namespace):
+            assert namespace == "tenant-a"
+            nonlocal engine_job_locked
+            engine_job_locked = True
+
+        def release_engine_job_slot(self, _identity, *, namespace):
+            assert namespace == "tenant-a"
+            nonlocal engine_job_locked
+            assert engine_job_locked
+            engine_job_locked = False
+
+        def release_engine_request(self, _identity, *, namespace):
+            assert namespace == "tenant-a"
+            nonlocal request_reservations
+            request_reservations -= 1
+
+        def cancel_engine_job(self, _identity, *, namespace, job_id):
+            assert namespace == "tenant-a"
+            assert job_id == "req-work-permit-handoff"
+
+        def shutdown_engine_after_request_lease_loss(self, _identity, *, namespace):
+            assert namespace == "tenant-a"
+
+    async def lose_lease(_claimed, *, stop_event, lease_confirmed):
+        del stop_event
+        lease_confirmed.set()
+        renewal_ready.set()
+        await acquire.wait()
+        raise compute_request_runtime.ComputeRequestLeaseLost("lease lost during work permit acquisition")
+
+    async def block_execution(_function, *_args, **_kwargs):
+        await asyncio.Future()
+
+    manager = _Manager()
+    monkeypatch.setattr(compute_request_runtime, "_renew_compute_lease", lose_lease)
+    monkeypatch.setattr(compute_request_runtime, "run_compute_in_thread", block_execution)
+    claimed = compute_request_runtime.ClaimedComputeRequest(
+        id="req-work-permit-handoff",
+        namespace="tenant-a",
+        kind=enums_pb2.COMPUTE_REQUEST_KIND_PREVIEW,
+        worker_id="worker-test",
+        claim_token="claim-test",
+        lease_generation=1,
+        lease_ttl_seconds=300,
+        command_envelope=_preview_command_envelope(request_id="req-work-permit-handoff"),
+    )
+
+    task = asyncio.create_task(
+        compute_request_runtime._execute_request(
+            claimed,
+            cast(Any, manager),
+            work_semaphore=work_semaphore,
+        )
+    )
+    try:
+        await asyncio.wait_for(permit_waiting.wait(), timeout=1)
+        await asyncio.wait_for(renewal_ready.wait(), timeout=1)
+        # Wake both child acquisitions before the parent consumes either
+        # result, reproducing lease loss during ownership handoff.
+        work_semaphore.release()
+        acquire.set()
+
+        with pytest.raises(
+            compute_request_runtime.ComputeRequestLeaseLost,
+            match="lease lost during work permit acquisition",
+        ):
+            await asyncio.wait_for(task, timeout=1)
+
+        assert not engine_job_locked
+        assert request_reservations == 0
+        assert await asyncio.wait_for(work_semaphore.acquire(), timeout=1)
+        work_semaphore.release()
+    finally:
+        acquire.set()
+        if not task.done():
+            task.cancel()
+            await asyncio.gather(task, return_exceptions=True)
+
+
+@pytest.mark.asyncio
+async def test_terminal_compute_publication_wins_late_lease_loss(monkeypatch) -> None:
+    publication_entered = threading.Event()
+    allow_publication_return = threading.Event()
+    lease_loss_reported = asyncio.Event()
+    published_requests: list[str] = []
+    shutdown_calls: list[str] = []
+    cancelled_jobs: list[str] = []
+
+    async def lose_lease(_claimed, *, stop_event: asyncio.Event, lease_confirmed: asyncio.Event) -> None:
+        del stop_event
+        lease_confirmed.set()
+        await asyncio.to_thread(publication_entered.wait)
+        lease_loss_reported.set()
+        raise compute_request_runtime.ComputeRequestLeaseLost("late renewal failure")
+
+    async def complete_request(function, *args, **kwargs) -> None:
+        del kwargs
+        execution = asyncio.create_task(asyncio.to_thread(function, *args))
+        await asyncio.to_thread(publication_entered.wait)
+        await asyncio.to_thread(allow_publication_return.wait)
+        await execution
+
+    class _Manager:
+        async def await_engine_request_admission(self, _identity, *, namespace, priority):
+            assert namespace == "tenant-a"
+            assert priority == compute_request_runtime.ENGINE_ADMISSION_PRIORITY_INTERACTIVE
+            return False
+
+        def release_spawn_admission(self, _identity, *, namespace: str, owned: bool) -> None:
+            assert namespace == "tenant-a"
+            assert owned is False
+
+        def release_engine_request(self, _identity, *, namespace):
+            assert namespace == "tenant-a"
+
+        async def await_engine_job_slot(self, _identity, *, namespace):
+            assert namespace == "tenant-a"
+
+        def release_engine_job_slot(self, _identity, *, namespace):
+            assert namespace == "tenant-a"
+
+        def shutdown_engine(self, identity, *, namespace: str | None = None) -> None:
+            del namespace
+            shutdown_calls.append(identity.resource_id)
+
+        def cancel_engine_job(self, identity, *, namespace, job_id):
+            del namespace, job_id
+            cancelled_jobs.append(identity.resource_id)
+
+        def shutdown_engine_after_request_lease_loss(self, identity, *, namespace):
+            del namespace
+            shutdown_calls.append(identity.resource_id)
+
+    monkeypatch.setattr(compute_request_runtime, "_renew_compute_lease", lose_lease)
+    monkeypatch.setattr(compute_request_runtime, "run_compute_in_thread", complete_request)
+
+    def publish_request(
+        request: compute_request_runtime.ClaimedComputeRequest,
+        _manager,
+        terminal_publication_started: threading.Event,
+    ) -> bool:
+        terminal_publication_started.set()
+        publication_entered.set()
+        assert allow_publication_return.wait(timeout=1)
+        published_requests.append(request.id)
+        return True
+
+    monkeypatch.setattr(compute_request_runtime, "_execute_request_sync", publish_request)
+    claimed = compute_request_runtime.ClaimedComputeRequest(
+        id="req-completed-with-late-renewal",
+        namespace="tenant-a",
+        kind=enums_pb2.COMPUTE_REQUEST_KIND_PREVIEW,
+        worker_id="worker-test",
+        claim_token="claim-test",
+        lease_generation=1,
+        lease_ttl_seconds=300,
+        command_envelope=_preview_command_envelope(request_id="req-completed-with-late-renewal"),
+    )
+
+    execution = asyncio.create_task(compute_request_runtime._execute_request(claimed, cast(Any, _Manager())))
+    try:
+        await asyncio.wait_for(lease_loss_reported.wait(), timeout=1)
+        await asyncio.sleep(0)
+        assert shutdown_calls == []
+        assert cancelled_jobs == []
+        allow_publication_return.set()
+        await asyncio.wait_for(execution, timeout=1)
+
+        assert published_requests == [claimed.id]
+        assert shutdown_calls == []
+        assert cancelled_jobs == []
+    finally:
+        allow_publication_return.set()
+        if not execution.done():
+            execution.cancel()
+            await asyncio.gather(execution, return_exceptions=True)
+
+
 def test_shutdown_compute_request_removes_active_engine_and_emits_empty_snapshot(monkeypatch) -> None:
     completed: list[compute_pb2.ComputeResponse] = []
-    dispatched: list[bool] = []
     identity = _analysis_identity("analysis-1")
 
     class _Engine:
@@ -437,6 +2008,10 @@ def test_shutdown_compute_request_removes_active_engine_and_emits_empty_snapshot
             self.alive = True
 
         def is_process_alive(self) -> bool:
+            return self.alive
+
+        @property
+        def last_known_alive(self) -> bool:
             return self.alive
 
         def check_health(self) -> bool:
@@ -458,10 +2033,6 @@ def test_shutdown_compute_request_removes_active_engine_and_emits_empty_snapshot
 
         def fail_compute_request(self, **_kwargs):
             raise AssertionError("request should not fail")
-
-        def dispatch_runtime_outbox(self):
-            dispatched.append(True)
-            return 0
 
     monkeypatch.setattr(compute_request_runtime, "worker_runtime_client", lambda: _Client())
 
@@ -493,7 +2064,6 @@ def test_shutdown_compute_request_removes_active_engine_and_emits_empty_snapshot
         assert len(completed) == 1
         assert completed[0].WhichOneof("response") == "ack"
         assert completed[0].ack.success is True
-        assert dispatched == [True]
     finally:
         manager.shutdown_all()
 
@@ -511,9 +2081,6 @@ def test_shutdown_compute_request_is_idempotent_when_engine_already_absent(monke
 
         def fail_compute_request(self, **_kwargs):
             raise AssertionError("missing engines must complete shutdown successfully")
-
-        def dispatch_runtime_outbox(self):
-            return 0
 
     monkeypatch.setattr(compute_request_runtime, "worker_runtime_client", lambda: _Client())
     manager = ProcessManager(engine_factory=lambda _identity, _resource_config: cast(Any, object()))
@@ -544,6 +2111,7 @@ def test_shutdown_compute_request_is_idempotent_when_engine_already_absent(monke
 
 def test_compute_request_maps_missing_datasource_to_error_result(monkeypatch) -> None:
     completed: list[compute_pb2.ComputeResponse] = []
+    metadata_calls = 0
 
     monkeypatch.setattr(compute_request_runtime, "set_namespace_context", lambda namespace: namespace)
     monkeypatch.setattr(compute_request_runtime, "reset_namespace", lambda token: None)
@@ -553,6 +2121,8 @@ def test_compute_request_maps_missing_datasource_to_error_result(monkeypatch) ->
             pass
 
         def datasource_metadata(self, **_kwargs):
+            nonlocal metadata_calls
+            metadata_calls += 1
             from runtime.worker_runtime_client import DatasourceMetadata
 
             return DatasourceMetadata(
@@ -563,6 +2133,7 @@ def test_compute_request_maps_missing_datasource_to_error_result(monkeypatch) ->
                 config=None,
                 schema_cache=None,
                 is_hidden=None,
+                revision=None,
             )
 
         def complete_compute_request(self, **kwargs):
@@ -584,6 +2155,7 @@ def test_compute_request_maps_missing_datasource_to_error_result(monkeypatch) ->
             payload={"datasource_id": "datasource-1"},
         ),
     )
+    claimed.command_envelope.command.input_revisions.add(datasource_id="datasource-1", revision=7)
 
     compute_request_runtime._execute_request_sync(claimed, cast(Any, SimpleNamespace()))
 
@@ -592,6 +2164,7 @@ def test_compute_request_maps_missing_datasource_to_error_result(monkeypatch) ->
     assert completed[0].datasource.WhichOneof("result") == "error"
     assert completed[0].datasource.error.error == "datasource_not_found"
     assert completed[0].datasource.error.message == "datasource-1"
+    assert metadata_calls == 1
 
 
 def test_grpc_precondition_error_does_not_invent_domain_error_code() -> None:
@@ -619,9 +2192,6 @@ def test_retired_compute_request_lease_drains_without_error_log(monkeypatch, cap
                 error_code="FAILED_PRECONDITION",
             )
 
-        def dispatch_runtime_outbox(self):
-            return 0
-
     monkeypatch.setattr(compute_request_runtime, "worker_runtime_client", lambda: _Client())
     claimed = compute_request_runtime.ClaimedComputeRequest(
         id="req-retired",
@@ -640,32 +2210,49 @@ def test_retired_compute_request_lease_drains_without_error_log(monkeypatch, cap
 
 
 @pytest.mark.asyncio
-async def test_pending_datasource_delete_waits_for_busy_preview_engine(monkeypatch) -> None:
+async def test_datasource_delete_claim_rpc_does_not_block_the_runtime_event_loop() -> None:
+    class BlockingClient:
+        async def pending_datasource_deletes_async(self, **_kwargs):
+            await asyncio.sleep(0.05)
+            return []
+
+    task = asyncio.create_task(
+        datasource_delete_runtime._run_once(
+            manager=cast(Any, SimpleNamespace()),
+            client=cast(Any, BlockingClient()),
+            namespace="default",
+        )
+    )
+    await asyncio.sleep(0.005)
+    assert not task.done()
+    assert await task is False
+
+
+async def _pending_delete_async(datasource_id: str) -> list[PendingDatasourceDelete]:
+    return [PendingDatasourceDelete(namespace="default", datasource_id=datasource_id)]
+
+
+@pytest.mark.asyncio
+async def test_pending_datasource_delete_waits_for_busy_preview_engine() -> None:
     datasource_id = "datasource-1"
 
     cleanup_calls: list[str] = []
     finalized: list[tuple[str, str]] = []
     shutdown_calls: list[str] = []
-    busy_engine = SimpleNamespace(current_job_id="job-1", is_process_alive=lambda: True)
-    expected_identity = _datasource_preview_identity(datasource_id)
     manager = SimpleNamespace(
-        get_engine=lambda identity, *, namespace=None: busy_engine if identity.resource_id == expected_identity.resource_id else None,
-        shutdown_engine=lambda identity, *, namespace=None: shutdown_calls.append(identity.resource_id),
+        shutdown_engine_if_idle=lambda identity, *, namespace=None: False,
     )
 
-    def finalize_delete(*, namespace: str, datasource_id: str) -> bool:
+    async def finalize_delete_async(*, namespace: str, datasource_id: str) -> bool:
         finalized.append((namespace, datasource_id))
         return True
 
     client = SimpleNamespace(
-        pending_datasource_deletes=lambda: [PendingDatasourceDelete(namespace="default", datasource_id=datasource_id)],
-        finalize_datasource_delete=finalize_delete,
-        close=lambda: None,
+        pending_datasource_deletes_async=lambda **_kwargs: _pending_delete_async(datasource_id),
+        finalize_datasource_delete_async=finalize_delete_async,
     )
 
-    monkeypatch.setattr(datasource_delete_runtime, "worker_runtime_client", lambda: client)
-
-    handled = await datasource_delete_runtime._run_once(manager=cast(Any, manager), client=cast(Any, client))
+    handled = await datasource_delete_runtime._run_once(manager=cast(Any, manager), client=cast(Any, client), namespace="default")
 
     assert handled is False
     assert cleanup_calls == []
@@ -674,37 +2261,69 @@ async def test_pending_datasource_delete_waits_for_busy_preview_engine(monkeypat
 
 
 @pytest.mark.asyncio
-async def test_pending_datasource_delete_finalizes_once_preview_engine_is_idle(monkeypatch) -> None:
+async def test_pending_datasource_delete_finalizes_once_preview_engine_is_idle() -> None:
     datasource_id = "datasource-2"
 
     cleanup_calls: list[str] = []
     finalized: list[tuple[str, str]] = []
     shutdown_calls: list[str] = []
-    idle_engine = SimpleNamespace(current_job_id=None, is_process_alive=lambda: True)
+    manager_threads: list[int] = []
+    event_loop = asyncio.get_running_loop()
     expected_identity = _datasource_preview_identity(datasource_id)
+
+    def shutdown_engine_if_idle(identity, *, namespace=None):
+        manager_threads.append(threading.get_ident())
+        shutdown_calls.append(identity.resource_id)
+        return True
+
     manager = SimpleNamespace(
-        get_engine=lambda identity, *, namespace=None: idle_engine if identity.resource_id == expected_identity.resource_id else None,
-        shutdown_engine=lambda identity, *, namespace=None: shutdown_calls.append(identity.resource_id),
+        shutdown_engine_if_idle=shutdown_engine_if_idle,
     )
 
-    def finalize_delete(*, namespace: str, datasource_id: str) -> bool:
+    async def pending_deletes_async(*_args, **_kwargs):
+        assert asyncio.get_running_loop() is event_loop
+        return [PendingDatasourceDelete(namespace="default", datasource_id=datasource_id)]
+
+    async def finalize_delete_async(*, namespace: str, datasource_id: str) -> bool:
+        assert asyncio.get_running_loop() is event_loop
         finalized.append((namespace, datasource_id))
         return True
 
     client = SimpleNamespace(
-        pending_datasource_deletes=lambda: [PendingDatasourceDelete(namespace="default", datasource_id=datasource_id)],
-        finalize_datasource_delete=finalize_delete,
-        close=lambda: None,
+        pending_datasource_deletes_async=pending_deletes_async,
+        finalize_datasource_delete_async=finalize_delete_async,
     )
 
-    monkeypatch.setattr(datasource_delete_runtime, "worker_runtime_client", lambda: client)
-
-    handled = await datasource_delete_runtime._run_once(manager=cast(Any, manager), client=cast(Any, client))
+    handled = await datasource_delete_runtime._run_once(manager=cast(Any, manager), client=cast(Any, client), namespace="default")
 
     assert handled is True
     assert cleanup_calls == []
     assert finalized == [("default", datasource_id)]
     assert shutdown_calls == [expected_identity.resource_id]
+    assert manager_threads and all(thread_id != threading.get_ident() for thread_id in manager_threads)
+
+
+@pytest.mark.asyncio
+async def test_pending_datasource_delete_waits_when_backend_defers_finalization() -> None:
+    datasource_id = "datasource-3"
+    finalized: list[tuple[str, str]] = []
+    manager = SimpleNamespace(
+        shutdown_engine_if_idle=lambda _identity, *, namespace=None: True,
+    )
+
+    async def finalize_delete_async(*, namespace: str, datasource_id: str) -> bool:
+        finalized.append((namespace, datasource_id))
+        return False
+
+    client = SimpleNamespace(
+        pending_datasource_deletes_async=lambda **_kwargs: _pending_delete_async(datasource_id),
+        finalize_datasource_delete_async=finalize_delete_async,
+    )
+
+    handled = await datasource_delete_runtime._run_once(manager=cast(Any, manager), client=cast(Any, client), namespace="default")
+
+    assert handled is False
+    assert finalized == [("default", datasource_id)]
 
 
 @pytest.mark.asyncio
@@ -713,6 +2332,7 @@ async def test_run_analysis_build_stream_shuts_down_build_engine_after_completio
 ) -> None:
     pipeline = {
         "analysis_id": "analysis-1",
+        "tab_id": "tab-1",
         "tabs": [
             {
                 "id": "tab-1",
@@ -748,7 +2368,6 @@ async def test_run_analysis_build_stream_shuts_down_build_engine_after_completio
     )
     events: list[compute_schemas.BuildEvent] = []
     shutdown_calls: list[str] = []
-    spawn_calls: list[str] = []
     seen_engine_identities: list[str] = []
 
     def fake_export_data(*, engine_identity, **_kwargs) -> ExportDatasourceResult:
@@ -766,11 +2385,7 @@ async def test_run_analysis_build_stream_shuts_down_build_engine_after_completio
     manager = cast(
         Any,
         SimpleNamespace(
-            await_spawn_admission=lambda identity: asyncio.sleep(0),
-            release_spawn_admission=lambda identity, *, owned: None,
-            spawn_engine=lambda identity: spawn_calls.append(identity.resource_id),
             shutdown_engine=lambda identity: shutdown_calls.append(identity.resource_id),
-            set_engine_runtime_context=lambda identity, current_build_id, current_engine_run_id: None,
         ),
     )
 
@@ -787,7 +2402,6 @@ async def test_run_analysis_build_stream_shuts_down_build_engine_after_completio
     )
 
     assert result["analysis_id"] == "analysis-1"
-    assert spawn_calls == ["build-1"]
     assert seen_engine_identities == ["build-1"]
     assert shutdown_calls == ["build-1"]
     assert events[-1].type == compute_schemas.BuildEventType.COMPLETE

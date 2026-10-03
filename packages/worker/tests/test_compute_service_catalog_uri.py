@@ -61,22 +61,25 @@ def test_list_iceberg_snapshots_uses_worker_database_url(
     worker_database_url: str,
 ) -> None:
     captured: dict = {}
+    metadata_namespaces: list[str] = []
 
     def fake_load_runtime_catalog(name: str, **kwargs):
         captured.update(kwargs)
         raise RuntimeError("stop before catalog access")
 
-    monkeypatch.setattr(
-        compute_service,
-        "client_from_env",
-        lambda: SimpleNamespace(datasource_metadata=lambda **_: _datasource_with_catalog_uri("postgresql://leaked:creds@config-db:5432/platform")),
-    )
+    def datasource_metadata(*, namespace: str, **_kwargs):
+        metadata_namespaces.append(namespace)
+        return _datasource_with_catalog_uri("postgresql://leaked:creds@config-db:5432/platform")
+
+    monkeypatch.setattr(compute_service, "client_from_env", lambda: SimpleNamespace(datasource_metadata=datasource_metadata))
     monkeypatch.setattr(compute_service, "load_runtime_catalog", fake_load_runtime_catalog)
+    monkeypatch.setattr(compute_service, "get_namespace", lambda: pytest.fail("snapshot lookup must not depend on ContextVar namespace"))
 
     with pytest.raises(RuntimeError, match="stop before catalog access"):
-        compute_service.list_iceberg_snapshots(session=None, datasource_id="ds-1")
+        compute_service.list_iceberg_snapshots(session=None, datasource_id="ds-1", request_namespace="analytics")
 
     assert captured["uri"] == worker_database_url
+    assert metadata_namespaces == ["analytics"]
 
 
 def test_delete_iceberg_snapshot_uses_worker_database_url(
@@ -84,22 +87,25 @@ def test_delete_iceberg_snapshot_uses_worker_database_url(
     worker_database_url: str,
 ) -> None:
     captured: dict = {}
+    metadata_namespaces: list[str] = []
 
     def fake_load_runtime_catalog(name: str, **kwargs):
         captured.update(kwargs)
         raise RuntimeError("stop before catalog access")
 
-    monkeypatch.setattr(
-        compute_service,
-        "client_from_env",
-        lambda: SimpleNamespace(datasource_metadata=lambda **_: _datasource_with_catalog_uri("postgresql://leaked:creds@config-db:5432/platform")),
-    )
+    def datasource_metadata(*, namespace: str, **_kwargs):
+        metadata_namespaces.append(namespace)
+        return _datasource_with_catalog_uri("postgresql://leaked:creds@config-db:5432/platform")
+
+    monkeypatch.setattr(compute_service, "client_from_env", lambda: SimpleNamespace(datasource_metadata=datasource_metadata))
     monkeypatch.setattr(compute_service, "load_runtime_catalog", fake_load_runtime_catalog)
+    monkeypatch.setattr(compute_service, "get_namespace", lambda: pytest.fail("snapshot deletion must not depend on ContextVar namespace"))
 
     with pytest.raises(RuntimeError, match="stop before catalog access"):
-        compute_service.delete_iceberg_snapshot(session=None, datasource_id="ds-1", snapshot_id="1")
+        compute_service.delete_iceberg_snapshot(session=None, datasource_id="ds-1", snapshot_id="1", request_namespace="analytics")
 
     assert captured["uri"] == worker_database_url
+    assert metadata_namespaces == ["analytics"]
 
 
 def _write_parquet(path: Path, columns: dict[str, pa.Array]) -> None:

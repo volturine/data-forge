@@ -2,6 +2,7 @@ from __future__ import annotations
 
 import asyncio
 import threading
+from collections import Counter
 from dataclasses import dataclass
 
 
@@ -19,14 +20,60 @@ class BuildNotificationHub:
         self._latest_by_build: dict[str, BuildNotification] = {}
         self._latest_by_namespace: dict[str, BuildNotification] = {}
         self._namespace_version: dict[str, int] = {}
+        self._build_subscribers: Counter[tuple[str, str]] = Counter()
+        self._namespace_subscribers: Counter[str] = Counter()
         self._lock = threading.Lock()
+
+    def subscribe_build(self, namespace: str, build_id: str) -> None:
+        with self._lock:
+            self._build_subscribers[namespace, build_id] += 1
+
+    def unsubscribe_build(self, namespace: str, build_id: str) -> None:
+        with self._lock:
+            key = (namespace, build_id)
+            self._build_subscribers[key] -= 1
+            if self._build_subscribers[key] <= 0:
+                self._build_subscribers.pop(key, None)
+
+    def subscribe_namespace(self, namespace: str) -> int:
+        with self._lock:
+            self._namespace_subscribers[namespace] += 1
+            return self._namespace_version.get(namespace, 0)
+
+    def unsubscribe_namespace(self, namespace: str) -> None:
+        with self._lock:
+            self._namespace_subscribers[namespace] -= 1
+            if self._namespace_subscribers[namespace] <= 0:
+                self._namespace_subscribers.pop(namespace, None)
+
+    def active_builds(self) -> list[tuple[str, str]]:
+        with self._lock:
+            return list(self._build_subscribers)
+
+    async def recover_namespaces(self) -> None:
+        with self._lock:
+            namespaces = list(self._namespace_subscribers)
+        for namespace in namespaces:
+            notification = BuildNotification(namespace=namespace, build_id='', latest_sequence=0)
+            with self._lock:
+                if namespace not in self._namespace_subscribers:
+                    continue
+                self._latest_by_namespace[namespace] = notification
+                self._namespace_version[namespace] = self._namespace_version.get(namespace, 0) + 1
+                waiters = self._namespace_waiters.pop(namespace, [])
+            for loop, future in waiters:
+                loop.call_soon_threadsafe(self._resolve_waiter, future, notification)
+            await asyncio.sleep(0)
 
     async def publish(self, notification: BuildNotification) -> None:
         with self._lock:
-            self._latest_by_build[notification.build_id] = notification
+            current = self._latest_by_build.get(notification.build_id)
+            advances_build = current is None or notification.latest_sequence > current.latest_sequence
+            if advances_build:
+                self._latest_by_build[notification.build_id] = notification
             self._latest_by_namespace[notification.namespace] = notification
             self._namespace_version[notification.namespace] = self._namespace_version.get(notification.namespace, 0) + 1
-            build_waiters = self._build_waiters.pop(notification.build_id, [])
+            build_waiters = self._build_waiters.pop(notification.build_id, []) if advances_build else []
             namespace_waiters = self._namespace_waiters.pop(notification.namespace, [])
         for loop, future in [*build_waiters, *namespace_waiters]:
             if future.done():
@@ -82,6 +129,8 @@ class BuildNotificationHub:
             self._latest_by_build = {}
             self._latest_by_namespace = {}
             self._namespace_version = {}
+            self._build_subscribers.clear()
+            self._namespace_subscribers.clear()
         for waiters in [*build_waiters.values(), *namespace_waiters.values()]:
             for loop, future in waiters:
                 if future.done():

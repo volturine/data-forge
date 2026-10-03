@@ -6,6 +6,8 @@ from typing import Any, Literal, Protocol, runtime_checkable
 import polars as pl
 from pydantic import BaseModel, ConfigDict
 
+from runtime.domain.compute.result import EngineResult
+
 
 class OperationParams(BaseModel):
     model_config = ConfigDict(extra="forbid")
@@ -83,20 +85,6 @@ EngineCommand = ShutdownCommand | PreviewCommand | ExportCommand | SchemaCommand
 
 
 @dataclass(slots=True)
-class EngineResult:
-    job_id: str | None
-    data: dict[str, Any] | None
-    error: str | None
-    error_kind: str | None = None
-    error_details: dict[str, Any] | None = None
-    step_timings: dict[str, float] = field(default_factory=dict)
-    query_plan: str | None = None
-    read_duration_ms: float | None = None
-    write_duration_ms: float | None = None
-    collect_duration_ms: float | None = None
-
-
-@dataclass(slots=True)
 class EngineProgressEvent:
     job_id: str
     event: dict[str, Any]
@@ -162,6 +150,16 @@ class ComputeEngine(Protocol):
     def is_process_alive(self) -> bool:
         raise NotImplementedError
 
+    @property
+    def last_known_alive(self) -> bool:
+        """Liveness from in-memory state only, without touching the runtime.
+
+        Callers holding a manager lock must use this: probing Docker or the
+        engine RPC while the engines lock is held stalls every other engine
+        operation behind one slow daemon round trip.
+        """
+        raise NotImplementedError
+
     def check_health(self) -> bool:
         raise NotImplementedError
 
@@ -195,10 +193,16 @@ class ComputeEngine(Protocol):
     ) -> str:
         raise NotImplementedError
 
+    def datasource_job(self, kind: str, payload: dict[str, Any]) -> str:
+        raise NotImplementedError
+
     def get_result(self, timeout: float = 1.0, job_id: str | None = None) -> EngineResult | None:
         raise NotImplementedError
 
     def get_progress_event(self, timeout: float = 1.0, job_id: str | None = None) -> EngineProgressEvent | None:
+        raise NotImplementedError
+
+    def cancel_job(self, job_id: str | None = None) -> bool:
         raise NotImplementedError
 
     def shutdown(self) -> None:

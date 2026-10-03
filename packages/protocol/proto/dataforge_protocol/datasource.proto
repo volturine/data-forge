@@ -113,6 +113,50 @@ message CompareIcebergSnapshotsCommand {
   }];
 }
 
+message DatasourceInputRevision {
+  string datasource_id = 1 [(buf.validate.field).string.min_len = 1];
+  int64 revision = 2 [(buf.validate.field).int64.gte = 1];
+}
+
+message DatasourcePreflightCommand {
+  string preflight_id = 1 [(buf.validate.field).string.min_len = 1];
+  string source_path = 2 [(buf.validate.field).string.min_len = 1];
+  DatasourcePreflightAction action = 3 [(buf.validate.field).enum = {
+    defined_only: true
+    not_in: 0
+  }];
+  optional string sheet_name = 4;
+  int32 start_row = 5 [(buf.validate.field).int32.gte = 0];
+  int32 start_col = 6 [(buf.validate.field).int32.gte = 0];
+  int32 end_col = 7 [(buf.validate.field).int32.gte = 0];
+  optional int32 end_row = 8 [(buf.validate.field).int32.gte = 0];
+  bool has_header = 9;
+  optional string table_name = 10;
+  optional string named_range = 11;
+  optional string cell_range = 12;
+  optional string datasource_id = 13 [(buf.validate.field).string.min_len = 1];
+  bool delete_source = 14;
+}
+
+message DatasourcePreflightTable {
+  repeated string columns = 1;
+}
+
+message DatasourcePreflightResult {
+  string preflight_id = 1 [(buf.validate.field).string.min_len = 1];
+  repeated string sheets = 2;
+  map<string, DatasourcePreflightTable> tables = 3;
+  repeated string named_ranges = 4;
+  repeated google.protobuf.Struct preview_rows = 5;
+  optional string sheet_name = 6;
+  optional int32 start_row = 7;
+  optional int32 start_col = 8;
+  optional int32 end_col = 9;
+  optional int32 detected_end_row = 10;
+  optional string source_path = 11;
+  bool delete_source = 12;
+}
+
 message DatasourceCommand {
   oneof command {
     CreateFileDatasourceCommand create_file = 1;
@@ -122,6 +166,7 @@ message DatasourceCommand {
     DatasourceSchemaCommand schema = 5;
     DatasourceColumnStatsCommand column_stats = 6;
     CompareIcebergSnapshotsCommand compare_iceberg_snapshots = 7;
+    DatasourcePreflightCommand preflight = 8;
   }
 }
 
@@ -244,5 +289,6 @@ message DatasourceResult {
     ColumnStatsResult column_stats = 3;
     SnapshotCompareResult snapshot_compare = 4;
     DatasourceErrorResult error = 5;
+    DatasourcePreflightResult preflight = 6;
   }
 }

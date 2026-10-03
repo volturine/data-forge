@@ -1,4 +1,5 @@
 <script lang="ts">
+	import { browser } from '$app/environment';
 	import { page } from '$app/state';
 	import { resolve } from '$app/paths';
 	import { css, button, input, label, spinner } from '$lib/styles/panda';
@@ -11,7 +12,9 @@
 	let error = $state<string | null>(null);
 	let validation = $state<string | null>(null);
 
-	const token = $derived(page.url.searchParams.get('token'));
+	// The static auth entry point is prerendered. Query parameters only exist in
+	// the browser, where the page store remains reactive for client navigation.
+	const token = $derived(browser ? page.url.searchParams.get('token') : null);
 	const valid = $derived(password.length >= 8 && password === confirm);
 	const displayed = $derived(validation ?? error);
 

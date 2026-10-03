@@ -52,19 +52,36 @@ def main() -> None:
     print(f'Total requests recorded: {len(entries)} ({len(completed)} completed, {len(entries) - len(completed)} unfinished)')
 
     if args.endpoints:
-        by_endpoint: dict[str, list[tuple[int, float, int]]] = defaultdict(list)
+        by_endpoint: dict[str, list[tuple[int, float, float | None, int]]] = defaultdict(list)
         for e in completed:
             endpoint = f'{e["method"]} {_endpoint(e["url"])}'
-            by_endpoint[endpoint].append((e.get('status') or 0, float(e['durationMs']), e['workerIndex']))
-        print(f'\n{"endpoint":<70} {"count":>6} {"mean":>9} {"median":>9} {"p90":>9} {"max":>9}')
-        print('-' * 115)
-        ranked = sorted(by_endpoint.items(), key=lambda kv: sum(d for _, d, _ in kv[1]), reverse=True)
+            server_duration = e.get('serverDurationMs')
+            by_endpoint[endpoint].append(
+                (
+                    e.get('status') or 0,
+                    float(e['durationMs']),
+                    float(server_duration) if server_duration is not None else None,
+                    e['workerIndex'],
+                )
+            )
+        print(f'\n{"endpoint":<70} {"count":>6} {"mean":>9} {"median":>9} {"p90":>9} {"app p90":>9} {"max":>9}')
+        print('-' * 126)
+        ranked = sorted(by_endpoint.items(), key=lambda kv: sum(duration for _, duration, _, _ in kv[1]), reverse=True)
         for endpoint, data in ranked[: args.top]:
-            durations = [d for _, d, _ in data]
+            durations = [duration for _, duration, _, _ in data]
             p90 = statistics.quantiles(durations, n=10, method='inclusive')[8] if len(durations) >= 2 else durations[0]
+            server_durations = [server_duration for _, _, server_duration, _ in data if server_duration is not None]
+            server_p90 = (
+                statistics.quantiles(server_durations, n=10, method='inclusive')[8]
+                if len(server_durations) >= 2
+                else server_durations[0]
+                if server_durations
+                else None
+            )
+            server_p90_label = _fmt(server_p90) if server_p90 is not None else 'n/a'
             print(
                 f'{endpoint:<70} {len(durations):>6} {_fmt(statistics.mean(durations)):>9} '
-                f'{_fmt(statistics.median(durations)):>9} {_fmt(p90):>9} {_fmt(max(durations)):>9}'
+                f'{_fmt(statistics.median(durations)):>9} {_fmt(p90):>9} {server_p90_label:>9} {_fmt(max(durations)):>9}'
             )
 
     if args.tests:

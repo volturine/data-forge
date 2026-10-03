@@ -2,16 +2,16 @@
 
 from __future__ import annotations
 
-import time
 import uuid
-from collections.abc import Callable
 
 from fastapi import Query
 from pydantic import BaseModel
 
+from backend_core.api_execution_budget import run_bootstrap_settings_db
 from backend_core.auth_config import settings as auth_settings
 from backend_core.config import settings
 from backend_core.error_handlers import handle_errors
+from backend_core.settings_schemas import SettingsResponse
 from backend_core.settings_store import get_settings
 from modules.mcp.router import MCPRouter
 
@@ -42,37 +42,6 @@ class UuidResponse(BaseModel):
     uuids: list[str]
 
 
-_CONFIG_CACHE_TTL: float = 10.0
-
-
-class FrontendConfigCache:
-    def __init__(self, ttl: float) -> None:
-        self._ttl = ttl
-        self._config: FrontendConfig | None = None
-        self._expires_at = 0.0
-
-    def get_or_create(self, create: Callable[[], FrontendConfig]) -> FrontendConfig:
-        if self._config is not None and time.monotonic() < self._expires_at:
-            return self._config
-
-        config = create()
-        self._config = config
-        self._expires_at = time.monotonic() + self._ttl
-        return config
-
-    def invalidate(self) -> None:
-        self._config = None
-        self._expires_at = 0.0
-
-
-_frontend_config_cache = FrontendConfigCache(_CONFIG_CACHE_TTL)
-
-
-def invalidate_config_cache() -> None:
-    """Clear cached config so the next request rebuilds it."""
-    _frontend_config_cache.invalidate()
-
-
 @router.get('/uuid', response_model=UuidResponse, mcp=True)
 @handle_errors(operation='generate UUID')
 def generate_uuid(count: int = Query(default=1, ge=1, le=20)) -> UuidResponse:
@@ -85,16 +54,14 @@ def generate_uuid(count: int = Query(default=1, ge=1, le=20)) -> UuidResponse:
 
 @router.get('', response_model=FrontendConfig, mcp=True)
 @handle_errors(operation='get config')
-def get_config() -> FrontendConfig:
+async def get_config() -> FrontendConfig:
     """Get application configuration: runtime settings, logging settings, feature flags, and default namespace."""
-    return _frontend_config_cache.get_or_create(_build_frontend_config)
+    db_settings = await run_bootstrap_settings_db(get_settings)
+    return _build_frontend_config(db_settings)
 
 
-def _build_frontend_config() -> FrontendConfig:
+def _build_frontend_config(db_settings: SettingsResponse) -> FrontendConfig:
     """Build the frontend configuration from current runtime and persisted settings."""
-    from backend_core.database import run_settings_db
-
-    db_settings = run_settings_db(get_settings)
     return FrontendConfig(
         timezone=settings.timezone,
         normalize_tz=settings.normalize_tz,

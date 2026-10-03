@@ -65,8 +65,6 @@
 
 	const saveMutation = createMutation(() => ({
 		mutationFn: async () => {
-			saving = true;
-			error = '';
 			const signature: UdfSignature = {
 				inputs,
 				output_dtype: outputDtype || null
@@ -96,20 +94,27 @@
 			});
 			if (update.isErr()) throw new Error(update.error.message);
 			return update.value;
-		},
-		onSuccess: (data: Udf) => {
-			queryClient.invalidateQueries({ queryKey: ['udfs'] });
-			dirty = false;
-			if (mode === 'create') {
-				goto(resolve(`/udfs/${data.id}`), { invalidateAll: true });
-			}
-			saving = false;
-		},
-		onError: (err: unknown) => {
-			saving = false;
-			error = err instanceof Error ? err.message : 'Failed to save';
 		}
 	}));
+
+	async function handleSave() {
+		if (!canSave || saving) return;
+
+		saving = true;
+		error = '';
+		try {
+			const data = await saveMutation.mutateAsync();
+			dirty = false;
+			if (mode === 'create') {
+				await goto(resolve(`/udfs/${data.id}`));
+			}
+			void queryClient.invalidateQueries({ queryKey: ['udfs'] });
+		} catch (err) {
+			error = err instanceof Error ? err.message : 'Failed to save';
+		} finally {
+			saving = false;
+		}
+	}
 
 	function handleBack() {
 		goto(resolve('/udfs'), { invalidateAll: true });
@@ -196,7 +201,7 @@
 		<button
 			class={button({ variant: 'primary' })}
 			data-testid="udf-save-button"
-			onclick={() => saveMutation.mutate()}
+			onclick={handleSave}
 			disabled={!canSave || saving}
 		>
 			<Save size={16} />

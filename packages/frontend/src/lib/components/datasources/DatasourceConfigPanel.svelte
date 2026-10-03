@@ -121,10 +121,12 @@
 	}));
 
 	const buildRunsStore = new BuildsStore();
+	const onboardingBuildRunsStore = new BuildsStore();
 	let runsRequested = false;
 
 	onDestroy(() => {
 		buildRunsStore.close();
+		onboardingBuildRunsStore.close();
 	});
 
 	function selectTab(
@@ -134,10 +136,15 @@
 		if (tab !== 'runs' || !datasource.id) return;
 		if (!runsRequested) {
 			buildRunsStore.load({ datasource_id: datasource.id, limit: 50 });
+			// The mixed run list is intentionally bounded, but previews can be
+			// numerous enough to hide the datasource's initial ingest. Fetch that
+			// semantic Build row independently without scanning the full history.
+			onboardingBuildRunsStore.load({ datasource_id: datasource.id, kind: 'build', limit: 1 });
 			runsRequested = true;
 			return;
 		}
 		buildRunsStore.silentRefresh();
+		onboardingBuildRunsStore.silentRefresh();
 	}
 
 	const updateMutation = createMutation(() => ({
@@ -358,7 +365,7 @@
 			}
 			queryClient.invalidateQueries({ queryKey: ['datasource', ns.value, ds.id] });
 			queryClient.invalidateQueries({ queryKey: ['datasource-schema', ds.id] });
-			queryClient.invalidateQueries({ queryKey: ['datasource-preview', ds.id] });
+			queryClient.invalidateQueries({ queryKey: ['datasource-preview', ns.value, ds.id] });
 			queryClient.invalidateQueries({ queryKey: ['datasources'] });
 		}
 	}
@@ -404,7 +411,7 @@
 			schemaDiff = schemaChanged ? { added, removed, types } : null;
 			queryClient.setQueryData(['datasource-schema', datasource.id], nextSchema);
 			queryClient.invalidateQueries({ queryKey: ['datasource-schema', datasource.id] });
-			queryClient.invalidateQueries({ queryKey: ['datasource-preview', datasource.id] });
+			queryClient.invalidateQueries({ queryKey: ['datasource-preview', ns.value, datasource.id] });
 		} catch (error) {
 			refreshError = error instanceof Error ? error.message : 'Failed to ingest datasource schema';
 		} finally {
@@ -627,6 +634,7 @@
 			<DatasourceRunsTab
 				datasourceId={datasource.id}
 				builds={buildRunsStore.builds}
+				onboardingBuilds={onboardingBuildRunsStore.builds}
 				status={buildRunsStore.status}
 				error={buildRunsStore.error}
 				{showPreviews}
