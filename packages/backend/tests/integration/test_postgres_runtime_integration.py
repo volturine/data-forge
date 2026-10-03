@@ -2847,8 +2847,15 @@ def test_postgres_runtime_coordinator_takeover_during_compute_terminal_publicati
 
             preview_thread = threading.Thread(target=submit_preview, name='coordinator-publication-preview')
             preview_thread.start()
+
+            def running_preview_request() -> tuple[str, int] | None:
+                request = _active_preview_request(container)
+                if request is None or request[1] != enums_pb2.COMPUTE_REQUEST_STATUS_RUNNING:
+                    return None
+                return request
+
             active = wait_for_condition(
-                lambda: _active_preview_request(container),
+                running_preview_request,
                 timeout=90,
                 interval=0.1,
                 description='durable preview request to enter running state',
