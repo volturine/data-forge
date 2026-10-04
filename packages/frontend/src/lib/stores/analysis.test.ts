@@ -536,11 +536,8 @@ describe('AnalysisStore.restoreSavedSnapshot', () => {
 			thumbnail: null
 		});
 		const resourceConfig = { max_threads: 3 };
-		const engineDefaults = { max_threads: 4, max_memory_mb: 1024, streaming_chunk_size: 512 };
 		store.setResourceConfig(resourceConfig);
-		store.setEngineDefaults(engineDefaults);
 		const existingResourceConfig = store.resourceConfig;
-		const existingEngineDefaults = store.engineDefaults;
 		store.update({ name: 'Unsaved name', description: 'Unsaved description' });
 		store.setActiveTab('tab-a');
 		store.updateStepConfig('step-a', { filter: { column: 'unsaved' } });
@@ -558,7 +555,6 @@ describe('AnalysisStore.restoreSavedSnapshot', () => {
 		expect(store.tabs).not.toBe(store.savedTabs);
 		expect(store.tabs[0]?.steps[0]?.config).not.toBe(store.savedTabs[0]?.steps[0]?.config);
 		expect(store.resourceConfig).toBe(existingResourceConfig);
-		expect(store.engineDefaults).toBe(existingEngineDefaults);
 	});
 
 	test('restores an empty saved tab list as a valid snapshot', () => {

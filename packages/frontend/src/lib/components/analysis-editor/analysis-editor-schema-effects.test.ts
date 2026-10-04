@@ -17,7 +17,6 @@ const mocks = vi.hoisted(() => {
 		datasourceStore: { datasources: [] as unknown[] },
 		getDatasourceSchema: vi.fn(),
 		getStepSchema: vi.fn(),
-		getEngineDefaults: vi.fn(),
 		track: vi.fn()
 	};
 });
@@ -27,7 +26,6 @@ vi.mock('$lib/stores/datasource.svelte', () => ({ datasourceStore: mocks.datasou
 vi.mock('$lib/stores/schema.svelte', () => ({ schemaStore: {} }));
 vi.mock('$lib/api/datasource', () => ({ getDatasourceSchema: mocks.getDatasourceSchema }));
 vi.mock('$lib/api/compute', () => ({
-	getEngineDefaults: mocks.getEngineDefaults,
 	getStepSchema: mocks.getStepSchema
 }));
 vi.mock('$lib/utils/audit-log', () => ({ track: mocks.track }));

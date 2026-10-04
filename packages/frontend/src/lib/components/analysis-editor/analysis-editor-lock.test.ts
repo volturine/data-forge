@@ -64,7 +64,6 @@ function createEditor(hydrateOnOwned: boolean) {
 			tabs: [],
 			activeTabId: null,
 			resourceConfig: null,
-			engineDefaults: null,
 			selectedStepId: null,
 			leftPaneCollapsed: false,
 			rightPaneCollapsed: false

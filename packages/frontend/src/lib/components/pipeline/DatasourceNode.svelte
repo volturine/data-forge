@@ -74,13 +74,11 @@
 			if (result.isErr()) throw new Error(result.error.message);
 			return result.value;
 		},
-		initialData: analysisStore.engineDefaults ?? undefined,
 		staleTime: Infinity,
 		refetchOnMount: false
 	}));
 
-	// Use defaults from store or query cache for both existing and new analyses.
-	const defaults = $derived(engineDefaultsQuery.data ?? analysisStore.engineDefaults);
+	const defaults = $derived(engineDefaultsQuery.data);
 
 	// Threads: show effective value (default when not overridden)
 	const threadsOverride = $derived(analysisStore.resourceConfig?.max_threads ?? 0);
