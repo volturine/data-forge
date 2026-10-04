@@ -241,7 +241,7 @@ test.describe('Analyses – blank creation', () => {
 		await expect(page.getByRole('button', { name: 'Create Analysis' })).toBeDisabled();
 	});
 
-	test('creates an empty, centered pipeline from the selected datasource', async ({
+	test('creates a top-aligned blank pipeline with centered insert controls', async ({
 		page,
 		sharedDatasource
 	}) => {
@@ -295,9 +295,33 @@ test.describe('Analyses – blank creation', () => {
 			const flowBounds = await flow.boundingBox();
 			if (!canvasBounds || !flowBounds)
 				throw new Error('Could not measure the empty pipeline canvas');
+			expect(flowBounds.y - canvasBounds.y).toBeLessThan(80);
+
+			const insertZone = canvas.locator('[data-hook="insert-zone"]').first();
+			await insertZone.hover();
+			const connection = insertZone.locator('.connection-line');
+			await expect(canvas.locator('.connection-line')).toHaveCount(1);
+			const connectionBounds = await connection.boundingBox();
+			if (!connectionBounds) throw new Error('Could not measure the empty pipeline connection');
+
+			const controls = insertZone.locator('.insert-controls-group > *');
+			await expect(controls).toHaveCount(3);
+			const controlBounds = await Promise.all(
+				Array.from({ length: await controls.count() }, (_, index) =>
+					controls.nth(index).boundingBox()
+				)
+			);
+			const visibleControlBounds = controlBounds.filter((bounds) => bounds !== null);
+			expect(visibleControlBounds).toHaveLength(3);
+			const controlsTop = Math.min(...visibleControlBounds.map((bounds) => bounds.y));
+			const controlsBottom = Math.max(
+				...visibleControlBounds.map((bounds) => bounds.y + bounds.height)
+			);
 			expect(
-				Math.abs(flowBounds.y + flowBounds.height / 2 - (canvasBounds.y + canvasBounds.height / 2))
-			).toBeLessThan(40);
+				Math.abs(
+					(controlsTop + controlsBottom) / 2 - (connectionBounds.y + connectionBounds.height / 2)
+				)
+			).toBeLessThan(1);
 		} finally {
 			if (analysisId) {
 				await deleteAnalysisViaUI(page, analysisName, { id: analysisId }).catch(() => undefined);

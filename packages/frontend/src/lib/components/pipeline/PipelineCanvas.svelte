@@ -385,8 +385,7 @@
 				width: '100%',
 				maxWidth: '100%',
 				flexDirection: 'column',
-				alignItems: 'center',
-				...(steps.length === 0 ? { minHeight: '100%', justifyContent: 'center' } : {})
+				alignItems: 'center'
 			})}
 			role="list"
 		>
@@ -697,19 +696,6 @@
 					</div>
 				{/if}
 			{/each}
-			{#if steps.length === 0}
-				<div
-					class={css({
-						display: 'flex',
-						alignItems: 'center',
-						justifyContent: 'center',
-						paddingY: '0'
-					})}
-					aria-hidden="true"
-				>
-					<ConnectionLine fromStepIndex={-1} toStepIndex={0} totalSteps={1} />
-				</div>
-			{/if}
 			<div
 				bind:this={outputEl}
 				class={css({ width: '100%', display: 'flex', justifyContent: 'center' })}
