@@ -1,3 +1,4 @@
+import type { Request } from '@playwright/test';
 import { test, expect } from './fixtures.js';
 import { createAnalysis } from './utils/api.js';
 import { deleteAnalysisViaUI } from './utils/ui-cleanup.js';
@@ -123,6 +124,84 @@ test.describe('Analyses – list & gallery', () => {
 });
 
 test.describe('Analyses – gallery interactions', () => {
+	test('switching to a prefetched favorite makes one datasource schema request', async ({
+		page,
+		request,
+		sharedDatasource
+	}) => {
+		const suffix = uid();
+		const currentName = `Schema Current ${suffix}`;
+		const targetName = `Schema Target ${suffix}`;
+		const currentId = await createAnalysis(request, currentName, sharedDatasource.id);
+		const targetId = await createAnalysis(request, targetName, sharedDatasource.id);
+
+		try {
+			await gotoAnalysesGallery(page);
+			const targetCard = page.locator(`[data-analysis-card="${targetName}"]`);
+			const prefetch = page.waitForResponse(
+				(response) =>
+					new URL(response.url()).pathname === `/api/v1/analysis/${targetId}` &&
+					response.request().method() === 'GET'
+			);
+			await targetCard.hover();
+			expect((await prefetch).status()).toBe(200);
+
+			await expandSidebar(page);
+			const favoriteResponse = page.waitForResponse(
+				(response) =>
+					new URL(response.url()).pathname === `/api/v1/analysis/${targetId}/favorite` &&
+					response.request().method() === 'POST'
+			);
+			await targetCard.getByRole('button', { name: 'Add analysis to favorites' }).click();
+			expect((await favoriteResponse).status()).toBe(200);
+
+			const favorites = page.getByRole('group', { name: 'Favorite analyses' });
+			const targetLink = favorites.getByRole('link', { name: targetName });
+			await expect(targetLink).toBeVisible({ timeout: readyTimeoutMs() });
+
+			const schemaPath = `/api/v1/datasource/${sharedDatasource.id}/schema`;
+			const currentSchema = page.waitForResponse(
+				(response) => new URL(response.url()).pathname === schemaPath,
+				{ timeout: readyTimeoutMs() }
+			);
+			await page.locator(`[data-analysis-card="${currentName}"]`).click();
+			expect(await waitForCurrentAnalysisEditor(page, readyTimeoutMs())).toBe(currentId);
+			expect((await currentSchema).status()).toBe(200);
+
+			const schemaRequests: string[] = [];
+			const failedSchemaRequests: string[] = [];
+			const captureSchemaRequest = (schemaRequest: Request) => {
+				if (new URL(schemaRequest.url()).pathname === schemaPath) {
+					schemaRequests.push(schemaRequest.url());
+				}
+			};
+			const captureFailedSchemaRequest = (schemaRequest: Request) => {
+				if (new URL(schemaRequest.url()).pathname === schemaPath) {
+					failedSchemaRequests.push(
+						`${schemaRequest.url()}: ${schemaRequest.failure()?.errorText ?? 'failed'}`
+					);
+				}
+			};
+			page.on('request', captureSchemaRequest);
+			page.on('requestfailed', captureFailedSchemaRequest);
+			const targetSchema = page.waitForResponse(
+				(response) => new URL(response.url()).pathname === schemaPath,
+				{ timeout: readyTimeoutMs() }
+			);
+			await targetLink.click();
+			await expect(page).toHaveURL(`/analysis/${targetId}`, { timeout: readyTimeoutMs() });
+			expect(await waitForCurrentAnalysisEditor(page, readyTimeoutMs())).toBe(targetId);
+			expect((await targetSchema).status()).toBe(200);
+			page.off('request', captureSchemaRequest);
+			page.off('requestfailed', captureFailedSchemaRequest);
+			expect(failedSchemaRequests).toEqual([]);
+			expect(schemaRequests).toHaveLength(1);
+		} finally {
+			await deleteAnalysisViaUI(page, currentName).catch(() => undefined);
+			await deleteAnalysisViaUI(page, targetName).catch(() => undefined);
+		}
+	});
+
 	test('opens prefetched analyses when switching between analysis cards', async ({
 		page,
 		request,
@@ -133,6 +212,7 @@ test.describe('Analyses – gallery interactions', () => {
 		const secondName = `Prefetched Second ${suffix}`;
 		const firstId = await createAnalysis(request, firstName, sharedDatasource.id);
 		const secondId = await createAnalysis(request, secondName, sharedDatasource.id);
+		let releasePrefetch: (() => void) | undefined;
 
 		try {
 			for (const [name, id] of [
@@ -141,17 +221,34 @@ test.describe('Analyses – gallery interactions', () => {
 			] as const) {
 				await gotoAnalysesGallery(page);
 				const card = page.locator(`[data-analysis-card="${name}"]`);
+				if (id === secondId) {
+					const pendingPrefetch = new Promise<void>((resolve) => {
+						releasePrefetch = resolve;
+					});
+					await page.route(`**/api/v1/analysis/${id}`, async (route) => {
+						await pendingPrefetch;
+						await route.continue();
+					});
+				}
+				const prefetchStarted = page.waitForRequest(
+					(analysisRequest) => new URL(analysisRequest.url()).pathname === `/api/v1/analysis/${id}`
+				);
 				const prefetch = page.waitForResponse(
 					(response) =>
 						new URL(response.url()).pathname === `/api/v1/analysis/${id}` &&
 						response.request().method() === 'GET'
 				);
 				await card.hover();
-				expect((await prefetch).status()).toBe(200);
+				await prefetchStarted;
+				if (!releasePrefetch) expect((await prefetch).status()).toBe(200);
 				await card.click();
+				await expect(page).toHaveURL(`/analysis/${id}`, { timeout: readyTimeoutMs() });
+				releasePrefetch?.();
+				expect((await prefetch).status()).toBe(200);
 				expect(await waitForCurrentAnalysisEditor(page, readyTimeoutMs())).toBe(id);
 			}
 		} finally {
+			releasePrefetch?.();
 			await deleteAnalysisViaUI(page, firstName).catch(() => undefined);
 			await deleteAnalysisViaUI(page, secondName).catch(() => undefined);
 		}
