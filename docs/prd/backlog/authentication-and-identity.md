@@ -20,7 +20,7 @@ Introduce real user identity in place of anonymous client identity. This documen
 ### Identity and session domain
 
 - [ ] Add a canonical user identity with email, display name, avatar, status, timestamps, and preferences.
-- [ ] Add provider identity links for password, Google, and GitHub with uniqueness and safe unlink rules.
+- [ ] Add provider identity links for password and GitHub with uniqueness and safe unlink rules.
 - [ ] Add durable sessions with expiry, revocation, device metadata, and current-session resolution.
 
 ### Authentication services
@@ -28,7 +28,7 @@ Introduce real user identity in place of anonymous client identity. This documen
 - [ ] Implement registration, login, logout, current-user, and current-session endpoints.
 - [ ] Implement password validation, hashing, reset, and rate limiting.
 - [ ] Implement email verification and resend/expiry safeguards.
-- [ ] Implement Google and GitHub OAuth callbacks and account-linking semantics.
+- [ ] Implement GitHub OAuth callbacks and account-linking semantics.
 
 ### Account experience
 

@@ -11,13 +11,6 @@
 
 <div class={css({ display: 'flex', gap: '3' })}>
 	<a
-		href="/api/v1/auth/google"
-		rel="external"
-		class={button({ variant: 'secondary', width: 'grow' })}
-	>
-		Google
-	</a>
-	<a
 		href="/api/v1/auth/github"
 		rel="external"
 		class={button({ variant: 'secondary', width: 'grow' })}

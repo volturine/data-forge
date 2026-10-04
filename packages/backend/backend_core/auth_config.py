@@ -53,18 +53,8 @@ class AuthSettings(BaseSettings):
     default_user_email: str = Field(default='default@example.com', alias='DEFAULT_USER_EMAIL')
     default_user_password: str = Field(default='ChangeMe123', alias='DEFAULT_USER_PASSWORD')
     default_user_name: str = Field(default='Default User', alias='DEFAULT_USER_NAME')
-    google_client_id: str = Field(default='', alias='GOOGLE_CLIENT_ID')
-    google_client_secret: str = Field(default='', alias='GOOGLE_CLIENT_SECRET')
-    google_redirect_uri: str = Field(
-        default='http://localhost:8000/api/v1/auth/google/callback',
-        alias='GOOGLE_REDIRECT_URI',
-    )
     github_client_id: str = Field(default='', alias='GITHUB_CLIENT_ID')
     github_client_secret: str = Field(default='', alias='GITHUB_CLIENT_SECRET')
-    github_redirect_uri: str = Field(
-        default='http://localhost:8000/api/v1/auth/github/callback',
-        alias='GITHUB_REDIRECT_URI',
-    )
     auth_frontend_url: str = Field(default='http://localhost:5173', alias='AUTH_FRONTEND_URL')
     session_max_age_days: int = Field(default=30, alias='SESSION_MAX_AGE_DAYS')
 

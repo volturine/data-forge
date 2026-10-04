@@ -238,8 +238,8 @@ test.describe('Profile – Account tab', () => {
 
 		const panel = page.locator('#panel-account');
 		await expect(panel.getByText('Connected accounts')).toBeVisible();
-		await expect(panel.getByText('Google')).toBeVisible();
 		await expect(panel.getByText('GitHub')).toBeVisible();
+		await expect(panel.getByText('Google')).toHaveCount(0);
 	});
 
 	test('profile save shows success feedback on 200', async ({ page }) => {
@@ -879,7 +879,7 @@ test.describe('Profile – Notifications tab functional', () => {
 // ────────────────────────────────────────────────────────────────────────────────
 
 test.describe('Profile – Connected accounts', () => {
-	test('Google and GitHub connect buttons are present when not connected', async ({ page }) => {
+	test('GitHub connect button is present when not connected', async ({ page }) => {
 		await gotoProfile(page, 'account');
 
 		const panel = page.locator('#panel-account');
@@ -887,6 +887,6 @@ test.describe('Profile – Connected accounts', () => {
 		// Since e2e worker registers via email, OAuth should not be connected.
 		// Look for Connect buttons in the connected-accounts section.
 		const connectButtons = panel.getByRole('button', { name: 'Connect' });
-		await expect(connectButtons).toHaveCount(2);
+		await expect(connectButtons).toHaveCount(1);
 	});
 });

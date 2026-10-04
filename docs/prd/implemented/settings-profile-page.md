@@ -63,7 +63,7 @@ Historically, settings and profile were separate destinations in the app. Users 
 
 1. Account tab shows: display name (editable), email (read-only), avatar URL (editable), "Change Password" button.
 2. Active sessions listed with device info, IP, last active — "Revoke All" button.
-3. Auth providers shown (password, Google, GitHub) with link/unlink actions.
+3. Auth providers shown (password and GitHub) with link/unlink actions.
 4. Save triggers `PUT /auth/profile` and shows success toast.
 
 ### US-3: Configure Notifications

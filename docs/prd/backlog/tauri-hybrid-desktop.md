@@ -150,9 +150,9 @@ The hybrid architecture changes the meaning of authentication depending on backe
 
 ### Remote Mode
 
-- Remote mode must support production-safe auth callback configuration and secure cookie/header handling.
+- Remote mode must derive callbacks from the externally visible request origin and handle secure cookie/header settings.
 - Remote mode must not depend on localhost callback defaults.
-- OAuth redirects and frontend callback URLs must become deployment-specific configuration rather than fixed localhost values.
+- OAuth callback and post-login URLs derive from the incoming request origin rather than fixed localhost values.
 
 ### Desktop OAuth
 
@@ -163,7 +163,7 @@ One of the following approved patterns must be implemented for desktop OAuth:
 
 The selected pattern must:
 
-- work for both Google and GitHub if those providers remain supported,
+- work with GitHub if that provider remains supported,
 - avoid embedding provider secrets in the frontend bundle,
 - be documented separately for local and remote deployment paths.
 

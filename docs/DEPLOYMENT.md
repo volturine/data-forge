@@ -104,8 +104,11 @@ compose files mirror this directory's topology and follow the same registry.
 
 1. Review `docker/env/prod.env` and replace every `replace-with-...` value.
 2. Set the five image variables to tags published from the same release. `DF_ENGINE_IMAGE` must be available to the local Docker daemon before the worker starts. Pin it to a `repository@sha256:<digest>` reference when engines must stay byte-identical across launches; a tag is accepted (and logged as unpinned) so custom engine images with extra libraries can be used.
-3. Set `DF_AUTH_FRONTEND_URL`, OAuth callback URLs, and `DF_CORS_ORIGINS` to the
-   public HTTPS origin.
+3. Set `DF_AUTH_FRONTEND_URL` and `DF_CORS_ORIGINS` to the public HTTPS origin.
+   GitHub OAuth derives its callback from the incoming request host, so register
+   `https://<your-host>/api/v1/auth/github/callback` in the GitHub OAuth app.
+   Set `DF_TRUSTED_PROXY_HOPS` to the number of proxies that provide the
+   forwarded public scheme.
 4. Set `DF_DOCKER_SOCKET_PATH` and `DF_DOCKER_GID` for the deployment host. The worker is the only service with Docker access; this permission is equivalent to administrative host access.
 5. Start the stack:
 
@@ -240,8 +243,10 @@ dataforge.example.com {
 ```
 
 Caddy obtains and renews public certificates when DNS and ports 80/443 are
-available. For either proxy, set `AUTH_FRONTEND_URL` and OAuth callback URLs to
-`https://dataforge.example.com`.
+available. For either proxy, set `AUTH_FRONTEND_URL` to
+`https://dataforge.example.com` and register
+`https://dataforge.example.com/api/v1/auth/github/callback` in the GitHub OAuth
+app. Set `TRUSTED_PROXY_HOPS=1` when a single proxy terminates TLS.
 
 ## Health checks
 

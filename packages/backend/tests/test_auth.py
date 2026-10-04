@@ -1541,23 +1541,6 @@ class TestAuthRoutes:
         assert refreshed_first.revoked is True
         assert refreshed_second.revoked is True
 
-    def test_google_oauth_start_sets_state_cookie(self, auth_client: TestClient) -> None:
-        response = auth_client.get('/api/v1/auth/google', follow_redirects=False)
-
-        assert response.status_code in {302, 307}
-        location = response.headers.get('location', '')
-        assert location.startswith('https://accounts.google.com/o/oauth2/v2/auth?')
-        query = parse_qs(urlparse(location).query)
-        assert 'state' in query
-        assert query['state']
-        state = query['state'][0]
-        assert response.cookies.get('oauth_state_google') == state
-        set_cookie = response.headers.get('set-cookie', '')
-        assert 'oauth_state_google=' in set_cookie
-        assert 'HttpOnly' in set_cookie
-        assert 'SameSite=lax' in set_cookie
-        assert 'Secure' not in set_cookie
-
     def test_github_oauth_start_sets_state_cookie(self, auth_client: TestClient) -> None:
         response = auth_client.get('/api/v1/auth/github', follow_redirects=False)
 
@@ -1565,6 +1548,7 @@ class TestAuthRoutes:
         location = response.headers.get('location', '')
         assert location.startswith('https://github.com/login/oauth/authorize?')
         query = parse_qs(urlparse(location).query)
+        assert query['redirect_uri'] == ['http://testserver/api/v1/auth/github/callback']
         assert 'state' in query
         assert query['state']
         state = query['state'][0]
@@ -1574,78 +1558,6 @@ class TestAuthRoutes:
         assert 'HttpOnly' in set_cookie
         assert 'SameSite=lax' in set_cookie
         assert 'Secure' not in set_cookie
-
-    def test_google_oauth_start_sets_secure_state_cookie_for_https(
-        self,
-        auth_client: TestClient,
-        monkeypatch: pytest.MonkeyPatch,
-    ) -> None:
-        monkeypatch.setattr('backend_core.config.settings.trusted_proxy_hops', 1)
-        response = auth_client.get(
-            '/api/v1/auth/google',
-            headers={'x-forwarded-proto': 'https'},
-            follow_redirects=False,
-        )
-
-        assert response.status_code in {302, 307}
-        assert 'Secure' in response.headers.get('set-cookie', '')
-
-    def test_google_oauth_callback_requires_matching_state(self, auth_client: TestClient) -> None:
-        start = auth_client.get('/api/v1/auth/google', follow_redirects=False)
-        location = start.headers.get('location', '')
-        query = parse_qs(urlparse(location).query)
-        state = query['state'][0]
-
-        mismatch = auth_client.get(
-            f'/api/v1/auth/google/callback?code=test-code&state={state}-mismatch',
-            follow_redirects=False,
-        )
-
-        assert mismatch.status_code == 400
-
-    def test_google_oauth_callback_redirects_to_frontend_callback(
-        self,
-        auth_client: TestClient,
-        monkeypatch: pytest.MonkeyPatch,
-    ) -> None:
-        start = auth_client.get('/api/v1/auth/google', follow_redirects=False)
-        state = parse_qs(urlparse(start.headers['location']).query)['state'][0]
-
-        class MockResponse:
-            def __init__(self, status_code: int, data: dict[str, object]):
-                self.status_code = status_code
-                self._data = data
-
-            def json(self) -> dict[str, object]:
-                return self._data
-
-        client = AsyncMock()
-        client.post = AsyncMock(return_value=MockResponse(200, {'access_token': 'google-token'}))
-        client.get = AsyncMock(
-            return_value=MockResponse(
-                200,
-                {
-                    'id': 'google-user-1',
-                    'email': 'google@example.com',
-                    'name': 'Google User',
-                    'picture': 'https://example.com/avatar.png',
-                },
-            )
-        )
-        monkeypatch.setattr('modules.auth.routes.http_client.get_async_client', lambda: client)
-        monkeypatch.setattr(
-            'backend_core.auth_config.settings.auth_frontend_url',
-            'https://app.example.com',
-        )
-
-        response = auth_client.get(
-            f'/api/v1/auth/google/callback?code=test-code&state={state}',
-            follow_redirects=False,
-        )
-
-        assert response.status_code in {302, 307}
-        assert response.headers['location'] == 'https://app.example.com/callback'
-        assert auth_client.cookies.get('session_token') is not None
 
     def test_github_oauth_callback_requires_state(self, auth_client: TestClient) -> None:
         missing = auth_client.get('/api/v1/auth/github/callback?code=test-code', follow_redirects=False)
@@ -1694,18 +1606,13 @@ class TestAuthRoutes:
             ]
         )
         monkeypatch.setattr('modules.auth.routes.http_client.get_async_client', lambda: client)
-        monkeypatch.setattr(
-            'backend_core.auth_config.settings.auth_frontend_url',
-            'https://app.example.com',
-        )
-
         response = auth_client.get(
             f'/api/v1/auth/github/callback?code=test-code&state={state}',
             follow_redirects=False,
         )
 
         assert response.status_code in {302, 307}
-        assert response.headers['location'] == 'https://app.example.com/callback'
+        assert response.headers['location'] == 'http://testserver/callback'
         assert auth_client.cookies.get('session_token') is not None
 
     def test_session_cookie_not_secure_for_http_request(self, auth_client: TestClient) -> None:
