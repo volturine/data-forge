@@ -354,6 +354,18 @@
 		schemaKey: () => schemaKey,
 		datasources: () => (datasourceStore.loaded ? datasourceStore.datasources : undefined)
 	});
+	$effect(() => {
+		const detail = analysisQuery.data;
+		const id = validAnalysisId;
+		if (!detail || !id || detail.analysis.id !== id || analysisStore.current?.id === id) return;
+
+		// Gallery hover can populate the query cache without running this route's query function.
+		analysisStore.applyAnalysis(detail.analysis);
+		analysisStore.currentRevision = detail.version;
+		lastLoadedVersion = detail.version;
+		draft.hydrate();
+		sourceSchemaLoader.load();
+	});
 	const isLoadingSchema = $derived(sourceSchemaLoader.isLoading());
 
 	function refreshEditorServices(): void {
