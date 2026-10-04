@@ -123,6 +123,40 @@ test.describe('Analyses – list & gallery', () => {
 });
 
 test.describe('Analyses – gallery interactions', () => {
+	test('opens prefetched analyses when switching between analysis cards', async ({
+		page,
+		request,
+		sharedDatasource
+	}) => {
+		const suffix = uid();
+		const firstName = `Prefetched First ${suffix}`;
+		const secondName = `Prefetched Second ${suffix}`;
+		const firstId = await createAnalysis(request, firstName, sharedDatasource.id);
+		const secondId = await createAnalysis(request, secondName, sharedDatasource.id);
+
+		try {
+			for (const [name, id] of [
+				[firstName, firstId],
+				[secondName, secondId]
+			] as const) {
+				await gotoAnalysesGallery(page);
+				const card = page.locator(`[data-analysis-card="${name}"]`);
+				const prefetch = page.waitForResponse(
+					(response) =>
+						new URL(response.url()).pathname === `/api/v1/analysis/${id}` &&
+						response.request().method() === 'GET'
+				);
+				await card.hover();
+				expect((await prefetch).status()).toBe(200);
+				await card.click();
+				expect(await waitForCurrentAnalysisEditor(page, readyTimeoutMs())).toBe(id);
+			}
+		} finally {
+			await deleteAnalysisViaUI(page, firstName).catch(() => undefined);
+			await deleteAnalysisViaUI(page, secondName).catch(() => undefined);
+		}
+	});
+
 	test('sort dropdown A-Z reorders analysis cards', async ({ page, request, sharedDatasource }) => {
 		const suffix = uid();
 		const alphaName = `Alpha Sort ${suffix}`;
