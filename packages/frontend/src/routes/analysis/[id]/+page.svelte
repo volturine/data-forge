@@ -223,7 +223,7 @@
 				}
 				forceAnalysisServerSync = false;
 				draft.hydrate();
-				sourceSchemaLoader.load();
+				loadSourceSchemaWhenRouteReady();
 				return cached;
 			}
 			// Query refetches must not overwrite an editor's unsaved working copy.
@@ -240,7 +240,7 @@
 			}
 			forceAnalysisServerSync = false;
 			draft.hydrate();
-			sourceSchemaLoader.load();
+			loadSourceSchemaWhenRouteReady();
 			return detail;
 		},
 		retry: false
@@ -327,7 +327,7 @@
 			}
 			datasourceStore.datasources = result.value;
 			datasourceStore.loaded = true;
-			sourceSchemaLoader.load();
+			loadSourceSchemaWhenRouteReady();
 			return result.value;
 		}
 	}));
@@ -354,9 +354,12 @@
 		schemaKey: () => schemaKey,
 		datasources: () => (datasourceStore.loaded ? datasourceStore.datasources : undefined)
 	});
+	let synchronizedEditorRoute = $state<string | null>(null);
 	$effect(() => {
 		const detail = analysisQuery.data;
 		const id = validAnalysisId;
+		const routeKey = `${ns.value}:${analysisId ?? ''}`;
+		if (synchronizedEditorRoute !== routeKey) return;
 		if (!detail || !id || detail.analysis.id !== id || analysisStore.current?.id === id) return;
 
 		// Gallery hover can populate the query cache without running this route's query function.
@@ -364,14 +367,14 @@
 		analysisStore.currentRevision = detail.version;
 		lastLoadedVersion = detail.version;
 		draft.hydrate();
-		sourceSchemaLoader.load();
+		loadSourceSchemaWhenRouteReady();
 	});
 	const isLoadingSchema = $derived(sourceSchemaLoader.isLoading());
 
 	function refreshEditorServices(): void {
 		loadEngineDefaults();
 		hydrateInferredSchemas();
-		sourceSchemaLoader.load();
+		loadSourceSchemaWhenRouteReady();
 	}
 
 	function cancelEditorServices(): void {
@@ -380,7 +383,6 @@
 		sourceSchemaLoader.cancel();
 	}
 
-	let synchronizedEditorRoute: string | null = null;
 	function syncEditorRoute(): void {
 		const routeKey = `${ns.value}:${analysisId ?? ''}`;
 		if (synchronizedEditorRoute === routeKey) return;
@@ -389,6 +391,12 @@
 		resetForAnalysisId(analysisId);
 		lock.sync(validAnalysisId);
 		refreshEditorServices();
+	}
+
+	function loadSourceSchemaWhenRouteReady(): void {
+		const routeKey = `${ns.value}:${analysisId ?? ''}`;
+		if (synchronizedEditorRoute !== routeKey) return;
+		sourceSchemaLoader.load();
 	}
 
 	const currentDatasource = $derived.by(() => {
@@ -505,7 +513,7 @@
 		analysisStore.setActiveTab(tabId);
 		draft.schedulePersist();
 		hydrateInferredSchemas();
-		sourceSchemaLoader.load();
+		loadSourceSchemaWhenRouteReady();
 	}
 
 	onMount(() => {
