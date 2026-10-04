@@ -27,7 +27,6 @@
 	import AnalysisEditorExportModal from '$lib/components/analysis-editor/AnalysisEditorExportModal.svelte';
 	import AnalysisEditorVersionModal from '$lib/components/analysis-editor/AnalysisEditorVersionModal.svelte';
 	import {
-		setupEngineDefaultsEffect,
 		setupInferredSchemaHydrationEffect,
 		setupSourceSchemaLoadingEffect
 	} from '$lib/components/analysis-editor/analysis-editor-schema-effects.svelte';
@@ -134,7 +133,6 @@
 			tabs: analysisStore.tabs,
 			activeTabId: analysisStore.activeTabId,
 			resourceConfig: analysisStore.resourceConfig,
-			engineDefaults: analysisStore.engineDefaults,
 			selectedStepId,
 			leftPaneCollapsed,
 			rightPaneCollapsed,
@@ -145,7 +143,6 @@
 			analysisStore.setTabs(parsed.tabs);
 			analysisStore.activeTabId = parsed.activeTabId;
 			analysisStore.setResourceConfig(parsed.resourceConfig);
-			analysisStore.setEngineDefaults(parsed.engineDefaults);
 			selectedStepId = parsed.selectedStepId;
 			leftPaneCollapsed = parsed.leftPaneCollapsed;
 			rightPaneCollapsed = parsed.rightPaneCollapsed;
@@ -318,7 +315,6 @@
 		}
 	}));
 
-	const loadEngineDefaults = setupEngineDefaultsEffect(() => validAnalysisId);
 	const hydrateInferredSchemas = setupInferredSchemaHydrationEffect(() => validAnalysisId);
 
 	const activeTab = $derived(analysisStore.activeTab);
@@ -344,13 +340,11 @@
 	const isLoadingSchema = $derived(sourceSchemaLoader.isLoading());
 
 	function refreshEditorServices(): void {
-		loadEngineDefaults();
 		hydrateInferredSchemas();
 		loadSourceSchemaWhenRouteReady();
 	}
 
 	function cancelEditorServices(): void {
-		loadEngineDefaults.cancel();
 		hydrateInferredSchemas.cancel();
 		sourceSchemaLoader.cancel();
 	}

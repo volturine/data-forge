@@ -125,7 +125,7 @@ test.describe('Analyses – list & gallery', () => {
 });
 
 test.describe('Analyses – gallery interactions', () => {
-	test('switching to a prefetched favorite makes one datasource schema request', async ({
+	test('switching to a prefetched favorite avoids duplicate schema and defaults requests', async ({
 		page,
 		request,
 		sharedDatasource
@@ -161,6 +161,25 @@ test.describe('Analyses – gallery interactions', () => {
 			await expect(targetLink).toBeVisible({ timeout: readyTimeoutMs() });
 
 			const schemaPath = `/api/v1/datasource/${sharedDatasource.id}/schema`;
+			const defaultsPath = '/api/v1/compute/defaults';
+			const defaultsRequests: string[] = [];
+			const failedDefaultsRequests: string[] = [];
+			const captureDefaultsRequest = (defaultsRequest: Request) => {
+				if (new URL(defaultsRequest.url()).pathname === defaultsPath) {
+					defaultsRequests.push(defaultsRequest.url());
+				}
+			};
+			const captureFailedDefaultsRequest = (defaultsRequest: Request) => {
+				if (new URL(defaultsRequest.url()).pathname === defaultsPath) {
+					failedDefaultsRequests.push(defaultsRequest.failure()?.errorText ?? 'failed');
+				}
+			};
+			page.on('request', captureDefaultsRequest);
+			page.on('requestfailed', captureFailedDefaultsRequest);
+			const currentDefaults = page.waitForResponse(
+				(response) => new URL(response.url()).pathname === defaultsPath,
+				{ timeout: readyTimeoutMs() }
+			);
 			const currentSchema = page.waitForResponse(
 				(response) => new URL(response.url()).pathname === schemaPath,
 				{ timeout: readyTimeoutMs() }
@@ -168,6 +187,7 @@ test.describe('Analyses – gallery interactions', () => {
 			await page.locator(`[data-analysis-card="${currentName}"]`).click();
 			expect(await waitForCurrentAnalysisEditor(page, readyTimeoutMs())).toBe(currentId);
 			expect((await currentSchema).status()).toBe(200);
+			expect((await currentDefaults).status()).toBe(200);
 
 			const schemaRequests: string[] = [];
 			const failedSchemaRequests: string[] = [];
@@ -195,8 +215,12 @@ test.describe('Analyses – gallery interactions', () => {
 			expect((await targetSchema).status()).toBe(200);
 			page.off('request', captureSchemaRequest);
 			page.off('requestfailed', captureFailedSchemaRequest);
+			page.off('request', captureDefaultsRequest);
+			page.off('requestfailed', captureFailedDefaultsRequest);
 			expect(failedSchemaRequests).toEqual([]);
 			expect(schemaRequests).toHaveLength(1);
+			expect(failedDefaultsRequests).toEqual([]);
+			expect(defaultsRequests).toHaveLength(1);
 		} finally {
 			await deleteAnalysisViaUI(page, currentName).catch(() => undefined);
 			await deleteAnalysisViaUI(page, targetName).catch(() => undefined);

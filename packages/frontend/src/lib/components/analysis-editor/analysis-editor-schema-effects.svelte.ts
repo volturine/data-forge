@@ -4,7 +4,7 @@ import { datasourceStore } from '$lib/stores/datasource.svelte';
 import { schemaStore } from '$lib/stores/schema.svelte';
 import { getDatasourceSchema } from '$lib/api/datasource';
 import type { DataSource } from '$lib/types/datasource';
-import { getEngineDefaults, getStepSchema } from '$lib/api/compute';
+import { getStepSchema } from '$lib/api/compute';
 import { buildAnalysisPipelinePayload } from '$lib/utils/analysis-pipeline';
 import { hashPipeline } from '$lib/utils/hash';
 import { applySteps } from '$lib/utils/pipeline';
@@ -13,36 +13,6 @@ import { track } from '$lib/utils/audit-log';
 import { isUuid } from '$lib/utils/analysis-tab';
 
 type CancellableEffect = (() => void) & { cancel: () => void };
-
-export function setupEngineDefaultsEffect(validAnalysisId: () => string | null): CancellableEffect {
-	let controller: AbortController | null = null;
-	const run = () => {
-		const id = validAnalysisId();
-		if (!id || analysisStore.engineDefaults) return;
-		controller?.abort();
-		controller = new AbortController();
-		getEngineDefaults({ signal: controller.signal }).match(
-			(defaults) => {
-				if (controller?.signal.aborted) return;
-				analysisStore.setEngineDefaults(defaults);
-			},
-			(err) => {
-				if (controller?.signal.aborted) return;
-				track({
-					event: 'engine_error',
-					action: 'defaults',
-					target: id,
-					meta: { message: err.message }
-				});
-			}
-		);
-	};
-	run.cancel = () => {
-		controller?.abort();
-		controller = null;
-	};
-	return run;
-}
 
 export function setupInferredSchemaHydrationEffect(
 	validAnalysisId: () => string | null

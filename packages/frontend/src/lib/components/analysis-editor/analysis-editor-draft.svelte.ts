@@ -2,7 +2,7 @@ import { createAsyncGate } from '$lib/utils/async-gate';
 import { idbGet, idbSet, idbDelete } from '$lib/utils/indexeddb';
 import { ensureTabDefaults } from '$lib/utils/analysis-tab';
 import type { AnalysisTab } from '$lib/types/analysis';
-import type { EngineDefaults, EngineResourceConfig } from '$lib/types/compute';
+import type { EngineResourceConfig } from '$lib/types/compute';
 
 export type AnalysisDraftSnapshot = {
 	analysisId: string | null;
@@ -10,7 +10,6 @@ export type AnalysisDraftSnapshot = {
 	tabs: AnalysisTab[];
 	activeTabId: string | null;
 	resourceConfig: EngineResourceConfig | null;
-	engineDefaults: EngineDefaults | null;
 	selectedStepId: string | null;
 	leftPaneCollapsed: boolean;
 	rightPaneCollapsed: boolean;

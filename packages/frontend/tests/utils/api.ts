@@ -238,6 +238,24 @@ export async function createAnalysis(
 	);
 }
 
+export async function createAnalysisWithTabs(
+	request: E2ERequest,
+	name: string,
+	tabs: Record<string, unknown>[]
+): Promise<string> {
+	return withAuthedPage(request, async (page) => {
+		await prepareHelperNamespace(page);
+		const response = await page.request.post(new URL('/api/v1/analysis', page.url()).toString(), {
+			headers: { 'X-Namespace': helperDefaultNamespace },
+			data: { name, tabs }
+		});
+		if (!response.ok()) throw new Error(`Analysis creation failed: HTTP ${response.status()}`);
+		const created = (await response.json()) as { id: string };
+		registerAnalysis(created.id, name);
+		return created.id;
+	});
+}
+
 export async function createImportedAnalysis(
 	request: E2ERequest,
 	name: string,

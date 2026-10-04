@@ -7,6 +7,8 @@
 	import type { AnalysisTab, AnalysisTabDatasource } from '$lib/types/analysis';
 	import { createQuery } from '@tanstack/svelte-query';
 	import { analysisStore } from '$lib/stores/analysis.svelte';
+	import { datasourceStore } from '$lib/stores/datasource.svelte';
+	import { useNamespace } from '$lib/stores/namespace.svelte';
 	import { getDatasource } from '$lib/api/datasource';
 	import { getEngineDefaults } from '$lib/api/compute';
 	import { schemaStore } from '$lib/stores/schema.svelte';
@@ -60,6 +62,7 @@
 	}: Props = $props();
 
 	const activeTab = $derived(activeTabRaw);
+	const ns = useNamespace();
 
 	let isEditing = $state(false);
 	let draftName = $state('');
@@ -74,13 +77,11 @@
 			if (result.isErr()) throw new Error(result.error.message);
 			return result.value;
 		},
-		initialData: analysisStore.engineDefaults ?? undefined,
 		staleTime: Infinity,
 		refetchOnMount: false
 	}));
 
-	// Use defaults from store or query cache for both existing and new analyses.
-	const defaults = $derived(engineDefaultsQuery.data ?? analysisStore.engineDefaults);
+	const defaults = $derived(engineDefaultsQuery.data);
 
 	// Threads: show effective value (default when not overridden)
 	const threadsOverride = $derived(analysisStore.resourceConfig?.max_threads ?? 0);
@@ -129,22 +130,21 @@
 	// do not read the published datasource for that tab's result_id.
 	const isDerived = $derived(!!activeTab?.datasource?.analysis_tab_id);
 	const sourceDatasourceId = $derived(datasource?.id ?? activeTab?.datasource?.id ?? null);
-	const canQueryDatasource = $derived(!!sourceDatasourceId && !isDerived);
+	const canQueryDatasource = $derived(
+		!!sourceDatasourceId && !isDerived && !datasource && datasourceStore.loaded
+	);
 	const datasourceQuery = createQuery(() => ({
-		queryKey: [
-			'datasource',
-			sourceDatasourceId,
-			activeTab?.datasource?.config?.branch ?? datasource?.config?.branch ?? ''
-		],
-		queryFn: async () => {
-			if (!sourceDatasourceId) return null;
-			const result = await getDatasource(sourceDatasourceId);
+		queryKey: ['datasource', ns.value, sourceDatasourceId] as const,
+		queryFn: async ({ queryKey }) => {
+			const id = queryKey[2];
+			if (!id) return null;
+			const result = await getDatasource(id);
 			if (result.isErr()) throw new Error(result.error.message);
 			return result.value;
 		},
 		enabled: canQueryDatasource
 	}));
-	const resolvedDatasource = $derived(datasourceQuery.data ?? datasource);
+	const resolvedDatasource = $derived(datasource ?? datasourceQuery.data);
 	const showSnapshotBuildPreviews = $derived.by(() => {
 		if (!resolvedDatasource) return false;
 		return (
