@@ -315,7 +315,7 @@ export async function selectDatasourceAndWaitForConfig(
  */
 export async function gotoNewAnalysis(page: Page, timeout = readyTimeoutMs()): Promise<void> {
 	await gotoAuthedRoute(page, '/analysis/new', timeout);
-	await expect(page.getByRole('heading', { name: 'Select a datasource' })).toBeVisible({ timeout });
+	await expect(page.getByRole('heading', { name: 'New Analysis' })).toBeVisible({ timeout });
 }
 
 export async function gotoMonitoringTab(

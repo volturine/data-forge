@@ -6,6 +6,7 @@ import { uid } from './utils/uid.js';
 import { screenshot } from './utils/visual.js';
 import {
 	gotoAnalysesGallery,
+	gotoDatasourcesPage,
 	gotoNewAnalysis,
 	waitForAnalysisLoadError,
 	readyTimeoutMs
@@ -365,11 +366,35 @@ test.describe('Analyses – gallery interactions', () => {
 });
 
 test.describe('Analyses – blank creation', () => {
-	test('requires a datasource before creating an analysis', async ({ page }) => {
+	test('lists datasources to start from', async ({ page, sharedDatasource }) => {
 		await gotoNewAnalysis(page);
-		await expect(page.getByRole('heading', { name: 'Select a datasource' })).toBeVisible();
+		await expect(page.getByRole('heading', { name: 'New Analysis' })).toBeVisible();
 		await expect(page.getByPlaceholder('Search datasources...')).toBeVisible();
-		await expect(page.getByRole('button', { name: 'Create Analysis' })).toBeDisabled();
+		await expect(page.locator(`[data-ds-option="${sharedDatasource.name}"]`)).toBeVisible();
+	});
+
+	test('expanding a datasource previews it inline before creating', async ({
+		page,
+		sharedDatasource
+	}) => {
+		const timeout = readyTimeoutMs();
+		await gotoNewAnalysis(page);
+		const row = page.locator(`[data-ds-option="${sharedDatasource.name}"]`);
+		await expect(row).toHaveAttribute('aria-expanded', 'false');
+		await expect(page.locator('[data-testid="datasource-preview"]')).toHaveCount(0);
+
+		await row.click();
+		await expect(row).toHaveAttribute('aria-expanded', 'true');
+		await expect(page.getByRole('button', { name: 'Create analysis' })).toBeVisible({ timeout });
+		const preview = page.locator('[data-testid="datasource-preview"]');
+		await expect(preview).toBeVisible({ timeout });
+		await expect(preview).toHaveAttribute('data-preview-ready', 'true', { timeout });
+		await screenshot(page, 'analysis/crud', 'new-analysis-datasource-preview');
+
+		// Clicking the row again collapses the inline preview.
+		await row.click();
+		await expect(row).toHaveAttribute('aria-expanded', 'false');
+		await expect(preview).toHaveCount(0);
 	});
 
 	test('creates a top-aligned blank pipeline with centered insert controls', async ({
@@ -382,10 +407,9 @@ test.describe('Analyses – blank creation', () => {
 
 		try {
 			await gotoNewAnalysis(page);
-			await page.getByPlaceholder('Search datasources...').click();
-			await page.locator(`[data-picker-option="${sharedDatasource.name}"]`).click();
-			const createButton = page.getByRole('button', { name: 'Create Analysis' });
-			await expect(createButton).toBeEnabled();
+			await page.locator(`[data-ds-option="${sharedDatasource.name}"]`).click();
+			const createButton = page.getByRole('button', { name: 'Create analysis' });
+			await expect(createButton).toBeVisible();
 			const createResponsePromise = page.waitForResponse(
 				(response) =>
 					response.url().endsWith('/api/v1/analysis') && response.request().method() === 'POST'
@@ -473,13 +497,49 @@ test.describe('Analyses – blank creation', () => {
 		await expect(page.getByRole('heading', { name: 'No analyses yet' })).toBeVisible();
 		await page.getByRole('button', { name: 'Create Analysis' }).click();
 		await expect(page).toHaveURL(/\/analysis\/new$/);
-		await expect(page.getByRole('heading', { name: 'Select a datasource' })).toBeVisible();
+		await expect(page.getByPlaceholder('Search datasources...')).toBeVisible();
 	});
 
-	test('Cancel returns to the analyses gallery', async ({ page }) => {
+	test('back link returns to the analyses gallery', async ({ page }) => {
 		await gotoNewAnalysis(page);
-		await page.getByRole('link', { name: 'Cancel', exact: true }).click();
+		await page.getByRole('link', { name: 'Back to analyses' }).click();
 		await expect(page).toHaveURL('/', { timeout: 5_000 });
+	});
+
+	test('datasource row menu opens an analysis from that datasource', async ({
+		page,
+		sharedDatasource
+	}) => {
+		const timeout = readyTimeoutMs();
+		const analysisName = `${sharedDatasource.name} Analysis`;
+		let analysisId: string | undefined;
+
+		try {
+			await gotoDatasourcesPage(page);
+			const row = page.locator(`[data-ds-row="${sharedDatasource.name}"]`);
+			await expect(row).toBeVisible({ timeout });
+			const createResponsePromise = page.waitForResponse(
+				(response) =>
+					response.url().endsWith('/api/v1/analysis') && response.request().method() === 'POST'
+			);
+			await row.getByRole('button', { name: 'Datasource actions' }).click();
+			await page.getByRole('menuitem', { name: 'Create analysis' }).click();
+
+			const createResponse = await createResponsePromise;
+			if (!createResponse.ok()) {
+				throw new Error(`Create analysis failed: HTTP ${createResponse.status()}`);
+			}
+			const created = (await createResponse.json()) as { id: string };
+			analysisId = created.id;
+			await expect(page).toHaveURL((url) => url.pathname === `/analysis/${analysisId}`, {
+				timeout
+			});
+			await waitForCurrentAnalysisEditor(page, timeout);
+		} finally {
+			if (analysisId) {
+				await deleteAnalysisViaUI(page, analysisName, { id: analysisId }).catch(() => undefined);
+			}
+		}
 	});
 });
 

@@ -18,6 +18,7 @@
 	import BranchPicker from '$lib/components/common/BranchPicker.svelte';
 	import FreshnessBadge from '$lib/components/common/FreshnessBadge.svelte';
 	import RelativeTime from '$lib/components/common/RelativeTime.svelte';
+	import RowActionMenu from '$lib/components/common/RowActionMenu.svelte';
 	import DatasourcePreview from '$lib/components/datasources/DatasourcePreview.svelte';
 	import DatasourceConfigPanel from '$lib/components/datasources/DatasourceConfigPanel.svelte';
 	import SnapshotPicker from '$lib/components/datasources/SnapshotPicker.svelte';
@@ -154,6 +155,10 @@
 
 	function handleDelete(id: string) {
 		deletingId = id;
+	}
+
+	function handleCreateAnalysis(datasourceId: string) {
+		void goto(resolve(`/analysis/new?datasource=${datasourceId}`));
 	}
 
 	function confirmDelete() {
@@ -516,6 +521,16 @@
 								</div>
 							</button>
 							<div class={css({ display: 'flex', alignItems: 'center', flexShrink: '0' })}>
+								<RowActionMenu
+									label="Datasource actions"
+									items={[
+										{
+											id: 'create-analysis',
+											label: 'Create analysis',
+											onSelect: () => handleCreateAnalysis(datasource.id)
+										}
+									]}
+								/>
 								<button
 									class={css({
 										padding: '1.5',

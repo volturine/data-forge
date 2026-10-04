@@ -1,10 +1,13 @@
 <script lang="ts">
 	import { goto } from '$app/navigation';
 	import { resolve } from '$app/paths';
+	import { page as pageState } from '$app/state';
 	import { createQuery } from '@tanstack/svelte-query';
 	import { createAnalysis } from '$lib/api/analysis';
 	import { listDatasources } from '$lib/api/datasource';
-	import DatasourcePicker from '$lib/components/common/DatasourcePicker.svelte';
+	import { ArrowLeft, ChevronDown, Search } from '@lucide/svelte';
+	import FileTypeBadge from '$lib/components/common/FileTypeBadge.svelte';
+	import DatasourcePreview from '$lib/components/datasources/DatasourcePreview.svelte';
 	import Callout from '$lib/components/ui/Callout.svelte';
 	import { button, css, spinner } from '$lib/styles/panda';
 	import { configStore } from '$lib/stores/config.svelte';
@@ -15,9 +18,15 @@
 	import { uuid } from '$lib/utils/uuid';
 
 	const ns = useNamespace();
-	let selectedDatasourceId = $state('');
-	let creating = $state(false);
-	let error = $state('');
+	// A datasource in the query means the user already asked to start an
+	// analysis from it, so the page goes straight to the editor.
+	const requestedDatasourceId = $derived(pageState.url.searchParams.get('datasource') ?? '');
+
+	let expandedDatasourceId = $state('');
+	let searchQuery = $state('');
+	let creatingDatasource = $state<DataSource | null>(null);
+	let createError = $state('');
+	let autoStartAttempted = $state(false);
 
 	const datasourcesQuery = createQuery(() => ({
 		queryKey: ['datasources', ns.value],
@@ -30,9 +39,11 @@
 	}));
 
 	const datasources = $derived(datasourcesQuery.data ?? []);
-	const selectedDatasource = $derived(
-		datasources.find((datasource) => datasource.id === selectedDatasourceId) ?? null
-	);
+	const filteredDatasources = $derived.by(() => {
+		const query = searchQuery.trim().toLowerCase();
+		if (!query) return datasources;
+		return datasources.filter((datasource) => datasource.name.toLowerCase().includes(query));
+	});
 	const outputNamespace = $derived(configStore.config?.default_namespace ?? ns.value);
 
 	function defaultBranch(datasource: DataSource): string {
@@ -59,18 +70,17 @@
 		);
 	}
 
-	async function handleCreate(): Promise<void> {
-		const datasource = selectedDatasource;
-		if (!datasource || creating) return;
+	/** Opening an analysis from a datasource is the whole point of this page. */
+	async function startAnalysis(datasource: DataSource): Promise<void> {
+		if (creatingDatasource) return;
+		creatingDatasource = datasource;
+		createError = '';
 
-		creating = true;
-		error = '';
 		const branch = defaultBranch(datasource);
-		const tabName = 'Source 1';
 		const outputId = uuid();
 		const tab: AnalysisTab = {
 			id: uuid(),
-			name: tabName,
+			name: 'Source 1',
 			parent_id: null,
 			datasource: {
 				id: datasource.id,
@@ -93,15 +103,38 @@
 				tabs: [tab]
 			});
 			if (result.isErr()) {
-				error = result.error.message;
+				createError = result.error.message;
 				return;
 			}
 			await goto(resolve(`/analysis/${result.value.id}`));
 		} catch (cause) {
-			error = cause instanceof Error ? cause.message : 'Failed to open the new analysis';
+			createError =
+				cause instanceof Error ? cause.message : 'Could not start the analysis. Try again.';
 		} finally {
-			creating = false;
+			creatingDatasource = null;
 		}
+	}
+
+	$effect(() => {
+		if (autoStartAttempted || !requestedDatasourceId) return;
+		if (datasourcesQuery.isPending) return;
+		autoStartAttempted = true;
+		const datasource = datasources.find((candidate) => candidate.id === requestedDatasourceId);
+		if (!datasource) {
+			createError = 'That datasource is no longer available.';
+			return;
+		}
+		void startAnalysis(datasource);
+	});
+
+	function toggleExpanded(id: string): void {
+		expandedDatasourceId = expandedDatasourceId === id ? '' : id;
+	}
+
+	function handleSearchKeydown(event: KeyboardEvent): void {
+		if (event.key !== 'Enter') return;
+		const firstMatch = filteredDatasources[0];
+		if (firstMatch) expandedDatasourceId = firstMatch.id;
 	}
 </script>
 
@@ -109,130 +142,250 @@
 	class={css({
 		boxSizing: 'border-box',
 		width: 'full',
-		maxWidth: 'page',
 		marginX: 'auto',
-		paddingX: '6',
-		paddingY: '8'
+		maxWidth: 'page',
+		paddingX: '8',
+		paddingY: '8',
+		md: { paddingX: '4', paddingY: '4' }
 	})}
 >
 	<a
 		href={resolve('/')}
+		aria-label="Back to analyses"
 		class={css({
 			display: 'inline-flex',
-			marginBottom: '5',
-			color: 'fg.tertiary',
-			fontSize: 'sm',
+			alignItems: 'center',
+			gap: '1.5',
+			fontSize: 'xs',
+			color: 'fg.muted',
 			textDecoration: 'none',
+			cursor: 'pointer',
 			_hover: { color: 'fg.primary' }
 		})}
 	>
-		← Analyses
+		<ArrowLeft size={13} />
+		Analyses
 	</a>
 
-	<header class={css({ marginBottom: '6' })}>
-		<h1 class={css({ margin: '0', fontSize: '2xl', fontWeight: 'semibold' })}>New Analysis</h1>
-		<p class={css({ marginTop: '2', marginBottom: '0', color: 'fg.tertiary', fontSize: 'sm' })}>
-			Choose one datasource to start with. The analysis opens with an empty pipeline ready for you
-			to build.
+	<header
+		class={css({ marginTop: '4', marginBottom: '5', paddingBottom: '5', borderBottomWidth: '1' })}
+	>
+		<h1 class={css({ margin: '0', fontSize: '2xl', fontWeight: 'semibold' })}>New analysis</h1>
+		<p class={css({ margin: '2 0 0 0', fontSize: 'sm', color: 'fg.tertiary' })}>
+			Pick a datasource to preview its data, then start building on it.
 		</p>
 	</header>
 
-	{#if error}
-		<div class={css({ marginBottom: '4' })}>
-			<Callout tone="error">{error}</Callout>
+	{#if createError && !creatingDatasource}
+		<div class={css({ marginBottom: '3' })}>
+			<Callout tone="error">{createError}</Callout>
 		</div>
 	{/if}
 
-	<section
-		class={css({
-			maxWidth: 'panelLg',
-			borderWidth: '1',
-			backgroundColor: 'bg.primary',
-			padding: '5'
-		})}
-		aria-labelledby="datasource-heading"
-	>
-		<h2
-			id="datasource-heading"
-			class={css({ marginTop: '0', marginBottom: '4', fontSize: 'lg', fontWeight: 'semibold' })}
-		>
-			Select a datasource
-		</h2>
+	{#if datasources.length > 0}
+		<div class={css({ position: 'relative', marginBottom: '3', maxWidth: 'panelMd' })}>
+			<Search
+				size={14}
+				class={css({
+					position: 'absolute',
+					left: '3',
+					top: '50%',
+					transform: 'translateY(-50%)',
+					color: 'fg.muted'
+				})}
+			/>
+			<input
+				type="text"
+				id="new-analysis-ds-search"
+				aria-label="Search datasources"
+				placeholder="Search datasources..."
+				class={css({
+					width: 'full',
+					fontSize: 'sm',
+					color: 'fg.primary',
+					backgroundColor: 'transparent',
+					borderWidth: '1',
+					paddingLeft: '9',
+					paddingRight: '3',
+					paddingY: '2',
+					_focusVisible: { outline: 'none', borderColor: 'border.accent' },
+					_placeholder: { color: 'fg.muted' }
+				})}
+				onkeydown={handleSearchKeydown}
+				bind:value={searchQuery}
+			/>
+		</div>
+	{/if}
 
+	<section aria-label="Datasources">
 		{#if datasourcesQuery.isPending}
-			<div class={css({ display: 'flex', alignItems: 'center', gap: '3', color: 'fg.tertiary' })}>
-				<div class={spinner()}></div>
+			<div
+				class={css({
+					display: 'flex',
+					alignItems: 'center',
+					gap: '2',
+					padding: '6',
+					fontSize: 'sm',
+					color: 'fg.tertiary'
+				})}
+			>
+				<div class={spinner({ size: 'sm' })}></div>
 				Loading datasources…
 			</div>
 		{:else if datasourcesQuery.isError}
 			<Callout tone="error">{datasourcesQuery.error.message}</Callout>
 		{:else if datasources.length === 0}
-			<p class={css({ margin: '0', color: 'fg.tertiary', fontSize: 'sm' })}>
-				There are no datasources yet. <a href={resolve('/datasources/new')}>Create a datasource</a>
-				first.
-			</p>
+			<div class={css({ padding: '8', textAlign: 'center' })}>
+				<p class={css({ margin: '0 0 3 0', fontSize: 'sm', color: 'fg.muted' })}>
+					No datasources yet.
+				</p>
+				<a
+					href={resolve('/datasources/new')}
+					class={css({
+						display: 'inline-flex',
+						alignItems: 'center',
+						gap: '1',
+						fontSize: 'sm',
+						color: 'accent.primary',
+						textDecoration: 'none',
+						_hover: { textDecoration: 'underline' }
+					})}
+				>
+					Create a datasource
+				</a>
+			</div>
+		{:else if filteredDatasources.length === 0}
+			<div class={css({ padding: '4', fontSize: 'sm', color: 'fg.muted' })}>
+				No datasources match "{searchQuery.trim()}"
+			</div>
 		{:else}
-			<DatasourcePicker
-				{datasources}
-				selected={selectedDatasourceId}
-				mode="single"
-				label="Available datasources"
-				placeholder="Search datasources..."
-				alwaysOpen
-				showChips={false}
-				showBulkActions={false}
-				onSelect={(id) => (selectedDatasourceId = id)}
-			/>
-		{/if}
+			<ul class={css({ listStyle: 'none', margin: '0', padding: '0' })}>
+				{#each filteredDatasources as datasource (datasource.id)}
+					{@const isExpanded = expandedDatasourceId === datasource.id}
+					<li class={css({ borderBottomWidth: '1', borderColor: 'border.primary' })}>
+						<button
+							type="button"
+							data-ds-option={datasource.name}
+							aria-expanded={isExpanded}
+							class={css({
+								display: 'flex',
+								alignItems: 'center',
+								gap: '3',
+								width: 'full',
+								paddingX: '2',
+								paddingY: '2.5',
+								textAlign: 'left',
+								cursor: 'pointer',
+								border: 'none',
+								borderLeftWidth: '2',
+								background: 'transparent',
+								_hover: { backgroundColor: 'bg.hover' },
+								...(isExpanded
+									? { backgroundColor: 'bg.accent', borderLeftColor: 'border.accent' }
+									: { borderLeftColor: 'transparent' })
+							})}
+							onclick={() => toggleExpanded(datasource.id)}
+						>
+							<span
+								class={css({
+									flex: '1',
+									minWidth: '0',
+									overflow: 'hidden',
+									textOverflow: 'ellipsis',
+									whiteSpace: 'nowrap',
+									fontFamily: 'mono',
+									fontSize: 'sm',
+									color: isExpanded ? 'accent.primary' : 'fg.primary'
+								})}
+							>
+								{datasource.name}
+							</span>
+							{#if datasource.source_type === 'file'}
+								<FileTypeBadge path={(datasource.config?.file_path as string) ?? ''} size="sm" />
+							{:else}
+								{@const badgeSource = datasource.source_type}
+								<FileTypeBadge sourceType={badgeSource} size="sm" />
+							{/if}
+							<ChevronDown
+								size={14}
+								class={css({
+									flexShrink: '0',
+									color: 'fg.faint',
+									transitionProperty: 'transform',
+									transitionDuration: '160ms',
+									transform: isExpanded ? 'rotate(180deg)' : 'none'
+								})}
+							/>
+						</button>
 
-		{#if selectedDatasource}
-			<p
-				class={css({
-					marginTop: '4',
-					marginBottom: '0',
-					borderLeftWidth: '2',
-					borderColor: 'accent.primary',
-					paddingLeft: '3',
-					color: 'fg.tertiary',
-					fontSize: 'sm'
-				})}
-			>
-				Starting with <strong>{selectedDatasource.name}</strong>. You can add operations and
-				configure its output in the editor.
-			</p>
+						{#if isExpanded}
+							<div
+								class={css({
+									margin: '0 2 3 2',
+									borderWidth: '1',
+									borderColor: 'border.primary',
+									backgroundColor: 'bg.primary',
+									padding: '3'
+								})}
+							>
+								{#if creatingDatasource?.id === datasource.id}
+									<div
+										class={css({
+											display: 'flex',
+											alignItems: 'center',
+											justifyContent: 'center',
+											gap: '2',
+											padding: '8',
+											fontSize: 'sm',
+											color: 'fg.tertiary'
+										})}
+									>
+										<div class={spinner({ size: 'sm' })}></div>
+										Opening<strong class={css({ color: 'fg.primary' })}>{datasource.name}</strong>…
+									</div>
+								{:else}
+									<div
+										class={css({
+											display: 'flex',
+											alignItems: 'center',
+											justifyContent: 'space-between',
+											gap: '3',
+											marginBottom: '3'
+										})}
+									>
+										<span
+											class={css({
+												fontSize: '2xs',
+												fontWeight: 'semibold',
+												textTransform: 'uppercase',
+												letterSpacing: 'wider',
+												color: 'fg.faint'
+											})}
+										>
+											Preview
+										</span>
+										<button
+											type="button"
+											class={button({ variant: 'primary', size: 'sm' })}
+											onclick={() => void startAnalysis(datasource)}
+										>
+											Create analysis
+										</button>
+									</div>
+
+									<div class={css({ maxHeight: '24rem', overflow: 'auto' })}>
+										<DatasourcePreview
+											datasourceId={datasource.id}
+											{datasource}
+											datasourceConfig={datasource.config}
+										/>
+									</div>
+								{/if}
+							</div>
+						{/if}
+					</li>
+				{/each}
+			</ul>
 		{/if}
 	</section>
-
-	<footer
-		class={css({
-			maxWidth: 'panelLg',
-			marginTop: '5',
-			display: 'flex',
-			alignItems: 'center',
-			justifyContent: 'space-between',
-			gap: '4'
-		})}
-	>
-		<a
-			href={resolve('/')}
-			class={css({
-				borderWidth: '1',
-				paddingX: '4',
-				paddingY: '2',
-				textDecoration: 'none',
-				color: 'fg.primary',
-				backgroundColor: 'bg.primary'
-			})}
-		>
-			Cancel
-		</a>
-		<button
-			type="button"
-			class={button({ variant: 'primary' })}
-			disabled={!selectedDatasource || creating}
-			onclick={handleCreate}
-		>
-			{creating ? 'Creating…' : 'Create Analysis'}
-		</button>
-	</footer>
 </main>

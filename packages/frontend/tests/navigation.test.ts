@@ -56,7 +56,7 @@ test.describe('Navigation – page load smoke tests', () => {
 	test('new analysis page renders the datasource picker', async ({ page }) => {
 		await gotoNewAnalysis(page);
 		await expect(page.getByRole('heading', { name: 'New Analysis' })).toBeVisible();
-		await expect(page.getByRole('heading', { name: 'Select a datasource' })).toBeVisible();
+		await expect(page.getByPlaceholder('Search datasources...')).toBeVisible();
 		await screenshot(page, 'navigation', 'new-analysis-datasource-picker');
 	});
 
