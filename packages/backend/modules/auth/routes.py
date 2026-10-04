@@ -100,14 +100,23 @@ def _validate_oauth_state(request: Request, response: Response, provider: str, s
 
 
 def _github_redirect_uri(request: Request) -> str:
-    return str(request.url_for('github_oauth_callback').replace(scheme=request_scheme(request)))
+    return str(
+        request.url.replace(
+            scheme=request_scheme(request),
+            path='/api/v1/auth/github/callback',
+            query='',
+            fragment='',
+        )
+    )
 
 
 def _github_frontend_callback_url(request: Request) -> str:
     return str(
-        request.url_for('github_oauth_callback').replace(
+        request.url.replace(
             scheme=request_scheme(request),
             path='/callback',
+            query='',
+            fragment='',
         )
     )
 
