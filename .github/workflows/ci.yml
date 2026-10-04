@@ -19,6 +19,7 @@ concurrency:
 jobs:
   verify:
     name: verification
+    if: github.event_name != 'push' || github.ref_name != 'master'
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v7
