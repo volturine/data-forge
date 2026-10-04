@@ -151,13 +151,14 @@ export async function uploadDatasourceWithDatesViaUi(
 export async function createAnalysisViaUi(page: Page, datasourceName: string): Promise<string> {
 	const { registerAnalysis } = await import('./api.js');
 	await gotoNewAnalysis(page);
-	await page.getByPlaceholder('Search datasources...').click();
-	await page.locator(`[data-picker-option="${datasourceName}"]`).click();
+	await page.locator(`[data-ds-option="${datasourceName}"]`).click();
+	const createButton = page.getByRole('button', { name: 'Create analysis' });
+	await createButton.waitFor({ state: 'visible', timeout: 10_000 });
 	const createResponsePromise = page.waitForResponse(
 		(response) =>
 			response.url().endsWith('/api/v1/analysis') && response.request().method() === 'POST'
 	);
-	await page.getByRole('button', { name: 'Create Analysis' }).click();
+	await createButton.click();
 	const createResponse = await createResponsePromise;
 	if (!createResponse.ok()) {
 		const body = await createResponse.text().catch(() => '');
