@@ -1,4 +1,4 @@
-import { getClientIdentity } from '$lib/stores/clientIdentity.svelte';
+import { getClientIdentity, getEditorClientId } from '$lib/stores/clientIdentity.svelte';
 import { requireNamespace } from '$lib/stores/namespace.svelte';
 
 const CLOSE_NORMAL = 1000;
@@ -99,6 +99,10 @@ export function buildWebsocketUrl(endpoint: string): string {
 	}
 	if (identity.clientSignature) {
 		url.searchParams.set('client_signature', identity.clientSignature);
+	}
+	const editorClientId = getEditorClientId();
+	if (editorClientId) {
+		url.searchParams.set('editor_client_id', editorClientId);
 	}
 	return url.toString();
 }

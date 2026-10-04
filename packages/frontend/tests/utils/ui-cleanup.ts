@@ -239,9 +239,13 @@ async function deleteDatasourceById(page: Page, name: string, datasourceId: stri
 async function deleteAnalysisByRequest(
 	request: APIRequestContext,
 	name: string,
-	analysisId: string
+	analysisId: string,
+	editorClientId?: string | null
 ): Promise<void> {
-	const headers = cleanupHeaders();
+	const headers = {
+		...cleanupHeaders(),
+		...(editorClientId ? { 'X-Editor-Client-Id': editorClientId } : {})
+	};
 	const current = await request.get(`/api/v1/analysis/${encodeURIComponent(analysisId)}`, {
 		headers
 	});
@@ -274,7 +278,14 @@ async function deleteAnalysisByRequest(
 }
 
 async function deleteAnalysisById(page: Page, name: string, analysisId: string): Promise<void> {
-	await deleteAnalysisByRequest(page.context().request, name, analysisId);
+	const editorClientId = await page.evaluate(() => {
+		try {
+			return window.sessionStorage.getItem('dataforge_editor_client_id');
+		} catch {
+			return null;
+		}
+	});
+	await deleteAnalysisByRequest(page.context().request, name, analysisId, editorClientId);
 }
 
 const cleanupSessions = new WeakMap<BrowserContext, Promise<CleanupSession>>();

@@ -3,7 +3,7 @@
 	import { css } from '$lib/styles/panda';
 
 	interface Props {
-		onCreate?: () => void;
+		onCreate: () => void;
 	}
 
 	let { onCreate }: Props = $props();
@@ -62,7 +62,7 @@
 			alignItems: 'center',
 			gap: '2'
 		})}
-		onclick={() => onCreate?.()}
+		onclick={onCreate}
 	>
 		<Plus size={16} />
 		Create Analysis

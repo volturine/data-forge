@@ -59,24 +59,37 @@ class TestLockRoutes:
         ]
         assert notifications[-1][-1].lock is None
 
-    def test_no_auth_reacquire_ignores_client_id(self, client, monkeypatch) -> None:
+    def test_editor_client_id_scopes_locks_even_without_auth(self, client, test_db_session, monkeypatch) -> None:
         monkeypatch.setattr('backend_core.auth_config.settings.auth_required', False)
         owner = run_settings_db(ensure_default_user)
         first = client.post(
             '/api/v1/locks',
             json={'resource_type': 'analysis', 'resource_id': 'analysis-2'},
-            headers={'X-Client-Id': 'owner-1'},
+            headers={'X-Editor-Client-Id': 'editor-1'},
         )
         assert first.status_code == 200
+        assert first.json()['owner_id'] == f'{owner.id}:editor-1'
 
-        second = client.post(
+        same_editor = client.post(
             '/api/v1/locks',
             json={'resource_type': 'analysis', 'resource_id': 'analysis-2'},
-            headers={'X-Client-Id': 'owner-2'},
+            headers={'X-Editor-Client-Id': 'editor-1'},
         )
-        assert second.status_code == 200
-        assert second.json()['owner_id'] == owner.id
-        assert second.json()['lock_token'] != first.json()['lock_token']
+        assert same_editor.status_code == 200
+        assert same_editor.json()['owner_id'] == f'{owner.id}:editor-1'
+        assert same_editor.json()['lock_token'] != first.json()['lock_token']
+
+        another_editor = client.post(
+            '/api/v1/locks',
+            json={'resource_type': 'analysis', 'resource_id': 'analysis-2'},
+            headers={'X-Editor-Client-Id': 'editor-2'},
+        )
+        assert another_editor.status_code == 409
+
+        stored = test_db_session.get(ResourceLock, ('analysis', 'analysis-2'))
+        assert stored is not None
+        assert stored.owner_id == f'{owner.id}:editor-1'
+        assert stored.lock_token == same_editor.json()['lock_token']
 
     def test_expired_lock_replacement(self, client, test_db_session, monkeypatch) -> None:
         monkeypatch.setattr('backend_core.auth_config.settings.auth_required', False)

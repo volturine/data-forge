@@ -1,6 +1,6 @@
 import { test, expect } from './fixtures.js';
 import { createAnalysis } from './utils/api.js';
-import { createCleanupPage, deleteAnalysisViaUI } from './utils/ui-cleanup.js';
+import { deleteAnalysisViaUI } from './utils/ui-cleanup.js';
 import { uid } from './utils/uid.js';
 import { screenshot } from './utils/visual.js';
 import {
@@ -233,244 +233,98 @@ test.describe('Analyses – gallery interactions', () => {
 	});
 });
 
-test.describe('Analyses – create wizard', () => {
-	test('step 1: Next is disabled when name is empty', async ({ page }) => {
+test.describe('Analyses – blank creation', () => {
+	test('requires a datasource before creating an analysis', async ({ page }) => {
 		await gotoNewAnalysis(page);
-		await expect(page.getByRole('button', { name: /Next/i })).toBeDisabled();
+		await expect(page.getByRole('heading', { name: 'Select a datasource' })).toBeVisible();
+		await expect(page.getByPlaceholder('Search datasources...')).toBeVisible();
+		await expect(page.getByRole('button', { name: 'Create Analysis' })).toBeDisabled();
 	});
 
-	test('step 1: Next is enabled after typing a name', async ({ page }) => {
-		await gotoNewAnalysis(page);
-		await page.locator('#name').fill('My E2E Analysis');
-		await expect(page.getByRole('button', { name: /Next/i })).toBeEnabled();
-	});
-
-	test('step 1 → step 2: shows datasource selection', async ({ page }) => {
-		await gotoNewAnalysis(page);
-		await page.locator('#name').fill('E2E Wizard Test');
-		await page.getByRole('button', { name: /Next/i }).click();
-		await expect(page.getByRole('heading', { name: /Select Data Sources/i })).toBeVisible();
-		await screenshot(page, 'analysis/crud', 'wizard-step-2');
-	});
-
-	test('can navigate Back from step 2 to step 1', async ({ page }) => {
-		await gotoNewAnalysis(page);
-		await page.locator('#name').fill('Back Test');
-		await page.getByRole('button', { name: /Next/i }).click();
-		await page.getByRole('button', { name: /Back/i }).click();
-		await expect(page.getByRole('heading', { name: /How do you want to start\?/i })).toBeVisible();
-	});
-
-	test('Cancel on step 1 returns to home', async ({ page }) => {
-		await gotoNewAnalysis(page);
-		await page.getByRole('link', { name: /Cancel/i }).click();
-		await expect(page).toHaveURL('/', { timeout: 5_000 });
-	});
-
-	test('full create flow: wizard → analysis detail page', async ({ page, sharedDatasource }) => {
-		const aName = `E2E Created ${uid()}`;
-		try {
-			await gotoNewAnalysis(page);
-
-			// Step 1 – name
-			await page.locator('#name').fill(aName);
-			await page.getByRole('button', { name: /Next/i }).click();
-
-			// Step 2 – pick datasource
-			await expect(page.getByRole('heading', { name: /Select Data Sources/i })).toBeVisible();
-			await page.getByPlaceholder('Search datasources...').click();
-			await page.locator(`[data-picker-option="${sharedDatasource.name}"]`).click();
-			// Close the dropdown by clicking outside
-			await page.getByRole('heading', { name: /Select Data Sources/i }).click();
-			await expect(page.getByRole('button', { name: /Next/i })).toBeEnabled();
-			await page.getByRole('button', { name: /Next/i }).click();
-
-			// Step 3 – design
-			await expect(page.getByRole('heading', { name: /Choose Template/i })).toBeVisible();
-			await page.getByRole('button', { name: /Next/i }).click();
-
-			// Step 4 – output
-			await expect(page.getByRole('heading', { name: /Configure Outputs/i })).toBeVisible();
-			await page.getByRole('button', { name: /Next/i }).click();
-
-			// Step 5 – review
-			await expect(page.getByRole('heading', { name: /Review/i })).toBeVisible();
-			await expect(page.locator('main')).toContainText(aName);
-			await page.getByRole('button', { name: /Create Analysis/i }).click();
-
-			// Redirects to an actual analysis editor, not back to /analysis/new
-			await expect(page).toHaveURL(
-				(url) => url.pathname.startsWith('/analysis/') && url.pathname !== '/analysis/new',
-				{ timeout: readyTimeoutMs() }
-			);
-		} finally {
-			await deleteAnalysisViaUI(page, aName);
-		}
-	});
-
-	test('template wizard configures ordered sources, outputs, and validated review', async ({
-		page,
-		sharedDatasource,
-		sharedAuxDatasource
-	}) => {
-		const firstDsName = sharedDatasource.name;
-		const secondDsName = sharedAuxDatasource.name;
-		const aName = `E2E Template ${uid()}`;
-		try {
-			await gotoNewAnalysis(page);
-			await page.locator('#name').fill(aName);
-			await page.getByRole('button', { name: /Next/i }).click();
-
-			await expect(page.getByRole('heading', { name: /Select Data Sources/i })).toBeVisible();
-			await page.getByPlaceholder('Search datasources...').click();
-			await page.locator(`[data-picker-option="${firstDsName}"]`).click();
-			await page.locator(`[data-picker-option="${secondDsName}"]`).click();
-			await page.getByRole('heading', { name: /Select Data Sources/i }).click();
-
-			const firstSource = page.getByRole('listitem', {
-				name: `Selected datasource ${firstDsName}`
-			});
-			const secondSource = page.getByRole('listitem', {
-				name: `Selected datasource ${secondDsName}`
-			});
-			await expect(firstSource.getByRole('combobox')).toHaveValue('master');
-			await expect(firstSource.getByRole('button', { name: /Snapshot/i })).toContainText('Latest');
-			await firstSource.getByRole('button', { name: /Snapshot/i }).click();
-			await expect(page.getByText(/Selected: Latest/i)).toBeVisible();
-			await page.keyboard.press('Escape');
-
-			await secondSource.dragTo(firstSource);
-			await expect(page.getByRole('listitem').filter({ hasText: secondDsName })).toBeVisible();
-			await expect(
-				page.getByRole('listitem', { name: /Selected datasource/ }).first()
-			).toContainText(secondDsName);
-			await page.getByRole('button', { name: /Next/i }).click();
-
-			await expect(page.getByRole('heading', { name: /Choose Template/i })).toBeVisible();
-			await page.getByRole('button', { name: 'Data Quality Audit' }).click();
-			await expect(page.locator('main')).toContainText('Profile nulls, derive quality flags');
-			await expect(page.locator('main')).toContainText(
-				/view\s*→\s*filter\s*→\s*with_columns\s*→\s*groupby/,
-				{ timeout: 10_000 }
-			);
-			await page.getByRole('button', { name: /Next/i }).click();
-
-			await expect(page.getByRole('heading', { name: /Configure Outputs/i })).toBeVisible();
-			const outputSection = page.locator('section').filter({
-				has: page.getByRole('heading', { name: /Configure Outputs/i })
-			});
-			const firstOutput = outputSection.locator(':scope > div > div').first();
-			await firstOutput.getByLabel('Output name').fill('reviewed_output');
-			await firstOutput.getByLabel('Namespace').fill('reviewed_namespace');
-			await firstOutput.getByLabel('Table name').fill('reviewed_table');
-			await firstOutput.getByLabel('Build mode').selectOption('incremental');
-			await expect(firstOutput.getByLabel('Build mode')).toHaveValue('incremental');
-			await page.getByRole('button', { name: /Next/i }).click();
-
-			await expect(page.getByRole('heading', { name: /Review/i })).toBeVisible();
-			await expect(page.locator('main')).toContainText('Sources: 2');
-			await expect(page.locator('main')).toContainText('Steps: 8');
-			await expect(page.locator('main')).toContainText('Complexity: High');
-			await expect(page.locator('main')).toContainText(secondDsName);
-			await expect(page.locator('main')).toContainText('view');
-			await expect(page.locator('main')).toContainText('reviewed_namespace.reviewed_table');
-			await expect(page.getByText('Validation passed.')).toBeVisible({ timeout: 5_000 });
-			await page.getByRole('button', { name: /Create Analysis/i }).click();
-
-			await expect(page).toHaveURL(
-				(url) => url.pathname.startsWith('/analysis/') && url.pathname !== '/analysis/new',
-				{ timeout: readyTimeoutMs() }
-			);
-			const match = page.url().match(/\/analysis\/([^/?#]+)/);
-			if (!match || match[1] === 'new') {
-				throw new Error(`Could not extract analysis id from URL: ${page.url()}`);
-			}
-			await waitForCurrentAnalysisEditor(page, readyTimeoutMs());
-			await expect(page.locator('[role="application"]')).toHaveAttribute(
-				'data-editor-access-state',
-				'editable'
-			);
-		} finally {
-			await deleteAnalysisViaUI(page, aName);
-		}
-	});
-
-	test('JSON import remaps a missing datasource and reaches the editor', async ({
+	test('creates an empty, centered pipeline from the selected datasource', async ({
 		page,
 		sharedDatasource
 	}) => {
-		const dsName = sharedDatasource.name;
-		const analysisName = `E2E Import ${uid()}`;
+		const analysisName = `${sharedDatasource.name} Analysis`;
+		let analysisId: string | undefined;
+		await page.setViewportSize({ width: 1280, height: 1600 });
+
 		try {
 			await gotoNewAnalysis(page);
-			await page.getByRole('button', { name: 'Import JSON' }).click();
-			await page.locator('#name').fill(analysisName);
-			await page.getByRole('button', { name: /Next/i }).click();
-
-			const importedResultId = crypto.randomUUID();
-			await page.locator('input[type="file"]').setInputFiles({
-				name: 'pipeline.json',
-				mimeType: 'application/json',
-				buffer: Buffer.from(
-					JSON.stringify({
-						tabs: [
-							{
-								id: 'import-tab',
-								name: 'Imported Source',
-								parent_id: null,
-								datasource: {
-									id: 'missing-source',
-									analysis_tab_id: null,
-									config: { branch: 'master' }
-								},
-								output: {
-									result_id: importedResultId,
-									datasource_type: 'iceberg',
-									format: 'parquet',
-									filename: 'imported_output',
-									build_mode: 'full',
-									iceberg: {
-										namespace: 'outputs',
-										table_name: 'imported_output',
-										branch: 'master'
-									}
-								},
-								steps: []
-							}
-						]
-					})
-				)
-			});
-			await expect(page.getByText('Loaded: pipeline.json')).toBeVisible();
-			await expect(page.getByText(/Remap missing datasource references/i)).toBeVisible();
-			await page.getByLabel('Remap missing-source').selectOption({ label: dsName });
-			await page.getByRole('button', { name: /Next/i }).click();
-			await expect(page.getByRole('heading', { name: /Review Import/i })).toBeVisible();
-			await expect(page.locator('main')).toContainText('Remapped datasources: 1');
-			await page.getByRole('button', { name: /Create Analysis/i }).click();
-			await expect(page).toHaveURL(
-				(url) => url.pathname.startsWith('/analysis/') && url.pathname !== '/analysis/new',
-				{ timeout: readyTimeoutMs() }
+			await page.getByPlaceholder('Search datasources...').click();
+			await page.locator(`[data-picker-option="${sharedDatasource.name}"]`).click();
+			const createButton = page.getByRole('button', { name: 'Create Analysis' });
+			await expect(createButton).toBeEnabled();
+			const createResponsePromise = page.waitForResponse(
+				(response) =>
+					response.url().endsWith('/api/v1/analysis') && response.request().method() === 'POST'
 			);
+			await createButton.click();
+			const createResponse = await createResponsePromise;
+			if (!createResponse.ok()) {
+				throw new Error(`Create analysis failed: HTTP ${createResponse.status()}`);
+			}
+
+			const created = (await createResponse.json()) as {
+				id: string;
+				pipeline_definition: {
+					tabs: Array<{
+						datasource: { id: string };
+						steps: unknown[];
+						output: { result_id: string; iceberg?: { table_name?: string } };
+					}>;
+				};
+			};
+			analysisId = created.id;
+			const tab = created.pipeline_definition.tabs[0];
+			if (!tab) throw new Error('Created analysis did not contain its source tab');
+			expect(created.pipeline_definition.tabs).toHaveLength(1);
+			expect(tab.datasource.id).toBe(sharedDatasource.id);
+			expect(tab.steps).toEqual([]);
+			expect(tab.output.iceberg?.table_name).toContain(tab.output.result_id.slice(0, 8));
+
+			await expect(page).toHaveURL((url) => url.pathname === `/analysis/${analysisId}`, {
+				timeout: readyTimeoutMs()
+			});
 			await waitForCurrentAnalysisEditor(page, readyTimeoutMs());
+			await expect(page.locator('[data-step-type]')).toHaveCount(0);
+
+			const canvas = page.locator('.pipeline-canvas');
+			const flow = canvas.locator(':scope > div[role="list"]');
+			const canvasBounds = await canvas.boundingBox();
+			const flowBounds = await flow.boundingBox();
+			if (!canvasBounds || !flowBounds)
+				throw new Error('Could not measure the empty pipeline canvas');
+			expect(
+				Math.abs(flowBounds.y + flowBounds.height / 2 - (canvasBounds.y + canvasBounds.height / 2))
+			).toBeLessThan(40);
 		} finally {
-			await deleteAnalysisViaUI(page, analysisName);
+			if (analysisId) {
+				await deleteAnalysisViaUI(page, analysisName, { id: analysisId }).catch(() => undefined);
+			}
 		}
 	});
 
-	test('description field is optional – can proceed without it', async ({ page }) => {
-		await gotoNewAnalysis(page);
-		await page.locator('#name').fill('No Desc Analysis');
-		// description textarea exists but is empty – should not block Next
-		await expect(page.locator('#description')).toBeVisible();
-		await expect(page.getByRole('button', { name: /Next/i })).toBeEnabled();
+	test('empty-gallery Create Analysis opens the datasource picker', async ({ page }) => {
+		await page.route('**/api/v1/analysis', async (route) => {
+			if (route.request().method() === 'GET') {
+				await route.fulfill({ status: 200, contentType: 'application/json', body: '[]' });
+				return;
+			}
+			await route.continue();
+		});
+
+		await gotoAnalysesGallery(page);
+		await expect(page.getByRole('heading', { name: 'No analyses yet' })).toBeVisible();
+		await page.getByRole('button', { name: 'Create Analysis' }).click();
+		await expect(page).toHaveURL(/\/analysis\/new$/);
+		await expect(page.getByRole('heading', { name: 'Select a datasource' })).toBeVisible();
 	});
 
-	test('description field accepts multiline text', async ({ page }) => {
+	test('Cancel returns to the analyses gallery', async ({ page }) => {
 		await gotoNewAnalysis(page);
-		await page.locator('#description').fill('Line 1\nLine 2\nLine 3');
-		const value = await page.locator('#description').inputValue();
-		expect(value).toContain('Line 1');
+		await page.getByRole('link', { name: 'Cancel', exact: true }).click();
+		await expect(page).toHaveURL('/', { timeout: 5_000 });
 	});
 });
 
@@ -485,11 +339,8 @@ test.describe('Analyses – detail page', () => {
 		aId = await createAnalysis(request, aName, dsId);
 	});
 
-	test.afterEach(async ({ browser, workerAuth }) => {
-		const { page, context } = await createCleanupPage(browser, workerAuth.sessionState);
-		await deleteAnalysisViaUI(page, aName);
-		await page.close();
-		await context.close();
+	test.afterEach(async ({ page }) => {
+		await deleteAnalysisViaUI(page, aName, { id: aId });
 	});
 
 	test('analysis detail page loads with step library', async ({ page }) => {

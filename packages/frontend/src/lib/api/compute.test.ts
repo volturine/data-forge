@@ -12,7 +12,8 @@ vi.mock('$lib/utils/audit-log', () => ({
 }));
 
 vi.mock('$lib/stores/clientIdentity.svelte', () => ({
-	getClientIdentity: () => ({ clientId: 'client-1', clientSignature: 'signature-1' })
+	getClientIdentity: () => ({ clientId: 'client-1', clientSignature: 'signature-1' }),
+	getEditorClientId: () => 'editor-client-1'
 }));
 
 vi.mock('$lib/stores/namespace.svelte', () => ({

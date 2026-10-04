@@ -385,7 +385,8 @@
 				width: '100%',
 				maxWidth: '100%',
 				flexDirection: 'column',
-				alignItems: 'center'
+				alignItems: 'center',
+				...(steps.length === 0 ? { minHeight: '100%', justifyContent: 'center' } : {})
 			})}
 			role="list"
 		>

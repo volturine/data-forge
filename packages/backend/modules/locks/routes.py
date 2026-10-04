@@ -37,6 +37,7 @@ async def _get_websocket_owner_id(websocket: WebSocket) -> str | None:
         run_settings_db,
         resolve_lock_owner_id,
         resolve_websocket_session_token(websocket),
+        websocket.query_params.get('editor_client_id'),
     )
 
 

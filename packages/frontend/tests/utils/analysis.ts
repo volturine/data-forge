@@ -64,7 +64,9 @@ async function waitForAnalysisEditor(
 	const alreadyVisible = anyStepButton !== null;
 
 	if (!alreadyVisible) {
-		const expandBtn = await findVisibleLocator(page.locator('button[title="Expand panels"]'));
+		const expandBtn = await findVisibleLocator(
+			page.locator('button[aria-label="Expand operations"]')
+		);
 		if (expandBtn) {
 			await expandBtn.click();
 		}

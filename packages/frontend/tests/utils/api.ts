@@ -8,7 +8,6 @@ import {
 	createHealthCheckViaUi,
 	createScheduleViaUi,
 	createUdfViaUi,
-	importAnalysisViaUi,
 	uploadDatasourceViaUi,
 	uploadDatasourceWithDatesViaUi,
 	E2E_PASSWORD
@@ -248,8 +247,25 @@ export async function createImportedAnalysis(
 ): Promise<string> {
 	return withAuthedPage(request, async (page) => {
 		await prepareHelperNamespace(page);
-		// importAnalysisViaUi registers the analysis for cleanup / engine shutdown.
-		return importAnalysisViaUi(page, { name, description, pipeline, datasourceRemap });
+		const response = await page.request.post(
+			new URL('/api/v1/analysis/import', page.url()).toString(),
+			{
+				headers: { 'X-Namespace': helperDefaultNamespace },
+				data: {
+					name,
+					description,
+					pipeline,
+					datasource_remap: datasourceRemap ?? {}
+				}
+			}
+		);
+		if (!response.ok()) {
+			const body = await response.text().catch(() => '');
+			throw new Error(`Analysis import failed: HTTP ${response.status()} ${body.slice(0, 300)}`);
+		}
+		const created = (await response.json()) as { id: string };
+		registerAnalysis(created.id, name);
+		return created.id;
 	});
 }
 

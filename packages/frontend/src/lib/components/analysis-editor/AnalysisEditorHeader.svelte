@@ -251,10 +251,10 @@
 			})}
 			onclick={() => {
 				leftPaneCollapsed = !leftPaneCollapsed;
-				rightPaneCollapsed = !rightPaneCollapsed;
 			}}
 			type="button"
-			title={leftPaneCollapsed ? 'Expand panels' : 'Collapse panels'}
+			title={leftPaneCollapsed ? 'Expand operations' : 'Collapse operations'}
+			aria-label={leftPaneCollapsed ? 'Expand operations' : 'Collapse operations'}
 		>
 			{#if leftPaneCollapsed}
 				<ChevronRight size={12} />
@@ -389,18 +389,18 @@
 		})}
 		onclick={() => {
 			rightPaneCollapsed = !rightPaneCollapsed;
-			leftPaneCollapsed = !leftPaneCollapsed;
 		}}
 		type="button"
-		title={rightPaneCollapsed ? 'Expand panels' : 'Collapse panels'}
+		title={rightPaneCollapsed ? 'Expand operation config' : 'Collapse operation config'}
+		aria-label={rightPaneCollapsed ? 'Expand operation config' : 'Collapse operation config'}
 	>
 		{#if configPosition === 'bottom'}
-			{#if leftPaneCollapsed}
+			{#if rightPaneCollapsed}
 				<ChevronUp size={12} />
 			{:else}
 				<ChevronDown size={12} />
 			{/if}
-		{:else if leftPaneCollapsed}
+		{:else if rightPaneCollapsed}
 			<ChevronLeft size={12} />
 		{:else}
 			<ChevronRight size={12} />

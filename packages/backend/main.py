@@ -703,6 +703,7 @@ app.add_middleware(
         'Authorization',
         'If-Match',
         'X-Client-Id',
+        'X-Editor-Client-Id',
         'X-Namespace',
         'X-Session-Token',
         'X-Request-ID',

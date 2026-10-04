@@ -1,14 +1,11 @@
 import { test, expect } from './fixtures.js';
 import { createDatasource, createAnalysis } from './utils/api.js';
 import { addStepAndOpenConfig, gotoAnalysisEditor, waitForEditorReload } from './utils/analysis.js';
-import {
-	createCleanupPage,
-	deleteAnalysisViaUI,
-	deleteDatasourceViaUI
-} from './utils/ui-cleanup.js';
+import { deleteAnalysisViaUI, deleteDatasourceViaUI } from './utils/ui-cleanup.js';
 import { screenshot } from './utils/visual.js';
 import { uid } from './utils/uid.js';
 import { dialogByHeading } from './utils/locators.js';
+import { createAnalysisViaUi } from './utils/user-flows.js';
 
 async function latestNode(page: Parameters<typeof gotoAnalysisEditor>[0], stepType: string) {
 	const nodes = page.locator(`[data-step-type="${stepType}"]`);
@@ -175,11 +172,8 @@ test.describe('Analyses – step library labels', () => {
 		aId = await createAnalysis(request, aName, sharedDatasourceId);
 	});
 
-	test.afterEach(async ({ browser, workerAuth }) => {
-		const { page, context } = await createCleanupPage(browser, workerAuth.sessionState);
-		await deleteAnalysisViaUI(page, aName);
-		await page.close();
-		await context.close();
+	test.afterEach(async ({ page }) => {
+		await deleteAnalysisViaUI(page, aName, { id: aId });
 	});
 
 	const ALL_STEP_TYPES = [
@@ -291,6 +285,40 @@ test.describe('Analyses – step interaction', () => {
 			});
 		} finally {
 			await deleteAnalysisViaUI(page, analysis);
+		}
+	});
+});
+
+test.describe('Analyses – independent operation panels', () => {
+	test('closing either panel leaves the other panel open', async ({ page }) => {
+		const analysisName = `${sharedDatasourceName} Analysis`;
+		const analysisId = await createAnalysisViaUi(page, sharedDatasourceName);
+		try {
+			await gotoAnalysisEditor(page, analysisId);
+			const filterButton = page.locator('button[data-step="filter"]');
+			await filterButton.click();
+			const filterNode = await latestNode(page, 'filter');
+			await filterNode.click();
+
+			const configPanel = page.locator('[data-step-config="filter"]');
+			await expect(configPanel).toBeVisible();
+			await expect(filterButton).toBeVisible();
+
+			await page.getByRole('button', { name: 'Collapse operation config' }).click();
+			await expect(configPanel).toBeHidden();
+			await expect(filterButton).toBeVisible();
+
+			await page.getByRole('button', { name: 'Expand operation config' }).click();
+			await expect(configPanel).toBeVisible();
+			await page.getByRole('button', { name: 'Collapse operations' }).click();
+			await expect(filterButton).toBeHidden();
+			await expect(configPanel).toBeVisible();
+
+			await page.getByRole('button', { name: 'Expand operations' }).click();
+			await expect(filterButton).toBeVisible();
+			await expect(configPanel).toBeVisible();
+		} finally {
+			await deleteAnalysisViaUI(page, analysisName, { id: analysisId }).catch(() => undefined);
 		}
 	});
 });

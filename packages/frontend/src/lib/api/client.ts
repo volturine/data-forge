@@ -1,5 +1,5 @@
 import { err, okAsync, ResultAsync } from 'neverthrow';
-import { getClientIdentity } from '$lib/stores/clientIdentity.svelte';
+import { getClientIdentity, getEditorClientId } from '$lib/stores/clientIdentity.svelte';
 import { requireNamespace, isNamespaceReady } from '$lib/stores/namespace.svelte';
 import { uuid } from '$lib/utils/uuid';
 import { track } from '$lib/utils/audit-log';
@@ -77,11 +77,14 @@ function createApiError(
 function buildHeaders(options?: RequestInit): Headers {
 	const headers = new Headers(options?.headers);
 	const identity = getClientIdentity();
+	const editorClientId = getEditorClientId();
 	const namespace = isNamespaceReady() ? requireNamespace() : undefined;
 	if (identity.clientId && !headers.has('X-Client-Id'))
 		headers.set('X-Client-Id', identity.clientId);
 	if (identity.clientSignature && !headers.has('X-Client-Signature'))
 		headers.set('X-Client-Signature', identity.clientSignature);
+	if (editorClientId && !headers.has('X-Editor-Client-Id'))
+		headers.set('X-Editor-Client-Id', editorClientId);
 	if (!headers.has('X-Request-ID')) headers.set('X-Request-ID', uuid());
 	if (namespace && !headers.has('X-Namespace')) headers.set('X-Namespace', namespace);
 	if (!(options?.body instanceof FormData) && !headers.has('Content-Type'))
