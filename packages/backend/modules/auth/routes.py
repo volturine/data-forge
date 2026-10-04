@@ -99,6 +99,28 @@ def _validate_oauth_state(request: Request, response: Response, provider: str, s
         raise OAuthError('OAuth state mismatch')
 
 
+def _github_redirect_uri(request: Request) -> str:
+    return str(
+        request.url.replace(
+            scheme=request_scheme(request),
+            path='/api/v1/auth/github/callback',
+            query='',
+            fragment='',
+        )
+    )
+
+
+def _github_frontend_callback_url(request: Request) -> str:
+    return str(
+        request.url.replace(
+            scheme=request_scheme(request),
+            path='/callback',
+            query='',
+            fragment='',
+        )
+    )
+
+
 def _build_user_public(session: Session, user: User) -> UserPublic:
     providers = get_user_providers(session, user.id)
     return UserPublic(
@@ -372,87 +394,13 @@ async def revoke_all_sessions_route(
     return {'success': True}
 
 
-@router.get('/google')
-@handle_errors(operation='google oauth start')
-def google_oauth_start(request: Request) -> RedirectResponse:
-    state = secrets.token_urlsafe(32)
-    params = {
-        'client_id': auth_settings.google_client_id,
-        'redirect_uri': auth_settings.google_redirect_uri,
-        'response_type': 'code',
-        'scope': 'openid email profile',
-        'access_type': 'online',
-        'prompt': 'select_account',
-        'state': state,
-    }
-    url = f'https://accounts.google.com/o/oauth2/v2/auth?{urlencode(params)}'
-    response = RedirectResponse(url=url)
-    _set_oauth_state_cookie(
-        response,
-        provider=AuthProviderName.GOOGLE.value,
-        state=state,
-        secure=request_scheme(request) == 'https',
-    )
-    return response
-
-
-@router.get('/google/callback')
-@handle_errors(operation='google oauth callback')
-async def google_oauth_callback(
-    request: Request,
-    params: OAuthCallbackParams = Depends(),
-) -> RedirectResponse:
-    redirect_url = f'{auth_settings.auth_frontend_url}/callback'
-    response = RedirectResponse(url=redirect_url)
-    _validate_oauth_state(request, response, provider=AuthProviderName.GOOGLE.value, state=params.state)
-    token_payload = {
-        'code': params.code,
-        'client_id': auth_settings.google_client_id,
-        'client_secret': auth_settings.google_client_secret,
-        'redirect_uri': auth_settings.google_redirect_uri,
-        'grant_type': 'authorization_code',
-    }
-    client = http_client.get_async_client()
-    token_resp = await client.post('https://oauth2.googleapis.com/token', data=token_payload, timeout=15.0)
-    if token_resp.status_code != 200:
-        raise OAuthError('Google token exchange failed')
-    token_data = token_resp.json()
-    access_token = token_data.get('access_token')
-    if not isinstance(access_token, str) or not access_token:
-        raise OAuthError('Google access token missing')
-    info_resp = await client.get(
-        'https://www.googleapis.com/oauth2/v2/userinfo',
-        headers={'Authorization': f'Bearer {access_token}'},
-        timeout=15.0,
-    )
-    if info_resp.status_code != 200:
-        raise OAuthError('Failed to fetch Google user info')
-    info = info_resp.json()
-    subject = info.get('id')
-    email = info.get('email')
-    if not isinstance(subject, str) or not isinstance(email, str):
-        raise OAuthError('Google user info missing id or email')
-    result = await _run_auth_db(
-        _authenticate_oauth_user,
-        provider=AuthProviderName.GOOGLE,
-        provider_subject=subject,
-        email=email,
-        display_name=str(info.get('name') or email.split('@')[0]),
-        avatar_url=info.get('picture') if isinstance(info.get('picture'), str) else None,
-        device_info=_request_device_info(request),
-        ip_address=_request_ip_address(request),
-    )
-    _set_session_cookie(response, result, secure=request_scheme(request) == 'https')
-    return response
-
-
 @router.get('/github')
 @handle_errors(operation='github oauth start')
 def github_oauth_start(request: Request) -> RedirectResponse:
     state = secrets.token_urlsafe(32)
     params = {
         'client_id': auth_settings.github_client_id,
-        'redirect_uri': auth_settings.github_redirect_uri,
+        'redirect_uri': _github_redirect_uri(request),
         'scope': 'read:user user:email',
         'state': state,
     }
@@ -473,14 +421,13 @@ async def github_oauth_callback(
     request: Request,
     params: OAuthCallbackParams = Depends(),
 ) -> RedirectResponse:
-    redirect_url = f'{auth_settings.auth_frontend_url}/callback'
-    response = RedirectResponse(url=redirect_url)
+    response = RedirectResponse(url=_github_frontend_callback_url(request))
     _validate_oauth_state(request, response, provider=AuthProviderName.GITHUB.value, state=params.state)
     payload = {
         'client_id': auth_settings.github_client_id,
         'client_secret': auth_settings.github_client_secret,
         'code': params.code,
-        'redirect_uri': auth_settings.github_redirect_uri,
+        'redirect_uri': _github_redirect_uri(request),
     }
     headers = {'Accept': 'application/json'}
     client = http_client.get_async_client()

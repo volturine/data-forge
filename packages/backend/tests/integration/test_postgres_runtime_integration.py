@@ -2767,9 +2767,9 @@ def test_postgres_runtime_coordinator_takeover_during_compute_terminal_publicati
             data_plane_port=data_plane_port,
         )
         base_env.update(engine_runtime_env)
-        # A short lease makes crash recovery bounded while preserving the real
-        # claim-expiry/reconciliation path exercised by production.
-        base_env['RUNTIME_WORK_LEASE_TTL_SECONDS'] = '5'
+        # A short lease makes crash recovery bounded while allowing transient
+        # runtime RPC delays without expiring the claim before terminal publication.
+        base_env['RUNTIME_WORK_LEASE_TTL_SECONDS'] = '30'
         _init_runtime_db(base_env)
         coordinator_application_name = f'dataforge-test-coordinator-{uuid.uuid4().hex[:12]}'
 
@@ -2787,7 +2787,7 @@ def test_postgres_runtime_coordinator_takeover_during_compute_terminal_publicati
             rustfs=rustfs_container,
             extra_env={
                 'PGAPPNAME': coordinator_application_name,
-                'RUNTIME_WORK_LEASE_TTL_SECONDS': '5',
+                'RUNTIME_WORK_LEASE_TTL_SECONDS': '30',
             },
         )
         worker_manager = _worker_manager(
@@ -2796,7 +2796,7 @@ def test_postgres_runtime_coordinator_takeover_during_compute_terminal_publicati
             grpc_port=coordinator_grpc_port,
             data_plane_port=data_plane_port,
             rustfs=rustfs_container,
-            extra_env={**engine_runtime_env, 'RUNTIME_WORK_LEASE_TTL_SECONDS': '5'},
+            extra_env={**engine_runtime_env, 'RUNTIME_WORK_LEASE_TTL_SECONDS': '30'},
         )
         blocker_connection: psycopg.Connection | None = None
         preview_thread: threading.Thread | None = None

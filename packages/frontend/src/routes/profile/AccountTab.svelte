@@ -80,8 +80,8 @@
 		changing = false;
 	}
 
-	function oauth(provider: string) {
-		window.location.href = `/api/v1/auth/${provider}`;
+	function oauthGithub() {
+		window.location.href = '/api/v1/auth/github';
 	}
 
 	async function disconnect(provider: string) {
@@ -346,52 +346,6 @@
 					})}
 				>
 					<div class={css({ display: 'flex', alignItems: 'center', gap: '3' })}>
-						<span class={css({ color: 'fg.primary', fontSize: 'sm' })}>Google</span>
-						{#if connected('google')}
-							<span
-								class={css({
-									fontSize: 'xs',
-									color: 'fg.success',
-									backgroundColor: 'bg.success',
-									paddingX: '2',
-									paddingY: '0.5',
-									borderRadius: 'sm'
-								})}
-							>
-								Connected
-							</span>
-						{/if}
-					</div>
-					{#if connected('google')}
-						<button
-							type="button"
-							class={button({ variant: 'ghost', size: 'sm' })}
-							disabled={unlinking === 'google'}
-							onclick={() => disconnect('google')}
-						>
-							{#if unlinking === 'google'}
-								<div class={spinner({ size: 'sm' })}></div>
-							{/if}
-							Disconnect
-						</button>
-					{:else}
-						<button type="button" class={button({ size: 'sm' })} onclick={() => oauth('google')}>
-							Connect
-						</button>
-					{/if}
-				</div>
-
-				<div class={css({ borderTopWidth: '1', borderColor: 'border.primary' })}></div>
-
-				<div
-					class={css({
-						display: 'flex',
-						alignItems: 'center',
-						justifyContent: 'space-between',
-						paddingY: '2'
-					})}
-				>
-					<div class={css({ display: 'flex', alignItems: 'center', gap: '3' })}>
 						<GitBranch size={16} />
 						<span class={css({ color: 'fg.primary', fontSize: 'sm' })}>GitHub</span>
 						{#if connected('github')}
@@ -422,7 +376,7 @@
 							Disconnect
 						</button>
 					{:else}
-						<button type="button" class={button({ size: 'sm' })} onclick={() => oauth('github')}>
+						<button type="button" class={button({ size: 'sm' })} onclick={oauthGithub}>
 							<GitBranch size={14} />
 							Connect
 						</button>
