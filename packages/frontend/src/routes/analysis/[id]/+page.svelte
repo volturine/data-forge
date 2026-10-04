@@ -49,7 +49,6 @@
 	});
 	let isSaving = $state(false);
 	let saveError = $state('');
-	let forceAnalysisServerSync = false;
 
 	const isDirty = $derived(analysisStore.isDirty());
 	let lastLoadedVersion = $state<string | null>(null);
@@ -102,6 +101,7 @@
 	});
 
 	onDestroy(() => {
+		synchronizedEditorRoute = null;
 		actions.clearTabErrorTimer();
 		buildStore.close();
 		lock.stop();
@@ -199,52 +199,34 @@
 		};
 	}
 
-	const analysisQuery = createQuery(() => ({
-		queryKey: analysisQueryKey(analysisId ?? ''),
-		enabled: !!analysisId,
-		staleTime: Infinity,
-		refetchOnWindowFocus: false,
-		queryFn: async ({ signal }): Promise<AnalysisDetail> => {
-			if (!analysisId) throw new Error('Analysis ID is required');
-			if (!validAnalysisId) throw new Error('Invalid analysis ID format');
-			const cached = queryClient.getQueryData<AnalysisDetail>(analysisQueryKey(validAnalysisId));
-			if (cached && analysisStore.current?.id !== validAnalysisId) {
-				analysisStore.applyAnalysis(cached.analysis);
-				analysisStore.currentRevision = cached.version;
-				lastLoadedVersion = cached.version;
-			}
-			const detail = await fetchAnalysis(validAnalysisId, cached?.etag, { signal });
-			if ('notModified' in detail) {
-				if (!cached) throw new Error('Analysis cache is empty after 304');
-				if (forceAnalysisServerSync) {
-					analysisStore.applyAnalysis(cached.analysis);
-					analysisStore.currentRevision = cached.version;
-					lastLoadedVersion = cached.version;
-				}
-				forceAnalysisServerSync = false;
-				draft.hydrate();
-				loadSourceSchemaWhenRouteReady();
-				return cached;
-			}
-			// Query refetches must not overwrite an editor's unsaved working copy.
-			// The store is the working state; only the initial load or an explicit
-			// remote-lock sync may replace it with server data.
-			if (
-				forceAnalysisServerSync ||
-				analysisStore.current?.id !== validAnalysisId ||
-				!analysisStore.isDirty()
-			) {
-				analysisStore.applyAnalysis(detail.analysis);
-				analysisStore.currentRevision = detail.version;
-				lastLoadedVersion = detail.version;
-			}
-			forceAnalysisServerSync = false;
-			draft.hydrate();
-			loadSourceSchemaWhenRouteReady();
-			return detail;
-		},
-		retry: false
-	}));
+	async function loadAnalysisDetail(id: string, signal: AbortSignal): Promise<AnalysisDetail> {
+		if (!isUuid(id)) throw new Error('Invalid analysis ID format');
+		const cached = queryClient.getQueryData<AnalysisDetail>(analysisQueryKey(id));
+		const detail = await fetchAnalysis(id, cached?.etag, { signal });
+		if ('notModified' in detail) {
+			if (!cached) throw new Error('Analysis cache is empty after 304');
+			return cached;
+		}
+		return detail;
+	}
+
+	const analysisQuery = createQuery(() => {
+		const id = analysisId ?? '';
+		return {
+			queryKey: analysisQueryKey(id),
+			enabled: !!id,
+			staleTime: Infinity,
+			refetchOnWindowFocus: false,
+			queryFn: ({ signal }) => loadAnalysisDetail(id, signal),
+			retry: false
+		};
+	});
+
+	function applyAnalysisDetail(detail: AnalysisDetail): void {
+		analysisStore.applyAnalysis(detail.analysis);
+		analysisStore.currentRevision = detail.version;
+		lastLoadedVersion = detail.version;
+	}
 
 	const currentAnalysis = $derived(analysisStore.current ?? analysisQuery.data?.analysis ?? null);
 
@@ -268,7 +250,6 @@
 	);
 
 	function snapBackFromRemoteLock(): void {
-		forceAnalysisServerSync = true;
 		lock.setRemoteSyncPending(true);
 		lock.setRemoteSyncFailed(false);
 
@@ -283,14 +264,19 @@
 		}
 		if (analysisQuery.data) {
 			const syncAnalysisId = analysisId;
+			const syncRouteKey = synchronizedEditorRoute;
 			void analysisQuery
 				.refetch()
 				.then((result) => {
-					if (analysisId !== syncAnalysisId) return;
+					if (analysisId !== syncAnalysisId || synchronizedEditorRoute !== syncRouteKey) return;
 					lock.setRemoteSyncFailed(result.isError);
+					if (!result.isError && result.data) {
+						applyAnalysisDetail(result.data);
+						loadSourceSchemaWhenRouteReady();
+					}
 				})
 				.finally(() => {
-					if (analysisId !== syncAnalysisId) return;
+					if (analysisId !== syncAnalysisId || synchronizedEditorRoute !== syncRouteKey) return;
 					lock.setRemoteSyncPending(false);
 					draft.hydrate();
 				});
@@ -354,21 +340,7 @@
 		schemaKey: () => schemaKey,
 		datasources: () => (datasourceStore.loaded ? datasourceStore.datasources : undefined)
 	});
-	let synchronizedEditorRoute = $state<string | null>(null);
-	$effect(() => {
-		const detail = analysisQuery.data;
-		const id = validAnalysisId;
-		const routeKey = `${ns.value}:${analysisId ?? ''}`;
-		if (synchronizedEditorRoute !== routeKey) return;
-		if (!detail || !id || detail.analysis.id !== id || analysisStore.current?.id === id) return;
-
-		// Gallery hover can populate the query cache without running this route's query function.
-		analysisStore.applyAnalysis(detail.analysis);
-		analysisStore.currentRevision = detail.version;
-		lastLoadedVersion = detail.version;
-		draft.hydrate();
-		loadSourceSchemaWhenRouteReady();
-	});
+	let synchronizedEditorRoute: string | null = null;
 	const isLoadingSchema = $derived(sourceSchemaLoader.isLoading());
 
 	function refreshEditorServices(): void {
@@ -391,6 +363,34 @@
 		resetForAnalysisId(analysisId);
 		lock.sync(validAnalysisId);
 		refreshEditorServices();
+
+		const id = analysisId;
+		const namespace = ns.value;
+		if (!id) return;
+		void queryClient
+			.ensureQueryData({
+				queryKey: analysisQueryKey(id),
+				queryFn: ({ signal }) => loadAnalysisDetail(id, signal),
+				staleTime: Infinity,
+				retry: false
+			})
+			.then(
+				(detail) => {
+					if (
+						synchronizedEditorRoute !== routeKey ||
+						analysisId !== id ||
+						!ns.ready ||
+						ns.value !== namespace
+					)
+						return;
+					if (analysisStore.current?.id !== id || !analysisStore.isDirty()) {
+						applyAnalysisDetail(detail);
+					}
+					draft.hydrate();
+					refreshEditorServices();
+				},
+				() => {} // The query observer renders load errors.
+			);
 	}
 
 	function loadSourceSchemaWhenRouteReady(): void {

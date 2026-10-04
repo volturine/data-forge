@@ -212,6 +212,7 @@ test.describe('Analyses – gallery interactions', () => {
 		const secondName = `Prefetched Second ${suffix}`;
 		const firstId = await createAnalysis(request, firstName, sharedDatasource.id);
 		const secondId = await createAnalysis(request, secondName, sharedDatasource.id);
+		let releasePrefetch: (() => void) | undefined;
 
 		try {
 			for (const [name, id] of [
@@ -220,17 +221,34 @@ test.describe('Analyses – gallery interactions', () => {
 			] as const) {
 				await gotoAnalysesGallery(page);
 				const card = page.locator(`[data-analysis-card="${name}"]`);
+				if (id === secondId) {
+					const pendingPrefetch = new Promise<void>((resolve) => {
+						releasePrefetch = resolve;
+					});
+					await page.route(`**/api/v1/analysis/${id}`, async (route) => {
+						await pendingPrefetch;
+						await route.continue();
+					});
+				}
+				const prefetchStarted = page.waitForRequest(
+					(analysisRequest) => new URL(analysisRequest.url()).pathname === `/api/v1/analysis/${id}`
+				);
 				const prefetch = page.waitForResponse(
 					(response) =>
 						new URL(response.url()).pathname === `/api/v1/analysis/${id}` &&
 						response.request().method() === 'GET'
 				);
 				await card.hover();
-				expect((await prefetch).status()).toBe(200);
+				await prefetchStarted;
+				if (!releasePrefetch) expect((await prefetch).status()).toBe(200);
 				await card.click();
+				await expect(page).toHaveURL(`/analysis/${id}`, { timeout: readyTimeoutMs() });
+				releasePrefetch?.();
+				expect((await prefetch).status()).toBe(200);
 				expect(await waitForCurrentAnalysisEditor(page, readyTimeoutMs())).toBe(id);
 			}
 		} finally {
+			releasePrefetch?.();
 			await deleteAnalysisViaUI(page, firstName).catch(() => undefined);
 			await deleteAnalysisViaUI(page, secondName).catch(() => undefined);
 		}
