@@ -53,10 +53,11 @@ test.describe('Navigation – page load smoke tests', () => {
 		await screenshot(page, 'navigation', 'monitoring-page');
 	});
 
-	test('new analysis page renders wizard', async ({ page }) => {
+	test('new analysis page renders the datasource picker', async ({ page }) => {
 		await gotoNewAnalysis(page);
 		await expect(page.getByRole('heading', { name: 'New Analysis' })).toBeVisible();
-		await screenshot(page, 'navigation', 'new-analysis-wizard');
+		await expect(page.getByRole('heading', { name: 'Select a datasource' })).toBeVisible();
+		await screenshot(page, 'navigation', 'new-analysis-datasource-picker');
 	});
 
 	test('new datasource page loads', async ({ page }) => {

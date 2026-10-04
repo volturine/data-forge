@@ -13,7 +13,8 @@ vi.mock('$lib/utils/indexeddb', () => ({
 }));
 
 vi.mock('$lib/stores/clientIdentity.svelte', () => ({
-	getClientIdentity: () => ({ clientId: 'test-client', clientSignature: 'test-sig' })
+	getClientIdentity: () => ({ clientId: 'test-client', clientSignature: 'test-sig' }),
+	getEditorClientId: () => 'editor-client-1'
 }));
 
 vi.mock('$lib/stores/config.svelte', () => ({

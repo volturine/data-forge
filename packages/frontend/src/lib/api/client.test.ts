@@ -12,7 +12,8 @@ vi.mock('$lib/utils/audit-log', () => ({
 }));
 
 vi.mock('$lib/stores/clientIdentity.svelte', () => ({
-	getClientIdentity: () => ({ clientId: 'client-1', clientSignature: 'signature-1' })
+	getClientIdentity: () => ({ clientId: 'client-1', clientSignature: 'signature-1' }),
+	getEditorClientId: () => 'editor-client-1'
 }));
 
 vi.mock('$lib/stores/namespace.svelte', () => ({
@@ -62,6 +63,18 @@ describe('api client cache policy', () => {
 			'/api/v1/test',
 			expect.objectContaining({ cache: 'reload' })
 		);
+	});
+
+	test('sends the editor session identity with API requests', async () => {
+		await apiRequest<{ ok: boolean }>('/v1/test').match(
+			(value) => value,
+			(error) => {
+				throw error;
+			}
+		);
+
+		const requestInit = vi.mocked(fetch).mock.calls[0]?.[1];
+		expect(new Headers(requestInit?.headers).get('X-Editor-Client-Id')).toBe('editor-client-1');
 	});
 
 	test('preserves a caller request ID and merges caller headers', async () => {

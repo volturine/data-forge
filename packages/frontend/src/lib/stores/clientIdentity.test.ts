@@ -8,7 +8,10 @@ vi.mock('$lib/utils/indexeddb', () => ({
 	idbSet: (...args: unknown[]) => mockIdbSet(...args)
 }));
 
-const { hashFingerprint, getClientIdentity } = await import('./clientIdentity.svelte');
+vi.mock('$app/environment', () => ({ browser: true, building: false, dev: true, version: 'test' }));
+
+const { hashFingerprint, getClientIdentity, getEditorClientId } =
+	await import('./clientIdentity.svelte');
 import type { Fingerprint } from './clientIdentity.svelte';
 
 describe('hashFingerprint', () => {
@@ -85,5 +88,15 @@ describe('getClientIdentity', () => {
 		const a = getClientIdentity();
 		const b = getClientIdentity();
 		expect(a.clientSignature).toBe(b.clientSignature);
+	});
+});
+
+describe('getEditorClientId', () => {
+	test('persists one identity in session storage for the current tab', () => {
+		const editorClientId = getEditorClientId();
+
+		expect(editorClientId).toMatch(/^[0-9a-f-]{36}$/i);
+		expect(sessionStorage.getItem('dataforge_editor_client_id')).toBe(editorClientId);
+		expect(getEditorClientId()).toBe(editorClientId);
 	});
 });

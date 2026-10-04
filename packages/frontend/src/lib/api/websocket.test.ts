@@ -1,7 +1,8 @@
 import { afterEach, beforeEach, describe, expect, test, vi } from 'vitest';
 
 vi.mock('$lib/stores/clientIdentity.svelte', () => ({
-	getClientIdentity: () => ({ clientId: 'client-1', clientSignature: 'signature-1' })
+	getClientIdentity: () => ({ clientId: 'client-1', clientSignature: 'signature-1' }),
+	getEditorClientId: () => 'editor-client-1'
 }));
 
 vi.mock('$lib/stores/namespace.svelte', () => ({
@@ -162,7 +163,7 @@ describe('createStream', () => {
 		connect();
 		expect(MockWebSocket.instances).toHaveLength(1);
 		expect(MockWebSocket.instances[0].url).toBe(
-			'ws://localhost:8000/api/v1/test/ws?namespace=default&client_id=client-1&client_signature=signature-1'
+			'ws://localhost:8000/api/v1/test/ws?namespace=default&client_id=client-1&client_signature=signature-1&editor_client_id=editor-client-1'
 		);
 	});
 

@@ -10,6 +10,29 @@ export interface Fingerprint {
 }
 
 let clientIdValue = '';
+let editorClientIdValue = '';
+
+const EDITOR_CLIENT_ID_KEY = 'dataforge_editor_client_id';
+
+/** Stable for one browser tab so opening an analysis elsewhere cannot take its lock. */
+export function getEditorClientId(): string {
+	if (!browser) return '';
+	if (editorClientIdValue) return editorClientIdValue;
+
+	try {
+		const existing = window.sessionStorage.getItem(EDITOR_CLIENT_ID_KEY);
+		if (existing) {
+			editorClientIdValue = existing;
+			return existing;
+		}
+		editorClientIdValue = uuid();
+		window.sessionStorage.setItem(EDITOR_CLIENT_ID_KEY, editorClientIdValue);
+		return editorClientIdValue;
+	} catch {
+		editorClientIdValue = uuid();
+		return editorClientIdValue;
+	}
+}
 
 async function initClientId(): Promise<void> {
 	if (!browser) return;

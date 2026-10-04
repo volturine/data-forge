@@ -311,17 +311,11 @@ export async function selectDatasourceAndWaitForConfig(
 }
 
 /**
- * Navigate to `/analysis/new` and wait for the step-1 form to render.
- *
- * Readiness chain:
- *  1. Layout ready (shell hydrated).
- *  2. The `#name` input field is visible — proving the wizard mounted and
- *     step 1 rendered its form. This is a stronger gate than the heading
- *     alone because the input is the interactable element tests need next.
+ * Navigate to `/analysis/new` and wait for the datasource picker to render.
  */
 export async function gotoNewAnalysis(page: Page, timeout = readyTimeoutMs()): Promise<void> {
 	await gotoAuthedRoute(page, '/analysis/new', timeout);
-	await expect(page.locator('#name')).toBeVisible({ timeout });
+	await expect(page.getByRole('heading', { name: 'Select a datasource' })).toBeVisible({ timeout });
 }
 
 export async function gotoMonitoringTab(

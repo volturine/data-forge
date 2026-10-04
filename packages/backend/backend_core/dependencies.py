@@ -36,18 +36,36 @@ async def get_manager(request: Request) -> Any:
     return request.app.state.manager
 
 
-def resolve_lock_owner_id(session: Session, token: str | None) -> str | None:
+def _scope_lock_owner_id(owner_id: str, editor_client_id: str | None) -> str:
+    if editor_client_id is None:
+        return owner_id
+    client_id = editor_client_id.strip()
+    if not client_id or len(client_id) > 128:
+        return owner_id
+    return f'{owner_id}:{client_id}'
+
+
+def resolve_lock_owner_id(
+    session: Session,
+    token: str | None,
+    editor_client_id: str | None = None,
+) -> str | None:
     if token:
         user = validate_session(session, token)
         if user is not None:
-            return user.id
+            return _scope_lock_owner_id(user.id, editor_client_id)
     if not auth_settings.auth_required:
-        return ensure_default_user(session).id
+        return _scope_lock_owner_id(ensure_default_user(session).id, editor_client_id)
     return None
 
 
 async def get_optional_lock_owner_id(request: Request) -> str | None:
-    return await run_api_blocking(run_settings_db, resolve_lock_owner_id, _resolve_session_token(request))
+    return await run_api_blocking(
+        run_settings_db,
+        resolve_lock_owner_id,
+        _resolve_session_token(request),
+        request.headers.get('X-Editor-Client-Id'),
+    )
 
 
 async def get_runtime_availability_probe(

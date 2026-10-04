@@ -148,86 +148,26 @@ export async function uploadDatasourceWithDatesViaUi(
 	return uploadDatasourceViaUi(page, name, { csv: DATE_CSV });
 }
 
-export async function createAnalysisViaUi(
-	page: Page,
-	analysisName: string,
-	datasourceName: string
-): Promise<string> {
+export async function createAnalysisViaUi(page: Page, datasourceName: string): Promise<string> {
 	const { registerAnalysis } = await import('./api.js');
 	await gotoNewAnalysis(page);
-	await page.locator('#name').fill(analysisName);
-	await page.getByRole('button', { name: /Next/i }).click();
-	await expect(page.getByRole('heading', { name: /Select Data Sources/i })).toBeVisible();
 	await page.getByPlaceholder('Search datasources...').click();
 	await page.locator(`[data-picker-option="${datasourceName}"]`).click();
-	await page.getByRole('heading', { name: /Select Data Sources/i }).click();
-	await page.getByRole('button', { name: /Next/i }).click();
-	await expect(page.getByRole('heading', { name: /Choose Template/i })).toBeVisible();
-	await page.getByRole('button', { name: /Next/i }).click();
-	await expect(page.getByRole('heading', { name: /Configure Outputs/i })).toBeVisible();
-	await page.getByRole('button', { name: /Next/i }).click();
-	await expect(page.getByRole('heading', { name: /Review/i })).toBeVisible();
-	await page.getByRole('button', { name: /Create Analysis/i }).click();
-	const analysisId = await waitForCurrentAnalysisEditor(page);
-	registerAnalysis(analysisId, analysisName);
-	await gotoAuthedRoute(page, '/');
-	return analysisId;
-}
-
-export async function importAnalysisViaUi(
-	page: Page,
-	options: {
-		name: string;
-		description?: string;
-		pipeline: Record<string, unknown>;
-		datasourceRemap?: Record<string, string>;
-	}
-): Promise<string> {
-	const { registerAnalysis } = await import('./api.js');
-	await gotoNewAnalysis(page);
-	await page.getByRole('button', { name: 'Import JSON' }).click();
-	await page.locator('#name').fill(options.name);
-	if (options.description) {
-		await page.locator('#description').fill(options.description);
-	}
-	await page.getByRole('button', { name: /Next/i }).click();
-	await expect(page.getByRole('heading', { name: /Import Pipeline Definition/i })).toBeVisible();
-	await page.locator('input[type="file"]').setInputFiles({
-		name: `${options.name}.json`,
-		mimeType: 'application/json',
-		buffer: Buffer.from(JSON.stringify(options.pipeline, null, 2))
-	});
-	if (options.datasourceRemap) {
-		for (const [missingId, datasourceId] of Object.entries(options.datasourceRemap)) {
-			const remapSelect = page
-				.locator('label')
-				.filter({ hasText: `Remap ${missingId}` })
-				.locator('select');
-			await remapSelect.selectOption(datasourceId);
-		}
-	}
-	await page.getByRole('button', { name: /Next/i }).click();
-	await expect(page.getByRole('heading', { name: /Review Import/i })).toBeVisible();
-	const createButton = page.getByRole('button', { name: /Create Analysis/i });
 	const createResponsePromise = page.waitForResponse(
 		(response) =>
-			response.url().includes('/api/v1/analysis') &&
-			response.request().method() === 'POST' &&
-			response.status() !== 0
+			response.url().endsWith('/api/v1/analysis') && response.request().method() === 'POST'
 	);
-	await createButton.click();
+	await page.getByRole('button', { name: 'Create Analysis' }).click();
 	const createResponse = await createResponsePromise;
 	if (!createResponse.ok()) {
 		const body = await createResponse.text().catch(() => '');
 		throw new Error(
-			`Analysis import create failed: HTTP ${createResponse.status()} ${body.slice(0, 300)}`
+			`Analysis create failed: HTTP ${createResponse.status()} ${body.slice(0, 300)}`
 		);
 	}
+	const created = (await createResponse.json()) as { id: string; name: string };
 	const analysisId = await waitForCurrentAnalysisEditor(page);
-	registerAnalysis(analysisId, options.name);
-	// Setup pages are reused by a worker, while the test page owns the actual
-	// editor interaction. Leave the editor before returning so setup cannot keep
-	// a second lock websocket on the analysis and rotate the test page's token.
+	registerAnalysis(analysisId, created.name);
 	await gotoAuthedRoute(page, '/');
 	return analysisId;
 }

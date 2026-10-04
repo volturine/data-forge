@@ -458,7 +458,7 @@
 			</div>
 		{:else if query.data}
 			{#if query.data.length === 0}
-				<EmptyState />
+				<EmptyState onCreate={() => void goto(resolve('/analysis/new'))} />
 			{:else}
 				<AnalysisFilters
 					{searchQuery}
