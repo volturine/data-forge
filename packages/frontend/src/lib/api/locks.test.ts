@@ -210,6 +210,32 @@ describe('openLockSession', () => {
 		session.close();
 	});
 
+	test('adopts a rotated token for the same owner without acquiring again', () => {
+		const onStatus = vi.fn();
+		const session: LockSession = openLockSession({
+			resourceType: 'analysis',
+			resourceId: 'analysis-1',
+			onStatus,
+			onError: vi.fn()
+		});
+		const socket = sockets[0];
+		session.acquire();
+		socket.emit('open');
+		socket.emit('message', { data: statusMessage(lock('existing-lock')) });
+		socket.emit('message', { data: statusMessage(lock('owned-token')) });
+		socket.emit('message', { data: statusMessage(lock('rotated-token')) });
+
+		expect(sentMessages(socket)).toEqual([
+			{ action: 'watch', resource_type: 'analysis', resource_id: 'analysis-1' },
+			{ action: 'acquire' }
+		]);
+		expect(onStatus).toHaveBeenLastCalledWith(
+			expect.objectContaining({ lock_token: 'rotated-token' }),
+			true
+		);
+		session.close();
+	});
+
 	test('reconnects with exponential backoff that resets after a successful connection', () => {
 		vi.useFakeTimers();
 		const session: LockSession = openLockSession({

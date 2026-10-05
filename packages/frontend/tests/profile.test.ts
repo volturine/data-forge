@@ -318,8 +318,8 @@ test.describe('Profile – AI Providers tab', () => {
 		await waitForProfileTab(page, 'AI Providers');
 
 		await expect(page.getByText('OpenRouter')).toBeVisible();
-		await expect(page.getByText('OpenAI')).toBeVisible();
 		await expect(page.getByText('Ollama')).toBeVisible();
+		await expect(page.getByText('OpenAI')).toHaveCount(0);
 
 		await screenshot(page, 'profile', 'ai-providers-tab');
 	});
@@ -329,8 +329,8 @@ test.describe('Profile – AI Providers tab', () => {
 		await waitForProfileTab(page, 'AI Providers');
 
 		await expect(page.getByRole('button', { name: 'Test OpenRouter' })).toBeVisible();
-		await expect(page.getByRole('button', { name: 'Test OpenAI' })).toBeVisible();
 		await expect(page.getByRole('button', { name: 'Test Ollama' })).toBeVisible();
+		await expect(page.getByRole('button', { name: 'Test OpenAI' })).toHaveCount(0);
 	});
 
 	test('ai providers save shows success feedback on 200', async ({ page }) => {
@@ -763,20 +763,19 @@ test.describe('Profile – AI Providers tab functional', () => {
 		await expect(keyInput).toHaveValue('');
 	});
 
-	test('AI provider OpenAI endpoint edit persists after save and reload', async ({ page }) => {
+	test('AI provider Ollama endpoint edit persists after save and reload', async ({ page }) => {
 		await gotoProfile(page, 'ai-providers');
 		await waitForProfileTab(page, 'AI Providers');
 
-		const endpointInput = page.locator('#openai-endpoint-url');
+		const endpointInput = page.locator('#ollama-endpoint-url');
 		await expect(endpointInput).toBeVisible({ timeout: 3_000 });
 
-		const customEndpoint = 'https://e2e-openai.example.com';
+		const customEndpoint = 'https://e2e-ollama.example.com';
 		await endpointInput.fill(customEndpoint);
 
 		await page.getByRole('button', { name: 'Save' }).click();
 		await expect(page.getByText('AI provider settings saved')).toBeVisible({ timeout: 5_000 });
 
-		// Verify endpoint is correct immediately after save (before reload)
 		await expect(endpointInput).toHaveValue(customEndpoint);
 
 		await page.reload();

@@ -16,8 +16,13 @@ from modules.mcp.tool_output import format_output_hint
 
 logger = logging.getLogger(__name__)
 
-_OPENROUTER_BASE = 'https://openrouter.ai/api/v1'
 _TIMEOUT = httpx.Timeout(connect=10, read=120, write=10, pool=10)
+
+
+def _openrouter_base() -> str:
+    from backend_core.ai_clients import openrouter_base_url
+
+    return openrouter_base_url()
 
 
 class ChatHttpError(Exception):
@@ -86,7 +91,7 @@ async def chat_with_tools(
 
     client = http_client.get_async_client()
     resp = await client.post(
-        f'{_OPENROUTER_BASE}/chat/completions',
+        f'{_openrouter_base()}/chat/completions',
         headers=_headers(api_key),
         content=await serialize_json(payload),
         timeout=_TIMEOUT,
@@ -99,7 +104,7 @@ async def chat_with_tools(
 async def list_models(api_key: str) -> list[dict]:
     """List models available on OpenRouter."""
     client = http_client.get_async_client()
-    resp = await client.get(f'{_OPENROUTER_BASE}/models', headers=_headers(api_key), timeout=_TIMEOUT)
+    resp = await client.get(f'{_openrouter_base()}/models', headers=_headers(api_key), timeout=_TIMEOUT)
     if not resp.is_success:
         logger.error('list_models failed: %d %s', resp.status_code, resp.text[:500])
         raise ChatHttpError(f'OpenRouter returned {resp.status_code}: {resp.text[:500]}')

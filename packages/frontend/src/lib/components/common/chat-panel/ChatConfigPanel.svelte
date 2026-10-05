@@ -18,7 +18,7 @@
 	let modelSearch = $state('');
 
 	async function saveConfig() {
-		chatStore.setProvider(providerDraft as 'openrouter' | 'openai' | 'ollama');
+		chatStore.setProvider(providerDraft as 'openrouter' | 'ollama');
 		chatStore.model = modelDraft;
 		chatStore.systemPrompt = systemPromptDraft;
 		await chatStore.configure(apiKeyDraft);
@@ -26,7 +26,7 @@
 	}
 
 	function handleLoadModels() {
-		chatStore.setProvider(providerDraft as 'openrouter' | 'openai' | 'ollama');
+		chatStore.setProvider(providerDraft as 'openrouter' | 'ollama');
 		chatStore.apiKey = apiKeyDraft;
 		void chatStore.loadModels();
 	}
@@ -68,7 +68,6 @@
 			disabled={!!chatStore.sessionId}
 		>
 			<option value="openrouter">OpenRouter</option>
-			<option value="openai">OpenAI</option>
 			<option value="ollama">Ollama</option>
 		</select>
 	</div>

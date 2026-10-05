@@ -159,6 +159,9 @@ class Settings(BaseSettings):
     log_level: str = Field(default='info', alias='LOG_LEVEL')
     sql_echo: bool = Field(default=False, alias='SQL_ECHO')
     uvicorn_access_log: bool = Field(default=True, alias='UVICORN_ACCESS_LOG')
+    # Idle keep-alive close. Clients that pool sockets without their own idle
+    # expiry (Playwright's API client) race this timer and observe ECONNRESET.
+    uvicorn_timeout_keep_alive: int = Field(default=5, alias='UVICORN_TIMEOUT_KEEP_ALIVE')
 
     # Timezone handling
     timezone: str = Field(default='UTC', alias='TIMEZONE')
@@ -201,10 +204,7 @@ class Settings(BaseSettings):
     # AI configuration
     ollama_base_url: str = Field(default='http://localhost:11434', alias='OLLAMA_BASE_URL')
     ollama_default_model: str = Field(default='llama3.2', alias='OLLAMA_DEFAULT_MODEL')
-    openai_api_key: str = Field(default='', alias='OPENAI_API_KEY')
-    openai_base_url: str = Field(default='https://api.openai.com', alias='OPENAI_BASE_URL')
-    openai_default_model: str = Field(default='gpt-4o-mini', alias='OPENAI_DEFAULT_MODEL')
-    openai_organization_id: str = Field(default='', alias='OPENAI_ORGANIZATION_ID')
+    openrouter_base_url: str = Field(default='https://openrouter.ai/api/v1', alias='OPENROUTER_BASE_URL')
 
     # DB-persisted settings — seeded into app_settings on first run if the DB field is empty.
     # Users may later override these via the UI; ENV values are never re-applied after that.
@@ -216,9 +216,6 @@ class Settings(BaseSettings):
     telegram_bot_enabled: bool = Field(default=False, alias='TELEGRAM_BOT_ENABLED')
     openrouter_api_key: str = Field(default='', alias='OPENROUTER_API_KEY')
     openrouter_default_model: str = Field(default='', alias='OPENROUTER_DEFAULT_MODEL')
-    openai_default_model_db: str = Field(default='', alias='OPENAI_DEFAULT_MODEL_DB')
-    openai_endpoint_url_db: str = Field(default='', alias='OPENAI_ENDPOINT_URL_DB')
-    openai_organization_id_db: str = Field(default='', alias='OPENAI_ORGANIZATION_ID_DB')
     ollama_endpoint_url_db: str = Field(default='', alias='OLLAMA_ENDPOINT_URL_DB')
     ollama_default_model_db: str = Field(default='', alias='OLLAMA_DEFAULT_MODEL_DB')
 

@@ -340,6 +340,7 @@ def _enqueue_schedule_analysis_build(
     tab_name: str | None,
     request: compute_schemas.BuildRequest,
     now: datetime,
+    output_id: str | None = None,
 ) -> build_run_service.BuildRun:
     build_id = str(uuid.uuid4())
     datasource_ids = build_datasource_dependencies.external_datasource_ids(request.analysis_pipeline)
@@ -358,7 +359,7 @@ def _enqueue_schedule_analysis_build(
         current_datasource_id=schedule.datasource_id,
         current_tab_id=tab_id,
         current_tab_name=tab_name,
-        current_output_id=schedule.datasource_id,
+        current_output_id=output_id or schedule.datasource_id,
         current_output_name=tab_name,
         total_tabs=len(request.analysis_pipeline.tabs),
         datasource_ids=datasource_ids,
@@ -936,6 +937,59 @@ def mark_schedule_run(session: Session, schedule_id: str) -> None:
     session.commit()
 
 
+def _tab_reading_datasource(tabs: list[Any], datasource_id: str) -> dict[str, Any] | None:
+    """Return the first tab that reads datasource_id as an external source."""
+    for tab in tabs:
+        if not isinstance(tab, dict):
+            continue
+        datasource = tab.get('datasource')
+        if not isinstance(datasource, dict) or datasource.get('analysis_tab_id'):
+            continue
+        if str(datasource.get('id') or '') == datasource_id:
+            return tab
+    return None
+
+
+def _analyses_reading_datasource(session: Session, datasource_id: str) -> list[Analysis]:
+    """Analyses in this namespace whose pipeline reads the scheduled source.
+
+    pipeline_definition is JSON, so the match is done in Python. The schedule
+    fire already selected one namespace; this does not scan the namespace registry.
+    """
+    analyses = session.execute(select(Analysis).order_by(col(Analysis.id))).scalars().all()
+    readers: list[Analysis] = []
+    for analysis in analyses:
+        pipeline = analysis.pipeline_definition
+        tabs = pipeline.get('tabs') if isinstance(pipeline, dict) else None
+        if isinstance(tabs, list) and _tab_reading_datasource(tabs, datasource_id) is not None:
+            readers.append(analysis)
+    return readers
+
+
+def _build_reader_analysis_request(
+    session: Session,
+    schedule: Schedule,
+    analysis: Analysis,
+) -> tuple[compute_schemas.BuildRequest, str, str, str, str | None, str | None]:
+    pipeline = analysis.pipeline_definition
+    tabs = pipeline.get('tabs') if isinstance(pipeline, dict) else None
+    target = _tab_reading_datasource(tabs, schedule.datasource_id) if isinstance(tabs, list) else None
+    if target is None:
+        raise ValueError(f'Analysis {analysis.id} does not read datasource {schedule.datasource_id}')
+    tab_id = target.get('id')
+    if not isinstance(tab_id, str) or not tab_id:
+        raise ValueError(f'Analysis {analysis.id} tab reading {schedule.datasource_id} has no id')
+    payload = build_analysis_pipeline_payload(session, analysis, datasource_id=schedule.datasource_id)
+    request = compute_schemas.BuildRequest.model_validate({'analysis_pipeline': payload, 'tab_id': tab_id})
+    raw_output = target.get('output')
+    output = raw_output if isinstance(raw_output, dict) else {}
+    result_id = output.get('result_id')
+    output_id = result_id if isinstance(result_id, str) else None
+    raw_name = target.get('name')
+    tab_name = raw_name if isinstance(raw_name, str) else None
+    return request, str(analysis.id), analysis.name, tab_id, tab_name, output_id
+
+
 def enqueue_schedule_run(
     session: Session,
     schedule_id: str,
@@ -966,21 +1020,37 @@ def enqueue_schedule_run(
     schedule.last_triggered_at = naive_stamp
     schedule.last_failure_at = None
 
-    if target_kind == DataSourceTargetKind.RAW:
-        run = _enqueue_schedule_ingest_build(
-            session,
-            schedule=schedule,
-            target_kind=EngineRunKind.BUILD.value,
-            namespace=namespace,
-            now=stamp,
-        )
-        session.add(schedule)
-        session.commit()
-        _wake_build_worker(namespace)
-        build_job_hub.publish()
-        return run.id
-
-    if target_kind == DataSourceTargetKind.DATASOURCE:
+    if target_kind in {DataSourceTargetKind.RAW, DataSourceTargetKind.DATASOURCE}:
+        readers = _analyses_reading_datasource(session, schedule.datasource_id)
+        if readers:
+            first_run_id: str | None = None
+            for analysis in readers:
+                request, reader_analysis_id, reader_name, reader_tab_id, reader_tab_name, output_id = _build_reader_analysis_request(
+                    session, schedule, analysis
+                )
+                run = _enqueue_schedule_analysis_build(
+                    session,
+                    schedule=schedule,
+                    namespace=namespace,
+                    analysis_id=reader_analysis_id,
+                    analysis_name=reader_name,
+                    tab_id=reader_tab_id,
+                    tab_name=reader_tab_name,
+                    request=request,
+                    now=stamp,
+                    output_id=output_id,
+                )
+                if first_run_id is None:
+                    first_run_id = run.id
+            session.add(schedule)
+            session.commit()
+            _wake_build_worker(namespace)
+            build_job_hub.publish()
+            if first_run_id is None:
+                raise ValueError(f'Schedule {schedule_id} did not enqueue an analysis build')
+            return first_run_id
+        if target_kind == DataSourceTargetKind.DATASOURCE:
+            raise ValueError(f'Datasource {schedule.datasource_id} has no analysis reading it and cannot be re-ingested. Schedule an analysis output instead.')
         run = _enqueue_schedule_ingest_build(
             session,
             schedule=schedule,

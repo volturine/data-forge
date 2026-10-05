@@ -196,10 +196,10 @@ class TestUpdateSettings:
 
         monkeypatch.setattr(settings_store, 'get_resolved_telegram_settings', unexpected_telegram_lookup)
 
-        response = client.put('/api/v1/settings', json={'openai_default_model': 'e2e-model'})
+        response = client.put('/api/v1/settings', json={'openrouter_default_model': 'e2e-model'})
 
         assert response.status_code == 200
-        assert response.json()['openai_default_model'] == 'e2e-model'
+        assert response.json()['openrouter_default_model'] == 'e2e-model'
 
     def test_update_smtp(self, client: TestClient, monkeypatch) -> None:
         monkeypatch.setenv('SETTINGS_ENCRYPTION_KEY', 'test-key')

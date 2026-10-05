@@ -770,7 +770,7 @@ class TestAnalysisGeneration:
             'name': 'Generated Analysis',
             'description': 'Keep adults and select their names',
             'datasources': [{'id': datasource_id, 'branch': 'feature/generated'}],
-            'provider': 'openai',
+            'provider': 'openrouter',
             'model': 'test-model',
         }
 
@@ -797,7 +797,7 @@ class TestAnalysisGeneration:
         monkeypatch.setattr(
             analysis_service,
             '_resolved_generation_provider',
-            lambda _provider=None: ('openai', 'test-model', {'api_key': 'test'}),
+            lambda _provider=None: ('openrouter', 'test-model', {'api_key': 'test'}),
         )
         monkeypatch.setattr(analysis_service, 'get_ai_client', lambda *_args, **_kwargs: fake_client)
 
@@ -805,7 +805,7 @@ class TestAnalysisGeneration:
 
         assert response.status_code == 200
         body = response.json()
-        assert body['provider'] == 'openai'
+        assert body['provider'] == 'openrouter'
         assert body['model'] == 'test-model'
         assert body['explanation'] == generated['explanation']
         tab = body['pipeline']['tabs'][0]
@@ -840,7 +840,7 @@ class TestAnalysisGeneration:
         monkeypatch.setattr(
             analysis_service,
             '_resolved_generation_provider',
-            lambda _provider=None: ('openai', 'test-model', {'api_key': 'test'}),
+            lambda _provider=None: ('openrouter', 'test-model', {'api_key': 'test'}),
         )
         monkeypatch.setattr(analysis_service, 'get_ai_client', lambda *_args, **_kwargs: fake_client)
 

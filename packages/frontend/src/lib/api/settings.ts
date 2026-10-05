@@ -17,10 +17,6 @@ export interface AppSettings {
 	telegram_bot_enabled: boolean;
 	openrouter_api_key: string;
 	openrouter_default_model: string;
-	openai_api_key: string;
-	openai_endpoint_url: string;
-	openai_default_model: string;
-	openai_organization_id: string;
 	ollama_endpoint_url: string;
 	ollama_default_model: string;
 	public_idb_debug: boolean;

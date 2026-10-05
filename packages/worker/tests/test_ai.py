@@ -157,20 +157,20 @@ class TestGetAIClient:
         api_client = MagicMock()
         api_client.generate_ai.return_value = ["one", "two"]
         client = InternalAIClient(
-            provider=enums_pb2.AI_PROVIDER_OPENAI,
-            endpoint_url="https://custom.api.com",
+            provider=enums_pb2.AI_PROVIDER_OPENROUTER,
+            endpoint_url=None,
             api_key="sk-test",
             client=api_client,
         )
 
-        result = client.generate_batch(["p1", "p2"], model="gpt-4o", options={"temperature": 0.2})
+        result = client.generate_batch(["p1", "p2"], model="openai/gpt-4o", options={"temperature": 0.2})
 
         assert result == ["one", "two"]
         api_client.generate_ai.assert_called_once_with(
-            provider="openai",
+            provider="openrouter",
             prompts=["p1", "p2"],
-            model="gpt-4o",
-            endpoint_url="https://custom.api.com",
+            model="openai/gpt-4o",
+            endpoint_url=None,
             api_key="sk-test",
             options={"temperature": 0.2},
         )
@@ -179,12 +179,8 @@ class TestGetAIClient:
         client = get_ai_client("ollama", endpoint_url="http://myhost:11434")
         assert isinstance(client, InternalAIClient)
 
-    def test_openai_with_key(self):
-        client = get_ai_client("openai", api_key="sk-test")
-        assert isinstance(client, InternalAIClient)
-
-    def test_openai_custom_url(self):
-        client = get_ai_client("openai", api_key="sk-test", endpoint_url="https://custom.api.com/")
+    def test_openrouter_with_key(self):
+        client = get_ai_client("openrouter", api_key="sk-test")
         assert isinstance(client, InternalAIClient)
 
     def test_unknown_provider_raises(self):

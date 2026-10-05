@@ -25,29 +25,33 @@
 	let newColumn = $state('');
 	let newDescending = $state(false);
 
+	function writeSort(columns: string[], descending: boolean[]) {
+		// Mutate the bound object. Replacing it leaves the parent draft on the
+		// previous object, so Apply stays disabled while the rule is visible here.
+		config.columns = columns;
+		config.descending = descending;
+	}
+
 	function addSortRule() {
 		if (!newColumn) return;
 		if (safeConfig.columns.includes(newColumn)) return;
-		config = {
-			columns: [...safeConfig.columns, newColumn],
-			descending: [...safeConfig.descending, newDescending]
-		};
+		writeSort([...safeConfig.columns, newColumn], [...safeConfig.descending, newDescending]);
 		newColumn = '';
 		newDescending = false;
 	}
 
 	function removeSortRule(index: number) {
-		config = {
-			columns: safeConfig.columns.filter((_, i) => i !== index),
-			descending: safeConfig.descending.filter((_, i) => i !== index)
-		};
+		writeSort(
+			safeConfig.columns.filter((_, i) => i !== index),
+			safeConfig.descending.filter((_, i) => i !== index)
+		);
 	}
 
 	function setDirection(index: number, descending: boolean) {
-		config = {
-			...safeConfig,
-			descending: safeConfig.descending.map((d, i) => (i === index ? descending : d))
-		};
+		writeSort(
+			safeConfig.columns,
+			safeConfig.descending.map((value, i) => (i === index ? descending : value))
+		);
 	}
 
 	const availableColumns = $derived(

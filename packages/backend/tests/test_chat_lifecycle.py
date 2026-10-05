@@ -187,6 +187,7 @@ async def test_agent_early_returns_preserve_durable_terminal_or_confirmation_sta
         await ChatTurnConsumer(runtime.app, 1)._run_claim(claim)
     else:
         runtime.api_key = ''
+        monkeypatch.setattr(routes_module, 'get_resolved_openrouter_key', lambda: '')
         await routes_module._run_agent_turn(runtime, runtime.app, 'run')
 
     with Session(database.get_settings_engine()) as db:
@@ -199,6 +200,28 @@ async def test_agent_early_returns_preserve_durable_terminal_or_confirmation_sta
     tool_executor.assert_not_awaited()
     if path != 'confirmation':
         provider.assert_not_awaited()
+
+
+@pytest.mark.asyncio
+async def test_empty_openrouter_session_uses_stored_settings_key(monkeypatch: pytest.MonkeyPatch) -> None:
+    session = session_store.create('openrouter', 'glm-5.3-flash', '', user_id='user')
+    store = ChatTurnStore()
+    store.enqueue(session_id=session.id, user_id='user', content='hello', tool_ids=[], namespace='default', session_token='token')
+    claim = store.claim_batch(generation=1, limit=1)[0]
+    assert claim.api_key == ''
+    runtime = TurnRuntime(claim, FastAPI(), (), [])
+    provider = AsyncMock(return_value={'choices': [{'message': {'content': 'ok'}, 'finish_reason': 'stop'}]})
+    monkeypatch.setattr(routes_module, 'chat_with_tools', provider)
+    monkeypatch.setattr(routes_module, 'get_resolved_openrouter_key', lambda: 'stored-openrouter-key')
+
+    await routes_module._run_agent_turn(runtime, runtime.app, 'hello')
+
+    provider.assert_awaited()
+    assert provider.await_args is not None
+    assert provider.await_args.args[0] == 'stored-openrouter-key'
+    assert provider.await_args.args[1] == 'glm-5.3-flash'
+    history = session_store.history(session.id)[0]
+    assert not any(item.get('content') == 'No API key configured' for item in history)
 
 
 @pytest.mark.asyncio

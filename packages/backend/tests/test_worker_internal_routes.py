@@ -126,7 +126,7 @@ async def test_generate_ai_fences_provider_call_and_result_against_owner_generat
 
     context = Context(settings.internal_api_token)
     request = worker_runtime_pb2.WorkerGenerateAIRequest(
-        provider=enums_pb2.AI_PROVIDER_OPENAI,
+        provider=enums_pb2.AI_PROVIDER_OPENROUTER,
         prompts=['prompt'],
         model='test-model',
     )

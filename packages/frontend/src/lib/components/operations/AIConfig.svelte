@@ -47,7 +47,6 @@
 		<label class={label()} for="ai-provider">Provider</label>
 		<select id="ai-provider" class={input()} bind:value={config.provider}>
 			<option value="ollama">Ollama (Local)</option>
-			<option value="openai">OpenAI</option>
 			<option value="openrouter">OpenRouter</option>
 		</select>
 	</div>
@@ -59,28 +58,24 @@
 			type="text"
 			class={input()}
 			bind:value={config.model}
-			placeholder={config.provider === 'openai'
-				? 'gpt-4o-mini'
-				: config.provider === 'openrouter'
-					? 'openai/gpt-4o-mini'
-					: 'llama3.2'}
+			placeholder={config.provider === 'openrouter' ? 'openai/gpt-4o-mini' : 'llama3.2'}
 		/>
 	</div>
 
-	<div class={css({ marginBottom: '5' })}>
-		<label class={label()} for="ai-endpoint">Endpoint URL</label>
-		<input
-			id="ai-endpoint"
-			type="text"
-			class={input()}
-			bind:value={config.endpoint_url}
-			placeholder={config.provider === 'openai'
-				? 'https://api.openai.com'
-				: 'http://localhost:11434'}
-		/>
-	</div>
+	{#if config.provider === 'ollama'}
+		<div class={css({ marginBottom: '5' })}>
+			<label class={label()} for="ai-endpoint">Endpoint URL</label>
+			<input
+				id="ai-endpoint"
+				type="text"
+				class={input()}
+				bind:value={config.endpoint_url}
+				placeholder="http://localhost:11434"
+			/>
+		</div>
+	{/if}
 
-	{#if config.provider === 'openai' || config.provider === 'openrouter'}
+	{#if config.provider === 'openrouter'}
 		<div class={css({ marginBottom: '5' })}>
 			<label class={label()} for="ai-api-key">API Key</label>
 			<input

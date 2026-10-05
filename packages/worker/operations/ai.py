@@ -28,7 +28,6 @@ class AIError(Exception):
 
 _AI_PROVIDER_NAMES: dict[enums_pb2.AIProvider, str] = {
     enums_pb2.AI_PROVIDER_OLLAMA: "ollama",
-    enums_pb2.AI_PROVIDER_OPENAI: "openai",
     enums_pb2.AI_PROVIDER_OPENROUTER: "openrouter",
 }
 _AI_PROVIDER_BY_NAME = {name: provider for provider, name in _AI_PROVIDER_NAMES.items()}

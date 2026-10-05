@@ -131,6 +131,7 @@ class TestUvicornSettings:
         main._run_api_server()
 
         assert call['ws_per_message_deflate'] is False
+        assert call['timeout_keep_alive'] == main.settings.uvicorn_timeout_keep_alive
 
     def test_cors_allows_and_exposes_client_request_ids(self) -> None:
         cors = next(middleware for middleware in app.user_middleware if middleware.cls is CORSMiddleware)

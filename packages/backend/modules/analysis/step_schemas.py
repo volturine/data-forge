@@ -632,7 +632,7 @@ STEP_CATALOG: dict[str, StepCatalogEntry] = {
     },
     'ai': {
         'description': (
-            'Run AI inference on rows using Ollama or OpenAI. Configure input columns, prompt template with {{column}} placeholders, and output column.'
+            'Run AI inference on rows using Ollama or OpenRouter. Configure input columns, prompt template with {{column}} placeholders, and output column.'
         ),
         'category': 'advanced',
         'config': AIConfig,

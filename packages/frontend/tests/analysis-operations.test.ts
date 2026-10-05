@@ -852,8 +852,8 @@ test.describe('Analyses – AI config editing', () => {
 			await applyBtn.click();
 			await expect(applyBtn).toBeDisabled({ timeout: 5_000 });
 
-			// Switch to OpenAI — API key field should appear
-			await providerSelect.selectOption('openai');
+			// Switch to OpenRouter — API key field should appear
+			await providerSelect.selectOption('openrouter');
 			await expect(configPanel.locator('#ai-api-key')).toBeVisible();
 
 			await screenshot(page, 'analysis/operations', 'ai-config-applied');

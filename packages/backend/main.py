@@ -945,6 +945,7 @@ def _run_api_server() -> None:
         limit_concurrency=_resolve_uvicorn_limit_concurrency(),
         log_level=settings.log_level,
         access_log=settings.uvicorn_access_log,
+        timeout_keep_alive=settings.uvicorn_timeout_keep_alive,
         # The API's WebSockets carry small JSON control/status messages.
         # Uvicorn's per-message deflate decode is synchronous on the API loop;
         # the 50-tab trace showed it blocking that loop under concurrent frames.

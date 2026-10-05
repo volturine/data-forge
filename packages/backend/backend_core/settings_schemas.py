@@ -14,10 +14,6 @@ class SettingsResponse(BaseModel):
     telegram_bot_enabled: bool
     openrouter_api_key: str
     openrouter_default_model: str
-    openai_api_key: str
-    openai_endpoint_url: str
-    openai_default_model: str
-    openai_organization_id: str
     ollama_endpoint_url: str
     ollama_default_model: str
     public_idb_debug: bool
@@ -32,10 +28,6 @@ class SettingsUpdate(BaseModel):
     telegram_bot_enabled: bool | None = None
     openrouter_api_key: str | None = None
     openrouter_default_model: str | None = None
-    openai_api_key: str | None = None
-    openai_endpoint_url: str | None = None
-    openai_default_model: str | None = None
-    openai_organization_id: str | None = None
     ollama_endpoint_url: str | None = None
     ollama_default_model: str | None = None
     public_idb_debug: bool | None = None

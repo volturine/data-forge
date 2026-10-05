@@ -1,12 +1,23 @@
-"""Deterministic OpenAI-compatible E2E provider for the Compose test network."""
+"""Deterministic OpenAI-compatible E2E provider for the Compose test network.
+
+Chat completions for glm-5.3-flash are forwarded to OpenRouter so the live
+stored-key regression test exercises the real provider. Every other model
+stays on the deterministic local replies. The Authorization header is
+forwarded and never logged.
+"""
 
 from __future__ import annotations
 
 import json
 import re
 import time
+import urllib.error
+import urllib.request
 from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 from typing import Any
+
+_LIVE_CHAT_MODEL = 'glm-5.3-flash'
+_UPSTREAM_CHAT = 'https://openrouter.ai/api/v1/chat/completions'
 
 
 def _analysis_reply(prompt: str) -> str:
@@ -45,6 +56,9 @@ class OpenAIFixtureHandler(BaseHTTPRequestHandler):
             return
         size = int(self.headers.get('Content-Length', '0'))
         payload = json.loads(self.rfile.read(size))
+        if payload.get('model') == _LIVE_CHAT_MODEL:
+            self._proxy_live_chat(payload)
+            return
         messages = payload.get('messages', [])
         prompt = '\n'.join(str(message.get('content') or '') for message in messages)
         latest = next(
@@ -73,6 +87,29 @@ class OpenAIFixtureHandler(BaseHTTPRequestHandler):
                 'usage': {'prompt_tokens': 1, 'completion_tokens': 1, 'total_tokens': 2},
             },
         )
+
+    def _proxy_live_chat(self, payload: dict[str, Any]) -> None:
+        body = json.dumps(payload).encode()
+        headers = {'Content-Type': 'application/json', 'HTTP-Referer': 'https://data-forge.local'}
+        authorization = self.headers.get('Authorization')
+        if authorization:
+            headers['Authorization'] = authorization
+        request = urllib.request.Request(_UPSTREAM_CHAT, data=body, headers=headers, method='POST')
+        try:
+            with urllib.request.urlopen(request, timeout=90) as response:
+                raw = response.read()
+                status = response.status
+        except urllib.error.HTTPError as exc:
+            raw = exc.read()
+            status = exc.code
+        except (urllib.error.URLError, TimeoutError, OSError):
+            self._json(502, {'error': {'message': 'upstream chat provider unavailable'}})
+            return
+        self.send_response(status)
+        self.send_header('Content-Type', 'application/json')
+        self.send_header('Content-Length', str(len(raw)))
+        self.end_headers()
+        self.wfile.write(raw)
 
     def _json(self, status: int, value: dict[str, Any]) -> None:
         body = json.dumps(value, separators=(',', ':')).encode()

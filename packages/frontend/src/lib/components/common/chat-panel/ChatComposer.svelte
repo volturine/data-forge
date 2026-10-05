@@ -147,7 +147,6 @@
 			title="Chat provider"
 		>
 			<option value="openrouter">OpenRouter</option>
-			<option value="openai">OpenAI</option>
 			<option value="ollama">Ollama</option>
 		</select>
 

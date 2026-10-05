@@ -75,10 +75,6 @@ function makeSettings(overrides: Partial<AppSettings> = {}): AppSettings {
 		telegram_bot_enabled: false,
 		openrouter_api_key: '',
 		openrouter_default_model: 'openai/gpt-4o-mini',
-		openai_api_key: '',
-		openai_endpoint_url: 'https://api.openai.com',
-		openai_default_model: 'gpt-4o-mini',
-		openai_organization_id: '',
 		ollama_endpoint_url: 'http://localhost:11434',
 		ollama_default_model: 'llama3.2',
 		public_idb_debug: false,
@@ -222,9 +218,9 @@ describe('ChatStore — pure local logic', () => {
 			expect(chatApi.listModels).toHaveBeenCalled();
 		});
 
-		test('open_panel selects openai when an API key is stored', async () => {
+		test('open_panel keeps openrouter when an API key is stored', async () => {
 			vi.mocked(settingsApi.getSettings).mockReturnValue(
-				okAsync(makeSettings({ openai_api_key: 'sk-test' }))
+				okAsync(makeSettings({ openrouter_api_key: 'sk-test' }))
 			);
 			vi.mocked(mcpApi.listTools).mockReturnValue(okAsync([]));
 			vi.mocked(chatApi.listSessions).mockReturnValue(okAsync([]));
@@ -232,28 +228,13 @@ describe('ChatStore — pure local logic', () => {
 
 			await store.open_panel();
 
-			expect(store.provider).toBe('openai');
+			expect(store.provider).toBe('openrouter');
 			expect(store.configured).toBe(true);
 		});
 
-		test('open_panel selects openai when a custom endpoint is set without a key', async () => {
-			vi.mocked(settingsApi.getSettings).mockReturnValue(
-				okAsync(makeSettings({ openai_endpoint_url: 'https://openai.test' }))
-			);
-			vi.mocked(mcpApi.listTools).mockReturnValue(okAsync([]));
-			vi.mocked(chatApi.listSessions).mockReturnValue(okAsync([]));
-			vi.mocked(chatApi.listModels).mockReturnValue(okAsync([]));
-
-			await store.open_panel();
-
-			expect(store.provider).toBe('openai');
-			expect(store.configured).toBe(true);
-			expect(store.model).toBe('gpt-4o-mini');
-			expect(chatApi.listModels).toHaveBeenCalled();
-		});
-
-		test('default openai endpoint without a key is not configured', () => {
-			store.provider = 'openai';
+		test('openrouter without a stored key is not configured', () => {
+			store.provider = 'openrouter';
+			store.apiKey = '';
 			store.settings = makeSettings();
 			const refreshConfigured = Reflect.get(store, '_refreshConfigured') as
 				(() => void) | undefined;

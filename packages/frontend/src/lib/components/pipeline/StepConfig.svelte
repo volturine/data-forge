@@ -541,7 +541,12 @@
 						letterSpacing: 'wider',
 						color: 'accent.primary',
 						_hover: { opacity: '0.9' },
-						_disabled: { cursor: 'not-allowed', opacity: '0.4' }
+						_disabled: {
+							cursor: 'not-allowed',
+							opacity: '1',
+							backgroundColor: 'bg.muted',
+							color: 'fg.muted'
+						}
 					})}
 					onclick={handleApplyConfig}
 					disabled={!canApply}
