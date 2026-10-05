@@ -600,15 +600,28 @@
 
 	{#if loading}
 		<div
-			class={css({
-				display: 'flex',
-				height: '100%',
-				flexDirection: 'column',
-				alignItems: 'center',
-				justifyContent: 'center',
-				gap: '3',
-				color: 'fg.tertiary'
-			})}
+			class={css(
+				{
+					display: 'flex',
+					flexDirection: 'column',
+					alignItems: 'center',
+					justifyContent: 'center',
+					gap: '3',
+					color: 'fg.tertiary',
+					minHeight: '48',
+					paddingY: '8'
+				},
+				data.length > 0
+					? {
+							position: 'absolute',
+							inset: '0',
+							zIndex: '10',
+							backgroundColor: 'bg.overlaySoft'
+						}
+					: fillContainer
+						? { flex: '1', width: '100%' }
+						: { width: '100%' }
+			)}
 		>
 			<LoaderCircle size={18} class={css({ animation: 'spin 1s linear infinite' })} />
 			<p class={css({ margin: '0', color: 'fg.tertiary' })}>Loading</p>
@@ -617,15 +630,19 @@
 
 	{#if error}
 		<div
-			class={css({
-				display: 'flex',
-				height: '100%',
-				flexDirection: 'column',
-				alignItems: 'center',
-				justifyContent: 'center',
-				gap: '3',
-				color: 'fg.tertiary'
-			})}
+			class={css(
+				{
+					display: 'flex',
+					flexDirection: 'column',
+					alignItems: 'center',
+					justifyContent: 'center',
+					gap: '3',
+					color: 'fg.tertiary',
+					minHeight: '48',
+					paddingY: '8'
+				},
+				fillContainer ? { flex: '1', width: '100%' } : { width: '100%' }
+			)}
 			data-testid="preview-error"
 		>
 			<Bug size={18} />
@@ -644,19 +661,23 @@
 		{#if analysis}
 			<button
 				type="button"
-				class={css({
-					display: 'flex',
-					height: '100%',
-					width: '100%',
-					flexDirection: 'column',
-					alignItems: 'center',
-					justifyContent: 'center',
-					gap: '3',
-					color: 'fg.tertiary',
-					border: 'none',
-					backgroundColor: 'transparent',
-					cursor: onPreview ? 'pointer' : 'default'
-				})}
+				class={css(
+					{
+						display: 'flex',
+						width: '100%',
+						flexDirection: 'column',
+						alignItems: 'center',
+						justifyContent: 'center',
+						gap: '3',
+						color: 'fg.tertiary',
+						border: 'none',
+						backgroundColor: 'transparent',
+						cursor: onPreview ? 'pointer' : 'default',
+						minHeight: '48',
+						paddingY: '8'
+					},
+					fillContainer && { flex: '1' }
+				)}
 				tabindex={onPreview ? 0 : -1}
 				disabled={!onPreview}
 				onclick={handlePreview}
@@ -666,7 +687,23 @@
 				<p class={css({ margin: '0', color: 'fg.tertiary' })}>Preview</p>
 			</button>
 		{:else}
-			<div class={css({ padding: '12', textAlign: 'center', margin: '0', color: 'fg.muted' })}>
+			<div
+				class={css(
+					{
+						display: 'flex',
+						width: '100%',
+						flexDirection: 'column',
+						alignItems: 'center',
+						justifyContent: 'center',
+						padding: '12',
+						textAlign: 'center',
+						margin: '0',
+						color: 'fg.muted',
+						minHeight: '48'
+					},
+					fillContainer && { flex: '1' }
+				)}
+			>
 				<p class={css({ margin: '0' })}>No data available</p>
 			</div>
 		{/if}

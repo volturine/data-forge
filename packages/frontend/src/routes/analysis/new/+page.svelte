@@ -376,7 +376,16 @@
 										</button>
 									</div>
 
-									<div class={css({ maxHeight: '24rem', overflow: 'auto' })}>
+									<div
+										class={css({
+											height: 'panel',
+											width: '100%',
+											overflow: 'hidden',
+											borderWidth: '1',
+											borderColor: 'border.secondary',
+											borderRadius: 'sm'
+										})}
+									>
 										<DatasourcePreview
 											datasourceId={datasource.id}
 											{datasource}

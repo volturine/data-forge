@@ -171,7 +171,7 @@
 			Build this output before previewing or refreshing its schema.
 		</div>
 	{:else}
-		<div class={css({ overflow: 'hidden', height: 'full' })}>
+		<div class={css({ overflow: 'hidden', height: 'full', flex: '1', minHeight: '0' })}>
 			<DataTable
 				columns={data?.columns ?? []}
 				data={data?.data ?? []}
