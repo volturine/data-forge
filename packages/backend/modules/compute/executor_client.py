@@ -12,7 +12,6 @@ from functools import partial
 from pathlib import Path
 from typing import Any, cast
 
-from dataforge_protocol import compute_pb2, datasource_pb2, enums_pb2
 from fastapi import HTTPException, Request, Response
 from fastapi.encoders import jsonable_encoder
 from fastapi.exceptions import RequestValidationError
@@ -30,6 +29,7 @@ from backend_core.domain.compute_requests.models import command_from_payload
 from backend_core.exceptions import AppError, ClientDisconnectedError, PipelineExecutionCancelledError, PipelineExecutionError
 from backend_core.namespace import get_namespace, reset_namespace, set_namespace_context
 from backend_core.persistence.compute_requests.models import ComputeRequest
+from dataforge_protocol import compute_pb2, datasource_pb2, enums_pb2
 from modules.analysis.step_schemas import normalize_step_config_for_protocol
 from modules.datasource import schemas as datasource_schemas
 from modules.datasource.schema_protocol import schema_info_proto

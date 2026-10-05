@@ -10,7 +10,6 @@ from types import SimpleNamespace
 from typing import cast
 
 import pytest
-from dataforge_protocol import compute_pb2, enums_pb2
 from fastapi import Request
 from pydantic import BaseModel, Field
 
@@ -26,6 +25,7 @@ from backend_core.dependencies import RuntimeAvailabilityProbe
 from backend_core.domain.compute.schemas import AnalysisPipelinePayload, DownloadRequest
 from backend_core.domain.compute_requests.models import command_envelope
 from backend_core.exceptions import AppError, ClientDisconnectedError
+from dataforge_protocol import compute_pb2, enums_pb2
 
 
 class _DisconnectedRequest:

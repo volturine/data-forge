@@ -12,7 +12,6 @@ from dataclasses import dataclass
 from typing import TYPE_CHECKING, Any
 
 import httpx
-from dataforge_protocol import enums_pb2
 from fastapi import APIRouter, Depends, FastAPI, HTTPException, Request
 from fastapi.responses import StreamingResponse
 from pydantic import BaseModel, ConfigDict
@@ -24,6 +23,7 @@ from backend_core.database import RuntimeCoordinatorFenced
 from backend_core.error_handlers import handle_errors
 from backend_core.namespace import get_namespace
 from backend_core.websocket import serialize_json
+from dataforge_protocol import enums_pb2
 from modules.auth.dependencies import get_current_user
 from modules.auth.models import User
 from modules.chat.chat_http import ChatHttpError, chat_with_tools, list_models
