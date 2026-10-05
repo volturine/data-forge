@@ -226,10 +226,19 @@
 		positionSnapshot = next;
 	}
 
-	function attachGraph(_node: HTMLElement): void {
+	function attachGraph(node: HTMLElement): () => void {
 		void layoutNodes;
 		applyDeterministicLayout(layoutMode);
 		resetViewToBounds();
+		// The first fit can run against the 1200×720 placeholder. Refit once the
+		// canvas has its real size, and again if the panel changes that size.
+		const observer = new ResizeObserver(() => {
+			if (node.clientWidth > 0) viewWidth = node.clientWidth;
+			if (node.clientHeight > 0) viewHeight = node.clientHeight;
+			resetViewToBounds();
+		});
+		observer.observe(node);
+		return () => observer.disconnect();
 	}
 
 	/* ---------- canvas size (fixed, no expansion) ---------- */

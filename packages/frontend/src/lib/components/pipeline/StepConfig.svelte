@@ -2,31 +2,6 @@
 	import { onDestroy } from 'svelte';
 	import type { PipelineStep } from '$lib/types/analysis';
 	import type { Schema } from '$lib/types/schema';
-	import type {
-		FilterConfigData,
-		SelectConfigData,
-		GroupByConfigData,
-		SortConfigData,
-		RenameConfigData,
-		DropConfigData,
-		JoinConfigData,
-		ExpressionConfigData,
-		DeduplicateConfigData,
-		FillNullConfigData,
-		ExplodeConfigData,
-		PivotConfigData,
-		TimeSeriesConfigData,
-		StringMethodsConfigData,
-		ViewConfigData,
-		SampleConfigData,
-		LimitConfigData,
-		TopKConfigData,
-		PlotConfigData,
-		UnpivotConfigData,
-		UnionByNameConfigData,
-		WithColumnsConfigData,
-		DownloadConfigData
-	} from '$lib/types/operation-config';
 	import { schemaStore } from '$lib/stores/schema.svelte';
 	import { analysisStore } from '$lib/stores/analysis.svelte';
 	import { configStore } from '$lib/stores/config.svelte';
@@ -34,7 +9,6 @@
 	import { getStepSchema, throwIfAborted, type StepSchemaResponse } from '$lib/api/compute';
 	import { track } from '$lib/utils/audit-log';
 	import { normalizeConfig } from '$lib/utils/step-config-defaults';
-	import type { NotificationConfigData, AIConfigData } from '$lib/types/operation-config';
 	import { buildAnalysisPipelinePayload } from '$lib/utils/analysis-pipeline';
 	import { cloneJson } from '$lib/utils/json';
 	import { applySteps } from '$lib/utils/pipeline';
@@ -66,22 +40,12 @@
 	import AIConfig from '$lib/components/operations/AIConfig.svelte';
 	import UnionByNameConfig from '$lib/components/operations/UnionByNameConfig.svelte';
 	import { getStepTypeConfig } from '$lib/components/pipeline/utils';
+	import type { StepDraft } from '$lib/components/pipeline/step-draft';
 	import PanelHeader from '$lib/components/ui/PanelHeader.svelte';
 	import PanelFooter from '$lib/components/ui/PanelFooter.svelte';
 	import Callout from '$lib/components/ui/Callout.svelte';
 	import { Settings2, X } from '@lucide/svelte';
 	import { css, spinner, button } from '$lib/styles/panda';
-
-	function bindDraftConfig<T extends object>() {
-		return {
-			get value(): T {
-				return draftConfig as T;
-			},
-			set value(value: T) {
-				draftConfig = value as Record<string, unknown>;
-			}
-		};
-	}
 
 	interface Props {
 		step?: PipelineStep | null;
@@ -129,7 +93,9 @@
 	}
 
 	let draftStepId = $state<string | null>(step?.id ?? null);
-	let draftConfig = $state<Record<string, unknown>>(draftFromStep(step));
+	// One $state object, bound straight into the step form. A getter wrapper
+	// lets the inputs mutate a copy while Apply still reads this object.
+	let draftConfig = $state<StepDraft>(draftFromStep(step));
 	const draftReady = $derived(step !== null && draftStepId === step.id);
 
 	const inputSchema = $derived(
@@ -146,36 +112,47 @@
 		telegramEnabled: configStore.telegramEnabled
 	});
 	const readOnlyConfigJson = $derived(JSON.stringify(draftConfig, null, 2));
-	const filterConfigBinding = bindDraftConfig<FilterConfigData>();
-	const selectConfigBinding = bindDraftConfig<SelectConfigData>();
-	const groupByConfigBinding = bindDraftConfig<GroupByConfigData>();
-	const sortConfigBinding = bindDraftConfig<SortConfigData>();
-	const renameConfigBinding = bindDraftConfig<RenameConfigData>();
-	const dropConfigBinding = bindDraftConfig<DropConfigData>();
-	const joinConfigBinding = bindDraftConfig<JoinConfigData>();
-	const expressionConfigBinding = bindDraftConfig<ExpressionConfigData>();
-	const withColumnsConfigBinding = bindDraftConfig<WithColumnsConfigData>();
-	const deduplicateConfigBinding = bindDraftConfig<DeduplicateConfigData>();
-	const fillNullConfigBinding = bindDraftConfig<FillNullConfigData>();
-	const explodeConfigBinding = bindDraftConfig<ExplodeConfigData>();
-	const pivotConfigBinding = bindDraftConfig<PivotConfigData>();
-	const timeSeriesConfigBinding = bindDraftConfig<TimeSeriesConfigData>();
-	const stringMethodsConfigBinding = bindDraftConfig<StringMethodsConfigData>();
-	const viewConfigBinding = bindDraftConfig<ViewConfigData>();
-	const downloadConfigBinding = bindDraftConfig<DownloadConfigData>();
-	const sampleConfigBinding = bindDraftConfig<SampleConfigData>();
-	const limitConfigBinding = bindDraftConfig<LimitConfigData>();
-	const topKConfigBinding = bindDraftConfig<TopKConfigData>();
-	const plotConfigBinding = bindDraftConfig<PlotConfigData>();
-	const unpivotConfigBinding = bindDraftConfig<UnpivotConfigData>();
-	const unionByNameConfigBinding = bindDraftConfig<UnionByNameConfigData>();
-	const notificationConfigBinding = bindDraftConfig<NotificationConfigData>();
-	const aiConfigBinding = bindDraftConfig<AIConfigData>();
+
+	function applyBlockReason(stepType: string, config: Record<string, unknown>): string | null {
+		if (stepType === 'download') {
+			const filename = config.filename;
+			if (typeof filename !== 'string' || filename.trim() === '') return 'Enter a filename';
+		}
+		if (stepType === 'with_columns') {
+			const expressions = config.expressions;
+			if (!Array.isArray(expressions) || expressions.length === 0) return 'Add an expression';
+		}
+		if (stepType === 'rename') {
+			const mapping = config.column_mapping;
+			if (
+				mapping == null ||
+				typeof mapping !== 'object' ||
+				Array.isArray(mapping) ||
+				Object.keys(mapping).length === 0
+			) {
+				return 'Add a rename';
+			}
+		}
+		if (stepType === 'sample') {
+			const fraction = config.fraction;
+			if (
+				typeof fraction !== 'number' ||
+				!Number.isFinite(fraction) ||
+				fraction <= 0 ||
+				fraction > 1
+			) {
+				return 'Fraction must be greater than 0 and at most 1';
+			}
+		}
+		return null;
+	}
 
 	const hasChanges = $derived(
 		!!step &&
 			(JSON.stringify(step.config) !== JSON.stringify(draftConfig) || step.is_applied === false)
 	);
+	const applyBlockedBecause = $derived(step ? applyBlockReason(step.type, draftConfig) : null);
+	const canApply = $derived(!!step && hasChanges && applyBlockedBecause == null);
 
 	function handleRefreshPivotSchema() {
 		if (!step || step.type !== 'pivot') return;
@@ -231,7 +208,7 @@
 
 	function handleApplyConfig() {
 		if (readOnly) return;
-		if (!step) return;
+		if (!step || !hasChanges || applyBlockReason(step.type, draftConfig)) return;
 		analysisStore.updateStepConfig(step.id, cloneConfig(draftConfig));
 		if (step.is_applied === false) {
 			analysisStore.updateStep(step.id, { is_applied: true } as Partial<PipelineStep>);
@@ -440,44 +417,44 @@
 {readOnlyConfigJson}</pre>
 				</div>
 			{:else if step.type === 'filter'}
-				<FilterConfig schema={inputSchema} bind:config={filterConfigBinding.value} />
+				<FilterConfig schema={inputSchema} bind:config={draftConfig} />
 			{:else if step.type === 'select'}
-				<SelectConfig schema={inputSchema} bind:config={selectConfigBinding.value} />
+				<SelectConfig schema={inputSchema} bind:config={draftConfig} />
 			{:else if step.type === 'groupby'}
-				<GroupByConfig schema={inputSchema} bind:config={groupByConfigBinding.value} />
+				<GroupByConfig schema={inputSchema} bind:config={draftConfig} />
 			{:else if step.type === 'sort'}
-				<SortConfig schema={inputSchema} bind:config={sortConfigBinding.value} />
+				<SortConfig schema={inputSchema} bind:config={draftConfig} />
 			{:else if step.type === 'rename'}
-				<RenameConfig schema={inputSchema} bind:config={renameConfigBinding.value} />
+				<RenameConfig schema={inputSchema} bind:config={draftConfig} />
 			{:else if step.type === 'drop'}
-				<DropConfig schema={inputSchema} bind:config={dropConfigBinding.value} />
+				<DropConfig schema={inputSchema} bind:config={draftConfig} />
 			{:else if step.type === 'join'}
-				<JoinConfig schema={inputSchema} bind:config={joinConfigBinding.value} />
+				<JoinConfig schema={inputSchema} bind:config={draftConfig} />
 			{:else if step.type === 'expression'}
-				<ExpressionConfig schema={inputSchema} bind:config={expressionConfigBinding.value} />
+				<ExpressionConfig schema={inputSchema} bind:config={draftConfig} />
 			{:else if step.type === 'with_columns'}
-				<WithColumnsConfig schema={inputSchema} bind:config={withColumnsConfigBinding.value} />
+				<WithColumnsConfig schema={inputSchema} bind:config={draftConfig} />
 			{:else if step.type === 'deduplicate'}
-				<DeduplicateConfig schema={inputSchema} bind:config={deduplicateConfigBinding.value} />
+				<DeduplicateConfig schema={inputSchema} bind:config={draftConfig} />
 			{:else if step.type === 'fill_null'}
-				<FillNullConfig schema={inputSchema} bind:config={fillNullConfigBinding.value} />
+				<FillNullConfig schema={inputSchema} bind:config={draftConfig} />
 			{:else if step.type === 'explode'}
-				<ExplodeConfig schema={inputSchema} bind:config={explodeConfigBinding.value} />
+				<ExplodeConfig schema={inputSchema} bind:config={draftConfig} />
 			{:else if step.type === 'pivot'}
 				<PivotConfig
 					schema={inputSchema}
-					bind:config={pivotConfigBinding.value}
+					bind:config={draftConfig}
 					onRefreshSchema={handleRefreshPivotSchema}
 					isRefreshing={fetchingPivotSchema}
 				/>
 			{:else if step.type === 'timeseries'}
-				<TimeSeriesConfig schema={inputSchema} bind:config={timeSeriesConfigBinding.value} />
+				<TimeSeriesConfig schema={inputSchema} bind:config={draftConfig} />
 			{:else if step.type === 'string_transform'}
-				<StringMethodsConfig schema={inputSchema} bind:config={stringMethodsConfigBinding.value} />
+				<StringMethodsConfig schema={inputSchema} bind:config={draftConfig} />
 			{:else if step.type === 'view'}
-				<ViewConfig schema={inputSchema} bind:config={viewConfigBinding.value} />
+				<ViewConfig schema={inputSchema} bind:config={draftConfig} />
 			{:else if step.type === 'download'}
-				<DownloadConfig bind:config={downloadConfigBinding.value} />
+				<DownloadConfig bind:config={draftConfig} />
 			{:else if step.type === 'datasource'}
 				<div class={css({ backgroundColor: 'bg.primary', padding: '10', textAlign: 'center' })}>
 					<p class={css({ margin: '0', fontSize: 'xs', color: 'fg.muted' })}>
@@ -485,25 +462,21 @@
 					</p>
 				</div>
 			{:else if step.type === 'sample'}
-				<SampleConfig bind:config={sampleConfigBinding.value} />
+				<SampleConfig bind:config={draftConfig} />
 			{:else if step.type === 'limit'}
-				<LimitConfig bind:config={limitConfigBinding.value} />
+				<LimitConfig bind:config={draftConfig} />
 			{:else if step.type === 'topk'}
-				<TopKConfig schema={inputSchema} bind:config={topKConfigBinding.value} />
+				<TopKConfig schema={inputSchema} bind:config={draftConfig} />
 			{:else if step.type === 'unpivot'}
-				<UnpivotConfig schema={inputSchema} bind:config={unpivotConfigBinding.value} />
+				<UnpivotConfig schema={inputSchema} bind:config={draftConfig} />
 			{:else if step.type === 'union_by_name'}
-				<UnionByNameConfig schema={inputSchema} bind:config={unionByNameConfigBinding.value} />
+				<UnionByNameConfig schema={inputSchema} bind:config={draftConfig} />
 			{:else if step.type === 'chart'}
-				<PlotConfig schema={inputSchema} bind:config={plotConfigBinding.value} />
+				<PlotConfig schema={inputSchema} bind:config={draftConfig} />
 			{:else if step.type === 'notification'}
-				<NotificationConfig
-					schema={inputSchema}
-					bind:config={notificationConfigBinding.value}
-					{configFlags}
-				/>
+				<NotificationConfig schema={inputSchema} bind:config={draftConfig} {configFlags} />
 			{:else if step.type === 'ai'}
-				<AIConfig schema={inputSchema} bind:config={aiConfigBinding.value} />
+				<AIConfig schema={inputSchema} bind:config={draftConfig} />
 			{:else}
 				<div class={css({ backgroundColor: 'bg.primary', padding: '10', textAlign: 'center' })}>
 					<p class={css({ margin: '0', marginBottom: '4', fontSize: 'xs', color: 'fg.muted' })}>
@@ -548,6 +521,7 @@
 					})}
 					onclick={handleCancelConfig}
 					disabled={!hasChanges}
+					title={hasChanges ? 'Discard edits in this step' : 'No edits to discard'}
 					type="button"
 				>
 					Cancel
@@ -570,7 +544,9 @@
 						_disabled: { cursor: 'not-allowed', opacity: '0.4' }
 					})}
 					onclick={handleApplyConfig}
-					disabled={!hasChanges}
+					disabled={!canApply}
+					title={applyBlockedBecause ??
+						(hasChanges ? 'Apply configuration' : 'No changes to apply')}
 					type="button"
 				>
 					Apply

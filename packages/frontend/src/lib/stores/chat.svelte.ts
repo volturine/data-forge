@@ -383,13 +383,17 @@ export class ChatStore {
 		return provider === 'ollama';
 	}
 
+	/** A non-default OpenAI base URL is user configuration even before a key is saved. */
+	private _customOpenAiEndpoint(): boolean {
+		const endpoint = (this.settings?.openai_endpoint_url ?? '').replace(/\/+$/, '');
+		return endpoint.length > 0 && endpoint !== 'https://api.openai.com';
+	}
+
 	private _providerCanStart(provider: ChatProvider): boolean {
-		if (!this.settings) return provider === 'openai' || provider === 'ollama';
-		if (provider === 'openrouter') {
-			return this._hasStoredProviderKey(provider);
-		}
+		if (!this.settings) return provider === 'ollama';
+		if (provider === 'openrouter') return this._hasStoredProviderKey(provider);
 		if (provider === 'openai') {
-			return this._hasStoredProviderKey(provider) || this.settings.openai_endpoint_url.length > 0;
+			return this._hasStoredProviderKey(provider) || this._customOpenAiEndpoint();
 		}
 		return (this.settings.ollama_endpoint_url || 'http://localhost:11434').length > 0;
 	}
@@ -407,12 +411,18 @@ export class ChatStore {
 			this.configured = true;
 			return;
 		}
-		if (this.provider === 'openrouter') {
-			this.configured = this.apiKey.length > 0 || this._hasStoredProviderKey();
+		if (this.provider === 'ollama') {
+			const endpoint =
+				this.settings?.ollama_endpoint_url || this.endpointUrl || 'http://localhost:11434';
+			this.configured = endpoint.length > 0;
 			return;
 		}
-		// OpenAI can be self-hosted without key; Ollama requires no key.
-		this.configured = true;
+		if (this.provider === 'openai') {
+			this.configured =
+				this.apiKey.length > 0 || this._hasStoredProviderKey() || this._customOpenAiEndpoint();
+			return;
+		}
+		this.configured = this.apiKey.length > 0 || this._hasStoredProviderKey();
 	}
 
 	private _applyProviderDefaults(): void {

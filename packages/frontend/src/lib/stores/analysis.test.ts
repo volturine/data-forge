@@ -583,6 +583,30 @@ describe('AnalysisStore.restoreSavedSnapshot', () => {
 	test('returns false when no saved analysis snapshot exists', () => {
 		expect(new AnalysisStore().restoreSavedSnapshot()).toBe(false);
 	});
+
+	test('an empty working copy stays dirty until the saved steps are restored', () => {
+		const store = new AnalysisStore();
+		store.applyAnalysis({
+			id: 'analysis-a',
+			name: 'Saved name',
+			description: null,
+			pipeline_definition: {
+				tabs: [makeTab({ id: 'tab-a', steps: [makeStep({ id: 'step-a' })] })]
+			},
+			created_at: '',
+			updated_at: '',
+			revision: 1,
+			result_path: null,
+			thumbnail: null
+		});
+		store.setTabs([makeTab({ id: 'tab-a', steps: [] })]);
+
+		expect(store.isDirty()).toBe(true);
+		expect(store.savedTabs[0]?.steps).toHaveLength(1);
+		expect(store.restoreSavedSnapshot()).toBe(true);
+		expect(store.tabs[0]?.steps.map((step) => step.id)).toEqual(['step-a']);
+		expect(store.isDirty()).toBe(false);
+	});
 });
 
 describe('AnalysisStore.reset', () => {

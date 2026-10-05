@@ -1,6 +1,7 @@
 import { createAsyncGate } from '$lib/utils/async-gate';
 import { idbGet, idbSet, idbDelete } from '$lib/utils/indexeddb';
 import { ensureTabDefaults } from '$lib/utils/analysis-tab';
+import { cloneJson } from '$lib/utils/json';
 import type { AnalysisTab } from '$lib/types/analysis';
 import type { EngineResourceConfig } from '$lib/types/compute';
 
@@ -25,9 +26,14 @@ export type DraftControllerDeps = {
 	readOnly: () => boolean;
 	hasTabs: () => boolean;
 	getServerVersion: () => string | null;
+	serverStepCount: () => number;
 	buildPayload: () => AnalysisDraftSnapshot;
-	applyDraft: (draft: AnalysisDraftSnapshot) => void;
+	applyDraft: (draft: AnalysisDraftSnapshot, options: { tabs: boolean }) => void;
 };
+
+function stepCount(tabs: AnalysisTab[]): number {
+	return tabs.reduce((count, tab) => count + (Array.isArray(tab.steps) ? tab.steps.length : 0), 0);
+}
 
 export function createDraftController(deps: DraftControllerDeps) {
 	let draftLoaded = $state(false);
@@ -92,7 +98,9 @@ export function createDraftController(deps: DraftControllerDeps) {
 					return;
 				}
 				parsed.tabs = parsed.tabs.map((tab, index) => ensureTabDefaults(tab, index));
-				deps.applyDraft(parsed);
+				const restoreTabs = !(stepCount(parsed.tabs) === 0 && deps.serverStepCount() > 0);
+				if (!restoreTabs) void idbDelete(currentStorageKey);
+				deps.applyDraft(parsed, { tabs: restoreTabs });
 				draftLoaded = true;
 			})
 			.catch(() => {
@@ -104,10 +112,11 @@ export function createDraftController(deps: DraftControllerDeps) {
 		const storageKey = deps.getStorageKey();
 		if (!storageKey || !draftLoaded || deps.readOnly()) return;
 		if (!deps.hasTabs()) return;
-		const payload = deps.buildPayload();
+		const payload = cloneJson(deps.buildPayload());
+		const key = storageKey;
 		if (draftTimer) window.clearTimeout(draftTimer);
 		draftTimer = window.setTimeout(() => {
-			void idbSet(storageKey, JSON.stringify(payload));
+			void idbSet(key, JSON.stringify(payload));
 			draftTimer = null;
 		}, 400);
 	}

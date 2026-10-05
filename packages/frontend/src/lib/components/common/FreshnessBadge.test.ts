@@ -44,12 +44,12 @@ describe('FreshnessBadge', () => {
 		expect(screen.getByRole('status')).toHaveTextContent('Outdated');
 	});
 
-	test('shows Unknown when never built', () => {
+	test('shows No snapshot when never built', () => {
 		render(FreshnessBadge, {
 			props: { lastDataUpdate: null, thresholdMinutes: 1440, live: false }
 		});
 		expect(screen.getByRole('status')).toHaveAttribute('data-freshness', 'unknown');
-		expect(screen.getByRole('status')).toHaveTextContent('Unknown');
+		expect(screen.getByRole('status')).toHaveTextContent('No snapshot');
 	});
 
 	test('applies the default 24-hour threshold when none is configured', () => {

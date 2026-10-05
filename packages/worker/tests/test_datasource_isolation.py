@@ -334,6 +334,39 @@ def test_scheduled_ingest_uses_the_same_manifest_commit_path_as_manual_ingest(mo
     assert calls[-1][0] == "publish"
 
 
+def test_schedule_ingest_rejects_datasource_without_external_source(monkeypatch) -> None:
+    from runtime.exceptions import DataSourceValidationError
+    from runtime.worker_runtime_client import DatasourceMetadata
+
+    metadata = DatasourceMetadata(
+        found=True,
+        id="source",
+        name="iot-sensor-100k",
+        source_type="iceberg",
+        config={"branch": "master"},
+        schema_cache=None,
+        is_hidden=False,
+        revision=3,
+        created_by="import",
+    )
+    monkeypatch.setattr(execution, "_require_metadata", lambda *_args, **_kwargs: metadata)
+
+    with pytest.raises(DataSourceValidationError, match="no external source"):
+        execution.ingest_datasource_for_schedule(
+            object(),
+            manager=None,  # type: ignore[arg-type]
+            namespace="default",
+            database_url="unused",
+            datasource_id="source",
+            staging_key="claim",
+            worker_id="worker",
+            claim_token="claim",
+            lease_generation=1,
+            job_id="job-1",
+            build_id="build-1",
+        )
+
+
 def test_excel_ingestion_uses_bounded_batches_with_consistent_mixed_column_types(tmp_path) -> None:
     path = tmp_path / "source.xlsx"
     workbook = Workbook(write_only=True)

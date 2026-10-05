@@ -372,6 +372,13 @@
 		return map.get(id) ?? `${id.slice(0, 8)}...`;
 	}
 
+	function resolveAnalysisName(run: BuildRunSummary): string {
+		const listed = analysisNames.get(run.analysis_id);
+		if (listed) return listed;
+		if (run.analysis_name) return run.analysis_name;
+		return resolveName(run.analysis_id, analysisNames);
+	}
+
 	function effectiveKind(run: BuildRunSummary): string {
 		return engineRunDisplayKind(run.current_kind ?? '');
 	}
@@ -1041,7 +1048,7 @@
 								data-build-datasource-name={buildDatasourceName(run) ??
 									resolveName(buildDatasourceId(run), dsNames)}
 								data-build-analysis-id={run.analysis_id}
-								data-build-analysis-name={resolveName(run.analysis_id, analysisNames)}
+								data-build-analysis-name={resolveAnalysisName(run)}
 								data-build-output-name={buildOutputName(run) ?? ''}
 								class={css(
 									{
@@ -1247,7 +1254,7 @@
 											})}
 											title={run.analysis_id}
 										>
-											{resolveName(run.analysis_id, analysisNames)}
+											{resolveAnalysisName(run)}
 										</span>
 									{:else}
 										<span class={css({ color: 'fg.muted' })}>-</span>

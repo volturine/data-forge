@@ -1,4 +1,5 @@
 <script lang="ts">
+	import { resolve } from '$app/paths';
 	import { ArrowDown, CircleAlert, RotateCcw, X, Eye, Play, History, Trash2 } from '@lucide/svelte';
 	import { onDestroy, onMount } from 'svelte';
 	import { SvelteSet } from 'svelte/reactivity';
@@ -16,6 +17,12 @@
 	}
 
 	let { onSendPrompt, onFocusInput }: Props = $props();
+
+	const providerSetupHref = resolve('/profile#ai-providers' as '/');
+
+	function needsProviderSetup(message: string | null): boolean {
+		return message != null && /api key|not configured|no ai provider/i.test(message);
+	}
 
 	let messagesEl: HTMLElement | undefined;
 	let userScrolledUp = $state(false);
@@ -185,9 +192,16 @@
 						: 'Execute mode — full access, acts directly'}
 				</p>
 				<p class={css({ fontSize: 'xs', margin: '0', color: 'fg.muted' })}>
-					{chatStore.sessionId
-						? 'Send a message to get started.'
-						: 'Start a session and ask anything.'}
+					{#if !chatStore.configured}
+						No AI provider is configured.
+						<a href={providerSetupHref} class={css({ color: 'accent.primary' })}
+							>Set one up in Profile</a
+						>
+					{:else if chatStore.sessionId}
+						Send a message to get started.
+					{:else}
+						Start a session and ask anything.
+					{/if}
 				</p>
 			</div>
 			{#if chatStore.configured}
@@ -526,6 +540,14 @@
 		>
 			{chatStore.error}
 		</span>
+		{#if needsProviderSetup(chatStore.error)}
+			<a
+				href={providerSetupHref}
+				class={css({ color: 'accent.primary', fontSize: '11px', flexShrink: '0' })}
+			>
+				AI Providers
+			</a>
+		{/if}
 		{#if chatStore.lastFailedContent}
 			<button
 				class={css({

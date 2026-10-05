@@ -127,6 +127,7 @@
 		readOnly: () => editorReadOnly,
 		hasTabs: () => analysisStore.tabs.length > 0,
 		getServerVersion: () => lastLoadedVersion ?? analysisStore.currentRevision,
+		serverStepCount: () => analysisStore.tabs.reduce((count, tab) => count + tab.steps.length, 0),
 		buildPayload: () => ({
 			analysisId,
 			version: analysisStore.currentRevision,
@@ -139,8 +140,8 @@
 			configPosition,
 			bottomPaneHeight
 		}),
-		applyDraft: (parsed) => {
-			analysisStore.setTabs(parsed.tabs);
+		applyDraft: (parsed, options) => {
+			if (options.tabs) analysisStore.setTabs(parsed.tabs);
 			analysisStore.activeTabId = parsed.activeTabId;
 			analysisStore.setResourceConfig(parsed.resourceConfig);
 			selectedStepId = parsed.selectedStepId;
@@ -436,6 +437,7 @@
 				void datasourcesQuery.refetch();
 
 				if (storageKey) {
+					draft.flush();
 					void idbDelete(storageKey);
 				}
 			},
@@ -826,6 +828,7 @@
 	onbeforeunload={(e) => {
 		if (!isDirty) return;
 		e.preventDefault();
+		e.returnValue = '';
 	}}
 	onpointerdown={handleWindowPointerDown}
 />

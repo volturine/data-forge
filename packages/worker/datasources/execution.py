@@ -40,7 +40,6 @@ from runtime.object_store import (
     object_store_url,
     upload_bytes,
 )
-from runtime.protocol_mapping import schema_info_proto
 from runtime.worker_runtime_client import BackendWorkerRpcError, DatasourceMetadata, WorkerRuntimeClient
 
 logger = logging.getLogger(__name__)
@@ -465,6 +464,11 @@ def ingest_datasource_for_schedule(
     metadata = _require_metadata(client, namespace=namespace, datasource_id=datasource_id)
     if metadata.revision is None:
         raise ValueError("Scheduled datasource snapshot is missing its revision")
+    if not is_reingestable_raw(metadata):
+        raise DataSourceValidationError(
+            "This datasource has no external source to re-ingest. Schedule an analysis output instead.",
+            details={"datasource_id": datasource_id},
+        )
     identity = compute_pb2.EngineIdentity(
         scope=enums_pb2.ENGINE_SCOPE_DATASOURCE_PREVIEW,
         reuse_policy=enums_pb2.ENGINE_REUSE_POLICY_SHARED,
@@ -473,59 +477,41 @@ def ingest_datasource_for_schedule(
     )
     config = dict(metadata.config or {})
     manifest_url = object_store_url("runtime-staging", "schedule-ingest", job_id, str(lease_generation), "manifest.json", namespace=namespace)
-    schema = None
     try:
         with manager.acquire_engine(identity) as engine:
-            if is_reingestable_raw(metadata):
-                branch = config.get("branch")
-                if not isinstance(branch, str) or not branch:
-                    raise DataSourceValidationError("Datasource branch is required")
-                branch_name = branch
-                staging_id = f"{datasource_id}__claim_{staging_key.replace('-', '_')}"
-                target = object_store_url("clean", staging_id, branch, namespace=namespace)
-                client.register_datasource_stage(
-                    namespace=namespace,
-                    datasource_id=datasource_id,
-                    job_id=job_id,
-                    build_id=build_id,
-                    worker_id=worker_id,
-                    claim_token=claim_token,
-                    lease_generation=lease_generation,
-                    prefix_url=target,
-                    manifest_url=manifest_url,
-                    catalog_identifier=f"clean.{target.rstrip('/').split('/')[-2]}",
-                )
-                source, _source_type = _external_source(metadata)
-                engine_job = engine.datasource_job("datasource_stage", {"source_config": source, "table_path": target, "manifest_url": manifest_url})
-            else:
-                engine_job = engine.datasource_job(
-                    "datasource_schema",
-                    {
-                        "datasource_metadata": {
-                            "id": datasource_id,
-                            "name": metadata.name,
-                            "source_type": metadata.source_type,
-                            "config": metadata.config,
-                            "revision": metadata.revision,
-                        }
-                    },
-                )
+            branch = config.get("branch")
+            if not isinstance(branch, str) or not branch:
+                raise DataSourceValidationError("Datasource branch is required")
+            branch_name = branch
+            staging_id = f"{datasource_id}__claim_{staging_key.replace('-', '_')}"
+            target = object_store_url("clean", staging_id, branch, namespace=namespace)
+            client.register_datasource_stage(
+                namespace=namespace,
+                datasource_id=datasource_id,
+                job_id=job_id,
+                build_id=build_id,
+                worker_id=worker_id,
+                claim_token=claim_token,
+                lease_generation=lease_generation,
+                prefix_url=target,
+                manifest_url=manifest_url,
+                catalog_identifier=f"clean.{target.rstrip('/').split('/')[-2]}",
+            )
+            source, _source_type = _external_source(metadata)
+            engine_job = engine.datasource_job("datasource_stage", {"source_config": source, "table_path": target, "manifest_url": manifest_url})
             result = await_engine_result(engine, job_id=engine_job)
             if result.get("error") or not isinstance(result.get("data"), dict):
                 raise DataSourceConnectionError("Scheduled datasource computation failed", details={"datasource_id": datasource_id})
-            if is_reingestable_raw(metadata):
-                table = import_staged_parquet_files(result["data"], table_path=target, database_url=database_url)
-                config.update(_build_iceberg_config(target, branch_name, source_config=source))
-                _set_snapshot_metadata(config, table)
-            else:
-                schema = schema_info_proto(result["data"])
+            table = import_staged_parquet_files(result["data"], table_path=target, database_url=database_url)
+            config.update(_build_iceberg_config(target, branch_name, source_config=source))
+            _set_snapshot_metadata(config, table)
             config["ingest"] = {"ingested_at": datetime.now(UTC).replace(tzinfo=None).isoformat(), "mode": "schedule_ingest"}
             return client.publish_datasource_ingest(
                 namespace=namespace,
                 datasource_id=datasource_id,
                 config=config,
                 expected_revision=metadata.revision,
-                schema_info=schema,
+                schema_info=None,
                 worker_id=worker_id,
                 claim_token=claim_token,
                 lease_generation=lease_generation,

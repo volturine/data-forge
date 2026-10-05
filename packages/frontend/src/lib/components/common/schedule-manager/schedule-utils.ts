@@ -92,5 +92,5 @@ export function getProvenanceDisplay(schedule: Schedule): string {
 	if (schedule.analysis_id) {
 		return schedule.analysis_id.slice(0, 8) + '...';
 	}
-	return 'Unknown';
+	return 'Not an analysis output';
 }

@@ -146,3 +146,82 @@ def test_preview_step_finalizes_run_when_engine_fails(sample_datasource, monkeyp
     assert raised.value.engine_run_finalization.run_id == "run-1"
     assert raised.value.engine_run_finalization.fields["status"] == "failed"
     assert raised.value.engine_run_finalization.fields["error_message"] == "engine failed"
+
+
+def test_hydrate_udfs_loads_code_for_protocol_enum_number(monkeypatch) -> None:
+    from unittest.mock import MagicMock
+
+    client = MagicMock()
+    client.udf_codes.return_value = {"udf-1": "def udf(value):\n    return value\n"}
+    monkeypatch.setattr(compute_service, "client_from_env", lambda: client)
+    monkeypatch.setattr(compute_service, "get_namespace", lambda: "default")
+
+    hydrated = compute_service._hydrate_udfs(
+        None,
+        [
+            {
+                "type": "with_columns",
+                "config": {
+                    "expressions": [
+                        {"name": "value_f", "type": 3, "udf_id": "udf-1", "args": ["value"]},
+                    ]
+                },
+            }
+        ],
+    )
+
+    expression = hydrated[0]["config"]["expressions"][0]
+    assert expression["code"].startswith("def udf")
+    client.udf_codes.assert_called_once()
+
+
+def test_hydrate_udfs_missing_library_udf_fails(monkeypatch) -> None:
+    from unittest.mock import MagicMock
+
+    client = MagicMock()
+    client.udf_codes.return_value = {}
+    monkeypatch.setattr(compute_service, "client_from_env", lambda: client)
+    monkeypatch.setattr(compute_service, "get_namespace", lambda: "default")
+
+    with pytest.raises(ValueError, match="not found"):
+        compute_service._hydrate_udfs(
+            None,
+            [
+                {
+                    "type": "with_columns",
+                    "config": {"expressions": [{"name": "value_f", "type": "udf", "udf_id": "missing"}]},
+                }
+            ],
+        )
+
+
+def test_row_count_records_run_when_engine_acquire_fails(sample_datasource) -> None:
+    from runtime.exceptions import PipelineExecutionError
+
+    analysis_id = f"row-count-failure-{uuid.uuid4()}"
+    pipeline = _pipeline(sample_datasource, analysis_id)
+    internal_client = _internal_client_mock()
+    internal_client.engine_run_state.return_value = None
+    manager = ProcessManager(engine_factory=lambda identity, config: PolarsComputeEngine(identity.resource_id, config))
+
+    with (
+        patch("runtime.compute_service.client_from_env", return_value=internal_client),
+        patch("runtime.compute_service._acquire_engine", side_effect=RuntimeError("Timed out waiting for engine listener")),
+        pytest.raises(PipelineExecutionError, match="Timed out waiting for engine listener"),
+    ):
+        compute_service.get_step_row_count(
+            session=None,
+            manager=manager,
+            target_step_id="source",
+            analysis_id=analysis_id,
+            analysis_pipeline=pipeline,
+            tab_id="tab1",
+            request_json={"analysis_id": analysis_id, "analysis_pipeline": pipeline, "target_step_id": "source"},
+        )
+
+    create_kwargs = internal_client.create_engine_run.call_args.kwargs
+    assert create_kwargs["kind"] == "row_count"
+    assert create_kwargs["status"] == "running"
+    fields = internal_client.update_engine_run.call_args.kwargs["fields"]
+    assert fields["status"] == "failed"
+    assert fields["error_message"] == "Timed out waiting for engine listener"
