@@ -26,7 +26,7 @@
 	import { button, css, input, spinner } from '$lib/styles/panda';
 	import { favoriteStore } from '$lib/stores/favorites.svelte';
 	import { useNamespace } from '$lib/stores/namespace.svelte';
-	import { nextAnalysisName } from '$lib/utils/analysis-name';
+	import { timestampedAnalysisName } from '$lib/utils/analysis-name';
 
 	const queryClient = useQueryClient();
 	const ns = useNamespace();
@@ -228,8 +228,7 @@
 
 	function requestDuplicate(analysis: AnalysisGalleryItem) {
 		duplicateSource = analysis;
-		const existingNames = (query.data ?? []).map((item) => item.name);
-		duplicateName = nextAnalysisName(`Copy of ${analysis.name}`, existingNames);
+		duplicateName = timestampedAnalysisName(`Copy of ${analysis.name}`);
 		duplicateDescription = '';
 		duplicateError = '';
 		duplicating = false;
@@ -315,18 +314,10 @@
 
 	async function confirmDuplicate() {
 		if (!duplicateSource || !duplicateName.trim()) return;
-		const trimmed = duplicateName.trim();
-		const isDuplicate = (query.data ?? []).some(
-			(item) => item.name.trim().toLowerCase() === trimmed.toLowerCase()
-		);
-		if (isDuplicate) {
-			duplicateError = `An analysis named '${trimmed}' already exists.`;
-			return;
-		}
 		duplicating = true;
 		duplicateError = '';
 		const result = await duplicateAnalysis(duplicateSource.id, {
-			name: trimmed,
+			name: duplicateName.trim(),
 			description: duplicateDescription.trim() || null
 		});
 		result.match(
@@ -574,13 +565,7 @@
 		{/if}
 		<label class={css({ display: 'grid', gap: '1' })}>
 			<span class={css({ fontSize: 'sm', fontWeight: 'medium' })}>Name</span>
-			<input
-				class={input({ variant: 'dialog' })}
-				bind:value={duplicateName}
-				oninput={() => {
-					duplicateError = '';
-				}}
-			/>
+			<input class={input({ variant: 'dialog' })} bind:value={duplicateName} />
 		</label>
 		<label class={css({ display: 'grid', gap: '1' })}>
 			<span class={css({ fontSize: 'sm', fontWeight: 'medium' })}>Description</span>

@@ -3,7 +3,7 @@
 	import { resolve } from '$app/paths';
 	import { page as pageState } from '$app/state';
 	import { createQuery } from '@tanstack/svelte-query';
-	import { createAnalysis, listAnalyses } from '$lib/api/analysis';
+	import { createAnalysis } from '$lib/api/analysis';
 	import { listDatasources } from '$lib/api/datasource';
 	import { ArrowLeft, ChevronDown, Search } from '@lucide/svelte';
 	import DatasourcePreview from '$lib/components/datasources/DatasourcePreview.svelte';
@@ -13,7 +13,7 @@
 	import { useNamespace } from '$lib/stores/namespace.svelte';
 	import type { AnalysisTab } from '$lib/types/analysis';
 	import type { DataSource } from '$lib/types/datasource';
-	import { nextAnalysisName } from '$lib/utils/analysis-name';
+	import { timestampedAnalysisName } from '$lib/utils/analysis-name';
 	import { buildOutputConfig } from '$lib/utils/analysis-tab';
 	import { uuid } from '$lib/utils/uuid';
 
@@ -97,10 +97,8 @@
 		};
 
 		try {
-			const existing = await listAnalyses();
-			const existingNames = existing.isOk() ? existing.value.map((analysis) => analysis.name) : [];
 			const result = await createAnalysis({
-				name: nextAnalysisName(`${datasource.name} Analysis`, existingNames),
+				name: timestampedAnalysisName(datasource.name),
 				description: null,
 				tabs: [tab]
 			});

@@ -148,12 +148,14 @@ export interface GeneratedAnalysisResponse {
 }
 
 export interface DuplicateAnalysisRequest {
-	name: string;
+	/** Defaults to a timestamped "Copy of …" name. */
+	name?: string;
 	description?: string | null;
 }
 
 export interface ImportAnalysisRequest {
-	name: string;
+	/** Defaults to a timestamped "Imported analysis" name. */
+	name?: string;
 	description?: string | null;
 	pipeline: Record<string, unknown>;
 	datasource_remap?: Record<string, string>;

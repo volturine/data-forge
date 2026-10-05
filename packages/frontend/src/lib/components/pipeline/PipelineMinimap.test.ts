@@ -1,80 +1,94 @@
-import { describe, expect, test, vi } from 'vitest';
+import { afterEach, beforeEach, describe, expect, test, vi } from 'vitest';
 import { fireEvent, render, screen } from '@testing-library/svelte';
 import PipelineMinimap from './PipelineMinimap.svelte';
 import type { PipelineStep } from '$lib/types/analysis';
 
+const steps: PipelineStep[] = [
+	{ id: 'step-1', type: 'filter', config: {}, is_applied: true },
+	{ id: 'step-2', type: 'sort', config: {}, is_applied: false }
+];
+
+function node(id: string, top: number, height: number): HTMLElement {
+	const el = document.createElement('div');
+	el.id = id;
+	el.getBoundingClientRect = () => ({ top, height }) as DOMRect;
+	el.scrollIntoView = vi.fn();
+	return el;
+}
+
+/** jsdom has no layout, so the canvas reports a 1000px document scrolled to 250px in a 500px viewport. */
+function canvas(): { el: HTMLElement; nodes: Record<string, HTMLElement> } {
+	const el = document.createElement('div');
+	Object.defineProperties(el, {
+		scrollHeight: { value: 1000 },
+		clientHeight: { value: 500 },
+		scrollTop: { value: 250, writable: true }
+	});
+	el.getBoundingClientRect = () => ({ top: 0, height: 500 }) as DOMRect;
+	// Node rects are viewport-relative: content offset minus scrollTop.
+	const nodes = {
+		source: node('pipeline-datasource-node', 0 - 250, 100),
+		'step-1': node('step-node-step-1', 300 - 250, 100),
+		'step-2': node('step-node-step-2', 600 - 250, 100),
+		output: node('pipeline-output-node', 900 - 250, 100)
+	};
+	el.append(...Object.values(nodes));
+	return { el, nodes };
+}
+
+beforeEach(() => {
+	vi.stubGlobal(
+		'ResizeObserver',
+		class {
+			observe() {}
+			disconnect() {}
+		}
+	);
+});
+
+afterEach(() => {
+	vi.unstubAllGlobals();
+});
+
 describe('PipelineMinimap', () => {
-	const mockSteps: PipelineStep[] = [
-		{ id: 'step-1', type: 'filter', config: { condition: 'x > 1' }, is_applied: true },
-		{ id: 'step-2', type: 'aggregate', config: { group_by: ['a'] }, is_applied: false },
-		{ id: 'step-3', type: 'sort', config: { columns: ['b'] }, is_applied: true }
-	];
+	test('places markers at their proportional canvas positions', () => {
+		const { el } = canvas();
+		render(PipelineMinimap, { props: { steps, canvasEl: el } });
 
-	test('renders correct step count label', () => {
-		const { rerender } = render(PipelineMinimap, {
-			props: { steps: [] }
-		});
-		expect(screen.getByTestId('canvas-step-count')).toHaveTextContent('0 steps');
-
-		rerender({ steps: [mockSteps[0]] });
-		expect(screen.getByTestId('canvas-step-count')).toHaveTextContent('1 step');
-
-		rerender({ steps: mockSteps });
-		expect(screen.getByTestId('canvas-step-count')).toHaveTextContent('3 steps');
+		expect(screen.getByTestId('minimap-marker-source').style.top).toBe('0%');
+		expect(screen.getByTestId('minimap-marker-step-1').style.top).toBe('30%');
+		expect(screen.getByTestId('minimap-marker-step-2').style.top).toBe('60%');
+		expect(screen.getByTestId('minimap-marker-output').style.top).toBe('90%');
+		expect(screen.getByTestId('minimap-marker-step-1').style.height).toBe('10%');
 	});
 
-	test('toggles minimap visibility when toggle button is clicked', async () => {
-		render(PipelineMinimap, {
-			props: { steps: mockSteps }
-		});
+	test('shows the visible part of the canvas as a viewport band', () => {
+		const { el } = canvas();
+		render(PipelineMinimap, { props: { steps, canvasEl: el } });
 
-		expect(screen.getByTestId('pipeline-minimap')).toBeInTheDocument();
-
-		const toggleButton = screen.getByTestId('minimap-toggle');
-		await fireEvent.click(toggleButton);
-
-		expect(screen.queryByTestId('pipeline-minimap')).not.toBeInTheDocument();
-		expect(screen.getByTestId('canvas-step-count')).toBeInTheDocument();
-
-		await fireEvent.click(toggleButton);
-		expect(screen.getByTestId('pipeline-minimap')).toBeInTheDocument();
+		const viewport = screen.getByTestId('minimap-viewport');
+		expect(viewport.style.top).toBe('25%');
+		expect(viewport.style.height).toBe('50%');
 	});
 
-	test('scrolls to nodes and triggers onStepClick when minimap items are clicked', async () => {
-		const onStepClick = vi.fn();
-		const container = document.createElement('div');
-		const dsNode = document.createElement('div');
-		dsNode.id = 'pipeline-datasource-node';
-		dsNode.scrollIntoView = vi.fn();
+	test('scrolls to a node when its marker is clicked', async () => {
+		const { el, nodes } = canvas();
+		render(PipelineMinimap, { props: { steps, canvasEl: el } });
 
-		const stepNode1 = document.createElement('div');
-		stepNode1.id = 'step-node-step-1';
-		stepNode1.scrollIntoView = vi.fn();
+		await fireEvent.click(screen.getByRole('button', { name: 'Go to 1. Filter' }));
 
-		const outputNode = document.createElement('div');
-		outputNode.id = 'pipeline-output-node';
-		outputNode.scrollIntoView = vi.fn();
-
-		container.appendChild(dsNode);
-		container.appendChild(stepNode1);
-		container.appendChild(outputNode);
-
-		render(PipelineMinimap, {
-			props: {
-				steps: mockSteps,
-				canvasEl: container,
-				onStepClick
-			}
+		expect(nodes['step-1'].scrollIntoView).toHaveBeenCalledWith({
+			behavior: 'smooth',
+			block: 'center'
 		});
+	});
 
-		await fireEvent.click(screen.getByTestId('minimap-datasource'));
-		expect(dsNode.scrollIntoView).toHaveBeenCalled();
+	test('labels the hovered marker and flags disabled steps', async () => {
+		const { el } = canvas();
+		render(PipelineMinimap, { props: { steps, canvasEl: el } });
 
-		await fireEvent.click(screen.getByTestId('minimap-step-step-1'));
-		expect(stepNode1.scrollIntoView).toHaveBeenCalled();
-		expect(onStepClick).toHaveBeenCalledWith('step-1');
+		await fireEvent.pointerEnter(screen.getByTestId('minimap-marker-step-2'));
 
-		await fireEvent.click(screen.getByTestId('minimap-output'));
-		expect(outputNode.scrollIntoView).toHaveBeenCalled();
+		expect(screen.getByTestId('minimap-label')).toHaveTextContent('2. Sort (disabled)');
 	});
 });

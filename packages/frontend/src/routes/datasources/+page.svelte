@@ -329,7 +329,7 @@
 		</header>
 
 		<!-- Datasource List -->
-		<div class={css({ flex: '1', overflowY: 'auto' })} role="feed" aria-label="Data sources">
+		<div class={css({ flex: '1', overflowY: 'auto' })}>
 			{#if ns.status === 'failed'}
 				<Callout tone="error">Namespace is unavailable: {ns.error ?? 'Unknown error'}</Callout>
 			{:else if !namespaceReady || query.isPending || query.isLoading || (query.isFetching && !query.data)}
@@ -348,7 +348,7 @@
 					Error: {query.error instanceof Error ? query.error.message : 'Unknown error'}
 				</Callout>
 			{:else if datasources.length === 0}
-				<div class={css({ padding: '8', textAlign: 'center' })} role="article">
+				<div class={css({ padding: '8', textAlign: 'center' })}>
 					<p class={css({ fontSize: 'sm', color: 'fg.muted', marginBottom: '4' })}>
 						No data sources yet.
 					</p>
@@ -373,10 +373,7 @@
 					</a>
 				</div>
 			{:else if filteredDatasources.length === 0}
-				<div
-					class={css({ padding: '8', textAlign: 'center', fontSize: 'sm', color: 'fg.muted' })}
-					role="article"
-				>
+				<div class={css({ padding: '8', textAlign: 'center', fontSize: 'sm', color: 'fg.muted' })}>
 					No datasources match "{searchQuery}"
 				</div>
 			{:else}
@@ -384,7 +381,6 @@
 					<div
 						data-ds-row={datasource.name}
 						data-ds-id={datasource.id}
-						role="article"
 						class={css({
 							borderBottomWidth: '1',
 							...(activeSelectedId === datasource.id
@@ -688,14 +684,14 @@
 	</main>
 </div>
 
-{#if deletingId}
-	<ConfirmDialog
-		show={true}
-		heading="Delete Datasource"
-		message={`Are you sure you want to delete "${deleteConfirmName || 'this datasource'}"? This action cannot be undone.`}
-		confirmText="Delete"
-		cancelText="Cancel"
-		onConfirm={confirmDelete}
-		onCancel={cancelDelete}
-	/>
-{/if}
+<ConfirmDialog
+	show={deletingId !== null}
+	heading="Delete Datasource"
+	message={deleteConfirmName
+		? `Are you sure you want to delete "${deleteConfirmName}"? This action cannot be undone.`
+		: 'Are you sure you want to delete this datasource? This action cannot be undone.'}
+	confirmText="Delete"
+	cancelText="Cancel"
+	onConfirm={confirmDelete}
+	onCancel={cancelDelete}
+/>

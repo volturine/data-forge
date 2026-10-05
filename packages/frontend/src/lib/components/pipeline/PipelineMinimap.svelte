@@ -1,301 +1,249 @@
 <script lang="ts">
 	import type { PipelineStep } from '$lib/types/analysis';
 	import { css } from '$lib/styles/panda';
-	import { ChevronUp, ChevronDown, Database, ArrowDown } from '@lucide/svelte';
+	import { getStepTypeConfig } from './utils';
 
 	interface Props {
 		steps: PipelineStep[];
 		canvasEl?: HTMLElement | null;
-		onStepClick?: (id: string) => void;
 	}
 
-	let { steps, canvasEl = null, onStepClick }: Props = $props();
-
-	let isExpanded = $state(true);
-	let viewportTopPct = $state(0);
-	let viewportHeightPct = $state(100);
-
-	const stepCountLabel = $derived(`${steps.length} ${steps.length === 1 ? 'step' : 'steps'}`);
-
-	function updateViewport() {
-		if (!canvasEl) {
-			viewportTopPct = 0;
-			viewportHeightPct = 100;
-			return;
-		}
-		const { scrollTop, scrollHeight, clientHeight } = canvasEl;
-		if (scrollHeight <= clientHeight || scrollHeight === 0) {
-			viewportTopPct = 0;
-			viewportHeightPct = 100;
-			return;
-		}
-		const top = (scrollTop / scrollHeight) * 100;
-		const height = Math.max(10, (clientHeight / scrollHeight) * 100);
-		viewportTopPct = Math.min(top, 100 - height);
-		viewportHeightPct = height;
+	interface Marker {
+		key: string;
+		selector: string;
+		label: string;
+		kind: 'source' | 'step' | 'output';
+		applied: boolean;
+		top: number;
+		height: number;
 	}
 
-	function scrollToTarget(selector: string) {
+	let { steps, canvasEl = null }: Props = $props();
+
+	let markers = $state<Marker[]>([]);
+	let viewTop = $state(0);
+	let viewHeight = $state(1);
+	let hoveredKey = $state<string | null>(null);
+	let railEl = $state<HTMLElement | null>(null);
+	let frame = 0;
+
+	const targets = $derived([
+		{
+			key: 'source',
+			selector: '#pipeline-datasource-node',
+			label: 'Source',
+			kind: 'source' as const,
+			applied: true
+		},
+		...steps.map((step, index) => ({
+			key: step.id,
+			selector: `[id="step-node-${step.id}"]`,
+			label: `${index + 1}. ${getStepTypeConfig(step.type).label}`,
+			kind: 'step' as const,
+			applied: step.is_applied !== false
+		})),
+		{
+			key: 'output',
+			selector: '#pipeline-output-node',
+			label: 'Output',
+			kind: 'output' as const,
+			applied: true
+		}
+	]);
+
+	const hovered = $derived(markers.find((marker) => marker.key === hoveredKey) ?? null);
+
+	function measure() {
+		frame = 0;
 		if (!canvasEl) return;
-		const target = canvasEl.querySelector(selector) as HTMLElement | null;
-		if (target) {
-			target.scrollIntoView({ behavior: 'smooth', block: 'center' });
+		const total = canvasEl.scrollHeight;
+		if (total <= 0) return;
+		const originTop = canvasEl.getBoundingClientRect().top - canvasEl.scrollTop;
+		const next: Marker[] = [];
+		for (const target of targets) {
+			const node = canvasEl.querySelector<HTMLElement>(target.selector);
+			if (!node) continue;
+			const rect = node.getBoundingClientRect();
+			next.push({
+				...target,
+				top: (rect.top - originTop) / total,
+				height: rect.height / total
+			});
 		}
+		markers = next;
+		viewTop = canvasEl.scrollTop / total;
+		viewHeight = Math.min(1, canvasEl.clientHeight / total);
 	}
 
-	function handleDatasourceClick() {
-		scrollToTarget('#pipeline-datasource-node');
-	}
-
-	function handleStepClick(id: string) {
-		scrollToTarget(`#step-node-${id}`);
-		onStepClick?.(id);
-	}
-
-	function handleOutputClick() {
-		scrollToTarget('#pipeline-output-node');
+	function scheduleMeasure() {
+		if (frame) return;
+		frame = requestAnimationFrame(measure);
 	}
 
 	$effect(() => {
-		if (!canvasEl) return;
-		updateViewport();
-		canvasEl.addEventListener('scroll', updateViewport, { passive: true });
-		window.addEventListener('resize', updateViewport, { passive: true });
-
+		const el = canvasEl;
+		void targets;
+		if (!el) return;
+		measure();
+		const resizeObserver = new ResizeObserver(scheduleMeasure);
+		resizeObserver.observe(el);
+		for (const child of el.children) resizeObserver.observe(child);
+		el.addEventListener('scroll', scheduleMeasure, { passive: true });
 		return () => {
-			canvasEl?.removeEventListener('scroll', updateViewport);
-			window.removeEventListener('resize', updateViewport);
+			resizeObserver.disconnect();
+			el.removeEventListener('scroll', scheduleMeasure);
+			if (frame) cancelAnimationFrame(frame);
+			frame = 0;
 		};
 	});
+
+	function scrollToMarker(marker: Marker) {
+		canvasEl
+			?.querySelector<HTMLElement>(marker.selector)
+			?.scrollIntoView({ behavior: 'smooth', block: 'center' });
+	}
+
+	function scrollToPointer(event: PointerEvent) {
+		if (!canvasEl || !railEl) return;
+		const rect = railEl.getBoundingClientRect();
+		const fraction = Math.min(1, Math.max(0, (event.clientY - rect.top) / rect.height));
+		canvasEl.scrollTop = fraction * canvasEl.scrollHeight - canvasEl.clientHeight / 2;
+	}
+
+	function handleRailPointerDown(event: PointerEvent) {
+		if (event.button !== 0) return;
+		railEl?.setPointerCapture(event.pointerId);
+		scrollToPointer(event);
+	}
+
+	function handleRailPointerMove(event: PointerEvent) {
+		if (!railEl?.hasPointerCapture(event.pointerId)) return;
+		scrollToPointer(event);
+	}
+
+	const markerTone = {
+		endpoint: css({ backgroundColor: 'accent.primary' }),
+		visible: css({ backgroundColor: 'fg.muted' }),
+		offscreen: css({ backgroundColor: 'fg.faint' }),
+		disabled: css({ backgroundColor: 'border.secondary' })
+	};
+
+	function toneFor(marker: Marker): string {
+		if (marker.kind !== 'step') return markerTone.endpoint;
+		if (!marker.applied) return markerTone.disabled;
+		const inView = marker.top + marker.height > viewTop && marker.top < viewTop + viewHeight;
+		return inView ? markerTone.visible : markerTone.offscreen;
+	}
 </script>
 
-<div
+<nav
+	aria-label="Pipeline overview"
+	data-testid="pipeline-minimap"
 	class={css({
 		position: 'absolute',
-		top: '4',
-		right: '4',
+		top: '3',
+		bottom: '12',
+		right: '1',
+		width: '4',
 		zIndex: '10',
-		display: 'flex',
-		flexDirection: 'column',
-		alignItems: 'flex-end',
-		gap: '2',
-		pointerEvents: 'none'
+		opacity: '0.55',
+		transitionProperty: 'opacity',
+		transitionDuration: '160ms',
+		_hover: { opacity: '1' },
+		_focusWithin: { opacity: '1' }
 	})}
-	data-testid="pipeline-minimap-container"
 >
-	<!-- Step Count & Toggle Header -->
 	<div
+		bind:this={railEl}
+		data-testid="minimap-rail"
+		role="presentation"
+		onpointerdown={handleRailPointerDown}
+		onpointermove={handleRailPointerMove}
 		class={css({
-			display: 'flex',
-			alignItems: 'center',
-			gap: '2',
-			backgroundColor: 'bg.primary',
-			borderWidth: '1',
-			borderColor: 'border.secondary',
-			borderRadius: 'md',
-			boxShadow: 'sm',
-			paddingX: '2.5',
-			paddingY: '1.5',
-			pointerEvents: 'auto'
+			position: 'absolute',
+			inset: '0',
+			cursor: 'pointer',
+			touchAction: 'none'
 		})}
 	>
-		<span
-			data-testid="canvas-step-count"
-			class={css({
-				fontSize: 'xs',
-				fontWeight: 'semibold',
-				color: 'fg.secondary',
-				letterSpacing: 'wide'
-			})}
-		>
-			{stepCountLabel}
-		</span>
-		<button
-			type="button"
-			data-testid="minimap-toggle"
-			aria-label={isExpanded ? 'Collapse minimap' : 'Expand minimap'}
-			title={isExpanded ? 'Collapse minimap' : 'Expand minimap'}
-			onclick={() => (isExpanded = !isExpanded)}
-			class={css({
-				display: 'inline-flex',
-				alignItems: 'center',
-				justifyContent: 'center',
-				background: 'none',
-				border: 'none',
-				padding: '0.5',
-				cursor: 'pointer',
-				color: 'fg.muted',
-				_hover: { color: 'fg.primary' }
-			})}
-		>
-			{#if isExpanded}
-				<ChevronUp size={14} />
-			{:else}
-				<ChevronDown size={14} />
-			{/if}
-		</button>
-	</div>
-
-	<!-- Minimap body -->
-	{#if isExpanded}
 		<div
-			data-testid="pipeline-minimap"
 			class={css({
-				width: '44',
-				maxHeight: '80',
+				position: 'absolute',
+				top: '0',
+				bottom: '0',
+				left: '50%',
+				width: '1px',
+				backgroundColor: 'border.primary'
+			})}
+		></div>
+		<div
+			data-testid="minimap-viewport"
+			class={css({
+				position: 'absolute',
+				left: '0',
+				right: '0',
+				borderRadius: 'xs',
+				backgroundColor: 'bg.tertiary',
+				borderWidth: '1',
+				borderColor: 'border.secondary',
+				pointerEvents: 'none'
+			})}
+			style:top={`${viewTop * 100}%`}
+			style:height={`${viewHeight * 100}%`}
+		></div>
+		{#each markers as marker (marker.key)}
+			<button
+				type="button"
+				data-testid={`minimap-marker-${marker.key}`}
+				aria-label={`Go to ${marker.label}`}
+				onpointerdown={(event) => event.stopPropagation()}
+				onclick={() => scrollToMarker(marker)}
+				onpointerenter={() => (hoveredKey = marker.key)}
+				onpointerleave={() => (hoveredKey = null)}
+				onfocus={() => (hoveredKey = marker.key)}
+				onblur={() => (hoveredKey = null)}
+				class={[
+					toneFor(marker),
+					css({
+						position: 'absolute',
+						left: '1.5',
+						right: '1.5',
+						minHeight: '1',
+						padding: '0',
+						borderWidth: '0',
+						borderRadius: 'full',
+						cursor: 'pointer',
+						transitionProperty: 'background-color',
+						transitionDuration: '160ms',
+						_focusVisible: { outlineWidth: '2', outlineColor: 'border.accent' }
+					})
+				]}
+				style:top={`${marker.top * 100}%`}
+				style:height={`${marker.height * 100}%`}
+			></button>
+		{/each}
+	</div>
+	{#if hovered}
+		<span
+			data-testid="minimap-label"
+			class={css({
+				position: 'absolute',
+				right: '5',
+				transform: 'translateY(-50%)',
+				whiteSpace: 'nowrap',
+				pointerEvents: 'none',
+				paddingX: '1.5',
+				paddingY: '0.5',
+				fontSize: '2xs',
+				color: 'fg.secondary',
 				backgroundColor: 'bg.primary',
 				borderWidth: '1',
 				borderColor: 'border.secondary',
-				borderRadius: 'md',
-				boxShadow: 'md',
-				padding: '2.5',
-				display: 'flex',
-				flexDirection: 'column',
-				gap: '2',
-				pointerEvents: 'auto',
-				overflow: 'hidden'
+				borderRadius: 'xs'
 			})}
+			style:top={`${(hovered.top + hovered.height / 2) * 100}%`}
 		>
-			<!-- Rail container with relative positioning for viewport indicator -->
-			<div
-				class={css({
-					position: 'relative',
-					display: 'flex',
-					flexDirection: 'column',
-					gap: '1.5',
-					maxHeight: '64',
-					overflowY: 'auto',
-					paddingRight: '1'
-				})}
-			>
-				<!-- Viewport indicator overlay -->
-				<div
-					data-testid="minimap-viewport-indicator"
-					class={css({
-						position: 'absolute',
-						left: '0',
-						right: '0',
-						borderWidth: '1',
-						borderColor: 'border.accent',
-						backgroundColor: 'bg.tertiary',
-						opacity: '0.3',
-						pointerEvents: 'none',
-						borderRadius: 'xs',
-						transitionProperty: 'top, height',
-						transitionDuration: '75ms'
-					})}
-					style={`top: ${viewportTopPct}%; height: ${viewportHeightPct}%;`}
-				></div>
-
-				<!-- Datasource Node -->
-				<button
-					type="button"
-					data-testid="minimap-datasource"
-					onclick={handleDatasourceClick}
-					class={css({
-						display: 'flex',
-						alignItems: 'center',
-						gap: '1.5',
-						width: 'full',
-						paddingX: '2',
-						paddingY: '1',
-						fontSize: '2xs',
-						fontWeight: 'medium',
-						color: 'fg.secondary',
-						backgroundColor: 'bg.secondary',
-						borderWidth: '1',
-						borderColor: 'border.subtle',
-						borderRadius: 'xs',
-						textAlign: 'left',
-						cursor: 'pointer',
-						_hover: { backgroundColor: 'bg.hover', borderColor: 'border.secondary' }
-					})}
-				>
-					<Database size={12} class={css({ flexShrink: '0', color: 'accent.primary' })} />
-					<span class={css({ overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' })}>
-						Source
-					</span>
-				</button>
-
-				<!-- Steps -->
-				{#each steps as step, i (step.id)}
-					<button
-						type="button"
-						data-testid={`minimap-step-${step.id}`}
-						onclick={() => handleStepClick(step.id)}
-						class={css({
-							display: 'flex',
-							alignItems: 'center',
-							gap: '1.5',
-							width: 'full',
-							paddingX: '2',
-							paddingY: '1',
-							fontSize: '2xs',
-							color: step.is_applied === false ? 'fg.faint' : 'fg.primary',
-							backgroundColor: step.is_applied === false ? 'bg.secondary' : 'bg.primary',
-							borderWidth: '1',
-							borderColor: 'border.subtle',
-							borderStyle: step.is_applied === false ? 'dashed' : 'solid',
-							borderRadius: 'xs',
-							textAlign: 'left',
-							cursor: 'pointer',
-							_hover: { backgroundColor: 'bg.hover', borderColor: 'border.secondary' }
-						})}
-					>
-						<span
-							class={css({
-								fontSize: '3xs',
-								color: 'fg.muted',
-								fontFamily: 'mono',
-								width: '3.5',
-								flexShrink: '0'
-							})}
-						>
-							{i + 1}
-						</span>
-						<span
-							class={css({
-								overflow: 'hidden',
-								textOverflow: 'ellipsis',
-								whiteSpace: 'nowrap',
-								textTransform: 'capitalize'
-							})}
-						>
-							{step.type}
-						</span>
-					</button>
-				{/each}
-
-				<!-- Output Node -->
-				<button
-					type="button"
-					data-testid="minimap-output"
-					onclick={handleOutputClick}
-					class={css({
-						display: 'flex',
-						alignItems: 'center',
-						gap: '1.5',
-						width: 'full',
-						paddingX: '2',
-						paddingY: '1',
-						fontSize: '2xs',
-						fontWeight: 'medium',
-						color: 'fg.secondary',
-						backgroundColor: 'bg.secondary',
-						borderWidth: '1',
-						borderColor: 'border.subtle',
-						borderRadius: 'xs',
-						textAlign: 'left',
-						cursor: 'pointer',
-						_hover: { backgroundColor: 'bg.hover', borderColor: 'border.secondary' }
-					})}
-				>
-					<ArrowDown size={12} class={css({ flexShrink: '0', color: 'accent.primary' })} />
-					<span class={css({ overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' })}>
-						Output
-					</span>
-				</button>
-			</div>
-		</div>
+			{hovered.label}{hovered.applied ? '' : ' (disabled)'}
+		</span>
 	{/if}
-</div>
+</nav>

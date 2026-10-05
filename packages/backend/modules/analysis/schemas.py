@@ -170,7 +170,7 @@ class AnalysisTemplateDetailSchema(AnalysisTemplateSummarySchema):
 class DuplicateAnalysisSchema(BaseModel):
     model_config = ConfigDict(extra='forbid')
 
-    name: Annotated[str, StringConstraints(min_length=1, strip_whitespace=True)]
+    name: Annotated[str, StringConstraints(min_length=1, strip_whitespace=True)] | None = None
     description: str | None = None
 
 
@@ -184,7 +184,7 @@ class AnalysisFavoriteStatusSchema(BaseModel):
 class ImportAnalysisSchema(BaseModel):
     model_config = ConfigDict(extra='forbid')
 
-    name: Annotated[str, StringConstraints(min_length=1, strip_whitespace=True)]
+    name: Annotated[str, StringConstraints(min_length=1, strip_whitespace=True)] | None = None
     description: str | None = None
     pipeline: dict[str, Any]
     datasource_remap: dict[str, str] = Field(default_factory=dict)

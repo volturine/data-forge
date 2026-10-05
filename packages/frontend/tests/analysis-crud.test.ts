@@ -319,6 +319,7 @@ test.describe('Analyses – gallery interactions', () => {
 		const suffix = uid();
 		const aName = `E2E Duplicate ${suffix}`;
 		await createAnalysis(request, aName, sharedDatasource.id);
+		let copyName: string | undefined;
 		try {
 			await gotoAnalysesGallery(page);
 			const card = page.locator(`[data-analysis-card="${aName}"]`);
@@ -331,7 +332,12 @@ test.describe('Analyses – gallery interactions', () => {
 			const modal = page.locator('[role="dialog"]').filter({ hasText: /Duplicate Analysis/i });
 			await expect(modal).toBeVisible({ timeout: 5_000 });
 			const nameInput = modal.locator('input').first();
-			await expect(nameInput).toHaveValue(`Copy of ${aName}`);
+			await expect(nameInput).toHaveValue(
+				new RegExp(
+					`^Copy of ${aName} · [A-Z][a-z]{2} \\d{1,2}, \\d{4}, \\d{2}:\\d{2}:\\d{2}\\.\\d{3}$`
+				)
+			);
+			copyName = await nameInput.inputValue();
 
 			// Click Duplicate
 			await modal.getByRole('button', { name: /^Duplicate$/ }).click();
@@ -342,7 +348,7 @@ test.describe('Analyses – gallery interactions', () => {
 				timeout: 10_000
 			});
 		} finally {
-			await deleteAnalysisViaUI(page, `Copy of ${aName}`);
+			if (copyName) await deleteAnalysisViaUI(page, copyName);
 			await deleteAnalysisViaUI(page, aName);
 		}
 	});

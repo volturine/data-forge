@@ -1,4 +1,4 @@
-"""last_data_update enrichment and freshness_threshold_minutes on datasources."""
+"""last_data_update enrichment and source revision tracking on datasources."""
 
 from __future__ import annotations
 
@@ -21,7 +21,6 @@ def _insert_datasource(
     config: dict | None = None,
     created_by: str = 'import',
     created_by_analysis_id: str | None = None,
-    freshness_threshold_minutes: int | None = None,
 ) -> DataSource:
     ds = DataSource(
         id=datasource_id,
@@ -32,7 +31,6 @@ def _insert_datasource(
         created_by=created_by,
         created_by_analysis_id=created_by_analysis_id,
         is_hidden=False,
-        freshness_threshold_minutes=freshness_threshold_minutes,
         created_at=datetime.now(UTC).replace(tzinfo=None),
     )
     session.add(ds)
@@ -161,59 +159,27 @@ class TestLastDataUpdate:
         assert response.last_data_update == snapshot_time
 
 
-class TestFreshnessThreshold:
-    def test_response_includes_threshold(self, test_db_session: Session) -> None:
-        _insert_datasource(
-            test_db_session,
-            datasource_id='ds-threshold',
-            freshness_threshold_minutes=720,
-        )
-
-        item = next(i for i in datasource_service.list_datasources(test_db_session) if i.id == 'ds-threshold')
-
-        assert item.freshness_threshold_minutes == 720
-
-    def test_update_sets_threshold(self, test_db_session: Session) -> None:
-        datasource = _insert_datasource(test_db_session, datasource_id='ds-update-threshold')
+class TestSourceRevision:
+    def test_update_advances_source_revision(self, test_db_session: Session) -> None:
+        datasource = _insert_datasource(test_db_session, datasource_id='ds-update-revision')
 
         response = datasource_service.update_datasource(
             test_db_session,
-            'ds-update-threshold',
-            DataSourceUpdate(freshness_threshold_minutes=60),
+            'ds-update-revision',
+            DataSourceUpdate(is_hidden=True),
         )
 
-        assert response.freshness_threshold_minutes == 60
-        test_db_session.refresh(datasource)
-        assert datasource.revision == 2
-
-    def test_update_clears_threshold(self, test_db_session: Session) -> None:
-        datasource = _insert_datasource(
-            test_db_session,
-            datasource_id='ds-clear-threshold',
-            freshness_threshold_minutes=60,
-        )
-
-        response = datasource_service.update_datasource(
-            test_db_session,
-            'ds-clear-threshold',
-            DataSourceUpdate(freshness_threshold_minutes=None),
-        )
-
-        assert response.freshness_threshold_minutes is None
+        assert response.is_hidden is True
         test_db_session.refresh(datasource)
         assert datasource.revision == 2
 
     def test_noop_update_does_not_advance_source_revision(self, test_db_session: Session) -> None:
-        datasource = _insert_datasource(
-            test_db_session,
-            datasource_id='ds-noop-update',
-            freshness_threshold_minutes=60,
-        )
+        datasource = _insert_datasource(test_db_session, datasource_id='ds-noop-update')
 
         datasource_service.update_datasource(
             test_db_session,
             datasource.id,
-            DataSourceUpdate(freshness_threshold_minutes=60),
+            DataSourceUpdate(is_hidden=False),
         )
 
         test_db_session.refresh(datasource)
@@ -237,13 +203,3 @@ class TestFreshnessThreshold:
 
         test_db_session.refresh(datasource)
         assert datasource.revision == 2
-
-    def test_update_rejects_non_positive_threshold(self) -> None:
-        from pydantic import ValidationError
-
-        try:
-            DataSourceUpdate(freshness_threshold_minutes=0)
-        except ValidationError:
-            pass
-        else:
-            raise AssertionError('expected ValidationError for non-positive threshold')

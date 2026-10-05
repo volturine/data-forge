@@ -171,8 +171,8 @@ message DatasourceCommand {
 }
 
 message DataSourceRecord {
-  reserved 6;
-  reserved "schema_cache";
+  reserved 6, 13;
+  reserved "schema_cache", "freshness_threshold_minutes";
 
   string id = 1 [(buf.validate.field).string.min_len = 1];
   string name = 2 [(buf.validate.field).string.min_len = 1];
@@ -191,7 +191,6 @@ message DataSourceRecord {
   google.protobuf.Timestamp created_at = 10;
   optional string output_of_tab_id = 11 [(buf.validate.field).string.min_len = 1];
   SchemaInfo schema_info = 12;
-  optional int32 freshness_threshold_minutes = 13 [(buf.validate.field).int32.gte = 1];
 }
 
 message ColumnSchema {

@@ -113,7 +113,6 @@ export class ChatStore {
 	lastTurnUsage = $state<UsageInfo | null>(null);
 	lastFailedContent = $state<string | null>(null);
 	sessions = $state<ChatSessionInfo[]>([]);
-	unreadCount = $state(0);
 	currentTurn = $state(0);
 	maxTurns = $state<number | null>(null);
 	pendingConfirm = $state<{

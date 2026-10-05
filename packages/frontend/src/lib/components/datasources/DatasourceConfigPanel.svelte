@@ -208,7 +208,7 @@
 
 	const columns = $derived.by(() => {
 		const value = schemaQuery.data;
-		if (!value) return [];
+		if (!value?.columns?.length) return [];
 		return value.columns.map((col) => ({
 			name: col.name,
 			dtype: resolveColumnType(col.dtype),
@@ -498,28 +498,20 @@
 	{/if}
 
 	{#if updateMutation.isError}
-		<div
-			class={css({
-				display: 'flex',
-				alignItems: 'center',
-				margin: '4',
-				marginBottom: '0',
-				gap: '2',
-				paddingX: '3',
-				paddingY: '2.5',
-				border: 'none',
-				borderLeftWidth: '2',
-				fontSize: 'xs',
-				lineHeight: 'normal',
-				backgroundColor: 'transparent',
-				borderLeftColor: 'border.error',
-				color: 'fg.error',
-				borderWidth: '1',
-				borderColor: 'border.error'
-			})}
-		>
-			<CircleAlert size={14} />
-			<p class={css({ margin: '0' })}>{updateMutation.error?.message}</p>
+		<div class={css({ paddingX: '4', paddingTop: '4' })}>
+			<Callout tone="error">
+				<div class={css({ display: 'flex', alignItems: 'flex-start', gap: '3' })}>
+					<CircleAlert size={20} />
+					<div class={css({ display: 'flex', flexDirection: 'column', gap: '1' })}>
+						<p class={css({ margin: '0', fontWeight: 'semibold' })}>Error saving changes</p>
+						<p class={css({ margin: '0', fontSize: 'sm', opacity: '0.8' })}>
+							{updateMutation.error instanceof Error
+								? updateMutation.error.message
+								: 'Unknown error'}
+						</p>
+					</div>
+				</div>
+			</Callout>
 		</div>
 	{/if}
 

@@ -745,6 +745,20 @@ def test_storage_cleanup_catalog_migration_backfills_indexes_and_downgrades(monk
             assert version_row is not None
             assert version_row[0] == '0022_telegram_part_receipts'
 
+            command.upgrade(config, '0023_drop_ds_freshness', tag='tenant')
+            with container.connect() as connection:
+                datasource_columns = {
+                    row[0]
+                    for row in connection.execute(
+                        'SELECT column_name FROM information_schema.columns WHERE table_schema = %s AND table_name = %s',
+                        (schema, 'datasources'),
+                    ).fetchall()
+                }
+                version_row = connection.execute(f'SELECT version_num FROM "{schema}".alembic_version').fetchone()
+            assert 'freshness_threshold_minutes' not in datasource_columns
+            assert version_row is not None
+            assert version_row[0] == '0023_drop_ds_freshness'
+
             command.downgrade(config, '0019_build_run_datasources', tag='tenant')
             with container.connect() as connection:
                 columns = {
