@@ -367,6 +367,8 @@
 		overflow: 'hidden'
 	})}
 >
+	<PipelineMinimap {steps} {canvasEl} {onStepClick} />
+
 	<div
 		bind:this={canvasEl}
 		class={[
