@@ -27,7 +27,7 @@
 	import HealthChecksManager from '$lib/components/common/HealthChecksManager.svelte';
 	import ScheduleManager from '$lib/components/common/ScheduleManager.svelte';
 	import Callout from '$lib/components/ui/Callout.svelte';
-	import DatasourceGeneralTab, { FRESHNESS_THRESHOLD_OPTIONS } from './DatasourceGeneralTab.svelte';
+	import DatasourceGeneralTab from './DatasourceGeneralTab.svelte';
 	import DatasourceSchemaTab from './DatasourceSchemaTab.svelte';
 	import DatasourceCsvOptionsTab, { type CsvConfig } from './DatasourceCsvOptionsTab.svelte';
 	import DatasourceExcelOptionsTab, { type ExcelConfig } from './DatasourceExcelOptionsTab.svelte';
@@ -152,7 +152,6 @@
 			name: string;
 			description: string | null;
 			config?: Record<string, unknown>;
-			freshness_threshold_minutes?: number | null;
 		}) => {
 			const result = await updateDatasource(datasource.id, update);
 			if (result.isErr()) throw new Error(result.error.message);
@@ -167,11 +166,6 @@
 	}));
 
 	const seed = untrack(() => datasource);
-	const isCustomFreshness =
-		seed.freshness_threshold_minutes != null &&
-		!FRESHNESS_THRESHOLD_OPTIONS.some(
-			(option) => option.minutes === seed.freshness_threshold_minutes
-		);
 	let name = $state(seed.name);
 	let description = $state(seed.description ?? '');
 	let hasChanges = $state(false);
@@ -190,10 +184,6 @@
 	let descriptionDraft = $state('');
 	let descriptionError = $state<string | null>(null);
 	let descriptionExpanded = $state<Record<string, boolean>>({});
-	const initialFreshnessThreshold = seed.freshness_threshold_minutes ?? null;
-	let freshnessThreshold = $state<number | null>(initialFreshnessThreshold);
-	let customFreshnessThreshold = $state(isCustomFreshness ? String(initialFreshnessThreshold) : '');
-	let isCustomFreshnessThreshold = $state(isCustomFreshness);
 
 	const descriptionMutation = createMutation(() => ({
 		mutationFn: async (payload: { columnName: string; description: string | null }) => {
@@ -218,24 +208,27 @@
 
 	const columns = $derived.by(() => {
 		const value = schemaQuery.data;
-		if (!value?.columns?.length) return [];
+		if (!value) return [];
 		return value.columns.map((col) => ({
-			...col,
-			dtype: resolveColumnType(col.dtype)
+			name: col.name,
+			dtype: resolveColumnType(col.dtype),
+			nullable: col.nullable ?? false,
+			description: col.description ?? null
 		}));
 	});
 
-	function getSelectedDescription(name: string | null): string | null {
-		if (!name) return null;
-		return columns.find((column) => column.name === name)?.description ?? null;
+	function getSelectedDescription(columnName: string | null): string | null {
+		if (!columnName) return null;
+		const col = columns.find((c) => c.name === columnName);
+		return col?.description ?? null;
 	}
 
-	function isDescriptionExpanded(name: string): boolean {
-		return descriptionExpanded[name] ?? false;
+	function toggleDescription(columnName: string) {
+		descriptionExpanded[columnName] = !descriptionExpanded[columnName];
 	}
 
-	function toggleDescription(name: string) {
-		descriptionExpanded = { ...descriptionExpanded, [name]: !isDescriptionExpanded(name) };
+	function isDescriptionExpanded(columnName: string): boolean {
+		return !!descriptionExpanded[columnName];
 	}
 
 	function startEditingDescription(column: ColumnSchema) {
@@ -294,11 +287,9 @@
 			name: string;
 			description: string | null;
 			config?: Record<string, unknown>;
-			freshness_threshold_minutes?: number | null;
 		} = {
 			name,
-			description,
-			freshness_threshold_minutes: freshnessThreshold
+			description
 		};
 
 		if (configDirty) {
@@ -357,16 +348,27 @@
 		hasChanges = false;
 		configDirty = false;
 
+		const ds = datasourceQuery.data;
 		if (update.config && datasourceNeedsExternalIngest(ds)) {
 			const ingestResult = await ingestDatasource(ds.id);
 			if (ingestResult.isErr()) {
 				refreshError = ingestResult.error.message || 'Failed to re-ingest datasource';
 				return;
 			}
-			queryClient.invalidateQueries({ queryKey: ['datasource', ns.value, ds.id] });
-			queryClient.invalidateQueries({ queryKey: ['datasource-schema', ds.id] });
-			queryClient.invalidateQueries({ queryKey: ['datasource-preview', ns.value, ds.id] });
-			queryClient.invalidateQueries({ queryKey: ['datasources'] });
+			queryClient.setQueryData(['datasource', ns.value, ds.id], ingestResult.value);
+			queryClient.setQueriesData<DataSource[]>(
+				{ queryKey: ['datasources', ns.value] },
+				(current) =>
+					current ? current.map((d) => (d.id === ds.id ? ingestResult.value : d)) : current
+			);
+			await Promise.all([
+				queryClient.invalidateQueries({ queryKey: ['datasource', ns.value, ds.id] }),
+				queryClient.invalidateQueries({ queryKey: ['datasources'] }),
+				queryClient.invalidateQueries({ queryKey: ['datasource-schema', ds.id] }),
+				queryClient.invalidateQueries({ queryKey: ['iceberg-snapshots', ds.id] })
+			]);
+			await queryClient.invalidateQueries({ queryKey: ['datasource-preview', ns.value, ds.id] });
+			onSave?.();
 		}
 	}
 
@@ -382,11 +384,13 @@
 		}
 		try {
 			const reingested = datasourceNeedsExternalIngest(datasource);
+			let nextDatasource: DataSource | null = null;
 			if (reingested) {
 				const ingestResult = await ingestDatasource(datasource.id);
 				if (ingestResult.isErr()) {
 					throw new Error(ingestResult.error.message);
 				}
+				nextDatasource = ingestResult.value;
 			}
 			const result = await getDatasourceSchema(datasource.id, { refresh: !reingested });
 			if (result.isErr()) {
@@ -409,9 +413,26 @@
 				.map((col) => col.name);
 			schemaChanged = added.length > 0 || removed.length > 0 || types.length > 0;
 			schemaDiff = schemaChanged ? { added, removed, types } : null;
+
+			if (nextDatasource) {
+				queryClient.setQueryData(['datasource', ns.value, datasource.id], nextDatasource);
+				queryClient.setQueriesData<DataSource[]>(
+					{ queryKey: ['datasources', ns.value] },
+					(current) =>
+						current ? current.map((d) => (d.id === datasource.id ? nextDatasource! : d)) : current
+				);
+			}
 			queryClient.setQueryData(['datasource-schema', datasource.id], nextSchema);
-			queryClient.invalidateQueries({ queryKey: ['datasource-schema', datasource.id] });
-			queryClient.invalidateQueries({ queryKey: ['datasource-preview', ns.value, datasource.id] });
+			await Promise.all([
+				queryClient.invalidateQueries({ queryKey: ['datasource', ns.value, datasource.id] }),
+				queryClient.invalidateQueries({ queryKey: ['datasources'] }),
+				queryClient.invalidateQueries({ queryKey: ['datasource-schema', datasource.id] }),
+				queryClient.invalidateQueries({ queryKey: ['iceberg-snapshots', datasource.id] })
+			]);
+			await queryClient.invalidateQueries({
+				queryKey: ['datasource-preview', ns.value, datasource.id]
+			});
+			onSave?.();
 		} catch (error) {
 			refreshError = error instanceof Error ? error.message : 'Failed to ingest datasource schema';
 		} finally {
@@ -438,41 +459,68 @@
 		datasourceNeedsExternalIngest(ds) ? 'Re-ingest from source' : 'Refresh schema'
 	);
 	const refreshBusyLabel = $derived(
-		datasourceNeedsExternalIngest(ds) ? 'Re-ingesting...' : 'Refreshing schema...'
+		datasourceNeedsExternalIngest(ds) ? 'Re-ingesting…' : 'Refreshing…'
 	);
 
-	const PROTECTED_CONFIG_KEYS = [
-		'snapshot_id',
-		'snapshot_timestamp_ms',
-		'current_snapshot_id',
-		'current_snapshot_timestamp_ms',
-		'time_travel_snapshot_id',
-		'time_travel_snapshot_timestamp_ms',
-		'time_travel_ui'
-	];
-
-	function stripProtectedKeys(config: Record<string, unknown>): Record<string, unknown> {
-		const cleaned = { ...config };
-		for (const key of PROTECTED_CONFIG_KEYS) {
-			delete cleaned[key];
-		}
-		return cleaned;
+	function stripProtectedKeys(cfg: Record<string, unknown>): Record<string, unknown> {
+		const out = { ...cfg };
+		delete out.metadata_file;
+		delete out.metadata_path;
+		delete out.table_path;
+		delete out.snapshot_id;
+		delete out.snapshot_timestamp_ms;
+		delete out.current_snapshot_id;
+		delete out.current_snapshot_timestamp_ms;
+		delete out.branches;
+		delete out.schema;
+		delete out.arrow_schema;
+		delete out.row_count;
+		delete out.time_travel_snapshot_id;
+		delete out.time_travel_snapshot_timestamp_ms;
+		delete out.time_travel_ui;
+		return out;
 	}
 </script>
 
-<div class={css({ backgroundColor: 'bg.secondary' })} data-ds-config={datasource.id}>
+<div
+	class={css({
+		display: 'flex',
+		flexDirection: 'column',
+		height: 'full',
+		overflowY: 'auto'
+	})}
+	data-ds-config
+>
+	{#if refreshError}
+		<div class={css({ paddingX: '4', paddingTop: '4' })}>
+			<Callout tone="error">{refreshError}</Callout>
+		</div>
+	{/if}
+
 	{#if updateMutation.isError}
-		<Callout tone="error">
-			<div class={css({ display: 'flex', alignItems: 'flex-start', gap: '3' })}>
-				<CircleAlert size={20} />
-				<div class={css({ display: 'flex', flexDirection: 'column', gap: '1' })}>
-					<p class={css({ margin: '0', fontWeight: 'semibold' })}>Error saving changes</p>
-					<p class={css({ margin: '0', fontSize: 'sm', opacity: '0.8' })}>
-						{updateMutation.error instanceof Error ? updateMutation.error.message : 'Unknown error'}
-					</p>
-				</div>
-			</div>
-		</Callout>
+		<div
+			class={css({
+				display: 'flex',
+				alignItems: 'center',
+				margin: '4',
+				marginBottom: '0',
+				gap: '2',
+				paddingX: '3',
+				paddingY: '2.5',
+				border: 'none',
+				borderLeftWidth: '2',
+				fontSize: 'xs',
+				lineHeight: 'normal',
+				backgroundColor: 'transparent',
+				borderLeftColor: 'border.error',
+				color: 'fg.error',
+				borderWidth: '1',
+				borderColor: 'border.error'
+			})}
+		>
+			<CircleAlert size={14} />
+			<p class={css({ margin: '0' })}>{updateMutation.error?.message}</p>
+		</div>
 	{/if}
 
 	{#if updateMutation.isSuccess}
@@ -582,9 +630,6 @@
 				schema={schemaQuery.data}
 				bind:name
 				bind:description
-				bind:freshnessThreshold
-				bind:customFreshnessThreshold
-				bind:isCustomFreshnessThreshold
 				savePending={updateMutation.isPending}
 				{hasChanges}
 				{isRefreshing}

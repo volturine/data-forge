@@ -1,22 +1,9 @@
-<script lang="ts" module>
-	export const FRESHNESS_THRESHOLD_OPTIONS: { label: string; minutes: number | null }[] = [
-		{ label: 'Default (24 hours)', minutes: null },
-		{ label: '1 hour', minutes: 60 },
-		{ label: '6 hours', minutes: 360 },
-		{ label: '12 hours', minutes: 720 },
-		{ label: '24 hours', minutes: 1440 },
-		{ label: '7 days', minutes: 10080 },
-		{ label: '30 days', minutes: 43200 }
-	];
-</script>
-
 <script lang="ts">
 	import { resolve } from '$app/paths';
 	import { GitBranch, Loader, RefreshCw, Save, Upload } from '@lucide/svelte';
 	import type {
 		DataSource,
 		DatabaseDataSource,
-		FileDataSource,
 		IcebergDataSource,
 		SchemaInfo
 	} from '$lib/types/datasource';
@@ -25,15 +12,13 @@
 		datasourceExternalSourceType,
 		datasourceIsAnalysisOutput,
 		datasourceIsDatabase,
-		datasourceIsFile,
 		datasourceIsIceberg,
 		datasourceRowCount
 	} from '$lib/types/datasource';
 	import FileTypeBadge from '$lib/components/common/FileTypeBadge.svelte';
-	import FreshnessBadge from '$lib/components/common/FreshnessBadge.svelte';
 	import RelativeTime from '$lib/components/common/RelativeTime.svelte';
 	import { formatDateDisplay } from '$lib/utils/datetime';
-	import { css, input, chip, emptyText } from '$lib/styles/panda';
+	import { css, input, chip } from '$lib/styles/panda';
 
 	interface Props {
 		datasourceId: string;
@@ -41,9 +26,6 @@
 		schema: SchemaInfo | null | undefined;
 		name?: string;
 		description?: string;
-		freshnessThreshold?: number | null;
-		customFreshnessThreshold?: string;
-		isCustomFreshnessThreshold?: boolean;
 		savePending: boolean;
 		hasChanges: boolean;
 		isRefreshing: boolean;
@@ -60,9 +42,6 @@
 		schema,
 		name = $bindable(''),
 		description = $bindable(''),
-		freshnessThreshold = $bindable(null),
-		customFreshnessThreshold = $bindable(''),
-		isCustomFreshnessThreshold = $bindable(false),
 		savePending,
 		hasChanges,
 		isRefreshing,
@@ -72,10 +51,6 @@
 		onIngest,
 		onSave
 	}: Props = $props();
-
-	function isFile(value: DataSource): value is FileDataSource {
-		return datasourceIsFile(value);
-	}
 
 	function isDatabase(value: DataSource): value is DatabaseDataSource {
 		return datasourceIsDatabase(value);
@@ -94,33 +69,6 @@
 
 	function getExternalSourceType(value: DataSource) {
 		return datasourceExternalSourceType(value);
-	}
-
-	function handleThresholdChange(value: string) {
-		if (value === 'custom') {
-			isCustomFreshnessThreshold = true;
-			customFreshnessThreshold = freshnessThreshold == null ? '' : String(freshnessThreshold);
-			return;
-		}
-		if (value === '') {
-			freshnessThreshold = null;
-			isCustomFreshnessThreshold = false;
-			onDirty();
-			return;
-		}
-		const option = FRESHNESS_THRESHOLD_OPTIONS.find((opt) => opt.minutes === Number(value));
-		if (!option) return;
-		freshnessThreshold = option.minutes;
-		isCustomFreshnessThreshold = false;
-		onDirty();
-	}
-
-	function handleCustomThresholdChange(value: string) {
-		customFreshnessThreshold = value;
-		const minutes = Number(value);
-		if (!Number.isInteger(minutes) || minutes <= 0) return;
-		freshnessThreshold = minutes;
-		onDirty();
 	}
 </script>
 
@@ -175,9 +123,6 @@
 			rows="5"
 			maxlength="4000"
 			class={input({ variant: 'textarea' })}></textarea>
-		{#if description.trim().length === 0}
-			<p class={emptyText({ size: 'inline' })}>No description added yet.</p>
-		{/if}
 	</div>
 
 	<div class={css({ paddingTop: '4' })}>
@@ -193,28 +138,11 @@
 			Source Information
 		</h3>
 		<div class={css({ display: 'flex', flexDirection: 'column', gap: '3', fontSize: 'xs' })}>
-			<div class={css({ display: 'flex', alignItems: 'center', gap: '4' })}>
-				<div class={css({ display: 'flex', alignItems: 'center', gap: '2' })}>
-					<span
-						class={css({
-							textTransform: 'uppercase',
-							letterSpacing: 'wide',
-							color: 'fg.muted'
-						})}>Type</span
-					>
-					{#if isFile(ds)}
-						{@const config = (ds as FileDataSource).config}
-						<FileTypeBadge path={config.file_path} size="sm" />
-					{:else}
-						<FileTypeBadge sourceType={ds.source_type} size="sm" />
-					{/if}
+			{#if ds.is_hidden}
+				<div class={css({ display: 'flex', alignItems: 'center', gap: '1.5' })}>
+					<span class={chip({ tone: 'warning' })}> Hidden </span>
 				</div>
-				{#if ds.is_hidden}
-					<div class={css({ display: 'flex', alignItems: 'center', gap: '1.5' })}>
-						<span class={chip({ tone: 'warning' })}> Hidden </span>
-					</div>
-				{/if}
-			</div>
+			{/if}
 
 			<div class={css({ display: 'flex', alignItems: 'center', gap: '2' })}>
 				<span
@@ -264,7 +192,7 @@
 				{/if}
 			</div>
 
-			<div class={css({ display: 'flex', flexDirection: 'column', gap: '1' })}>
+			<div class={css({ display: 'flex', alignItems: 'center', gap: '2' })}>
 				<span
 					class={css({
 						textTransform: 'uppercase',
@@ -272,39 +200,13 @@
 						color: 'fg.muted'
 					})}>Datasource ID</span
 				>
-				<span
-					class={css({
-						wordBreak: 'break-all',
-						color: 'fg.secondary',
-						fontFamily: 'mono'
-					})}>{ds.id}</span
-				>
+				<span class={css({ fontFamily: 'mono', fontSize: '2xs' })}>{ds.id}</span>
 			</div>
 
-			{#if isFile(ds)}
-				{@const config = (ds as FileDataSource).config}
-				<div class={css({ display: 'flex', flexDirection: 'column', gap: '1' })}>
-					<span
-						class={css({
-							textTransform: 'uppercase',
-							letterSpacing: 'wide',
-							color: 'fg.muted'
-						})}>Location</span
-					>
-					<span
-						class={css({
-							wordBreak: 'break-all',
-							color: 'fg.secondary',
-							fontFamily: 'mono'
-						})}>{config.file_path}</span
-					>
-				</div>
-			{/if}
-
-			{#if isDatabase(ds)}
-				{@const config = ds.config}
-				{#if config.connection_string}
-					<div class={css({ display: 'flex', flexDirection: 'column', gap: '1' })}>
+			{#if isIceberg(ds)}
+				{@const config = (ds as IcebergDataSource).config}
+				{#if config.location}
+					<div class={css({ display: 'flex', alignItems: 'center', gap: '2' })}>
 						<span
 							class={css({
 								textTransform: 'uppercase',
@@ -314,54 +216,116 @@
 						>
 						<span
 							class={css({
-								wordBreak: 'break-all',
-								color: 'fg.secondary',
-								fontFamily: 'mono'
-							})}>{config.connection_string}</span
+								fontFamily: 'mono',
+								fontSize: '2xs',
+								overflow: 'hidden',
+								textOverflow: 'ellipsis',
+								whiteSpace: 'nowrap'
+							})}>{config.location}</span
+						>
+					</div>
+				{/if}
+				{#if config.current_snapshot_id}
+					<div class={css({ display: 'flex', alignItems: 'center', gap: '2' })}>
+						<span
+							class={css({
+								textTransform: 'uppercase',
+								letterSpacing: 'wide',
+								color: 'fg.muted'
+							})}>Snapshot</span
+						>
+						<span class={css({ fontFamily: 'mono', fontSize: '2xs' })}
+							>{config.current_snapshot_id}</span
+						>
+					</div>
+				{/if}
+			{/if}
+
+			{#if isDatabase(ds)}
+				{@const config = (ds as DatabaseDataSource).config}
+				{#if config.database_type}
+					<div class={css({ display: 'flex', alignItems: 'center', gap: '2' })}>
+						<span
+							class={css({
+								textTransform: 'uppercase',
+								letterSpacing: 'wide',
+								color: 'fg.muted'
+							})}>Engine</span
+						>
+						<span class={css({ fontWeight: 'medium' })}>{config.database_type}</span>
+					</div>
+				{/if}
+				{#if config.host}
+					<div class={css({ display: 'flex', alignItems: 'center', gap: '2' })}>
+						<span
+							class={css({
+								textTransform: 'uppercase',
+								letterSpacing: 'wide',
+								color: 'fg.muted'
+							})}>Host</span
+						>
+						<span class={css({ fontFamily: 'mono', fontSize: '2xs' })}
+							>{config.host}:{config.port ?? 5432}</span
+						>
+					</div>
+				{/if}
+				{#if config.database}
+					<div class={css({ display: 'flex', alignItems: 'center', gap: '2' })}>
+						<span
+							class={css({
+								textTransform: 'uppercase',
+								letterSpacing: 'wide',
+								color: 'fg.muted'
+							})}>Database</span
+						>
+						<span class={css({ fontWeight: 'medium' })}>{config.database}</span>
+					</div>
+				{/if}
+				{#if config.table_name}
+					<div class={css({ display: 'flex', alignItems: 'center', gap: '2' })}>
+						<span
+							class={css({
+								textTransform: 'uppercase',
+								letterSpacing: 'wide',
+								color: 'fg.muted'
+							})}>Table</span
+						>
+						<span class={css({ fontWeight: 'medium' })}
+							>{config.schema_name
+								? `${config.schema_name}.${config.table_name}`
+								: config.table_name}</span
 						>
 					</div>
 				{/if}
 			{/if}
 
 			{#if isIceberg(ds)}
-				{@const config = (ds as IcebergDataSource).config}
-				<div class={css({ display: 'flex', flexDirection: 'column', gap: '1' })}>
-					<span
-						class={css({
-							textTransform: 'uppercase',
-							letterSpacing: 'wide',
-							color: 'fg.muted'
-						})}>Location</span
-					>
-					<span
-						class={css({
-							wordBreak: 'break-all',
-							color: 'fg.secondary',
-							fontFamily: 'mono'
-						})}>{config.metadata_path}</span
-					>
-				</div>
-				{#if getExternalSource(ds)}
-					{@const externalSource = getExternalSource(ds)}
-					{@const externalSourceType = getExternalSourceType(ds)}
+				{@const externalSource = getExternalSource(ds)}
+				{@const externalSourceType = getExternalSourceType(ds)}
+				{#if externalSourceType || externalSource}
 					<div
 						class={css({
-							paddingTop: '2',
-							marginTop: '1',
 							display: 'flex',
 							flexDirection: 'column',
-							gap: '2'
+							gap: '2',
+							paddingY: '2',
+							borderTopWidth: '1',
+							borderBottomWidth: '1',
+							borderColor: 'border.primary'
 						})}
 					>
-						<span
-							class={css({
-								fontSize: '2xs',
-								textTransform: 'uppercase',
-								letterSpacing: 'wider',
-								color: 'fg.muted',
-								fontWeight: 'semibold'
-							})}>Original Source</span
-						>
+						<div class={css({ display: 'flex', alignItems: 'center', gap: '2' })}>
+							<span
+								class={css({
+									textTransform: 'uppercase',
+									letterSpacing: 'wide',
+									color: 'fg.muted'
+								})}>Original source type</span
+							>
+							<span class={css({ fontWeight: 'medium', textTransform: 'uppercase' })}>
+								{externalSourceType ?? 'unknown'}
+							</span>
+						</div>
 						<div class={css({ display: 'flex', alignItems: 'center', gap: '2' })}>
 							<span
 								class={css({
@@ -389,51 +353,56 @@
 								>
 								<span
 									class={css({
-										wordBreak: 'break-all',
-										color: 'fg.secondary',
-										fontFamily: 'mono'
+										fontFamily: 'mono',
+										fontSize: '2xs',
+										overflow: 'hidden',
+										textOverflow: 'ellipsis',
+										whiteSpace: 'nowrap'
 									})}>{externalSource.file_path}</span
 								>
 							</div>
 						{/if}
-						{#if typeof externalSource?.connection_string === 'string'}
-							<div class={css({ display: 'flex', flexDirection: 'column', gap: '1' })}>
+						{#if typeof externalSource?.database === 'string'}
+							<div class={css({ display: 'flex', alignItems: 'center', gap: '2' })}>
 								<span
 									class={css({
 										textTransform: 'uppercase',
 										letterSpacing: 'wide',
 										color: 'fg.muted'
-									})}>Connection</span
+									})}>Database</span
 								>
-								<span
-									class={css({
-										wordBreak: 'break-all',
-										color: 'fg.secondary',
-										fontFamily: 'mono'
-									})}>{externalSource.connection_string}</span
-								>
+								<span class={css({ fontWeight: 'medium' })}>{externalSource.database}</span>
 							</div>
 						{/if}
-						{#if typeof externalSource?.query === 'string'}
-							<div class={css({ display: 'flex', flexDirection: 'column', gap: '1' })}>
+						{#if typeof externalSource?.table_name === 'string'}
+							<div class={css({ display: 'flex', alignItems: 'center', gap: '2' })}>
 								<span
 									class={css({
 										textTransform: 'uppercase',
 										letterSpacing: 'wide',
 										color: 'fg.muted'
-									})}>Query</span
+									})}>Table</span
 								>
-								<span
-									class={css({
-										wordBreak: 'break-all',
-										color: 'fg.secondary',
-										fontFamily: 'mono'
-									})}>{externalSource.query}</span
-								>
+								<span class={css({ fontWeight: 'medium' })}>{externalSource.table_name}</span>
 							</div>
 						{/if}
 					</div>
 				{/if}
+			{/if}
+
+			{#if ds.created_at}
+				<div class={css({ display: 'flex', alignItems: 'center', gap: '2' })}>
+					<span
+						class={css({
+							textTransform: 'uppercase',
+							letterSpacing: 'wide',
+							color: 'fg.muted'
+						})}>Created</span
+					>
+					<span class={css({ fontWeight: 'medium' })}>
+						{formatDateDisplay(ds.created_at)}
+					</span>
+				</div>
 			{/if}
 
 			<div class={css({ display: 'flex', alignItems: 'center', gap: '4' })}>
@@ -443,23 +412,13 @@
 							textTransform: 'uppercase',
 							letterSpacing: 'wide',
 							color: 'fg.muted'
-						})}>Created</span
-					>
-					<span class={css({ fontWeight: 'medium' })}>{formatDateDisplay(ds.created_at)}</span>
-				</div>
-				<div class={css({ display: 'flex', alignItems: 'center', gap: '2' })}>
-					<span
-						class={css({
-							textTransform: 'uppercase',
-							letterSpacing: 'wide',
-							color: 'fg.muted'
 						})}>Rows</span
 					>
-					<span data-testid="datasource-row-count" class={css({ fontWeight: 'medium' })}
-						>{rowCount?.toLocaleString() ?? 'Unknown'}</span
+					<span class={css({ fontWeight: 'medium' })}
+						>{rowCount != null ? rowCount.toLocaleString() : '—'}</span
 					>
 				</div>
-				{#if schema}
+				{#if schema?.columns}
 					<div class={css({ display: 'flex', alignItems: 'center', gap: '2' })}>
 						<span
 							class={css({
@@ -482,10 +441,6 @@
 							color: 'fg.muted'
 						})}>Last updated</span
 					>
-					<FreshnessBadge
-						lastDataUpdate={ds.last_data_update}
-						thresholdMinutes={ds.freshness_threshold_minutes ?? null}
-					/>
 					{#if ds.last_data_update}
 						<span class={css({ fontWeight: 'medium' })}>
 							<RelativeTime timestamp={ds.last_data_update} />
@@ -494,42 +449,6 @@
 						<span class={css({ fontWeight: 'medium', color: 'fg.muted' })}>Never</span>
 					{/if}
 				</div>
-			</div>
-
-			<div class={css({ display: 'flex', alignItems: 'center', gap: '4' })}>
-				<label
-					for="freshness-threshold-{datasourceId}"
-					class={css({
-						textTransform: 'uppercase',
-						letterSpacing: 'wide',
-						color: 'fg.muted',
-						margin: '0'
-					})}>Freshness threshold</label
-				>
-				<select
-					id="freshness-threshold-{datasourceId}"
-					value={isCustomFreshnessThreshold ? 'custom' : (freshnessThreshold ?? '')}
-					onchange={(e) => handleThresholdChange(e.currentTarget.value)}
-					class={input()}
-					disabled={savePending}
-				>
-					{#each FRESHNESS_THRESHOLD_OPTIONS as option (option.minutes)}
-						<option value={option.minutes ?? ''}>{option.label}</option>
-					{/each}
-					<option value="custom">Custom</option>
-				</select>
-				{#if isCustomFreshnessThreshold}
-					<input
-						type="number"
-						min="1"
-						step="1"
-						aria-label="Custom freshness threshold in minutes"
-						value={customFreshnessThreshold}
-						oninput={(e) => handleCustomThresholdChange(e.currentTarget.value)}
-						class={input()}
-						disabled={savePending}
-					/>
-				{/if}
 			</div>
 		</div>
 	</div>

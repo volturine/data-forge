@@ -6,7 +6,6 @@
 	import { createAnalysis, listAnalyses } from '$lib/api/analysis';
 	import { listDatasources } from '$lib/api/datasource';
 	import { ArrowLeft, ChevronDown, Search } from '@lucide/svelte';
-	import FileTypeBadge from '$lib/components/common/FileTypeBadge.svelte';
 	import DatasourcePreview from '$lib/components/datasources/DatasourcePreview.svelte';
 	import Callout from '$lib/components/ui/Callout.svelte';
 	import { button, css, spinner } from '$lib/styles/panda';
@@ -248,13 +247,18 @@
 						display: 'inline-flex',
 						alignItems: 'center',
 						gap: '1',
-						fontSize: 'sm',
-						color: 'accent.primary',
+						fontSize: 'xs',
+						fontWeight: 'medium',
+						paddingX: '3',
+						paddingY: '2',
 						textDecoration: 'none',
-						_hover: { textDecoration: 'underline' }
+						backgroundColor: 'accent.primary',
+						color: 'fg.inverse',
+						borderWidth: '1',
+						borderColor: 'border.accent'
 					})}
 				>
-					Create a datasource
+					Add a datasource
 				</a>
 			</div>
 		{:else if filteredDatasources.length === 0}
@@ -266,10 +270,7 @@
 				{#each filteredDatasources as datasource (datasource.id)}
 					{@const isExpanded = expandedDatasourceId === datasource.id}
 					<li class={css({ borderBottomWidth: '1', borderColor: 'border.primary' })}>
-						<button
-							type="button"
-							data-ds-option={datasource.name}
-							aria-expanded={isExpanded}
+						<div
 							class={css({
 								display: 'flex',
 								alignItems: 'center',
@@ -278,7 +279,6 @@
 								paddingX: '2',
 								paddingY: '2.5',
 								textAlign: 'left',
-								cursor: 'pointer',
 								border: 'none',
 								borderLeftWidth: '2',
 								background: 'transparent',
@@ -287,39 +287,70 @@
 									? { backgroundColor: 'bg.accent', borderLeftColor: 'border.accent' }
 									: { borderLeftColor: 'transparent' })
 							})}
-							onclick={() => toggleExpanded(datasource.id)}
 						>
-							<span
+							<button
+								type="button"
+								data-ds-option={datasource.name}
+								aria-expanded={isExpanded}
 								class={css({
+									display: 'flex',
 									flex: '1',
 									minWidth: '0',
-									overflow: 'hidden',
-									textOverflow: 'ellipsis',
-									whiteSpace: 'nowrap',
-									fontFamily: 'mono',
-									fontSize: 'sm',
-									color: isExpanded ? 'accent.primary' : 'fg.primary'
+									alignItems: 'center',
+									textAlign: 'left',
+									cursor: 'pointer',
+									backgroundColor: 'transparent',
+									borderWidth: '0',
+									padding: '0'
 								})}
+								onclick={() => toggleExpanded(datasource.id)}
 							>
-								{datasource.name}
-							</span>
-							{#if datasource.source_type === 'file'}
-								<FileTypeBadge path={(datasource.config?.file_path as string) ?? ''} size="sm" />
-							{:else}
-								{@const badgeSource = datasource.source_type}
-								<FileTypeBadge sourceType={badgeSource} size="sm" />
-							{/if}
-							<ChevronDown
-								size={14}
+								<span
+									class={css({
+										overflow: 'hidden',
+										textOverflow: 'ellipsis',
+										whiteSpace: 'nowrap',
+										fontFamily: 'mono',
+										fontSize: 'sm',
+										color: isExpanded ? 'accent.primary' : 'fg.primary'
+									})}
+								>
+									{datasource.name}
+								</span>
+							</button>
+							<button
+								type="button"
+								class={button({ variant: 'primary', size: 'sm' })}
+								onclick={() => void startAnalysis(datasource)}
+							>
+								Create analysis
+							</button>
+							<button
+								type="button"
 								class={css({
-									flexShrink: '0',
-									color: 'fg.faint',
-									transitionProperty: 'transform',
-									transitionDuration: '160ms',
-									transform: isExpanded ? 'rotate(180deg)' : 'none'
+									display: 'flex',
+									alignItems: 'center',
+									justifyContent: 'center',
+									cursor: 'pointer',
+									backgroundColor: 'transparent',
+									borderWidth: '0',
+									padding: '1'
 								})}
-							/>
-						</button>
+								aria-label={isExpanded ? 'Collapse' : 'Expand'}
+								onclick={() => toggleExpanded(datasource.id)}
+							>
+								<ChevronDown
+									size={14}
+									class={css({
+										flexShrink: '0',
+										color: 'fg.faint',
+										transitionProperty: 'transform',
+										transitionDuration: '160ms',
+										transform: isExpanded ? 'rotate(180deg)' : 'none'
+									})}
+								/>
+							</button>
+						</div>
 
 						{#if isExpanded}
 							<div
@@ -347,35 +378,6 @@
 										Opening<strong class={css({ color: 'fg.primary' })}>{datasource.name}</strong>…
 									</div>
 								{:else}
-									<div
-										class={css({
-											display: 'flex',
-											alignItems: 'center',
-											justifyContent: 'space-between',
-											gap: '3',
-											marginBottom: '3'
-										})}
-									>
-										<span
-											class={css({
-												fontSize: '2xs',
-												fontWeight: 'semibold',
-												textTransform: 'uppercase',
-												letterSpacing: 'wider',
-												color: 'fg.faint'
-											})}
-										>
-											Preview
-										</span>
-										<button
-											type="button"
-											class={button({ variant: 'primary', size: 'sm' })}
-											onclick={() => void startAnalysis(datasource)}
-										>
-											Create analysis
-										</button>
-									</div>
-
 									<div
 										class={css({
 											height: 'panel',

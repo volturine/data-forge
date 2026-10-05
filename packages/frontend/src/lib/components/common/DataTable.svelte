@@ -523,7 +523,7 @@
 		fillContainer && { height: '100%', display: 'flex', flexDirection: 'column' }
 	)}
 >
-	{#if showHeader}
+	{#if showHeader && (!loading || data.length > 0) && !error}
 		<div
 			class={css({
 				display: 'flex',
@@ -598,36 +598,6 @@
 		</div>
 	{/if}
 
-	{#if loading}
-		<div
-			class={css(
-				{
-					display: 'flex',
-					flexDirection: 'column',
-					alignItems: 'center',
-					justifyContent: 'center',
-					gap: '3',
-					color: 'fg.tertiary',
-					minHeight: '48',
-					paddingY: '8'
-				},
-				data.length > 0
-					? {
-							position: 'absolute',
-							inset: '0',
-							zIndex: '10',
-							backgroundColor: 'bg.overlaySoft'
-						}
-					: fillContainer
-						? { flex: '1', width: '100%' }
-						: { width: '100%' }
-			)}
-		>
-			<LoaderCircle size={18} class={css({ animation: 'spin 1s linear infinite' })} />
-			<p class={css({ margin: '0', color: 'fg.tertiary' })}>Loading</p>
-		</div>
-	{/if}
-
 	{#if error}
 		<div
 			class={css(
@@ -641,7 +611,7 @@
 					minHeight: '48',
 					paddingY: '8'
 				},
-				fillContainer ? { flex: '1', width: '100%' } : { width: '100%' }
+				fillContainer ? { flex: '1', width: '100%', height: '100%' } : { width: '100%' }
 			)}
 			data-testid="preview-error"
 		>
@@ -655,432 +625,476 @@
 					: error.message}
 			</p>
 		</div>
-	{/if}
-
-	{#if !loading && data.length === 0}
-		{#if analysis}
-			<button
-				type="button"
-				class={css(
-					{
-						display: 'flex',
-						width: '100%',
-						flexDirection: 'column',
-						alignItems: 'center',
-						justifyContent: 'center',
-						gap: '3',
-						color: 'fg.tertiary',
-						border: 'none',
-						backgroundColor: 'transparent',
-						cursor: onPreview ? 'pointer' : 'default',
-						minHeight: '48',
-						paddingY: '8'
-					},
-					fillContainer && { flex: '1' }
-				)}
-				tabindex={onPreview ? 0 : -1}
-				disabled={!onPreview}
-				onclick={handlePreview}
-				onkeydown={handlePreviewKey}
-			>
-				<Play size={18} />
-				<p class={css({ margin: '0', color: 'fg.tertiary' })}>Preview</p>
-			</button>
-		{:else}
-			<div
-				class={css(
-					{
-						display: 'flex',
-						width: '100%',
-						flexDirection: 'column',
-						alignItems: 'center',
-						justifyContent: 'center',
-						padding: '12',
-						textAlign: 'center',
-						margin: '0',
-						color: 'fg.muted',
-						minHeight: '48'
-					},
-					fillContainer && { flex: '1' }
-				)}
-			>
-				<p class={css({ margin: '0' })}>No data available</p>
-			</div>
-		{/if}
-	{:else if headerGroups.length > 0}
+	{:else if loading && data.length === 0}
 		<div
 			class={css(
-				{ overflowX: 'auto', overflowY: 'auto', backgroundColor: 'bg.primary' },
-				fillContainer && { flex: '1' }
+				{
+					display: 'flex',
+					flexDirection: 'column',
+					alignItems: 'center',
+					justifyContent: 'center',
+					gap: '3',
+					color: 'fg.tertiary',
+					minHeight: '48',
+					paddingY: '8'
+				},
+				fillContainer ? { flex: '1', width: '100%', height: '100%' } : { width: '100%' }
 			)}
-			bind:this={scrollRef}
-			onwheel={handleScrollWheel}
-			data-testid="data-table-scroll"
 		>
-			<table
+			<LoaderCircle size={18} class={css({ animation: 'spin 1s linear infinite' })} />
+			<p class={css({ margin: '0', color: 'fg.tertiary' })}>Loading</p>
+		</div>
+	{:else}
+		{#if loading && data.length > 0}
+			<div
 				class={css({
-					tableLayout: 'fixed',
-					minWidth: '100%',
-					width: '100%',
-					borderCollapse: 'collapse',
-					fontSize: 'sm'
+					display: 'flex',
+					flexDirection: 'column',
+					alignItems: 'center',
+					justifyContent: 'center',
+					gap: '3',
+					color: 'fg.tertiary',
+					minHeight: '48',
+					paddingY: '8',
+					position: 'absolute',
+					inset: '0',
+					zIndex: '10',
+					backgroundColor: 'bg.overlaySoft'
 				})}
-				use:setWidth={table.getTotalSize()}
 			>
-				<thead
-					class={css({
-						position: 'sticky',
-						top: '0',
-						zIndex: '20',
-						backgroundColor: 'bg.tertiary'
-					})}
+				<LoaderCircle size={18} class={css({ animation: 'spin 1s linear infinite' })} />
+				<p class={css({ margin: '0', color: 'fg.tertiary' })}>Loading</p>
+			</div>
+		{/if}
+
+		{#if !loading && data.length === 0}
+			{#if analysis}
+				<button
+					type="button"
+					class={css(
+						{
+							display: 'flex',
+							width: '100%',
+							flexDirection: 'column',
+							alignItems: 'center',
+							justifyContent: 'center',
+							gap: '3',
+							color: 'fg.tertiary',
+							border: 'none',
+							backgroundColor: 'transparent',
+							cursor: onPreview ? 'pointer' : 'default',
+							minHeight: '48',
+							paddingY: '8'
+						},
+						fillContainer && { flex: '1' }
+					)}
+					tabindex={onPreview ? 0 : -1}
+					disabled={!onPreview}
+					onclick={handlePreview}
+					onkeydown={handlePreviewKey}
 				>
-					{#each headerGroups as headerGroup (headerGroup.id)}
-						<tr>
-							{#each headerGroup.headers as header (header.id)}
-								{@const headerLabel =
-									typeof header.column.columnDef.header === 'string'
-										? header.column.columnDef.header
-										: header.id}
-								<th
-									class={css(
-										{
-											position: 'relative',
-											borderRightWidth: '1',
-											_last: { borderRight: 'none' },
-											padding: '0',
-											textAlign: 'left',
-											fontWeight: 'semibold',
-											borderBottomWidth: '1'
-										},
-										dragOver === header.id && {
-											outlineWidth: '2',
-											outlineStyle: 'dashed',
-											outlineColor: 'border.primary'
-										},
-										dragColumn === header.id && { opacity: '0.6' }
-									)}
-									data-column-header
-									data-column-id={header.id}
-									use:setWidth={header.getSize()}
-								>
-									<div
-										class={css({
-											minHeight: 'rowLg',
-											gap: '2',
-											display: 'flex',
-											alignItems: 'flex-start',
-											justifyContent: 'space-between',
-											width: '100%',
-											paddingX: '4',
-											paddingY: '2'
-										})}
+					<Play size={18} />
+					<p class={css({ margin: '0', color: 'fg.tertiary' })}>Preview</p>
+				</button>
+			{:else}
+				<div
+					class={css(
+						{
+							display: 'flex',
+							width: '100%',
+							flexDirection: 'column',
+							alignItems: 'center',
+							justifyContent: 'center',
+							padding: '12',
+							textAlign: 'center',
+							margin: '0',
+							color: 'fg.muted',
+							minHeight: '48'
+						},
+						fillContainer && { flex: '1' }
+					)}
+				>
+					<p class={css({ margin: '0' })}>No data available</p>
+				</div>
+			{/if}
+		{:else if headerGroups.length > 0}
+			<div
+				class={css(
+					{ overflowX: 'auto', overflowY: 'auto', backgroundColor: 'bg.primary' },
+					fillContainer && { flex: '1' }
+				)}
+				bind:this={scrollRef}
+				onwheel={handleScrollWheel}
+				data-testid="data-table-scroll"
+			>
+				<table
+					class={css({
+						tableLayout: 'fixed',
+						minWidth: '100%',
+						width: '100%',
+						borderCollapse: 'collapse',
+						fontSize: 'sm'
+					})}
+					use:setWidth={table.getTotalSize()}
+				>
+					<thead
+						class={css({
+							position: 'sticky',
+							top: '0',
+							zIndex: '20',
+							backgroundColor: 'bg.tertiary'
+						})}
+					>
+						{#each headerGroups as headerGroup (headerGroup.id)}
+							<tr>
+								{#each headerGroup.headers as header (header.id)}
+									{@const headerLabel =
+										typeof header.column.columnDef.header === 'string'
+											? header.column.columnDef.header
+											: header.id}
+									<th
+										class={css(
+											{
+												position: 'relative',
+												borderRightWidth: '1',
+												_last: { borderRight: 'none' },
+												padding: '0',
+												textAlign: 'left',
+												fontWeight: 'semibold',
+												borderBottomWidth: '1'
+											},
+											dragOver === header.id && {
+												outlineWidth: '2',
+												outlineStyle: 'dashed',
+												outlineColor: 'border.primary'
+											},
+											dragColumn === header.id && { opacity: '0.6' }
+										)}
+										data-column-header
+										data-column-id={header.id}
+										use:setWidth={header.getSize()}
 									>
 										<div
 											class={css({
-												display: 'flex',
+												minHeight: 'rowLg',
 												gap: '2',
-												alignItems: 'center',
-												flex: '1',
-												minWidth: '0'
+												display: 'flex',
+												alignItems: 'flex-start',
+												justifyContent: 'space-between',
+												width: '100%',
+												paddingX: '4',
+												paddingY: '2'
 											})}
 										>
 											<div
 												class={css({
-													display: 'inline-flex',
-													gap: '1'
+													display: 'flex',
+													gap: '2',
+													alignItems: 'center',
+													flex: '1',
+													minWidth: '0'
 												})}
 											>
 												<div
 													class={css({
-														width: 'iconSm',
-														height: 'iconSm',
 														display: 'inline-flex',
-														alignItems: 'center',
-														justifyContent: 'center'
+														gap: '1'
 													})}
 												>
-													{#if columnPinning().start.includes(header.id) || columnPinning().end.includes(header.id)}
-														<Pin
-															class={css({ alignSelf: 'center', color: 'fg.muted' })}
-															size={12}
-														/>
-													{:else}
-														<button
-															class={css({
-																border: 'none',
-																background: 'transparent',
-																color: 'fg.muted',
-																display: 'inline-flex',
-																alignItems: 'center',
-																justifyContent: 'center',
-																cursor: 'grab',
-																alignSelf: 'center',
-																_icon: { stroke: 'currentColor', fill: 'none' },
-																_hover: { color: 'fg.primary' },
-																_active: { cursor: 'grabbing' }
-															})}
-															onpointerdown={(event) =>
-																handleColumnPointerDown(event, header.id, headerLabel)}
-															onpointermove={handleColumnPointerMove}
-															onpointerup={handleColumnPointerUp}
-															onpointercancel={handleColumnPointerUp}
-															aria-label="Drag to reorder"
-														>
-															<GripVertical size={12} />
-														</button>
+													<div
+														class={css({
+															width: 'iconSm',
+															height: 'iconSm',
+															display: 'inline-flex',
+															alignItems: 'center',
+															justifyContent: 'center'
+														})}
+													>
+														{#if columnPinning().start.includes(header.id) || columnPinning().end.includes(header.id)}
+															<Pin
+																class={css({ alignSelf: 'center', color: 'fg.muted' })}
+																size={12}
+															/>
+														{:else}
+															<button
+																class={css({
+																	border: 'none',
+																	background: 'transparent',
+																	color: 'fg.muted',
+																	display: 'inline-flex',
+																	alignItems: 'center',
+																	justifyContent: 'center',
+																	cursor: 'grab',
+																	alignSelf: 'center',
+																	_icon: { stroke: 'currentColor', fill: 'none' },
+																	_hover: { color: 'fg.primary' },
+																	_active: { cursor: 'grabbing' }
+																})}
+																onpointerdown={(event) =>
+																	handleColumnPointerDown(event, header.id, headerLabel)}
+																onpointermove={handleColumnPointerMove}
+																onpointerup={handleColumnPointerUp}
+																onpointercancel={handleColumnPointerUp}
+																aria-label="Drag to reorder"
+															>
+																<GripVertical size={12} />
+															</button>
+														{/if}
+													</div>
+												</div>
+												<div
+													class={css({
+														display: 'flex',
+														flexDirection: 'column',
+														gap: 'tight',
+														alignItems: 'flex-start',
+														alignSelf: 'flex-start',
+														minWidth: '0'
+													})}
+													role="presentation"
+												>
+													<span
+														class={css({
+															maxWidth: '100%',
+															overflow: 'hidden',
+															textOverflow: 'ellipsis',
+															whiteSpace: 'nowrap',
+															fontFamily: 'mono',
+															fontSize: 'sm',
+															fontWeight: 'semibold'
+														})}
+													>
+														{typeof header.column.columnDef.header === 'string'
+															? header.column.columnDef.header
+															: header.id}
+													</span>
+													{#if showTypeBadges}
+														{#if getColumnType(header.id)}
+															<ColumnTypeBadge columnType={getColumnType(header.id)} size="xs" />
+														{:else}
+															<span class={css({ fontSize: 'xs', color: 'fg.muted' })}>-</span>
+														{/if}
 													{/if}
 												</div>
 											</div>
 											<div
 												class={css({
-													display: 'flex',
-													flexDirection: 'column',
-													gap: 'tight',
-													alignItems: 'flex-start',
-													alignSelf: 'flex-start',
-													minWidth: '0'
+													display: 'inline-flex',
+													gap: '1',
+													alignSelf: 'center',
+													flexShrink: '0'
 												})}
-												role="presentation"
 											>
-												<span
+												<button
 													class={css({
-														maxWidth: '100%',
-														overflow: 'hidden',
-														textOverflow: 'ellipsis',
-														whiteSpace: 'nowrap',
-														fontFamily: 'mono',
-														fontSize: 'sm',
-														fontWeight: 'semibold'
+														border: 'none',
+														background: 'transparent',
+														color: 'fg.muted',
+														padding: '0',
+														display: 'inline-flex',
+														alignItems: 'center',
+														justifyContent: 'center',
+														_hover: { color: 'fg.primary' }
 													})}
+													onclick={() => toggleColumnMenu(header.id)}
+													aria-label="Column options"
 												>
-													{typeof header.column.columnDef.header === 'string'
-														? header.column.columnDef.header
-														: header.id}
-												</span>
-												{#if showTypeBadges}
-													{#if getColumnType(header.id)}
-														<ColumnTypeBadge columnType={getColumnType(header.id)} size="xs" />
-													{:else}
-														<span class={css({ fontSize: 'xs', color: 'fg.muted' })}>-</span>
-													{/if}
-												{/if}
+													<Settings2 size={12} />
+												</button>
 											</div>
 										</div>
-										<div
-											class={css({
-												display: 'inline-flex',
-												gap: '1',
-												alignSelf: 'center',
-												flexShrink: '0'
-											})}
-										>
+										{#if enableResize}
 											<button
-												class={css({
-													border: 'none',
-													background: 'transparent',
-													color: 'fg.muted',
-													padding: '0',
-													display: 'inline-flex',
-													alignItems: 'center',
-													justifyContent: 'center',
-													_hover: { color: 'fg.primary' }
-												})}
-												onclick={() => toggleColumnMenu(header.id)}
-												aria-label="Column options"
-											>
-												<Settings2 size={12} />
-											</button>
-										</div>
-									</div>
-									{#if enableResize}
-										<button
-											class={css(
-												{
-													position: 'absolute',
-													top: '0',
-													right: '-3px',
-													width: 'bar',
-													height: '100%',
-													cursor: 'col-resize',
-													background: 'transparent',
-													padding: '0',
-													smDown: { width: 'dot' },
-													_after: {
-														content: "''",
+												class={css(
+													{
 														position: 'absolute',
-														opacity: '0',
-														width: 'px',
+														top: '0',
+														right: '-3px',
+														width: 'bar',
 														height: '100%',
-														background: 'accent.primary'
+														cursor: 'col-resize',
+														background: 'transparent',
+														padding: '0',
+														smDown: { width: 'dot' },
+														_after: {
+															content: "''",
+															position: 'absolute',
+															opacity: '0',
+															width: 'px',
+															height: '100%',
+															background: 'accent.primary'
+														},
+														_hover: { _after: { opacity: '1' } }
 													},
-													_hover: { _after: { opacity: '1' } }
-												},
-												header.column.getIsResizing() && { _after: { opacity: '1' } }
-											)}
-											onmousedown={header.getResizeHandler()}
-											ontouchstart={header.getResizeHandler()}
-											aria-label="Resize column"
-										></button>
-									{/if}
-									{#if activeColumn === header.id}
-										<div
-											class={css({
-												position: 'absolute',
-												right: '1',
-												top: '10',
-												background: 'bg.primary',
-												borderWidth: '1',
-												zIndex: 'tooltip',
-												padding: '2',
-												minWidth: 'inputSm',
-												boxShadow: 'menu',
-												display: 'flex',
-												flexDirection: 'column',
-												gap: '1'
-											})}
-											bind:this={columnMenuRef}
-											use:overlayStack.action={columnMenuOverlayConfig}
-										>
-											<button class={menuItem()} onclick={() => setSort(header.id, 'asc')}
-												>Sort A-Z</button
+													header.column.getIsResizing() && { _after: { opacity: '1' } }
+												)}
+												onmousedown={header.getResizeHandler()}
+												ontouchstart={header.getResizeHandler()}
+												aria-label="Resize column"
+											></button>
+										{/if}
+										{#if activeColumn === header.id}
+											<div
+												class={css({
+													position: 'absolute',
+													right: '1',
+													top: '10',
+													background: 'bg.primary',
+													borderWidth: '1',
+													zIndex: 'tooltip',
+													padding: '2',
+													minWidth: 'inputSm',
+													boxShadow: 'menu',
+													display: 'flex',
+													flexDirection: 'column',
+													gap: '1'
+												})}
+												bind:this={columnMenuRef}
+												use:overlayStack.action={columnMenuOverlayConfig}
 											>
-											<button class={menuItem()} onclick={() => setSort(header.id, 'desc')}
-												>Sort Z-A</button
-											>
-											<button class={menuItem()} onclick={() => setSort(header.id, 'none')}
-												>Clear sort</button
-											>
-											<button class={menuItem()} onclick={() => pinColumn(header.id, 'left')}
-												>Pin left</button
-											>
-											<button class={menuItem()} onclick={() => pinColumn(header.id, 'right')}
-												>Pin right</button
-											>
-											<button class={menuItem()} onclick={() => pinColumn(header.id, 'none')}
-												>Unpin</button
-											>
-											<button class={menuItem()} onclick={() => toggleColumnVisibility(header.id)}>
-												{(columnVisibility()[header.id] ?? true) ? 'Hide column' : 'Show column'}
-											</button>
-											{#if onColumnStats}
+												<button class={menuItem()} onclick={() => setSort(header.id, 'asc')}
+													>Sort A-Z</button
+												>
+												<button class={menuItem()} onclick={() => setSort(header.id, 'desc')}
+													>Sort Z-A</button
+												>
+												<button class={menuItem()} onclick={() => setSort(header.id, 'none')}
+													>Clear sort</button
+												>
+												<button class={menuItem()} onclick={() => pinColumn(header.id, 'left')}
+													>Pin left</button
+												>
+												<button class={menuItem()} onclick={() => pinColumn(header.id, 'right')}
+													>Pin right</button
+												>
+												<button class={menuItem()} onclick={() => pinColumn(header.id, 'none')}
+													>Unpin</button
+												>
 												<button
 													class={menuItem()}
-													onclick={() => {
-														onColumnStats(header.id);
-														activeColumn = null;
-													}}
+													onclick={() => toggleColumnVisibility(header.id)}
 												>
-													Column stats
+													{(columnVisibility()[header.id] ?? true) ? 'Hide column' : 'Show column'}
+												</button>
+												{#if onColumnStats}
+													<button
+														class={menuItem()}
+														onclick={() => {
+															onColumnStats(header.id);
+															activeColumn = null;
+														}}
+													>
+														Column stats
+													</button>
+												{/if}
+											</div>
+										{/if}
+									</th>
+								{/each}
+							</tr>
+						{/each}
+					</thead>
+					<tbody>
+						{#each rows as row (row.id)}
+							<tr
+								class={css({
+									_hover: { backgroundColor: 'bg.hover' }
+								})}
+							>
+								{#each row.getVisibleCells() as cell (cell.id)}
+									{@const display = formatValue(cell.getValue() as TableCellValue, cell.column.id)}
+									<td
+										class={css({
+											padding: '0',
+											borderRightWidth: '1',
+											borderBottomWidth: '1',
+											_last: { borderRight: 'none' }
+										})}
+									>
+										<div
+											class={[
+												'group',
+												css({
+													position: 'relative',
+													paddingRight: '9',
+													whiteSpace: 'nowrap',
+													overflow: 'hidden',
+													textOverflow: 'ellipsis',
+													minHeight: 'row',
+													display: 'flex',
+													alignItems: 'center',
+													minWidth: '0',
+													paddingX: '4',
+													fontSize: 'sm',
+													color: 'fg.secondary'
+												}),
+												compact &&
+													css({
+														paddingTop: '2',
+														paddingBottom: '2'
+													}),
+												isListType(getColumnType(cell.column.id)) && css({ fontSize: 'xs' })
+											]}
+											role="presentation"
+											onmouseenter={(event) => tipShow(event, cell.id, display)}
+											onmouseleave={() => tipHide(cell.id)}
+										>
+											<span
+												class={css({
+													flex: '1',
+													minWidth: '0',
+													overflow: 'hidden',
+													textOverflow: 'ellipsis',
+													display: 'block'
+												})}
+												data-cell-value="true">{display}</span
+											>
+											{#if enableCopy}
+												<button
+													class={css({
+														position: 'absolute',
+														top: '50%',
+														right: '2',
+														transform: 'translateY(-50%)',
+														opacity: '0',
+														color: 'fg.muted',
+														display: 'inline-flex',
+														alignItems: 'center',
+														justifyContent: 'center',
+														backgroundColor: 'transparent',
+														padding: '0',
+														transition: 'none',
+														_icon: { stroke: 'currentColor', fill: 'none' },
+														_groupHover: { opacity: '1' },
+														smDown: { opacity: '1', width: 'row', height: 'row' }
+													})}
+													aria-label="Copy cell value"
+													onclick={(event) => copyValue(event, cell.id, display)}
+												>
+													<span
+														class={css({
+															display: copiedCells.has(cell.id) ? 'none' : 'block'
+														})}><Copy size={14} /></span
+													>
+													<span
+														class={css({
+															display: copiedCells.has(cell.id) ? 'block' : 'none'
+														})}><Check size={14} /></span
+													>
 												</button>
 											{/if}
 										</div>
-									{/if}
-								</th>
-							{/each}
-						</tr>
-					{/each}
-				</thead>
-				<tbody>
-					{#each rows as row (row.id)}
-						<tr
-							class={css({
-								_hover: { backgroundColor: 'bg.hover' }
-							})}
-						>
-							{#each row.getVisibleCells() as cell (cell.id)}
-								{@const display = formatValue(cell.getValue() as TableCellValue, cell.column.id)}
-								<td
-									class={css({
-										padding: '0',
-										borderRightWidth: '1',
-										borderBottomWidth: '1',
-										_last: { borderRight: 'none' }
-									})}
-								>
-									<div
-										class={[
-											'group',
-											css({
-												position: 'relative',
-												paddingRight: '9',
-												whiteSpace: 'nowrap',
-												overflow: 'hidden',
-												textOverflow: 'ellipsis',
-												minHeight: 'row',
-												display: 'flex',
-												alignItems: 'center',
-												minWidth: '0',
-												paddingX: '4',
-												fontSize: 'sm',
-												color: 'fg.secondary'
-											}),
-											compact &&
-												css({
-													paddingTop: '2',
-													paddingBottom: '2'
-												}),
-											isListType(getColumnType(cell.column.id)) && css({ fontSize: 'xs' })
-										]}
-										role="presentation"
-										onmouseenter={(event) => tipShow(event, cell.id, display)}
-										onmouseleave={() => tipHide(cell.id)}
-									>
-										<span
-											class={css({
-												flex: '1',
-												minWidth: '0',
-												overflow: 'hidden',
-												textOverflow: 'ellipsis',
-												display: 'block'
-											})}
-											data-cell-value="true">{display}</span
-										>
-										{#if enableCopy}
-											<button
-												class={css({
-													position: 'absolute',
-													top: '50%',
-													right: '2',
-													transform: 'translateY(-50%)',
-													opacity: '0',
-													color: 'fg.muted',
-													display: 'inline-flex',
-													alignItems: 'center',
-													justifyContent: 'center',
-													backgroundColor: 'transparent',
-													padding: '0',
-													transition: 'none',
-													_icon: { stroke: 'currentColor', fill: 'none' },
-													_groupHover: { opacity: '1' },
-													smDown: { opacity: '1', width: 'row', height: 'row' }
-												})}
-												aria-label="Copy cell value"
-												onclick={(event) => copyValue(event, cell.id, display)}
-											>
-												<span
-													class={css({
-														display: copiedCells.has(cell.id) ? 'none' : 'block'
-													})}><Copy size={14} /></span
-												>
-												<span
-													class={css({
-														display: copiedCells.has(cell.id) ? 'block' : 'none'
-													})}><Check size={14} /></span
-												>
-											</button>
-										{/if}
-									</div>
-								</td>
-							{/each}
-						</tr>
-					{/each}
-				</tbody>
-			</table>
-		</div>
+									</td>
+								{/each}
+							</tr>
+						{/each}
+					</tbody>
+				</table>
+			</div>
+		{/if}
 	{/if}
 
-	{#if showFooter && !loading && data.length > 0}
+	{#if showFooter && !loading && !error && data.length > 0}
 		<div
 			class={css({
 				borderTopWidth: '1',

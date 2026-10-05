@@ -84,6 +84,10 @@ function makeQueryResult(overrides: Record<string, unknown> = {}) {
 let datasourceQueryState = makeQueryResult();
 let schemaQueryState = makeQueryResult();
 
+const mockInvalidateQueries = vi.fn();
+const mockSetQueryData = vi.fn();
+const mockSetQueriesData = vi.fn();
+
 vi.mock('@tanstack/svelte-query', () => ({
 	createQuery: (optsFn: () => Record<string, unknown>) => {
 		const opts = optsFn();
@@ -101,8 +105,9 @@ vi.mock('@tanstack/svelte-query', () => ({
 		error: null
 	}),
 	useQueryClient: () => ({
-		invalidateQueries: vi.fn(),
-		setQueryData: vi.fn()
+		invalidateQueries: (...args: unknown[]) => mockInvalidateQueries(...args),
+		setQueryData: (...args: unknown[]) => mockSetQueryData(...args),
+		setQueriesData: (...args: unknown[]) => mockSetQueriesData(...args)
 	})
 }));
 
@@ -149,6 +154,9 @@ beforeEach(() => {
 	mockBuildLoad.mockReset();
 	mockBuildClose.mockReset();
 	mockBuildReset.mockReset();
+	mockInvalidateQueries.mockReset();
+	mockSetQueryData.mockReset();
+	mockSetQueriesData.mockReset();
 	mockBuilds = [];
 	mockBuildStatus = 'disconnected';
 	mockBuildError = null;
@@ -186,24 +194,46 @@ describe('DatasourceConfigPanel', () => {
 		expect(mockBuildClose).toHaveBeenCalledTimes(2);
 	});
 
-	test('clears a custom freshness threshold back to the default', async () => {
-		renderPanel({ datasource: makeDatasource({ freshness_threshold_minutes: 90 }) });
-
-		const threshold = screen.getByLabelText('Freshness threshold');
-		expect(threshold).toHaveValue('custom');
-
-		await fireEvent.change(threshold, { target: { value: '' } });
-
-		expect(threshold).toHaveValue('');
-	});
-
-	test('shows an input for a custom freshness threshold', async () => {
-		renderPanel();
-
-		await fireEvent.change(screen.getByLabelText('Freshness threshold'), {
-			target: { value: 'custom' }
+	test('re-ingests external datasource from source and invalidates preview and snapshots', async () => {
+		const reingestDs = makeDatasource({
+			id: 'ds-csv',
+			name: 'CSV Datasource',
+			config: {
+				source: { source_type: 'file', file_type: 'csv', file_path: '/data.csv' },
+				metadata_path: '/tmp/metadata'
+			}
+		});
+		datasourceQueryState = makeQueryResult({ data: reingestDs });
+		const nextDs = { ...reingestDs, name: 'CSV Datasource Updated' };
+		mockIngestDatasource.mockResolvedValueOnce({
+			isErr: () => false,
+			isOk: () => true,
+			value: nextDs
+		});
+		mockGetDatasourceSchema.mockResolvedValueOnce({
+			isErr: () => false,
+			isOk: () => true,
+			value: makeSchema({ columns: [{ name: 'col_a', dtype: 'string', nullable: true }] })
 		});
 
-		expect(screen.getByLabelText('Custom freshness threshold in minutes')).toBeVisible();
+		const onSave = vi.fn();
+		renderPanel({ datasource: reingestDs, onSave });
+
+		const reingestBtn = screen.getByRole('button', { name: /re-ingest from source/i });
+		expect(reingestBtn).toBeInTheDocument();
+
+		await fireEvent.click(reingestBtn);
+
+		await vi.waitFor(() => {
+			expect(mockIngestDatasource).toHaveBeenCalledWith('ds-csv');
+			expect(mockSetQueryData).toHaveBeenCalledWith(['datasource', 'default', 'ds-csv'], nextDs);
+			expect(mockInvalidateQueries).toHaveBeenCalledWith({
+				queryKey: ['datasource-preview', 'default', 'ds-csv']
+			});
+			expect(mockInvalidateQueries).toHaveBeenCalledWith({
+				queryKey: ['iceberg-snapshots', 'ds-csv']
+			});
+			expect(onSave).toHaveBeenCalled();
+		});
 	});
 });

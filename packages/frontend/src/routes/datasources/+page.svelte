@@ -16,8 +16,6 @@
 	} from '@lucide/svelte';
 	import ConfirmDialog from '$lib/components/common/ConfirmDialog.svelte';
 	import BranchPicker from '$lib/components/common/BranchPicker.svelte';
-	import FileTypeBadge from '$lib/components/common/FileTypeBadge.svelte';
-	import FreshnessBadge from '$lib/components/common/FreshnessBadge.svelte';
 	import RelativeTime from '$lib/components/common/RelativeTime.svelte';
 	import RowActionMenu from '$lib/components/common/RowActionMenu.svelte';
 	import DatasourcePreview from '$lib/components/datasources/DatasourcePreview.svelte';
@@ -188,6 +186,7 @@
 	});
 
 	function handleConfigSaved() {
+		resetPreviewLocals();
 		queryClient.invalidateQueries({ queryKey: ['datasources'] });
 	}
 
@@ -330,7 +329,7 @@
 		</header>
 
 		<!-- Datasource List -->
-		<div class={css({ flex: '1', overflowY: 'auto' })}>
+		<div class={css({ flex: '1', overflowY: 'auto' })} role="feed" aria-label="Data sources">
 			{#if ns.status === 'failed'}
 				<Callout tone="error">Namespace is unavailable: {ns.error ?? 'Unknown error'}</Callout>
 			{:else if !namespaceReady || query.isPending || query.isLoading || (query.isFetching && !query.data)}
@@ -349,7 +348,7 @@
 					Error: {query.error instanceof Error ? query.error.message : 'Unknown error'}
 				</Callout>
 			{:else if datasources.length === 0}
-				<div class={css({ padding: '8', textAlign: 'center' })}>
+				<div class={css({ padding: '8', textAlign: 'center' })} role="article">
 					<p class={css({ fontSize: 'sm', color: 'fg.muted', marginBottom: '4' })}>
 						No data sources yet.
 					</p>
@@ -366,14 +365,18 @@
 							textDecoration: 'none',
 							backgroundColor: 'accent.primary',
 							color: 'fg.inverse',
-							borderWidth: '1'
+							borderWidth: '1',
+							borderColor: 'border.accent'
 						})}
 					>
 						Create your first data source
 					</a>
 				</div>
 			{:else if filteredDatasources.length === 0}
-				<div class={css({ padding: '8', textAlign: 'center', fontSize: 'sm', color: 'fg.muted' })}>
+				<div
+					class={css({ padding: '8', textAlign: 'center', fontSize: 'sm', color: 'fg.muted' })}
+					role="article"
+				>
 					No datasources match "{searchQuery}"
 				</div>
 			{:else}
@@ -381,6 +384,7 @@
 					<div
 						data-ds-row={datasource.name}
 						data-ds-id={datasource.id}
+						role="article"
 						class={css({
 							borderBottomWidth: '1',
 							...(activeSelectedId === datasource.id
@@ -418,23 +422,21 @@
 								<div
 									class={css({
 										display: 'flex',
-										minWidth: '0',
-										flex: '1',
 										flexDirection: 'column',
-										gap: '1'
+										gap: '1',
+										minWidth: '0',
+										flex: '1'
 									})}
 								>
-									<div
-										class={css({ display: 'flex', minWidth: '0', alignItems: 'center', gap: '2' })}
-									>
+									<div class={css({ display: 'flex', alignItems: 'center', gap: '2' })}>
 										<span
 											class={css({
-												fontWeight: 'medium',
-												textOverflow: 'ellipsis',
-												overflow: 'hidden',
-												whiteSpace: 'nowrap',
 												fontSize: 'sm',
-												color: activeSelectedId === datasource.id ? 'accent.primary' : undefined
+												fontWeight: 'medium',
+												overflow: 'hidden',
+												textOverflow: 'ellipsis',
+												whiteSpace: 'nowrap',
+												color: activeSelectedId === datasource.id ? 'accent.primary' : 'fg.primary'
 											})}
 										>
 											{datasource.name}
@@ -482,11 +484,6 @@
 												Import
 											</span>
 										{/if}
-										<FileTypeBadge sourceType={datasource.source_type} size="sm" />
-										<FreshnessBadge
-											lastDataUpdate={datasource.last_data_update}
-											thresholdMinutes={datasource.freshness_threshold_minutes ?? null}
-										/>
 									</div>
 									{#if datasource.description}
 										<p
@@ -679,26 +676,21 @@
 						backgroundColor: 'bg.secondary'
 					})}
 				>
-					<div class={css({ textAlign: 'center' })}>
-						<p class={css({ fontSize: 'lg', fontWeight: 'medium', marginBottom: '2' })}>
-							No datasource selected
-						</p>
-						<p class={css({ fontSize: 'sm' })}>Select a datasource from the list to preview</p>
-					</div>
+					Select a datasource from the list to preview its data.
 				</div>
 			{/if}
 		{/key}
 	</main>
 </div>
 
-<ConfirmDialog
-	show={deletingId !== null}
-	heading="Delete Datasource"
-	message={deleteConfirmName
-		? `Are you sure you want to delete "${deleteConfirmName}"? This action cannot be undone.`
-		: 'Are you sure you want to delete this datasource? This action cannot be undone.'}
-	confirmText="Delete"
-	cancelText="Cancel"
-	onConfirm={confirmDelete}
-	onCancel={cancelDelete}
-/>
+{#if deletingId}
+	<ConfirmDialog
+		show={true}
+		heading="Delete Datasource"
+		message={`Are you sure you want to delete "${deleteConfirmName || 'this datasource'}"? This action cannot be undone.`}
+		confirmText="Delete"
+		cancelText="Cancel"
+		onConfirm={confirmDelete}
+		onCancel={cancelDelete}
+	/>
+{/if}
