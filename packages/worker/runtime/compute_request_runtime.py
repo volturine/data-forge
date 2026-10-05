@@ -1002,7 +1002,7 @@ def _publish_staged_datasource(
             config = dict(metadata.config or {})
         config.update(datasource_execution._build_iceberg_config(target_path, branch, source_config=source))
         if not create:
-            for key in ('time_travel_snapshot_id', 'time_travel_snapshot_timestamp_ms', 'time_travel_ui'):
+            for key in ("time_travel_snapshot_id", "time_travel_snapshot_timestamp_ms", "time_travel_ui"):
                 config.pop(key, None)
         datasource_execution._set_snapshot_metadata(config, table)
         if create:

@@ -451,7 +451,6 @@ def test_failed_or_stale_import_leaves_only_claim_prefix_for_durable_cleanup(mon
     assert deleted_objects == []
 
 
-
 def test_reingest_datasource_strips_stale_time_travel_keys(monkeypatch: pytest.MonkeyPatch) -> None:
     from runtime import compute_request_runtime
 
@@ -469,12 +468,15 @@ def test_reingest_datasource_strips_stale_time_travel_keys(monkeypatch: pytest.M
 
         def publish_datasource_ingest(self, **kwargs: object) -> object:
             published_configs.append(kwargs.get("config"))
+
             class Rec:
                 name = "ds-1"
                 source_type = "iceberg"
                 config = {}
+
                 def model_dump(self, **kwargs):
                     return {"id": "ds-1", "name": "ds-1", "source_type": "iceberg", "config": {}}
+
             return Rec()
 
         def complete_engine_run(self, **_kwargs: object) -> None:
@@ -499,7 +501,7 @@ def test_reingest_datasource_strips_stale_time_travel_keys(monkeypatch: pytest.M
     }
 
     class DummyMetadata:
-        source_type = 'iceberg'
+        source_type = "iceberg"
         revision = 2
         config = {
             "source": {"source_type": "file", "file_path": "s3://default/uploads/file.csv", "file_type": "csv"},
@@ -515,10 +517,7 @@ def test_reingest_datasource_strips_stale_time_travel_keys(monkeypatch: pytest.M
     monkeypatch.setattr(compute_request_runtime.datasource_execution, "_set_snapshot_metadata", lambda config, table: None)
 
     compute_request_runtime._publish_staged_datasource(
-        cast(compute_request_runtime.WorkerRuntimeClient, ReingestClient()),
-        _manager(),
-        claimed,
-        command.datasource
+        cast(compute_request_runtime.WorkerRuntimeClient, ReingestClient()), _manager(), claimed, command.datasource
     )
 
     assert len(published_configs) == 1
