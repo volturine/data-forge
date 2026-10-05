@@ -676,7 +676,12 @@
 						backgroundColor: 'bg.secondary'
 					})}
 				>
-					Select a datasource from the list to preview its data.
+					<div class={css({ textAlign: 'center' })}>
+						<p class={css({ fontSize: 'lg', fontWeight: 'medium', marginBottom: '2' })}>
+							No datasource selected
+						</p>
+						<p class={css({ fontSize: 'sm' })}>Select a datasource from the list to preview</p>
+					</div>
 				</div>
 			{/if}
 		{/key}

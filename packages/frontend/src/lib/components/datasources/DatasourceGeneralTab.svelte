@@ -1,17 +1,11 @@
 <script lang="ts">
 	import { resolve } from '$app/paths';
 	import { GitBranch, Loader, RefreshCw, Save, Upload } from '@lucide/svelte';
-	import type {
-		DataSource,
-		DatabaseDataSource,
-		IcebergDataSource,
-		SchemaInfo
-	} from '$lib/types/datasource';
+	import type { DataSource, IcebergDataSource, SchemaInfo } from '$lib/types/datasource';
 	import {
 		datasourceExternalSourceConfig,
 		datasourceExternalSourceType,
 		datasourceIsAnalysisOutput,
-		datasourceIsDatabase,
 		datasourceIsIceberg,
 		datasourceRowCount
 	} from '$lib/types/datasource';
@@ -51,10 +45,6 @@
 		onIngest,
 		onSave
 	}: Props = $props();
-
-	function isDatabase(value: DataSource): value is DatabaseDataSource {
-		return datasourceIsDatabase(value);
-	}
 
 	function isIceberg(value: DataSource): value is IcebergDataSource {
 		return datasourceIsIceberg(value);
@@ -204,102 +194,6 @@
 			</div>
 
 			{#if isIceberg(ds)}
-				{@const config = (ds as IcebergDataSource).config}
-				{#if config.location}
-					<div class={css({ display: 'flex', alignItems: 'center', gap: '2' })}>
-						<span
-							class={css({
-								textTransform: 'uppercase',
-								letterSpacing: 'wide',
-								color: 'fg.muted'
-							})}>Location</span
-						>
-						<span
-							class={css({
-								fontFamily: 'mono',
-								fontSize: '2xs',
-								overflow: 'hidden',
-								textOverflow: 'ellipsis',
-								whiteSpace: 'nowrap'
-							})}>{config.location}</span
-						>
-					</div>
-				{/if}
-				{#if config.current_snapshot_id}
-					<div class={css({ display: 'flex', alignItems: 'center', gap: '2' })}>
-						<span
-							class={css({
-								textTransform: 'uppercase',
-								letterSpacing: 'wide',
-								color: 'fg.muted'
-							})}>Snapshot</span
-						>
-						<span class={css({ fontFamily: 'mono', fontSize: '2xs' })}
-							>{config.current_snapshot_id}</span
-						>
-					</div>
-				{/if}
-			{/if}
-
-			{#if isDatabase(ds)}
-				{@const config = (ds as DatabaseDataSource).config}
-				{#if config.database_type}
-					<div class={css({ display: 'flex', alignItems: 'center', gap: '2' })}>
-						<span
-							class={css({
-								textTransform: 'uppercase',
-								letterSpacing: 'wide',
-								color: 'fg.muted'
-							})}>Engine</span
-						>
-						<span class={css({ fontWeight: 'medium' })}>{config.database_type}</span>
-					</div>
-				{/if}
-				{#if config.host}
-					<div class={css({ display: 'flex', alignItems: 'center', gap: '2' })}>
-						<span
-							class={css({
-								textTransform: 'uppercase',
-								letterSpacing: 'wide',
-								color: 'fg.muted'
-							})}>Host</span
-						>
-						<span class={css({ fontFamily: 'mono', fontSize: '2xs' })}
-							>{config.host}:{config.port ?? 5432}</span
-						>
-					</div>
-				{/if}
-				{#if config.database}
-					<div class={css({ display: 'flex', alignItems: 'center', gap: '2' })}>
-						<span
-							class={css({
-								textTransform: 'uppercase',
-								letterSpacing: 'wide',
-								color: 'fg.muted'
-							})}>Database</span
-						>
-						<span class={css({ fontWeight: 'medium' })}>{config.database}</span>
-					</div>
-				{/if}
-				{#if config.table_name}
-					<div class={css({ display: 'flex', alignItems: 'center', gap: '2' })}>
-						<span
-							class={css({
-								textTransform: 'uppercase',
-								letterSpacing: 'wide',
-								color: 'fg.muted'
-							})}>Table</span
-						>
-						<span class={css({ fontWeight: 'medium' })}
-							>{config.schema_name
-								? `${config.schema_name}.${config.table_name}`
-								: config.table_name}</span
-						>
-					</div>
-				{/if}
-			{/if}
-
-			{#if isIceberg(ds)}
 				{@const externalSource = getExternalSource(ds)}
 				{@const externalSourceType = getExternalSourceType(ds)}
 				{#if externalSourceType || externalSource}
@@ -414,7 +308,7 @@
 							color: 'fg.muted'
 						})}>Rows</span
 					>
-					<span class={css({ fontWeight: 'medium' })}
+					<span data-testid="datasource-row-count" class={css({ fontWeight: 'medium' })}
 						>{rowCount != null ? rowCount.toLocaleString() : '—'}</span
 					>
 				</div>

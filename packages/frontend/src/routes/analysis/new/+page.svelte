@@ -318,13 +318,15 @@
 									{datasource.name}
 								</span>
 							</button>
-							<button
-								type="button"
-								class={button({ variant: 'primary', size: 'sm' })}
-								onclick={() => void startAnalysis(datasource)}
-							>
-								Create analysis
-							</button>
+							{#if isExpanded}
+								<button
+									type="button"
+									class={button({ variant: 'primary', size: 'sm' })}
+									onclick={() => void startAnalysis(datasource)}
+								>
+									Create analysis
+								</button>
+							{/if}
 							<button
 								type="button"
 								class={css({

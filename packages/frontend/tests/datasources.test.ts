@@ -611,30 +611,38 @@ test.describe('Datasources – schema refresh', () => {
 
 	test('re-ingest from source completes successfully and keeps preview table operational', async ({
 		page,
-		sharedDatasource
+		request
 	}) => {
-		await gotoDatasourcesPage(page);
-		await selectDatasourceAndWaitForConfig(page, sharedDatasource.name);
+		const ds = `e2e-reingest-${uid()}`;
+		const dsId = await createDatasource(request, ds);
+		try {
+			await gotoDatasourcesPage(page);
+			await selectDatasourceAndWaitForConfig(page, ds);
 
-		const preview = page.locator('[data-preview]');
-		await expect(preview.locator('table')).toBeVisible({ timeout: readyTimeoutMs() });
+			const preview = page.locator('[data-preview]');
+			await expect(preview.locator('table')).toBeVisible({ timeout: readyTimeoutMs() });
 
-		const config = page.locator('[data-ds-config]');
-		const reingestBtn = config.getByRole('button', {
-			name: /Re-ingest from source|Refresh schema/i
-		});
-		await expect(reingestBtn).toBeVisible({ timeout: 5_000 });
-		await reingestBtn.click();
+			const config = page.locator('[data-ds-config]');
+			const reingestBtn = config.getByRole('button', {
+				name: /Re-ingest from source|Refresh schema/i
+			});
+			await expect(reingestBtn).toBeVisible({ timeout: 5_000 });
+			await reingestBtn.click();
 
-		// Wait for re-ingest button to finish loading
-		await expect(config.getByRole('button', { name: /Refreshing|Re-ingesting/i })).not.toBeVisible({
-			timeout: readyTimeoutMs()
-		});
+			// Wait for re-ingest button to finish loading
+			await expect(
+				config.getByRole('button', { name: /Refreshing|Re-ingesting/i })
+			).not.toBeVisible({
+				timeout: readyTimeoutMs()
+			});
 
-		// Check that preview error is not visible and preview table is operational with data rows
-		await expect(preview.getByTestId('preview-error')).not.toBeVisible();
-		await expect(preview.locator('table')).toBeVisible({ timeout: readyTimeoutMs() });
-		await expect(preview.locator('tbody tr').first()).toBeVisible({ timeout: readyTimeoutMs() });
+			// Check that preview error is not visible and preview table is operational with data rows
+			await expect(preview.getByTestId('preview-error')).not.toBeVisible();
+			await expect(preview.locator('table')).toBeVisible({ timeout: readyTimeoutMs() });
+			await expect(preview.locator('tbody tr').first()).toBeVisible({ timeout: readyTimeoutMs() });
+		} finally {
+			await deleteDatasourceViaUI(page, ds, { id: dsId }).catch(() => undefined);
+		}
 	});
 });
 
