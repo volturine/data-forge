@@ -619,7 +619,8 @@ test.describe('Datasources – schema refresh', () => {
 			await gotoDatasourcesPage(page);
 			await selectDatasourceAndWaitForConfig(page, ds);
 
-			const preview = page.locator('[data-preview]');
+			await waitForDatasourcePreviewReady(page);
+			const preview = page.getByTestId('datasource-preview');
 			await expect(preview.locator('table')).toBeVisible({ timeout: readyTimeoutMs() });
 
 			const config = page.locator('[data-ds-config]');
@@ -638,6 +639,7 @@ test.describe('Datasources – schema refresh', () => {
 
 			// Check that preview error is not visible and preview table is operational with data rows
 			await expect(preview.getByTestId('preview-error')).not.toBeVisible();
+			await waitForDatasourcePreviewReady(page);
 			await expect(preview.locator('table')).toBeVisible({ timeout: readyTimeoutMs() });
 			await expect(preview.locator('tbody tr').first()).toBeVisible({ timeout: readyTimeoutMs() });
 		} finally {
