@@ -8,7 +8,7 @@ from datetime import UTC, datetime
 from typing import Any
 
 from pydantic import ValidationError
-from sqlalchemy import delete, select
+from sqlalchemy import delete, func, select
 from sqlalchemy.orm import defer
 from sqlalchemy.orm.attributes import flag_modified
 from sqlmodel import Session
@@ -569,6 +569,13 @@ def create_analysis(
     data: AnalysisCreateSchema,
     owner_id: str | None = None,
 ) -> AnalysisResponseSchema:
+    trimmed_name = data.name.strip()
+    if not trimmed_name:
+        raise AnalysisValidationError('Analysis name cannot be empty')
+    existing = session.execute(select(Analysis).where(func.lower(Analysis.name) == func.lower(trimmed_name))).scalars().first()
+    if existing:
+        raise AnalysisValidationError(f"An analysis named '{trimmed_name}' already exists")
+
     analysis_id = str(uuid.uuid4())
 
     tabs_payload, datasource_ids = _validate_analysis_payload(session, data, analysis_id)
@@ -578,7 +585,7 @@ def create_analysis(
     now = datetime.now(UTC).replace(tzinfo=None)
     analysis = Analysis(
         id=analysis_id,
-        name=data.name,
+        name=trimmed_name,
         description=data.description,
         pipeline_definition=pipeline_definition,
         status=AnalysisStatus.DRAFT,
@@ -982,7 +989,23 @@ def update_analysis(
     version_service.create_version(session, analysis)
 
     if data.name is not None:
-        analysis.name = data.name
+        trimmed_name = data.name.strip()
+        if not trimmed_name:
+            raise AnalysisValidationError('Analysis name cannot be empty')
+        if trimmed_name.lower() != analysis.name.lower():
+            existing = (
+                session.execute(
+                    select(Analysis).where(
+                        func.lower(Analysis.name) == func.lower(trimmed_name),
+                        col(Analysis.id) != analysis_id,
+                    )
+                )
+                .scalars()
+                .first()
+            )
+            if existing:
+                raise AnalysisValidationError(f"An analysis named '{trimmed_name}' already exists")
+        analysis.name = trimmed_name
 
     if data.description is not None:
         analysis.description = data.description

@@ -8,6 +8,7 @@
 	import OutputNode from './OutputNode.svelte';
 	import ConnectionLine from './ConnectionLine.svelte';
 	import DatasourceNode from './DatasourceNode.svelte';
+	import PipelineMinimap from './PipelineMinimap.svelte';
 	import { css } from '$lib/styles/panda';
 	import { ClipboardPaste, Plus, Eye, ArrowDown } from '@lucide/svelte';
 	import { stepTypes, isChartStep } from './utils';
@@ -389,18 +390,23 @@
 			})}
 			role="list"
 		>
-			<DatasourceNode
-				{datasource}
-				{datasourceLabel}
-				{analysisId}
-				tabName={_tabName}
-				{activeTab}
-				onChangeDatasource={_onChangeDatasource}
-				onRenameTab={_onRenameTab}
-				onDuplicateTab={_onDuplicateTab}
-				onResourceConfigChange={_onResourceConfigChange}
-				{readOnly}
-			/>
+			<div
+				id="pipeline-datasource-node"
+				class={css({ width: '100%', display: 'flex', justifyContent: 'center' })}
+			>
+				<DatasourceNode
+					{datasource}
+					{datasourceLabel}
+					{analysisId}
+					tabName={_tabName}
+					{activeTab}
+					onChangeDatasource={_onChangeDatasource}
+					onRenameTab={_onRenameTab}
+					onDuplicateTab={_onDuplicateTab}
+					onResourceConfigChange={_onResourceConfigChange}
+					{readOnly}
+				/>
+			</div>
 			{#if shouldShowInsert(0)}
 				<div
 					class={[
@@ -697,6 +703,7 @@
 				{/if}
 			{/each}
 			<div
+				id="pipeline-output-node"
 				bind:this={outputEl}
 				class={css({ width: '100%', display: 'flex', justifyContent: 'center' })}
 				{@attach observeOutput}

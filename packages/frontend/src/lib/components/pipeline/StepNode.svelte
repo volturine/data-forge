@@ -364,6 +364,7 @@
 </script>
 
 <div
+	id={`step-node-${step.id}`}
 	class={[
 		'step-node',
 		nodeWidthClass,

@@ -11,4 +11,8 @@ describe('nextAnalysisName', () => {
 			'Sensors Analysis (3)'
 		);
 	});
+
+	test('handles case-insensitive collisions', () => {
+		expect(nextAnalysisName('Sensors Analysis', ['sensors analysis'])).toBe('Sensors Analysis (2)');
+	});
 });
