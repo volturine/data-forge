@@ -26,7 +26,7 @@ const MAX_BACKOFF = 30_000;
 const BASE_BACKOFF = 1_000;
 const MAX_RETRIES = 10;
 
-export type ChatProvider = 'openrouter' | 'openai' | 'ollama';
+export type ChatProvider = 'openrouter' | 'ollama';
 
 export type AgentMode = 'plan' | 'execute';
 
@@ -348,18 +348,12 @@ export class ChatStore {
 		this.apiKey = apiKey;
 		this.error = null;
 		this._savePrefs();
-		if (this.settings) {
-			if (this.provider === 'openrouter') {
-				this.settings.openrouter_api_key = apiKey;
-			} else if (this.provider === 'openai') {
-				this.settings.openai_api_key = apiKey;
-			}
+		if (this.settings && this.provider === 'openrouter') {
+			this.settings.openrouter_api_key = apiKey;
 		}
 		this._refreshConfigured();
 		if (this.provider === 'openrouter') {
 			await updateSettings({ openrouter_api_key: apiKey });
-		} else if (this.provider === 'openai') {
-			await updateSettings({ openai_api_key: apiKey });
 		}
 	}
 
@@ -379,31 +373,21 @@ export class ChatStore {
 	private _hasStoredProviderKey(provider: ChatProvider = this.provider): boolean {
 		if (!this.settings) return false;
 		if (provider === 'openrouter') return this.settings.openrouter_api_key.length > 0;
-		if (provider === 'openai') return this.settings.openai_api_key.length > 0;
 		return provider === 'ollama';
-	}
-
-	/** A non-default OpenAI base URL is user configuration even before a key is saved. */
-	private _customOpenAiEndpoint(): boolean {
-		const endpoint = (this.settings?.openai_endpoint_url ?? '').replace(/\/+$/, '');
-		return endpoint.length > 0 && endpoint !== 'https://api.openai.com';
 	}
 
 	private _providerCanStart(provider: ChatProvider): boolean {
 		if (!this.settings) return provider === 'ollama';
 		if (provider === 'openrouter') return this._hasStoredProviderKey(provider);
-		if (provider === 'openai') {
-			return this._hasStoredProviderKey(provider) || this._customOpenAiEndpoint();
-		}
 		return (this.settings.ollama_endpoint_url || 'http://localhost:11434').length > 0;
 	}
 
 	private _pickPreferredProvider(): ChatProvider {
-		const candidates: ChatProvider[] = [this.provider, 'openrouter', 'openai', 'ollama'];
+		const candidates: ChatProvider[] = [this.provider, 'openrouter', 'ollama'];
 		for (const candidate of candidates) {
 			if (this._providerCanStart(candidate)) return candidate;
 		}
-		return 'openai';
+		return 'ollama';
 	}
 
 	private _refreshConfigured(): void {
@@ -415,11 +399,6 @@ export class ChatStore {
 			const endpoint =
 				this.settings?.ollama_endpoint_url || this.endpointUrl || 'http://localhost:11434';
 			this.configured = endpoint.length > 0;
-			return;
-		}
-		if (this.provider === 'openai') {
-			this.configured =
-				this.apiKey.length > 0 || this._hasStoredProviderKey() || this._customOpenAiEndpoint();
 			return;
 		}
 		this.configured = this.apiKey.length > 0 || this._hasStoredProviderKey();
@@ -437,11 +416,6 @@ export class ChatStore {
 				s.openrouter_api_key && !isMasked(s.openrouter_api_key) ? s.openrouter_api_key : '';
 			this.endpointUrl = 'https://openrouter.ai/api/v1';
 			this.organizationId = '';
-		} else if (this.provider === 'openai') {
-			this.model = s.openai_default_model || 'gpt-4o-mini';
-			this.apiKey = s.openai_api_key && !isMasked(s.openai_api_key) ? s.openai_api_key : '';
-			this.endpointUrl = s.openai_endpoint_url || 'https://api.openai.com';
-			this.organizationId = s.openai_organization_id || '';
 		} else {
 			this.model = s.ollama_default_model || 'llama3.2';
 			this.apiKey = '';

@@ -32,8 +32,8 @@ from backend_core.exceptions import (
 from backend_core.persistence.analysis.models import Analysis, AnalysisDataSource, AnalysisFavorite
 from backend_core.persistence.datasource.models import DataSource
 from backend_core.settings_store import (
+    get_resolved_default_model,
     get_resolved_ollama_settings,
-    get_resolved_openai_settings,
     get_resolved_openrouter_key,
 )
 from backend_core.sqlmodel_typing import col, sa
@@ -366,7 +366,7 @@ def resolve_requested_openrouter_generation_provider() -> GenerationProviderReso
         raise ValueError('OpenRouter is not configured')
     return GenerationProviderResolution(
         provider=enums_pb2.AI_PROVIDER_OPENROUTER,
-        model='',
+        model=get_resolved_default_model(),
         client_kwargs={'api_key': api_key},
     )
 
@@ -377,38 +377,8 @@ def resolve_default_openrouter_generation_provider() -> GenerationProviderResolu
         return None
     return GenerationProviderResolution(
         provider=enums_pb2.AI_PROVIDER_OPENROUTER,
-        model='',
+        model=get_resolved_default_model(),
         client_kwargs={'api_key': api_key},
-    )
-
-
-def resolve_requested_openai_generation_provider() -> GenerationProviderResolution:
-    resolved = get_resolved_openai_settings()
-    if not resolved['api_key']:
-        raise ValueError('OpenAI is not configured')
-    return GenerationProviderResolution(
-        provider=enums_pb2.AI_PROVIDER_OPENAI,
-        model=str(resolved['default_model']),
-        client_kwargs={
-            'api_key': str(resolved['api_key']),
-            'endpoint_url': str(resolved['endpoint_url']),
-            'organization_id': str(resolved['organization_id']),
-        },
-    )
-
-
-def resolve_default_openai_generation_provider() -> GenerationProviderResolution | None:
-    resolved = get_resolved_openai_settings()
-    if not resolved['api_key']:
-        return None
-    return GenerationProviderResolution(
-        provider=enums_pb2.AI_PROVIDER_OPENAI,
-        model=str(resolved['default_model']),
-        client_kwargs={
-            'api_key': str(resolved['api_key']),
-            'endpoint_url': str(resolved['endpoint_url']),
-            'organization_id': str(resolved['organization_id']),
-        },
     )
 
 
@@ -438,11 +408,6 @@ ANALYSIS_GENERATION_PROVIDER_DEFINITIONS: dict[enums_pb2.AIProvider, AnalysisGen
         resolve_requested=resolve_requested_openrouter_generation_provider,
         resolve_default=resolve_default_openrouter_generation_provider,
     ),
-    enums_pb2.AI_PROVIDER_OPENAI: AnalysisGenerationProviderDefinition(
-        provider=enums_pb2.AI_PROVIDER_OPENAI,
-        resolve_requested=resolve_requested_openai_generation_provider,
-        resolve_default=resolve_default_openai_generation_provider,
-    ),
     enums_pb2.AI_PROVIDER_OLLAMA: AnalysisGenerationProviderDefinition(
         provider=enums_pb2.AI_PROVIDER_OLLAMA,
         resolve_requested=resolve_requested_ollama_generation_provider,
@@ -452,7 +417,6 @@ ANALYSIS_GENERATION_PROVIDER_DEFINITIONS: dict[enums_pb2.AIProvider, AnalysisGen
 
 ANALYSIS_GENERATION_PROVIDER_PRIORITY: tuple[enums_pb2.AIProvider, ...] = (
     enums_pb2.AI_PROVIDER_OPENROUTER,
-    enums_pb2.AI_PROVIDER_OPENAI,
     enums_pb2.AI_PROVIDER_OLLAMA,
 )
 

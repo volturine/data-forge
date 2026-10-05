@@ -211,12 +211,20 @@ export function openLockSession(options: LockSessionOptions): LockSession {
 		}
 
 		if (ownerId !== null && lock.owner_id === ownerId) {
-			if (wantsAcquire && !attemptedAcquireOnExistingLock) {
-				attemptedAcquireOnExistingLock = true;
-				ownedToken = null;
-				options.onStatus(null, false);
-				sendAcquire();
+			// This tab already holds the lock under a newer token. Adopting it
+			// avoids rotating the token again and locking the editor until TTL.
+			if (closingAfterRelease) {
+				if (ownedToken !== null && lock.lock_token === ownedToken) {
+					if (!release()) finishClose();
+				} else {
+					finishClose();
+				}
+				return;
 			}
+			awaitingAcquire = false;
+			attemptedAcquireOnExistingLock = false;
+			ownedToken = lock.lock_token;
+			options.onStatus(lock, true);
 			return;
 		}
 

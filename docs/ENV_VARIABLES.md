@@ -289,6 +289,7 @@ rejected explicitly while accepted compute requests remain durable.
 | ------------------------------ | ------- | -------------------------------------------------------------------------------------------------------------------------------------------- |
 | `LOG_LEVEL`                    | `info`  | One of `debug`, `info`, `warning`, `error`, `critical`.                                                                                      |
 | `UVICORN_ACCESS_LOG`           | `true`  | Enables uvicorn access logs.                                                                                                                 |
+| `UVICORN_TIMEOUT_KEEP_ALIVE`   | `5`     | Seconds before Uvicorn closes an idle keep-alive connection. E2E raises this above the suite budget so pooled API clients are not reset.    |
 | `TIMEZONE`                     | `UTC`   | Must be a valid IANA timezone.                                                                                                               |
 | `NORMALIZE_TZ`                 | `false` | Normalizes datetime values to `TIMEZONE`.                                                                                                    |
 | `LOG_CLIENT_BATCH_SIZE`        | `20`    | Client audit batch size.                                                                                                                     |
@@ -305,18 +306,12 @@ rejected explicitly while accepted compute requests remain durable.
 
 | Variable                    | Default                  | Notes                                             |
 | --------------------------- | ------------------------ | ------------------------------------------------- |
-| `OLLAMA_BASE_URL`           | `http://localhost:11434` | Base URL for Ollama.                              |
-| `OLLAMA_DEFAULT_MODEL`      | `llama3.2`               | Default Ollama chat model.                        |
-| `OPENAI_API_KEY`            | empty                    | OpenAI API key.                                   |
-| `OPENAI_BASE_URL`           | `https://api.openai.com` | OpenAI-compatible API base URL.                   |
-| `OPENAI_DEFAULT_MODEL`      | `gpt-4o-mini`            | Default OpenAI model.                             |
-| `OPENAI_ORGANIZATION_ID`    | empty                    | Optional OpenAI org id.                           |
-| `OPENROUTER_API_KEY`        | empty                    | Seeded into DB on first run if DB field is empty. |
-| `OPENROUTER_DEFAULT_MODEL`  | empty                    | Seeded into DB on first run if DB field is empty. |
-| `OPENAI_DEFAULT_MODEL_DB`   | empty                    | DB-seeded default model override.                 |
-| `OPENAI_ENDPOINT_URL_DB`    | empty                    | DB-seeded endpoint override.                      |
-| `OPENAI_ORGANIZATION_ID_DB` | empty                    | DB-seeded organization override.                  |
-| `OLLAMA_ENDPOINT_URL_DB`    | empty                    | DB-seeded Ollama endpoint override.               |
+| `OLLAMA_BASE_URL`           | `http://localhost:11434`     | Base URL for Ollama.                              |
+| `OLLAMA_DEFAULT_MODEL`      | `llama3.2`                   | Default Ollama chat model.                        |
+| `OPENROUTER_BASE_URL`       | `https://openrouter.ai/api/v1` | OpenRouter API base. Not a profile setting.     |
+| `OPENROUTER_API_KEY`        | empty                        | Seeded into DB on first run if DB field is empty. |
+| `OPENROUTER_DEFAULT_MODEL`  | empty                        | Seeded into DB on first run if DB field is empty. |
+| `OLLAMA_ENDPOINT_URL_DB`    | empty                        | DB-seeded Ollama endpoint override.               |
 | `OLLAMA_DEFAULT_MODEL_DB`   | empty                    | DB-seeded Ollama model override.                  |
 
 ### Notifications and encrypted settings

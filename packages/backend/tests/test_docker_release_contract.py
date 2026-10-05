@@ -35,6 +35,21 @@ def test_compose_wires_worker_data_plane_across_containers() -> None:
     assert 'WORKER_DATA_PLANE_GRPC_PORT: "50052"' in worker_service
 
 
+def test_e2e_api_keep_alive_outlasts_the_suite_budget() -> None:
+    """Playwright reuses API sockets until the server closes them.
+
+    Uvicorn's 5s idle close races that pool and the next POST reads ECONNRESET
+    with no response. The e2e API must keep idle sockets for the whole suite.
+    """
+    env_text = (ROOT / 'docker' / 'env' / 'e2e.env').read_text()
+    suite = re.search(r'^E2E_TIMEOUT_SECONDS=\$\{E2E_TIMEOUT_SECONDS:-(\d+)\}', env_text, re.M)
+    keep_alive = re.search(r'^UVICORN_TIMEOUT_KEEP_ALIVE=(\d+)\s*$', env_text, re.M)
+    assert suite is not None and keep_alive is not None
+    assert int(keep_alive.group(1)) >= int(suite.group(1))
+    api_service = COMPOSE_E2E.read_text().split('\n  api:\n', 1)[1].split('\n  runtime:\n', 1)[0]
+    assert 'UVICORN_TIMEOUT_KEEP_ALIVE: ${UVICORN_TIMEOUT_KEEP_ALIVE}' in api_service
+
+
 def test_runtime_inherits_api_database_pool_settings_without_overrides() -> None:
     for compose in (COMPOSE, COMPOSE_E2E):
         text = compose.read_text()

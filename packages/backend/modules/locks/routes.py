@@ -412,6 +412,11 @@ async def lock_websocket(websocket: WebSocket) -> None:
                         token_value,
                         message.ttl_seconds,
                     )
+                    if lock.lock_token != token_value:
+                        # This socket's token was rotated. Tell it the live lock
+                        # without adopting that token, so disconnect cannot release it.
+                        await _send_status(websocket, watch_type, watch_id, lock)
+                        continue
                     watch_token = token_value
                     await _notify_watchers(watch_type, watch_id, lock)
                     continue

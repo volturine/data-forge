@@ -16,9 +16,15 @@ _TIMEOUT = httpx.Timeout(connect=10, read=120, write=10, pool=10)
 _MAX_RETRIES = 2
 _AI_PROVIDER_NAMES: dict[enums_pb2.AIProvider, str] = {
     enums_pb2.AI_PROVIDER_OLLAMA: 'ollama',
-    enums_pb2.AI_PROVIDER_OPENAI: 'openai',
     enums_pb2.AI_PROVIDER_OPENROUTER: 'openrouter',
 }
+
+
+def openrouter_base_url() -> str:
+    configured = settings.openrouter_base_url.strip()
+    return (configured or 'https://openrouter.ai/api/v1').rstrip('/')
+
+
 _AI_PROVIDER_BY_NAME = {name: provider for provider, name in _AI_PROVIDER_NAMES.items()}
 
 
@@ -111,58 +117,10 @@ class OllamaClient(AIClient):
             return {'ok': False, 'detail': str(exc)}
 
 
-class OpenAIClient(AIClient):
-    def __init__(self, api_key: str = '', base_url: str | None = None, organization_id: str = '') -> None:
-        self.api_key = api_key
-        self.base_url = (base_url or 'https://api.openai.com').rstrip('/')
-        self.organization_id = organization_id
-
-    def _headers(self) -> dict[str, str]:
-        headers: dict[str, str] = {'Content-Type': 'application/json'}
-        if self.api_key:
-            headers['Authorization'] = f'Bearer {self.api_key}'
-        if self.organization_id:
-            headers['OpenAI-Organization'] = self.organization_id
-        return headers
-
-    def generate(self, prompt: str, *, model: str, options: dict | None = None) -> str:
-        payload: dict[str, object] = {'model': model, 'messages': [{'role': 'user', 'content': prompt}]}
-        if options:
-            payload.update(options)
-        response = _retry_request('POST', f'{self.base_url}/v1/chat/completions', headers=self._headers(), payload=payload)
-        data = response.json()
-        choices = data.get('choices', [])
-        if not choices:
-            return ''
-        message = choices[0].get('message', {})
-        content = message.get('content', '')
-        if isinstance(content, list):
-            chunks = [str(part.get('text', '')) for part in content if isinstance(part, dict)]
-            return ''.join(chunks)
-        return str(content)
-
-    def list_models(self) -> list[dict]:
-        try:
-            response = _retry_request('GET', f'{self.base_url}/v1/models', headers=self._headers(), retries=0)
-            data = response.json()
-            return [{'name': m.get('id', ''), 'owned_by': m.get('owned_by', '')} for m in data.get('data', [])]
-        except AIError:
-            return []
-
-    def test_connection(self) -> dict:
-        try:
-            response = http_client.get(f'{self.base_url}/v1/models', headers=self._headers(), timeout=_TIMEOUT)
-            response.raise_for_status()
-            models = response.json().get('data', [])
-            return {'ok': True, 'detail': f'{len(models)} model(s) available'}
-        except Exception as exc:
-            return {'ok': False, 'detail': str(exc)}
-
-
 class OpenRouterClient(AIClient):
-    def __init__(self, api_key: str, base_url: str = 'https://openrouter.ai/api/v1') -> None:
+    def __init__(self, api_key: str, base_url: str | None = None) -> None:
         self.api_key = api_key
-        self.base_url = base_url.rstrip('/')
+        self.base_url = (base_url or openrouter_base_url()).rstrip('/')
 
     def _headers(self) -> dict[str, str]:
         return {'Authorization': f'Bearer {self.api_key}', 'Content-Type': 'application/json'}
@@ -236,25 +194,11 @@ def build_ollama_client(*, endpoint_url: str | None, api_key: str | None, organi
     return OllamaClient(endpoint_url or resolved['endpoint_url'] or settings.ollama_base_url)
 
 
-def build_openai_client(*, endpoint_url: str | None, api_key: str | None, organization_id: str | None) -> AIClient:
-    from backend_core.settings_projection import get_resolved_openai_settings
-
-    resolved = get_resolved_openai_settings()
-    resolved_key = api_key if api_key is not None else resolved['api_key'] or settings.openai_api_key
-    if not resolved_key:
-        raise ValueError('OPENAI_API_KEY not configured')
-    return OpenAIClient(
-        api_key=resolved_key,
-        base_url=endpoint_url or resolved['endpoint_url'] or settings.openai_base_url,
-        organization_id=organization_id if organization_id is not None else resolved['organization_id'],
-    )
-
-
 def build_openrouter_client(*, endpoint_url: str | None, api_key: str | None, organization_id: str | None) -> AIClient:
     del endpoint_url, organization_id
     from backend_core.settings_projection import get_resolved_openrouter_key
 
-    resolved_key = api_key if api_key is not None else get_resolved_openrouter_key() or settings.openrouter_api_key
+    resolved_key = api_key or get_resolved_openrouter_key() or settings.openrouter_api_key
     if not resolved_key:
         raise ValueError('OPENROUTER_API_KEY not configured')
     return OpenRouterClient(resolved_key)
@@ -265,11 +209,6 @@ AI_CLIENT_PROVIDER_DEFINITIONS: dict[enums_pb2.AIProvider, AIClientProviderDefin
         provider=enums_pb2.AI_PROVIDER_OLLAMA,
         aliases=(),
         build=build_ollama_client,
-    ),
-    enums_pb2.AI_PROVIDER_OPENAI: AIClientProviderDefinition(
-        provider=enums_pb2.AI_PROVIDER_OPENAI,
-        aliases=(),
-        build=build_openai_client,
     ),
     enums_pb2.AI_PROVIDER_OPENROUTER: AIClientProviderDefinition(
         provider=enums_pb2.AI_PROVIDER_OPENROUTER,

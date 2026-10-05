@@ -295,13 +295,28 @@ class TestLockRoutes:
             other.commit()
         test_db_session.expire_all()
 
-        with pytest.raises(ValueError, match='owned by another owner'):
-            locks_service.heartbeat_lock(test_db_session, 'analysis', 'analysis-cas-heartbeat', 'owner-a', 'token-a')
+        status = locks_service.heartbeat_lock(test_db_session, 'analysis', 'analysis-cas-heartbeat', 'owner-a', 'token-a')
 
+        assert status.owner_id == 'owner-a'
+        assert status.lock_token == 'rotated-token'
         stored = test_db_session.get(ResourceLock, ('analysis', 'analysis-cas-heartbeat'))
         assert stored is not None
         assert stored.lock_token == 'rotated-token'
         # The superseded heartbeat must not extend the lock expiry.
+        assert ResourceLock.as_utc(stored.expires_at) == ResourceLock.as_utc(seeded.expires_at)
+
+    def test_heartbeat_lock_rejects_a_different_owner(self, test_db_session) -> None:
+        from modules.locks import service as locks_service
+
+        active = datetime.now(UTC).replace(tzinfo=None) + timedelta(seconds=60)
+        seeded = self._seed_lock(test_db_session, 'analysis-cas-other-owner', owner='owner-a', token='token-a', expires_at=active)
+
+        with pytest.raises(ValueError, match='owned by another owner'):
+            locks_service.heartbeat_lock(test_db_session, 'analysis', 'analysis-cas-other-owner', 'owner-b', 'token-a')
+
+        stored = test_db_session.get(ResourceLock, ('analysis', 'analysis-cas-other-owner'))
+        assert stored is not None
+        assert stored.owner_id == 'owner-a'
         assert ResourceLock.as_utc(stored.expires_at) == ResourceLock.as_utc(seeded.expires_at)
 
     def test_acquire_lock_cas_takes_over_only_expired_row(self, test_db_session) -> None:

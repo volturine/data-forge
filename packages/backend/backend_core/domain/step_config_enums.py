@@ -10,12 +10,10 @@ from dataforge_protocol import enums_pb2
 
 class AIProvider(ApiEnumValue):
     OLLAMA: ClassVar[Self]
-    OPENAI: ClassVar[Self]
     OPENROUTER: ClassVar[Self]
 
 
 AIProvider.OLLAMA = AIProvider(enums_pb2.AI_PROVIDER_OLLAMA, api_token('AIProvider', enums_pb2.AI_PROVIDER_OLLAMA))
-AIProvider.OPENAI = AIProvider(enums_pb2.AI_PROVIDER_OPENAI, api_token('AIProvider', enums_pb2.AI_PROVIDER_OPENAI))
 AIProvider.OPENROUTER = AIProvider(enums_pb2.AI_PROVIDER_OPENROUTER, api_token('AIProvider', enums_pb2.AI_PROVIDER_OPENROUTER))
 
 

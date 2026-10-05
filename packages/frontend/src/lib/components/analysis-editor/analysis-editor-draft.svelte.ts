@@ -28,7 +28,13 @@ export type DraftControllerDeps = {
 	getServerVersion: () => string | null;
 	serverStepCount: () => number;
 	buildPayload: () => AnalysisDraftSnapshot;
-	applyDraft: (draft: AnalysisDraftSnapshot, options: { tabs: boolean }) => void;
+	// Tabs currently shown from the server snapshot. Used when an empty draft
+	// must not replace those tabs but may still select one of them.
+	serverTabIds?: () => string[];
+	applyDraft: (
+		draft: AnalysisDraftSnapshot,
+		options: { tabs: boolean; activeTabId: string | null }
+	) => void;
 };
 
 function stepCount(tabs: AnalysisTab[]): number {
@@ -100,7 +106,13 @@ export function createDraftController(deps: DraftControllerDeps) {
 				parsed.tabs = parsed.tabs.map((tab, index) => ensureTabDefaults(tab, index));
 				const restoreTabs = !(stepCount(parsed.tabs) === 0 && deps.serverStepCount() > 0);
 				if (!restoreTabs) void idbDelete(currentStorageKey);
-				deps.applyDraft(parsed, { tabs: restoreTabs });
+				const requestedTabId = typeof parsed.activeTabId === 'string' ? parsed.activeTabId : null;
+				const visibleTabIds = restoreTabs
+					? parsed.tabs.map((tab) => tab.id)
+					: (deps.serverTabIds?.() ?? []);
+				const activeTabId =
+					requestedTabId && visibleTabIds.includes(requestedTabId) ? requestedTabId : null;
+				deps.applyDraft(parsed, { tabs: restoreTabs, activeTabId });
 				draftLoaded = true;
 			})
 			.catch(() => {
@@ -113,6 +125,9 @@ export function createDraftController(deps: DraftControllerDeps) {
 		if (!storageKey || !draftLoaded || deps.readOnly()) return;
 		if (!deps.hasTabs()) return;
 		const payload = cloneJson(deps.buildPayload());
+		// An empty local snapshot must not overwrite a saved pipeline. A real
+		// deletion still lives in memory until save; reload keeps the server steps.
+		if (stepCount(payload.tabs) === 0 && deps.serverStepCount() > 0) return;
 		const key = storageKey;
 		if (draftTimer) window.clearTimeout(draftTimer);
 		draftTimer = window.setTimeout(() => {

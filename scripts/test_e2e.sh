@@ -518,6 +518,7 @@ run_playwright_architecture_tests() {
         "PLAYWRIGHT_JSON_REPORT=${output_dir}/playwright-report.json"
         "PLAYWRIGHT_REQUEST_TRACE_DIR=${request_trace_root}/runtime-architecture"
         "E2E_OPENAI_FIXTURE_URL=${E2E_OPENAI_FIXTURE_URL}"
+        "E2E_OPENROUTER_API_KEY=${E2E_OPENROUTER_API_KEY:-}"
     )
     if [ -n "${PLAYWRIGHT_GREP:-}" ]; then
         runner_env+=("PLAYWRIGHT_GREP=${PLAYWRIGHT_GREP}")

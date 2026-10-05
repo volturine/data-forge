@@ -3,7 +3,7 @@ from dataclasses import dataclass
 
 from pydantic import BaseModel
 
-from backend_core.ai_clients import ai_provider_name, get_ai_client, resolve_ai_provider
+from backend_core.ai_clients import ai_provider_name, get_ai_client, openrouter_base_url, resolve_ai_provider
 from backend_core.error_handlers import handle_errors
 from dataforge_protocol import enums_pb2
 from modules.mcp.router import MCPRouter
@@ -48,20 +48,8 @@ def resolve_openrouter_status() -> AIProviderStatus:
     return AIProviderStatus(
         provider=ai_provider_name(enums_pb2.AI_PROVIDER_OPENROUTER),
         configured=bool(openrouter_key),
-        endpoint_url='https://openrouter.ai/api/v1',
+        endpoint_url=openrouter_base_url(),
         default_model='',
-    )
-
-
-def resolve_openai_status() -> AIProviderStatus:
-    from backend_core.settings_store import get_resolved_openai_settings
-
-    openai = get_resolved_openai_settings()
-    return AIProviderStatus(
-        provider=ai_provider_name(enums_pb2.AI_PROVIDER_OPENAI),
-        configured=bool(openai['endpoint_url']),
-        endpoint_url=openai['endpoint_url'],
-        default_model=openai['default_model'],
     )
 
 
@@ -79,7 +67,6 @@ def resolve_ollama_status() -> AIProviderStatus:
 
 AI_PROVIDER_STATUS_DEFINITIONS: tuple[AIProviderStatusDefinition, ...] = (
     AIProviderStatusDefinition(enums_pb2.AI_PROVIDER_OPENROUTER, resolve_openrouter_status),
-    AIProviderStatusDefinition(enums_pb2.AI_PROVIDER_OPENAI, resolve_openai_status),
     AIProviderStatusDefinition(enums_pb2.AI_PROVIDER_OLLAMA, resolve_ollama_status),
 )
 

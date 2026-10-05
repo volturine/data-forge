@@ -113,7 +113,6 @@
 ## AI Integration
 
 - ✅ Connect to Ollama (local/self-hosted and remote)
-- ✅ Connect to OpenAI (local/self-hosted and remote)
 - ✅ Connect to OpenRouter (remote)
 - ✅ Use AI inside the pipeline to assist with expressions and per-row LLM transformations
 - ✅ Test provider connectivity and browse available models from within the app

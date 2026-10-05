@@ -113,7 +113,7 @@ async function readChatStreams(
 
 async function createChatSession(page: Page, model: string): Promise<string> {
 	const response = await page.context().request.post('/api/v1/ai/chat/sessions', {
-		data: { provider: 'openai', model, api_key: 'e2e-provider-key' }
+		data: { provider: 'openrouter', model, api_key: 'e2e-provider-key' }
 	});
 	expect(response.ok(), await response.text()).toBeTruthy();
 	return ((await response.json()) as { session_id: string }).session_id;
@@ -199,7 +199,6 @@ test.describe('runtime architecture', () => {
 		const settingsResponse = await page.context().request.get('/api/v1/settings');
 		expect(settingsResponse.ok()).toBeTruthy();
 		const original = (await settingsResponse.json()) as Record<string, unknown>;
-		expect(original.openai_api_key).toBe('');
 		const datasourceId = await createCsvDatasource(
 			request,
 			`e2e-settings-source-${randomUUID()}`,
@@ -225,10 +224,9 @@ test.describe('runtime architecture', () => {
 		const fixtureCheck = await page.context().request.get(`${fixtureUrl}/models`);
 		expect(fixtureCheck.ok()).toBeTruthy();
 		const settingsUpdate = {
-			openai_api_key: 'e2e-provider-key',
+			openrouter_api_key: 'e2e-provider-key',
 			public_idb_debug: !original.public_idb_debug,
-			openai_endpoint_url: fixtureUrl.replace(/\/v1$/, ''),
-			openai_default_model: model
+			openrouter_default_model: model
 		};
 
 		try {
@@ -270,9 +268,9 @@ test.describe('runtime architecture', () => {
 						const debug = (await config.json()).public_idb_debug as boolean;
 						const read = await context.request.get('/api/v1/settings');
 						expect(read.ok()).toBeTruthy();
-						const readSettings = (await read.json()) as { openai_default_model: string };
-						expect(readSettings.openai_default_model).toBe(model);
-						return { pid, debug, model: readSettings.openai_default_model };
+						const readSettings = (await read.json()) as { openrouter_default_model: string };
+						expect(readSettings.openrouter_default_model).toBe(model);
+						return { pid, debug, model: readSettings.openrouter_default_model };
 					})
 				);
 				const configuredApiWorkers = process.env.E2E_API_WORKERS?.trim();
@@ -299,7 +297,7 @@ test.describe('runtime architecture', () => {
 							name: `settings-projection-${index}`,
 							description: 'Make a simple source pipeline',
 							datasources: [{ id: datasourceId }],
-							provider: 'openai'
+							provider: 'openrouter'
 						}
 					});
 					expect(generated.ok(), await generated.text()).toBeTruthy();
@@ -312,10 +310,9 @@ test.describe('runtime architecture', () => {
 			// Restore the shared settings row after this serialized case.
 			const restore = await page.context().request.put('/api/v1/settings', {
 				data: {
-					openai_api_key: '',
+					openrouter_api_key: '',
 					public_idb_debug: original.public_idb_debug,
-					openai_endpoint_url: original.openai_endpoint_url,
-					openai_default_model: original.openai_default_model
+					openrouter_default_model: original.openrouter_default_model
 				}
 			});
 			expect(restore.ok()).toBeTruthy();
@@ -470,13 +467,6 @@ test.describe('runtime architecture', () => {
 		request
 	}) => {
 		await page.goto('/');
-		const fixtureUrl = process.env.E2E_OPENAI_FIXTURE_URL;
-		if (!fixtureUrl) throw new Error('E2E_OPENAI_FIXTURE_URL was not provided by the harness');
-		const settings = await page.context().request.put('/api/v1/settings', {
-			data: { openai_endpoint_url: fixtureUrl.replace(/\/v1$/, '') }
-		});
-		expect(settings.ok()).toBeTruthy();
-
 		const sessionId = await createChatSession(page, `e2e-chat-${randomUUID()}`);
 		const streamsReady = waitForChatStreams(page, sessionId, 2);
 		const streams = readChatStreams(page, sessionId, 2);
@@ -541,13 +531,6 @@ test.describe('runtime architecture', () => {
 		request
 	}) => {
 		await page.goto('/');
-		const fixtureUrl = process.env.E2E_OPENAI_FIXTURE_URL;
-		if (!fixtureUrl) throw new Error('E2E_OPENAI_FIXTURE_URL was not provided by the harness');
-		const settings = await page.context().request.put('/api/v1/settings', {
-			data: { openai_endpoint_url: fixtureUrl.replace(/\/v1$/, '') }
-		});
-		expect(settings.ok()).toBeTruthy();
-
 		const slowSession = await createChatSession(page, `e2e-stop-${randomUUID()}`);
 		const idleSession = await createChatSession(page, `e2e-heartbeat-${randomUUID()}`);
 		const slowStreamReady = page.waitForResponse((response) =>
@@ -602,16 +585,6 @@ test.describe('runtime architecture', () => {
 		request
 	}) => {
 		await page.goto('/');
-		const fixtureUrl = process.env.E2E_OPENAI_FIXTURE_URL;
-		if (!fixtureUrl) throw new Error('E2E_OPENAI_FIXTURE_URL was not provided by the harness');
-		const settingsResponse = await page.context().request.get('/api/v1/settings');
-		expect(settingsResponse.ok()).toBeTruthy();
-		const originalSettings = (await settingsResponse.json()) as Record<string, unknown>;
-		const settingsUpdate = await page.context().request.put('/api/v1/settings', {
-			data: { openai_endpoint_url: fixtureUrl.replace(/\/v1$/, '') }
-		});
-		expect(settingsUpdate.ok()).toBeTruthy();
-
 		const datasourceId = await createCsvDatasource(
 			request,
 			`e2e-chat-delete-preview-${randomUUID()}`,
@@ -730,8 +703,7 @@ test.describe('runtime architecture', () => {
 					(event) =>
 						event.data.type === 'message' &&
 						event.data.role === 'assistant' &&
-						event.data.content ===
-							`E2E fixture reply: user: ${slowContent}\nuser: a later turn still works\nassistant:`
+						event.data.content === 'E2E fixture reply: a later turn still works'
 				)
 			).toBeTruthy();
 			lastEventId = Number(laterEvents?.at(-1)?.id ?? lastEventId);
@@ -756,9 +728,71 @@ test.describe('runtime architecture', () => {
 			}
 			await apiContext.close();
 			await deleteDatasource(request, datasourceId);
+		}
+	});
+
+	test('stored OpenRouter key answers chat when the session key is empty', async ({
+		page
+	}, testInfo) => {
+		testInfo.setTimeout(180_000);
+		const apiKey = process.env.E2E_OPENROUTER_API_KEY?.trim();
+		if (!apiKey) throw new Error('E2E_OPENROUTER_API_KEY was not provided by the harness');
+		await page.goto('/');
+		const settingsResponse = await page.context().request.get('/api/v1/settings');
+		expect(settingsResponse.ok()).toBeTruthy();
+		const original = (await settingsResponse.json()) as { openrouter_default_model?: string };
+		const model = 'glm-5.3-flash';
+		const sessionResponse = await page.context().request.post('/api/v1/ai/chat/sessions', {
+			data: { provider: 'openrouter', model, api_key: '' }
+		});
+		expect(sessionResponse.ok(), await sessionResponse.text()).toBeTruthy();
+		const sessionId = ((await sessionResponse.json()) as { session_id: string }).session_id;
+		try {
+			const settingsUpdate = await page.context().request.put('/api/v1/settings', {
+				data: { openrouter_api_key: apiKey, openrouter_default_model: model }
+			});
+			expect(settingsUpdate.ok()).toBeTruthy();
+			const send = await page.context().request.post('/api/v1/ai/chat/message', {
+				data: {
+					session_id: sessionId,
+					content: 'Reply with the single word pong.',
+					tool_ids: ['e2e-no-tools']
+				}
+			});
+			expect(send.ok(), await send.text()).toBeTruthy();
+			const deadline = Date.now() + 120_000;
+			let outcome = 'pending';
+			while (Date.now() < deadline && outcome === 'pending') {
+				const historyResponse = await page
+					.context()
+					.request.get(`/api/v1/ai/chat/history/${sessionId}`);
+				if (historyResponse.ok()) {
+					const history = (await historyResponse.json()) as { history: ChatEvent[] };
+					for (const event of history.history) {
+						if (event.type === 'error') {
+							outcome = `error:${String(event.content ?? '')}`;
+							break;
+						}
+						if (
+							event.type === 'message' &&
+							event.role === 'assistant' &&
+							String(event.content ?? '').trim().length > 0
+						) {
+							outcome = 'assistant';
+							break;
+						}
+					}
+				}
+				if (outcome === 'pending') await new Promise((resolve) => setTimeout(resolve, 1_000));
+			}
+			expect(outcome).toBe('assistant');
+		} finally {
+			await page.context().request.post(`/api/v1/ai/chat/sessions/${sessionId}/stop`);
+			await page.context().request.delete(`/api/v1/ai/chat/sessions/${sessionId}`);
 			const restore = await page.context().request.put('/api/v1/settings', {
 				data: {
-					openai_endpoint_url: originalSettings.openai_endpoint_url
+					openrouter_api_key: '',
+					openrouter_default_model: original.openrouter_default_model ?? ''
 				}
 			});
 			expect(restore.ok()).toBeTruthy();

@@ -174,6 +174,10 @@ def heartbeat_lock(
         lock = get_lock(session, resource_type, resource_id)
         if lock is None or lock.is_expired(now=now):
             raise ValueError(f'{resource_type} {resource_id} lock is not active')
+        # Same owner, newer token: report the live lock without extending it.
+        # A 409 here makes the editor that rotated the token wait out the TTL.
+        if lock.owner_id == owner_id:
+            return _status(lock, now)
         raise ValueError(f'{resource_type} {resource_id} lock is owned by another owner')
     session.commit()
     session.expire_all()

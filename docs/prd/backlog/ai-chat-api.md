@@ -1,7 +1,7 @@
 # PRD: AI Chat API Support
 
-> **Status (audited 2026-08-02): Backlog — baseline support is shipped; deeper unification remains future work.**
-> **Current truth:** Provider settings and multi-provider chat support exist today. This document tracks the remaining consolidation and product-expansion work.
+> **Status (audited 2026-10-05): Backlog — OpenRouter and Ollama are the supported providers. OpenAI is not.**
+> **Current truth:** Chat and pipeline AI use OpenRouter and Ollama. Sections below that specify an OpenAI provider are superseded.
 > **Portfolio:** [PRD index](../README.md)
 
 

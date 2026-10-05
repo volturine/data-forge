@@ -10,6 +10,8 @@ from sqlmodel import Session
 from backend_core import runtime_work_service
 from backend_core.config import settings
 from backend_core.database import run_settings_db
+from backend_core.domain.analysis.models import AnalysisStatus
+from backend_core.persistence.analysis.models import Analysis
 from backend_core.persistence.build_jobs.models import BuildJob
 from backend_core.persistence.datasource.models import DataSource
 from backend_core.persistence.runtime_workers.models import RuntimeWorker
@@ -90,6 +92,45 @@ async def test_internal_scheduler_grpc_run_due_enqueues_build_job(
 ) -> None:
     token = _set_internal_token(monkeypatch)
     worker_id = f'scheduler:{uuid.uuid4()}'
+    # A plain file source is not re-ingested. The due run rebuilds an analysis that reads it.
+    reader = Analysis(
+        id=str(uuid.uuid4()),
+        name='Scheduled reader',
+        description=None,
+        pipeline_definition={
+            'tabs': [
+                {
+                    'id': 'tab-1',
+                    'name': 'Source',
+                    'parent_id': None,
+                    'datasource': {
+                        'id': sample_datasource.id,
+                        'analysis_tab_id': None,
+                        'config': {'branch': 'master'},
+                    },
+                    'output': {
+                        'result_id': str(uuid.uuid4()),
+                        'datasource_type': 'iceberg',
+                        'format': 'parquet',
+                        'filename': 'reader_output',
+                    },
+                    'steps': [
+                        {
+                            'id': 'sort-1',
+                            'type': 'sort',
+                            'config': {'columns': ['value'], 'descending': [False]},
+                            'depends_on': [],
+                            'is_applied': True,
+                        }
+                    ],
+                }
+            ]
+        },
+        status=AnalysisStatus.DRAFT,
+        created_at=datetime.now(UTC),
+        updated_at=datetime.now(UTC),
+    )
+    test_db_session.add(reader)
     schedule = Schedule(
         id=str(uuid.uuid4()),
         datasource_id=sample_datasource.id,

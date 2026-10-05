@@ -16,13 +16,6 @@
 	let openrouter_default_model = $state('');
 	let openrouter_api_key_dirty = $state(false);
 
-	// OpenAI
-	let openai_api_key = $state('');
-	let openai_endpoint_url = $state('https://api.openai.com');
-	let openai_default_model = $state('gpt-4o-mini');
-	let openai_organization_id = $state('');
-	let openai_api_key_dirty = $state(false);
-
 	// Ollama
 	let ollama_endpoint_url = $state('http://localhost:11434');
 	let ollama_default_model = $state('llama3.2');
@@ -31,17 +24,12 @@
 		loading = true;
 		feedback = null;
 		openrouter_api_key_dirty = false;
-		openai_api_key_dirty = false;
 		let aborted = false;
 		void getSettings().match(
 			(s) => {
 				if (aborted) return;
 				openrouter_api_key = isMasked(s.openrouter_api_key) ? '' : s.openrouter_api_key;
 				openrouter_default_model = s.openrouter_default_model;
-				openai_api_key = isMasked(s.openai_api_key) ? '' : s.openai_api_key;
-				openai_endpoint_url = s.openai_endpoint_url;
-				openai_default_model = s.openai_default_model;
-				openai_organization_id = s.openai_organization_id;
 				ollama_endpoint_url = s.ollama_endpoint_url;
 				ollama_default_model = s.ollama_default_model;
 				loading = false;
@@ -61,14 +49,10 @@
 		feedback = null;
 		const payload: Partial<AppSettings> = {
 			openrouter_default_model,
-			openai_endpoint_url,
-			openai_default_model,
-			openai_organization_id,
 			ollama_endpoint_url,
 			ollama_default_model
 		};
 		if (openrouter_api_key_dirty) payload.openrouter_api_key = openrouter_api_key;
-		if (openai_api_key_dirty) payload.openai_api_key = openai_api_key;
 		const result = await updateSettings(payload);
 		result.match(
 			() => {
@@ -81,25 +65,14 @@
 		saving = false;
 	}
 
-	async function handleTestAIProvider(provider: 'openrouter' | 'openai' | 'ollama') {
+	async function handleTestAIProvider(provider: 'openrouter' | 'ollama') {
 		testingProvider = provider;
 		feedback = null;
-		const endpoint =
-			provider === 'openai'
-				? openai_endpoint_url
-				: provider === 'ollama'
-					? ollama_endpoint_url
-					: null;
-		const apiKey =
-			provider === 'openrouter'
-				? openrouter_api_key || null
-				: provider === 'openai'
-					? openai_api_key || null
-					: null;
-		const organizationId = provider === 'openai' ? openai_organization_id || null : null;
+		const endpoint = provider === 'ollama' ? ollama_endpoint_url : null;
+		const apiKey = provider === 'openrouter' ? openrouter_api_key || null : null;
 
-		const testResult = await testAIConnection(provider, endpoint, apiKey, organizationId);
-		const modelsResult = await listAIModels(provider, endpoint, apiKey, organizationId);
+		const testResult = await testAIConnection(provider, endpoint, apiKey, null);
+		const modelsResult = await listAIModels(provider, endpoint, apiKey, null);
 		testResult.match(
 			(result) => {
 				const modelsCount = modelsResult.isOk() ? modelsResult.value.length : 0;
@@ -228,72 +201,6 @@
 					justifyContent: 'space-between'
 				})}
 			>
-				<span class={css({ fontSize: 'sm', fontWeight: 'medium' })}>OpenAI</span>
-				<button
-					class={button({ variant: 'secondary', size: 'sm' })}
-					onclick={() => void handleTestAIProvider('openai')}
-					disabled={testingProvider === 'openai'}
-					aria-label="Test OpenAI"
-					type="button"
-				>
-					{testingProvider === 'openai' ? 'Testing…' : 'Test'}
-				</button>
-			</div>
-			<label class={label({ variant: 'wrapper' })}>
-				<span class={css({ fontSize: 'xs', color: 'fg.tertiary' })}>API key</span>
-				<input
-					type="password"
-					class={input()}
-					bind:value={openai_api_key}
-					oninput={() => (openai_api_key_dirty = true)}
-					placeholder={MASKED_PLACEHOLDER}
-				/>
-			</label>
-			<div
-				class={css({
-					display: 'grid',
-					gridTemplateColumns: 'repeat(2, minmax(0, 1fr))',
-					gap: '3'
-				})}
-			>
-				<label class={label({ variant: 'wrapper' })}>
-					<span class={css({ fontSize: 'xs', color: 'fg.tertiary' })}>Endpoint URL</span>
-					<input
-						type="text"
-						id="openai-endpoint-url"
-						class={input()}
-						bind:value={openai_endpoint_url}
-					/>
-				</label>
-				<label class={label({ variant: 'wrapper' })}>
-					<span class={css({ fontSize: 'xs', color: 'fg.tertiary' })}>Default model</span>
-					<input type="text" class={input()} bind:value={openai_default_model} />
-				</label>
-			</div>
-			<label class={label({ variant: 'wrapper' })}>
-				<span class={css({ fontSize: 'xs', color: 'fg.tertiary' })}>Organization ID (optional)</span
-				>
-				<input type="text" class={input()} bind:value={openai_organization_id} />
-			</label>
-		</div>
-
-		<div
-			class={css({
-				backgroundColor: 'bg.panel',
-				borderWidth: '1',
-				padding: '6',
-				display: 'flex',
-				flexDirection: 'column',
-				gap: '4'
-			})}
-		>
-			<div
-				class={css({
-					display: 'flex',
-					alignItems: 'center',
-					justifyContent: 'space-between'
-				})}
-			>
 				<span class={css({ fontSize: 'sm', fontWeight: 'medium' })}>Ollama</span>
 				<button
 					class={button({ variant: 'secondary', size: 'sm' })}
@@ -314,7 +221,12 @@
 			>
 				<label class={label({ variant: 'wrapper' })}>
 					<span class={css({ fontSize: 'xs', color: 'fg.tertiary' })}>Endpoint URL</span>
-					<input type="text" class={input()} bind:value={ollama_endpoint_url} />
+					<input
+						id="ollama-endpoint-url"
+						type="text"
+						class={input()}
+						bind:value={ollama_endpoint_url}
+					/>
 				</label>
 				<label class={label({ variant: 'wrapper' })}>
 					<span class={css({ fontSize: 'xs', color: 'fg.tertiary' })}>Default model</span>

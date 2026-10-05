@@ -8,9 +8,9 @@ from dataforge_protocol import enums_pb2
 
 def test_ai_provider_resolver_uses_protocol_enum_values() -> None:
     assert resolve_ai_provider('openrouter') == enums_pb2.AI_PROVIDER_OPENROUTER
-    assert ai_provider_name(enums_pb2.AI_PROVIDER_OPENAI) == 'openai'
+    assert ai_provider_name(enums_pb2.AI_PROVIDER_OLLAMA) == 'ollama'
     with pytest.raises(ValueError, match='Unknown AI provider'):
-        require_ai_provider('anthropic')
+        require_ai_provider('openai')
 
 
 class TestAIRoutes:
@@ -38,7 +38,6 @@ class TestAIRoutes:
         data = response.json()
         assert [entry['provider'] for entry in data] == [
             'openrouter',
-            'openai',
             'ollama',
         ]
 
@@ -71,8 +70,8 @@ class TestAIRoutes:
     def test_test_connection_no_key(self, client):
         with patch(
             'modules.ai.routes.get_ai_client',
-            side_effect=ValueError('OPENAI_API_KEY not configured'),
+            side_effect=ValueError('OPENROUTER_API_KEY not configured'),
         ):
-            response = client.post('/api/v1/ai/test', json={'provider': 'openai'})
+            response = client.post('/api/v1/ai/test', json={'provider': 'openrouter'})
             assert response.status_code == 400
-            assert 'OPENAI_API_KEY' in response.json()['detail']
+            assert 'OPENROUTER_API_KEY' in response.json()['detail']

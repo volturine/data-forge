@@ -123,7 +123,12 @@
 	let menuContainerRef = $state<HTMLElement>();
 	let triggerRef = $state<HTMLButtonElement | HTMLInputElement>();
 
-	const debouncedSearch = $derived(new Debounced(() => searchValue, searchDelay));
+	// Construct once. A Debounced inside $derived registers an effect on every
+	// keystroke, and the search query then fails to match options that are listed.
+	const debouncedSearch = new Debounced(
+		() => searchValue,
+		() => searchDelay
+	);
 
 	const selectedSet = $derived(new SvelteSet(Array.isArray(value) ? value : value ? [value] : []));
 	const selectedCount = $derived(selectedSet.size);
@@ -135,7 +140,7 @@
 			return options.filter((option) => filter(option, query));
 		}
 		return options.filter((option) => {
-			const base = [option.label];
+			const base = [option.label, option.id];
 			const extra = option.searchText ?? [];
 			return [...base, ...extra].some((text) => text.toLowerCase().includes(query));
 		});

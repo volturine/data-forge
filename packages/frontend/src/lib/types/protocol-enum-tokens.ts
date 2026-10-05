@@ -341,7 +341,6 @@ export const RECIPIENT_SOURCE_TOKENS = {
 
 export const AI_PROVIDER_TOKENS = {
 	[ProtocolAIProvider.AI_PROVIDER_OLLAMA]: 'ollama',
-	[ProtocolAIProvider.AI_PROVIDER_OPENAI]: 'openai',
 	[ProtocolAIProvider.AI_PROVIDER_OPENROUTER]: 'openrouter'
 } as const satisfies Partial<Record<ProtocolAIProvider, string>>;
 

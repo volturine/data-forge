@@ -111,6 +111,26 @@ describe('SearchableDropdown', () => {
 			expect(rendered[2]).toHaveTextContent('Charlie');
 		});
 
+		test('keeps a listed column when the query is its name', async () => {
+			renderDropdown({
+				searchDelay: 0,
+				options: [
+					{ id: 'value', label: 'value' },
+					{ id: 'value_mean', label: 'value_mean' },
+					{ id: 'temperature', label: 'temperature' }
+				]
+			});
+			await fireEvent.click(screen.getByRole('button'));
+			await fireEvent.input(screen.getByLabelText('Search'), {
+				target: { value: 'value_mean' }
+			});
+			await vi.waitFor(() => {
+				expect(screen.queryByText('temperature')).not.toBeInTheDocument();
+			});
+			expect(screen.getByText('value_mean')).toBeInTheDocument();
+			expect(screen.queryByText('No results')).not.toBeInTheDocument();
+		});
+
 		test('shows empty label when no options match search', async () => {
 			renderDropdown({ searchDelay: 0 });
 			await fireEvent.click(screen.getByRole('button'));

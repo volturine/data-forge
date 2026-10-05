@@ -169,14 +169,14 @@ describe('normalizeConfig', () => {
 
 	test('ai preserves explicit null fields', () => {
 		const config = normalizeConfig('ai', {
-			provider: 'openai',
+			provider: 'openrouter',
 			model: 'gpt-4',
 			input_columns: null,
 			endpoint_url: null,
 			api_key: null
 		});
 		expect(config).toEqual({
-			provider: 'openai',
+			provider: 'openrouter',
 			model: 'gpt-4',
 			input_columns: null,
 			endpoint_url: null,

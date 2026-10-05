@@ -8,8 +8,6 @@ from backend_core.persistence.settings.models import AppSettings
 from backend_core.secrets import decrypt_secret
 
 DEFAULT_SMTP_PORT = 587
-DEFAULT_OPENAI_ENDPOINT_URL = 'https://api.openai.com'
-DEFAULT_OPENAI_MODEL = 'gpt-4o-mini'
 DEFAULT_OLLAMA_ENDPOINT_URL = 'http://localhost:11434'
 DEFAULT_OLLAMA_MODEL = 'llama3.2'
 
@@ -25,10 +23,6 @@ class ResolvedSettingsSnapshot:
     telegram_bot_token: str = ''
     openrouter_api_key: str = ''
     openrouter_default_model: str = ''
-    openai_api_key: str = ''
-    openai_endpoint_url: str = DEFAULT_OPENAI_ENDPOINT_URL
-    openai_default_model: str = DEFAULT_OPENAI_MODEL
-    openai_organization_id: str = ''
     ollama_endpoint_url: str = DEFAULT_OLLAMA_ENDPOINT_URL
     ollama_default_model: str = DEFAULT_OLLAMA_MODEL
 
@@ -44,10 +38,6 @@ class ResolvedSettingsSnapshot:
             telegram_bot_token=_read_secret(row, 'telegram_bot_token'),
             openrouter_api_key=_read_secret(row, 'openrouter_api_key'),
             openrouter_default_model=row.openrouter_default_model,
-            openai_api_key=_read_secret(row, 'openai_api_key'),
-            openai_endpoint_url=row.openai_endpoint_url or DEFAULT_OPENAI_ENDPOINT_URL,
-            openai_default_model=row.openai_default_model or DEFAULT_OPENAI_MODEL,
-            openai_organization_id=row.openai_organization_id or '',
             ollama_endpoint_url=row.ollama_endpoint_url or DEFAULT_OLLAMA_ENDPOINT_URL,
             ollama_default_model=row.ollama_default_model or DEFAULT_OLLAMA_MODEL,
         )
@@ -70,14 +60,6 @@ class ResolvedSettingsSnapshot:
 
     def openrouter_key(self) -> str:
         return self.openrouter_api_key if self.exists else ''
-
-    def openai_settings(self) -> dict[str, str]:
-        return {
-            'api_key': self.openai_api_key if self.exists else '',
-            'endpoint_url': self.openai_endpoint_url,
-            'default_model': self.openai_default_model,
-            'organization_id': self.openai_organization_id if self.exists else '',
-        }
 
     def ollama_settings(self) -> dict[str, str]:
         return {'endpoint_url': self.ollama_endpoint_url, 'default_model': self.ollama_default_model}
@@ -123,10 +105,6 @@ def get_resolved_telegram_settings() -> dict[str, object]:
 
 def get_resolved_openrouter_key() -> str:
     return _get_resolved_snapshot().openrouter_key()
-
-
-def get_resolved_openai_settings() -> dict[str, str]:
-    return _get_resolved_snapshot().openai_settings()
 
 
 def get_resolved_ollama_settings() -> dict[str, str]:

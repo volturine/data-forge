@@ -43,8 +43,12 @@ function savedStep() {
 	};
 }
 
-function controller(options: { serverSteps: number; payload: () => ReturnType<typeof tab>[] }) {
-	const applied: Array<{ tabs: boolean; stepIds: string[] }> = [];
+function controller(options: {
+	serverSteps: number;
+	payload: () => ReturnType<typeof tab>[];
+	serverTabIds?: string[];
+}) {
+	const applied: Array<{ tabs: boolean; activeTabId: string | null; stepIds: string[] }> = [];
 	const draft = createDraftController({
 		getStorageKey: () => `analysis-draft:${ANALYSIS_ID}`,
 		getAnalysisId: () => ANALYSIS_ID,
@@ -53,6 +57,7 @@ function controller(options: { serverSteps: number; payload: () => ReturnType<ty
 		hasTabs: () => true,
 		getServerVersion: () => 'v1',
 		serverStepCount: () => options.serverSteps,
+		serverTabIds: () => options.serverTabIds ?? ['tab-1'],
 		buildPayload: () => ({
 			analysisId: ANALYSIS_ID,
 			version: 'v1',
@@ -66,6 +71,7 @@ function controller(options: { serverSteps: number; payload: () => ReturnType<ty
 		applyDraft: (parsed, apply) => {
 			applied.push({
 				tabs: apply.tabs,
+				activeTabId: apply.activeTabId,
 				stepIds: parsed.tabs.flatMap((item) => item.steps.map((step) => step.id))
 			});
 		}
@@ -105,9 +111,34 @@ describe('analysis editor draft', () => {
 		draft.hydrate();
 		await vi.runAllTimersAsync();
 
-		expect(applied).toEqual([{ tabs: false, stepIds: [] }]);
+		expect(applied).toEqual([{ tabs: false, activeTabId: 'tab-1', stepIds: [] }]);
 		expect(idbDelete).toHaveBeenCalledWith(`analysis-draft:${ANALYSIS_ID}`);
 		expect(draft.draftLoaded).toBe(true);
+	});
+
+	test('does not point the canvas at a tab id the saved analysis lacks', async () => {
+		idbGet.mockResolvedValue(
+			JSON.stringify({
+				analysisId: ANALYSIS_ID,
+				version: 'v1',
+				tabs: [tab([])],
+				activeTabId: 'missing-tab',
+				resourceConfig: null,
+				selectedStepId: null,
+				leftPaneCollapsed: false,
+				rightPaneCollapsed: false
+			})
+		);
+		const { draft, applied } = controller({
+			serverSteps: 2,
+			serverTabIds: ['tab-1'],
+			payload: () => [tab([savedStep()])]
+		});
+
+		draft.hydrate();
+		await vi.runAllTimersAsync();
+
+		expect(applied).toEqual([{ tabs: false, activeTabId: null, stepIds: [] }]);
 	});
 
 	test('restores a same-revision draft that still has steps', async () => {
@@ -128,7 +159,7 @@ describe('analysis editor draft', () => {
 		draft.hydrate();
 		await vi.runAllTimersAsync();
 
-		expect(applied).toEqual([{ tabs: true, stepIds: ['step-1'] }]);
+		expect(applied).toEqual([{ tabs: true, activeTabId: 'tab-1', stepIds: ['step-1'] }]);
 		expect(idbDelete).not.toHaveBeenCalled();
 		expect(draft.draftLoaded).toBe(true);
 	});
@@ -145,6 +176,14 @@ describe('analysis editor draft', () => {
 		expect(idbSet).toHaveBeenCalledTimes(1);
 		const stored = JSON.parse(String(idbSet.mock.calls[0]?.[1])) as { tabs: AnalysisTab[] };
 		expect(stored.tabs[0]?.steps.map((step) => step.id)).toEqual(['step-1']);
+	});
+
+	test('does not persist an empty draft over saved steps', async () => {
+		const { draft } = controller({ serverSteps: 7, payload: () => [tab([])] });
+		draft.markLoaded();
+		draft.schedulePersist();
+		await vi.advanceTimersByTimeAsync(400);
+		expect(idbSet).not.toHaveBeenCalled();
 	});
 
 	test('flush drops a pending draft write', async () => {

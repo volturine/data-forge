@@ -21,6 +21,7 @@ jobs:
     env:
       E2E_SHARDS: "3"
       E2E_API_WORKERS: "4"
+      E2E_OPENROUTER_API_KEY: ${{ secrets.E2E_OPENROUTER_API_KEY }}
       # Leave compute headroom for previews and cleanup during browser tests.
       PW_E2E_WORKERS: "2"
     steps:

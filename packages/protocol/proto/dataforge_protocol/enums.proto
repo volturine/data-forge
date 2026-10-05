@@ -619,7 +619,6 @@ enum RecipientSource {
 enum AIProvider {
   AI_PROVIDER_UNSPECIFIED = 0;
   AI_PROVIDER_OLLAMA = 1 [(dataforge_token) = "ollama"];
-  AI_PROVIDER_OPENAI = 2 [(dataforge_token) = "openai"];
   AI_PROVIDER_OPENROUTER = 3 [(dataforge_token) = "openrouter"];
 }
 

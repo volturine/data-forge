@@ -378,12 +378,8 @@ test.describe('Navigation – chat panel smoke', () => {
 					smtp_password: '',
 					telegram_bot_token: '',
 					telegram_bot_enabled: false,
-					openrouter_api_key: '',
+					openrouter_api_key: 'sk-test',
 					openrouter_default_model: 'openai/gpt-4o-mini',
-					openai_api_key: '',
-					openai_endpoint_url: 'https://openai.test',
-					openai_default_model: 'gpt-4o-mini',
-					openai_organization_id: '',
 					ollama_endpoint_url: 'http://ollama.test',
 					ollama_default_model: 'llama3.2',
 					public_idb_debug: false
@@ -424,7 +420,7 @@ test.describe('Navigation – chat panel smoke', () => {
 
 		const providerSelect = panel.locator('select[title="Chat provider"]');
 		await expect(providerSelect).toBeVisible({ timeout: 3_000 });
-		await expect(providerSelect).toHaveValue('openai', { timeout: 5_000 });
+		await expect(providerSelect).toHaveValue('openrouter', { timeout: 5_000 });
 		await expect(panel.getByRole('button', { name: 'gpt-4o-mini' })).toBeVisible({
 			timeout: 5_000
 		});

@@ -22,6 +22,7 @@ from backend_core.api_execution_budget import run_api_blocking
 from backend_core.database import RuntimeCoordinatorFenced
 from backend_core.error_handlers import handle_errors
 from backend_core.namespace import get_namespace
+from backend_core.settings_projection import get_resolved_openrouter_key
 from backend_core.websocket import serialize_json
 from dataforge_protocol import enums_pb2
 from modules.auth.dependencies import get_current_user
@@ -87,6 +88,19 @@ class ChatProviderDefinition:
         return await run_api_blocking(client.list_models)
 
 
+def _provider_api_key(provider: ChatProviderDefinition, api_key: str | None) -> str | None:
+    """Use the session key, or the same stored OpenRouter key Profile Test validates.
+
+    An empty session key is the masked value the client persists. It is not an
+    explicit key and must not block the settings fallback.
+    """
+    if api_key:
+        return api_key
+    if provider.provider != enums_pb2.AI_PROVIDER_OPENROUTER:
+        return None
+    return get_resolved_openrouter_key() or None
+
+
 CHAT_PROVIDER_DEFINITIONS: dict[enums_pb2.AIProvider, ChatProviderDefinition] = {
     enums_pb2.AI_PROVIDER_OPENROUTER: ChatProviderDefinition(
         provider=enums_pb2.AI_PROVIDER_OPENROUTER,
@@ -94,7 +108,6 @@ CHAT_PROVIDER_DEFINITIONS: dict[enums_pb2.AIProvider, ChatProviderDefinition] = 
         requires_model_list_api_key=True,
         supports_mcp_tool_calls=True,
     ),
-    enums_pb2.AI_PROVIDER_OPENAI: ChatProviderDefinition(provider=enums_pb2.AI_PROVIDER_OPENAI),
     enums_pb2.AI_PROVIDER_OLLAMA: ChatProviderDefinition(provider=enums_pb2.AI_PROVIDER_OLLAMA),
 }
 
@@ -566,7 +579,7 @@ async def _run_agent_turn(
 ) -> None:
     """Run one agent turn: send message, handle tool calls, push SSE events."""
     provider = ChatProviderDefinition.require(session.provider)
-    api_key = session.api_key
+    api_key = _provider_api_key(provider, session.api_key)
     if provider.requires_session_api_key and not api_key:
         await session.push_event({'type': 'error', 'content': 'No API key configured'})
         await session.finish('failed')
@@ -630,7 +643,7 @@ async def _run_agent_turn(
                 api_messages.insert(insert_idx, tool_system_msg)
 
             response = await chat_with_tools(
-                api_key,
+                api_key or '',
                 session.model,
                 api_messages,
                 all_tools,

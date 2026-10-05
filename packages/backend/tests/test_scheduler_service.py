@@ -20,7 +20,7 @@ from backend_core.domain.engine_runs.schemas import EngineRunKind
 from backend_core.domain.scheduler.schemas import ScheduleCreate, ScheduleUpdate
 from backend_core.exceptions import AppError
 from backend_core.persistence.analysis.models import Analysis, AnalysisDataSource
-from backend_core.persistence.build_runs.models import BuildRunDatasource
+from backend_core.persistence.build_runs.models import BuildRun, BuildRunDatasource
 from backend_core.persistence.datasource.models import DataSource
 from backend_core.persistence.scheduler.models import Schedule
 from backend_core.sqlmodel_typing import col
@@ -1075,7 +1075,84 @@ class TestEnqueueScheduleRun:
         job = build_job_service.get_job_by_build_id(test_db_session, run_id)
         assert job is not None
 
-    def test_enqueue_schedule_for_plain_datasource_creates_ingest_build(self, test_db_session: Session, sample_datasource: DataSource):
+    def test_enqueue_schedule_for_plain_datasource_fails_without_a_reader(self, test_db_session: Session, sample_datasource: DataSource):
+        schedule = create_schedule(
+            test_db_session,
+            ScheduleCreate(datasource_id=sample_datasource.id, cron_expression='0 * * * *'),
+        )
+        row = test_db_session.get(Schedule, schedule.id)
+        assert row is not None
+        claim_token, lease_generation = _assign_schedule_claim(row)
+        test_db_session.add(row)
+        test_db_session.commit()
+
+        with pytest.raises(ValueError, match='no analysis reading it'):
+            enqueue_schedule_run(
+                test_db_session,
+                schedule.id,
+                worker_id='scheduler:test',
+                claim_token=claim_token,
+                lease_generation=lease_generation,
+            )
+
+    def test_enqueue_schedule_for_source_read_by_analysis_runs_that_analysis(
+        self,
+        test_db_session: Session,
+        analysis_with_output: Analysis,
+        sample_datasource: DataSource,
+    ):
+        definition = {
+            'tabs': [
+                {
+                    **analysis_with_output.pipeline_definition['tabs'][0],
+                    'steps': [
+                        {
+                            'id': 'sort-1',
+                            'type': 'sort',
+                            'config': {'columns': ['value'], 'descending': [False]},
+                            'depends_on': [],
+                            'is_applied': True,
+                        }
+                    ],
+                }
+            ]
+        }
+        analysis_with_output.pipeline_definition = definition
+        second = Analysis(
+            id=str(uuid.uuid4()),
+            name='Second reader',
+            description=None,
+            pipeline_definition={
+                'tabs': [
+                    {
+                        **definition['tabs'][0],
+                        'id': 'tab-second',
+                        'name': 'Second',
+                        'output': {
+                            **definition['tabs'][0]['output'],
+                            'result_id': str(uuid.uuid4()),
+                            'filename': 'second_output',
+                        },
+                        'steps': [
+                            {
+                                'id': 'sort-2',
+                                'type': 'sort',
+                                'config': {'columns': ['value'], 'descending': [True]},
+                                'depends_on': [],
+                                'is_applied': True,
+                            }
+                        ],
+                    }
+                ]
+            },
+            status=AnalysisStatus.DRAFT,
+            created_at=datetime.now(UTC),
+            updated_at=datetime.now(UTC),
+        )
+        test_db_session.add(analysis_with_output)
+        test_db_session.add(second)
+        test_db_session.commit()
+
         schedule = create_schedule(
             test_db_session,
             ScheduleCreate(datasource_id=sample_datasource.id, cron_expression='0 * * * *'),
@@ -1093,13 +1170,14 @@ class TestEnqueueScheduleRun:
             claim_token=claim_token,
             lease_generation=lease_generation,
         )
-        run = build_run_service.get_build_run(test_db_session, run_id)
-
-        assert run is not None
-        assert run.schedule_id == schedule.id
-        assert run.current_kind == EngineRunKind.BUILD.value
-        assert run.status == BuildRunStatus.QUEUED
-        assert build_run_service.has_active_build_for_datasource(test_db_session, namespace='default', datasource_id=sample_datasource.id)
+        runs = test_db_session.execute(select(BuildRun).where(col(BuildRun.schedule_id) == schedule.id)).scalars().all()
+        assert {run.analysis_id for run in runs} == {analysis_with_output.id, second.id}
+        assert all(run.analysis_name != f'Schedule ingest {sample_datasource.name}' for run in runs)
+        assert run_id in {run.id for run in runs}
+        for run in runs:
+            tabs = run.request_json['analysis_pipeline']['tabs']
+            assert any(step['type'] == 'sort' for tab in tabs for step in tab['steps'])
+            assert all(tab['datasource']['source_type'] != 'schedule' for tab in tabs)
 
     def test_enqueue_schedule_for_raw_datasource_uses_build_kind(self, test_db_session: Session, sample_csv_file):
         raw = DataSource(

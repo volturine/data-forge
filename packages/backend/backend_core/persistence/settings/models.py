@@ -24,12 +24,6 @@ class AppSettings(SQLModel, table=True):
     openrouter_api_key: str = Field(default='')
     openrouter_default_model: str = Field(default='')
 
-    # OpenAI-compatible
-    openai_api_key: str = Field(default='')
-    openai_endpoint_url: str = Field(default='https://api.openai.com')
-    openai_default_model: str = Field(default='gpt-4o-mini')
-    openai_organization_id: str = Field(default='')
-
     # Ollama
     ollama_endpoint_url: str = Field(default='http://localhost:11434')
     ollama_default_model: str = Field(default='llama3.2')

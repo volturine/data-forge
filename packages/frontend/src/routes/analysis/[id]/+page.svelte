@@ -128,6 +128,7 @@
 		hasTabs: () => analysisStore.tabs.length > 0,
 		getServerVersion: () => lastLoadedVersion ?? analysisStore.currentRevision,
 		serverStepCount: () => analysisStore.tabs.reduce((count, tab) => count + tab.steps.length, 0),
+		serverTabIds: () => analysisStore.tabs.map((tab) => tab.id),
 		buildPayload: () => ({
 			analysisId,
 			version: analysisStore.currentRevision,
@@ -142,7 +143,7 @@
 		}),
 		applyDraft: (parsed, options) => {
 			if (options.tabs) analysisStore.setTabs(parsed.tabs);
-			analysisStore.activeTabId = parsed.activeTabId;
+			if (options.activeTabId) analysisStore.activeTabId = options.activeTabId;
 			analysisStore.setResourceConfig(parsed.resourceConfig);
 			selectedStepId = parsed.selectedStepId;
 			leftPaneCollapsed = parsed.leftPaneCollapsed;
