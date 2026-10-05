@@ -198,7 +198,7 @@ def build_openrouter_client(*, endpoint_url: str | None, api_key: str | None, or
     del endpoint_url, organization_id
     from backend_core.settings_projection import get_resolved_openrouter_key
 
-    resolved_key = api_key or get_resolved_openrouter_key() or settings.openrouter_api_key
+    resolved_key = api_key or get_resolved_openrouter_key()
     if not resolved_key:
         raise ValueError('OPENROUTER_API_KEY not configured')
     return OpenRouterClient(resolved_key)

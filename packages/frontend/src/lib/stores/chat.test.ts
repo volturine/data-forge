@@ -218,6 +218,50 @@ describe('ChatStore — pure local logic', () => {
 			expect(chatApi.listModels).toHaveBeenCalled();
 		});
 
+		test('empty openrouter apply does not erase the stored key', async () => {
+			store.provider = 'openrouter';
+			store.settings = makeSettings({ openrouter_api_key: '••••••••' });
+			await store.configure('');
+			expect(settingsApi.updateSettings).not.toHaveBeenCalled();
+			expect(store.settings?.openrouter_api_key).toBe('••••••••');
+			expect(store.configured).toBe(true);
+		});
+
+		test('loads openrouter models through the stored key when the session key is empty', async () => {
+			store.provider = 'openrouter';
+			store.apiKey = '';
+			store.settings = makeSettings({ openrouter_api_key: '••••••••' });
+			vi.mocked(chatApi.listModels).mockReturnValue(
+				okAsync([{ id: 'z-ai/glm-5.3-flash', name: 'GLM', context_length: 1 }])
+			);
+			await store.loadModels();
+			expect(chatApi.listModels).toHaveBeenCalledWith('openrouter', '', undefined, undefined);
+			expect(store.error).toBeNull();
+			expect(store.models).toHaveLength(1);
+		});
+
+		test('open_panel keeps openrouter when the saved key is masked', async () => {
+			vi.mocked(settingsApi.getSettings).mockReturnValue(
+				okAsync(
+					makeSettings({
+						openrouter_api_key: '••••••••',
+						openrouter_default_model: 'z-ai/glm-5.3-flash'
+					})
+				)
+			);
+			vi.mocked(mcpApi.listTools).mockReturnValue(okAsync([]));
+			vi.mocked(chatApi.listSessions).mockReturnValue(okAsync([]));
+			vi.mocked(chatApi.listModels).mockReturnValue(okAsync([]));
+
+			await store.open_panel();
+
+			expect(store.provider).toBe('openrouter');
+			expect(store.apiKey).toBe('');
+			expect(store.model).toBe('z-ai/glm-5.3-flash');
+			expect(store.configured).toBe(true);
+			expect(chatApi.listModels).toHaveBeenCalled();
+		});
+
 		test('open_panel keeps openrouter when an API key is stored', async () => {
 			vi.mocked(settingsApi.getSettings).mockReturnValue(
 				okAsync(makeSettings({ openrouter_api_key: 'sk-test' }))

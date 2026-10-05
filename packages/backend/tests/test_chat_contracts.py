@@ -32,9 +32,20 @@ class TestModelsRoute:
         assert resp.status_code == 422
 
     def test_models_returns_400_when_no_key(self, client: TestClient) -> None:
-        resp = client.post('/api/v1/ai/chat/models', json={'provider': 'openrouter'})
+        with patch('modules.chat.routes.get_resolved_openrouter_key', return_value=''):
+            resp = client.post('/api/v1/ai/chat/models', json={'provider': 'openrouter'})
         assert resp.status_code == 400
         assert 'API key is required' in resp.json()['detail']
+
+    def test_models_uses_resolved_key_when_request_key_is_empty(self, client: TestClient) -> None:
+        mock_models = [{'id': 'z-ai/glm-5.3-flash', 'name': 'GLM'}]
+        with (
+            patch('modules.chat.routes.list_models', new=AsyncMock(return_value=mock_models)) as mock_list,
+            patch('modules.chat.routes.get_resolved_openrouter_key', return_value='sk-deploy'),
+        ):
+            resp = client.post('/api/v1/ai/chat/models', json={'provider': 'openrouter', 'api_key': ''})
+        assert resp.status_code == 200
+        mock_list.assert_awaited_once_with('sk-deploy')
 
     def test_models_returns_empty_list(self, client: TestClient) -> None:
         with patch('modules.chat.routes.list_models', new=AsyncMock(return_value=[])):

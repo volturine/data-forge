@@ -291,6 +291,40 @@ class TestUpdateSettings:
         assert get_resolved_telegram_token() == 'bot999:xyz'
         assert get_resolved_openrouter_key() == 'sk-live'
 
+    def test_get_populates_empty_openrouter_key_then_keeps_a_profile_key(self, client: TestClient, monkeypatch) -> None:
+        from backend_core.config import settings as app_settings
+        from backend_core.database import run_settings_db
+        from backend_core.persistence.settings.models import AppSettings
+        from backend_core.settings_store import get_resolved_openrouter_key
+
+        monkeypatch.setenv('SETTINGS_ENCRYPTION_KEY', 'test-key')
+        monkeypatch.setattr(app_settings, 'openrouter_api_key', 'sk-or-env', raising=False)
+        cleared = client.put('/api/v1/settings', json={'openrouter_api_key': ''})
+        assert cleared.status_code == 200
+        assert cleared.json()['openrouter_api_key'] == ''
+
+        populated = client.get('/api/v1/settings')
+        assert populated.status_code == 200
+        assert populated.json()['openrouter_api_key'] == MASKED_SECRET
+        assert get_resolved_openrouter_key() == 'sk-or-env'
+
+        def _stored_key(session: Session) -> str:
+            row = session.get(AppSettings, 1)
+            assert row is not None
+            assert str(row.openrouter_api_key).startswith('enc:v1:')
+            return decrypt_secret(row.openrouter_api_key)
+
+        assert run_settings_db(_stored_key) == 'sk-or-env'
+
+        saved = client.put('/api/v1/settings', json={'openrouter_api_key': 'sk-or-user'})
+        assert saved.status_code == 200
+        assert saved.json()['openrouter_api_key'] == MASKED_SECRET
+        reread = client.get('/api/v1/settings')
+        assert reread.status_code == 200
+        assert reread.json()['openrouter_api_key'] == MASKED_SECRET
+        assert get_resolved_openrouter_key() == 'sk-or-user'
+        assert run_settings_db(_stored_key) == 'sk-or-user'
+
     def test_encrypts_settings_secrets_at_rest(self, client: TestClient, monkeypatch) -> None:
         from backend_core.database import run_settings_db
         from backend_core.persistence.settings.models import AppSettings
@@ -924,6 +958,37 @@ class TestSeedSettingsFromEnv:
             assert row.openrouter_api_key == 'sk-or-db'
             assert row.openrouter_default_model == 'db/model'
 
+    def test_seed_copies_deployment_key_when_saved_openrouter_key_is_empty(self, monkeypatch) -> None:
+        from backend_core.config import settings as app_settings
+        from backend_core.persistence.settings.models import AppSettings
+        from backend_core.settings_store import seed_settings_from_env
+
+        monkeypatch.setenv('SETTINGS_ENCRYPTION_KEY', 'test-key')
+        monkeypatch.setattr(app_settings, 'settings_encryption_key', 'test-key', raising=False)
+        monkeypatch.setattr(app_settings, 'smtp_host', 'env.example.com', raising=False)
+        monkeypatch.setattr(app_settings, 'openrouter_api_key', 'sk-or-env', raising=False)
+        monkeypatch.setattr(app_settings, 'openrouter_default_model', 'env/model', raising=False)
+
+        engine = self._make_engine()
+        with Session(engine) as session:
+            row = AppSettings(
+                id=1,
+                smtp_host='db.example.com',
+                openrouter_api_key='',
+                openrouter_default_model='db/model',
+                env_bootstrap_complete=True,
+            )
+            session.add(row)
+            session.commit()
+
+            seed_settings_from_env(session)
+            session.refresh(row)
+
+            assert row.smtp_host == 'db.example.com'
+            assert row.openrouter_default_model == 'db/model'
+            assert row.openrouter_api_key.startswith('enc:v1:')
+            assert decrypt_secret(row.openrouter_api_key) == 'sk-or-env'
+
     def test_seeds_openrouter_default_model_field(self, monkeypatch) -> None:
         from backend_core.config import settings as app_settings
         from backend_core.persistence.settings.models import AppSettings
@@ -1246,5 +1311,55 @@ class TestSettingsRuntimeReads:
 
             assert get_resolved_openrouter_key() == 'openrouter-seeded'
             assert get_resolved_default_model() == 'seeded-model'
+        finally:
+            clear_settings_engine_override()
+
+    def test_resolved_openrouter_key_uses_deployment_key_when_saved_key_is_empty(self, monkeypatch) -> None:
+        from backend_core.config import settings as app_settings
+        from backend_core.database import clear_settings_engine_override, set_settings_engine_override
+        from backend_core.persistence.settings.models import AppSettings
+        from backend_core.settings_store import get_resolved_openrouter_key
+
+        monkeypatch.setenv('SETTINGS_ENCRYPTION_KEY', 'test-key')
+        monkeypatch.setattr(app_settings, 'settings_encryption_key', 'test-key', raising=False)
+        monkeypatch.setattr(app_settings, 'openrouter_api_key', 'sk-or-env', raising=False)
+        engine = self._make_engine()
+        set_settings_engine_override(engine)
+        try:
+            with Session(engine) as session:
+                session.add(AppSettings(id=1, openrouter_api_key='', env_bootstrap_complete=True))
+                session.commit()
+            assert get_resolved_openrouter_key() == 'sk-or-env'
+            with Session(engine) as session:
+                row = session.get(AppSettings, 1)
+                assert row is not None
+                assert row.openrouter_api_key.startswith('enc:v1:')
+                assert decrypt_secret(row.openrouter_api_key) == 'sk-or-env'
+        finally:
+            clear_settings_engine_override()
+
+    def test_resolved_openrouter_key_prefers_saved_key(self, monkeypatch) -> None:
+        from backend_core.config import settings as app_settings
+        from backend_core.database import clear_settings_engine_override, set_settings_engine_override
+        from backend_core.persistence.settings.models import AppSettings
+        from backend_core.secrets import encrypt_secret
+        from backend_core.settings_store import get_resolved_openrouter_key
+
+        monkeypatch.setenv('SETTINGS_ENCRYPTION_KEY', 'test-key')
+        monkeypatch.setattr(app_settings, 'settings_encryption_key', 'test-key', raising=False)
+        monkeypatch.setattr(app_settings, 'openrouter_api_key', 'sk-or-env', raising=False)
+        engine = self._make_engine()
+        set_settings_engine_override(engine)
+        try:
+            with Session(engine) as session:
+                session.add(
+                    AppSettings(
+                        id=1,
+                        openrouter_api_key=encrypt_secret('sk-or-db'),
+                        env_bootstrap_complete=True,
+                    )
+                )
+                session.commit()
+            assert get_resolved_openrouter_key() == 'sk-or-db'
         finally:
             clear_settings_engine_override()

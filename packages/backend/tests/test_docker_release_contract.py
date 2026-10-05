@@ -48,6 +48,7 @@ def test_e2e_api_keep_alive_outlasts_the_suite_budget() -> None:
     assert int(keep_alive.group(1)) >= int(suite.group(1))
     api_service = COMPOSE_E2E.read_text().split('\n  api:\n', 1)[1].split('\n  runtime:\n', 1)[0]
     assert 'UVICORN_TIMEOUT_KEEP_ALIVE: ${UVICORN_TIMEOUT_KEEP_ALIVE}' in api_service
+    assert 'OPENROUTER_API_KEY: ${E2E_OPENROUTER_API_KEY:-}' in api_service
 
 
 def test_runtime_inherits_api_database_pool_settings_without_overrides() -> None:
