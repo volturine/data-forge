@@ -513,7 +513,12 @@
 							>
 								Schedules
 							</h3>
-							<ScheduleManager datasourceId={selectedRawId} compact />
+							<ScheduleManager
+								datasourceId={selectedNode.node_kind === 'source'
+									? undefined
+									: (selectedRawId ?? undefined)}
+								compact
+							/>
 						</div>
 					{/if}
 				{:else}

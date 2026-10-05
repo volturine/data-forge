@@ -90,7 +90,9 @@ class WithColumnsHandler(OperationHandler):
                 exprs.append(pl.lit(expr.value).alias(expr.name))
             elif expr.type == WithColumnsExprType.COLUMN and expr.column:
                 exprs.append(pl.col(expr.column).alias(expr.name))
-            elif expr.type == WithColumnsExprType.UDF and expr.code:
+            elif expr.type == WithColumnsExprType.UDF:
+                if not expr.code:
+                    raise ValueError(f"UDF expression {expr.name!r} is missing its code")
                 validate_no_reflection_escape(expr.code, label="UDF code")
                 scope: dict[str, Any] = {
                     "pl": pl,

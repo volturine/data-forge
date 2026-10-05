@@ -217,9 +217,48 @@ describe('ChatStore — pure local logic', () => {
 
 			await store.open_panel();
 
-			expect(store.provider).toBe('openai');
+			expect(store.provider).toBe('ollama');
 			expect(store.configured).toBe(true);
 			expect(chatApi.listModels).toHaveBeenCalled();
+		});
+
+		test('open_panel selects openai when an API key is stored', async () => {
+			vi.mocked(settingsApi.getSettings).mockReturnValue(
+				okAsync(makeSettings({ openai_api_key: 'sk-test' }))
+			);
+			vi.mocked(mcpApi.listTools).mockReturnValue(okAsync([]));
+			vi.mocked(chatApi.listSessions).mockReturnValue(okAsync([]));
+			vi.mocked(chatApi.listModels).mockReturnValue(okAsync([]));
+
+			await store.open_panel();
+
+			expect(store.provider).toBe('openai');
+			expect(store.configured).toBe(true);
+		});
+
+		test('open_panel selects openai when a custom endpoint is set without a key', async () => {
+			vi.mocked(settingsApi.getSettings).mockReturnValue(
+				okAsync(makeSettings({ openai_endpoint_url: 'https://openai.test' }))
+			);
+			vi.mocked(mcpApi.listTools).mockReturnValue(okAsync([]));
+			vi.mocked(chatApi.listSessions).mockReturnValue(okAsync([]));
+			vi.mocked(chatApi.listModels).mockReturnValue(okAsync([]));
+
+			await store.open_panel();
+
+			expect(store.provider).toBe('openai');
+			expect(store.configured).toBe(true);
+			expect(store.model).toBe('gpt-4o-mini');
+			expect(chatApi.listModels).toHaveBeenCalled();
+		});
+
+		test('default openai endpoint without a key is not configured', () => {
+			store.provider = 'openai';
+			store.settings = makeSettings();
+			const refreshConfigured = Reflect.get(store, '_refreshConfigured') as
+				(() => void) | undefined;
+			refreshConfigured?.call(store);
+			expect(store.configured).toBe(false);
 		});
 
 		test('reset clears session-backed configured state when no provider key is stored', () => {
@@ -234,7 +273,7 @@ describe('ChatStore — pure local logic', () => {
 
 			store.reset();
 			expect(store.sessionId).toBeNull();
-			expect(store.provider).toBe('openai');
+			expect(store.provider).toBe('ollama');
 			expect(store.configured).toBe(true);
 		});
 	});

@@ -156,6 +156,30 @@ describe('openLockSession', () => {
 		session.close();
 	});
 
+	test('releases an acquire that completes after close starts', () => {
+		vi.useFakeTimers();
+		const session: LockSession = openLockSession({
+			resourceType: 'analysis',
+			resourceId: 'analysis-1',
+			onStatus: vi.fn(),
+			onError: vi.fn()
+		});
+		const socket = sockets[0];
+		session.acquire();
+		socket.emit('open');
+		socket.emit('message', { data: statusMessage(lock('existing-lock')) });
+		session.close();
+		expect(socket.closed).toBe(false);
+
+		socket.emit('message', { data: statusMessage(lock('late-token')) });
+
+		expect(sentMessages(socket)).toContainEqual({
+			action: 'release',
+			lock_token: 'late-token'
+		});
+		session.close();
+	});
+
 	test('does not spam acquire on repeated existing-lock statuses after a 409 conflict', () => {
 		const onStatus = vi.fn();
 		const onError = vi.fn();

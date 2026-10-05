@@ -3,7 +3,7 @@
 	import { listSchedules, updateSchedule, deleteSchedule } from '$lib/api/schedule';
 	import type { Schedule } from '$lib/api/schedule';
 	import { listDatasources } from '$lib/api/datasource';
-	import type { DataSource } from '$lib/types/datasource';
+	import { datasourceIsAnalysisOutput, type DataSource } from '$lib/types/datasource';
 	import {
 		Plus,
 		Calendar,
@@ -90,8 +90,10 @@
 		new SvelteMap((datasourcesQuery.data ?? []).map((ds) => [ds.id, ds] as [string, DataSource]))
 	);
 
-	// Lookups may include hidden outputs (existing schedules); pickers never list them.
-	const pickerDatasources = $derived((datasourcesQuery.data ?? []).filter((ds) => !ds.is_hidden));
+	// Hidden analysis outputs are the datasets a schedule can rebuild.
+	const pickerDatasources = $derived(
+		(datasourcesQuery.data ?? []).filter((ds) => !ds.is_hidden || datasourceIsAnalysisOutput(ds))
+	);
 
 	const schedules = $derived(schedulesQuery.data ?? []);
 	const allSchedules = $derived(allSchedulesQuery.data ?? []);
@@ -105,7 +107,9 @@
 		targetDatasource
 			? {
 					datasourceName: targetDatasource.name,
-					analysisName: targetDatasource.created_by_analysis_id ? 'Analysis' : 'Unknown',
+					analysisName: targetDatasource.created_by_analysis_id
+						? 'Analysis'
+						: 'Not an analysis output',
 					tabName: targetDatasource.output_of_tab_id ? 'Tab' : null
 				}
 			: null
@@ -161,7 +165,9 @@
 		void listDatasources(true, { cache: 'no-store' }).match(
 			(datasources) => {
 				queryClient.setQueryData(['datasources-lookup', ns.value, 'include-hidden'], datasources);
-				createDatasources = datasources.filter((ds) => !ds.is_hidden);
+				createDatasources = datasources.filter(
+					(ds) => !ds.is_hidden || datasourceIsAnalysisOutput(ds)
+				);
 				creating = true;
 			},
 			() => {

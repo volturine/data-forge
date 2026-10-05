@@ -859,6 +859,43 @@ def test_with_columns_udf_can_use_sleep_helper(monkeypatch: pytest.MonkeyPatch) 
     assert all(call == 0.01 for call in calls)
 
 
+def test_with_columns_library_udf_without_code_fails() -> None:
+    handler = WithColumnsHandler()
+    with pytest.raises(ValueError, match="missing its code"):
+        handler(
+            pl.DataFrame({"value": [0.0]}).lazy(),
+            {
+                "expressions": [
+                    {
+                        "name": "value_f",
+                        "type": WithColumnsExprType.UDF,
+                        "udf_id": "udf-1",
+                        "args": ["value"],
+                    }
+                ]
+            },
+        )
+
+
+def test_with_columns_protocol_udf_number_computes_the_column() -> None:
+    handler = WithColumnsHandler()
+    frame = handler(
+        pl.DataFrame({"value": [0.0, 100.0]}).lazy(),
+        {
+            "expressions": [
+                {
+                    "name": "value_f",
+                    "type": int(WithColumnsExprType.UDF),
+                    "args": ["value"],
+                    "code": "def udf(value):\n    return value * 9 / 5 + 32\n",
+                }
+            ]
+        },
+    ).collect()
+
+    assert frame["value_f"].to_list() == [32.0, 212.0]
+
+
 def test_expression_rejects_dunder_escape() -> None:
     with pytest.raises(ValueError, match="forbidden dunder access"):
         parse_expression('pl.col("age").__class__')

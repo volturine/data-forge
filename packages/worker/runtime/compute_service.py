@@ -44,6 +44,7 @@ from runtime.domain.compute.schemas import BuildStatus, BuildTabStatus, ComputeR
 from runtime.domain.datasource.source_types import DataSourceType
 from runtime.domain.engine_runs.schemas import EngineRunExecutionCategory, EngineRunKind, EngineRunStatus
 from runtime.exceptions import (
+    AppError,
     DataSourceSnapshotError,
     EngineShutdownError,
     PipelineExecutionError,
@@ -1335,6 +1336,14 @@ def _get_additional_datasources(
     return additional
 
 
+def _library_udf_expression(expr: object) -> bool:
+    from operations.enums import WithColumnsExprType
+
+    if not isinstance(expr, dict) or expr.get("code") or not expr.get("udf_id"):
+        return False
+    return WithColumnsExprType.read(expr.get("type")) == WithColumnsExprType.UDF
+
+
 def _hydrate_udfs(session: object | None, steps: list[dict]) -> list[dict]:
     del session
     udf_ids: list[str] = []
@@ -1344,7 +1353,7 @@ def _hydrate_udfs(session: object | None, steps: list[dict]) -> list[dict]:
         if not isinstance(expressions, list):
             continue
         for expr in expressions:
-            if isinstance(expr, dict) and expr.get("type") == "udf" and expr.get("udf_id") and not expr.get("code"):
+            if _library_udf_expression(expr):
                 udf_ids.append(str(expr["udf_id"]))
     codes = client_from_env().udf_codes(namespace=get_namespace(), udf_ids=sorted(set(udf_ids))) if udf_ids else {}
     next_steps: list[dict] = []
@@ -1359,7 +1368,7 @@ def _hydrate_udfs(session: object | None, steps: list[dict]) -> list[dict]:
             continue
         updated = []
         for expr in expressions:
-            if not isinstance(expr, dict) or expr.get("type") != "udf" or expr.get("code"):
+            if not _library_udf_expression(expr):
                 updated.append(expr)
                 continue
             udf_id = expr.get("udf_id")
@@ -1968,6 +1977,19 @@ def get_step_schema(
     )
 
 
+def _reported_row_count_error(exc: Exception) -> Exception:
+    if isinstance(exc, (AppError, ValueError)):
+        return exc
+    if isinstance(exc, RuntimeError):
+        return PipelineExecutionError(str(exc))
+    import grpc
+
+    if isinstance(exc, grpc.RpcError):
+        details = exc.details() if callable(getattr(exc, "details", None)) else None
+        return PipelineExecutionError(details or str(exc) or "Engine request failed")
+    return exc
+
+
 def get_step_row_count(
     session: object,
     manager: ProcessManager,
@@ -2019,18 +2041,6 @@ def get_step_row_count(
         count_steps = steps[: step_index + 1]
         count_steps = _hydrate_udfs(session, count_steps)
 
-    with _acquire_engine(
-        manager,
-        default_stateless_engine_identity(analysis_pipeline, requested_target_step_id, tab_id),
-    ) as engine:
-        additional_datasources = _get_additional_datasources(session, count_steps, analysis_pipeline)
-
-        job_id = engine.get_row_count(
-            datasource_config=config,
-            steps=count_steps,
-            additional_datasources=additional_datasources,
-        )
-        result_data = await_engine_result(engine, job_id=job_id)
     run_response = _create_engine_run(
         session,
         analysis_id=analysis_id_value,
@@ -2052,7 +2062,20 @@ def get_step_row_count(
     step_timings: dict = {}
     current_step_id: str | None = None
     query_plan: str | None = None
+    result_data: dict | None = None
     try:
+        with _acquire_engine(
+            manager,
+            default_stateless_engine_identity(analysis_pipeline, requested_target_step_id, tab_id),
+        ) as engine:
+            additional_datasources = _get_additional_datasources(session, count_steps, analysis_pipeline)
+
+            job_id = engine.get_row_count(
+                datasource_config=config,
+                steps=count_steps,
+                additional_datasources=additional_datasources,
+            )
+            result_data = await_engine_result(engine, job_id=job_id)
         step_timings = result_data.get("step_timings", {}) if isinstance(result_data, dict) else {}
         query_plan = result_data.get("query_plan") if isinstance(result_data, dict) else None
         _raise_engine_failure(
@@ -2113,15 +2136,16 @@ def get_step_row_count(
         except BuildCancelledError as cancel_exc:
             raise cancel_exc from exc
 
+        reported = _reported_row_count_error(exc)
         completed_at = datetime.now(UTC)
         duration_ms = int((time.perf_counter() - started_perf) * 1000)
-        execution_entries = _build_engine_run_execution_entries(result_data, duration_ms=duration_ms)
+        execution_entries = _build_engine_run_execution_entries(result_data if isinstance(result_data, dict) else None, duration_ms=duration_ms)
         _finalize_failed_engine_run(
             session,
             run_id=run_response.id,
             existing_result=_load_engine_run_result_json(session, run_response.id),
             execution_entries=execution_entries,
-            error=exc,
+            error=reported,
             completed_at=completed_at,
             duration_ms=duration_ms,
             step_timings=step_timings,
@@ -2133,12 +2157,14 @@ def get_step_row_count(
                 tab_id=tab_id,
                 tab_name=tab_name,
                 status=BuildTabStatus.FAILED,
-                error=str(exc),
+                error=str(reported),
             ),
-            log_entry=_log_entry(message=str(exc), level="error", tab_id=tab_id, tab_name=tab_name),
+            log_entry=_log_entry(message=str(reported), level="error", tab_id=tab_id, tab_name=tab_name),
             current_step=current_step_id,
         )
-        raise
+        if reported is exc:
+            raise
+        raise reported from exc
 
 
 def export_data(

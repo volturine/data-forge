@@ -31,7 +31,7 @@
 		fresh: 'Fresh',
 		stale: 'Stale',
 		outdated: 'Outdated',
-		unknown: 'Unknown'
+		unknown: 'No snapshot'
 	};
 
 	const tones: Record<FreshnessStatus, 'success' | 'warning' | 'error' | 'neutral'> = {

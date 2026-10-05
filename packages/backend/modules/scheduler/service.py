@@ -297,7 +297,9 @@ def _enqueue_schedule_ingest_build(
     now: datetime,
 ) -> build_run_service.BuildRun:
     build_id = str(uuid.uuid4())
-    analysis_name = f'Schedule ingest {schedule.datasource_id}'
+    datasource = session.get(DataSource, schedule.datasource_id)
+    datasource_name = datasource.name if datasource is not None and datasource.name else schedule.datasource_id
+    analysis_name = f'Schedule ingest {datasource_name}'
     request = _build_ingest_request(schedule)
     datasource_ids = build_datasource_dependencies.external_datasource_ids(request.analysis_pipeline)
     build_datasource_dependencies.lock_active_datasources(session, namespace=namespace, datasource_ids=datasource_ids)

@@ -58,6 +58,7 @@ function createEditor(hydrateOnOwned: boolean) {
 		readOnly: () => lock.editorReadOnly,
 		hasTabs: () => true,
 		getServerVersion: () => 'v1',
+		serverStepCount: () => 0,
 		buildPayload: () => ({
 			analysisId: ANALYSIS_ID,
 			version: 'v1',

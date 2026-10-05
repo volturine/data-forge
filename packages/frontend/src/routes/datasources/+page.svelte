@@ -16,6 +16,7 @@
 	} from '@lucide/svelte';
 	import ConfirmDialog from '$lib/components/common/ConfirmDialog.svelte';
 	import BranchPicker from '$lib/components/common/BranchPicker.svelte';
+	import FileTypeBadge from '$lib/components/common/FileTypeBadge.svelte';
 	import FreshnessBadge from '$lib/components/common/FreshnessBadge.svelte';
 	import RelativeTime from '$lib/components/common/RelativeTime.svelte';
 	import RowActionMenu from '$lib/components/common/RowActionMenu.svelte';
@@ -481,6 +482,7 @@
 												Import
 											</span>
 										{/if}
+										<FileTypeBadge sourceType={datasource.source_type} size="sm" />
 										<FreshnessBadge
 											lastDataUpdate={datasource.last_data_update}
 											thresholdMinutes={datasource.freshness_threshold_minutes ?? null}

@@ -5,7 +5,12 @@
 
 	interface Props {
 		schema: Schema;
-		config?: { index?: string[]; on?: string[]; variable_name?: string; value_name?: string };
+		config?: {
+			id_vars?: string[];
+			value_vars?: string[];
+			variable_name?: string;
+			value_name?: string;
+		};
 	}
 
 	let { schema, config = $bindable({}) }: Props = $props();
@@ -44,8 +49,8 @@
 		</div>
 		<MultiSelectColumnDropdown
 			{schema}
-			value={config.index ?? []}
-			onChange={(val) => (config.index = val)}
+			value={config.id_vars ?? []}
+			onChange={(val) => (config.id_vars = val)}
 			placeholder="Select index columns..."
 		/>
 		<span class={css({ marginTop: '1', display: 'block', fontSize: 'xs', color: 'fg.tertiary' })}
@@ -69,8 +74,8 @@
 		</div>
 		<MultiSelectColumnDropdown
 			{schema}
-			value={config.on ?? []}
-			onChange={(val) => (config.on = val)}
+			value={config.value_vars ?? []}
+			onChange={(val) => (config.value_vars = val)}
 			placeholder="Select columns to unpivot..."
 		/>
 		<span class={css({ marginTop: '1', display: 'block', fontSize: 'xs', color: 'fg.tertiary' })}

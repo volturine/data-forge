@@ -196,6 +196,10 @@ export function openLockSession(options: LockSessionOptions): LockSession {
 			attemptedAcquireOnExistingLock = false;
 			ownerId = lock.owner_id;
 			ownedToken = lock.lock_token;
+			if (closingAfterRelease) {
+				if (!release()) finishClose();
+				return;
+			}
 			options.onStatus(lock, true);
 			return;
 		}
@@ -256,6 +260,7 @@ export function openLockSession(options: LockSessionOptions): LockSession {
 			}
 			awaitingAcquire = false;
 			options.onError?.({ error: msg.error, statusCode: msg.status_code });
+			if (closingAfterRelease) finishClose();
 		});
 
 		socket.addEventListener('close', () => {
@@ -316,6 +321,13 @@ export function openLockSession(options: LockSessionOptions): LockSession {
 		close() {
 			if (closed || closingAfterRelease) return;
 			closingAfterRelease = true;
+			wantsAcquire = false;
+			// release() clears an in-flight acquire. Wait for that response so
+			// the token can be released instead of living until the lock TTL.
+			if (awaitingAcquire && ownedToken === null) {
+				releaseCloseTimer = window.setTimeout(finishClose, RELEASE_ACK_TIMEOUT_MS);
+				return;
+			}
 			const waitingForRelease = releasePending || release();
 			if (!waitingForRelease) {
 				finishClose();

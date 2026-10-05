@@ -508,6 +508,7 @@
 				})}
 				onclick={onSave}
 				disabled={isSaving || loading || editorReadOnly}
+				title={saveButtonLabel}
 				type="button"
 				data-save-state={saveButtonState}
 			>

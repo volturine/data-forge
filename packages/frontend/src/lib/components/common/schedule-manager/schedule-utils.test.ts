@@ -175,7 +175,7 @@ describe('getProvenanceDisplay', () => {
 		);
 	});
 
-	test('unknown when nothing available', () => {
-		expect(getProvenanceDisplay(makeSchedule())).toBe('Unknown');
+	test('names a datasource that is not an analysis output', () => {
+		expect(getProvenanceDisplay(makeSchedule())).toBe('Not an analysis output');
 	});
 });

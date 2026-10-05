@@ -227,7 +227,7 @@
 									<span class={css({ color: 'fg.secondary' })}>Tab</span>
 								{/if}
 							{:else}
-								<span class={css({ color: 'fg.secondary' })}>Unknown</span>
+								<span class={css({ color: 'fg.secondary' })}>Not an analysis output</span>
 							{/if}
 						</div>
 					</div>

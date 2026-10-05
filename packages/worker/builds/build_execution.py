@@ -3,6 +3,7 @@ from __future__ import annotations
 import asyncio
 import contextlib
 import logging
+import time
 from collections.abc import AsyncIterator
 
 from builds.build_live import RuntimeBuild
@@ -222,22 +223,125 @@ async def _run_queued_build_job(
                 datasource_id=datasource_id,
                 resource_id=datasource_id,
             )
-            async with _admitted_build_work_slot(manager, datasource_identity, namespace=build.namespace, work_semaphore=work_semaphore):
-                refreshed = await run_compute_in_thread(
-                    datasource_execution.ingest_datasource_for_schedule,
-                    worker_runtime_client(),
-                    manager=manager,
-                    namespace=build.namespace,
-                    database_url=worker_settings.database_url,
-                    datasource_id=datasource_id,
-                    staging_key=claim.claim_token,
-                    worker_id=worker_id,
-                    claim_token=claim.claim_token,
-                    lease_generation=claim.lease_generation,
-                    job_id=claim.job_id,
-                    build_id=claim.build_id,
+            step_id = f"{build.build_id}:ingest"
+            step_name = "Ingest"
+            await _emit_build_event(
+                claim,
+                worker_id,
+                schemas.BuildStepStartEvent(
+                    build_id=build.build_id,
+                    analysis_id=build.analysis_id,
+                    emitted_at=service._utcnow(),
+                    current_kind=EngineRunKind.parse(build.current_kind),
+                    current_datasource_id=build.current_datasource_id,
+                    tab_id=build.current_tab_id,
+                    tab_name=build.current_tab_name,
+                    current_output_id=build.current_output_id,
+                    current_output_name=build.current_output_name,
+                    engine_run_id=None,
+                    build_step_index=0,
+                    step_index=0,
+                    step_id=step_id,
+                    step_name=step_name,
+                    step_type="read",
+                    total_steps=1,
+                ),
+                resource_config_json=build.resource_config_json,
+            )
+            started = time.perf_counter()
+            try:
+                async with _admitted_build_work_slot(manager, datasource_identity, namespace=build.namespace, work_semaphore=work_semaphore):
+                    refreshed = await run_compute_in_thread(
+                        datasource_execution.ingest_datasource_for_schedule,
+                        worker_runtime_client(),
+                        manager=manager,
+                        namespace=build.namespace,
+                        database_url=worker_settings.database_url,
+                        datasource_id=datasource_id,
+                        staging_key=claim.claim_token,
+                        worker_id=worker_id,
+                        claim_token=claim.claim_token,
+                        lease_generation=claim.lease_generation,
+                        job_id=claim.job_id,
+                        build_id=claim.build_id,
+                    )
+            except Exception as exc:
+                elapsed_ms = int((time.perf_counter() - started) * 1000)
+                await _emit_build_event(
+                    claim,
+                    worker_id,
+                    schemas.BuildStepFailedEvent(
+                        build_id=build.build_id,
+                        analysis_id=build.analysis_id,
+                        emitted_at=service._utcnow(),
+                        current_kind=EngineRunKind.parse(build.current_kind),
+                        current_datasource_id=build.current_datasource_id,
+                        tab_id=build.current_tab_id,
+                        tab_name=build.current_tab_name,
+                        current_output_id=build.current_output_id,
+                        current_output_name=build.current_output_name,
+                        engine_run_id=None,
+                        build_step_index=0,
+                        step_index=0,
+                        step_id=step_id,
+                        step_name=step_name,
+                        step_type="read",
+                        error=str(exc),
+                        total_steps=1,
+                    ),
+                    resource_config_json=build.resource_config_json,
                 )
+                await _emit_build_event(
+                    claim,
+                    worker_id,
+                    schemas.BuildFailedEvent(
+                        build_id=build.build_id,
+                        analysis_id=build.analysis_id,
+                        emitted_at=service._utcnow(),
+                        current_kind=EngineRunKind.parse(build.current_kind),
+                        current_datasource_id=build.current_datasource_id,
+                        tab_id=build.current_tab_id,
+                        tab_name=build.current_tab_name,
+                        current_output_id=build.current_output_id,
+                        current_output_name=build.current_output_name,
+                        engine_run_id=None,
+                        progress=build.progress,
+                        elapsed_ms=elapsed_ms,
+                        total_steps=1,
+                        tabs_built=0,
+                        results=[],
+                        duration_ms=elapsed_ms,
+                        error=str(exc),
+                    ),
+                    resource_config_json=build.resource_config_json,
+                )
+                return
+            elapsed_ms = int((time.perf_counter() - started) * 1000)
             refreshed_name = refreshed.name or datasource_id
+            await _emit_build_event(
+                claim,
+                worker_id,
+                schemas.BuildStepCompleteEvent(
+                    build_id=build.build_id,
+                    analysis_id=build.analysis_id,
+                    emitted_at=service._utcnow(),
+                    current_kind=EngineRunKind.parse(build.current_kind),
+                    current_datasource_id=build.current_datasource_id,
+                    tab_id=build.current_tab_id,
+                    tab_name=build.current_tab_name,
+                    current_output_id=build.current_output_id,
+                    current_output_name=refreshed_name,
+                    engine_run_id=None,
+                    build_step_index=0,
+                    step_index=0,
+                    step_id=step_id,
+                    step_name=step_name,
+                    step_type="read",
+                    duration_ms=elapsed_ms,
+                    total_steps=1,
+                ),
+                resource_config_json=build.resource_config_json,
+            )
             await _emit_build_event(
                 claim,
                 worker_id,
@@ -252,8 +356,8 @@ async def _run_queued_build_job(
                     current_output_id=build.current_output_id,
                     current_output_name=refreshed_name,
                     engine_run_id=None,
-                    elapsed_ms=build.elapsed_ms,
-                    total_steps=0,
+                    elapsed_ms=elapsed_ms,
+                    total_steps=1,
                     tabs_built=1,
                     results=[
                         schemas.BuildTabResult(
@@ -264,7 +368,7 @@ async def _run_queued_build_job(
                             output_name=refreshed_name,
                         )
                     ],
-                    duration_ms=build.elapsed_ms,
+                    duration_ms=elapsed_ms,
                 ),
                 resource_config_json=build.resource_config_json,
             )
@@ -286,7 +390,7 @@ async def _run_queued_build_job(
                     engine_run_id=None,
                     progress=build.progress,
                     elapsed_ms=build.elapsed_ms,
-                    total_steps=0,
+                    total_steps=1,
                     tabs_built=0,
                     results=[],
                     duration_ms=build.elapsed_ms,

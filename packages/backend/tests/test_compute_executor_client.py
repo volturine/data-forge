@@ -10,7 +10,8 @@ from types import SimpleNamespace
 from typing import cast
 
 import pytest
-from fastapi import HTTPException, Request
+from dataforge_protocol import compute_pb2, enums_pb2
+from fastapi import Request
 from pydantic import BaseModel, Field
 
 import modules.compute.executor_client as executor_client
@@ -24,8 +25,7 @@ from backend_core.compute_response_recovery import ComputeResponseRecovery
 from backend_core.dependencies import RuntimeAvailabilityProbe
 from backend_core.domain.compute.schemas import AnalysisPipelinePayload, DownloadRequest
 from backend_core.domain.compute_requests.models import command_envelope
-from backend_core.exceptions import ClientDisconnectedError
-from dataforge_protocol import compute_pb2, enums_pb2
+from backend_core.exceptions import AppError, ClientDisconnectedError
 
 
 class _DisconnectedRequest:
@@ -333,7 +333,7 @@ async def test_failed_compute_request_logs_correlation_and_error_code(
     monkeypatch.setattr(executor_client.response_recovery, 'unregister', unregister)
     request = cast(Request, SimpleNamespace(scope={'state': {'request_id': 'http-request-2'}}))
 
-    with caplog.at_level('WARNING', logger='modules.compute.executor_client'), pytest.raises(HTTPException) as exc_info:
+    with caplog.at_level('WARNING', logger='modules.compute.executor_client'), pytest.raises(AppError) as exc_info:
         await executor_client._submit_and_wait(
             kind=enums_pb2.COMPUTE_REQUEST_KIND_PREVIEW,
             command=command,
@@ -341,8 +341,8 @@ async def test_failed_compute_request_logs_correlation_and_error_code(
             http_request=request,
         )
 
-    assert exc_info.value.status_code == 500
-    assert exc_info.value.detail == 'The preview failed'
+    assert exc_info.value.message == 'The preview failed'
+    assert exc_info.value.error_code == 'PIPELINE_EXECUTION_ERROR'
     assert 'durable_request_id=durable-request-2' in caplog.text
     assert 'http_request_id=http-request-2' in caplog.text
     assert 'error_code=PIPELINE_EXECUTION_ERROR' in caplog.text

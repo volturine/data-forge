@@ -1116,14 +1116,13 @@
 										<div
 											class={css({
 												display: 'flex',
-												height: 'iconMd',
-												width: 'iconMd',
 												alignItems: 'center',
-												justifyContent: 'center',
-												backgroundColor: 'bg.tertiary'
+												gap: '1.5',
+												color: 'fg.muted'
 											})}
 										>
-											<TriangleAlert size={12} class={css({ color: 'fg.muted' })} />
+											<TriangleAlert size={12} />
+											<span class={css({ fontSize: 'xs' })}>Not run yet</span>
 										</div>
 									{/if}
 								</td>

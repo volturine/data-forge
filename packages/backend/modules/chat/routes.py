@@ -12,6 +12,7 @@ from dataclasses import dataclass
 from typing import TYPE_CHECKING, Any
 
 import httpx
+from dataforge_protocol import enums_pb2
 from fastapi import APIRouter, Depends, FastAPI, HTTPException, Request
 from fastapi.responses import StreamingResponse
 from pydantic import BaseModel, ConfigDict
@@ -23,7 +24,6 @@ from backend_core.database import RuntimeCoordinatorFenced
 from backend_core.error_handlers import handle_errors
 from backend_core.namespace import get_namespace
 from backend_core.websocket import serialize_json
-from dataforge_protocol import enums_pb2
 from modules.auth.dependencies import get_current_user
 from modules.auth.models import User
 from modules.chat.chat_http import ChatHttpError, chat_with_tools, list_models
@@ -598,7 +598,7 @@ async def _run_agent_turn(
                 prompt_lines.append(f'{role}: {content}')
             prompt_lines.append('assistant:')
             prompt = '\n'.join(prompt_lines)
-            client = get_ai_client(provider.provider, api_key=api_key)
+            client = get_ai_client(provider.provider, api_key=api_key or None)
             await session.set_checkpoint({'phase': 'provider_request'})
             assistant_content = await session.run_sync_provider(
                 client.generate,
@@ -721,10 +721,14 @@ async def _run_agent_turn(
         logger.error('Timeout session=%s: %s', session.id, exc)
         session.failed = True
         await session.push_event({'type': 'error', 'content': 'Request timed out'})
-    except Exception as exc:
+    except ValueError as exc:
+        logger.info('Chat configuration error session=%s: %s', session.id, exc)
+        session.failed = True
+        await session.push_event({'type': 'error', 'content': str(exc)})
+    except Exception:
         logger.exception('Unexpected error session=%s', session.id)
         session.failed = True
-        await session.push_event({'type': 'error', 'content': f'Internal error: {type(exc).__name__}'})
+        await session.push_event({'type': 'error', 'content': 'Internal error'})
     finally:
         elapsed = time.monotonic() - turn_start
         logger.info(
