@@ -304,7 +304,11 @@ export class ChatStore {
 
 	async loadModels(): Promise<void> {
 		this.modelsLoading = true;
-		if (this.provider === 'openrouter' && this.apiKey.length === 0) {
+		if (
+			this.provider === 'openrouter' &&
+			this.apiKey.length === 0 &&
+			!this._hasStoredProviderKey()
+		) {
 			this.models = [];
 			this.modelsLoading = false;
 			this.error = 'API key is required';
@@ -348,13 +352,13 @@ export class ChatStore {
 		this.apiKey = apiKey;
 		this.error = null;
 		this._savePrefs();
-		if (this.settings && this.provider === 'openrouter') {
-			this.settings.openrouter_api_key = apiKey;
-		}
-		this._refreshConfigured();
-		if (this.provider === 'openrouter') {
+		// An empty drawer key means "use the profile or deployment key".
+		// Writing it would erase the saved key and the next send would find nothing.
+		if (this.provider === 'openrouter' && apiKey.length > 0) {
+			if (this.settings) this.settings.openrouter_api_key = apiKey;
 			await updateSettings({ openrouter_api_key: apiKey });
 		}
+		this._refreshConfigured();
 	}
 
 	setProvider(provider: ChatProvider): void {

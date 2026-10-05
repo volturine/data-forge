@@ -94,6 +94,33 @@ def _masked_settings_response(row: AppSettings) -> SettingsResponse:
     return SettingsResponse(**payload)
 
 
+def ensure_openrouter_key_populated(session: Session) -> str:
+    """Copy OPENROUTER_API_KEY into settings when the saved key is empty.
+
+    A later profile save writes a different value into the same field. Chat and
+    Profile Test then read that saved value and leave the deployment key alone.
+    """
+    row = session.get(AppSettings, 1)
+    if row is None:
+        return ''
+    if str(row.openrouter_api_key or ''):
+        return _read_secret(row, 'openrouter_api_key')
+    from backend_core.config import settings as app_settings
+
+    deployment = app_settings.openrouter_api_key or ''
+    if not deployment:
+        return ''
+    try:
+        _write_secret(row, 'openrouter_api_key', deployment)
+    except SettingsConfigurationError:
+        _warn_bootstrap_secret_missing('OpenRouter key')
+        return ''
+    _notify_settings_changed(session)
+    session.commit()
+    session.refresh(row)
+    return deployment
+
+
 def seed_settings_from_env(session: Session) -> None:
     """Seed app_settings from ENV vars on first run.
 
@@ -106,6 +133,10 @@ def seed_settings_from_env(session: Session) -> None:
 
     row = session.get(AppSettings, 1)
     if row and row.env_bootstrap_complete:
+        # Other saved settings stay as the user left them. An empty OpenRouter
+        # key is still filled from the deployment so chat and Profile Test share it.
+        if not str(row.openrouter_api_key or ''):
+            ensure_openrouter_key_populated(session)
         return
     if not row:
         row = AppSettings(id=1, env_bootstrap_complete=False)
@@ -155,6 +186,8 @@ def get_settings(session: Session) -> SettingsResponse:
         session.commit()
         session.refresh(row)
 
+    ensure_openrouter_key_populated(session)
+    session.refresh(row)
     return _masked_settings_response(row)
 
 

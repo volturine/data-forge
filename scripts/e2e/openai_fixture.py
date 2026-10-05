@@ -1,7 +1,7 @@
 """Deterministic OpenAI-compatible E2E provider for the Compose test network.
 
-Chat completions for glm-5.3-flash are forwarded to OpenRouter so the live
-stored-key regression test exercises the real provider. Every other model
+Chat completions for the live OpenRouter model ids are forwarded so the
+stored-key and deployment-key tests exercise the real provider. Every other model
 stays on the deterministic local replies. The Authorization header is
 forwarded and never logged.
 """
@@ -16,7 +16,7 @@ import urllib.request
 from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 from typing import Any
 
-_LIVE_CHAT_MODEL = 'glm-5.3-flash'
+_LIVE_CHAT_MODELS = frozenset({'glm-5.3-flash', 'z-ai/glm-5.3-flash'})
 _UPSTREAM_CHAT = 'https://openrouter.ai/api/v1/chat/completions'
 
 
@@ -56,7 +56,7 @@ class OpenAIFixtureHandler(BaseHTTPRequestHandler):
             return
         size = int(self.headers.get('Content-Length', '0'))
         payload = json.loads(self.rfile.read(size))
-        if payload.get('model') == _LIVE_CHAT_MODEL:
+        if payload.get('model') in _LIVE_CHAT_MODELS:
             self._proxy_live_chat(payload)
             return
         messages = payload.get('messages', [])

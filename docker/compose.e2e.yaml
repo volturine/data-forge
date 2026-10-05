@@ -108,6 +108,7 @@ services:
       TIMEZONE: ${TIMEZONE}
       NORMALIZE_TZ: ${NORMALIZE_TZ}
       OPENROUTER_BASE_URL: http://openai-fixture:8001/v1
+      OPENROUTER_API_KEY: ${E2E_OPENROUTER_API_KEY:-}
     volumes:
       - data:/app/data
     healthcheck:

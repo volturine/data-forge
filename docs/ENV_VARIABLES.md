@@ -309,7 +309,7 @@ rejected explicitly while accepted compute requests remain durable.
 | `OLLAMA_BASE_URL`           | `http://localhost:11434`     | Base URL for Ollama.                              |
 | `OLLAMA_DEFAULT_MODEL`      | `llama3.2`                   | Default Ollama chat model.                        |
 | `OPENROUTER_BASE_URL`       | `https://openrouter.ai/api/v1` | OpenRouter API base. Not a profile setting.     |
-| `OPENROUTER_API_KEY`        | empty                        | Seeded into DB on first run if DB field is empty. |
+| `OPENROUTER_API_KEY`        | empty                        | Copied into settings when the saved key is empty. A key saved in the profile replaces it. |
 | `OPENROUTER_DEFAULT_MODEL`  | empty                        | Seeded into DB on first run if DB field is empty. |
 | `OLLAMA_ENDPOINT_URL_DB`    | empty                        | DB-seeded Ollama endpoint override.               |
 | `OLLAMA_DEFAULT_MODEL_DB`   | empty                    | DB-seeded Ollama model override.                  |

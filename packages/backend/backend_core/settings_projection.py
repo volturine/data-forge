@@ -104,7 +104,15 @@ def get_resolved_telegram_settings() -> dict[str, object]:
 
 
 def get_resolved_openrouter_key() -> str:
-    return _get_resolved_snapshot().openrouter_key()
+    """Return the saved OpenRouter key, copying the deployment key in when it is empty.
+
+    A key saved from the profile replaces that value and is what chat and Test
+    read afterwards.
+    """
+    from backend_core.database import run_settings_db
+    from backend_core.settings_store import ensure_openrouter_key_populated
+
+    return run_settings_db(ensure_openrouter_key_populated)
 
 
 def get_resolved_ollama_settings() -> dict[str, str]:

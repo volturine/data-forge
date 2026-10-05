@@ -731,27 +731,27 @@ test.describe('runtime architecture', () => {
 		}
 	});
 
-	test('stored OpenRouter key answers chat when the session key is empty', async ({
+	test('OpenRouter chat uses the key copied into settings, then a key saved from the profile', async ({
 		page
 	}, testInfo) => {
-		testInfo.setTimeout(180_000);
-		const apiKey = process.env.E2E_OPENROUTER_API_KEY?.trim();
-		if (!apiKey) throw new Error('E2E_OPENROUTER_API_KEY was not provided by the harness');
+		testInfo.setTimeout(240_000);
+		if (!process.env.E2E_OPENROUTER_API_KEY?.trim()) {
+			throw new Error('E2E_OPENROUTER_API_KEY was not provided by the harness');
+		}
 		await page.goto('/');
 		const settingsResponse = await page.context().request.get('/api/v1/settings');
 		expect(settingsResponse.ok()).toBeTruthy();
 		const original = (await settingsResponse.json()) as { openrouter_default_model?: string };
-		const model = 'glm-5.3-flash';
-		const sessionResponse = await page.context().request.post('/api/v1/ai/chat/sessions', {
-			data: { provider: 'openrouter', model, api_key: '' }
-		});
-		expect(sessionResponse.ok(), await sessionResponse.text()).toBeTruthy();
-		const sessionId = ((await sessionResponse.json()) as { session_id: string }).session_id;
-		try {
-			const settingsUpdate = await page.context().request.put('/api/v1/settings', {
-				data: { openrouter_api_key: apiKey, openrouter_default_model: model }
+		const model = 'z-ai/glm-5.3-flash';
+		const sessionIds: string[] = [];
+
+		async function chatOutcome(waitMs: number): Promise<{ outcome: string; assistant: string }> {
+			const sessionResponse = await page.context().request.post('/api/v1/ai/chat/sessions', {
+				data: { provider: 'openrouter', model, api_key: '' }
 			});
-			expect(settingsUpdate.ok()).toBeTruthy();
+			expect(sessionResponse.ok(), await sessionResponse.text()).toBeTruthy();
+			const sessionId = ((await sessionResponse.json()) as { session_id: string }).session_id;
+			sessionIds.push(sessionId);
 			const send = await page.context().request.post('/api/v1/ai/chat/message', {
 				data: {
 					session_id: sessionId,
@@ -760,8 +760,9 @@ test.describe('runtime architecture', () => {
 				}
 			});
 			expect(send.ok(), await send.text()).toBeTruthy();
-			const deadline = Date.now() + 120_000;
+			const deadline = Date.now() + waitMs;
 			let outcome = 'pending';
+			let assistant = '';
 			while (Date.now() < deadline && outcome === 'pending') {
 				const historyResponse = await page
 					.context()
@@ -778,6 +779,7 @@ test.describe('runtime architecture', () => {
 							event.role === 'assistant' &&
 							String(event.content ?? '').trim().length > 0
 						) {
+							assistant = String(event.content);
 							outcome = 'assistant';
 							break;
 						}
@@ -785,10 +787,47 @@ test.describe('runtime architecture', () => {
 				}
 				if (outcome === 'pending') await new Promise((resolve) => setTimeout(resolve, 1_000));
 			}
-			expect(outcome).toBe('assistant');
+			return { outcome, assistant };
+		}
+
+		try {
+			const cleared = await page.context().request.put('/api/v1/settings', {
+				data: { openrouter_api_key: '', openrouter_default_model: model }
+			});
+			expect(cleared.ok()).toBeTruthy();
+			expect(((await cleared.json()) as { openrouter_api_key?: string }).openrouter_api_key).toBe(
+				''
+			);
+
+			const populated = await page.context().request.get('/api/v1/settings');
+			expect(populated.ok()).toBeTruthy();
+			expect(((await populated.json()) as { openrouter_api_key?: string }).openrouter_api_key).toBe(
+				'••••••••'
+			);
+
+			const live = await chatOutcome(90_000);
+			expect(live.outcome).toBe('assistant');
+			expect(live.assistant).not.toContain('E2E fixture reply');
+			expect(live.assistant.toLowerCase()).toContain('pong');
+
+			const replaced = await page.context().request.put('/api/v1/settings', {
+				data: { openrouter_api_key: 'sk-or-replaced-by-profile' }
+			});
+			expect(replaced.ok()).toBeTruthy();
+			expect(((await replaced.json()) as { openrouter_api_key?: string }).openrouter_api_key).toBe(
+				'••••••••'
+			);
+
+			const changed = await chatOutcome(45_000);
+			expect(changed.outcome).toMatch(/^error:/);
+			expect(changed.outcome).not.toContain('No API key configured');
+			expect(changed.outcome).not.toContain('E2E fixture reply');
+			expect(changed.assistant).toBe('');
 		} finally {
-			await page.context().request.post(`/api/v1/ai/chat/sessions/${sessionId}/stop`);
-			await page.context().request.delete(`/api/v1/ai/chat/sessions/${sessionId}`);
+			for (const sessionId of sessionIds) {
+				await page.context().request.post(`/api/v1/ai/chat/sessions/${sessionId}/stop`);
+				await page.context().request.delete(`/api/v1/ai/chat/sessions/${sessionId}`);
+			}
 			const restore = await page.context().request.put('/api/v1/settings', {
 				data: {
 					openrouter_api_key: '',

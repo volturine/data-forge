@@ -89,10 +89,11 @@ class ChatProviderDefinition:
 
 
 def _provider_api_key(provider: ChatProviderDefinition, api_key: str | None) -> str | None:
-    """Use the session key, or the same stored OpenRouter key Profile Test validates.
+    """Use the session key, or the OpenRouter key saved in settings.
 
-    An empty session key is the masked value the client persists. It is not an
-    explicit key and must not block the settings fallback.
+    An empty session key is the masked value the client persists. Settings copy
+    the deployment key into that field when it is empty. A key saved from the
+    profile replaces it, and chat reads that saved value afterwards.
     """
     if api_key:
         return api_key
@@ -938,9 +939,10 @@ async def get_models(body: ChatModelsRequest, user: User = Depends(get_current_u
     """List models available for a chat provider."""
     del user
     provider = ChatProviderDefinition.require(body.provider)
-    if provider.requires_model_list_api_key and not body.api_key:
+    api_key = _provider_api_key(provider, body.api_key)
+    if provider.requires_model_list_api_key and not api_key:
         raise HTTPException(status_code=400, detail='API key is required')
     try:
-        return await provider.list_models(body)
+        return await provider.list_models(body.model_copy(update={'api_key': api_key}))
     except (ChatHttpError, ValueError) as exc:
         raise HTTPException(status_code=502, detail=str(exc)) from exc
