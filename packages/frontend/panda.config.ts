@@ -234,7 +234,7 @@ export default defineConfig({
 					rowLg: { value: '2rem' },
 					rowXl: { value: '2.25rem' },
 					spinner: { value: '2.5rem' },
-					headerSm: { value: '2.75rem' },
+					headerMd: { value: '4rem' },
 					logo: { value: '3rem' },
 					logoLg: { value: '3.5rem' },
 					logoXl: { value: '4rem' },

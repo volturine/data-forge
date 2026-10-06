@@ -21,6 +21,37 @@ test.beforeEach(async ({ sharedDatasource }) => {
 	sharedDatasourceId = sharedDatasource.id;
 });
 
+test.describe('Analyses – editor title spacing', () => {
+	test('keeps the title and description clear of the header edges', async ({ page, request }) => {
+		const id = uid();
+		const analysis = `E2E Title Spacing ${id}`;
+		const analysisId = await createAnalysis(request, analysis, sharedDatasourceId);
+		try {
+			await gotoAnalysisEditor(page, analysisId);
+
+			const title = page.locator('header h1[contenteditable="true"]');
+			await expect(title).toBeVisible();
+			const titleRegion = title.locator('xpath=../..');
+			const verticalPadding = await titleRegion.evaluate((element) => {
+				const styles = getComputedStyle(element);
+				return {
+					top: Number.parseFloat(styles.paddingTop),
+					bottom: Number.parseFloat(styles.paddingBottom)
+				};
+			});
+			expect(verticalPadding.top).toBeGreaterThanOrEqual(10);
+			expect(verticalPadding.bottom).toBeGreaterThanOrEqual(10);
+
+			const headerHeight = await titleRegion.evaluate(
+				(element) => element.closest('header')?.getBoundingClientRect().height ?? 0
+			);
+			expect(headerHeight).toBeGreaterThanOrEqual(64);
+		} finally {
+			await deleteAnalysisViaUI(page, analysis);
+		}
+	});
+});
+
 // ── Save/discard dirty tracking ─────────────────────────────────────────────
 
 test.describe('Analyses – save/discard dirty tracking', () => {
