@@ -1,11 +1,19 @@
 <script lang="ts">
 	import { resolve } from '$app/paths';
 	import { GitBranch, Loader, RefreshCw, Save, Upload } from '@lucide/svelte';
-	import type { DataSource, IcebergDataSource, SchemaInfo } from '$lib/types/datasource';
+	import type {
+		DataSource,
+		DatabaseDataSource,
+		FileDataSource,
+		IcebergDataSource,
+		SchemaInfo
+	} from '$lib/types/datasource';
 	import {
 		datasourceExternalSourceConfig,
 		datasourceExternalSourceType,
 		datasourceIsAnalysisOutput,
+		datasourceIsDatabase,
+		datasourceIsFile,
 		datasourceIsIceberg,
 		datasourceRowCount
 	} from '$lib/types/datasource';
@@ -45,6 +53,14 @@
 		onIngest,
 		onSave
 	}: Props = $props();
+
+	function isFile(value: DataSource): value is FileDataSource {
+		return datasourceIsFile(value);
+	}
+
+	function isDatabase(value: DataSource): value is DatabaseDataSource {
+		return datasourceIsDatabase(value);
+	}
 
 	function isIceberg(value: DataSource): value is IcebergDataSource {
 		return datasourceIsIceberg(value);
@@ -182,7 +198,7 @@
 				{/if}
 			</div>
 
-			<div class={css({ display: 'flex', alignItems: 'center', gap: '2' })}>
+			<div class={css({ display: 'flex', flexDirection: 'column', gap: '1' })}>
 				<span
 					class={css({
 						textTransform: 'uppercase',
@@ -190,36 +206,79 @@
 						color: 'fg.muted'
 					})}>Datasource ID</span
 				>
-				<span class={css({ fontFamily: 'mono', fontSize: '2xs' })}>{ds.id}</span>
+				<span
+					class={css({
+						wordBreak: 'break-all',
+						color: 'fg.secondary',
+						fontFamily: 'mono'
+					})}>{ds.id}</span
+				>
 			</div>
 
+			{#if isFile(ds)}
+				{@const config = (ds as FileDataSource).config}
+				<div class={css({ display: 'flex', flexDirection: 'column', gap: '1' })}>
+					<span
+						class={css({
+							textTransform: 'uppercase',
+							letterSpacing: 'wide',
+							color: 'fg.muted'
+						})}>Location</span
+					>
+					<span
+						class={css({
+							wordBreak: 'break-all',
+							color: 'fg.secondary',
+							fontFamily: 'mono'
+						})}>{config.file_path}</span
+					>
+				</div>
+			{/if}
+
+			{#if isDatabase(ds)}
+				{@const config = ds.config}
+				{#if config.connection_string}
+					<div class={css({ display: 'flex', flexDirection: 'column', gap: '1' })}>
+						<span
+							class={css({
+								textTransform: 'uppercase',
+								letterSpacing: 'wide',
+								color: 'fg.muted'
+							})}>Location</span
+						>
+						<span
+							class={css({
+								wordBreak: 'break-all',
+								color: 'fg.secondary',
+								fontFamily: 'mono'
+							})}>{config.connection_string}</span
+						>
+					</div>
+				{/if}
+			{/if}
+
 			{#if isIceberg(ds)}
-				{@const externalSource = getExternalSource(ds)}
-				{@const externalSourceType = getExternalSourceType(ds)}
-				{#if externalSourceType || externalSource}
+				{#if getExternalSource(ds)}
+					{@const externalSource = getExternalSource(ds)}
+					{@const externalSourceType = getExternalSourceType(ds)}
 					<div
 						class={css({
+							paddingTop: '2',
+							marginTop: '1',
 							display: 'flex',
 							flexDirection: 'column',
-							gap: '2',
-							paddingY: '2',
-							borderTopWidth: '1',
-							borderBottomWidth: '1',
-							borderColor: 'border.primary'
+							gap: '2'
 						})}
 					>
-						<div class={css({ display: 'flex', alignItems: 'center', gap: '2' })}>
-							<span
-								class={css({
-									textTransform: 'uppercase',
-									letterSpacing: 'wide',
-									color: 'fg.muted'
-								})}>Original source type</span
-							>
-							<span class={css({ fontWeight: 'medium', textTransform: 'uppercase' })}>
-								{externalSourceType ?? 'unknown'}
-							</span>
-						</div>
+						<span
+							class={css({
+								fontSize: '2xs',
+								textTransform: 'uppercase',
+								letterSpacing: 'wider',
+								color: 'fg.muted',
+								fontWeight: 'semibold'
+							})}>Original Source</span
+						>
 						<div class={css({ display: 'flex', alignItems: 'center', gap: '2' })}>
 							<span
 								class={css({
@@ -247,56 +306,51 @@
 								>
 								<span
 									class={css({
-										fontFamily: 'mono',
-										fontSize: '2xs',
-										overflow: 'hidden',
-										textOverflow: 'ellipsis',
-										whiteSpace: 'nowrap'
+										wordBreak: 'break-all',
+										color: 'fg.secondary',
+										fontFamily: 'mono'
 									})}>{externalSource.file_path}</span
 								>
 							</div>
 						{/if}
-						{#if typeof externalSource?.database === 'string'}
-							<div class={css({ display: 'flex', alignItems: 'center', gap: '2' })}>
+						{#if typeof externalSource?.connection_string === 'string'}
+							<div class={css({ display: 'flex', flexDirection: 'column', gap: '1' })}>
 								<span
 									class={css({
 										textTransform: 'uppercase',
 										letterSpacing: 'wide',
 										color: 'fg.muted'
-									})}>Database</span
+									})}>Connection</span
 								>
-								<span class={css({ fontWeight: 'medium' })}>{externalSource.database}</span>
+								<span
+									class={css({
+										wordBreak: 'break-all',
+										color: 'fg.secondary',
+										fontFamily: 'mono'
+									})}>{externalSource.connection_string}</span
+								>
 							</div>
 						{/if}
-						{#if typeof externalSource?.table_name === 'string'}
-							<div class={css({ display: 'flex', alignItems: 'center', gap: '2' })}>
+						{#if typeof externalSource?.query === 'string'}
+							<div class={css({ display: 'flex', flexDirection: 'column', gap: '1' })}>
 								<span
 									class={css({
 										textTransform: 'uppercase',
 										letterSpacing: 'wide',
 										color: 'fg.muted'
-									})}>Table</span
+									})}>Query</span
 								>
-								<span class={css({ fontWeight: 'medium' })}>{externalSource.table_name}</span>
+								<span
+									class={css({
+										wordBreak: 'break-all',
+										color: 'fg.secondary',
+										fontFamily: 'mono'
+									})}>{externalSource.query}</span
+								>
 							</div>
 						{/if}
 					</div>
 				{/if}
-			{/if}
-
-			{#if ds.created_at}
-				<div class={css({ display: 'flex', alignItems: 'center', gap: '2' })}>
-					<span
-						class={css({
-							textTransform: 'uppercase',
-							letterSpacing: 'wide',
-							color: 'fg.muted'
-						})}>Created</span
-					>
-					<span class={css({ fontWeight: 'medium' })}>
-						{formatDateDisplay(ds.created_at)}
-					</span>
-				</div>
 			{/if}
 
 			<div class={css({ display: 'flex', alignItems: 'center', gap: '4' })}>
@@ -306,13 +360,23 @@
 							textTransform: 'uppercase',
 							letterSpacing: 'wide',
 							color: 'fg.muted'
+						})}>Created</span
+					>
+					<span class={css({ fontWeight: 'medium' })}>{formatDateDisplay(ds.created_at)}</span>
+				</div>
+				<div class={css({ display: 'flex', alignItems: 'center', gap: '2' })}>
+					<span
+						class={css({
+							textTransform: 'uppercase',
+							letterSpacing: 'wide',
+							color: 'fg.muted'
 						})}>Rows</span
 					>
 					<span data-testid="datasource-row-count" class={css({ fontWeight: 'medium' })}
-						>{rowCount != null ? rowCount.toLocaleString() : '—'}</span
+						>{rowCount?.toLocaleString() ?? 'Unknown'}</span
 					>
 				</div>
-				{#if schema?.columns}
+				{#if schema}
 					<div class={css({ display: 'flex', alignItems: 'center', gap: '2' })}>
 						<span
 							class={css({

@@ -482,15 +482,7 @@
 	}
 </script>
 
-<div
-	class={css({
-		display: 'flex',
-		flexDirection: 'column',
-		height: 'full',
-		overflowY: 'auto'
-	})}
-	data-ds-config
->
+<div class={css({ backgroundColor: 'bg.secondary' })} data-ds-config={datasource.id}>
 	{#if refreshError}
 		<div class={css({ paddingX: '4', paddingTop: '4' })}>
 			<Callout tone="error">{refreshError}</Callout>
