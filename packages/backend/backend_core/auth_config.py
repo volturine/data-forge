@@ -1,12 +1,10 @@
 from __future__ import annotations
 
-import os
-
 from pydantic import Field, field_validator, model_validator
 from pydantic_settings import BaseSettings, SettingsConfigDict
 from pydantic_settings.sources import DotEnvSettingsSource
 
-from backend_core.config import Settings as SharedSettings
+from backend_core.config import Settings as SharedSettings, get_env_file
 
 _PLACEHOLDER_ENCRYPTION_KEYS = {'your-encryption-key-here'}
 _PLACEHOLDER_PASSWORDS = {
@@ -15,15 +13,6 @@ _PLACEHOLDER_PASSWORDS = {
     'replaceme123',
     'replace-with-strong-password',
 }
-
-
-def _get_env_file() -> str | None:
-    if 'ENV_FILE' in os.environ:
-        env_val = os.environ.get('ENV_FILE', '')
-        if env_val:
-            return env_val
-        return None
-    return '.env'
 
 
 class AuthSettings(BaseSettings):
@@ -38,7 +27,7 @@ class AuthSettings(BaseSettings):
         dotenv_settings,
         file_secret_settings,
     ):
-        env_file = _get_env_file()
+        env_file = get_env_file()
         if env_file is None:
             return (init_settings, env_settings, file_secret_settings)
         return (

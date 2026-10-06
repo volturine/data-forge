@@ -13,12 +13,6 @@ if [[ "${DATAFORGE_TEST_CONTAINER:-}" != "1" || "${DOCKER_HOST:-}" != "tcp://doc
 fi
 ROOT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
 set -a; source "${ROOT_DIR}/docker/env/e2e.env"; set +a
-# Local secrets (e.g. E2E_OPENROUTER_API_KEY) live in a git-ignored override so
-# tracked env files stay key-free. The runner image build copies the workspace
-# itself, so the local file is present inside the container when sourced here.
-if [[ -f "${ROOT_DIR}/docker/env/e2e.env.local" ]]; then
-    set -a; source "${ROOT_DIR}/docker/env/e2e.env.local"; set +a
-fi
 source "${ROOT_DIR}/scripts/e2e/test_selection.sh"
 E2E_PLAYWRIGHT_BASE_URL="http://api:8000"
 E2E_OPENAI_FIXTURE_URL="http://openai-fixture:8001/v1"
