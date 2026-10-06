@@ -494,10 +494,12 @@ test.describe('Analyses – blank creation', () => {
 
 			const insertZone = canvas.locator('[data-hook="insert-zone"]').first();
 			await insertZone.hover();
-			const connection = insertZone.locator('.connection-line');
-			await expect(canvas.locator('.connection-line')).toHaveCount(1);
-			const connectionBounds = await connection.boundingBox();
-			if (!connectionBounds) throw new Error('Could not measure the empty pipeline connection');
+			const connections = insertZone.locator('.connection-line');
+			await expect(canvas.locator('.connection-line')).toHaveCount(2);
+			const [firstConnection, secondConnection] = await Promise.all([
+				connections.nth(0).boundingBox(),
+				connections.nth(1).boundingBox()
+			]);
 
 			const controls = insertZone.locator('.insert-controls-group > *');
 			await expect(controls).toHaveCount(3);
@@ -512,10 +514,16 @@ test.describe('Analyses – blank creation', () => {
 			const controlsBottom = Math.max(
 				...visibleControlBounds.map((bounds) => bounds.y + bounds.height)
 			);
+			if (!firstConnection || !secondConnection) {
+				throw new Error('Could not measure both empty pipeline spacers');
+			}
+			const connectionTop = Math.min(firstConnection.y, secondConnection.y);
+			const connectionBottom = Math.max(
+				firstConnection.y + firstConnection.height,
+				secondConnection.y + secondConnection.height
+			);
 			expect(
-				Math.abs(
-					(controlsTop + controlsBottom) / 2 - (connectionBounds.y + connectionBounds.height / 2)
-				)
+				Math.abs((controlsTop + controlsBottom) / 2 - (connectionTop + connectionBottom) / 2)
 			).toBeLessThan(1);
 		} finally {
 			if (analysisId) {
