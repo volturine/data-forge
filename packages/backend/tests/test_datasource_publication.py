@@ -54,6 +54,80 @@ def test_create_datasource_replay_returns_existing_row(test_db_session: Session)
     assert len(rows) == 1
 
 
+def test_publish_ingest_response_carries_last_data_update(test_db_session: Session) -> None:
+    datasource_id = str(uuid.uuid4())
+    test_db_session.add(
+        DataSource(
+            id=datasource_id,
+            name='Ingestable',
+            source_type=DataSourceType.ICEBERG.value,
+            config={'metadata_path': 's3://bucket/old', 'branch': 'master', 'source': {'source_type': 'file'}},
+            revision=1,
+            created_at=datetime.now(UTC),
+        )
+    )
+    test_db_session.commit()
+
+    snapshot_time = datetime(2026, 10, 6, 8, 38, 24, tzinfo=UTC).replace(tzinfo=None)
+    snapshot_ms = int(snapshot_time.replace(tzinfo=UTC).timestamp() * 1000)
+    published = publication_service.publish_ingest(
+        test_db_session,
+        datasource_id=datasource_id,
+        config={
+            'metadata_path': 's3://bucket/new',
+            'branch': 'master',
+            'source': {'source_type': 'file'},
+            'current_snapshot_timestamp_ms': snapshot_ms,
+        },
+        expected_revision=1,
+        schema_info=None,
+    )
+    assert published.last_data_update == snapshot_time
+
+
+def test_publish_ingest_response_last_data_update_stays_none_without_snapshot(test_db_session: Session) -> None:
+    datasource_id = str(uuid.uuid4())
+    test_db_session.add(
+        DataSource(
+            id=datasource_id,
+            name='No snapshot',
+            source_type=DataSourceType.ICEBERG.value,
+            config={'metadata_path': 's3://bucket/old', 'branch': 'master', 'source': {'source_type': 'file'}},
+            revision=1,
+            created_at=datetime.now(UTC),
+        )
+    )
+    test_db_session.commit()
+    published = publication_service.publish_ingest(
+        test_db_session,
+        datasource_id=datasource_id,
+        config={'metadata_path': 's3://bucket/new', 'branch': 'master', 'source': {'source_type': 'file'}},
+        expected_revision=1,
+        schema_info=None,
+    )
+    assert published.last_data_update is None
+
+
+def test_create_datasource_response_carries_last_data_update(test_db_session: Session) -> None:
+    snapshot_time = datetime(2026, 10, 6, 9, 0, 0, tzinfo=UTC).replace(tzinfo=None)
+    snapshot_ms = int(snapshot_time.replace(tzinfo=UTC).timestamp() * 1000)
+    response = publication_service.create_datasource(
+        test_db_session,
+        datasource_id=str(uuid.uuid4()),
+        name='Stamped',
+        description=None,
+        source_type=DataSourceType.ICEBERG.value,
+        config={
+            'metadata_path': 's3://bucket/clean/stamped/master',
+            'branch': 'master',
+            'current_snapshot_timestamp_ms': snapshot_ms,
+        },
+        owner_id=None,
+        schema_info=None,
+    )
+    assert response.last_data_update == snapshot_time
+
+
 def test_publish_ingest_fences_on_revision(test_db_session: Session) -> None:
     datasource_id = str(uuid.uuid4())
     test_db_session.add(

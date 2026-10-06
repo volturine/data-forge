@@ -114,6 +114,12 @@ if [[ "$TEST_TARGET" == "test-e2e" ]]; then
 fi
 if [[ "$TEST_TARGET" == test-e2e* ]]; then
     export E2E_API_WORKERS="${E2E_API_WORKERS:-${WORKERS:-}}"
+    # Local secrets (e.g. E2E_OPENROUTER_API_KEY) live in the git-ignored root
+    # .env. Compose interpolates them into the runner service at up time; the
+    # image build context excludes .env, so nothing secret is baked into images.
+    if [[ -f "$ROOT_DIR/.env" ]]; then
+        set -a; source "$ROOT_DIR/.env"; set +a
+    fi
 fi
 export TEST_IMAGE_TAG TEST_TARGET
 {

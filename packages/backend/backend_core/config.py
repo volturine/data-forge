@@ -50,13 +50,34 @@ def _default_data_dir() -> Path:
     return Path(tempfile.gettempdir()) / 'data-forge'
 
 
-def _get_env_file() -> str | None:
+def _repo_root() -> Path:
+    """The monorepo root, resolved from this file's source location.
+
+    Walks up until the <root>/packages/backend/backend_core layout is found so
+    source checkouts, uv editable installs, and container images (where the
+    same tree is copied to /app) all resolve identically.
+    """
+    source = Path(__file__).resolve()
+    for candidate in source.parents:
+        if (candidate / 'packages/backend/backend_core/config.py').is_file():
+            return candidate
+    raise RuntimeError('Could not locate the repository root from backend_core/config.py; set ENV_FILE to an explicit env file path')
+
+
+def get_env_file() -> str | None:
+    """The local dotenv overrides file for this process.
+
+    One git-ignored `.env` at the repository root serves the backend and test
+    harnesses; process environment values take precedence over it. Containers
+    set ENV_FILE="" (isolated, compose-provided env only). An explicit ENV_FILE
+    path replaces the default.
+    """
     if 'ENV_FILE' in os.environ:
         env_val = os.environ.get('ENV_FILE', '')
         if env_val:
             return env_val
         return None
-    return '.env'
+    return str(_repo_root() / '.env')
 
 
 def _resolve_dir(value: Path | str) -> Path:
@@ -78,7 +99,7 @@ class Settings(BaseSettings):
 
     @classmethod
     def settings_customise_sources(cls, settings_cls, init_settings, env_settings, dotenv_settings, file_secret_settings):
-        env_file = _get_env_file()
+        env_file = get_env_file()
         if env_file is None:
             return (init_settings, env_settings, file_secret_settings)
         return (init_settings, env_settings, DotEnvSettingsSource(settings_cls, env_file=env_file, env_file_encoding='utf8'), file_secret_settings)

@@ -2,7 +2,7 @@
 
 This project uses environment variables for two layers:
 
-1. **Backend runtime** — loaded by `packages/backend/backend_core/config.py` from process env and the env file selected by `ENV_FILE`
+1. **Backend runtime** — loaded by `packages/backend/backend_core/config.py` from process env and the git-ignored `.env` at the repository root (path overridable with `ENV_FILE`)
 2. **Frontend dev server (Vite)** — read from the process environment; `just dev` sources `docker/env/dev.env` so local dev variables come from the same file
 
 There is no separate `packages/frontend/.env` file. All local dev configuration — including Vite
@@ -92,8 +92,8 @@ If you only want the high-value knobs, start with these:
 ### Backend
 
 - `Settings()` reads process environment first, then an env file.
-- `ENV_FILE` chooses the env file path. Default: `.env`.
-- Set `ENV_FILE` to an empty value only if you want to rely on process env alone.
+- The default env file is the git-ignored `.env` at the repository root. It is the one place for local secrets and overrides (backend settings, auth keys, e.g. `E2E_OPENROUTER_API_KEY`). A legacy `packages/backend/.env` is no longer read — move any such file to the root.
+- Process environment values win over `.env`. `ENV_FILE` chooses a different env file path; set it to an empty value only if you want to rely on process env alone. Application containers set `ENV_FILE` to empty so they only ever use compose-provided values.
 - `DATABASE_URL` is the backend database URL and must be a full PostgreSQL connection string.
 - Some values such as SMTP and provider defaults are **seeded into the database once**. After the UI saves a value, the database value wins until it is cleared.
 
@@ -188,7 +188,7 @@ just dev
 
 | Variable                               | Default                                                                                   | Notes                                                                                                                                                                                                                                                            |
 | -------------------------------------- | ----------------------------------------------------------------------------------------- | ---------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
-| `ENV_FILE`                             | `.env`                                                                                    | Path to the backend env file.                                                                                                                                                                                                                                    |
+| `ENV_FILE`                             | `<repo root>/.env`                                                                        | Path to the backend env file. Default is the git-ignored root `.env`; set to empty on all application containers.                                                                                                                                                |
 | `APP_NAME`                             | `Data-Forge Analysis Platform`                                                            | Application name for UI/logging metadata.                                                                                                                                                                                                                        |
 | `APP_VERSION`                          | `1.0.0`                                                                                   | Application version string.                                                                                                                                                                                                                                      |
 | `DEBUG`                                | `false`                                                                                   | Enables verbose/debug behavior.                                                                                                                                                                                                                                  |
@@ -365,6 +365,7 @@ deployment's `/api/v1/auth/github/callback` URL in the GitHub OAuth app.
 | Variable         | Default | Notes                                                                                                                                                                                                              |
 | ---------------- | ------- | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------ |
 | `PW_E2E_WORKERS` | `5`     | Playwright workers per E2E shard (3×5 validated). The checked-in E2E topology uses four API processes, one active runtime coordinator, one worker manager, a 32-worker compute budget, and four prewarmed workers. |
+| `E2E_OPENROUTER_API_KEY` | empty  | OpenRouter key passed to the E2E runner and the chat model stack; the `runtime-architecture` chat tests fail fast without it. Lives in the git-ignored root `.env` together with the other local overrides. |
 | `TEST_MEMORY_MB` | derived | Optional total memory budget in MiB per test recipe invocation. When unset, Python/Vitest uses 75% and E2E uses 90% of memory available to Docker. Explicit values must be at least `1024` MiB and no greater than Docker's available memory. E2E allocates 512 MiB to its controller and the remainder to its isolated DinD daemon, which runs all browser containers. |
 | `TEST_CPUS`      | unset   | Optional total CPU budget per test recipe invocation; when set, it must be at least `0.1`. Without it, the invocation uses the Docker-reported CPU capacity. E2E allocates at least 0.5 CPUs or 20% of the total to its controller, whichever is greater, and gives the remainder to DinD; its total must leave CPU for both. Concurrent invocations each get their own cap. |
 

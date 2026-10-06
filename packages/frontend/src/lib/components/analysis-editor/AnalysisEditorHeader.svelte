@@ -131,7 +131,9 @@
 						overflow: 'hidden',
 						textOverflow: 'ellipsis',
 						outline: 'none',
-						letterSpacing: 'wide2',
+						letterSpacing: 'normal',
+						lineHeight: '1.4',
+						paddingRight: '1',
 						cursor: editorReadOnly ? 'default' : 'text',
 						_focus: {
 							backgroundColor: 'bg.hover',
@@ -185,7 +187,7 @@
 							overflow: 'hidden',
 							textOverflow: 'ellipsis',
 							color: 'fg.faint',
-							letterSpacing: 'tight2',
+							letterSpacing: 'normal',
 							minWidth: '0',
 							flex: '1'
 						})}

@@ -239,3 +239,16 @@ export function buildDatasourcePreviewPipelinePayload(args: {
 		datasourceConfig: { ...persistedConfig, ...args.datasourceConfig }
 	});
 }
+
+/** Fire-and-warmup variant: returns null instead of throwing when the persisted
+ * config has no branch (and no default was resolved yet). */
+export function buildDatasourcePreviewPipelinePayloadSafe(args: {
+	datasource: DataSource;
+	datasourceConfig: Record<string, unknown>;
+}): AnalysisPipelinePayload | null {
+	try {
+		return buildDatasourcePreviewPipelinePayload(args);
+	} catch {
+		return null;
+	}
+}
