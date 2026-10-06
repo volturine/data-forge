@@ -561,31 +561,50 @@ test.describe('Analyses – fill null config editing', () => {
 });
 
 test.describe('Analyses – pivot config editing', () => {
-	test('Pivot: pick pivot column, check index, set agg, Apply', async ({ page, request }) => {
+	test('Pivot: choose rows, columns, and aggregates, preview, then apply', async ({
+		page,
+		request
+	}) => {
 		const id = uid();
 		const analysis = `E2E Pivot Config ${id}`;
 		const aId = await createTrackedAnalysis(request, analysis, sharedBaseDatasourceId);
 		try {
 			const configPanel = await addStepAndOpenConfig(page, aId, 'pivot');
 
-			// Select pivot column via ColumnDropdown
-			const pivotColumnGroup = configPanel.getByRole('group', { name: /Pivot Column/i });
-			await expect(pivotColumnGroup).toBeVisible();
-			const dropdownTrigger = pivotColumnGroup.locator('button[aria-expanded]');
-			await dropdownTrigger.click();
+			const rows = configPanel.getByRole('group', { name: 'Rows' });
+			const columns = configPanel.getByRole('group', { name: 'Columns' });
+			const aggregates = configPanel.getByRole('group', { name: 'Aggregates' });
+			await expect(rows).toBeVisible();
+			await expect(columns).toBeVisible();
+			await expect(aggregates).toBeVisible();
+			await expect(configPanel.getByText('Index Columns', { exact: true })).toHaveCount(0);
+
+			// Choose the row identifier.
+			await rows.locator('button[aria-expanded]').click();
+			await rows.locator('#msc-col-id').check();
+			await rows.getByRole('button', { name: /Done/ }).click();
+			await expect(rows).toContainText('1 selected');
+
+			// Distinct city values become output columns.
+			await columns.locator('button[aria-expanded]').click();
 			await page.getByRole('option', { name: 'city', exact: true }).click();
 
-			// Check 'id' as index column
-			const idCheckbox = configPanel.locator('[data-testid="pivot-index-checkbox-id"]');
-			await idCheckbox.check();
-			await expect(idCheckbox).toBeChecked();
+			// Aggregate age values with sum.
+			const valueColumn = aggregates.getByRole('group', { name: 'Value column' });
+			await valueColumn.locator('button[aria-expanded]').click();
+			await page.getByRole('option', { name: 'age', exact: true }).click();
 
-			// Verify selected count
-			await expect(configPanel.getByText('1 selected')).toBeVisible();
-
-			// Change aggregation
 			const aggSelect = configPanel.locator('[data-testid="pivot-agg-select"]');
 			await aggSelect.selectOption('sum');
+			const previewButton = configPanel.getByRole('button', { name: 'Preview columns' });
+			const previewResponse = page.waitForResponse(
+				(response) =>
+					new URL(response.url()).pathname.endsWith('/v1/compute/schema') &&
+					response.request().method() === 'POST',
+				{ timeout: readyTimeoutMs() }
+			);
+			await previewButton.click();
+			expect((await previewResponse).ok()).toBeTruthy();
 
 			const applyBtn = configPanel.getByRole('button', { name: 'Apply' });
 			await expect(applyBtn).toBeEnabled();
