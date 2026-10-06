@@ -442,6 +442,7 @@
 				flexDirection: 'column',
 				gap: '2'
 			})}
+			data-testid="time-travel-popover"
 			bind:this={popoverRef}
 			use:portal={popoverRect}
 			use:overlayStack.action={overlayConfig}
@@ -457,7 +458,10 @@
 					paddingY: '1'
 				})}
 			>
-				<div class={css({ fontSize: 'xs', color: 'fg.muted', textAlign: 'left' })}>
+				<div
+					data-testid="time-travel-selected"
+					class={css({ fontSize: 'xs', color: 'fg.muted', textAlign: 'left' })}
+				>
 					{#if isLatest}
 						Selected: Latest{#if currentSnapshot}
 							· #{currentSnapshot.id}{/if}
@@ -481,6 +485,7 @@
 						})}
 						onclick={() => setSnapshot(null)}
 						type="button"
+						data-testid="time-travel-latest"
 					>
 						Latest
 					</button>
@@ -609,6 +614,9 @@
 												: { cursor: 'default', opacity: '0.4' },
 											effectiveSelectedDay === day.key && { backgroundColor: 'bg.tertiary' }
 										)}
+										data-testid="time-travel-day"
+										data-snapshot-count={day.count}
+										aria-label={`${day.key}: ${day.count} snapshots`}
 										onclick={() => day.count > 0 && selectDay(day.key)}
 										type="button"
 									>
@@ -651,6 +659,8 @@
 						{#if effectiveSelectedDay}
 							{#each filteredSnapshots as snap (snap.id)}
 								<div
+									data-testid="time-travel-snapshot-item"
+									data-snapshot-id={snap.id}
 									class={css(
 										{
 											display: 'flex',
@@ -750,7 +760,7 @@
 							{/each}
 						{:else}
 							<div class={css({ padding: '2', fontSize: 'xs', color: 'fg.tertiary' })}>
-								Select a day to view builds.
+								Select a day to view snapshots.
 							</div>
 						{/if}
 					</div>

@@ -1,5 +1,6 @@
 import { test, expect } from './fixtures.js';
-import { createDatasource } from './utils/api.js';
+import { createCsvDatasource, createDatasource } from './utils/api.js';
+import type { Page } from '@playwright/test';
 import { deleteDatasourceViaUI } from './utils/ui-cleanup.js';
 import { uploadDatasourceViaUi } from './utils/user-flows.js';
 import { uid } from './utils/uid.js';
@@ -775,5 +776,154 @@ test.describe('Datasources – build comparison', () => {
 		await expect(page.getByRole('button', { name: 'Compare builds' })).toBeVisible({
 			timeout: 3_000
 		});
+	});
+});
+
+test.describe('Datasources – re-ingest freshness & time travel', () => {
+	// Five data rows with a header. Re-ingests flip `skip_rows` (same column
+	// type, different row count) so each generation is distinguishable by its
+	// preview data without hitting Iceberg's incompatible-type path.
+	const REINGEST_CSV = 'value\n1\n2\n3\n4\n5\n';
+
+	async function readLastUpdated(page: Page, dsId: string): Promise<number> {
+		const response = await page.context().request.get(`/api/v1/datasource/${dsId}`);
+		expect(response.ok()).toBeTruthy();
+		const body = (await response.json()) as { last_data_update: string | null };
+		return body.last_data_update ? new Date(body.last_data_update).getTime() : 0;
+	}
+
+	test('re-ingest advances the Last updated stamp instead of staying stale', async ({
+		page,
+		request
+	}) => {
+		const ds = `e2e-last-updated-${uid()}`;
+		const dsId = await createCsvDatasource(request, ds, REINGEST_CSV);
+		try {
+			await gotoDatasourcesPage(page);
+			await selectDatasourceAndWaitForConfig(page, ds);
+			await waitForDatasourcePreviewReady(page);
+
+			const config = page.locator('[data-ds-config]');
+			const beforeMs = await readLastUpdated(page, dsId);
+			expect(beforeMs).toBeGreaterThan(0);
+			// The publish response carries the freshness stamp: "Never" must
+			// not appear for a freshly imported, ingested datasource.
+			await expect(config.getByText('Never', { exact: true })).toHaveCount(0);
+			const displayedTimestamp = config.locator('time').first();
+			await expect(displayedTimestamp).toBeVisible();
+			const displayedBefore = await displayedTimestamp.getAttribute('datetime');
+			expect(displayedBefore).not.toBeNull();
+			expect(Date.parse(displayedBefore ?? '')).toBe(beforeMs);
+			const listRow = page.locator(`[data-ds-row="${ds}"]`);
+			await expect(listRow.getByText('Last updated', { exact: true })).toBeVisible();
+			const listTimestamp = listRow.locator('time').first();
+			await expect(listTimestamp).toBeVisible();
+			expect(Date.parse((await listTimestamp.getAttribute('datetime')) ?? '')).toBe(beforeMs);
+
+			await config.getByRole('button', { name: /Re-ingest from source/i }).click();
+			await expect(config.getByRole('button', { name: /Re-ingesting/i })).not.toBeVisible({
+				timeout: readyTimeoutMs()
+			});
+			await waitForDatasourcePreviewReady(page);
+
+			await expect(config.getByText('Never', { exact: true })).toHaveCount(0);
+			// The stamp must actually advance with the new ingest.
+			await expect
+				.poll(() => readLastUpdated(page, dsId), { timeout: readyTimeoutMs() })
+				.toBeGreaterThan(beforeMs);
+			await expect
+				.poll(async () => Date.parse((await displayedTimestamp.getAttribute('datetime')) ?? ''), {
+					timeout: readyTimeoutMs()
+				})
+				.toBeGreaterThan(beforeMs);
+			await expect
+				.poll(async () => Date.parse((await listTimestamp.getAttribute('datetime')) ?? ''), {
+					timeout: readyTimeoutMs()
+				})
+				.toBeGreaterThan(beforeMs);
+		} finally {
+			await deleteDatasourceViaUI(page, ds, { id: dsId }).catch(() => undefined);
+		}
+	});
+
+	test('time travel lists every ingest and switching snapshots changes the preview data', async ({
+		page,
+		request
+	}) => {
+		const ds = `e2e-time-travel-${uid()}`;
+		const dsId = await createCsvDatasource(request, ds, REINGEST_CSV);
+		try {
+			await gotoDatasourcesPage(page);
+			await selectDatasourceAndWaitForConfig(page, ds);
+			await waitForDatasourcePreviewReady(page);
+			const preview = page.locator('[data-testid="datasource-preview"]');
+			// Latest generation: skip_rows=0 → five rows.
+			await expect(preview.locator('tbody tr')).toHaveCount(5, { timeout: readyTimeoutMs() });
+
+			const config = page.locator('[data-ds-config]');
+			const beforeMs = await readLastUpdated(page, dsId);
+			expect(beforeMs).toBeGreaterThan(0);
+
+			// Change parsing options and save: the panel re-ingests, producing
+			// a second ingest generation (skip_rows=1 → four rows).
+			await config.getByRole('tab', { name: 'CSV' }).click();
+			await config.locator('input[id^="csv-skip-rows-"]').fill('1');
+			await config.getByRole('button', { name: 'Save Changes' }).click();
+			await expect
+				.poll(() => readLastUpdated(page, dsId), { timeout: readyTimeoutMs() })
+				.toBeGreaterThan(beforeMs);
+			await waitForDatasourcePreviewReady(page);
+			await expect(preview.locator('tbody tr')).toHaveCount(4, { timeout: readyTimeoutMs() });
+
+			// The time travel picker must list BOTH ingest generations.
+			const timeTravelButton = page.getByRole('button', { name: /Time Travel/i });
+			await expect(timeTravelButton).toBeVisible();
+			await timeTravelButton.click();
+			const popover = page.getByTestId('time-travel-popover');
+			await expect(popover.getByTestId('time-travel-selected')).toContainText('Latest');
+			await expect(popover.getByText('Select a day to view snapshots.')).toBeVisible();
+			const ingestionDay = popover.locator(
+				'[data-testid="time-travel-day"][data-snapshot-count="2"]'
+			);
+			await expect(ingestionDay).toHaveCount(1, { timeout: readyTimeoutMs() });
+			await ingestionDay.click();
+			const items = popover.getByTestId('time-travel-snapshot-item');
+			await expect(items).toHaveCount(2, { timeout: readyTimeoutMs() });
+
+			// Selecting the older ingestion must send its exact Iceberg snapshot
+			// to compute and load that generation's data.
+			const olderSnapshot = items.last();
+			const olderSnapshotId = await olderSnapshot.getAttribute('data-snapshot-id');
+			expect(olderSnapshotId).toBeTruthy();
+			const previewRequest = page.waitForRequest(
+				(request) =>
+					request.url().includes('/api/v1/compute/preview') && request.method() === 'POST',
+				{ timeout: readyTimeoutMs() }
+			);
+			await olderSnapshot.getByRole('button').first().click();
+			const selectedPreviewRequest = await previewRequest;
+			const previewPayload = selectedPreviewRequest.postDataJSON() as {
+				analysis_pipeline: {
+					tabs: Array<{ datasource: { config: { snapshot_id?: string } } }>;
+				};
+			};
+			expect(previewPayload.analysis_pipeline.tabs[0]?.datasource.config.snapshot_id).toBe(
+				olderSnapshotId
+			);
+			await expect(popover.getByTestId('time-travel-selected')).toContainText('#');
+			await expect(popover.getByTestId('time-travel-selected')).not.toContainText('Latest');
+			await page.getByRole('button', { name: /Time Travel/i }).click();
+			await waitForDatasourcePreviewReady(page);
+			await expect(preview.locator('tbody tr')).toHaveCount(5, { timeout: readyTimeoutMs() });
+
+			// Returning to latest restores the newest generation.
+			await page.getByRole('button', { name: /Time Travel/i }).click();
+			await popover.getByTestId('time-travel-latest').click();
+			await page.getByRole('button', { name: /Time Travel/i }).click();
+			await waitForDatasourcePreviewReady(page);
+			await expect(preview.locator('tbody tr')).toHaveCount(4, { timeout: readyTimeoutMs() });
+		} finally {
+			await deleteDatasourceViaUI(page, ds, { id: dsId }).catch(() => undefined);
+		}
 	});
 });

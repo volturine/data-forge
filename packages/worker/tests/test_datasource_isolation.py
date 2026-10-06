@@ -218,8 +218,11 @@ def test_manager_commits_staged_parquet_files_and_replaces_existing_table_atomic
         "arrow_schema": base64.b64encode(schema.serialize().to_pybytes()).decode("ascii"),
         "row_count": 96,
     }
-    table = execution.import_staged_parquet_files(manifest, table_path=table_path, database_url="catalog-credentials-stay-in-manager")
+    table, published_path = execution.import_staged_parquet_files(
+        manifest, staged_prefix=table_path, table_path=table_path, database_url="catalog-credentials-stay-in-manager"
+    )
 
+    assert published_path == table_path
     assert table.current_snapshot() is not None
     assert table.current_snapshot().summary["added-records"] == "96"
     assert table.scan().to_arrow().to_pylist() == rows.to_pylist()
@@ -253,9 +256,10 @@ def test_manager_rejects_stale_manifest_outside_claim_prefix_before_catalog_acce
         lambda *_args, **_kwargs: pytest.fail("A stale manifest must be rejected before catalog access"),
     )
 
-    with pytest.raises(ValueError, match="claim-scoped table prefix"):
+    with pytest.raises(ValueError, match="claim-scoped staging prefix"):
         execution.import_staged_parquet_files(
             manifest,
+            staged_prefix="s3://default/clean/current_claim/master",
             table_path="s3://default/clean/current_claim/master",
             database_url="catalog-credentials-stay-in-manager",
         )
@@ -271,7 +275,11 @@ def test_scheduled_ingest_uses_the_same_manifest_commit_path_as_manual_ingest(mo
         id="source",
         name="Source",
         source_type="iceberg",
-        config={"source": {"source_type": "file"}, "branch": "master"},
+        config={
+            "source": {"source_type": "file"},
+            "branch": "master",
+            "metadata_path": "s3://default/clean/source__claim_previous/master",
+        },
         schema_cache=None,
         is_hidden=False,
         revision=3,
@@ -305,7 +313,9 @@ def test_scheduled_ingest_uses_the_same_manifest_commit_path_as_manual_ingest(mo
     table = type("Table", (), {"current_snapshot": lambda _self: None, "metadata_location": None})()
     monkeypatch.setattr(execution, "_require_metadata", lambda *_args, **_kwargs: metadata)
     monkeypatch.setattr(execution, "_external_source", lambda _metadata: ({"source_type": "file"}, DataSourceType.FILE))
-    monkeypatch.setattr(execution, "import_staged_parquet_files", lambda received, **kwargs: (calls.append(("import", received, kwargs)), table)[1])
+    monkeypatch.setattr(
+        execution, "import_staged_parquet_files", lambda received, **kwargs: (calls.append(("import", received, kwargs)), (table, kwargs["table_path"]))[1]
+    )
     monkeypatch.setattr("runtime.compute_utils.await_engine_result", lambda *_args, **_kwargs: {"data": manifest})
     monkeypatch.setattr("runtime.object_store.delete_object", lambda _path: None)
 
@@ -328,10 +338,54 @@ def test_scheduled_ingest_uses_the_same_manifest_commit_path_as_manual_ingest(mo
     assert registration["prefix_url"] == "s3://default/clean/source__claim_claim_schedule/master"
     assert imported_manifest == manifest
     assert import_kwargs == {
-        "table_path": registration["prefix_url"],
+        "staged_prefix": registration["prefix_url"],
+        "table_path": "s3://default/clean/source__claim_previous/master",
         "database_url": "catalog-credentials-stay-in-manager",
     }
     assert calls[-1][0] == "publish"
+
+
+@pytest.mark.parametrize("published_table_name", ["ds-1", "ds-1__claim_previous"])
+def test_reingest_accumulates_snapshots_on_the_published_table(tmp_path, monkeypatch, published_table_name: str) -> None:
+    """Time travel keeps history on both new and already-published table paths."""
+    import base64
+
+    import pyarrow.parquet as pq
+    from pyiceberg.catalog.memory import InMemoryCatalog
+
+    schema = pa.schema([pa.field("value", pa.int64())])
+    published_table_path = (tmp_path / published_table_name / "master").as_uri()
+    catalog = InMemoryCatalog("reingest-history-tests", warehouse=(tmp_path / "warehouse").as_uri())
+    catalog.create_namespace("clean")
+    monkeypatch.setattr(execution, "load_runtime_catalog", lambda *_args, **_kwargs: catalog)
+    monkeypatch.setattr(execution, "object_store_storage_options", lambda: {})
+    monkeypatch.setattr(execution, "object_store_url", lambda *_args, **_kwargs: (tmp_path / "warehouse").as_uri())
+    monkeypatch.setattr(execution, "get_namespace", lambda: "default")
+
+    snapshot_ids: list[int] = []
+    for attempt in range(2):
+        claim_prefix = (tmp_path / f"ds-1__claim_attempt_{attempt}" / "master").as_uri()
+        parquet_path = tmp_path / f"ds-1__claim_attempt_{attempt}" / "master" / "data.parquet"
+        parquet_path.parent.mkdir(parents=True, exist_ok=True)
+        pq.write_table(pa.table({"value": [attempt] * 4}, schema=schema), parquet_path)
+        manifest = {
+            "file_paths": [parquet_path.as_uri()],
+            "arrow_schema": base64.b64encode(schema.serialize().to_pybytes()).decode("ascii"),
+            "row_count": 4,
+        }
+        table, returned_path = execution.import_staged_parquet_files(manifest, staged_prefix=claim_prefix, table_path=published_table_path, database_url="x")
+        assert returned_path == published_table_path
+        snapshot_ids.append(table.current_snapshot().snapshot_id)
+
+    assert snapshot_ids[0] != snapshot_ids[1]
+    # pyiceberg commits the overwrite as a chained DELETE + APPEND pair (the
+    # same shape the build path produces); the picker lists only the append
+    # snapshots recorded per ingest run, so users see one version per ingest.
+    assert len(table.snapshots()) == 3
+    assert len({snapshot.snapshot_id for snapshot in table.snapshots()}) == 3
+    # Old snapshots stay readable: time travel returns the ingested generation.
+    assert [row["value"] for row in table.scan(snapshot_id=snapshot_ids[0]).to_arrow().to_pylist()] == [0] * 4
+    assert [row["value"] for row in table.scan(snapshot_id=snapshot_ids[1]).to_arrow().to_pylist()] == [1] * 4
 
 
 def test_schedule_ingest_rejects_datasource_without_external_source(monkeypatch) -> None:
