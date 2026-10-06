@@ -37,6 +37,7 @@ def test_runtime_schema_has_only_public_and_tenant_creation_revisions() -> None:
         '0020_runtime_namespace_work_wakes.py',
         '0021_storage_cleanup_catalog_indexes.py',
         '0022_telegram_part_receipts.py',
+        '0023_drop_datasource_freshness.py',
     ]
 
 

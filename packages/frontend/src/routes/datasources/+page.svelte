@@ -16,8 +16,6 @@
 	} from '@lucide/svelte';
 	import ConfirmDialog from '$lib/components/common/ConfirmDialog.svelte';
 	import BranchPicker from '$lib/components/common/BranchPicker.svelte';
-	import FileTypeBadge from '$lib/components/common/FileTypeBadge.svelte';
-	import FreshnessBadge from '$lib/components/common/FreshnessBadge.svelte';
 	import RelativeTime from '$lib/components/common/RelativeTime.svelte';
 	import RowActionMenu from '$lib/components/common/RowActionMenu.svelte';
 	import DatasourcePreview from '$lib/components/datasources/DatasourcePreview.svelte';
@@ -188,6 +186,7 @@
 	});
 
 	function handleConfigSaved() {
+		resetPreviewLocals();
 		queryClient.invalidateQueries({ queryKey: ['datasources'] });
 	}
 
@@ -366,7 +365,8 @@
 							textDecoration: 'none',
 							backgroundColor: 'accent.primary',
 							color: 'fg.inverse',
-							borderWidth: '1'
+							borderWidth: '1',
+							borderColor: 'border.accent'
 						})}
 					>
 						Create your first data source
@@ -418,23 +418,21 @@
 								<div
 									class={css({
 										display: 'flex',
-										minWidth: '0',
-										flex: '1',
 										flexDirection: 'column',
-										gap: '1'
+										gap: '1',
+										minWidth: '0',
+										flex: '1'
 									})}
 								>
-									<div
-										class={css({ display: 'flex', minWidth: '0', alignItems: 'center', gap: '2' })}
-									>
+									<div class={css({ display: 'flex', alignItems: 'center', gap: '2' })}>
 										<span
 											class={css({
-												fontWeight: 'medium',
-												textOverflow: 'ellipsis',
-												overflow: 'hidden',
-												whiteSpace: 'nowrap',
 												fontSize: 'sm',
-												color: activeSelectedId === datasource.id ? 'accent.primary' : undefined
+												fontWeight: 'medium',
+												overflow: 'hidden',
+												textOverflow: 'ellipsis',
+												whiteSpace: 'nowrap',
+												color: activeSelectedId === datasource.id ? 'accent.primary' : 'fg.primary'
 											})}
 										>
 											{datasource.name}
@@ -482,11 +480,6 @@
 												Import
 											</span>
 										{/if}
-										<FileTypeBadge sourceType={datasource.source_type} size="sm" />
-										<FreshnessBadge
-											lastDataUpdate={datasource.last_data_update}
-											thresholdMinutes={datasource.freshness_threshold_minutes ?? null}
-										/>
 									</div>
 									{#if datasource.description}
 										<p

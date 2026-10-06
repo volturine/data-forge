@@ -288,7 +288,6 @@ def _apply_last_data_update[DatasourceResponseT: (DataSourceResponse, DataSource
     datasource: DataSource,
     last_build_completed_at: datetime | None,
 ) -> DatasourceResponseT:
-    response.freshness_threshold_minutes = datasource.freshness_threshold_minutes
     response.last_data_update = _last_data_update_from_config(datasource)
     if response.last_data_update is None and last_build_completed_at is not None:
         response.last_data_update = last_build_completed_at
@@ -629,11 +628,6 @@ def update_datasource(
     # Update is_hidden if provided
     if update.is_hidden is not None and update.is_hidden != datasource.is_hidden:
         datasource.is_hidden = update.is_hidden
-        changed = True
-
-    # Update freshness threshold if provided
-    if 'freshness_threshold_minutes' in update.model_fields_set and update.freshness_threshold_minutes != datasource.freshness_threshold_minutes:
-        datasource.freshness_threshold_minutes = update.freshness_threshold_minutes
         changed = True
 
     # Update config if provided

@@ -12,7 +12,9 @@ export default defineConfig({
 			$lib: resolve(import.meta.dirname, 'src/lib'),
 			'@lucide/svelte': resolve(stub, 'lucide.ts'),
 			'$app/environment': resolve(stub, 'app-environment.ts'),
-			'$app/paths': resolve(stub, 'app-paths.ts')
+			'$app/paths': resolve(stub, 'app-paths.ts'),
+			'$app/navigation': resolve(stub, 'app-navigation.ts'),
+			'$app/state': resolve(stub, 'app-state.ts')
 		}
 	},
 	test: {

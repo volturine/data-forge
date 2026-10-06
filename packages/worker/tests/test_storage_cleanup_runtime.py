@@ -451,6 +451,83 @@ def test_failed_or_stale_import_leaves_only_claim_prefix_for_durable_cleanup(mon
     assert deleted_objects == []
 
 
+def test_reingest_datasource_strips_stale_time_travel_keys(monkeypatch: pytest.MonkeyPatch) -> None:
+    from runtime import compute_request_runtime
+
+    published_configs = []
+
+    class ReingestClient:
+        def register_datasource_stage(self, **kwargs: object) -> None:
+            pass
+
+        def create_engine_run(self, **_kwargs: object) -> str:
+            return "run-ingest-1"
+
+        def update_engine_run(self, **_kwargs: object) -> None:
+            pass
+
+        def publish_datasource_ingest(self, **kwargs: object) -> object:
+            published_configs.append(kwargs.get("config"))
+
+            class Rec:
+                name = "ds-1"
+                source_type = "iceberg"
+                config = {}
+
+                def model_dump(self, **kwargs):
+                    return {"id": "ds-1", "name": "ds-1", "source_type": "iceberg", "config": {}}
+
+            return Rec()
+
+        def complete_engine_run(self, **_kwargs: object) -> None:
+            pass
+
+    command = compute_pb2.ComputeCommand()
+    command.datasource.ingest.datasource_id = "ds-1"
+    claimed = compute_request_runtime.ClaimedComputeRequest(
+        id="request-reingest-1",
+        namespace="default",
+        kind=enums_pb2.COMPUTE_REQUEST_KIND_INGEST_DATASOURCE,
+        command_envelope=compute_pb2.ComputeCommandEnvelope(command=command),
+        worker_id="writer",
+        claim_token="claim-token",
+        lease_generation=1,
+        lease_ttl_seconds=300,
+    )
+    manifest = {
+        "file_paths": ["s3://default/clean/ds-1__claim_claim_token/master/data.parquet"],
+        "row_count": 5,
+        "columns": [{"name": "col1", "dtype": "string", "nullable": True}],
+    }
+
+    class DummyMetadata:
+        source_type = "iceberg"
+        revision = 2
+        config = {
+            "source": {"source_type": "file", "file_path": "s3://default/uploads/file.csv", "file_type": "csv"},
+            "branch": "master",
+            "time_travel_snapshot_id": "9876543210",
+            "time_travel_snapshot_timestamp_ms": 1700000000000,
+            "time_travel_ui": {"selected": True},
+        }
+
+    monkeypatch.setattr(compute_request_runtime.datasource_execution, "_require_metadata", lambda *_args, **_kwargs: DummyMetadata())
+    monkeypatch.setattr(compute_request_runtime, "_datasource_engine_job", lambda *_args, **_kwargs: manifest)
+    monkeypatch.setattr(compute_request_runtime.datasource_execution, "import_staged_parquet_files", lambda *_args, **_kwargs: object())
+    monkeypatch.setattr(compute_request_runtime.datasource_execution, "_set_snapshot_metadata", lambda config, table: None)
+
+    compute_request_runtime._publish_staged_datasource(
+        cast(compute_request_runtime.WorkerRuntimeClient, ReingestClient()), _manager(), claimed, command.datasource
+    )
+
+    assert len(published_configs) == 1
+    published_config = published_configs[0]
+    assert "time_travel_snapshot_id" not in published_config
+    assert "time_travel_snapshot_timestamp_ms" not in published_config
+    assert "time_travel_ui" not in published_config
+    assert "ingest" in published_config
+
+
 def test_worker_heartbeat_reports_registration_loss_and_recovery_on_its_thread() -> None:
     from runtime.worker_runtime_client import run_worker_heartbeat_loop
 

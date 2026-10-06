@@ -81,6 +81,16 @@ def _favorite_ids(session: Session, user_id: str | None, analysis_ids: list[str]
     return {str(analysis_id) for (analysis_id,) in rows}
 
 
+_ANALYSIS_TIMESTAMP_SUFFIX = re.compile(r' · [A-Z][a-z]{2} \d{1,2}, \d{4}, \d{2}:\d{2}:\d{2}\.\d{3}( UTC)?$')
+
+
+def timestamped_analysis_name(base: str, now: datetime | None = None) -> str:
+    """Name an analysis after its creation time, e.g. ``Sales · Oct 6, 2026, 14:32:05.123 UTC``."""
+    moment = now or datetime.now(UTC)
+    stem = _ANALYSIS_TIMESTAMP_SUFFIX.sub('', base.strip())
+    return f'{stem} · {moment:%b} {moment.day}, {moment:%Y, %H:%M:%S}.{moment.microsecond // 1000:03d} UTC'
+
+
 def _slugify(value: str) -> str:
     normalized = re.sub(r'[^a-zA-Z0-9]+', '_', value.strip().lower()).strip('_')
     return normalized or 'analysis'
@@ -710,6 +720,7 @@ def duplicate_analysis(
     original = session.get(Analysis, analysis_id)
     if not original:
         raise analysis_not_found(analysis_id)
+    name = data.name or timestamped_analysis_name(f'Copy of {original.name}')
 
     pipeline = deepcopy(original.pipeline_definition)
     tabs = pipeline.get('tabs')
@@ -736,7 +747,7 @@ def duplicate_analysis(
         output_id_map[old_output_id] = new_output_id
         output['result_id'] = new_output_id
         branch = str(((output.get('iceberg') or {}) if isinstance(output.get('iceberg'), dict) else {}).get('branch') or 'master')
-        output_name = _default_output_name(data.name, str(tab.get('name') or f'tab_{index + 1}'), index)
+        output_name = _default_output_name(name, str(tab.get('name') or f'tab_{index + 1}'), index)
         output['filename'] = output_name
         iceberg = output.get('iceberg')
         if isinstance(iceberg, dict):
@@ -793,7 +804,7 @@ def duplicate_analysis(
                     ]
 
     payload = AnalysisCreateSchema(
-        name=data.name,
+        name=name,
         description=data.description if data.description is not None else original.description,
         tabs=tabs,
     )
@@ -816,7 +827,7 @@ def import_analysis(
     if not isinstance(tabs, list):
         raise ValueError("Imported pipeline must contain a 'tabs' array")
     payload = AnalysisCreateSchema(
-        name=data.name,
+        name=data.name or timestamped_analysis_name('Imported analysis'),
         description=data.description,
         tabs=tabs,
     )

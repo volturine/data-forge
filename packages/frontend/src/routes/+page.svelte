@@ -26,6 +26,7 @@
 	import { button, css, input, spinner } from '$lib/styles/panda';
 	import { favoriteStore } from '$lib/stores/favorites.svelte';
 	import { useNamespace } from '$lib/stores/namespace.svelte';
+	import { timestampedAnalysisName } from '$lib/utils/analysis-name';
 
 	const queryClient = useQueryClient();
 	const ns = useNamespace();
@@ -227,7 +228,7 @@
 
 	function requestDuplicate(analysis: AnalysisGalleryItem) {
 		duplicateSource = analysis;
-		duplicateName = `Copy of ${analysis.name}`;
+		duplicateName = timestampedAnalysisName(`Copy of ${analysis.name}`);
 		duplicateDescription = '';
 		duplicateError = '';
 		duplicating = false;

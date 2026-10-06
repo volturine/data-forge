@@ -891,6 +891,18 @@ class TestAnalysisList:
         assert item['is_favorite'] is False
 
 
+class TestTimestampedAnalysisName:
+    def test_formats_human_readable_millisecond_timestamp(self):
+        now = datetime(2026, 10, 6, 14, 32, 5, 123456, tzinfo=UTC)
+
+        assert analysis_service.timestamped_analysis_name('Sales', now) == 'Sales · Oct 6, 2026, 14:32:05.123 UTC'
+
+    def test_replaces_existing_timestamp_instead_of_stacking(self):
+        now = datetime(2026, 10, 6, 14, 32, 5, 123456, tzinfo=UTC)
+
+        assert analysis_service.timestamped_analysis_name('Copy of Sales · Oct 1, 2026, 09:00:00.001', now) == ('Copy of Sales · Oct 6, 2026, 14:32:05.123 UTC')
+
+
 class TestAnalysisImport:
     def test_import_analysis_applies_datasource_remap_before_missing_check(self, client, sample_datasource: DataSource):
         imported_source_id = 'imported-source-id'
@@ -927,6 +939,32 @@ class TestAnalysisImport:
         body = response.json()
         assert body['name'] == 'Imported Analysis'
         assert body['pipeline_definition']['tabs'][0]['datasource']['id'] == sample_datasource.id
+
+    def test_import_analysis_without_name_uses_timestamped_name(self, client, sample_datasource: DataSource):
+        payload: dict[str, Any] = {
+            'pipeline': {
+                'tabs': [
+                    {
+                        'id': 'tab-imported',
+                        'name': 'Imported Source',
+                        'parent_id': None,
+                        'datasource': {'id': sample_datasource.id, 'analysis_tab_id': None, 'config': {'branch': 'master'}},
+                        'output': {
+                            'result_id': str(uuid.uuid4()),
+                            'datasource_type': 'iceberg',
+                            'format': 'parquet',
+                            'filename': 'imported_source',
+                        },
+                        'steps': [],
+                    },
+                ],
+            },
+        }
+
+        response = client.post('/api/v1/analysis/import', json=payload)
+
+        assert response.status_code == 200
+        assert response.json()['name'].startswith('Imported analysis · ')
 
     def test_import_analysis_remaps_join_right_source(self, client, sample_datasource: DataSource):
         imported_source_id = 'imported-source-id'
@@ -1003,6 +1041,16 @@ class TestAnalysisDuplicate:
         assert duplicate_tab['output']['result_id'] != source_tab['output']['result_id']
         assert duplicate_tab['steps'][0]['id'] != source_tab['steps'][0]['id']
         assert duplicate_tab['datasource']['id'] == sample_datasource.id
+
+    def test_duplicate_without_name_uses_timestamped_copy_name(self, client, sample_analysis: Analysis):
+        first = client.post(f'/api/v1/analysis/{sample_analysis.id}/duplicate', json={})
+        second = client.post(f'/api/v1/analysis/{sample_analysis.id}/duplicate', json={})
+
+        assert first.status_code == 200
+        assert second.status_code == 200
+        assert first.json()['name'].startswith(f'Copy of {sample_analysis.name} · ')
+        assert first.json()['name'].endswith(' UTC')
+        assert first.json()['name'] != second.json()['name']
 
     def test_duplicate_rewrites_derived_tab_and_step_references(
         self,

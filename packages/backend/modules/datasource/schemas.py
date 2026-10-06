@@ -274,7 +274,6 @@ class DataSourceResponse(BaseModel):
     is_hidden: bool = False
     created_at: datetime
     output_of_tab_id: str | None = None
-    freshness_threshold_minutes: int | None = None
     last_data_update: datetime | None = None
 
 
@@ -298,7 +297,6 @@ class DataSourceListItem(BaseModel):
     is_hidden: bool = False
     created_at: datetime
     output_of_tab_id: str | None = None
-    freshness_threshold_minutes: int | None = None
     last_data_update: datetime | None = None
 
 
@@ -309,19 +307,11 @@ class DataSourceUpdate(DataSourceDescriptionModel):
     description: str | None = Field(default=None, max_length=4000)
     config: dict | None = None
     is_hidden: bool | None = None
-    freshness_threshold_minutes: int | None = None
 
     @field_validator('description')
     @classmethod
     def _normalize_description(cls, value: str | None) -> str | None:
         return cls.normalize_description(value)
-
-    @field_validator('freshness_threshold_minutes')
-    @classmethod
-    def _validate_freshness_threshold(cls, value: int | None) -> int | None:
-        if value is not None and value <= 0:
-            raise ValueError('Freshness threshold must be a positive number of minutes')
-        return value
 
 
 class BulkUploadResult(BaseModel):
