@@ -41,7 +41,9 @@ test.describe('Lineage – page structure', () => {
 	test('sidebar shows "Select a node" prompt by default', async ({ page }) => {
 		await page.goto('/lineage');
 		await waitForLineageToolbar(page);
-		await expect(page.getByText('Select a node')).toBeVisible();
+		// Exact match: Svelte Flow injects a visually hidden a11y hint that also
+		// contains the phrase "select a node".
+		await expect(page.getByText('Select a node', { exact: true })).toBeVisible();
 		await expect(page.getByText('Click a node to view details and schedules.')).toBeVisible();
 		await screenshot(page, 'lineage', 'default-state');
 	});
@@ -153,7 +155,9 @@ test.describe('Lineage – with datasource data', () => {
 			await node.click();
 
 			// Sidebar should show node details instead of the default prompt
-			await expect(page.getByText('Select a node')).not.toBeVisible({ timeout: 3_000 });
+			await expect(page.getByText('Select a node', { exact: true })).not.toBeVisible({
+				timeout: 3_000
+			});
 			// The sidebar heading contains the node label (scoped to sidebar to avoid matching the node itself)
 			await expect(page.locator('aside').getByText(dsName)).toBeVisible({ timeout: 3_000 });
 		} finally {

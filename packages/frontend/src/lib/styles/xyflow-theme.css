@@ -1,0 +1,21 @@
+/* Svelte Flow theme mapped onto the app's Panda tokens.
+   Token vars are redefined under [data-theme=dark] by the generated
+   styled-system stylesheet, so this mapping follows the app theme. */
+.svelte-flow {
+	--xy-background-color: var(--colors-bg-secondary);
+	--xy-edge-stroke: var(--colors-canvas-lineage-edge);
+	--xy-edge-stroke-selected: var(--colors-canvas-lineage-edge-active);
+	--xy-edge-stroke-width: 1.5;
+	--xy-handle-background-color: transparent;
+	--xy-handle-border-color: transparent;
+	--xy-minimap-background-color: var(--colors-bg-primary);
+	--xy-minimap-background-color-props: var(--colors-bg-primary);
+	--xy-minimap-mask-background-color: color-mix(
+		in srgb,
+		var(--colors-canvas-grid-line) 60%,
+		transparent
+	);
+	--xy-minimap-node-background-color: var(--colors-canvas-lineage-node-border);
+	--xy-minimap-node-stroke-color: transparent;
+	background-color: var(--xy-background-color);
+}
