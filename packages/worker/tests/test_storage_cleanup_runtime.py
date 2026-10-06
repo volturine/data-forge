@@ -443,7 +443,8 @@ def test_failed_or_stale_import_leaves_only_claim_prefix_for_durable_cleanup(mon
         (
             manifest,
             {
-                "table_path": registered["prefix_url"],
+                "staged_prefix": registered["prefix_url"],
+                "table_path": "s3://default/clean/request-1/master",
                 "database_url": compute_request_runtime.settings.database_url,
             },
         )
@@ -506,6 +507,7 @@ def test_reingest_datasource_strips_stale_time_travel_keys(monkeypatch: pytest.M
         config = {
             "source": {"source_type": "file", "file_path": "s3://default/uploads/file.csv", "file_type": "csv"},
             "branch": "master",
+            "metadata_path": "s3://default/clean/ds-1__claim_previous/master",
             "time_travel_snapshot_id": "9876543210",
             "time_travel_snapshot_timestamp_ms": 1700000000000,
             "time_travel_ui": {"selected": True},
@@ -513,7 +515,13 @@ def test_reingest_datasource_strips_stale_time_travel_keys(monkeypatch: pytest.M
 
     monkeypatch.setattr(compute_request_runtime.datasource_execution, "_require_metadata", lambda *_args, **_kwargs: DummyMetadata())
     monkeypatch.setattr(compute_request_runtime, "_datasource_engine_job", lambda *_args, **_kwargs: manifest)
-    monkeypatch.setattr(compute_request_runtime.datasource_execution, "import_staged_parquet_files", lambda *_args, **_kwargs: object())
+    import_kwargs: list[dict[str, object]] = []
+
+    def import_staged(_manifest: object, **kwargs: object) -> tuple[object, str]:
+        import_kwargs.append(kwargs)
+        return object(), str(kwargs["table_path"])
+
+    monkeypatch.setattr(compute_request_runtime.datasource_execution, "import_staged_parquet_files", import_staged)
     monkeypatch.setattr(compute_request_runtime.datasource_execution, "_set_snapshot_metadata", lambda config, table: None)
 
     compute_request_runtime._publish_staged_datasource(
@@ -526,6 +534,7 @@ def test_reingest_datasource_strips_stale_time_travel_keys(monkeypatch: pytest.M
     assert "time_travel_snapshot_timestamp_ms" not in published_config
     assert "time_travel_ui" not in published_config
     assert "ingest" in published_config
+    assert import_kwargs[0]["table_path"] == "s3://default/clean/ds-1__claim_previous/master"
 
 
 def test_worker_heartbeat_reports_registration_loss_and_recovery_on_its_thread() -> None:

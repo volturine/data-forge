@@ -82,6 +82,23 @@ class TestLastDataUpdate:
 
         assert item.last_data_update == snapshot_time
 
+    def test_accepts_integral_protobuf_struct_number(self, test_db_session: Session) -> None:
+        snapshot_time = datetime(2026, 5, 1, 12, 0, tzinfo=UTC).replace(tzinfo=None)
+        _insert_datasource(
+            test_db_session,
+            datasource_id='ds-protobuf-snapshot',
+            # Worker RPC Struct values are decoded as floats.
+            config={'current_snapshot_timestamp_ms': float(self._epoch_ms(snapshot_time))},
+        )
+
+        item = next(i for i in datasource_service.list_datasources(test_db_session) if i.id == 'ds-protobuf-snapshot')
+
+        assert item.last_data_update == snapshot_time
+
+    def test_ignores_invalid_snapshot_timestamp_values(self) -> None:
+        for value in (True, 0, -1, 1.5, float('nan'), float('inf')):
+            assert datasource_service._snapshot_timestamp_ms({'current_snapshot_timestamp_ms': value}) is None
+
     def test_prefers_current_over_plain_snapshot_timestamp(self, test_db_session: Session) -> None:
         old_time = datetime(2026, 4, 1, 12, 0, tzinfo=UTC).replace(tzinfo=None)
         new_time = datetime(2026, 6, 1, 12, 0, tzinfo=UTC).replace(tzinfo=None)

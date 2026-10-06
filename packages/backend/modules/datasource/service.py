@@ -1,4 +1,5 @@
 import logging
+import math
 import re
 import uuid
 from datetime import UTC, datetime
@@ -245,8 +246,17 @@ def _snapshot_timestamp_ms(config: object) -> int | None:
         return None
     for key in _SNAPSHOT_TIMESTAMP_KEYS:
         value = config.get(key)
-        if isinstance(value, int) and value > 0:
-            return value
+        if isinstance(value, bool):
+            continue
+        if isinstance(value, int):
+            timestamp_ms = value
+        elif isinstance(value, float) and math.isfinite(value) and value.is_integer():
+            # Protobuf Struct decodes every numeric value as a float.
+            timestamp_ms = int(value)
+        else:
+            continue
+        if timestamp_ms > 0:
+            return timestamp_ms
     return None
 
 

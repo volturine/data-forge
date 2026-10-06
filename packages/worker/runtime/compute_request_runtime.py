@@ -961,6 +961,15 @@ def _publish_staged_datasource(
     datasource_id = claimed.id if create else command.ingest.datasource_id
     staging_id = f"{datasource_id}__claim_{claimed.claim_token.replace('-', '_')}"
     target_path = object_store_url("clean", staging_id, branch, namespace=claimed.namespace)
+    # Reuse the datasource's published table identity so earlier snapshots
+    # remain available. New datasources use clean.<datasource_id>; reingests
+    # keep the metadata_path already recorded on the datasource.
+    table_path = datasource_execution._published_datasource_table_path(
+        datasource_id,
+        branch,
+        namespace=claimed.namespace,
+        existing_config=metadata.config if metadata is not None else None,
+    )
     manifest_url = object_store_url(
         "runtime-staging", "datasource-stage", claimed.id, str(claimed.lease_generation), "manifest.json", namespace=claimed.namespace
     )
@@ -994,17 +1003,27 @@ def _publish_staged_datasource(
         )
         schema_info = schema_info_proto(manifest)
         client.update_engine_run(namespace=claimed.namespace, run_id=run_id, fields={"current_step": "Importing staged batches", "progress": 0.7})
-        table = datasource_execution.import_staged_parquet_files(manifest, table_path=target_path, database_url=settings.database_url)
+        table, published_table_path = datasource_execution.import_staged_parquet_files(
+            manifest, staged_prefix=target_path, table_path=table_path, database_url=settings.database_url
+        )
         if create:
-            config = datasource_execution._build_iceberg_config(target_path, branch, source_config=source)
+            config = datasource_execution._build_iceberg_config(published_table_path, branch, source_config=source)
         else:
             assert metadata is not None
             config = dict(metadata.config or {})
-        config.update(datasource_execution._build_iceberg_config(target_path, branch, source_config=source))
+        config.update(datasource_execution._build_iceberg_config(published_table_path, branch, source_config=source))
         if not create:
             for key in ("time_travel_snapshot_id", "time_travel_snapshot_timestamp_ms", "time_travel_ui"):
                 config.pop(key, None)
         datasource_execution._set_snapshot_metadata(config, table)
+        # The snapshot added by this ingest references the staged parquet files
+        # under the claim prefix. Record it in the published config so the
+        # publication settles the cleanup intent: the prefix is part of table
+        # history for as long as any snapshot references it.
+        config["ingest"] = {
+            **({"ingested_at": datetime.now(UTC).replace(tzinfo=None).isoformat()} if not create else {}),
+            "claim_prefix": target_path,
+        }
         if create:
             assert isinstance(
                 request,
@@ -1026,7 +1045,6 @@ def _publish_staged_datasource(
             )
         else:
             assert metadata is not None and metadata.revision is not None
-            config["ingest"] = {"ingested_at": datetime.now(UTC).replace(tzinfo=None).isoformat()}
             record = client.publish_datasource_ingest(
                 namespace=claimed.namespace,
                 datasource_id=datasource_id,
@@ -1045,7 +1063,7 @@ def _publish_staged_datasource(
             started=started,
             record=record,
             original_source_type=source_type,
-            metadata_path=target_path,
+            metadata_path=published_table_path,
         )
         return _datasource_result_from_payload(claimed.kind, record.model_dump(mode="json"))
     except BackendWorkerRpcError as exc:

@@ -382,7 +382,7 @@ describe('SnapshotPicker', () => {
 			);
 			renderPicker();
 			await fireEvent.click(screen.getByRole('button'));
-			expect(screen.getByText('Select a day to view builds.')).toBeInTheDocument();
+			expect(screen.getByText('Select a day to view snapshots.')).toBeInTheDocument();
 		});
 
 		test('clicking a day with snapshots shows snapshot list', async () => {
@@ -396,13 +396,13 @@ describe('SnapshotPicker', () => {
 			);
 			renderPicker();
 			await fireEvent.click(screen.getByRole('button'));
-			expect(screen.getByText('Select a day to view builds.')).toBeInTheDocument();
+			expect(screen.getByText('Select a day to view snapshots.')).toBeInTheDocument();
 
 			const dayButton = screen.getByText('15').closest('button');
 			expect(dayButton).toBeTruthy();
 			await fireEvent.click(dayButton!);
 
-			expect(screen.queryByText('Select a day to view builds.')).not.toBeInTheDocument();
+			expect(screen.queryByText('Select a day to view snapshots.')).not.toBeInTheDocument();
 			const buttons = screen.getAllByRole('button');
 			const snapshotButtons = buttons.filter(
 				(btn) => btn.closest('[style]') || btn.textContent?.match(/\d{2}:\d{2}:\d{2}/)
@@ -438,7 +438,7 @@ describe('SnapshotPicker', () => {
 			const emptyDayButton = screen.getByText('3').closest('button');
 			await fireEvent.click(emptyDayButton!);
 
-			expect(screen.getByText('Select a day to view builds.')).toBeInTheDocument();
+			expect(screen.getByText('Select a day to view snapshots.')).toBeInTheDocument();
 		});
 	});
 

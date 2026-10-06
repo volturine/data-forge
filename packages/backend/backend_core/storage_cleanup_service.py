@@ -123,7 +123,9 @@ def _catalog_cleanup_identity(config: Mapping[str, object], *, datasource_id: st
         'catalog_namespace': namespace,
         'catalog_table': table,
     }
-    if table.startswith(f'{datasource_id}_'):
+    if table == datasource_id or table.startswith(f'{datasource_id}_'):
+        # The stable published table (<datasource_id>) and every claim-scoped
+        # revision of it (<datasource_id>_*) share one deletion family.
         identity['catalog_family_prefix'] = f'{datasource_id}_'
     return identity
 
@@ -470,6 +472,12 @@ def settle_publication(session: Session, config: Mapping[str, object]) -> None:
     paths = [config.get('metadata_path'), config.get('file_path')]
     if isinstance(source, dict):
         paths.extend((source.get('file_path'), source.get('metadata_path')))
+    # Ingest snapshots reference the staged Parquet files under the claim
+    # prefix; the published config records that prefix so it is retained for
+    # as long as table history references it.
+    ingest = config.get('ingest')
+    if isinstance(ingest, Mapping) and isinstance(ingest.get('claim_prefix'), str):
+        paths.append(ingest['claim_prefix'])
     for path in sorted({path for path in paths if isinstance(path, str)}):
         event = session.get(RuntimeOutboxEvent, _event_id(path), with_for_update=True, populate_existing=True)
         if event is not None and event.kind == STORAGE_CLEANUP_KIND:

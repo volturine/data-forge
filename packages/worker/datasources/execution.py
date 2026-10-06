@@ -4,6 +4,7 @@ import base64
 import contextlib
 import json
 import logging
+import uuid
 from collections.abc import Callable, Mapping
 from datetime import UTC, datetime
 from itertools import chain
@@ -196,7 +197,15 @@ def stage_datasource_to_object_store(
     return manifest
 
 
-def import_staged_parquet_files(manifest: Mapping[str, object], *, table_path: str, database_url: str) -> Table:
+def import_staged_parquet_files(manifest: Mapping[str, object], *, staged_prefix: str, table_path: str, database_url: str) -> tuple[Table, str]:
+    """Commit staged Parquet files as one snapshot on the published table.
+
+    ``staged_prefix`` is the claim-scoped prefix holding the staged files
+    (validation target); ``table_path`` is the stable published table location
+    that accumulates one snapshot per ingest. When the existing table's schema
+    cannot absorb the new schema, a fresh revision table is published instead
+    (mirroring the build path) and its location is returned.
+    """
     import pyarrow as pa  # type: ignore[import-untyped]  # PyArrow does not ship typing metadata.
 
     encoded_schema = manifest.get("arrow_schema")
@@ -211,7 +220,7 @@ def import_staged_parquet_files(manifest: Mapping[str, object], *, table_path: s
     except (ValueError, pa.ArrowException) as exc:
         raise ValueError("Datasource Parquet manifest contains an invalid Arrow schema") from exc
 
-    expected = urlsplit(table_path)
+    expected = urlsplit(staged_prefix)
     expected_key_prefix = expected.path.rstrip("/") + "/"
     file_paths = [path for path in raw_paths if isinstance(path, str)]
     if len(file_paths) != len(raw_paths) or len(file_paths) != len(set(file_paths)):
@@ -228,7 +237,7 @@ def import_staged_parquet_files(manifest: Mapping[str, object], *, table_path: s
             or parsed.fragment
             or not parsed.path.endswith(".parquet")
         ):
-            raise ValueError("Datasource Parquet files must be inside the claim-scoped table prefix")
+            raise ValueError("Datasource Parquet files must be inside the claim-scoped staging prefix")
 
     catalog = load_runtime_catalog(
         "local",
@@ -242,23 +251,40 @@ def import_staged_parquet_files(manifest: Mapping[str, object], *, table_path: s
     identifier = f"clean.{table_name}"
     if catalog.table_exists(identifier):
         table = catalog.load_table(identifier)
-        with table.transaction() as transaction:
-            current_names = {field.name for field in transaction.table_metadata.schema().fields}
-            new_names = set(schema.names)
-            update = transaction.update_schema()
-            for name in sorted(current_names - new_names):
-                update.delete_column(name)
-            update.union_by_name(schema).commit()
-            transaction.delete(delete_filter=AlwaysTrue())
+        try:
+            with table.transaction() as transaction:
+                current_names = {field.name for field in transaction.table_metadata.schema().fields}
+                new_names = set(schema.names)
+                update = transaction.update_schema()
+                for name in sorted(current_names - new_names):
+                    update.delete_column(name)
+                update.union_by_name(schema).commit()
+                transaction.delete(delete_filter=AlwaysTrue())
+                if file_paths:
+                    transaction.add_files(file_paths)
+            table.refresh()
+            return table, table_path
+        except Exception:
+            # Incompatible schema evolution (e.g. a conflicting column type
+            # change) cannot be applied in place. Publish a fresh revision
+            # table exactly like the build path so re-ingest still succeeds;
+            # snapshot history restarts only in this rare case.
+            parent, branch_segment = table_path.rsplit("/", 1)
+            revision_path = f"{parent}_rev{uuid.uuid4().hex[:8]}/{branch_segment}"
+            revision_name = revision_path.rstrip("/").split("/")[-2]
+            table = catalog.create_table(f"clean.{revision_name}", schema=schema, location=revision_path)
             if file_paths:
-                transaction.add_files(file_paths)
+                with table.transaction() as transaction:
+                    transaction.add_files(file_paths)
+            table.refresh()
+            return table, revision_path
     else:
         table = catalog.create_table(identifier, schema=schema, location=table_path)
         if file_paths:
             with table.transaction() as transaction:
                 transaction.add_files(file_paths)
-    table.refresh()
-    return table
+        table.refresh()
+        return table, table_path
 
 
 def _build_iceberg_config(
@@ -283,6 +309,19 @@ def _build_iceberg_config(
         "reader": "native",
         "ingest": None,
     }
+
+
+def _published_datasource_table_path(
+    datasource_id: str,
+    branch: str,
+    *,
+    namespace: str,
+    existing_config: Mapping[str, object] | None = None,
+) -> str:
+    current_path = existing_config.get("metadata_path") if existing_config is not None else None
+    if isinstance(current_path, str) and current_path.strip():
+        return current_path
+    return object_store_url("clean", datasource_id, branch, namespace=namespace)
 
 
 def _set_snapshot_metadata(config: dict[str, object], table: Any | None) -> None:
@@ -502,10 +541,17 @@ def ingest_datasource_for_schedule(
             result = await_engine_result(engine, job_id=engine_job)
             if result.get("error") or not isinstance(result.get("data"), dict):
                 raise DataSourceConnectionError("Scheduled datasource computation failed", details={"datasource_id": datasource_id})
-            table = import_staged_parquet_files(result["data"], table_path=target, database_url=database_url)
-            config.update(_build_iceberg_config(target, branch_name, source_config=source))
+            # Reuse the published table identity so snapshots from earlier
+            # ingests remain readable; new datasources fall back to clean.<RID>.
+            table_path = _published_datasource_table_path(datasource_id, branch, namespace=namespace, existing_config=config)
+            table, published_table_path = import_staged_parquet_files(result["data"], staged_prefix=target, table_path=table_path, database_url=database_url)
+            config.update(_build_iceberg_config(published_table_path, branch_name, source_config=source))
             _set_snapshot_metadata(config, table)
-            config["ingest"] = {"ingested_at": datetime.now(UTC).replace(tzinfo=None).isoformat(), "mode": "schedule_ingest"}
+            config["ingest"] = {
+                "ingested_at": datetime.now(UTC).replace(tzinfo=None).isoformat(),
+                "mode": "schedule_ingest",
+                "claim_prefix": target,
+            }
             return client.publish_datasource_ingest(
                 namespace=namespace,
                 datasource_id=datasource_id,

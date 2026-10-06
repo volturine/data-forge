@@ -441,6 +441,61 @@ def test_publication_settles_claim_atomically_even_when_reply_is_lost(test_db_se
     assert test_db_session.get(DataSource, request.id) is not None
 
 
+def test_publish_ingest_settles_the_claim_prefix_recorded_in_config(test_db_session: Session) -> None:
+    """Ingest snapshots reference the staged claim prefix; the published config
+    carries ingest.claim_prefix so the prefix is retained with table history.
+    """
+    request, staged_prefix, _artifact = _stage(test_db_session)
+    claim = _claim(test_db_session, staged_prefix)
+    stable_table = request.id
+    stable_metadata = f's3://default/clean/{stable_table}/master'
+    test_db_session.add(
+        DataSource(
+            id=stable_table,
+            name='Ingested',
+            source_type='iceberg',
+            config={'metadata_path': 's3://default/clean/old/master', 'namespace': 'clean', 'table': 'old_claim_table'},
+            revision=1,
+            created_at=datetime.now(UTC),
+        )
+    )
+    test_db_session.commit()
+    publication_service.publish_ingest(
+        test_db_session,
+        datasource_id=request.id,
+        config={
+            'metadata_path': stable_metadata,
+            'namespace': 'clean',
+            'table': stable_table,
+            'branch': 'master',
+            'source': {'source_type': 'file', 'file_path': 's3://default/uploads/source.csv'},
+            'ingest': {'ingested_at': '2026-10-06T12:00:00', 'claim_prefix': staged_prefix},
+        },
+        expected_revision=1,
+        schema_info=None,
+    )
+    event = test_db_session.get(RuntimeOutboxEvent, claim.event_id)
+    assert event is not None and event.payload_json['phase'] == cleanup.StorageCleanupPhase.PUBLISHED
+    # The claim prefix is part of table history: even with the writer settled
+    # and no config reference, a PUBLISHED intent can never be authorized.
+    _settle_writer(test_db_session, request)
+    assert not _authorize(test_db_session, claim)
+
+
+def test_catalog_cleanup_identity_treats_the_stable_table_as_its_family(test_db_session: Session) -> None:
+    datasource_id = str(uuid4())
+    stable = cleanup._catalog_cleanup_identity(
+        {'namespace': 'clean', 'table': datasource_id, 'catalog_type': 'sql', 'warehouse': 's3://default/clean'},
+        datasource_id=datasource_id,
+    )
+    assert stable['catalog_family_prefix'] == f'{datasource_id}_'
+    claim = cleanup._catalog_cleanup_identity(
+        {'namespace': 'clean', 'table': f'{datasource_id}__claim_token', 'catalog_type': 'sql', 'warehouse': 's3://default/clean'},
+        datasource_id=datasource_id,
+    )
+    assert claim['catalog_family_prefix'] == f'{datasource_id}_'
+
+
 def test_postgres_authorization_waits_for_the_publication_request_lock(test_db_session: Session, test_engine: Engine) -> None:
     assert test_engine.dialect.name == 'postgresql'
     request, prefix, _artifact = _stage(test_db_session)
