@@ -400,6 +400,7 @@ test.describe('Analyses – blank creation', () => {
 		await gotoNewAnalysis(page);
 		await expect(page.getByRole('heading', { name: 'New Analysis' })).toBeVisible();
 		await expect(page.getByPlaceholder('Search datasources...')).toBeVisible();
+		await page.getByLabel('Search datasources').fill(sharedDatasource.name);
 		await expect(page.locator(`[data-ds-option="${sharedDatasource.name}"]`)).toBeVisible();
 	});
 
@@ -409,13 +410,18 @@ test.describe('Analyses – blank creation', () => {
 	}) => {
 		const timeout = readyTimeoutMs();
 		await gotoNewAnalysis(page);
+		await page.getByLabel('Search datasources').fill(sharedDatasource.name);
 		const row = page.locator(`[data-ds-option="${sharedDatasource.name}"]`);
+		const createButton = page
+			.locator('li', { has: row })
+			.getByRole('button', { name: 'Create analysis' });
 		await expect(row).toHaveAttribute('aria-expanded', 'false');
 		await expect(page.locator('[data-testid="datasource-preview"]')).toHaveCount(0);
+		await expect(createButton).toBeVisible();
 
 		await row.click();
 		await expect(row).toHaveAttribute('aria-expanded', 'true');
-		await expect(page.getByRole('button', { name: 'Create analysis' })).toBeVisible({ timeout });
+		await expect(createButton).toBeVisible({ timeout });
 		const preview = page.locator('[data-testid="datasource-preview"]');
 		await expect(preview).toBeVisible({ timeout });
 		await expect(preview).toHaveAttribute('data-preview-ready', 'true', { timeout });
@@ -437,8 +443,12 @@ test.describe('Analyses – blank creation', () => {
 
 		try {
 			await gotoNewAnalysis(page);
-			await page.locator(`[data-ds-option="${sharedDatasource.name}"]`).click();
-			const createButton = page.getByRole('button', { name: 'Create analysis' });
+			await page.getByLabel('Search datasources').fill(sharedDatasource.name);
+			const option = page.locator(`[data-ds-option="${sharedDatasource.name}"]`);
+			await option.click();
+			const createButton = page
+				.locator('li', { has: option })
+				.getByRole('button', { name: 'Create analysis' });
 			await expect(createButton).toBeVisible();
 			const createResponsePromise = page.waitForResponse(
 				(response) =>

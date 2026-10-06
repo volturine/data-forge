@@ -14,6 +14,7 @@
 	import type { AnalysisTab } from '$lib/types/analysis';
 	import type { DataSource } from '$lib/types/datasource';
 	import { timestampedAnalysisName } from '$lib/utils/analysis-name';
+	import { rankDatasources } from '$lib/utils/datasource-picker';
 	import { buildOutputConfig } from '$lib/utils/analysis-tab';
 	import { uuid } from '$lib/utils/uuid';
 
@@ -22,8 +23,12 @@
 	// analysis from it, so the page goes straight to the editor.
 	const requestedDatasourceId = $derived(pageState.url.searchParams.get('datasource') ?? '');
 
+	// Rendering is capped so the picker stays responsive with thousands of datasources.
+	const PAGE_SIZE = 50;
+
 	let expandedDatasourceId = $state('');
 	let searchQuery = $state('');
+	let visibleCount = $state(PAGE_SIZE);
 	let creatingDatasource = $state<DataSource | null>(null);
 	let createError = $state('');
 	let autoStartAttempted = $state(false);
@@ -39,11 +44,8 @@
 	}));
 
 	const datasources = $derived(datasourcesQuery.data ?? []);
-	const filteredDatasources = $derived.by(() => {
-		const query = searchQuery.trim().toLowerCase();
-		if (!query) return datasources;
-		return datasources.filter((datasource) => datasource.name.toLowerCase().includes(query));
-	});
+	const filteredDatasources = $derived(rankDatasources(datasources, searchQuery));
+	const visibleDatasources = $derived(filteredDatasources.slice(0, visibleCount));
 	const outputNamespace = $derived(configStore.config?.default_namespace ?? ns.value);
 
 	function defaultBranch(datasource: DataSource): string {
@@ -74,6 +76,7 @@
 	async function startAnalysis(datasource: DataSource): Promise<void> {
 		if (creatingDatasource) return;
 		creatingDatasource = datasource;
+		expandedDatasourceId = datasource.id;
 		createError = '';
 
 		const branch = defaultBranch(datasource);
@@ -212,6 +215,7 @@
 					_placeholder: { color: 'fg.muted' }
 				})}
 				onkeydown={handleSearchKeydown}
+				oninput={() => (visibleCount = PAGE_SIZE)}
 				bind:value={searchQuery}
 			/>
 		</div>
@@ -265,57 +269,87 @@
 			</div>
 		{:else}
 			<ul class={css({ listStyle: 'none', margin: '0', padding: '0' })}>
-				{#each filteredDatasources as datasource (datasource.id)}
+				{#each visibleDatasources as datasource (datasource.id)}
 					{@const isExpanded = expandedDatasourceId === datasource.id}
 					<li class={css({ borderBottomWidth: '1', borderColor: 'border.primary' })}>
-						<button
-							type="button"
-							data-ds-option={datasource.name}
-							aria-expanded={isExpanded}
+						<div
 							class={css({
 								display: 'flex',
 								alignItems: 'center',
 								gap: '3',
-								width: 'full',
 								paddingX: '2',
-								paddingY: '2.5',
-								textAlign: 'left',
-								cursor: 'pointer',
-								border: 'none',
+								paddingY: '1.5',
 								borderLeftWidth: '2',
-								background: 'transparent',
 								_hover: { backgroundColor: 'bg.hover' },
 								...(isExpanded
 									? { backgroundColor: 'bg.accent', borderLeftColor: 'border.accent' }
 									: { borderLeftColor: 'transparent' })
 							})}
-							onclick={() => toggleExpanded(datasource.id)}
 						>
-							<span
+							<button
+								type="button"
+								data-ds-option={datasource.name}
+								aria-expanded={isExpanded}
 								class={css({
+									display: 'flex',
 									flex: '1',
 									minWidth: '0',
-									overflow: 'hidden',
-									textOverflow: 'ellipsis',
-									whiteSpace: 'nowrap',
-									fontFamily: 'mono',
-									fontSize: 'sm',
-									color: isExpanded ? 'accent.primary' : 'fg.primary'
+									alignItems: 'center',
+									justifyContent: 'flex-start',
+									paddingY: '1',
+									textAlign: 'left',
+									cursor: 'pointer',
+									border: 'none',
+									background: 'transparent'
 								})}
+								onclick={() => toggleExpanded(datasource.id)}
 							>
-								{datasource.name}
-							</span>
-							<ChevronDown
-								size={14}
+								<span
+									class={css({
+										overflow: 'hidden',
+										textOverflow: 'ellipsis',
+										whiteSpace: 'nowrap',
+										fontFamily: 'mono',
+										fontSize: 'sm',
+										color: isExpanded ? 'accent.primary' : 'fg.primary'
+									})}
+								>
+									{datasource.name}
+								</span>
+							</button>
+							<button
+								type="button"
+								class={button({ variant: isExpanded ? 'primary' : 'secondary', size: 'sm' })}
+								disabled={creatingDatasource !== null}
+								onclick={() => void startAnalysis(datasource)}
+							>
+								Create analysis
+							</button>
+							<button
+								type="button"
+								tabindex={-1}
+								aria-hidden="true"
 								class={css({
+									display: 'flex',
 									flexShrink: '0',
-									color: 'fg.faint',
-									transitionProperty: 'transform',
-									transitionDuration: '160ms',
-									transform: isExpanded ? 'rotate(180deg)' : 'none'
+									padding: '1',
+									cursor: 'pointer',
+									border: 'none',
+									background: 'transparent'
 								})}
-							/>
-						</button>
+								onclick={() => toggleExpanded(datasource.id)}
+							>
+								<ChevronDown
+									size={14}
+									class={css({
+										color: 'fg.faint',
+										transitionProperty: 'transform',
+										transitionDuration: '160ms',
+										transform: isExpanded ? 'rotate(180deg)' : 'none'
+									})}
+								/>
+							</button>
+						</div>
 
 						{#if isExpanded}
 							<div
@@ -345,35 +379,6 @@
 								{:else}
 									<div
 										class={css({
-											display: 'flex',
-											alignItems: 'center',
-											justifyContent: 'space-between',
-											gap: '3',
-											marginBottom: '3'
-										})}
-									>
-										<span
-											class={css({
-												fontSize: '2xs',
-												fontWeight: 'semibold',
-												textTransform: 'uppercase',
-												letterSpacing: 'wider',
-												color: 'fg.faint'
-											})}
-										>
-											Preview
-										</span>
-										<button
-											type="button"
-											class={button({ variant: 'primary', size: 'sm' })}
-											onclick={() => void startAnalysis(datasource)}
-										>
-											Create analysis
-										</button>
-									</div>
-
-									<div
-										class={css({
 											height: 'panel',
 											width: '100%',
 											overflow: 'hidden',
@@ -394,6 +399,34 @@
 					</li>
 				{/each}
 			</ul>
+			{#if filteredDatasources.length > PAGE_SIZE}
+				<div
+					class={css({
+						display: 'flex',
+						alignItems: 'center',
+						justifyContent: 'space-between',
+						gap: '3',
+						paddingX: '2',
+						paddingY: '3',
+						fontSize: 'xs',
+						color: 'fg.muted'
+					})}
+				>
+					<span data-testid="datasource-picker-count">
+						Showing {visibleDatasources.length.toLocaleString()} of {filteredDatasources.length.toLocaleString()}
+						{searchQuery.trim() ? 'matches' : 'datasources'}
+					</span>
+					{#if visibleDatasources.length < filteredDatasources.length}
+						<button
+							type="button"
+							class={button({ variant: 'ghost', size: 'sm' })}
+							onclick={() => (visibleCount += PAGE_SIZE)}
+						>
+							Show {Math.min(PAGE_SIZE, filteredDatasources.length - visibleDatasources.length)} more
+						</button>
+					{/if}
+				</div>
+			{/if}
 		{/if}
 	</section>
 </main>

@@ -17,6 +17,7 @@ export const Snowflake = IconStub;
 export const Folder = IconStub;
 export const ChevronDown = IconStub;
 export const ChevronUp = IconStub;
+export const ArrowLeft = IconStub;
 export const Check = IconStub;
 export const Copy = IconStub;
 export const GripVertical = IconStub;
