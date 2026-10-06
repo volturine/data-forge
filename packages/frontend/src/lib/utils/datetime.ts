@@ -1,4 +1,4 @@
-import { configStore } from '$lib/stores/config.svelte';
+import { authStore } from '$lib/stores/auth.svelte';
 import { localTimeZone, parseInstantWithZone } from '$lib/utils/temporal';
 
 type DateInput = string | number | Temporal.Instant;
@@ -54,7 +54,20 @@ export function formatTimeValue(
 }
 
 export function getTimezoneSettings(): { timezone: string; normalize: boolean } {
-	return { timezone: configStore.timezone, normalize: configStore.normalizeTz };
+	const preference = authStore.user?.preferences.timezone;
+	if (typeof preference === 'string' && isValidTimeZone(preference)) {
+		return { timezone: preference, normalize: true };
+	}
+	return { timezone: localTimeZone(), normalize: true };
+}
+
+export function isValidTimeZone(timezone: string): boolean {
+	try {
+		new Intl.DateTimeFormat(undefined, { timeZone: timezone });
+		return true;
+	} catch {
+		return false;
+	}
 }
 
 export function formatDateDisplay(value: DateInput, options?: Intl.DateTimeFormatOptions): string {

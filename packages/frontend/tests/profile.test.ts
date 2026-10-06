@@ -36,8 +36,9 @@ test.describe('Profile – tabbed interface', () => {
 		await expect(page.getByRole('heading', { name: 'Profile', level: 1 })).toBeVisible();
 		await expect(page.getByText('Manage your account and application settings')).toBeVisible();
 
-		// All four tabs visible
+		// All five tabs visible
 		await expect(page.getByRole('tab', { name: 'Account' })).toBeVisible();
+		await expect(page.getByRole('tab', { name: 'Preferences' })).toBeVisible();
 		await expect(page.getByRole('tab', { name: 'Notifications' })).toBeVisible();
 		await expect(page.getByRole('tab', { name: 'AI Providers' })).toBeVisible();
 		await expect(page.getByRole('tab', { name: 'System' })).toBeVisible();
@@ -68,6 +69,17 @@ test.describe('Profile – tabbed interface', () => {
 // ────────────────────────────────────────────────────────────────────────────────
 
 test.describe('Profile – deep-link tabs', () => {
+	test('navigating to /profile#preferences opens Preferences tab', async ({ page }) => {
+		await gotoProfile(page, 'preferences');
+
+		await expect(page.getByRole('tab', { name: 'Preferences' })).toHaveAttribute(
+			'aria-selected',
+			'true'
+		);
+		await expect(page.locator('#panel-preferences')).toBeVisible();
+		await expect(page.getByLabel('Time zone')).toBeVisible();
+	});
+
 	test('navigating to /profile#notifications opens Notifications tab', async ({ page }) => {
 		await gotoProfile(page, 'notifications');
 
@@ -122,6 +134,15 @@ test.describe('Profile – tab switching', () => {
 	test('clicking each tab switches content and updates URL hash', async ({ page }) => {
 		await gotoProfile(page);
 
+		// Switch to Preferences
+		await page.getByRole('tab', { name: 'Preferences' }).click();
+		await expect(page.getByRole('tab', { name: 'Preferences' })).toHaveAttribute(
+			'aria-selected',
+			'true'
+		);
+		await expect(page).toHaveURL(/profile#preferences/);
+		await expect(page.locator('#panel-preferences')).toBeVisible();
+
 		// Switch to Notifications
 		await page.getByRole('tab', { name: 'Notifications' }).click();
 		await expect(page.getByRole('tab', { name: 'Notifications' })).toHaveAttribute(
@@ -166,6 +187,13 @@ test.describe('Profile – tab switching', () => {
 
 		const accountTab = page.getByRole('tab', { name: 'Account' });
 		await accountTab.focus();
+
+		// ArrowRight → Preferences
+		await page.keyboard.press('ArrowRight');
+		await expect(page.getByRole('tab', { name: 'Preferences' })).toHaveAttribute(
+			'aria-selected',
+			'true'
+		);
 
 		// ArrowRight → Notifications
 		await page.keyboard.press('ArrowRight');

@@ -6,12 +6,14 @@
 	import { css, tabButton } from '$lib/styles/panda';
 	import { useNamespace } from '$lib/stores/namespace.svelte';
 	import AccountTab from './AccountTab.svelte';
+	import PreferencesTab from './PreferencesTab.svelte';
 	import NotificationsTab from './NotificationsTab.svelte';
 	import AiProvidersTab from './AiProvidersTab.svelte';
 	import SystemTab from './SystemTab.svelte';
 
 	const tabs = [
 		{ key: 'account', label: 'Account' },
+		{ key: 'preferences', label: 'Preferences' },
 		{ key: 'notifications', label: 'Notifications' },
 		{ key: 'ai-providers', label: 'AI Providers' },
 		{ key: 'system', label: 'System' }
@@ -106,6 +108,16 @@
 	{#if activeTab === 'account'}
 		<div id="panel-account" role="tabpanel" aria-labelledby="tab-account">
 			<AccountTab />
+		</div>
+	{/if}
+	{#if activeTab === 'preferences' || activated.has('preferences')}
+		<div
+			id="panel-preferences"
+			role="tabpanel"
+			aria-labelledby="tab-preferences"
+			hidden={activeTab !== 'preferences'}
+		>
+			<PreferencesTab />
 		</div>
 	{/if}
 

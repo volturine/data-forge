@@ -17,8 +17,13 @@ describe('formatRelativeTime', () => {
 
 	it('formats minutes with correct pluralization', () => {
 		expect(formatRelativeTime(NOW - 60_000, NOW)).toBe('1 minute ago');
+		expect(formatRelativeTime(NOW - 61_000, NOW)).toBe('1 minute ago');
 		expect(formatRelativeTime(NOW - 5 * 60_000, NOW)).toBe('5 minutes ago');
 		expect(formatRelativeTime(NOW - 59 * 60_000, NOW)).toBe('59 minutes ago');
+	});
+
+	it('does not round an hour and a minute up to two hours', () => {
+		expect(formatRelativeTime(NOW - (60 + 1) * 60_000, NOW)).toBe('1 hour ago');
 	});
 
 	it('formats hours with correct pluralization', () => {
