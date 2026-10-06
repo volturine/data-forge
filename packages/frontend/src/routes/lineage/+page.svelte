@@ -81,7 +81,6 @@
 	const lineage = $derived(query.data ?? emptyLineage);
 
 	let selectedNode = $state<LineageNode | null>(null);
-	const panelWidth = 384;
 	let layoutMode = $state<LayoutMode>('horizontal');
 	let zoomPercent = $state(100);
 	let graphRef = $state<LineageGraphApi | null>(null);
@@ -569,13 +568,11 @@
 				<LineageGraph
 					bind:this={graphRef}
 					{lineage}
-					showToolbar={false}
 					bind:layoutMode
 					bind:zoomPercent
 					onnodeclick={(node) => {
 						selectedNode = node;
 					}}
-					panelOffset={panelWidth}
 				/>
 
 				<!-- Legend -->

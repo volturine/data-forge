@@ -2,6 +2,7 @@
 
 > **Status (audited 2026-08-02): Active — partially implemented.**
 > **Current truth:** Lineage exists and is tested, but the broader semantic/UX revamp in this PRD is not complete.
+> **Update:** The lineage canvas now renders through Svelte Flow (`@xyflow/svelte`) with ELK hierarchical layout, a minimap, and fit-view — the rendering layer of G-4 is implemented; clustering, search, column-level lineage, and impact analysis remain.
 > **Portfolio:** [PRD index](../README.md)
 
 
@@ -312,9 +313,9 @@ components/lineage/
 
 #### Graph Rendering Strategy
 
-- Use HTML/CSS-based rendering (current approach) with virtualization for off-screen nodes.
-- Elk.js (Eclipse Layout Kernel) for automatic hierarchical layout — better than physics-based for DAGs.
-- Cluster support: nodes grouped by analysis, collapsible.
+- Use Svelte Flow (`@xyflow/svelte`) for the interactive canvas — panning, zooming, node dragging, viewport-fit, and the minimap come from the library; lineage nodes are a custom node type.
+- Elk.js (Eclipse Layout Kernel) for automatic hierarchical layout — adopted for horizontal/vertical DAGs.
+- Cluster support: nodes grouped by analysis, collapsible (not yet implemented).
 - SVG edges with curved paths and directional arrows.
 
 #### Interaction Model
@@ -338,7 +339,7 @@ Column trace (click column in Output DS):
 
 | Package | Version | Ecosystem | Purpose |
 |---------|---------|-----------|---------|
-| `elkjs` | `>=0.9.0` | npm | Hierarchical graph layout engine (optional, for improved layout) |
+| `elkjs` | `0.12.0` | npm | Hierarchical graph layout engine (adopted for horizontal/vertical lineage layouts) |
 
 ### Security Considerations
 
