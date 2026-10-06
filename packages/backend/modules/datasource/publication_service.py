@@ -53,6 +53,19 @@ def _response(datasource: DataSource) -> DataSourceResponse:
     return DataSourceResponse.model_validate(datasource)
 
 
+def _enriched_response(datasource: DataSource, response: DataSourceResponse) -> DataSourceResponse:
+    """Add the computed last_data_update the proto record cannot carry.
+
+    Publication responses serialize as DataSourceRecord, which has no
+    last_data_update field: the API re-derives it from the freshly published
+    config so re-ingest feedback shows the new ingest time immediately.
+    """
+    from modules.datasource.service import _last_data_update_from_config
+
+    response.last_data_update = _last_data_update_from_config(datasource)
+    return response
+
+
 def create_datasource(
     session: Session,
     *,
@@ -79,7 +92,7 @@ def create_datasource(
             raise ValueError(f'Datasource publication ID {datasource_id} is already in use')
         storage_cleanup_service.settle_publication(session, existing.config)
         session.commit()
-        return _response(existing)
+        return _enriched_response(existing, _response(existing))
 
     datasource = DataSource(
         id=datasource_id,
@@ -110,9 +123,9 @@ def create_datasource(
             publication_guard(session)
         storage_cleanup_service.settle_publication(session, existing.config)
         session.commit()
-        return _response(existing)
+        return _enriched_response(existing, _response(existing))
     session.refresh(datasource)
-    return _response(datasource)
+    return _enriched_response(datasource, _response(datasource))
 
 
 def publish_ingest(
@@ -150,7 +163,7 @@ def publish_ingest(
     session.commit()
     session.expire(datasource)
     session.refresh(datasource)
-    return _response(datasource)
+    return _enriched_response(datasource, _response(datasource))
 
 
 def publish_schema_cache(

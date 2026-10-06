@@ -211,6 +211,7 @@
 			(result) => {
 				buildSnapshotIndex(result.snapshots);
 				snapshotsLoading = false;
+				snapshotsLoaded = true;
 			},
 			(error) => {
 				snapshotsError = error.message || 'Failed to load snapshots';

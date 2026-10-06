@@ -1,12 +1,15 @@
 <script lang="ts">
+	import { onDestroy } from 'svelte';
 	import { goto } from '$app/navigation';
 	import { resolve } from '$app/paths';
 	import { page as pageState } from '$app/state';
 	import { createQuery } from '@tanstack/svelte-query';
 	import { createAnalysis } from '$lib/api/analysis';
 	import { listDatasources } from '$lib/api/datasource';
+	import { previewStepData } from '$lib/api/compute';
 	import { ArrowLeft, ChevronDown, Search } from '@lucide/svelte';
 	import DatasourcePreview from '$lib/components/datasources/DatasourcePreview.svelte';
+	import { buildDatasourcePreviewPipelinePayloadSafe } from '$lib/utils/analysis-pipeline';
 	import Callout from '$lib/components/ui/Callout.svelte';
 	import { button, css, spinner } from '$lib/styles/panda';
 	import { configStore } from '$lib/stores/config.svelte';
@@ -72,6 +75,41 @@
 		);
 	}
 
+	let warmupController = $state<AbortController | null>(null);
+
+	function cancelWarmup(): void {
+		warmupController?.abort();
+		warmupController = null;
+	}
+
+	onDestroy(() => cancelWarmup());
+
+	function warmPreviewPipeline(datasource: DataSource): void {
+		// Explicit (fresh page load) create flows skip the visible preview, so
+		// the shared datasource-preview engine would fall back to a serial
+		// engine-admission lane after the analysis was created. Firing the exact
+		// preview command now reuses the warm shared engine and the shareable
+		// in-flight response; the editor's own preview attaches to it.
+		const pipeline = buildDatasourcePreviewPipelinePayloadSafe({
+			datasource,
+			datasourceConfig: datasource.config
+		});
+		if (!pipeline) return;
+		warmupController?.abort();
+		const controller = new AbortController();
+		warmupController = controller;
+		void previewStepData(
+			{
+				target_step_id: 'source',
+				datasource_id: datasource.id,
+				analysis_pipeline: pipeline,
+				row_limit: 100,
+				page: 1
+			},
+			{ signal: controller.signal }
+		);
+	}
+
 	/** Opening an analysis from a datasource is the whole point of this page. */
 	async function startAnalysis(datasource: DataSource): Promise<void> {
 		if (creatingDatasource) return;
@@ -125,6 +163,10 @@
 		if (!datasource) {
 			createError = 'That datasource is no longer available.';
 			return;
+		}
+		if (expandedDatasourceId !== datasource.id) {
+			// No inline preview issued the exact preview command yet.
+			warmPreviewPipeline(datasource);
 		}
 		void startAnalysis(datasource);
 	});
@@ -318,9 +360,14 @@
 							</button>
 							<button
 								type="button"
-								class={button({ variant: 'primary', size: 'sm' })}
+								class={button({ variant: 'ghost', size: 'sm' })}
 								disabled={creatingDatasource !== null}
-								onclick={() => void startAnalysis(datasource)}
+								onclick={() => {
+									// Fire the shared preview command before the create round trip
+									// only when no visible preview has already issued it.
+									if (expandedDatasourceId !== datasource.id) warmPreviewPipeline(datasource);
+									void startAnalysis(datasource);
+								}}
 							>
 								{creatingDatasource?.id === datasource.id ? 'Opening…' : 'Create analysis'}
 							</button>

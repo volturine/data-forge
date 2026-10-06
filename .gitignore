@@ -3,6 +3,9 @@
 
 # Data directory (uploads, results, exports, logs)
 /data/
+
+# Local-only environment overrides (never commit real keys)
+docker/env/*.env.local
 .opencode/opencode.jsonc
 .vscode/mcp.json
 
