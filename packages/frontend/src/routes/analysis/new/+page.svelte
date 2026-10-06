@@ -76,7 +76,6 @@
 	async function startAnalysis(datasource: DataSource): Promise<void> {
 		if (creatingDatasource) return;
 		creatingDatasource = datasource;
-		expandedDatasourceId = datasource.id;
 		createError = '';
 
 		const branch = defaultBranch(datasource);
@@ -319,11 +318,11 @@
 							</button>
 							<button
 								type="button"
-								class={button({ variant: isExpanded ? 'primary' : 'secondary', size: 'sm' })}
+								class={button({ variant: 'primary', size: 'sm' })}
 								disabled={creatingDatasource !== null}
 								onclick={() => void startAnalysis(datasource)}
 							>
-								Create analysis
+								{creatingDatasource?.id === datasource.id ? 'Opening…' : 'Create analysis'}
 							</button>
 							<button
 								type="button"

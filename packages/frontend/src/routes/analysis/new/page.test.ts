@@ -22,7 +22,10 @@ vi.mock('$lib/stores/namespace.svelte', () => ({
 	useNamespace: () => ({ value: 'default', switching: false })
 }));
 vi.mock('$lib/stores/config.svelte', () => ({ configStore: { config: null } }));
-vi.mock('$lib/api/analysis', () => ({ createAnalysis: vi.fn() }));
+const mockCreateAnalysis = vi.fn();
+vi.mock('$lib/api/analysis', () => ({
+	createAnalysis: (...args: unknown[]) => mockCreateAnalysis(...args)
+}));
 vi.mock('$lib/api/datasource', () => ({ listDatasources: vi.fn() }));
 vi.mock('$lib/components/datasources/DatasourcePreview.svelte', async () => ({
 	default: (await import('$lib/test-utils/stubs/IconStub.svelte')).default
@@ -66,5 +69,26 @@ describe('new analysis datasource picker', () => {
 
 		expect(rows()).toHaveLength(1);
 		expect(screen.queryByTestId('datasource-picker-count')).not.toBeInTheDocument();
+	});
+
+	test('creating from a collapsed row creates directly without opening its preview', async () => {
+		mockCreateAnalysis.mockReturnValue(new Promise(() => {}));
+		render(NewAnalysisPage);
+		const row = document.querySelector('[data-ds-option="dataset_1998"]') as HTMLElement;
+		const rowButtons = row.parentElement as HTMLElement;
+
+		await fireEvent.click(
+			Array.from(rowButtons.querySelectorAll('button')).find(
+				(button) => button.textContent?.trim() === 'Create analysis'
+			) as HTMLElement
+		);
+
+		expect(mockCreateAnalysis).toHaveBeenCalledTimes(1);
+		expect(mockCreateAnalysis.mock.calls[0][0].tabs[0].datasource.id).toBe('ds-1998');
+		expect(row).toHaveAttribute('aria-expanded', 'false');
+		expect(rowButtons).toHaveTextContent('Opening…');
+		expect(screen.getAllByRole('button', { name: 'Create analysis' })).toSatisfy(
+			(buttons: HTMLButtonElement[]) => buttons.every((button) => button.disabled)
+		);
 	});
 });
