@@ -61,9 +61,9 @@ async def test_update_analysis_checks_revision_and_mutates_in_one_db_session(mon
         events.append(('run_api_blocking', function))
         return function(*args, **kwargs)
 
-    def check_revision(requested_id, if_match, actual_session, owner_id, user_id):
+    def check_revision(requested_id, if_match, actual_session, owner_id):
         assert actual_session is session
-        assert (requested_id, if_match, owner_id, user_id) == (analysis_id, f'"analysis-{analysis_id}-1"', 'lock-owner', 'user-id')
+        assert (requested_id, if_match, owner_id) == (analysis_id, f'"analysis-{analysis_id}-1"', 'lock-owner')
         events.append(('revision', actual_session))
         return analysis
 
@@ -90,7 +90,6 @@ async def test_update_analysis_checks_revision_and_mutates_in_one_db_session(mon
         data=analysis_routes.schemas.AnalysisUpdateSchema(name='Updated'),
         if_match=f'"analysis-{analysis_id}-1"',
         owner_id='lock-owner',
-        user_id='user-id',
     )
 
     assert response.status_code == 200

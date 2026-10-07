@@ -7,13 +7,12 @@ from backend_core.dependencies import get_optional_lock_owner_id
 from backend_core.error_handlers import handle_errors
 from backend_core.validation import AnalysisId, parse_analysis_id
 from modules.analysis import schemas as analysis_schemas, service as analysis_service
-from modules.analysis.ownership import ensure_analysis_mutation_allowed
 from modules.analysis.revisions import (
     require as require_analysis_revision,
     set_response_headers as set_analysis_revision_headers,
 )
 from modules.analysis_versions import schemas, service
-from modules.auth.dependencies import get_current_user, get_current_user_id, get_optional_user_id
+from modules.auth.dependencies import get_current_user
 from modules.mcp.router import MCPRouter
 
 router = MCPRouter(prefix='/analysis', tags=['analysis-versions'], dependencies=[Depends(get_current_user)])
@@ -25,10 +24,8 @@ def _delete_version(
     version: int,
     if_match: str | None,
     owner_id: str | None,
-    user_id: str | None,
 ) -> None:
-    require_analysis_revision(analysis_id, if_match, session, owner_id, user_id)
-    ensure_analysis_mutation_allowed(session, analysis_id, user_id)
+    require_analysis_revision(analysis_id, if_match, session, owner_id)
     service.delete_version(session, analysis_id, version)
 
 
@@ -39,10 +36,8 @@ def _rename_version(
     name: str,
     if_match: str | None,
     owner_id: str | None,
-    user_id: str | None,
 ):
-    require_analysis_revision(analysis_id, if_match, session, owner_id, user_id)
-    ensure_analysis_mutation_allowed(session, analysis_id, user_id)
+    require_analysis_revision(analysis_id, if_match, session, owner_id)
     return service.rename_version(session, analysis_id, version, name)
 
 
@@ -52,9 +47,8 @@ def _restore_version(
     version: int,
     if_match: str | None,
     owner_id: str | None,
-    user_id: str | None,
 ) -> analysis_schemas.AnalysisResponseSchema:
-    require_analysis_revision(analysis_id, if_match, session, owner_id, user_id)
+    require_analysis_revision(analysis_id, if_match, session, owner_id)
     restored = service.restore_version(session, analysis_id, version)
     return analysis_service.get_analysis(session, restored.id)
 
@@ -95,7 +89,6 @@ async def delete_version(
     version: int,
     if_match: str | None = Header(default=None, alias='If-Match'),
     owner_id: str | None = Depends(get_optional_lock_owner_id),
-    user_id: str = Depends(get_current_user_id),
 ) -> None:
     """Delete a specific version of an analysis by version number."""
     await run_api_blocking(
@@ -105,7 +98,6 @@ async def delete_version(
         version,
         if_match,
         owner_id,
-        user_id,
     )
 
 
@@ -121,7 +113,6 @@ async def rename_version(
     body: schemas.AnalysisVersionUpdate,
     if_match: str | None = Header(default=None, alias='If-Match'),
     owner_id: str | None = Depends(get_optional_lock_owner_id),
-    user_id: str = Depends(get_current_user_id),
 ):
     """Rename a version (set a descriptive label like 'before refactor'). Only the name field can be changed."""
     return await run_api_blocking(
@@ -132,7 +123,6 @@ async def rename_version(
         body.name,
         if_match,
         owner_id,
-        user_id,
     )
 
 
@@ -148,7 +138,6 @@ async def restore_version(
     response: Response,
     if_match: str | None = Header(default=None, alias='If-Match'),
     owner_id: str | None = Depends(get_optional_lock_owner_id),
-    user_id: str | None = Depends(get_optional_user_id),
 ):
     """Restore an analysis to a specific version. Creates a new version with the restored pipeline_definition.
 
@@ -161,7 +150,6 @@ async def restore_version(
         version,
         if_match,
         owner_id,
-        user_id,
     )
     set_analysis_revision_headers(response, analysis)
     return analysis
