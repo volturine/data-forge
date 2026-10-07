@@ -130,6 +130,8 @@ test.describe('Lineage – with datasource data', () => {
 			await expect(page.getByText('Failed to load lineage.')).not.toBeVisible();
 			// The graph container should be present and not loading
 			await expect(page.getByText('Loading lineage...')).not.toBeVisible({ timeout: 5_000 });
+			await expect(page.getByTestId('lineage-canvas').locator('.svelte-flow')).toBeVisible();
+			await expect(page.getByRole('link', { name: 'Svelte Flow attribution' })).toHaveCount(0);
 			await screenshot(page, 'lineage', 'with-data');
 		} finally {
 			await deleteAnalysisViaUI(page, aName);
