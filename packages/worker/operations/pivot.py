@@ -9,7 +9,7 @@ _MAX_AUTO_PIVOT_VALUES = 200
 class PivotParams(OperationParams):
     index: list[str]
     columns: str
-    values: str | None = None
+    value_columns: list[str] | None = None
     aggregate_function: PivotAggregateFunction = PivotAggregateFunction.FIRST
     on_columns: list[str] | None = None
 
@@ -44,6 +44,6 @@ class PivotHandler(OperationHandler):
             on=validated.columns,
             on_columns=on_columns,
             index=validated.index,
-            values=validated.values,
+            values=validated.value_columns or None,
             aggregate_function=validated.aggregate_function.polars_aggregate_function,
         )

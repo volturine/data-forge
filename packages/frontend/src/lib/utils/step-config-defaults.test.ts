@@ -31,6 +31,15 @@ describe('getDefaultConfig', () => {
 		expect(getDefaultConfig('topk')).toEqual({ column: '', k: 10, descending: false });
 	});
 
+	test('returns pivot defaults with no explicit value columns', () => {
+		expect(getDefaultConfig('pivot')).toEqual({
+			index: [],
+			columns: '',
+			value_columns: [],
+			aggregate_function: 'first'
+		});
+	});
+
 	test('returns empty object for unknown step type', () => {
 		expect(getDefaultConfig('nonexistent')).toEqual({});
 	});

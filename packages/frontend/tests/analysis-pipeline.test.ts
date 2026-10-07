@@ -610,7 +610,7 @@ test.describe('Pipeline data verification', () => {
 				config: {
 					index: ['name'],
 					columns: 'city',
-					values: 'age',
+					value_columns: ['age'],
 					aggregate_function: 'first'
 				}
 			}

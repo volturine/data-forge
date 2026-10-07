@@ -4,36 +4,34 @@
 	import ColumnDropdown from '$lib/components/common/ColumnDropdown.svelte';
 	import MultiSelectColumnDropdown from '$lib/components/common/MultiSelectColumnDropdown.svelte';
 	import SectionHeader from '$lib/components/ui/SectionHeader.svelte';
-	import { button, css, input, label, spinner, stepConfig } from '$lib/styles/panda';
+	import { css, input, label, stepConfig } from '$lib/styles/panda';
 
 	const uid = $props.id();
 	const rowsLabelId = `${uid}-rows`;
 	const columnsLabelId = `${uid}-columns`;
 	const aggregatesLabelId = `${uid}-aggregates`;
-	const valueColumnLabelId = `${uid}-value-column`;
-	const valueColumnSelectionId = `${uid}-value-column-selection`;
+	const valueColumnsLabelId = `${uid}-value-columns`;
 	const aggregateFunctionId = `${uid}-aggregate-function`;
 	const outputColumnsLabelId = `${uid}-output-columns`;
 
 	interface Props {
 		schema: Schema;
 		config?: PivotConfigData;
-		onRefreshSchema?: () => void;
 		onConfigChange?: () => void;
-		isRefreshing?: boolean;
 		outputColumns?: string[];
 	}
 
 	let {
 		schema,
-		config = $bindable({ index: [], columns: '', values: null, aggregate_function: 'first' }),
-		onRefreshSchema,
+		config = $bindable({ index: [], columns: '', value_columns: [], aggregate_function: 'first' }),
 		onConfigChange,
-		isRefreshing = false,
 		outputColumns = []
 	}: Props = $props();
 
 	const safeIndex = $derived(Array.isArray(config.index) ? config.index : []);
+	const safeValueColumns = $derived(
+		Array.isArray(config.value_columns) ? config.value_columns : []
+	);
 	const aggregateFunctions: PivotConfigData['aggregate_function'][] = [
 		'first',
 		'last',
@@ -44,16 +42,10 @@
 		'max',
 		'count'
 	];
-	const isConfigValid = $derived(
-		!!config.columns &&
-			safeIndex.length > 0 &&
-			!safeIndex.includes(config.columns) &&
-			(!config.values || (config.values !== config.columns && !safeIndex.includes(config.values)))
-	);
 
 	function updateRows(columns: string[]): void {
 		config.index = columns.filter(
-			(column) => column !== config.columns && column !== config.values
+			(column) => column !== config.columns && !safeValueColumns.includes(column)
 		);
 		onConfigChange?.();
 	}
@@ -61,14 +53,13 @@
 	function updatePivotColumn(column: string): void {
 		config.columns = column;
 		config.index = safeIndex.filter((name) => name !== column);
-		if (config.values === column) config.values = null;
+		config.value_columns = safeValueColumns.filter((name) => name !== column);
 		onConfigChange?.();
 	}
 
-	function updateValueColumn(column: string): void {
-		const value = column || null;
-		config.values = value;
-		if (value) config.index = safeIndex.filter((name) => name !== value);
+	function updateValueColumns(columns: string[]): void {
+		config.value_columns = columns.filter((column) => column !== config.columns);
+		config.index = safeIndex.filter((name) => !config.value_columns.includes(name));
 		onConfigChange?.();
 	}
 
@@ -97,7 +88,7 @@
 				onChange={updateRows}
 				filter={(column) =>
 					safeIndex.includes(column.name) ||
-					(column.name !== config.columns && column.name !== config.values)}
+					(column.name !== config.columns && !safeValueColumns.includes(column.name))}
 				showSelectAll={false}
 				placeholder="Choose row fields..."
 			/>
@@ -115,7 +106,6 @@
 			class={css({ display: 'flex', flexDirection: 'column', gap: '2' })}
 			role="group"
 			aria-labelledby={columnsLabelId}
-			data-testid="pivot-columns-group"
 		>
 			<SectionHeader id={columnsLabelId}>Columns</SectionHeader>
 			<ColumnDropdown
@@ -124,7 +114,7 @@
 				onChange={updatePivotColumn}
 				filter={(column) =>
 					column.name === config.columns ||
-					(!safeIndex.includes(column.name) && column.name !== config.values)}
+					(!safeIndex.includes(column.name) && !safeValueColumns.includes(column.name))}
 				placeholder="Choose a column field..."
 			/>
 			<p class={css({ margin: '0', color: 'fg.muted', fontSize: 'xs' })}>
@@ -140,24 +130,21 @@
 		>
 			<SectionHeader id={aggregatesLabelId}>Aggregates</SectionHeader>
 			<p class={css({ margin: '0', color: 'fg.muted', fontSize: 'xs' })}>
-				Choose the value column and function for each output cell.
+				Choose one or more value columns. The function applies to each selected column; leave them
+				empty to use all remaining columns.
 			</p>
 			<div class={css({ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: '2' })}>
-				<div role="group" aria-labelledby={valueColumnLabelId}>
-					<span id={valueColumnLabelId} class={label({ variant: 'field' })}>Value column</span>
-					<span id={valueColumnSelectionId} class={css({ srOnly: true })}>
-						{config.values ?? 'All remaining columns'}
-					</span>
-					<ColumnDropdown
+				<div role="group" aria-labelledby={valueColumnsLabelId}>
+					<span id={valueColumnsLabelId} class={label({ variant: 'field' })}>Value columns</span>
+					<MultiSelectColumnDropdown
 						{schema}
-						value={config.values ?? ''}
-						onChange={updateValueColumn}
+						value={safeValueColumns}
+						onChange={updateValueColumns}
 						filter={(column) =>
-							column.name === config.values ||
+							safeValueColumns.includes(column.name) ||
 							(column.name !== config.columns && !safeIndex.includes(column.name))}
-						triggerLabelledby={`${valueColumnLabelId} ${valueColumnSelectionId}`}
 						placeholder="All remaining columns"
-						clearable
+						showSelectAll={false}
 					/>
 				</div>
 				<div>
@@ -180,28 +167,6 @@
 			</div>
 		</div>
 
-		{#if onRefreshSchema}
-			<div class={css({ display: 'flex', flexDirection: 'column', gap: '1' })}>
-				<button
-					data-testid="pivot-preview-button"
-					class={button({ variant: 'primary', width: 'full' })}
-					onclick={onRefreshSchema}
-					disabled={!isConfigValid || isRefreshing}
-					type="button"
-					aria-busy={isRefreshing}
-				>
-					{#if isRefreshing}
-						<span class={spinner({ size: 'sm' })} aria-hidden="true"></span>
-						Loading output columns…
-					{:else}
-						Show output columns
-					{/if}
-				</button>
-				<p class={css({ margin: '0', color: 'fg.muted', fontSize: 'xs' })}>
-					Load the pivoted column names for the following steps.
-				</p>
-			</div>
-		{/if}
 		{#if outputColumns.length > 0}
 			<div
 				class={css({ borderWidth: '1', padding: '3', maxHeight: 'labelLg', overflowY: 'auto' })}

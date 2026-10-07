@@ -191,7 +191,7 @@ export interface ExplodeConfigData {
 export interface PivotConfigData {
 	index: Field<ProtocolPivotConfigJson, 'index'>;
 	columns: Field<ProtocolPivotConfigJson, 'columns'>;
-	values?: OptionalField<ProtocolPivotConfigJson, 'values'>;
+	value_columns: Field<ProtocolPivotConfigJson, 'valueColumns'>;
 	aggregate_function: PivotAggregateFunction;
 }
 

@@ -580,13 +580,13 @@ def render_polars_with_columns(context: PolarsStepRenderContext) -> str:
 @polars_step_renderer(STEP_TYPES.pivot.value)
 def render_polars_pivot(context: PolarsStepRenderContext) -> str:
     on_col = context.config.get('columns')
-    values = context.config.get('values')
+    values = context.config.get('value_columns')
     index = context.config.get('index')
     aggregate_function = str(context.config.get('aggregate_function', PivotAggregateFunction.FIRST.value))
     if not (isinstance(on_col, str) and on_col):
         return context.alias_current(warning=f"Pivot step in tab '{context.tab.name}' is missing columns")
     index_expr = '[' + ', '.join(json.dumps(col) for col in index if isinstance(col, str)) + ']' if isinstance(index, list) else '[]'
-    values_expr = json.dumps(values) if isinstance(values, str) and values else 'None'
+    values_expr = json.dumps(values) if isinstance(values, list) and values else 'None'
     return context.assign(
         f'{context.current_var}.pivot(on={json.dumps(on_col)}, values={values_expr}, index={index_expr}, aggregate_function={json.dumps(aggregate_function)})',
     )

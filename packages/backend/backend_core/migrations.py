@@ -11,7 +11,7 @@ from backend_core.config import settings
 from backend_core.namespace import namespace_database_schema
 
 _PUBLIC_REVISION = '0020_runtime_wakes'
-_TENANT_REVISION = '0023_drop_ds_freshness'
+_TENANT_REVISION = '0024_pivot_value_columns'
 _MISSING_DATABASE_SQLSTATE = '3D000'
 
 

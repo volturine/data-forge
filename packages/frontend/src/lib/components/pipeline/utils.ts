@@ -165,11 +165,12 @@ const stepTypes = {
 		typeLabel: 'pivot',
 		summary: (c) => {
 			const col = c.columns as string;
-			const vals = c.values as string;
+			const vals = Array.isArray(c.value_columns) ? (c.value_columns as string[]) : [];
 			const agg = c.aggregate_function as string;
 			const idx = c.index as string[];
-			if (!col || !vals) return 'not configured';
-			const base = `${col} → ${agg}(${vals})`;
+			if (!col || !idx?.length) return 'not configured';
+			const valuesLabel = vals.length ? truncate(vals, 2, 15) : 'all remaining columns';
+			const base = `${col} → ${agg}(${valuesLabel})`;
 			return idx?.length ? `${base}, index: ${truncate(idx, 2, 15)}` : base;
 		}
 	},

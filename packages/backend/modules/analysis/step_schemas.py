@@ -254,7 +254,7 @@ class PivotConfig(BaseModel):
 
     index: list[str] = Field(default_factory=list, description='Row identifier columns')
     columns: str = Field('', description='Column to pivot on')
-    values: str | None = Field(None, description='Values to aggregate')
+    value_columns: list[str] = Field(default_factory=list, description='Value columns to aggregate')
     aggregate_function: PivotAggregateFunction = Field(
         PivotAggregateFunction.FIRST,
         description='Aggregation function for pivoted values',

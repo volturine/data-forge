@@ -16,7 +16,7 @@ from pathlib import Path
 import psycopg
 import pytest
 from alembic import command
-from psycopg.types.json import Jsonb
+from psycopg.types.json import Json, Jsonb
 from sqlalchemy import text
 from sqlmodel import Session, select
 from websockets.asyncio.client import connect
@@ -684,6 +684,95 @@ def test_build_datasource_migration_backfills_nonterminal_pipeline_dependencies(
                 connection.execute(f'DROP SCHEMA IF EXISTS "{schema}" CASCADE')
 
 
+@pytest.mark.timeout(120)
+def test_pivot_values_migration_rewrites_analysis_and_version_pipelines(monkeypatch) -> None:
+    require_docker()
+
+    from backend_core.config import settings
+
+    with PostgresContainer() as container:
+        monkeypatch.setattr(settings, 'database_url', container.url, raising=False)
+        schema = f'pivot_values_{uuid.uuid4().hex[:12]}'
+        config = _alembic_config(scope='tenant', schema=schema)
+        command.upgrade(config, '0023_drop_ds_freshness', tag='tenant')
+        now = datetime.now(UTC)
+        analysis_pipeline = {
+            'tabs': [
+                {
+                    'steps': [
+                        {
+                            'id': 'pivot-analysis',
+                            'type': 'pivot',
+                            'config': {'index': ['group'], 'columns': 'period', 'values': 'age'},
+                        }
+                    ]
+                }
+            ]
+        }
+        snapshot_pipeline = {
+            'tabs': [
+                {
+                    'steps': [
+                        {
+                            'id': 'pivot-snapshot',
+                            'type': 'pivot',
+                            'config': {'index': ['group'], 'columns': 'period', 'values': None},
+                        }
+                    ]
+                }
+            ]
+        }
+        try:
+            with container.connect() as connection:
+                connection.execute(
+                    f'INSERT INTO "{schema}".analyses '
+                    '(id, name, pipeline_definition, status, created_at, updated_at, revision) '
+                    'VALUES (%s, %s, %s, %s, %s, %s, %s)',
+                    ('legacy-pivot', 'Legacy pivot', Json(analysis_pipeline), 'draft', now, now, 1),
+                )
+                connection.execute(
+                    f'INSERT INTO "{schema}".analysis_versions '
+                    '(id, analysis_id, version, name, pipeline_definition, created_at) '
+                    'VALUES (%s, %s, %s, %s, %s, %s)',
+                    ('legacy-pivot-v1', 'legacy-pivot', 1, 'Legacy pivot', Json(snapshot_pipeline), now),
+                )
+
+            command.upgrade(config, _TENANT_REVISION, tag='tenant')
+            with container.connect() as connection:
+                analysis_row = connection.execute(
+                    f'SELECT pipeline_definition FROM "{schema}".analyses WHERE id = %s',
+                    ('legacy-pivot',),
+                ).fetchone()
+                snapshot_row = connection.execute(
+                    f'SELECT pipeline_definition FROM "{schema}".analysis_versions WHERE id = %s',
+                    ('legacy-pivot-v1',),
+                ).fetchone()
+            assert analysis_row is not None and snapshot_row is not None
+            analysis_config = analysis_row[0]['tabs'][0]['steps'][0]['config']
+            snapshot_config = snapshot_row[0]['tabs'][0]['steps'][0]['config']
+            assert analysis_config['value_columns'] == ['age']
+            assert 'values' not in analysis_config
+            assert snapshot_config['value_columns'] == []
+            assert 'values' not in snapshot_config
+
+            command.downgrade(config, '0023_drop_ds_freshness', tag='tenant')
+            with container.connect() as connection:
+                analysis_row = connection.execute(
+                    f'SELECT pipeline_definition FROM "{schema}".analyses WHERE id = %s',
+                    ('legacy-pivot',),
+                ).fetchone()
+                snapshot_row = connection.execute(
+                    f'SELECT pipeline_definition FROM "{schema}".analysis_versions WHERE id = %s',
+                    ('legacy-pivot-v1',),
+                ).fetchone()
+            assert analysis_row is not None and snapshot_row is not None
+            assert analysis_row[0]['tabs'][0]['steps'][0]['config']['values'] == 'age'
+            assert snapshot_row[0]['tabs'][0]['steps'][0]['config']['values'] is None
+        finally:
+            with container.connect() as connection:
+                connection.execute(f'DROP SCHEMA IF EXISTS "{schema}" CASCADE')
+
+
 @pytest.mark.timeout(180)
 def test_storage_cleanup_catalog_migration_backfills_indexes_and_downgrades(monkeypatch) -> None:
     require_docker()
@@ -745,7 +834,7 @@ def test_storage_cleanup_catalog_migration_backfills_indexes_and_downgrades(monk
             assert version_row is not None
             assert version_row[0] == '0022_telegram_part_receipts'
 
-            command.upgrade(config, '0023_drop_ds_freshness', tag='tenant')
+            command.upgrade(config, _TENANT_REVISION, tag='tenant')
             with container.connect() as connection:
                 datasource_columns = {
                     row[0]
@@ -757,7 +846,7 @@ def test_storage_cleanup_catalog_migration_backfills_indexes_and_downgrades(monk
                 version_row = connection.execute(f'SELECT version_num FROM "{schema}".alembic_version').fetchone()
             assert 'freshness_threshold_minutes' not in datasource_columns
             assert version_row is not None
-            assert version_row[0] == '0023_drop_ds_freshness'
+            assert version_row[0] == _TENANT_REVISION
 
             command.downgrade(config, '0019_build_run_datasources', tag='tenant')
             with container.connect() as connection:

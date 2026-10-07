@@ -108,7 +108,7 @@ const defaultConfigs: Record<string, StepConfig> = {
 	pivot: {
 		index: [],
 		columns: '',
-		values: null,
+		value_columns: [],
 		aggregate_function: 'first'
 	} satisfies PivotConfigData,
 

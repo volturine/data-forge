@@ -3,6 +3,7 @@ from google.protobuf import json_format
 
 from dataforge_protocol import analysis_pb2, enums_pb2
 from modules.analysis.step_schemas import (
+    PivotConfig,
     SelectConfig,
     StringTransformConfig,
     TimeSeriesConfig,
@@ -12,6 +13,19 @@ from modules.analysis.step_schemas import (
     normalize_step_config_for_protocol,
     validate_step,
 )
+
+
+def test_pivot_config_accepts_multiple_value_columns() -> None:
+    config = PivotConfig.model_validate(
+        {
+            'index': ['account'],
+            'columns': 'quarter',
+            'value_columns': ['sales', 'units'],
+            'aggregate_function': 'sum',
+        }
+    )
+
+    assert config.value_columns == ['sales', 'units']
 
 
 def _enum_values(schema: dict, field_name: str) -> list[str] | None:
