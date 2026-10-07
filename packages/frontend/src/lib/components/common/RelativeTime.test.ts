@@ -5,6 +5,7 @@ import RelativeTime from './RelativeTime.svelte';
 const NOW = Date.parse('2026-06-01T12:00:00.000Z');
 const HOUR = 60 * 60_000;
 const DAY = 24 * HOUR;
+const relativeTimeFormat = new Intl.RelativeTimeFormat('en', { numeric: 'always' });
 
 function isoAgo(ms: number): string {
 	return new Date(NOW - ms).toISOString();
@@ -22,17 +23,17 @@ afterEach(() => {
 describe('RelativeTime', () => {
 	test('renders relative minutes', () => {
 		render(RelativeTime, { props: { timestamp: isoAgo(5 * 60_000), live: false } });
-		expect(screen.getByText('5 minutes ago')).toBeInTheDocument();
+		expect(screen.getByText(relativeTimeFormat.format(-5, 'minute'))).toBeInTheDocument();
 	});
 
 	test('renders relative hours', () => {
 		render(RelativeTime, { props: { timestamp: isoAgo(3 * HOUR), live: false } });
-		expect(screen.getByText('3 hours ago')).toBeInTheDocument();
+		expect(screen.getByText(relativeTimeFormat.format(-3, 'hour'))).toBeInTheDocument();
 	});
 
 	test('renders relative days', () => {
 		render(RelativeTime, { props: { timestamp: isoAgo(2 * DAY), live: false } });
-		expect(screen.getByText('2 days ago')).toBeInTheDocument();
+		expect(screen.getByText(relativeTimeFormat.format(-2, 'day'))).toBeInTheDocument();
 	});
 
 	test('renders just now under a minute', () => {

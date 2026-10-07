@@ -264,13 +264,13 @@ def _last_data_update_from_config(datasource: DataSource) -> datetime | None:
     timestamp_ms = _snapshot_timestamp_ms(datasource.config)
     if timestamp_ms is None:
         return None
-    return datetime.fromtimestamp(timestamp_ms / 1000, tz=UTC).replace(tzinfo=None)
+    return datetime.fromtimestamp(timestamp_ms / 1000, tz=UTC)
 
 
-def _naive_utc(value: datetime) -> datetime:
+def _aware_utc(value: datetime) -> datetime:
     if value.tzinfo is None:
-        return value
-    return value.astimezone(UTC).replace(tzinfo=None)
+        return value.replace(tzinfo=UTC)
+    return value.astimezone(UTC)
 
 
 def _last_build_completed_at_map(session: Session, analysis_ids: set[str]) -> dict[str, datetime]:
@@ -286,7 +286,7 @@ def _last_build_completed_at_map(session: Session, analysis_ids: set[str]) -> di
     for analysis_id, completed_at in rows:
         if completed_at is None:
             continue
-        completed_at = _naive_utc(completed_at)
+        completed_at = _aware_utc(completed_at)
         previous = latest.get(analysis_id)
         if previous is None or completed_at > previous:
             latest[analysis_id] = completed_at
@@ -298,9 +298,8 @@ def _apply_last_data_update[DatasourceResponseT: (DataSourceResponse, DataSource
     datasource: DataSource,
     last_build_completed_at: datetime | None,
 ) -> DatasourceResponseT:
-    response.last_data_update = _last_data_update_from_config(datasource)
-    if response.last_data_update is None and last_build_completed_at is not None:
-        response.last_data_update = last_build_completed_at
+    last_data_update = _last_data_update_from_config(datasource) or last_build_completed_at
+    response.last_data_update = _aware_utc(last_data_update) if last_data_update is not None else None
     return response
 
 

@@ -3,6 +3,7 @@
 	import { authStore } from '$lib/stores/auth.svelte';
 	import { configStore } from '$lib/stores/config.svelte';
 	import { updateProfile, changePassword, unlinkProvider, getMe } from '$lib/api/auth';
+	import FeedbackBanner from '$lib/components/ui/FeedbackBanner.svelte';
 	import { GitBranch } from '@lucide/svelte';
 
 	const editable = $derived(configStore.authRequired);
@@ -107,17 +108,6 @@
 		);
 		unlinking = null;
 	}
-
-	const alert = (kind: 'success' | 'error') =>
-		css({
-			backgroundColor: kind === 'success' ? 'bg.success' : 'bg.error',
-			borderWidth: '1',
-			borderColor: kind === 'success' ? 'border.success' : 'border.error',
-			color: kind === 'success' ? 'fg.success' : 'fg.error',
-			paddingX: '3',
-			paddingY: '2',
-			fontSize: 'sm'
-		});
 </script>
 
 <div class={css({ display: 'flex', flexDirection: 'column', gap: '6' })}>
@@ -163,7 +153,7 @@
 		{/if}
 
 		{#if message}
-			<div class={alert(message.kind)}>{message.text}</div>
+			<FeedbackBanner kind={message.kind} message={message.text} />
 		{/if}
 
 		<form
@@ -250,7 +240,7 @@
 			</h2>
 
 			{#if pwMessage}
-				<div class={alert(pwMessage.kind)}>{pwMessage.text}</div>
+				<FeedbackBanner kind={pwMessage.kind} message={pwMessage.text} />
 			{/if}
 
 			<form
@@ -333,7 +323,7 @@
 			</h2>
 
 			{#if linkMessage}
-				<div class={alert(linkMessage.kind)}>{linkMessage.text}</div>
+				<FeedbackBanner kind={linkMessage.kind} message={linkMessage.text} />
 			{/if}
 
 			<div class={css({ display: 'flex', flexDirection: 'column', gap: '3' })}>

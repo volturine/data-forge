@@ -3,8 +3,6 @@ import type { ApiError } from './client';
 import type { ResultAsync } from 'neverthrow';
 
 export interface FrontendConfig {
-	timezone: string;
-	normalize_tz: boolean;
 	log_client_batch_size: number;
 	log_client_flush_interval_ms: number;
 	log_client_dedupe_window_ms: number;

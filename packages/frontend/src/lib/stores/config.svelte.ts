@@ -48,14 +48,6 @@ export class ConfigStore {
 		return this.fetch();
 	}
 
-	get timezone(): string {
-		return this.config?.timezone ?? 'UTC';
-	}
-
-	get normalizeTz(): boolean {
-		return this.config?.normalize_tz ?? false;
-	}
-
 	get auditLogBatchSize(): number {
 		return this.config?.log_client_batch_size ?? 20;
 	}

@@ -11,6 +11,7 @@ import {
 	openSchemaTabAndWait,
 	waitForLayoutReady,
 	waitForDatasourcePreviewReady,
+	gotoProfile,
 	readyTimeoutMs
 } from './utils/readiness.js';
 import { dialogByHeading } from './utils/locators.js';
@@ -780,6 +781,8 @@ test.describe('Datasources – build comparison', () => {
 });
 
 test.describe('Datasources – re-ingest freshness & time travel', () => {
+	test.use({ timezoneId: 'Europe/Bratislava' });
+
 	// Five data rows with a header. Re-ingests flip `skip_rows` (same column
 	// type, different row count) so each generation is distinguishable by its
 	// preview data without hitting Iceberg's incompatible-type path.
@@ -789,7 +792,36 @@ test.describe('Datasources – re-ingest freshness & time travel', () => {
 		const response = await page.context().request.get(`/api/v1/datasource/${dsId}`);
 		expect(response.ok()).toBeTruthy();
 		const body = (await response.json()) as { last_data_update: string | null };
-		return body.last_data_update ? new Date(body.last_data_update).getTime() : 0;
+		if (!body.last_data_update) return 0;
+		expect(body.last_data_update).toMatch(/(?:Z|\+00:00)$/);
+		return new Date(body.last_data_update).getTime();
+	}
+
+	async function formatTimestampInZone(page: Page, epochMs: number, timezone: string) {
+		return page.evaluate(
+			({ epochMs, timezone }) =>
+				new Intl.DateTimeFormat(undefined, {
+					year: 'numeric',
+					month: 'short',
+					day: 'numeric',
+					hour: '2-digit',
+					minute: '2-digit',
+					hour12: false,
+					timeZone: timezone
+				}).format(epochMs),
+			{ epochMs, timezone }
+		);
+	}
+
+	async function saveTimezonePreference(page: Page, timezone: string | null): Promise<void> {
+		await gotoProfile(page, 'preferences');
+		if (timezone) await page.getByLabel('Time zone').fill(timezone);
+		else {
+			await page.getByLabel('Time zone').fill('');
+			await page.getByRole('button', { name: 'Use device timezone' }).click();
+		}
+		await page.getByRole('button', { name: 'Save preferences' }).click();
+		await expect(page.getByRole('status')).toHaveText('Preferences saved');
 	}
 
 	test('re-ingest advances the Last updated stamp instead of staying stale', async ({
@@ -842,6 +874,87 @@ test.describe('Datasources – re-ingest freshness & time travel', () => {
 				})
 				.toBeGreaterThan(beforeMs);
 		} finally {
+			await deleteDatasourceViaUI(page, ds, { id: dsId }).catch(() => undefined);
+		}
+	});
+
+	test('renders UTC freshness timestamps in the saved user timezone', async ({ page, request }) => {
+		const ds = `e2e-timezone-${uid()}`;
+		const dsId = await createCsvDatasource(request, ds, REINGEST_CSV);
+		let originalTimeZone: string | null = null;
+		let originalTimeZoneCaptured = false;
+		try {
+			const meResponse = await page.context().request.get('/api/v1/auth/me');
+			expect(meResponse.ok()).toBeTruthy();
+			const me = (await meResponse.json()) as { preferences: Record<string, unknown> };
+			originalTimeZone =
+				typeof me.preferences.timezone === 'string' ? me.preferences.timezone : null;
+			if (originalTimeZone) {
+				const isValid = await page.evaluate((timezone) => {
+					try {
+						new Intl.DateTimeFormat('en-US', { timeZone: timezone });
+						return true;
+					} catch {
+						return false;
+					}
+				}, originalTimeZone);
+				if (!isValid) originalTimeZone = null;
+			}
+			originalTimeZoneCaptured = true;
+
+			await gotoDatasourcesPage(page);
+			await selectDatasourceAndWaitForConfig(page, ds);
+			await waitForDatasourcePreviewReady(page);
+
+			const config = page.locator('[data-ds-config]');
+			const timestamp = config.locator('time').first();
+			await expect(timestamp).toBeVisible();
+			const timestampIso = await timestamp.getAttribute('datetime');
+			expect(timestampIso).toMatch(/Z$/);
+			const timestampMs = Date.parse(timestampIso ?? '');
+			expect(timestampMs).toBe(await readLastUpdated(page, dsId));
+			const localTitle = await formatTimestampInZone(page, timestampMs, 'Europe/Bratislava');
+			await expect(timestamp).toHaveAttribute('title', localTitle);
+
+			const losAngelesOption = page.locator(
+				'#supported-timezones option[value="America/Los_Angeles"]'
+			);
+			await gotoProfile(page, 'preferences');
+			await expect(losAngelesOption).toHaveAttribute(
+				'label',
+				/^America\/Los_Angeles \(UTC[-+]\d{2}:\d{2}\)$/
+			);
+			await page.getByLabel('Time zone').fill('America/Los_Angeles');
+			await page.getByRole('button', { name: 'Save preferences' }).click();
+			await expect(page.getByRole('status')).toHaveText('Preferences saved');
+
+			await gotoDatasourcesPage(page);
+			await selectDatasourceAndWaitForConfig(page, ds);
+			await waitForDatasourcePreviewReady(page);
+			const updatedTimestamp = page.locator('[data-ds-config] time').first();
+			const selectedZoneTitle = await formatTimestampInZone(
+				page,
+				timestampMs,
+				'America/Los_Angeles'
+			);
+			await expect(updatedTimestamp).toHaveAttribute('datetime', timestampIso ?? '');
+			await expect(updatedTimestamp).toHaveAttribute('title', selectedZoneTitle);
+			await expect(updatedTimestamp).not.toHaveAttribute('title', localTitle);
+
+			const savedMeResponse = await page.context().request.get('/api/v1/auth/me');
+			const savedMe = (await savedMeResponse.json()) as { preferences: Record<string, unknown> };
+			expect(savedMe.preferences.timezone).toBe('America/Los_Angeles');
+
+			await saveTimezonePreference(page, null);
+			const clearedMeResponse = await page.context().request.get('/api/v1/auth/me');
+			const clearedMe = (await clearedMeResponse.json()) as {
+				preferences: Record<string, unknown>;
+			};
+			expect(clearedMe.preferences.timezone).toBeUndefined();
+		} finally {
+			if (originalTimeZoneCaptured) {
+				await saveTimezonePreference(page, originalTimeZone).catch(() => undefined);
+			}
 			await deleteDatasourceViaUI(page, ds, { id: dsId }).catch(() => undefined);
 		}
 	});

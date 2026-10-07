@@ -82,7 +82,7 @@ def test_publish_ingest_response_carries_last_data_update(test_db_session: Sessi
         expected_revision=1,
         schema_info=None,
     )
-    assert published.last_data_update == snapshot_time
+    assert published.last_data_update == snapshot_time.replace(tzinfo=UTC)
 
 
 def test_publish_ingest_response_last_data_update_stays_none_without_snapshot(test_db_session: Session) -> None:
@@ -125,7 +125,7 @@ def test_create_datasource_response_carries_last_data_update(test_db_session: Se
         owner_id=None,
         schema_info=None,
     )
-    assert response.last_data_update == snapshot_time
+    assert response.last_data_update == snapshot_time.replace(tzinfo=UTC)
 
 
 def test_publish_ingest_fences_on_revision(test_db_session: Session) -> None:

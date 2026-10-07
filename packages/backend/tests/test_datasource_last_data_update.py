@@ -80,7 +80,7 @@ class TestLastDataUpdate:
 
         item = next(i for i in datasource_service.list_datasources(test_db_session) if i.id == 'ds-snapshot')
 
-        assert item.last_data_update == snapshot_time
+        assert item.last_data_update == snapshot_time.replace(tzinfo=UTC)
 
     def test_accepts_integral_protobuf_struct_number(self, test_db_session: Session) -> None:
         snapshot_time = datetime(2026, 5, 1, 12, 0, tzinfo=UTC).replace(tzinfo=None)
@@ -93,7 +93,7 @@ class TestLastDataUpdate:
 
         item = next(i for i in datasource_service.list_datasources(test_db_session) if i.id == 'ds-protobuf-snapshot')
 
-        assert item.last_data_update == snapshot_time
+        assert item.last_data_update == snapshot_time.replace(tzinfo=UTC)
 
     def test_ignores_invalid_snapshot_timestamp_values(self) -> None:
         for value in (True, 0, -1, 1.5, float('nan'), float('inf')):
@@ -113,7 +113,7 @@ class TestLastDataUpdate:
 
         item = next(i for i in datasource_service.list_datasources(test_db_session) if i.id == 'ds-both')
 
-        assert item.last_data_update == new_time
+        assert item.last_data_update == new_time.replace(tzinfo=UTC)
 
     def test_falls_back_to_latest_successful_build_for_analysis_output(self, test_db_session: Session) -> None:
         analysis_id = 'analysis-1'
@@ -131,7 +131,7 @@ class TestLastDataUpdate:
 
         item = next(i for i in datasource_service.list_datasources(test_db_session) if i.id == 'ds-analysis-output')
 
-        assert item.last_data_update == new_build
+        assert item.last_data_update == new_build.replace(tzinfo=UTC)
 
     def test_ignores_failed_builds_for_analysis_output(self, test_db_session: Session) -> None:
         analysis_id = 'analysis-2'
@@ -154,7 +154,7 @@ class TestLastDataUpdate:
 
         item = next(i for i in datasource_service.list_datasources(test_db_session) if i.id == 'ds-analysis-output-2')
 
-        assert item.last_data_update == succeeded
+        assert item.last_data_update == succeeded.replace(tzinfo=UTC)
 
     def test_unknown_without_snapshot_or_build(self, test_db_session: Session) -> None:
         _insert_datasource(test_db_session, datasource_id='ds-unknown', source_type='file')
@@ -173,7 +173,7 @@ class TestLastDataUpdate:
 
         response = datasource_service.get_datasource(test_db_session, 'ds-detail')
 
-        assert response.last_data_update == snapshot_time
+        assert response.last_data_update == snapshot_time.replace(tzinfo=UTC)
 
 
 class TestSourceRevision:
