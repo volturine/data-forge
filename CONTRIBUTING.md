@@ -158,6 +158,8 @@ Looking for a place to start? Check issues labeled:
 
 ### Review Process
 
+Before reviewing a change, read [CODING_STANDARDS.md](CODING_STANDARDS.md) for the project's judgment-call rules. Mechanical requirements belong in lint and CI.
+
 1. A maintainer will review your PR
 2. Address any requested changes
 3. Once approved, a maintainer will merge your PR
