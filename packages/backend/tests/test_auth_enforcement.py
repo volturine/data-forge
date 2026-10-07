@@ -1,4 +1,4 @@
-"""Authorization enforcement: router-level auth, ws auth, namespace middleware, object ownership."""
+"""Authentication enforcement for API routes and namespace middleware."""
 
 import importlib
 import uuid
@@ -13,7 +13,6 @@ from backend_core.domain.analysis.models import AnalysisStatus
 from backend_core.persistence.analysis.models import Analysis
 from backend_core.persistence.analysis_versions.models import AnalysisVersion
 from main import app
-from modules.analysis.ownership import ensure_mutation_allowed
 from modules.auth.dependencies import get_current_user
 from tests.http_client import TestClient
 
@@ -254,33 +253,39 @@ class TestNamespaceMiddleware:
         assert response.status_code == 200
 
 
-class TestObjectOwnership:
-    def test_helper_allows_all_when_auth_disabled(self, monkeypatch: pytest.MonkeyPatch) -> None:
-        monkeypatch.setattr('backend_core.auth_config.settings.auth_required', False)
-
-        ensure_mutation_allowed('owner-1', 'owner-2')
-        ensure_mutation_allowed(None, 'owner-2')
-
-    def test_owned_analysis_delete_rejected_for_non_owner(self, client: TestClient, test_db_session, monkeypatch: pytest.MonkeyPatch) -> None:
+class TestSharedAnalysisAccess:
+    def test_authenticated_non_owner_can_update_analysis(self, client: TestClient, test_db_session, monkeypatch: pytest.MonkeyPatch) -> None:
         monkeypatch.setattr('backend_core.auth_config.settings.auth_required', True)
         analysis = _make_analysis(test_db_session, owner_id='someone-else')
 
-        response = client.delete(f'/api/v1/analysis/{analysis.id}')
+        response = client.put(
+            f'/api/v1/analysis/{analysis.id}',
+            json={'name': 'Updated by another account'},
+            headers={'If-Match': f'"analysis-{analysis.id}-{analysis.revision}"'},
+        )
 
-        assert response.status_code == 403
+        assert response.status_code == 200
+        assert response.json()['name'] == 'Updated by another account'
+        test_db_session.refresh(analysis)
+        assert analysis.owner_id == 'someone-else'
 
-    def test_owned_analysis_version_delete_rejected_for_non_owner(self, client: TestClient, test_db_session, monkeypatch: pytest.MonkeyPatch) -> None:
+    def test_authenticated_non_owner_can_delete_analysis_version(self, client: TestClient, test_db_session, monkeypatch: pytest.MonkeyPatch) -> None:
         monkeypatch.setattr('backend_core.auth_config.settings.auth_required', True)
         analysis = _make_analysis(test_db_session, owner_id='someone-else')
-        _make_version(test_db_session, analysis)
+        version = _make_version(test_db_session, analysis)
 
-        response = client.delete(f'/api/v1/analysis/{analysis.id}/versions/1')
+        response = client.delete(
+            f'/api/v1/analysis/{analysis.id}/versions/{version.version}',
+            headers={'If-Match': f'"analysis-{analysis.id}-{analysis.revision}"'},
+        )
 
-        assert response.status_code == 403
+        assert response.status_code == 200
 
-    def test_ownerless_version_rename_allowed_for_any_authenticated_user(self, client: TestClient, test_db_session, monkeypatch: pytest.MonkeyPatch) -> None:
+    def test_authenticated_non_owner_can_rename_version_with_revision_precondition(
+        self, client: TestClient, test_db_session, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
         monkeypatch.setattr('backend_core.auth_config.settings.auth_required', True)
-        analysis = _make_analysis(test_db_session, owner_id=None)
+        analysis = _make_analysis(test_db_session, owner_id='someone-else')
         version = _make_version(test_db_session, analysis)
 
         # Version rename now enforces the analysis If-Match precondition like

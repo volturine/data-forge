@@ -25,7 +25,7 @@ from modules.analysis.revisions import (
     version as analysis_version,
 )
 from modules.analysis.step_schemas import get_step_catalog
-from modules.auth.dependencies import get_current_user, get_current_user_id, get_optional_user_id
+from modules.auth.dependencies import get_current_user, get_current_user_id
 from modules.auth.models import User
 from modules.compute import executor_client
 from modules.export import service as export_service
@@ -39,11 +39,10 @@ def _revisioned_operation[T](
     analysis_id: AnalysisId,
     if_match: str | None,
     owner_id: str | None,
-    user_id: str | None,
     operation: Callable[[Session], T],
 ) -> tuple[T, AnalysisRevisionSnapshot]:
     """Check and mutate atomically; analysis mutations advance their revision once."""
-    analysis = require_analysis_revision(analysis_id, if_match, session, owner_id, user_id)
+    analysis = require_analysis_revision(analysis_id, if_match, session, owner_id)
     revision = AnalysisRevisionSnapshot(id=analysis.id, revision=analysis.revision + 1)
     result = operation(session)
     return result, revision
@@ -209,7 +208,6 @@ async def update_analysis(
     data: schemas.AnalysisUpdateSchema,
     if_match: str | None = Header(default=None, alias='If-Match'),
     owner_id: str | None = Depends(get_optional_lock_owner_id),
-    user_id: str | None = Depends(get_optional_user_id),
 ):
     """Update an analysis and replace the full tabs array.
 
@@ -223,7 +221,6 @@ async def update_analysis(
         analysis_id_value,
         if_match,
         owner_id,
-        user_id,
         lambda session: service.update_analysis(session, analysis_id_value, data),
     )
     return await executor_client.json_response(
@@ -270,14 +267,13 @@ async def delete_analysis(
     analysis_id: AnalysisId,
     if_match: str | None = Header(default=None, alias='If-Match'),
     owner_id: str | None = Depends(get_optional_lock_owner_id),
-    user_id: str | None = Depends(get_optional_user_id),
     runtime_probe: RuntimeAvailabilityProbe = Depends(get_runtime_availability_probe),
 ):
     """Delete an analysis and its associated data."""
     analysis_id_value = parse_analysis_id(analysis_id)
 
     def delete_and_queue_shutdown(session: Session) -> None:
-        require_analysis_revision(analysis_id_value, if_match, session, owner_id, user_id)
+        require_analysis_revision(analysis_id_value, if_match, session, owner_id)
         try:
             service.delete_analysis(session, analysis_id_value)
         except ValueError as exc:
@@ -440,7 +436,6 @@ async def add_step(
     response: Response,
     if_match: str | None = Header(default=None, alias='If-Match'),
     owner_id: str | None = Depends(get_optional_lock_owner_id),
-    user_id: str | None = Depends(get_optional_user_id),
 ):
     """Add a new pipeline step to a tab in an analysis.
 
@@ -474,7 +469,6 @@ async def add_step(
         analysis_id_value,
         if_match,
         owner_id,
-        user_id,
         add,
     )
     set_analysis_revision_headers(response, analysis)
@@ -491,7 +485,6 @@ async def update_step(
     response: Response,
     if_match: str | None = Header(default=None, alias='If-Match'),
     owner_id: str | None = Depends(get_optional_lock_owner_id),
-    user_id: str | None = Depends(get_optional_user_id),
 ):
     """Update a pipeline step's type and/or config.
 
@@ -545,7 +538,6 @@ async def update_step(
         analysis_id_value,
         if_match,
         owner_id,
-        user_id,
         update,
     )
     set_analysis_revision_headers(response, analysis)
@@ -561,7 +553,6 @@ async def remove_step(
     response: Response,
     if_match: str | None = Header(default=None, alias='If-Match'),
     owner_id: str | None = Depends(get_optional_lock_owner_id),
-    user_id: str | None = Depends(get_optional_user_id),
 ):
     """Remove a pipeline step from a tab. Also cleans up depends_on references in other steps that depended on the removed step."""
     analysis_id_value = parse_analysis_id(analysis_id)
@@ -571,7 +562,6 @@ async def remove_step(
         analysis_id_value,
         if_match,
         owner_id,
-        user_id,
         lambda session: service.remove_step(session, analysis_id_value, tab_id, step_id),
     )
     set_analysis_revision_headers(response, analysis)
@@ -590,7 +580,6 @@ async def derive_tab(
     response: Response,
     if_match: str | None = Header(default=None, alias='If-Match'),
     owner_id: str | None = Depends(get_optional_lock_owner_id),
-    user_id: str | None = Depends(get_optional_user_id),
 ):
     """Create a new tab whose datasource is the given tab's output result_id.
 
@@ -604,7 +593,6 @@ async def derive_tab(
         analysis_id_value,
         if_match,
         owner_id,
-        user_id,
         lambda session: service.derive_tab(session, analysis_id_value, tab_id, data.name),
     )
     set_analysis_revision_headers(response, analysis)
@@ -624,7 +612,6 @@ async def duplicate_tab(
     response: Response,
     if_match: str | None = Header(default=None, alias='If-Match'),
     owner_id: str | None = Depends(get_optional_lock_owner_id),
-    user_id: str | None = Depends(get_optional_user_id),
 ):
     """Duplicate a tab inside the same analysis.
 
@@ -638,7 +625,6 @@ async def duplicate_tab(
         analysis_id_value,
         if_match,
         owner_id,
-        user_id,
         lambda session: service.duplicate_tab(session, analysis_id_value, tab_id, data.name),
     )
     set_analysis_revision_headers(response, analysis)
