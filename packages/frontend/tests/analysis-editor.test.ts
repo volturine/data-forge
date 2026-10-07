@@ -29,23 +29,26 @@ test.describe('Analyses – editor title spacing', () => {
 		try {
 			await gotoAnalysisEditor(page, analysisId);
 
-			const title = page.locator('header h1[contenteditable="true"]');
+			const header = page.getByTestId('analysis-editor-header');
+			const title = header.locator('h1[contenteditable="true"]');
+			const descriptionTrigger = page.getByTestId('analysis-description-trigger');
 			await expect(title).toBeVisible();
-			const titleRegion = title.locator('xpath=../..');
-			const verticalPadding = await titleRegion.evaluate((element) => {
-				const styles = getComputedStyle(element);
-				return {
-					top: Number.parseFloat(styles.paddingTop),
-					bottom: Number.parseFloat(styles.paddingBottom)
-				};
-			});
-			expect(verticalPadding.top).toBeGreaterThanOrEqual(10);
-			expect(verticalPadding.bottom).toBeGreaterThanOrEqual(10);
+			await expect(descriptionTrigger).toBeVisible();
 
-			const headerHeight = await titleRegion.evaluate(
-				(element) => element.closest('header')?.getBoundingClientRect().height ?? 0
-			);
-			expect(headerHeight).toBeGreaterThanOrEqual(64);
+			const [headerBox, titleBox, descriptionBox] = await Promise.all([
+				header.boundingBox(),
+				title.boundingBox(),
+				descriptionTrigger.boundingBox()
+			]);
+			if (!headerBox || !titleBox || !descriptionBox) {
+				throw new Error('Expected visible title and description controls to have rendered boxes');
+			}
+
+			expect(titleBox.y - headerBox.y).toBeGreaterThanOrEqual(10);
+			expect(
+				headerBox.y + headerBox.height - descriptionBox.y - descriptionBox.height
+			).toBeGreaterThanOrEqual(10);
+			expect(headerBox.height).toBeCloseTo(68, 0);
 		} finally {
 			await deleteAnalysisViaUI(page, analysis);
 		}

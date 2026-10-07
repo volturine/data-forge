@@ -89,10 +89,11 @@
 		alignItems: 'stretch',
 		position: 'sticky',
 		top: '0',
-		height: 'headerMd',
+		height: 'analysisHeader',
 		backgroundColor: 'bg.primary',
 		zIndex: 'header'
 	})}
+	data-testid="analysis-editor-header"
 >
 	<div
 		class={css({
