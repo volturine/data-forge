@@ -129,74 +129,121 @@ export TEST_IMAGE_TAG TEST_TARGET
 } > "$artifacts_dir/resources.txt"
 
 status=0
+compose_down_attempted=0
 started_at="$(date -u +%Y-%m-%dT%H:%M:%SZ)"
+
+compose_down() {
+    if [ "$compose_down_attempted" -eq 1 ]; then
+        return
+    fi
+    compose_down_attempted=1
+
+    local down_status=0
+    if command -v timeout >/dev/null 2>&1; then
+        timeout --signal=TERM --kill-after=5s 20s \
+            "${compose[@]}" down --timeout 5 --volumes --remove-orphans \
+            > "$artifacts_dir/compose-down.log" 2>&1 || down_status=$?
+    else
+        "${compose[@]}" down --timeout 5 --volumes --remove-orphans \
+            > "$artifacts_dir/compose-down.log" 2>&1 || down_status=$?
+    fi
+    if [ "$down_status" -ne 0 ]; then
+        echo "Test Compose cleanup failed (exit ${down_status}); see ${artifacts_dir}/compose-down.log." >&2
+        if [ "$status" -eq 0 ]; then
+            status=$down_status
+        fi
+    fi
+}
+
 finalize() {
     local exit_status=$?
-    trap - EXIT INT TERM
+    trap - EXIT
+    trap 'status=130; compose_down; exit 130' INT
+    trap 'status=143; compose_down; exit 143' TERM
+    local interrupted=0
+    if [ "$exit_status" -eq 130 ] || [ "$exit_status" -eq 143 ]; then
+        interrupted=1
+        compose_down
+        echo 'Interrupted test run; prioritized Compose cleanup over container diagnostics.' >&2
+    fi
     local service container_id
-    for service in docker runner; do
-        container_id="$("${compose[@]}" ps --all --quiet "$service" 2>/dev/null | head -n 1 || true)"
-        if [ -z "$container_id" ]; then
-            continue
-        fi
-        docker events --since "$started_at" --until "$(date -u +%Y-%m-%dT%H:%M:%SZ)" \
-            --filter type=container --filter event=oom --filter "container=${container_id}" \
-            --format '{{json .}}' >> "$artifacts_dir/outer-docker-oom-events.jsonl" 2>&1 || true
-        docker inspect --format \
-            'OOMKilled={{.State.OOMKilled}} ExitCode={{.State.ExitCode}} Status={{.State.Status}} MemoryBytes={{.HostConfig.Memory}} NanoCPUs={{.HostConfig.NanoCpus}} Privileged={{.HostConfig.Privileged}}' \
-            "$container_id" > "$artifacts_dir/${service}.inspect.txt" 2>&1 || true
-        docker inspect --format '{{json .State}}' "$container_id" \
-            > "$artifacts_dir/${service}.state.json" 2>&1 || true
-        docker logs "$container_id" > "$artifacts_dir/${service}.log" 2>&1 || true
-        if [ "$service" = docker ]; then
-            docker exec "$container_id" sh -c '
-                for path in /sys/fs/cgroup/memory.events /sys/fs/cgroup/memory/memory.oom_control; do
-                    if [ -r "$path" ]; then
-                        printf "%s\\n" "$path"
-                        cat "$path"
-                    fi
+    if [ "$interrupted" -eq 0 ]; then
+        for service in docker runner; do
+            container_id="$("${compose[@]}" ps --all --quiet "$service" 2>/dev/null | head -n 1 || true)"
+            if [ -z "$container_id" ]; then
+                continue
+            fi
+            docker events --since "$started_at" --until "$(date -u +%Y-%m-%dT%H:%M:%SZ)" \
+                --filter type=container --filter event=oom --filter "container=${container_id}" \
+                --format '{{json .}}' >> "$artifacts_dir/outer-docker-oom-events.jsonl" 2>&1 || true
+            docker inspect --format \
+                'OOMKilled={{.State.OOMKilled}} ExitCode={{.State.ExitCode}} Status={{.State.Status}} MemoryBytes={{.HostConfig.Memory}} NanoCPUs={{.HostConfig.NanoCpus}} Privileged={{.HostConfig.Privileged}}' \
+                "$container_id" > "$artifacts_dir/${service}.inspect.txt" 2>&1 || true
+            docker inspect --format '{{json .State}}' "$container_id" \
+                > "$artifacts_dir/${service}.state.json" 2>&1 || true
+            docker logs "$container_id" > "$artifacts_dir/${service}.log" 2>&1 || true
+            if [ "$service" = docker ]; then
+                docker exec "$container_id" sh -c '
+                    for path in /sys/fs/cgroup/memory.events /sys/fs/cgroup/memory/memory.oom_control; do
+                        if [ -r "$path" ]; then
+                            printf "%s\\n" "$path"
+                            cat "$path"
+                        fi
+                    done
+                ' > "$artifacts_dir/docker-cgroup-memory-events.txt" 2>&1 || true
+            fi
+            if [ "$service" = runner ]; then
+                docker cp "${container_id}:/app/.test-artifacts/." "$artifacts_dir/" \
+                    >/dev/null 2>&1 || true
+                for package in backend worker scheduler frontend; do
+                    mkdir -p "$artifacts_dir/${package}-tests"
+                    docker cp "${container_id}:/app/packages/${package}/tests/.artifacts/." \
+                        "$artifacts_dir/${package}-tests/" >/dev/null 2>&1 || true
                 done
-            ' > "$artifacts_dir/docker-cgroup-memory-events.txt" 2>&1 || true
+            fi
+        done
+        if [ "$exit_status" -ne 0 ]; then
+            daemon_id="$("${compose[@]}" ps --all --quiet docker 2>/dev/null | head -n 1 || true)"
+            if [ -n "$daemon_id" ]; then
+                local inner_dir inner_ids inner_id inner_artifact
+                inner_dir="$artifacts_dir/inner"
+                mkdir -p "$inner_dir"
+                if inner_ids="$(docker exec "$daemon_id" docker ps --all --quiet --no-trunc 2> "$inner_dir/list-error.log")"; then
+                    printf '%s\n' "$inner_ids" > "$inner_dir/container-ids.txt"
+                    while IFS= read -r inner_id; do
+                        if [ -z "$inner_id" ]; then
+                            continue
+                        fi
+                        inner_artifact="$inner_dir/${inner_id:0:12}"
+                        mkdir -p "$inner_artifact"
+                        docker exec "$daemon_id" docker inspect --format '{{.Name}}' "$inner_id" \
+                            > "$inner_artifact/name.txt" 2>&1 || true
+                        docker exec "$daemon_id" docker inspect --format '{{json .State}}' "$inner_id" \
+                            > "$inner_artifact/state.json" 2>&1 || true
+                        docker exec "$daemon_id" docker inspect --format '{{json .Config.Labels}}' "$inner_id" \
+                            > "$inner_artifact/labels.json" 2>&1 || true
+                        docker exec "$daemon_id" docker logs --timestamps "$inner_id" \
+                            > "$inner_artifact/container.log" 2>&1 || true
+                    done <<< "$inner_ids"
+                fi
+            fi
         fi
-        if [ "$service" = runner ]; then
-            docker cp "${container_id}:/app/.test-artifacts/." "$artifacts_dir/" \
-                >/dev/null 2>&1 || true
-            for package in backend worker scheduler frontend; do
-                mkdir -p "$artifacts_dir/${package}-tests"
-                docker cp "${container_id}:/app/packages/${package}/tests/.artifacts/." \
-                    "$artifacts_dir/${package}-tests/" >/dev/null 2>&1 || true
-            done
-        fi
-    done
-    if [ "$exit_status" -ne 0 ]; then
-        daemon_id="$("${compose[@]}" ps --all --quiet docker 2>/dev/null | head -n 1 || true)"
-        if [ -n "$daemon_id" ]; then
-            local inner_dir inner_ids inner_id inner_artifact
-            inner_dir="$artifacts_dir/inner"
-            mkdir -p "$inner_dir"
-            if inner_ids="$(docker exec "$daemon_id" docker ps --all --quiet --no-trunc 2> "$inner_dir/list-error.log")"; then
-                printf '%s\n' "$inner_ids" > "$inner_dir/container-ids.txt"
-                while IFS= read -r inner_id; do
-                    if [ -z "$inner_id" ]; then
-                        continue
-                    fi
-                    inner_artifact="$inner_dir/${inner_id:0:12}"
-                    mkdir -p "$inner_artifact"
-                    docker exec "$daemon_id" docker inspect --format '{{.Name}}' "$inner_id" \
-                        > "$inner_artifact/name.txt" 2>&1 || true
-                    docker exec "$daemon_id" docker inspect --format '{{json .State}}' "$inner_id" \
-                        > "$inner_artifact/state.json" 2>&1 || true
-                    docker exec "$daemon_id" docker inspect --format '{{json .Config.Labels}}' "$inner_id" \
-                        > "$inner_artifact/labels.json" 2>&1 || true
-                    docker exec "$daemon_id" docker logs --timestamps "$inner_id" \
-                        > "$inner_artifact/container.log" 2>&1 || true
-                done <<< "$inner_ids"
+        "${compose[@]}" logs --no-color > "$artifacts_dir/compose.log" 2>&1 || true
+        compose_down
+    else
+        printf 'Container diagnostics skipped after signal; Compose teardown was attempted first.\n' \
+            > "$artifacts_dir/compose.log"
+    fi
+    if docker image inspect "dataforge-test-runner:${TEST_IMAGE_TAG}" >/dev/null 2>&1; then
+        if ! docker image rm "dataforge-test-runner:${TEST_IMAGE_TAG}" \
+            > "$artifacts_dir/test-runner-image-remove.log" 2>&1; then
+            echo "Test runner image cleanup failed; see ${artifacts_dir}/test-runner-image-remove.log." >&2
+            if [ "$status" -eq 0 ]; then
+                status=1
             fi
         fi
     fi
-    "${compose[@]}" logs --no-color > "$artifacts_dir/compose.log" 2>&1 || true
-    "${compose[@]}" down --volumes --remove-orphans >/dev/null 2>&1 || true
-    docker image rm "dataforge-test-runner:${TEST_IMAGE_TAG}" >/dev/null 2>&1 || true
+    trap - INT TERM
     if [ "$exit_status" -eq 0 ] && [ "$status" -ne 0 ]; then
         exit_status=$status
     fi
