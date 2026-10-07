@@ -1,3 +1,4 @@
+import runpy
 from pathlib import Path
 from typing import Any
 
@@ -38,7 +39,41 @@ def test_runtime_schema_has_only_public_and_tenant_creation_revisions() -> None:
         '0021_storage_cleanup_catalog_indexes.py',
         '0022_telegram_part_receipts.py',
         '0023_drop_datasource_freshness.py',
+        '0024_pivot_value_columns.py',
     ]
+
+
+def test_pivot_values_migration_rewrites_only_legacy_pivot_configs() -> None:
+    migration_path = Path(__file__).parents[1] / 'database' / 'alembic' / 'versions' / '0024_pivot_value_columns.py'
+    rewrite_pipeline_definition = runpy.run_path(str(migration_path))['_rewrite_pipeline_definition']
+    pipeline_definition = {
+        'tabs': [
+            {
+                'steps': [
+                    {'type': 'pivot', 'config': {'values': 'age'}},
+                    {'type': 'pivot', 'config': {'values': None}},
+                    {'type': 'pivot', 'config': {'values': 'stale', 'value_columns': ['sales', 'units']}},
+                    {'type': 'filter', 'config': {'values': 'untouched'}},
+                ]
+            }
+        ]
+    }
+
+    assert rewrite_pipeline_definition(pipeline_definition, downgrade=False)
+    steps = pipeline_definition['tabs'][0]['steps']
+    assert steps[0]['config'] == {'value_columns': ['age']}
+    assert steps[1]['config'] == {'value_columns': []}
+    assert steps[2]['config'] == {'value_columns': ['sales', 'units']}
+    assert steps[3]['config'] == {'values': 'untouched'}
+    assert not rewrite_pipeline_definition(pipeline_definition, downgrade=False)
+
+    from modules.analysis.step_schemas import normalize_step_config
+
+    assert normalize_step_config('pivot', steps[0]['config'])['value_columns'] == ['age']
+
+    multiple_value_pipeline = {'tabs': [{'steps': [{'type': 'pivot', 'config': {'value_columns': ['sales', 'units']}}]}]}
+    with pytest.raises(RuntimeError, match='multiple value_columns'):
+        rewrite_pipeline_definition(multiple_value_pipeline, downgrade=True)
 
 
 def test_public_revision_is_runtime_namespace_work_wakes_head() -> None:

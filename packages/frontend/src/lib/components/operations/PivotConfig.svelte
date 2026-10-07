@@ -106,7 +106,6 @@
 			class={css({ display: 'flex', flexDirection: 'column', gap: '2' })}
 			role="group"
 			aria-labelledby={columnsLabelId}
-			data-testid="pivot-columns-group"
 		>
 			<SectionHeader id={columnsLabelId}>Columns</SectionHeader>
 			<ColumnDropdown

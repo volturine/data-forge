@@ -571,7 +571,7 @@ test.describe('Analyses – pivot config editing', () => {
 		try {
 			const pivotPanel = await addStepAndOpenConfig(page, aId, 'pivot');
 			const rows = pivotPanel.getByRole('group', { name: 'Rows' });
-			const columns = pivotPanel.getByTestId('pivot-columns-group');
+			const columns = pivotPanel.getByRole('group', { name: 'Columns', exact: true });
 			const aggregates = pivotPanel.getByRole('group', { name: 'Aggregates' });
 
 			await rows.locator('button[aria-expanded]').click();
@@ -634,7 +634,7 @@ test.describe('Analyses – pivot config editing', () => {
 			await page.locator('[data-step-type="pivot"]').locator('[data-action="edit"]').click();
 			await expect(reopenedPivot).toBeVisible();
 			await reopenedPivot
-				.getByTestId('pivot-columns-group')
+				.getByRole('group', { name: 'Columns', exact: true })
 				.getByRole('button', { name: 'city', exact: true })
 				.click();
 			await page.getByRole('option', { name: 'month', exact: true }).click();
@@ -663,7 +663,7 @@ test.describe('Analyses – pivot config editing', () => {
 			const configPanel = await addStepAndOpenConfig(page, aId, 'pivot');
 
 			const rows = configPanel.getByRole('group', { name: 'Rows' });
-			const columns = configPanel.getByTestId('pivot-columns-group');
+			const columns = configPanel.getByRole('group', { name: 'Columns', exact: true });
 			const aggregates = configPanel.getByRole('group', { name: 'Aggregates' });
 			await expect(rows).toBeVisible();
 			await expect(columns).toBeVisible();

@@ -239,6 +239,7 @@
 			);
 			if (controller.signal.aborted || schemaAbortController !== controller) return;
 			if (draftStepId !== stepId || JSON.stringify(draftConfig) !== configKey) {
+				// Discard the schema result if the user moved on or changed this draft while it loaded.
 				applyingPivotSchema = false;
 				schemaAbortController = null;
 				return;
