@@ -581,22 +581,29 @@ test.describe('Analyses – pivot config editing', () => {
 
 			// Choose the row identifier.
 			await rows.locator('button[aria-expanded]').click();
-			await rows.locator('#msc-col-id').check();
+			await rows.getByRole('checkbox', { name: 'id', exact: true }).check();
 			await rows.getByRole('button', { name: /Done/ }).click();
-			await expect(rows).toContainText('1 selected');
+			await expect(rows.getByRole('status')).toHaveText(
+				'1 row field selected. One output row for each unique combination.'
+			);
 
 			// Distinct city values become output columns.
 			await columns.locator('button[aria-expanded]').click();
 			await page.getByRole('option', { name: 'city', exact: true }).click();
+			await rows.locator('button[aria-expanded]').click();
+			await expect(rows.getByRole('checkbox', { name: 'city', exact: true })).toHaveCount(0);
+			await rows.getByRole('button', { name: /Done/ }).click();
 
 			// Aggregate age values with sum.
 			const valueColumn = aggregates.getByRole('group', { name: 'Value column' });
-			await valueColumn.locator('button[aria-expanded]').click();
+			await valueColumn.getByRole('button', { name: 'Value column' }).click();
+			await expect(valueColumn.getByRole('option', { name: 'id', exact: true })).toHaveCount(0);
+			await expect(valueColumn.getByRole('option', { name: 'city', exact: true })).toHaveCount(0);
 			await page.getByRole('option', { name: 'age', exact: true }).click();
 
 			const aggSelect = configPanel.locator('[data-testid="pivot-agg-select"]');
 			await aggSelect.selectOption('sum');
-			const previewButton = configPanel.getByRole('button', { name: 'Preview columns' });
+			const previewButton = configPanel.getByRole('button', { name: 'Show output columns' });
 			const previewResponse = page.waitForResponse(
 				(response) =>
 					new URL(response.url()).pathname.endsWith('/v1/compute/schema') &&
@@ -605,11 +612,26 @@ test.describe('Analyses – pivot config editing', () => {
 			);
 			await previewButton.click();
 			expect((await previewResponse).ok()).toBeTruthy();
+			const outputSchema = configPanel.getByTestId('pivot-output-schema');
+			await expect(outputSchema).toBeVisible({ timeout: readyTimeoutMs() });
+			for (const city of ['London', 'Paris', 'Berlin']) {
+				await expect(outputSchema.getByText(city, { exact: true })).toBeVisible();
+			}
 
 			const applyBtn = configPanel.getByRole('button', { name: 'Apply' });
 			await expect(applyBtn).toBeEnabled();
 			await applyBtn.click();
 			await expect(applyBtn).toBeDisabled({ timeout: 5_000 });
+
+			// A following step must receive the distinct pivot values as its input schema.
+			await page.locator('button[data-step="select"]').click();
+			const selectPanel = page.locator('[data-step-config="select"]');
+			await expect(selectPanel).toBeVisible({ timeout: 5_000 });
+			await selectPanel.getByRole('button', { name: 'Select columns to keep...' }).click();
+			for (const city of ['London', 'Paris', 'Berlin']) {
+				await expect(selectPanel.getByRole('checkbox', { name: city, exact: true })).toBeVisible();
+			}
+			await expect(selectPanel.getByRole('checkbox', { name: 'city', exact: true })).toHaveCount(0);
 
 			await screenshot(page, 'analysis/operations', 'pivot-config-applied');
 		} finally {

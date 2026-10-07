@@ -103,6 +103,11 @@
 			? (schemaStore.getInput(step.id) ?? { columns: [], row_count: null })
 			: { columns: [], row_count: null }
 	);
+	const pivotOutputColumns = $derived(
+		step?.type === 'pivot'
+			? (schemaStore.previewSchemas.get(step.id)?.schema.columns.map((column) => column.name) ?? [])
+			: []
+	);
 	const waitingForSelectedStepSchema = $derived(
 		isLoadingSchema && inputSchema.columns.length === 0
 	);
@@ -163,14 +168,26 @@
 		if (!(columns && Array.isArray(index) && index.length > 0)) return;
 
 		const analysis = analysisStore.current;
-		const datasourceId = analysisStore.activeTab?.datasource.id ?? null;
-		if (!analysis?.id || !datasourceId) return;
+		const activeTab = analysisStore.activeTab;
+		if (!analysis?.id || !activeTab?.datasource.id) return;
 
 		fetchingPivotSchema = true;
+		const tabsWithDraftConfig = analysisStore.tabs.map((tab) =>
+			tab.id === activeTab.id
+				? {
+						...tab,
+						steps: tab.steps.map((currentStep) =>
+							currentStep.id === step.id
+								? { ...currentStep, config: cloneConfig(config), is_applied: true }
+								: currentStep
+						)
+					}
+				: tab
+		);
 
 		const analysisPipeline = buildAnalysisPipelinePayload(
 			analysis.id,
-			analysisStore.tabs,
+			tabsWithDraftConfig,
 			datasourceStore.datasources
 		);
 		if (!analysisPipeline) {
@@ -204,6 +221,14 @@
 				});
 				if (schemaAbortController === controller) fetchingPivotSchema = false;
 			});
+	}
+
+	function handleClearPivotSchema() {
+		if (step?.type !== 'pivot') return;
+		schemaAbortController?.abort();
+		schemaAbortController = null;
+		fetchingPivotSchema = false;
+		schemaStore.clearPreviewSchema(step.id);
 	}
 
 	function handleApplyConfig() {
@@ -445,6 +470,8 @@
 					schema={inputSchema}
 					bind:config={draftConfig}
 					onRefreshSchema={handleRefreshPivotSchema}
+					onConfigChange={handleClearPivotSchema}
+					outputColumns={pivotOutputColumns}
 					isRefreshing={fetchingPivotSchema}
 				/>
 			{:else if step.type === 'timeseries'}

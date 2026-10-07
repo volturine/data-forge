@@ -17,6 +17,7 @@
 		placeholder?: string;
 		filter?: (column: { name: string; dtype: string }) => boolean;
 		clearable?: boolean;
+		triggerLabelledby?: string;
 		triggerClass?: string;
 		menuClass?: string;
 	}
@@ -28,6 +29,7 @@
 		placeholder = 'Select column...',
 		filter,
 		clearable = false,
+		triggerLabelledby,
 		triggerClass = '',
 		menuClass = ''
 	}: Props = $props();
@@ -48,6 +50,7 @@
 	onChange={(next) => onChange(next as string)}
 	{placeholder}
 	{clearable}
+	triggerAriaLabelledby={triggerLabelledby}
 	searchPlaceholder="Search columns..."
 	{triggerClass}
 	{menuClass}

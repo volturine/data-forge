@@ -3,10 +3,11 @@
 	import type { Snippet } from 'svelte';
 
 	interface Props {
+		id?: string;
 		children: Snippet;
 	}
 
-	let { children }: Props = $props();
+	let { id, children }: Props = $props();
 </script>
 
-<span class={sectionHeader()}>{@render children()}</span>
+<span {id} class={sectionHeader()}>{@render children()}</span>
