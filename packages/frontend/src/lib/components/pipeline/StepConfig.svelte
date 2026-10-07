@@ -56,12 +56,6 @@
 		readOnly?: boolean;
 	}
 
-	interface DraftPivotSchemaPreview {
-		stepId: string;
-		configKey: string;
-		response: StepSchemaResponse;
-	}
-
 	let {
 		step = $bindable(null),
 		schema,
@@ -71,8 +65,8 @@
 		readOnly = false
 	}: Props = $props();
 	const stepLabel = $derived(step ? getStepTypeConfig(step.type).label : '');
-	let fetchingPivotSchema = $state(false);
-	let draftPivotSchemaPreview = $state<DraftPivotSchemaPreview | null>(null);
+	let applyingPivotSchema = $state(false);
+	let pivotApplyError = $state('');
 	let schemaAbortController: AbortController | null = null;
 
 	function startSchemaRequest(): AbortController {
@@ -116,12 +110,6 @@
 	);
 	const pivotOutputColumns = $derived.by(() => {
 		if (step?.type !== 'pivot') return [];
-		if (
-			draftPivotSchemaPreview?.stepId === step.id &&
-			draftPivotSchemaPreview.configKey === JSON.stringify(draftConfig)
-		) {
-			return draftPivotSchemaPreview.response.columns;
-		}
 		if (hasChanges) return [];
 		return (
 			schemaStore.previewSchemas.get(step.id)?.schema.columns.map((column) => column.name) ?? []
@@ -138,6 +126,20 @@
 	const readOnlyConfigJson = $derived(JSON.stringify(draftConfig, null, 2));
 
 	function applyBlockReason(stepType: string, config: Record<string, unknown>): string | null {
+		if (stepType === 'pivot') {
+			const columns = config.columns;
+			const index = config.index;
+			const values = config.value_columns;
+			if (typeof columns !== 'string' || !columns) return 'Choose a column field';
+			if (!Array.isArray(index) || index.length === 0) return 'Choose at least one row field';
+			if (index.includes(columns)) return 'Choose different row and column fields';
+			if (
+				Array.isArray(values) &&
+				values.some((value) => value === columns || index.includes(value))
+			) {
+				return 'Value columns must differ from row and column fields';
+			}
+		}
 		if (stepType === 'download') {
 			const filename = config.filename;
 			if (typeof filename !== 'string' || filename.trim() === '') return 'Enter a filename';
@@ -172,119 +174,103 @@
 	}
 
 	const applyBlockedBecause = $derived(step ? applyBlockReason(step.type, draftConfig) : null);
-	const canApply = $derived(!!step && hasChanges && applyBlockedBecause == null);
+	const canApply = $derived(
+		!!step && hasChanges && applyBlockedBecause == null && !applyingPivotSchema
+	);
 
-	function handleRefreshPivotSchema() {
-		if (!step || step.type !== 'pivot') return;
-		const stepId = step.id;
-		const config = cloneConfig(draftConfig);
-		const configKey = JSON.stringify(config);
-		if (!config || typeof config !== 'object') return;
-		const columns = config['columns'];
-		const index = config['index'];
-		if (!(columns && Array.isArray(index) && index.length > 0)) return;
-
-		const analysis = analysisStore.current;
-		const activeTab = analysisStore.activeTab;
-		if (!analysis?.id || !activeTab?.datasource.id) return;
-
-		fetchingPivotSchema = true;
-		const tabsWithDraftConfig = analysisStore.tabs.map((tab) =>
-			tab.id === activeTab.id
-				? {
-						...tab,
-						steps: tab.steps.map((currentStep) =>
-							currentStep.id === stepId
-								? { ...currentStep, config: cloneConfig(config), is_applied: true }
-								: currentStep
-						)
-					}
-				: tab
-		);
-
-		const analysisPipeline = buildAnalysisPipelinePayload(
-			analysis.id,
-			tabsWithDraftConfig,
-			datasourceStore.datasources
-		);
-		if (!analysisPipeline) {
-			fetchingPivotSchema = false;
-			return;
-		}
-		const controller = startSchemaRequest();
-
-		getStepSchema(
-			{
-				analysis_id: analysis.id,
-				analysis_pipeline: analysisPipeline,
-				tab_id: analysisStore.activeTab?.id ?? null,
-				target_step_id: stepId
-			},
-			{ signal: controller.signal }
-		)
-			.map((response: StepSchemaResponse) => {
-				throwIfAborted(controller.signal);
-				if (
-					schemaAbortController !== controller ||
-					draftStepId !== stepId ||
-					JSON.stringify(draftConfig) !== configKey
-				) {
-					return;
-				}
-				draftPivotSchemaPreview = { stepId, configKey, response };
-				fetchingPivotSchema = false;
-			})
-			.mapErr((error: unknown) => {
-				if (controller.signal.aborted) return;
-				const err = error instanceof Error ? error.message : String(error);
-				track({
-					event: 'schema_error',
-					action: 'pivot_schema',
-					target: stepId,
-					meta: { message: err }
-				});
-				if (schemaAbortController === controller) fetchingPivotSchema = false;
-			});
-	}
-
-	function handleClearPivotDraftSchema() {
+	function handlePivotConfigChange() {
 		if (step?.type !== 'pivot') return;
 		schemaAbortController?.abort();
 		schemaAbortController = null;
-		fetchingPivotSchema = false;
-		draftPivotSchemaPreview = null;
+		applyingPivotSchema = false;
+		pivotApplyError = '';
 	}
 
-	function handleApplyConfig() {
+	async function handleApplyConfig() {
 		if (readOnly) return;
-		if (!step || !hasChanges || applyBlockReason(step.type, draftConfig)) return;
+		if (!step || !hasChanges || applyBlockReason(step.type, draftConfig) || applyingPivotSchema)
+			return;
 		const stepId = step.id;
 		const appliedConfig = cloneConfig(draftConfig);
-		const draftPreview =
-			step.type === 'pivot' &&
-			draftPivotSchemaPreview?.stepId === stepId &&
-			draftPivotSchemaPreview.configKey === JSON.stringify(appliedConfig)
-				? draftPivotSchemaPreview
-				: null;
-		schemaAbortController?.abort();
-		schemaAbortController = null;
-		fetchingPivotSchema = false;
+		let pivotSchema: StepSchemaResponse | null = null;
+
+		if (step.type === 'pivot') {
+			const configKey = JSON.stringify(appliedConfig);
+			const analysis = analysisStore.current;
+			const activeTab = analysisStore.activeTab;
+			if (!analysis?.id || !activeTab?.datasource.id) {
+				pivotApplyError =
+					'Could not load the pivot output columns. Check the analysis data source.';
+				return;
+			}
+			const tabsWithDraftConfig = analysisStore.tabs.map((tab) =>
+				tab.id === activeTab.id
+					? {
+							...tab,
+							steps: tab.steps.map((currentStep) =>
+								currentStep.id === stepId
+									? { ...currentStep, config: cloneConfig(appliedConfig), is_applied: true }
+									: currentStep
+							)
+						}
+					: tab
+			);
+			const analysisPipeline = buildAnalysisPipelinePayload(
+				analysis.id,
+				tabsWithDraftConfig,
+				datasourceStore.datasources
+			);
+			if (!analysisPipeline) {
+				pivotApplyError = 'Could not load the pivot output columns for this pipeline.';
+				return;
+			}
+
+			applyingPivotSchema = true;
+			pivotApplyError = '';
+			const controller = startSchemaRequest();
+			const result = await getStepSchema(
+				{
+					analysis_id: analysis.id,
+					analysis_pipeline: analysisPipeline,
+					tab_id: activeTab.id,
+					target_step_id: stepId
+				},
+				{ signal: controller.signal }
+			);
+			if (controller.signal.aborted || schemaAbortController !== controller) return;
+			if (draftStepId !== stepId || JSON.stringify(draftConfig) !== configKey) {
+				applyingPivotSchema = false;
+				schemaAbortController = null;
+				return;
+			}
+			if (result.isErr()) {
+				applyingPivotSchema = false;
+				schemaAbortController = null;
+				pivotApplyError = `Could not load pivot output columns: ${result.error.message}`;
+				track({
+					event: 'schema_error',
+					action: 'pivot_apply_schema',
+					target: stepId,
+					meta: { message: result.error.message }
+				});
+				return;
+			}
+			pivotSchema = result.value;
+			applyingPivotSchema = false;
+			schemaAbortController = null;
+		}
+
 		analysisStore.updateStepConfig(stepId, appliedConfig);
 		if (step.is_applied === false) {
 			analysisStore.updateStep(stepId, { is_applied: true } as Partial<PipelineStep>);
 		}
 		if (step.type === 'pivot') {
-			if (draftPreview) {
-				schemaStore.setPreviewSchema(
-					stepId,
-					draftPreview.response.columns,
-					draftPreview.response.column_types,
-					hashPipeline(applySteps(analysisStore.pipeline))
-				);
-			} else {
-				schemaStore.clearPreviewSchema(stepId);
-			}
-			draftPivotSchemaPreview = null;
+			schemaStore.setPreviewSchema(
+				stepId,
+				pivotSchema?.columns ?? [],
+				pivotSchema?.column_types,
+				hashPipeline(applySteps(analysisStore.pipeline))
+			);
 		}
 		onConfigApply?.();
 		if (step.type === 'expression' || step.type === 'with_columns') {
@@ -333,8 +319,8 @@
 		if (!step) return;
 		schemaAbortController?.abort();
 		schemaAbortController = null;
-		fetchingPivotSchema = false;
-		draftPivotSchemaPreview = null;
+		applyingPivotSchema = false;
+		pivotApplyError = '';
 		draftConfig = cloneConfig(step.config as Record<string, unknown>);
 	}
 
@@ -521,10 +507,8 @@
 				<PivotConfig
 					schema={inputSchema}
 					bind:config={draftConfig}
-					onRefreshSchema={handleRefreshPivotSchema}
-					onConfigChange={handleClearPivotDraftSchema}
+					onConfigChange={handlePivotConfigChange}
 					outputColumns={pivotOutputColumns}
-					isRefreshing={fetchingPivotSchema}
 				/>
 			{:else if step.type === 'timeseries'}
 				<TimeSeriesConfig schema={inputSchema} bind:config={draftConfig} />
@@ -578,6 +562,9 @@
 					>
 				</div>
 			{/if}
+			{#if pivotApplyError}
+				<Callout tone="error">{pivotApplyError}</Callout>
+			{/if}
 		</div>
 		{#if !readOnly}
 			<PanelFooter>
@@ -628,12 +615,21 @@
 						}
 					})}
 					onclick={handleApplyConfig}
-					disabled={!canApply}
-					title={applyBlockedBecause ??
-						(hasChanges ? 'Apply configuration' : 'No changes to apply')}
+					disabled={!canApply || applyingPivotSchema}
+					aria-busy={applyingPivotSchema}
+					title={applyingPivotSchema
+						? 'Loading pivot output columns'
+						: (applyBlockedBecause ?? (hasChanges ? 'Apply configuration' : 'No changes to apply'))}
 					type="button"
 				>
-					Apply
+					{#if applyingPivotSchema}
+						<span class={css({ display: 'inline-flex', alignItems: 'center', gap: '2' })}>
+							<span class={spinner({ size: 'sm' })} aria-hidden="true"></span>
+							Loading schema…
+						</span>
+					{:else}
+						Apply
+					{/if}
 				</button>
 			</PanelFooter>
 		{/if}

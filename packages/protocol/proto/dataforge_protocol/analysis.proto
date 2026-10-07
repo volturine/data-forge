@@ -233,11 +233,13 @@ message ExplodeConfig {
 message PivotConfig {
   repeated string index = 1;
   string columns = 2;
-  optional string values = 3;
+  reserved 3;
+  reserved "values";
   PivotAggregateFunction aggregate_function = 4 [(buf.validate.field).enum = {
     defined_only: true
     not_in: 0
   }];
+  repeated string value_columns = 5;
 }
 
 message UnionByNameConfig {

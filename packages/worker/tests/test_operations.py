@@ -1004,7 +1004,7 @@ def test_pivot_handler():
         {
             "index": ["idx"],
             "columns": "col",
-            "values": "val",
+            "value_columns": ["val"],
             "aggregate_function": "first",
             "on_columns": ["x", "y"],
         },
@@ -1020,12 +1020,39 @@ def test_pivot_handler_auto_discovers_on_columns_for_small_cardinality():
         {
             "index": ["idx"],
             "columns": "col",
-            "values": "val",
+            "value_columns": ["val"],
             "aggregate_function": "first",
         },
     )
     result = lf.collect()
     assert result.columns == ["idx", "x", "y"]
+
+
+def test_pivot_handler_aggregates_multiple_value_columns():
+    handler = PivotHandler()
+    lf = handler(
+        pl.DataFrame(
+            {
+                "idx": ["a", "a", "a"],
+                "col": ["x", "x", "y"],
+                "sales": [1, 2, 3],
+                "units": [4, 5, 6],
+            }
+        ).lazy(),
+        {
+            "index": ["idx"],
+            "columns": "col",
+            "value_columns": ["sales", "units"],
+            "aggregate_function": "sum",
+            "on_columns": ["x", "y"],
+        },
+    )
+
+    result = lf.collect()
+    assert result["sales_x"].to_list() == [3]
+    assert result["sales_y"].to_list() == [3]
+    assert result["units_x"].to_list() == [9]
+    assert result["units_y"].to_list() == [6]
 
 
 def test_pivot_handler_rejects_unbounded_auto_discovery(
@@ -1039,7 +1066,7 @@ def test_pivot_handler_rejects_unbounded_auto_discovery(
             {
                 "index": ["idx"],
                 "columns": "col",
-                "values": "val",
+                "value_columns": ["val"],
                 "aggregate_function": "first",
             },
         )
