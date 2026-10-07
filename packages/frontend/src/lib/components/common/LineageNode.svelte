@@ -3,6 +3,7 @@
 	import type { Node } from '@xyflow/svelte';
 	import type { LineageNodeData } from './lineage-flow';
 	import { css } from '$lib/styles/panda';
+	import { Database, GitBranch, Table, Workflow } from '@lucide/svelte';
 
 	type LineageNodeProps = NodeProps<Node<LineageNodeData, 'lineage'>>;
 
@@ -49,6 +50,7 @@
 			gap: '1',
 			width: '100%',
 			height: '100%',
+			justifyContent: 'center',
 			boxSizing: 'border-box',
 			overflow: 'hidden',
 			borderWidth: '1',
@@ -72,18 +74,37 @@
 		}
 	}}
 >
-	<div
-		class={css({
-			overflow: 'hidden',
-			textOverflow: 'ellipsis',
-			whiteSpace: 'nowrap',
-			fontSize: 'sm',
-			fontWeight: 'semibold',
-			color: data.kind === 'internal' ? 'fg.tertiary' : 'fg.primary'
-		})}
-		data-testid="lineage-node-name"
-	>
-		{data.name}
+	<div class={css({ display: 'flex', alignItems: 'center', gap: '2', minWidth: '0' })}>
+		<span
+			class={css({ display: 'flex', flexShrink: '0', color: 'fg.muted' })}
+			data-testid="lineage-node-kind-icon"
+			data-kind-icon={data.kind}
+			aria-hidden="true"
+		>
+			{#if data.kind === 'source'}
+				<Database size={14} />
+			{:else if data.kind === 'output'}
+				<Table size={14} />
+			{:else if data.kind === 'internal'}
+				<GitBranch size={14} />
+			{:else}
+				<Workflow size={14} />
+			{/if}
+		</span>
+		<div
+			class={css({
+				overflow: 'hidden',
+				textOverflow: 'ellipsis',
+				whiteSpace: 'nowrap',
+				fontSize: 'sm',
+				fontWeight: 'semibold',
+				color: data.kind === 'internal' ? 'fg.tertiary' : 'fg.primary',
+				minWidth: '0'
+			})}
+			data-testid="lineage-node-name"
+		>
+			{data.name}
+		</div>
 	</div>
 	{#if data.meta}
 		<div
