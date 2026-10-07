@@ -9,7 +9,7 @@ export type LineageLayoutMode = 'horizontal' | 'vertical' | 'grid';
 
 export interface LineageNodeData extends Record<string, unknown> {
 	kind: NodeKind;
-	label: string;
+	name: string;
 	meta: string | null;
 }
 
@@ -137,7 +137,7 @@ export function buildFlowGraph(
 			position,
 			width: LINEAGE_NODE_WIDTH,
 			height: LINEAGE_NODE_HEIGHT,
-			data: { kind: node.node_kind, label: node.name, meta }
+			data: { kind: node.node_kind, name: node.name, meta }
 		});
 	}
 
