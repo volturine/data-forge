@@ -11,6 +11,7 @@ import {
 	parseDateTimeInputToIso,
 	getYearInZone,
 	getTimezoneSettings,
+	isValidTimeZone,
 	toEpoch,
 	formatTimeValue
 } from './datetime';
@@ -19,26 +20,30 @@ const NOON_UTC = Temporal.Instant.from('2024-06-15T12:00:00Z');
 const MIDNIGHT_UTC = Temporal.Instant.from('2024-06-15T00:00:00Z');
 const previousUser = authStore.user;
 
+function userWithTimezone(timezone: string): UserPublic {
+	return {
+		id: 'user-1',
+		email: 'test@example.com',
+		display_name: 'Test User',
+		avatar_url: null,
+		status: 'active',
+		email_verified: true,
+		has_password: true,
+		preferences: { timezone },
+		providers: [],
+		created_at: '2026-01-01T00:00:00Z'
+	};
+}
+
 afterEach(() => {
 	authStore.user = previousUser;
 });
 
 describe('getTimezoneSettings', () => {
 	test('uses the saved user timezone for frontend date displays', () => {
-		authStore.user = {
-			id: 'user-1',
-			email: 'test@example.com',
-			display_name: 'Test User',
-			avatar_url: null,
-			status: 'active',
-			email_verified: true,
-			has_password: true,
-			preferences: { timezone: 'America/Los_Angeles' },
-			providers: [],
-			created_at: '2026-01-01T00:00:00Z'
-		} satisfies UserPublic;
+		authStore.user = userWithTimezone('America/Los_Angeles');
 
-		expect(getTimezoneSettings()).toEqual({ timezone: 'America/Los_Angeles', normalize: true });
+		expect(getTimezoneSettings()).toEqual({ timezone: 'America/Los_Angeles' });
 		const timestamp = '2026-10-06T21:11:15Z';
 		const expected = new Intl.DateTimeFormat(undefined, {
 			year: 'numeric',
@@ -54,24 +59,19 @@ describe('getTimezoneSettings', () => {
 
 	test('falls back to the browser timezone if no preference is saved', () => {
 		authStore.user = null;
-		expect(getTimezoneSettings()).toEqual({ timezone: localTimeZone(), normalize: true });
+		expect(getTimezoneSettings()).toEqual({ timezone: localTimeZone() });
 	});
 
 	test('falls back to the browser timezone for an invalid saved preference', () => {
-		authStore.user = {
-			id: 'user-1',
-			email: 'test@example.com',
-			display_name: 'Test User',
-			avatar_url: null,
-			status: 'active',
-			email_verified: true,
-			has_password: true,
-			preferences: { timezone: 'Mars/Phobos' },
-			providers: [],
-			created_at: '2026-01-01T00:00:00Z'
-		} satisfies UserPublic;
+		authStore.user = userWithTimezone('Mars/Phobos');
 
-		expect(getTimezoneSettings()).toEqual({ timezone: localTimeZone(), normalize: true });
+		expect(getTimezoneSettings()).toEqual({ timezone: localTimeZone() });
+	});
+
+	test('rejects unsupported IANA timezones', () => {
+		const timezone = 'Invalid/TimezoneCacheRegression';
+		expect(isValidTimeZone(timezone)).toBe(false);
+		expect(isValidTimeZone(timezone)).toBe(false);
 	});
 });
 
@@ -235,6 +235,11 @@ describe('parseDateTimeInputToIso', () => {
 	test('normalize mode with UTC produces correct ISO', () => {
 		const result = parseDateTimeInputToIso('2024-06-15T14:30', 'UTC', true);
 		expect(result).toBe('2024-06-15T14:30:00Z');
+	});
+
+	test('interprets local date-time input in the selected zone and sends a UTC instant', () => {
+		const result = parseDateTimeInputToIso('2024-06-15T14:30', 'America/Los_Angeles', true);
+		expect(result).toBe('2024-06-15T21:30:00Z');
 	});
 
 	test('round-trips through formatDateTimeForInput', () => {

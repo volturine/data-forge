@@ -2,7 +2,8 @@
 	import { authStore } from '$lib/stores/auth.svelte';
 	import { isValidTimeZone } from '$lib/utils/datetime';
 	import { localTimeZone } from '$lib/utils/temporal';
-	import { button, css, label } from '$lib/styles/panda';
+	import { button, css, input, label } from '$lib/styles/panda';
+	import FeedbackBanner from '$lib/components/ui/FeedbackBanner.svelte';
 
 	const deviceTimeZone = localTimeZone();
 	const supportedTimeZones = [
@@ -10,19 +11,33 @@
 		...new Set(
 			[...Intl.supportedValuesOf('timeZone'), deviceTimeZone].filter((zone) => zone !== 'UTC')
 		)
-	];
+	].map((timezone) => {
+		const offset = new Intl.DateTimeFormat('en-US', {
+			timeZone: timezone,
+			timeZoneName: 'longOffset'
+		})
+			.formatToParts(Date.now())
+			.find((part) => part.type === 'timeZoneName')?.value;
+		return { timezone, label: `${timezone} (${offset?.replace(/^GMT/, 'UTC') ?? 'UTC'})` };
+	});
 	const savedTimeZone = authStore.user?.preferences.timezone;
+	// This form keeps a mount-time draft so background auth refreshes don't overwrite in-progress edits.
 	let selectedTimeZone = $state(
 		typeof savedTimeZone === 'string' && isValidTimeZone(savedTimeZone) ? savedTimeZone : ''
 	);
 	let saving = $state(false);
-	let feedback = $state<{ type: 'success' | 'error'; message: string } | null>(null);
+	let feedback = $state<{ kind: 'success' | 'error'; message: string } | null>(null);
 	const displayTimeZone = $derived(selectedTimeZone || deviceTimeZone);
 
 	async function savePreferences(event: SubmitEvent) {
 		event.preventDefault();
 		saving = true;
 		feedback = null;
+		if (selectedTimeZone && !isValidTimeZone(selectedTimeZone)) {
+			feedback = { kind: 'error', message: 'Choose a listed time zone or use device timezone' };
+			saving = false;
+			return;
+		}
 
 		const preferences = { ...(authStore.user?.preferences ?? {}) };
 		if (selectedTimeZone) preferences.timezone = selectedTimeZone;
@@ -30,31 +45,15 @@
 
 		const success = await authStore.updateProfile({ preferences });
 		feedback = success
-			? { type: 'success', message: 'Preferences saved' }
-			: { type: 'error', message: authStore.error ?? 'Could not save preferences' };
+			? { kind: 'success', message: 'Preferences saved' }
+			: { kind: 'error', message: authStore.error ?? 'Could not save preferences' };
 		saving = false;
 	}
 </script>
 
 <div class={css({ display: 'flex', flexDirection: 'column', gap: '6' })}>
 	{#if feedback}
-		<div
-			class={css({
-				borderWidth: '1',
-				padding: '2',
-				fontSize: 'sm',
-				...(feedback.type === 'success'
-					? {
-							borderColor: 'border.success',
-							backgroundColor: 'bg.success',
-							color: 'fg.success'
-						}
-					: { borderColor: 'border.error', backgroundColor: 'bg.error', color: 'fg.error' })
-			})}
-			role={feedback.type === 'error' ? 'alert' : 'status'}
-		>
-			{feedback.message}
-		</div>
+		<FeedbackBanner kind={feedback.kind} message={feedback.message} />
 	{/if}
 
 	<section
@@ -91,28 +90,29 @@
 		>
 			<div>
 				<label for="timezone" class={label({ variant: 'field' })}>Time zone</label>
-				<select
+				<input
 					id="timezone"
-					class={css({
-						width: 'full',
-						fontSize: 'sm2',
-						color: 'fg.primary',
-						backgroundColor: 'bg.primary',
-						borderWidth: '1',
-						borderRadius: '0',
-						paddingX: '3.5',
-						paddingY: '2.25',
-						_focus: { outline: 'none', borderColor: 'border.accent' },
-						_disabled: { opacity: '0.5', cursor: 'not-allowed', backgroundColor: 'bg.tertiary' }
-					})}
+					type="text"
+					class={input()}
+					list="supported-timezones"
+					placeholder="Search time zones"
+					autocomplete="off"
 					bind:value={selectedTimeZone}
 					disabled={saving}
-				>
-					<option value="">Use device timezone ({deviceTimeZone})</option>
-					{#each supportedTimeZones as timezone (timezone)}
-						<option value={timezone}>{timezone}</option>
+				/>
+				<datalist id="supported-timezones">
+					{#each supportedTimeZones as { timezone, label } (timezone)}
+						<option value={timezone} {label}></option>
 					{/each}
-				</select>
+				</datalist>
+				<button
+					type="button"
+					class={button({ variant: 'secondary', size: 'sm' })}
+					onclick={() => (selectedTimeZone = '')}
+					disabled={saving}
+				>
+					Use device timezone
+				</button>
 				<p class={css({ fontSize: 'xs', color: 'fg.tertiary', marginTop: '1' })}>
 					Currently showing times in {displayTimeZone}.
 				</p>

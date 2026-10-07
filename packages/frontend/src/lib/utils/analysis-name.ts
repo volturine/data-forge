@@ -23,7 +23,7 @@ export function formatAnalysisTimestamp(now: Date, timeZone?: string): string {
 
 /** Names analyses after their creation time so they never collide; replaces any earlier stamp. */
 export function timestampedAnalysisName(base: string, now = new Date()): string {
-	const { timezone, normalize } = getTimezoneSettings();
+	const { timezone } = getTimezoneSettings();
 	const stem = base.trim().replace(TIMESTAMP_SUFFIX_RE, '');
-	return `${stem} · ${formatAnalysisTimestamp(now, normalize ? timezone : undefined)}`;
+	return `${stem} · ${formatAnalysisTimestamp(now, timezone)}`;
 }

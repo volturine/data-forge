@@ -11,8 +11,6 @@ const { ConfigStore } = await import('./config.svelte');
 
 function makeConfig(overrides: Partial<FrontendConfig> = {}): FrontendConfig {
 	return {
-		timezone: 'Europe/Berlin',
-		normalize_tz: true,
 		log_client_batch_size: 50,
 		log_client_flush_interval_ms: 2000,
 		log_client_dedupe_window_ms: 300,
@@ -77,14 +75,6 @@ describe('ConfigStore', () => {
 	});
 
 	describe('getter defaults before fetch', () => {
-		test('timezone returns UTC', () => {
-			expect(store.timezone).toBe('UTC');
-		});
-
-		test('normalizeTz returns false', () => {
-			expect(store.normalizeTz).toBe(false);
-		});
-
 		test('auditLogBatchSize returns 20', () => {
 			expect(store.auditLogBatchSize).toBe(20);
 		});
@@ -141,7 +131,6 @@ describe('ConfigStore', () => {
 		test('getters return fetched values', async () => {
 			mockSuccess(
 				makeConfig({
-					timezone: 'America/New_York',
 					smtp_enabled: true,
 					auth_required: false,
 					verify_email_address: false
@@ -150,7 +139,6 @@ describe('ConfigStore', () => {
 
 			await store.fetch();
 
-			expect(store.timezone).toBe('America/New_York');
 			expect(store.smtpEnabled).toBe(true);
 			expect(store.authRequired).toBe(false);
 			expect(store.verifyEmailAddress).toBe(false);
@@ -173,7 +161,7 @@ describe('ConfigStore', () => {
 		test('getters still return defaults after error', async () => {
 			mockError('boom');
 			await store.fetch();
-			expect(store.timezone).toBe('UTC');
+			expect(store.auditLogBatchSize).toBe(20);
 		});
 	});
 

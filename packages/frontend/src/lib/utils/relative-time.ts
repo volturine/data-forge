@@ -3,7 +3,7 @@ const HOUR_MS = 60 * MINUTE_MS;
 const DAY_MS = 24 * HOUR_MS;
 const WEEK_MS = 7 * DAY_MS;
 const MONTH_MS = 30 * DAY_MS;
-const relativeTimeFormat = new Intl.RelativeTimeFormat(undefined, { numeric: 'always' });
+const relativeTimeFormat = new Intl.RelativeTimeFormat('en', { numeric: 'always' });
 
 /**
  * Format an epoch-ms timestamp as a relative time label per the freshness PRD.

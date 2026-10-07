@@ -4,6 +4,7 @@ import { localTimeZone, parseInstantWithZone } from '$lib/utils/temporal';
 type DateInput = string | number | Temporal.Instant;
 
 const DATE_TIME_INPUT_RE = /^(\d{4}-\d{2}-\d{2})T(\d{2}):(\d{2})$/;
+const timeZoneValidity = new Map<string, boolean>();
 
 function instantFor(
 	value: DateInput,
@@ -53,51 +54,56 @@ export function formatTimeValue(
 	);
 }
 
-export function getTimezoneSettings(): { timezone: string; normalize: boolean } {
+export function getTimezoneSettings(): { timezone: string } {
 	const preference = authStore.user?.preferences.timezone;
 	if (typeof preference === 'string' && isValidTimeZone(preference)) {
-		return { timezone: preference, normalize: true };
+		return { timezone: preference };
 	}
-	return { timezone: localTimeZone(), normalize: true };
+	return { timezone: localTimeZone() };
 }
 
 export function isValidTimeZone(timezone: string): boolean {
+	const cached = timeZoneValidity.get(timezone);
+	if (cached !== undefined) return cached;
+
+	let valid = true;
 	try {
 		new Intl.DateTimeFormat(undefined, { timeZone: timezone });
-		return true;
 	} catch {
-		return false;
+		valid = false;
 	}
+	timeZoneValidity.set(timezone, valid);
+	return valid;
 }
 
 export function formatDateDisplay(value: DateInput, options?: Intl.DateTimeFormatOptions): string {
-	const { timezone, normalize } = getTimezoneSettings();
-	return formatDateValue(value, timezone, normalize, options);
+	const { timezone } = getTimezoneSettings();
+	return formatDateValue(value, timezone, true, options);
 }
 
 export function formatDateTimeDisplay(value: DateInput): string {
-	const { timezone, normalize } = getTimezoneSettings();
-	return formatDateTimeValue(value, timezone, normalize);
+	const { timezone } = getTimezoneSettings();
+	return formatDateTimeValue(value, timezone, true);
 }
 
 export function formatTimeDisplay(value: DateInput, options?: Intl.DateTimeFormatOptions): string {
-	const { timezone, normalize } = getTimezoneSettings();
-	return formatTimeValue(value, timezone, normalize, options);
+	const { timezone } = getTimezoneSettings();
+	return formatTimeValue(value, timezone, true, options);
 }
 
 export function formatDateInput(value: DateInput): string {
-	const { timezone, normalize } = getTimezoneSettings();
-	return formatDateForInput(value, timezone, normalize);
+	const { timezone } = getTimezoneSettings();
+	return formatDateForInput(value, timezone, true);
 }
 
 export function getYearDisplay(value: DateInput): number | null {
-	const { timezone, normalize } = getTimezoneSettings();
-	return getYearInZone(value, timezone, normalize);
+	const { timezone } = getTimezoneSettings();
+	return getYearInZone(value, timezone, true);
 }
 
 export function toEpochDisplay(value: DateInput): number {
-	const { timezone, normalize } = getTimezoneSettings();
-	return toEpoch(value, timezone, normalize);
+	const { timezone } = getTimezoneSettings();
+	return toEpoch(value, timezone, true);
 }
 
 export function formatDateTimeValue(

@@ -813,6 +813,17 @@ test.describe('Datasources – re-ingest freshness & time travel', () => {
 		);
 	}
 
+	async function saveTimezonePreference(page: Page, timezone: string | null): Promise<void> {
+		await gotoProfile(page, 'preferences');
+		if (timezone) await page.getByLabel('Time zone').fill(timezone);
+		else {
+			await page.getByLabel('Time zone').fill('');
+			await page.getByRole('button', { name: 'Use device timezone' }).click();
+		}
+		await page.getByRole('button', { name: 'Save preferences' }).click();
+		await expect(page.getByRole('status')).toHaveText('Preferences saved');
+	}
+
 	test('re-ingest advances the Last updated stamp instead of staying stale', async ({
 		page,
 		request
@@ -863,12 +874,26 @@ test.describe('Datasources – re-ingest freshness & time travel', () => {
 	test('renders UTC freshness timestamps in the saved user timezone', async ({ page, request }) => {
 		const ds = `e2e-timezone-${uid()}`;
 		const dsId = await createCsvDatasource(request, ds, REINGEST_CSV);
-		let originalPreferences: Record<string, unknown> | null = null;
+		let originalTimeZone: string | null = null;
+		let originalTimeZoneCaptured = false;
 		try {
 			const meResponse = await page.context().request.get('/api/v1/auth/me');
 			expect(meResponse.ok()).toBeTruthy();
 			const me = (await meResponse.json()) as { preferences: Record<string, unknown> };
-			originalPreferences = me.preferences;
+			originalTimeZone =
+				typeof me.preferences.timezone === 'string' ? me.preferences.timezone : null;
+			if (originalTimeZone) {
+				const isValid = await page.evaluate((timezone) => {
+					try {
+						new Intl.DateTimeFormat('en-US', { timeZone: timezone });
+						return true;
+					} catch {
+						return false;
+					}
+				}, originalTimeZone);
+				if (!isValid) originalTimeZone = null;
+			}
+			originalTimeZoneCaptured = true;
 
 			await gotoDatasourcesPage(page);
 			await selectDatasourceAndWaitForConfig(page, ds);
@@ -884,8 +909,15 @@ test.describe('Datasources – re-ingest freshness & time travel', () => {
 			const localTitle = await formatTimestampInZone(page, timestampMs, 'Europe/Bratislava');
 			await expect(timestamp).toHaveAttribute('title', localTitle);
 
+			const losAngelesOption = page.locator(
+				'#supported-timezones option[value="America/Los_Angeles"]'
+			);
 			await gotoProfile(page, 'preferences');
-			await page.getByLabel('Time zone').selectOption('America/Los_Angeles');
+			await expect(losAngelesOption).toHaveAttribute(
+				'label',
+				/^America\/Los_Angeles \(UTC[-+]\d{2}:\d{2}\)$/
+			);
+			await page.getByLabel('Time zone').fill('America/Los_Angeles');
 			await page.getByRole('button', { name: 'Save preferences' }).click();
 			await expect(page.getByRole('status')).toHaveText('Preferences saved');
 
@@ -905,12 +937,16 @@ test.describe('Datasources – re-ingest freshness & time travel', () => {
 			const savedMeResponse = await page.context().request.get('/api/v1/auth/me');
 			const savedMe = (await savedMeResponse.json()) as { preferences: Record<string, unknown> };
 			expect(savedMe.preferences.timezone).toBe('America/Los_Angeles');
+
+			await saveTimezonePreference(page, null);
+			const clearedMeResponse = await page.context().request.get('/api/v1/auth/me');
+			const clearedMe = (await clearedMeResponse.json()) as {
+				preferences: Record<string, unknown>;
+			};
+			expect(clearedMe.preferences.timezone).toBeUndefined();
 		} finally {
-			if (originalPreferences) {
-				await page
-					.context()
-					.request.put('/api/v1/auth/profile', { data: { preferences: originalPreferences } })
-					.catch(() => undefined);
+			if (originalTimeZoneCaptured) {
+				await saveTimezonePreference(page, originalTimeZone).catch(() => undefined);
 			}
 			await deleteDatasourceViaUI(page, ds, { id: dsId }).catch(() => undefined);
 		}

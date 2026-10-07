@@ -1,7 +1,7 @@
 from datetime import datetime
 
 from protovalidate import ValidationError, Validator
-from pydantic import BaseModel, ConfigDict, Field, field_validator
+from pydantic import AwareDatetime, BaseModel, ConfigDict, Field, field_validator
 
 from backend_core.domain.datasource.source_types import DataSourceFileType, DataSourceType
 from backend_core.domain.engine_runs.schemas import SchemaDiffStatus
@@ -261,7 +261,7 @@ class InternalPostgresToggleRequest(BaseModel):
 
 
 class DataSourceResponse(BaseModel):
-    model_config = ConfigDict(from_attributes=True)
+    model_config = ConfigDict(from_attributes=True, validate_assignment=True)
 
     id: str
     name: str
@@ -274,7 +274,7 @@ class DataSourceResponse(BaseModel):
     is_hidden: bool = False
     created_at: datetime
     output_of_tab_id: str | None = None
-    last_data_update: datetime | None = None
+    last_data_update: AwareDatetime | None = None
 
 
 class DataSourceListItem(BaseModel):
@@ -284,7 +284,7 @@ class DataSourceListItem(BaseModel):
     (e.g. the analysis wizard) can show size without loading full column metadata.
     """
 
-    model_config = ConfigDict(from_attributes=True)
+    model_config = ConfigDict(from_attributes=True, validate_assignment=True)
 
     id: str
     name: str
@@ -297,7 +297,7 @@ class DataSourceListItem(BaseModel):
     is_hidden: bool = False
     created_at: datetime
     output_of_tab_id: str | None = None
-    last_data_update: datetime | None = None
+    last_data_update: AwareDatetime | None = None
 
 
 class DataSourceUpdate(DataSourceDescriptionModel):
