@@ -2885,9 +2885,9 @@ def test_postgres_runtime_coordinator_takeover_during_compute_terminal_publicati
             data_plane_port=data_plane_port,
         )
         base_env.update(engine_runtime_env)
-        # The test holds the request row while waiting for terminal publication;
-        # the lease must outlast that observation window because renewal updates
-        # the same row and is intentionally blocked by the test transaction.
+        # The test holds the request row while waiting up to 90 seconds for
+        # terminal publication; renewal updates the same row and is blocked by
+        # the test transaction, so preserve a 10-second lease margin.
         base_env['RUNTIME_WORK_LEASE_TTL_SECONDS'] = '120'
         _init_runtime_db(base_env)
         coordinator_application_name = f'dataforge-test-coordinator-{uuid.uuid4().hex[:12]}'
@@ -2969,7 +2969,7 @@ def test_postgres_runtime_coordinator_takeover_during_compute_terminal_publicati
 
             def running_preview_request() -> tuple[str, int] | None:
                 request = _active_preview_request_with_lease(container)
-                if request is None or request[1] != enums_pb2.COMPUTE_REQUEST_STATUS_RUNNING or request[2] < 60:
+                if request is None or request[1] != enums_pb2.COMPUTE_REQUEST_STATUS_RUNNING or request[2] < 100:
                     return None
                 return request[0], request[1]
 
