@@ -2,219 +2,223 @@
 	import type { Schema } from '$lib/types/schema';
 	import type { PivotConfigData } from '$lib/types/operation-config';
 	import ColumnDropdown from '$lib/components/common/ColumnDropdown.svelte';
-	import { css, input, label, stepConfig } from '$lib/styles/panda';
+	import MultiSelectColumnDropdown from '$lib/components/common/MultiSelectColumnDropdown.svelte';
+	import SectionHeader from '$lib/components/ui/SectionHeader.svelte';
+	import { button, css, input, label, spinner, stepConfig } from '$lib/styles/panda';
+
+	const uid = $props.id();
+	const rowsLabelId = `${uid}-rows`;
+	const columnsLabelId = `${uid}-columns`;
+	const aggregatesLabelId = `${uid}-aggregates`;
+	const valueColumnLabelId = `${uid}-value-column`;
+	const valueColumnSelectionId = `${uid}-value-column-selection`;
+	const aggregateFunctionId = `${uid}-aggregate-function`;
+	const outputColumnsLabelId = `${uid}-output-columns`;
 
 	interface Props {
 		schema: Schema;
 		config?: PivotConfigData;
 		onRefreshSchema?: () => void;
+		onConfigChange?: () => void;
 		isRefreshing?: boolean;
+		outputColumns?: string[];
 	}
 
 	let {
 		schema,
 		config = $bindable({ index: [], columns: '', values: null, aggregate_function: 'first' }),
 		onRefreshSchema,
-		isRefreshing = false
+		onConfigChange,
+		isRefreshing = false,
+		outputColumns = []
 	}: Props = $props();
 
-	// Check if config is valid for schema refresh
+	const safeIndex = $derived(Array.isArray(config.index) ? config.index : []);
+	const aggregateFunctions: PivotConfigData['aggregate_function'][] = [
+		'first',
+		'last',
+		'sum',
+		'mean',
+		'median',
+		'min',
+		'max',
+		'count'
+	];
 	const isConfigValid = $derived(
-		!!(config?.columns && Array.isArray(config?.index) && config.index.length > 0)
+		!!config.columns &&
+			safeIndex.length > 0 &&
+			!safeIndex.includes(config.columns) &&
+			(!config.values || (config.values !== config.columns && !safeIndex.includes(config.values)))
 	);
 
-	// Safe accessor
-	const safeIndex = $derived(Array.isArray(config?.index) ? config.index : []);
+	function updateRows(columns: string[]): void {
+		config.index = columns.filter(
+			(column) => column !== config.columns && column !== config.values
+		);
+		onConfigChange?.();
+	}
 
-	const aggregateFunctions = ['first', 'last', 'sum', 'mean', 'median', 'min', 'max', 'count'];
+	function updatePivotColumn(column: string): void {
+		config.columns = column;
+		config.index = safeIndex.filter((name) => name !== column);
+		if (config.values === column) config.values = null;
+		onConfigChange?.();
+	}
 
-	function toggleIndexColumn(columnName: string) {
-		const base = Array.isArray(config.index) ? config.index : [];
-		const idx = base.indexOf(columnName);
-		config.index = idx > -1 ? base.filter((_, i) => i !== idx) : [...base, columnName];
+	function updateValueColumn(column: string): void {
+		const value = column || null;
+		config.values = value;
+		if (value) config.index = safeIndex.filter((name) => name !== value);
+		onConfigChange?.();
+	}
+
+	function updateAggregateFunction(value: PivotConfigData['aggregate_function']): void {
+		config.aggregate_function = value;
+		onConfigChange?.();
 	}
 </script>
 
 <div class={stepConfig()} role="region" aria-label="Pivot configuration">
-	<div class={css({ marginBottom: '5' })} role="group" aria-labelledby="pivot-column-label">
-		<div
-			id="pivot-column-label"
-			class={css({
-				display: 'block',
-				fontSize: 'xs',
-				fontWeight: 'semibold',
-				color: 'fg.muted',
-				marginBottom: '1.5',
-				textTransform: 'uppercase',
-				letterSpacing: 'wider'
-			})}
-		>
-			Pivot Column <span class={css({ fontSize: 'xs', color: 'fg.muted' })}
-				>(values become new columns)</span
-			>
-		</div>
-		<ColumnDropdown
-			{schema}
-			value={config.columns ?? ''}
-			onChange={(val) => (config.columns = val)}
-			placeholder="Select column..."
-		/>
-		<span id="pivot-column-help" class={css({ fontSize: 'xs', color: 'fg.muted' })}
-			>Select the column whose unique values will become new columns</span
-		>
-	</div>
+	<p class={css({ marginTop: '0', marginBottom: '5', color: 'fg.tertiary', fontSize: 'xs' })}>
+		Choose how rows are grouped, which values become columns, and what to aggregate.
+	</p>
 
-	<div class={css({ marginBottom: '5' })} role="group" aria-labelledby="index-columns-label">
-		<span
-			id="index-columns-label"
-			class={css({
-				display: 'block',
-				fontSize: 'xs',
-				fontWeight: 'semibold',
-				color: 'fg.muted',
-				marginBottom: '1.5',
-				textTransform: 'uppercase',
-				letterSpacing: 'wider'
-			})}>Index Columns <span class={css({ fontSize: 'xs', color: 'fg.muted' })}>(rows)</span></span
-		>
+	<div class={css({ display: 'flex', flexDirection: 'column', gap: '5' })}>
 		<div
-			class={css({
-				gridTemplateColumns: 'repeat(auto-fill, minmax(140px, 1fr))',
-				border: 'none',
-				backgroundColor: 'transparent',
-				display: 'grid',
-				gap: '3',
-				padding: '2',
-				maxHeight: 'inputSm',
-				overflowY: 'auto'
-			})}
+			class={css({ display: 'flex', flexDirection: 'column', gap: '2' })}
+			role="group"
+			aria-labelledby={rowsLabelId}
+			data-testid="pivot-rows-group"
 		>
-			{#each schema.columns as column (column.name)}
-				<label
-					class={css({
-						display: 'flex',
-						cursor: 'pointer',
-						alignItems: 'center',
-						gap: '3',
-						fontSize: 'sm',
-						fontWeight: 'normal',
-						color: 'fg.secondary',
-						textTransform: 'none',
-						letterSpacing: 'normal',
-						marginBottom: '0',
-						paddingX: '2',
-						paddingY: '1',
-						_hover: { backgroundColor: 'bg.hover' }
-					})}
-				>
-					<input
-						id={`pivot-checkbox-index-${column.name}`}
-						data-testid={`pivot-index-checkbox-${column.name}`}
-						type="checkbox"
-						name="pivot-index"
-						class={css({ accentColor: 'token(colors.accent.primary)' })}
-						checked={safeIndex.includes(column.name)}
-						onchange={() => toggleIndexColumn(column.name)}
-						aria-label={`Include ${column.name} as index column`}
-					/>
-					<span>{column.name}</span>
-				</label>
-			{/each}
-		</div>
-		{#if safeIndex.length > 0}
-			<div
-				id="pivot-index-summary"
-				class={css({ marginTop: '2', fontSize: 'xs', color: 'fg.muted' })}
+			<SectionHeader id={rowsLabelId}>Rows</SectionHeader>
+			<MultiSelectColumnDropdown
+				{schema}
+				value={safeIndex}
+				onChange={updateRows}
+				filter={(column) =>
+					safeIndex.includes(column.name) ||
+					(column.name !== config.columns && column.name !== config.values)}
+				showSelectAll={false}
+				placeholder="Choose row fields..."
+			/>
+			<p
+				class={css({ margin: '0', color: 'fg.muted', fontSize: 'xs' })}
+				role="status"
 				aria-live="polite"
 			>
-				{safeIndex.length} selected
+				{safeIndex.length} row field{safeIndex.length === 1 ? '' : 's'} selected. One output row for each
+				unique combination.
+			</p>
+		</div>
+
+		<div
+			class={css({ display: 'flex', flexDirection: 'column', gap: '2' })}
+			role="group"
+			aria-labelledby={columnsLabelId}
+			data-testid="pivot-columns-group"
+		>
+			<SectionHeader id={columnsLabelId}>Columns</SectionHeader>
+			<ColumnDropdown
+				{schema}
+				value={config.columns ?? ''}
+				onChange={updatePivotColumn}
+				filter={(column) =>
+					column.name === config.columns ||
+					(!safeIndex.includes(column.name) && column.name !== config.values)}
+				placeholder="Choose a column field..."
+			/>
+			<p class={css({ margin: '0', color: 'fg.muted', fontSize: 'xs' })}>
+				Each unique value becomes an output column.
+			</p>
+		</div>
+
+		<div
+			class={css({ display: 'flex', flexDirection: 'column', gap: '2' })}
+			role="group"
+			aria-labelledby={aggregatesLabelId}
+			data-testid="pivot-aggregates-group"
+		>
+			<SectionHeader id={aggregatesLabelId}>Aggregates</SectionHeader>
+			<p class={css({ margin: '0', color: 'fg.muted', fontSize: 'xs' })}>
+				Choose the value column and function for each output cell.
+			</p>
+			<div class={css({ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: '2' })}>
+				<div role="group" aria-labelledby={valueColumnLabelId}>
+					<span id={valueColumnLabelId} class={label({ variant: 'field' })}>Value column</span>
+					<span id={valueColumnSelectionId} class={css({ srOnly: true })}>
+						{config.values ?? 'All remaining columns'}
+					</span>
+					<ColumnDropdown
+						{schema}
+						value={config.values ?? ''}
+						onChange={updateValueColumn}
+						filter={(column) =>
+							column.name === config.values ||
+							(column.name !== config.columns && !safeIndex.includes(column.name))}
+						triggerLabelledby={`${valueColumnLabelId} ${valueColumnSelectionId}`}
+						placeholder="All remaining columns"
+						clearable
+					/>
+				</div>
+				<div>
+					<label class={label({ variant: 'field' })} for={aggregateFunctionId}>Function</label>
+					<select
+						id={aggregateFunctionId}
+						data-testid="pivot-agg-select"
+						class={input()}
+						value={config.aggregate_function}
+						onchange={(event) =>
+							updateAggregateFunction(
+								event.currentTarget.value as PivotConfigData['aggregate_function']
+							)}
+					>
+						{#each aggregateFunctions as func (func)}
+							<option value={func}>{func === 'count' ? 'Count rows' : func}</option>
+						{/each}
+					</select>
+				</div>
+			</div>
+		</div>
+
+		{#if onRefreshSchema}
+			<div class={css({ display: 'flex', flexDirection: 'column', gap: '1' })}>
+				<button
+					data-testid="pivot-preview-button"
+					class={button({ variant: 'primary', width: 'full' })}
+					onclick={onRefreshSchema}
+					disabled={!isConfigValid || isRefreshing}
+					type="button"
+					aria-busy={isRefreshing}
+				>
+					{#if isRefreshing}
+						<span class={spinner({ size: 'sm' })} aria-hidden="true"></span>
+						Loading output columns…
+					{:else}
+						Show output columns
+					{/if}
+				</button>
+				<p class={css({ margin: '0', color: 'fg.muted', fontSize: 'xs' })}>
+					Load the pivoted column names for the following steps.
+				</p>
+			</div>
+		{/if}
+		{#if outputColumns.length > 0}
+			<div
+				class={css({ borderWidth: '1', padding: '3', maxHeight: 'labelLg', overflowY: 'auto' })}
+				role="region"
+				aria-labelledby={outputColumnsLabelId}
+				aria-live="polite"
+				data-testid="pivot-output-schema"
+			>
+				<SectionHeader id={outputColumnsLabelId}>Output columns</SectionHeader>
+				<ul
+					class={css({ margin: '2 0 0', paddingLeft: '5', fontSize: 'xs', color: 'fg.secondary' })}
+				>
+					{#each outputColumns as column (column)}
+						<li data-testid="pivot-output-column">{column}</li>
+					{/each}
+				</ul>
 			</div>
 		{/if}
 	</div>
-
-	<div class={css({ marginBottom: '5' })}>
-		<div
-			class={css({
-				display: 'block',
-				fontSize: 'xs',
-				fontWeight: 'semibold',
-				color: 'fg.muted',
-				marginBottom: '1.5',
-				textTransform: 'uppercase',
-				letterSpacing: 'wider'
-			})}
-		>
-			Values Column
-		</div>
-		<ColumnDropdown
-			{schema}
-			value={config.values ?? ''}
-			onChange={(val) => (config.values = val)}
-			placeholder="All remaining columns"
-		/>
-	</div>
-
-	<div class={css({ marginBottom: '5' })}>
-		<label class={label()} for="pivot-select-agg">Aggregation</label>
-		<select
-			id="pivot-select-agg"
-			data-testid="pivot-agg-select"
-			class={input()}
-			bind:value={config.aggregate_function}
-		>
-			{#each aggregateFunctions as func (func)}
-				<option value={func}>{func}</option>
-			{/each}
-		</select>
-	</div>
-
-	{#if onRefreshSchema}
-		<div class={css({ marginBottom: '5' })}>
-			<button
-				id="pivot-btn-refresh"
-				data-testid="pivot-refresh-button"
-				class={css({
-					backgroundColor: 'accent.primary',
-					color: 'fg.inverse',
-					borderWidth: '1',
-					width: 'full',
-					paddingY: '2',
-					paddingX: '3',
-					fontSize: 'sm',
-					fontWeight: 'medium',
-					cursor: 'pointer',
-					display: 'flex',
-					alignItems: 'center',
-					justifyContent: 'center',
-					gap: '2',
-					_hover: { opacity: '0.9' },
-					_disabled: { opacity: '0.5', cursor: 'not-allowed' }
-				})}
-				onclick={onRefreshSchema}
-				disabled={!isConfigValid || isRefreshing}
-				type="button"
-				aria-busy={isRefreshing}
-			>
-				{#if isRefreshing}
-					<span
-						class={css({
-							width: 'iconXs',
-							height: 'iconXs',
-							borderWidth: '2',
-							borderColor: 'currentColor',
-							borderTopColor: 'transparent',
-							animation: 'spin 0.8s linear infinite'
-						})}
-						aria-hidden="true"
-					></span>
-					Refreshing...
-				{:else}
-					Refresh Output Columns
-				{/if}
-			</button>
-			<p class={css({ fontSize: 'xs', marginTop: '1', color: 'fg.muted' })}>
-				Click to compute the resulting columns after pivot
-			</p>
-		</div>
-	{/if}
 </div>

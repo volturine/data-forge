@@ -561,36 +561,178 @@ test.describe('Analyses – fill null config editing', () => {
 });
 
 test.describe('Analyses – pivot config editing', () => {
-	test('Pivot: pick pivot column, check index, set agg, Apply', async ({ page, request }) => {
+	test('draft pivot edits and previews keep the applied schema for following steps', async ({
+		page,
+		request
+	}) => {
+		const id = uid();
+		const analysis = `E2E Pivot Draft Schema ${id}`;
+		const aId = await createTrackedAnalysis(request, analysis, sharedBaseDatasourceId);
+		try {
+			const pivotPanel = await addStepAndOpenConfig(page, aId, 'pivot');
+			const rows = pivotPanel.getByRole('group', { name: 'Rows' });
+			const columns = pivotPanel.getByRole('group', { name: 'Columns' });
+			const aggregates = pivotPanel.getByRole('group', { name: 'Aggregates' });
+
+			await rows.locator('button[aria-expanded]').click();
+			await rows.getByRole('checkbox', { name: 'id', exact: true }).check();
+			await rows.getByRole('button', { name: /Done/ }).click();
+			await columns.locator('button[aria-expanded]').click();
+			await page.getByRole('option', { name: 'city', exact: true }).click();
+			await aggregates
+				.getByRole('group', { name: 'Value column' })
+				.getByRole('button', { name: /^Value column/ })
+				.click();
+			await page.getByRole('option', { name: 'age', exact: true }).click();
+			await pivotPanel.locator('[data-testid="pivot-agg-select"]').selectOption('sum');
+			await expect(
+				aggregates.getByRole('group', { name: 'Value column' }).getByRole('button', {
+					name: 'Value column age'
+				})
+			).toBeVisible();
+
+			const previewButton = pivotPanel.getByRole('button', { name: 'Show output columns' });
+			const waitForSchema = () =>
+				page.waitForResponse(
+					(response) =>
+						new URL(response.url()).pathname.endsWith('/v1/compute/schema') &&
+						response.request().method() === 'POST',
+					{ timeout: readyTimeoutMs() }
+				);
+			let previewResponse = waitForSchema();
+			await previewButton.click();
+			expect((await previewResponse).ok()).toBeTruthy();
+
+			const outputSchema = pivotPanel.getByTestId('pivot-output-schema');
+			await expect(outputSchema).toBeVisible({ timeout: readyTimeoutMs() });
+			for (const city of ['London', 'Paris', 'Berlin']) {
+				await expect(outputSchema.getByText(city, { exact: true })).toBeVisible();
+			}
+			await pivotPanel.getByRole('button', { name: 'Apply' }).click();
+			await expect(pivotPanel.getByRole('button', { name: 'Apply' })).toBeDisabled();
+
+			await page.locator('button[data-step="select"]').click();
+			const selectPanel = page.locator('[data-step-config="select"]');
+
+			async function expectAppliedCities(): Promise<void> {
+				await expect(selectPanel).toBeVisible();
+				await selectPanel.getByRole('button', { name: 'Select columns to keep...' }).click();
+				for (const city of ['London', 'Paris', 'Berlin']) {
+					await expect(
+						selectPanel.getByRole('checkbox', { name: city, exact: true })
+					).toBeVisible();
+				}
+				await expect(selectPanel.getByRole('checkbox', { name: 'month', exact: true })).toHaveCount(
+					0
+				);
+			}
+
+			await expectAppliedCities();
+
+			// An un-applied edit must leave the applied pivot schema untouched.
+			await page.locator('[data-step-type="pivot"]').locator('[data-action="edit"]').click();
+			const reopenedPivot = page.locator('[data-step-config="pivot"]');
+			await expect(reopenedPivot).toBeVisible();
+			await reopenedPivot.locator('[data-testid="pivot-agg-select"]').selectOption('mean');
+			await reopenedPivot.getByRole('button', { name: 'Cancel' }).click();
+			await expect(reopenedPivot.locator('[data-testid="pivot-agg-select"]')).toHaveValue('sum');
+			await page.locator('[data-step-type="select"]').locator('[data-action="edit"]').click();
+			await expectAppliedCities();
+
+			// A preview for a different draft column must also stay local until Apply.
+			await page.locator('[data-step-type="pivot"]').locator('[data-action="edit"]').click();
+			await expect(reopenedPivot).toBeVisible();
+			await reopenedPivot
+				.getByRole('group', { name: 'Columns' })
+				.locator('button[aria-expanded]')
+				.click();
+			await page.getByRole('option', { name: 'month', exact: true }).click();
+			previewResponse = waitForSchema();
+			await reopenedPivot.getByRole('button', { name: 'Show output columns' }).click();
+			expect((await previewResponse).ok()).toBeTruthy();
+			const draftOutput = reopenedPivot.getByTestId('pivot-output-schema');
+			for (const month of ['January', 'February', 'March']) {
+				await expect(draftOutput.getByText(month, { exact: true })).toBeVisible();
+			}
+			await reopenedPivot.getByRole('button', { name: 'Cancel' }).click();
+			await page.locator('[data-step-type="select"]').locator('[data-action="edit"]').click();
+			await expectAppliedCities();
+		} finally {
+			await deleteAnalysisViaUI(page, analysis);
+		}
+	});
+
+	test('Pivot: choose rows, columns, and aggregates, preview, then apply', async ({
+		page,
+		request
+	}) => {
 		const id = uid();
 		const analysis = `E2E Pivot Config ${id}`;
 		const aId = await createTrackedAnalysis(request, analysis, sharedBaseDatasourceId);
 		try {
 			const configPanel = await addStepAndOpenConfig(page, aId, 'pivot');
 
-			// Select pivot column via ColumnDropdown
-			const pivotColumnGroup = configPanel.getByRole('group', { name: /Pivot Column/i });
-			await expect(pivotColumnGroup).toBeVisible();
-			const dropdownTrigger = pivotColumnGroup.locator('button[aria-expanded]');
-			await dropdownTrigger.click();
+			const rows = configPanel.getByRole('group', { name: 'Rows' });
+			const columns = configPanel.getByRole('group', { name: 'Columns' });
+			const aggregates = configPanel.getByRole('group', { name: 'Aggregates' });
+			await expect(rows).toBeVisible();
+			await expect(columns).toBeVisible();
+			await expect(aggregates).toBeVisible();
+			await expect(configPanel.getByText('Index Columns', { exact: true })).toHaveCount(0);
+
+			// Choose the row identifier.
+			await rows.locator('button[aria-expanded]').click();
+			await rows.getByRole('checkbox', { name: 'id', exact: true }).check();
+			await rows.getByRole('button', { name: /Done/ }).click();
+			await expect(rows.getByRole('status')).toHaveText(
+				'1 row field selected. One output row for each unique combination.'
+			);
+
+			// Distinct city values become output columns.
+			await columns.locator('button[aria-expanded]').click();
 			await page.getByRole('option', { name: 'city', exact: true }).click();
+			await rows.locator('button[aria-expanded]').click();
+			await expect(rows.getByRole('checkbox', { name: 'city', exact: true })).toHaveCount(0);
+			await rows.getByRole('button', { name: /Done/ }).click();
 
-			// Check 'id' as index column
-			const idCheckbox = configPanel.locator('[data-testid="pivot-index-checkbox-id"]');
-			await idCheckbox.check();
-			await expect(idCheckbox).toBeChecked();
+			// Aggregate age values with sum.
+			const valueColumn = aggregates.getByRole('group', { name: 'Value column' });
+			await valueColumn.getByRole('button', { name: /^Value column/ }).click();
+			await expect(valueColumn.getByRole('option', { name: 'id', exact: true })).toHaveCount(0);
+			await expect(valueColumn.getByRole('option', { name: 'city', exact: true })).toHaveCount(0);
+			await page.getByRole('option', { name: 'age', exact: true }).click();
 
-			// Verify selected count
-			await expect(configPanel.getByText('1 selected')).toBeVisible();
-
-			// Change aggregation
 			const aggSelect = configPanel.locator('[data-testid="pivot-agg-select"]');
 			await aggSelect.selectOption('sum');
+			const previewButton = configPanel.getByRole('button', { name: 'Show output columns' });
+			const previewResponse = page.waitForResponse(
+				(response) =>
+					new URL(response.url()).pathname.endsWith('/v1/compute/schema') &&
+					response.request().method() === 'POST',
+				{ timeout: readyTimeoutMs() }
+			);
+			await previewButton.click();
+			expect((await previewResponse).ok()).toBeTruthy();
+			const outputSchema = configPanel.getByTestId('pivot-output-schema');
+			await expect(outputSchema).toBeVisible({ timeout: readyTimeoutMs() });
+			for (const city of ['London', 'Paris', 'Berlin']) {
+				await expect(outputSchema.getByText(city, { exact: true })).toBeVisible();
+			}
 
 			const applyBtn = configPanel.getByRole('button', { name: 'Apply' });
 			await expect(applyBtn).toBeEnabled();
 			await applyBtn.click();
 			await expect(applyBtn).toBeDisabled({ timeout: 5_000 });
+
+			// A following step must receive the distinct pivot values as its input schema.
+			await page.locator('button[data-step="select"]').click();
+			const selectPanel = page.locator('[data-step-config="select"]');
+			await expect(selectPanel).toBeVisible({ timeout: 5_000 });
+			await selectPanel.getByRole('button', { name: 'Select columns to keep...' }).click();
+			for (const city of ['London', 'Paris', 'Berlin']) {
+				await expect(selectPanel.getByRole('checkbox', { name: city, exact: true })).toBeVisible();
+			}
+			await expect(selectPanel.getByRole('checkbox', { name: 'city', exact: true })).toHaveCount(0);
 
 			await screenshot(page, 'analysis/operations', 'pivot-config-applied');
 		} finally {

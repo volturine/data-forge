@@ -76,6 +76,7 @@
 		<input
 			type="checkbox"
 			id="msc-col-{item.id}"
+			aria-label={item.label}
 			checked={payload.selected}
 			onchange={payload.onSelect}
 			onclick={(event) => event.stopPropagation()}

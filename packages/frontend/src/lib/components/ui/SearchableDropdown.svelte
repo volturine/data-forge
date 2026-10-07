@@ -57,6 +57,7 @@
 		menuClass?: string;
 		triggerClass?: string;
 		inputClass?: string;
+		triggerAriaLabelledby?: string;
 		triggerType?: 'button' | 'input';
 		disabled?: boolean;
 		searchDelay?: number;
@@ -92,6 +93,7 @@
 		menuClass = '',
 		triggerClass = '',
 		inputClass = '',
+		triggerAriaLabelledby,
 		triggerType = 'button',
 		disabled = false,
 		searchDelay = 120,
@@ -261,6 +263,7 @@
 			class={inputClass}
 			id="{uid}-trigger"
 			aria-label="Search"
+			aria-labelledby={triggerAriaLabelledby}
 			bind:value={searchValue}
 			{placeholder}
 			onfocus={openMenu}
@@ -296,6 +299,7 @@
 			onclick={openMenu}
 			aria-expanded={isMenuVisible ? 'true' : 'false'}
 			aria-controls={isMenuVisible ? `${uid}-listbox` : undefined}
+			aria-labelledby={triggerAriaLabelledby}
 			use:setTriggerRef={undefined}
 			{disabled}
 		>
