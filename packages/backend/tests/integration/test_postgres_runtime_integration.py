@@ -83,6 +83,21 @@ def _active_preview_request(container: PostgresContainer) -> tuple[str, int] | N
     return str(row[0]), int(row[1])
 
 
+def _active_preview_request_with_lease(container: PostgresContainer) -> tuple[str, int, float] | None:
+    with container.connect() as connection:
+        row = connection.execute(
+            'SELECT id, status, GREATEST(EXTRACT(EPOCH FROM (lease_expires_at - clock_timestamp())), 0) '
+            'FROM "default".compute_requests WHERE kind = %s ORDER BY created_at DESC LIMIT 1',
+            (enums_pb2.COMPUTE_REQUEST_KIND_PREVIEW,),
+        ).fetchone()
+    if row is None or row[1] not in {
+        enums_pb2.COMPUTE_REQUEST_STATUS_QUEUED,
+        enums_pb2.COMPUTE_REQUEST_STATUS_RUNNING,
+    }:
+        return None
+    return str(row[0]), int(row[1]), float(row[2])
+
+
 SAMPLE_CSV = 'id,name,age,city\n1,Alice,30,London\n2,Bob,25,Paris\n3,Charlie,35,Berlin\n'
 INTERNAL_API_TOKEN = 'dataforge-runtime-test-internal-token'
 ENGINE_TEST_IMAGE = 'data-forge-polars-engine:integration'
@@ -2870,9 +2885,10 @@ def test_postgres_runtime_coordinator_takeover_during_compute_terminal_publicati
             data_plane_port=data_plane_port,
         )
         base_env.update(engine_runtime_env)
-        # A short lease makes crash recovery bounded while allowing transient
-        # runtime RPC delays without expiring the claim before terminal publication.
-        base_env['RUNTIME_WORK_LEASE_TTL_SECONDS'] = '30'
+        # The test holds the request row while waiting for terminal publication;
+        # the lease must outlast that observation window because renewal updates
+        # the same row and is intentionally blocked by the test transaction.
+        base_env['RUNTIME_WORK_LEASE_TTL_SECONDS'] = '120'
         _init_runtime_db(base_env)
         coordinator_application_name = f'dataforge-test-coordinator-{uuid.uuid4().hex[:12]}'
 
@@ -2890,7 +2906,7 @@ def test_postgres_runtime_coordinator_takeover_during_compute_terminal_publicati
             rustfs=rustfs_container,
             extra_env={
                 'PGAPPNAME': coordinator_application_name,
-                'RUNTIME_WORK_LEASE_TTL_SECONDS': '30',
+                'RUNTIME_WORK_LEASE_TTL_SECONDS': '120',
             },
         )
         worker_manager = _worker_manager(
@@ -2899,7 +2915,7 @@ def test_postgres_runtime_coordinator_takeover_during_compute_terminal_publicati
             grpc_port=coordinator_grpc_port,
             data_plane_port=data_plane_port,
             rustfs=rustfs_container,
-            extra_env={**engine_runtime_env, 'RUNTIME_WORK_LEASE_TTL_SECONDS': '30'},
+            extra_env={**engine_runtime_env, 'RUNTIME_WORK_LEASE_TTL_SECONDS': '120'},
         )
         blocker_connection: psycopg.Connection | None = None
         preview_thread: threading.Thread | None = None
@@ -2952,16 +2968,16 @@ def test_postgres_runtime_coordinator_takeover_during_compute_terminal_publicati
             preview_thread.start()
 
             def running_preview_request() -> tuple[str, int] | None:
-                request = _active_preview_request(container)
-                if request is None or request[1] != enums_pb2.COMPUTE_REQUEST_STATUS_RUNNING:
+                request = _active_preview_request_with_lease(container)
+                if request is None or request[1] != enums_pb2.COMPUTE_REQUEST_STATUS_RUNNING or request[2] < 60:
                     return None
-                return request
+                return request[0], request[1]
 
             active = wait_for_condition(
                 running_preview_request,
                 timeout=90,
                 interval=0.1,
-                description='durable preview request to enter running state',
+                description='durable preview request to receive its renewed work lease',
             )
             request_id, active_status = active
             assert active_status == enums_pb2.COMPUTE_REQUEST_STATUS_RUNNING
@@ -2978,12 +2994,16 @@ def test_postgres_runtime_coordinator_takeover_during_compute_terminal_publicati
             worker_id, claim_token, lease_generation = str(claim_row[1]), str(claim_row[2]), int(claim_row[3])
             assert worker_id and claim_token and lease_generation > 0
 
-            blocked = wait_for_condition(
-                lambda: _blocked_compute_terminal_publications(container, blocker_pid),
-                timeout=90,
-                interval=0.1,
-                description='coordinator terminal publication SELECT FOR UPDATE to wait on the held compute row',
-            )
+            try:
+                blocked = wait_for_condition(
+                    lambda: _blocked_compute_terminal_publications(container, blocker_pid),
+                    timeout=90,
+                    interval=0.1,
+                    description='coordinator terminal publication SELECT FOR UPDATE to wait on the held compute row',
+                )
+            except AssertionError as exc:
+                lock_activity = _runtime_coordinator_lock_activity(container)
+                raise AssertionError(f'{exc}; database lock activity={lock_activity!r}') from exc
             assert blocked is not None
             assert len(blocked) == 1, f'expected one blocked terminal publication, found {blocked!r}'
             assert 'FOR UPDATE' in blocked[0][1].upper()

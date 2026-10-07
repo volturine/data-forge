@@ -331,7 +331,10 @@ test-backend-integration-raw: _prepare-test-services
     fi
     docker build -f docker/Dockerfile --target engine -t data-forge-polars-engine:integration .
     cd packages/backend
-    {{pytest}} -n auto --maxprocesses=4 --dist=loadfile tests/integration
+    # This test holds a compute request row lock, so run it outside the xdist load
+    # to keep unrelated integration work from expiring its lease before publication.
+    {{pytest}} -n auto --maxprocesses=4 --dist=loadfile tests/integration -k 'not test_postgres_runtime_coordinator_takeover_during_compute_terminal_publication'
+    {{pytest}} tests/integration/test_postgres_runtime_integration.py::test_postgres_runtime_coordinator_takeover_during_compute_terminal_publication
 
 test-worker:
     TEST_TARGET=test-worker scripts/test_container.sh

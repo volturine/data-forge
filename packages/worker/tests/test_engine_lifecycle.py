@@ -775,13 +775,15 @@ async def test_process_manager_capacity_admission_prioritizes_interactive_work(m
     running = _analysis_identity("analysis-priority-running")
     lifecycle = _analysis_identity("analysis-priority-lifecycle")
     interactive = _analysis_identity("analysis-priority-interactive")
-    order: list[str] = []
+    admission_order: list[str] = []
+    started: list[str] = []
 
     async def admit_spawn_stop(identity: compute_pb2.EngineIdentity, priority: int) -> None:
         owns_admission = await manager.await_spawn_admission(identity, priority=priority)
+        admission_order.append(identity.resource_id)
         try:
             await asyncio.to_thread(manager.spawn_engine, identity)
-            order.append(identity.resource_id)
+            started.append(identity.resource_id)
             await asyncio.to_thread(manager.shutdown_engine, identity)
         finally:
             manager.release_spawn_admission(identity, owned=owns_admission)
@@ -801,9 +803,10 @@ async def test_process_manager_capacity_admission_prioritizes_interactive_work(m
             await wait_for_waiters(1)
             interactive_task = asyncio.create_task(admit_spawn_stop(interactive, ENGINE_ADMISSION_PRIORITY_INTERACTIVE))
             await wait_for_waiters(2)
-            assert order == []
+            assert started == []
         await asyncio.wait_for(asyncio.gather(lifecycle_task, interactive_task), timeout=2)
-        assert order == [interactive.resource_id, lifecycle.resource_id]
+        assert admission_order == [interactive.resource_id, lifecycle.resource_id]
+        assert set(started) == {interactive.resource_id, lifecycle.resource_id}
     finally:
         manager.shutdown_all()
 
