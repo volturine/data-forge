@@ -63,7 +63,8 @@
 	style:border-style={data.kind === 'internal' ? 'dashed' : 'solid'}
 	role="button"
 	tabindex="0"
-	aria-label={`${data.kind} ${data.label}`}
+	aria-label={`${kindLabel[data.kind]} ${data.name}`}
+	title={data.name}
 	onkeydown={(event) => {
 		if (event.key === 'Enter' || event.key === ' ') {
 			event.preventDefault();
@@ -73,16 +74,6 @@
 >
 	<div
 		class={css({
-			fontSize: 'xs',
-			textTransform: 'uppercase',
-			letterSpacing: 'wide',
-			color: data.kind === 'internal' ? 'fg.faint' : 'fg.muted'
-		})}
-	>
-		{kindLabel[data.kind]}
-	</div>
-	<div
-		class={css({
 			overflow: 'hidden',
 			textOverflow: 'ellipsis',
 			whiteSpace: 'nowrap',
@@ -90,8 +81,9 @@
 			fontWeight: 'semibold',
 			color: data.kind === 'internal' ? 'fg.tertiary' : 'fg.primary'
 		})}
+		data-testid="lineage-node-name"
 	>
-		{data.label}
+		{data.name}
 	</div>
 	{#if data.meta}
 		<div

@@ -154,6 +154,14 @@ test.describe('Lineage – with datasource data', () => {
 
 			const node = page.getByRole('button', { name: `source ${dsName}` });
 			await expect(node).toBeVisible({ timeout: 5_000 });
+			await expect(node.getByTestId('lineage-node-name')).toHaveText(dsName);
+			await expect(node.getByText('Source', { exact: true })).toHaveCount(0);
+
+			const analysisNode = page.getByRole('button', { name: `analysis ${aName}` });
+			await expect(analysisNode).toBeVisible({ timeout: 5_000 });
+			await expect(analysisNode.getByTestId('lineage-node-name')).toHaveText(aName);
+			await expect(analysisNode.getByText('Analysis', { exact: true })).toHaveCount(0);
+
 			await node.click();
 
 			// Sidebar should show node details instead of the default prompt
