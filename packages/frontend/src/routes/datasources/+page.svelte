@@ -16,7 +16,6 @@
 	} from '@lucide/svelte';
 	import ConfirmDialog from '$lib/components/common/ConfirmDialog.svelte';
 	import BranchPicker from '$lib/components/common/BranchPicker.svelte';
-	import RelativeTime from '$lib/components/common/RelativeTime.svelte';
 	import RowActionMenu from '$lib/components/common/RowActionMenu.svelte';
 	import DatasourcePreview from '$lib/components/datasources/DatasourcePreview.svelte';
 	import DatasourceConfigPanel from '$lib/components/datasources/DatasourceConfigPanel.svelte';
@@ -506,11 +505,6 @@
 											})}
 										>
 											No description
-										</p>
-									{/if}
-									{#if datasource.last_data_update}
-										<p class={css({ margin: '0', fontSize: 'xs', color: 'fg.subtle' })}>
-											Last updated <RelativeTime timestamp={datasource.last_data_update} />
 										</p>
 									{/if}
 								</div>

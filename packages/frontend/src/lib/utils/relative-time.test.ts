@@ -17,6 +17,7 @@ describe('formatRelativeTime', () => {
 
 	it('formats minutes with correct pluralization', () => {
 		expect(formatRelativeTime(NOW - 60_000, NOW)).toBe('1 minute ago');
+		expect(formatRelativeTime(NOW - 61_000, NOW)).toBe('1 minute ago');
 		expect(formatRelativeTime(NOW - 5 * 60_000, NOW)).toBe('5 minutes ago');
 		expect(formatRelativeTime(NOW - 59 * 60_000, NOW)).toBe('59 minutes ago');
 	});
@@ -25,6 +26,12 @@ describe('formatRelativeTime', () => {
 		expect(formatRelativeTime(NOW - 60 * 60_000, NOW)).toBe('1 hour ago');
 		expect(formatRelativeTime(NOW - 3 * 60 * 60_000, NOW)).toBe('3 hours ago');
 		expect(formatRelativeTime(NOW - 23 * 60 * 60_000, NOW)).toBe('23 hours ago');
+	});
+
+	it('does not round a partial hour up to the next hour', () => {
+		expect(formatRelativeTime(NOW - 61 * 60_000, NOW)).toBe('1 hour ago');
+		expect(formatRelativeTime(NOW - 119 * 60_000, NOW)).toBe('1 hour ago');
+		expect(formatRelativeTime(NOW - 120 * 60_000, NOW)).toBe('2 hours ago');
 	});
 
 	it('formats days', () => {

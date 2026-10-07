@@ -847,10 +847,8 @@ test.describe('Datasources – re-ingest freshness & time travel', () => {
 			expect(displayedBefore).not.toBeNull();
 			expect(Date.parse(displayedBefore ?? '')).toBe(beforeMs);
 			const listRow = page.locator(`[data-ds-row="${ds}"]`);
-			await expect(listRow.getByText('Last updated', { exact: true })).toBeVisible();
-			const listTimestamp = listRow.locator('time').first();
-			await expect(listTimestamp).toBeVisible();
-			expect(Date.parse((await listTimestamp.getAttribute('datetime')) ?? '')).toBe(beforeMs);
+			const datasourceCard = listRow.getByRole('button').first();
+			await expect(datasourceCard.getByText('Last updated', { exact: true })).toHaveCount(0);
 
 			await config.getByRole('button', { name: /Re-ingest from source/i }).click();
 			await expect(config.getByRole('button', { name: /Re-ingesting/i })).not.toBeVisible({
@@ -865,11 +863,6 @@ test.describe('Datasources – re-ingest freshness & time travel', () => {
 				.toBeGreaterThan(beforeMs);
 			await expect
 				.poll(async () => Date.parse((await displayedTimestamp.getAttribute('datetime')) ?? ''), {
-					timeout: readyTimeoutMs()
-				})
-				.toBeGreaterThan(beforeMs);
-			await expect
-				.poll(async () => Date.parse((await listTimestamp.getAttribute('datetime')) ?? ''), {
 					timeout: readyTimeoutMs()
 				})
 				.toBeGreaterThan(beforeMs);
