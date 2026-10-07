@@ -109,6 +109,7 @@
 			fitView
 			minZoom={0.2}
 			maxZoom={3}
+			proOptions={{ hideAttribution: true }}
 			nodesConnectable={false}
 			onlyRenderVisibleElements
 			onnodeclick={({ node }) => handleNodeClick(node)}
