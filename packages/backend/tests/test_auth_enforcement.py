@@ -254,6 +254,25 @@ class TestNamespaceMiddleware:
 
 
 class TestSharedAnalysisAccess:
+    def test_unauthenticated_analysis_mutations_still_require_login(self, client: TestClient, test_db_session, monkeypatch: pytest.MonkeyPatch) -> None:
+        _require_unauthenticated(monkeypatch)
+        analysis = _make_analysis(test_db_session, owner_id='someone-else')
+        version = _make_version(test_db_session, analysis)
+        headers = {'If-Match': f'"analysis-{analysis.id}-{analysis.revision}"'}
+
+        update_response = client.put(
+            f'/api/v1/analysis/{analysis.id}',
+            json={'name': 'Anonymous edit'},
+            headers=headers,
+        )
+        delete_version_response = client.delete(
+            f'/api/v1/analysis/{analysis.id}/versions/{version.version}',
+            headers=headers,
+        )
+
+        assert update_response.status_code == 401
+        assert delete_version_response.status_code == 401
+
     def test_authenticated_non_owner_can_update_analysis(self, client: TestClient, test_db_session, monkeypatch: pytest.MonkeyPatch) -> None:
         monkeypatch.setattr('backend_core.auth_config.settings.auth_required', True)
         analysis = _make_analysis(test_db_session, owner_id='someone-else')
