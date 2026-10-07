@@ -473,14 +473,12 @@
 								>
 							{/if}
 						</div>
-						{#if steps.length > 0}
-							<ConnectionLine
-								fromStepIndex={-1}
-								toStepIndex={0}
-								totalSteps={steps.length + 1}
-								highlighted={hoverIndex === 0}
-							/>
-						{/if}
+						<ConnectionLine
+							fromStepIndex={-1}
+							toStepIndex={0}
+							totalSteps={steps.length + 1}
+							highlighted={hoverIndex === 0}
+						/>
 					{:else}
 						<div
 							class={css({
@@ -498,14 +496,12 @@
 								highlighted={false}
 								arrow={false}
 							/>
-							{#if steps.length > 0}
-								<ConnectionLine
-									fromStepIndex={-1}
-									toStepIndex={0}
-									totalSteps={steps.length + 1}
-									highlighted={false}
-								/>
-							{/if}
+							<ConnectionLine
+								fromStepIndex={-1}
+								toStepIndex={0}
+								totalSteps={steps.length + 1}
+								highlighted={false}
+							/>
 							{#if !readOnly}
 								<div class={insertControls}>
 									<button

@@ -933,6 +933,63 @@ test.describe('Analyses – version history modal', () => {
 // ── Canvas layout ───────────────────────────────────────────────────────────
 
 test.describe('Analyses – insert view via insert zone', () => {
+	test('empty pipeline keeps both insertion spacers between input and output', async ({
+		page,
+		request
+	}) => {
+		const id = uid();
+		const analysis = `E2E Empty Pipeline Spacing ${id}`;
+		const aId = await createAnalysis(request, analysis, sharedDatasourceId);
+		try {
+			await gotoAnalysisEditor(page, aId);
+
+			const insertZone = page.locator('[data-hook="insert-zone"][data-index="0"]');
+			const initialView = page.locator('[data-step-type="view"]').first();
+			await expect(initialView).toBeVisible();
+			await expect(insertZone.locator('.connection-line')).toHaveCount(2);
+			const populatedZoneHeight = await insertZone.evaluate(
+				(element) => element.getBoundingClientRect().height
+			);
+
+			// Removing the initial view leaves only the input and output nodes.
+			await initialView.locator('[data-action="delete"]').click();
+			await expect(page.locator('[data-step-type]')).toHaveCount(0);
+			await expect(insertZone.locator('.connection-line')).toHaveCount(2);
+			const emptyZoneHeight = await insertZone.evaluate(
+				(element) => element.getBoundingClientRect().height
+			);
+			expect(emptyZoneHeight).toBeCloseTo(populatedZoneHeight, 0);
+
+			const inputOutputGap = await page.evaluate(() => {
+				const input = document.querySelector('#pipeline-datasource-node');
+				const output = document.querySelector('#pipeline-output-node');
+				if (!input || !output) throw new Error('Pipeline input or output node is missing');
+				return output.getBoundingClientRect().top - input.getBoundingClientRect().bottom;
+			});
+			expect(inputOutputGap).toBeCloseTo(emptyZoneHeight, 0);
+
+			await insertZone.hover();
+			const insertViewButton = insertZone.locator('button[title="Insert view"]');
+			await expect(insertViewButton).toBeVisible();
+			await insertViewButton.click();
+			await expect(page.locator('[data-step-type="view"]')).toHaveCount(1);
+
+			const insertionZones = page.locator('[data-hook="insert-zone"]');
+			await expect(insertionZones).toHaveCount(2);
+			await expect(insertionZones.nth(0).locator('.connection-line')).toHaveCount(2);
+			await expect(insertionZones.nth(1).locator('.connection-line')).toHaveCount(2);
+			const topZoneHeight = await insertionZones
+				.nth(0)
+				.evaluate((element) => element.getBoundingClientRect().height);
+			const bottomZoneHeight = await insertionZones
+				.nth(1)
+				.evaluate((element) => element.getBoundingClientRect().height);
+			expect(topZoneHeight).toBeCloseTo(bottomZoneHeight, 0);
+		} finally {
+			await deleteAnalysisViaUI(page, analysis);
+		}
+	});
+
 	test('Insert View button adds a view step between existing steps', async ({ page, request }) => {
 		const id = uid();
 		const analysis = `E2E Insert View ${id}`;

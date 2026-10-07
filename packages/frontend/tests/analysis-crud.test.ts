@@ -494,10 +494,7 @@ test.describe('Analyses – blank creation', () => {
 
 			const insertZone = canvas.locator('[data-hook="insert-zone"]').first();
 			await insertZone.hover();
-			const connection = insertZone.locator('.connection-line');
-			await expect(canvas.locator('.connection-line')).toHaveCount(1);
-			const connectionBounds = await connection.boundingBox();
-			if (!connectionBounds) throw new Error('Could not measure the empty pipeline connection');
+			const insertZoneBounds = await insertZone.boundingBox();
 
 			const controls = insertZone.locator('.insert-controls-group > *');
 			await expect(controls).toHaveCount(3);
@@ -508,13 +505,14 @@ test.describe('Analyses – blank creation', () => {
 			);
 			const visibleControlBounds = controlBounds.filter((bounds) => bounds !== null);
 			expect(visibleControlBounds).toHaveLength(3);
+			if (!insertZoneBounds) throw new Error('Could not measure the empty pipeline insert zone');
 			const controlsTop = Math.min(...visibleControlBounds.map((bounds) => bounds.y));
 			const controlsBottom = Math.max(
 				...visibleControlBounds.map((bounds) => bounds.y + bounds.height)
 			);
 			expect(
 				Math.abs(
-					(controlsTop + controlsBottom) / 2 - (connectionBounds.y + connectionBounds.height / 2)
+					(controlsTop + controlsBottom) / 2 - (insertZoneBounds.y + insertZoneBounds.height / 2)
 				)
 			).toBeLessThan(1);
 		} finally {
