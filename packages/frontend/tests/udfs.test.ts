@@ -288,6 +288,59 @@ test.describe('UDFs – editor page', () => {
 		await screenshot(page, 'udfs', 'editor-page');
 	});
 
+	test('CodeMirror applies theme colors to syntax and editor surfaces', async ({ page }) => {
+		await gotoNewUdfPage(page);
+		const editor = page.locator('.cm-editor');
+		await editor
+			.locator('.cm-content')
+			.fill('def udf(value):\n    return value * 9.0 / 5.0 + 32\n');
+
+		await expect(editor.locator('.cm-code-keyword').first()).toHaveText('def');
+		await expect(editor.locator('.cm-code-number').first()).toHaveText('9.0');
+
+		async function expectThemeColors(): Promise<void> {
+			const colors = await editor.evaluate((element) => {
+				const content = element.querySelector('.cm-content');
+				const outerSurface = element.parentElement?.parentElement;
+				const keyword = element.querySelector('.cm-code-keyword');
+				const number = element.querySelector('.cm-code-number');
+				if (!content || !outerSurface || !keyword || !number) {
+					throw new Error('Expected code editor content and themed syntax tokens');
+				}
+
+				function tokenColor(token: string): string {
+					const probe = document.createElement('span');
+					probe.style.color = `var(${token})`;
+					document.body.append(probe);
+					const color = getComputedStyle(probe).color;
+					probe.remove();
+					return color;
+				}
+
+				return {
+					background: getComputedStyle(element).backgroundColor,
+					surface: getComputedStyle(outerSurface).backgroundColor,
+					keyword: getComputedStyle(keyword).color,
+					number: getComputedStyle(number).color,
+					error: tokenColor('--colors-fg-error'),
+					warning: tokenColor('--colors-fg-warning')
+				};
+			});
+			expect(colors.background).toBe(colors.surface);
+			expect(colors.keyword).toBe(colors.error);
+			expect(colors.number).toBe(colors.warning);
+		}
+
+		const initialTheme = await page.locator('html').getAttribute('data-theme');
+		await expectThemeColors();
+		await page.getByRole('button', { name: 'Toggle theme' }).click();
+		await expect(page.locator('html')).toHaveAttribute(
+			'data-theme',
+			initialTheme === 'dark' ? 'light' : 'dark'
+		);
+		await expectThemeColors();
+	});
+
 	test('new UDF editor has Save button', async ({ page }) => {
 		await page.goto('/udfs/new');
 		await waitForLayoutReady(page);
