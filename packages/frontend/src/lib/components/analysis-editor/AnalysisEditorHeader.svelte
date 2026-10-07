@@ -89,10 +89,11 @@
 		alignItems: 'stretch',
 		position: 'sticky',
 		top: '0',
-		height: 'headerSm',
+		height: 'analysisHeader',
 		backgroundColor: 'bg.primary',
 		zIndex: 'header'
 	})}
+	data-testid="analysis-editor-header"
 >
 	<div
 		class={css({
@@ -113,8 +114,9 @@
 				flexDirection: 'column',
 				minWidth: '0',
 				overflow: 'hidden',
-				paddingX: '5',
-				gap: '1'
+				paddingX: '6',
+				paddingY: '2.5',
+				gap: '2'
 			})}
 		>
 			<div class={css({ display: 'flex', alignItems: 'center', gap: '2', minWidth: '0' })}>

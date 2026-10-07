@@ -21,6 +21,40 @@ test.beforeEach(async ({ sharedDatasource }) => {
 	sharedDatasourceId = sharedDatasource.id;
 });
 
+test.describe('Analyses – editor title spacing', () => {
+	test('keeps the title and description clear of the header edges', async ({ page, request }) => {
+		const id = uid();
+		const analysis = `E2E Title Spacing ${id}`;
+		const analysisId = await createAnalysis(request, analysis, sharedDatasourceId);
+		try {
+			await gotoAnalysisEditor(page, analysisId);
+
+			const header = page.getByTestId('analysis-editor-header');
+			const title = header.locator('h1[contenteditable="true"]');
+			const descriptionTrigger = page.getByTestId('analysis-description-trigger');
+			await expect(title).toBeVisible();
+			await expect(descriptionTrigger).toBeVisible();
+
+			const [headerBox, titleBox, descriptionBox] = await Promise.all([
+				header.boundingBox(),
+				title.boundingBox(),
+				descriptionTrigger.boundingBox()
+			]);
+			if (!headerBox || !titleBox || !descriptionBox) {
+				throw new Error('Expected visible title and description controls to have rendered boxes');
+			}
+
+			expect(titleBox.y - headerBox.y).toBeGreaterThanOrEqual(10);
+			expect(
+				headerBox.y + headerBox.height - descriptionBox.y - descriptionBox.height
+			).toBeGreaterThanOrEqual(10);
+			expect(headerBox.height).toBeCloseTo(68, 0);
+		} finally {
+			await deleteAnalysisViaUI(page, analysis);
+		}
+	});
+});
+
 // ── Save/discard dirty tracking ─────────────────────────────────────────────
 
 test.describe('Analyses – save/discard dirty tracking', () => {
