@@ -11,6 +11,7 @@
 	const columnsLabelId = `${uid}-columns`;
 	const aggregatesLabelId = `${uid}-aggregates`;
 	const valueColumnLabelId = `${uid}-value-column`;
+	const valueColumnSelectionId = `${uid}-value-column-selection`;
 	const aggregateFunctionId = `${uid}-aggregate-function`;
 	const outputColumnsLabelId = `${uid}-output-columns`;
 
@@ -144,6 +145,9 @@
 			<div class={css({ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: '2' })}>
 				<div role="group" aria-labelledby={valueColumnLabelId}>
 					<span id={valueColumnLabelId} class={label({ variant: 'field' })}>Value column</span>
+					<span id={valueColumnSelectionId} class={css({ srOnly: true })}>
+						{config.values ?? 'All remaining columns'}
+					</span>
 					<ColumnDropdown
 						{schema}
 						value={config.values ?? ''}
@@ -151,7 +155,7 @@
 						filter={(column) =>
 							column.name === config.values ||
 							(column.name !== config.columns && !safeIndex.includes(column.name))}
-						triggerLabelledby={valueColumnLabelId}
+						triggerLabelledby={`${valueColumnLabelId} ${valueColumnSelectionId}`}
 						placeholder="All remaining columns"
 						clearable
 					/>
