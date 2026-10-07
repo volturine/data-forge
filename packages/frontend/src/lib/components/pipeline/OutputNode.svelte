@@ -439,6 +439,9 @@
 							item.id === datasource.id ? { ...item, ...datasource } : item
 						)
 				);
+				// A hidden output is absent from the default list cache, so mapping
+				// existing rows cannot add it after the visibility change.
+				void queryClient.invalidateQueries({ queryKey: ['datasources', ns.value] });
 				// Keep the committed value as the immediate source of truth until the
 				// membership query observes the same response. A second click can
 				// otherwise read the old list value and send the first mutation again,
