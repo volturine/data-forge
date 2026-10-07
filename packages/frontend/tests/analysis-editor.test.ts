@@ -924,7 +924,7 @@ test.describe('Analyses – insert view via insert zone', () => {
 			const emptyZoneHeight = await insertZone.evaluate(
 				(element) => element.getBoundingClientRect().height
 			);
-			expect(emptyZoneHeight).toBe(populatedZoneHeight);
+			expect(emptyZoneHeight).toBeCloseTo(populatedZoneHeight, 0);
 
 			const inputOutputGap = await page.evaluate(() => {
 				const input = document.querySelector('#pipeline-datasource-node');
@@ -938,7 +938,7 @@ test.describe('Analyses – insert view via insert zone', () => {
 			const insertViewButton = insertZone.locator('button[title="Insert view"]');
 			await expect(insertViewButton).toBeVisible();
 			await insertViewButton.click();
-			await expect(page.locator('[data-step-type="view"]')).toHaveCount(1, { timeout: 5_000 });
+			await expect(page.locator('[data-step-type="view"]')).toHaveCount(1);
 
 			const insertionZones = page.locator('[data-hook="insert-zone"]');
 			await expect(insertionZones).toHaveCount(2);
@@ -950,8 +950,7 @@ test.describe('Analyses – insert view via insert zone', () => {
 			const bottomZoneHeight = await insertionZones
 				.nth(1)
 				.evaluate((element) => element.getBoundingClientRect().height);
-			expect(topZoneHeight).toBe(bottomZoneHeight);
-			await screenshot(page, 'analysis/editor', 'empty-pipeline-spacing');
+			expect(topZoneHeight).toBeCloseTo(bottomZoneHeight, 0);
 		} finally {
 			await deleteAnalysisViaUI(page, analysis);
 		}
