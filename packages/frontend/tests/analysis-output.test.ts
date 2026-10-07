@@ -144,6 +144,14 @@ test.describe('Analyses – output visibility toggle', () => {
 			await expect(preview.locator('table tbody tr').first()).toBeVisible({
 				timeout: readyTimeoutMs()
 			});
+
+			await page.goBack();
+			await expect(toggle).toBeVisible({ timeout: readyTimeoutMs() });
+			await toggle.click();
+			await expect(toggle).toContainText('hidden', { timeout: 5_000 });
+
+			await page.getByRole('link', { name: 'Data Sources' }).click();
+			await expect(row).toHaveCount(0, { timeout: 15_000 });
 		} finally {
 			await cleanupAnalysis(page, aName);
 		}
