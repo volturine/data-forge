@@ -203,6 +203,9 @@ test.describe('Analyses – output visibility toggle', () => {
 			await expect(row).toBeVisible({ timeout: readyTimeoutMs() });
 
 			await row.click();
+			await page.waitForURL((url) => url.pathname === '/datasources', {
+				timeout: readyTimeoutMs()
+			});
 			await waitForDatasourcePreviewReady(page, readyTimeoutMs());
 			const preview = page.getByTestId('datasource-preview');
 			await expect(preview.getByTestId('preview-error')).not.toBeVisible();
