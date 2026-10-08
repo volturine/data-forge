@@ -554,7 +554,7 @@ def test_build_stream_keeps_legacy_run_enum_json_names(test_db_session) -> None:
             build_step_index=1,
             step_index=0,
             step_id='step-1',
-            step_name='Read',
+            step_name='COMPUTE_WORKER_RUN_KIND_BUILD',
             step_type='read',
             duration_ms=125,
             total_steps=1,
@@ -568,6 +568,7 @@ def test_build_stream_keeps_legacy_run_enum_json_names(test_db_session) -> None:
     assert isinstance(context, dict)
     assert isinstance(step_completed, dict)
     assert context['currentKind'] == 'ENGINE_RUN_KIND_BUILD'
+    assert step_completed['stepName'] == 'COMPUTE_WORKER_RUN_KIND_BUILD'
     step_kind = step_completed['stepKind']
     assert isinstance(step_kind, dict)
     assert step_kind['executionCategory'] == 'ENGINE_RUN_EXECUTION_CATEGORY_READ'
