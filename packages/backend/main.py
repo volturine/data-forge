@@ -840,7 +840,8 @@ def _readiness_checks() -> tuple[dict[str, str], bool]:
         probe_object_store(namespace=settings.default_namespace)
         checks['object_store'] = 'ok'
     except Exception as e:
-        checks['object_store'] = f'error: {e!s}'
+        logger.warning('Object store readiness check failed: %s', e)
+        checks['object_store'] = 'error'
         is_ready = False
 
     return checks, is_ready
@@ -870,11 +871,7 @@ async def startup() -> dict[str, str]:
     """Startup probe - quick check for container startup.
     Returns 200 when app is initialized and ready to accept traffic.
     """
-    try:
-        _ = settings.app_name
-        return {'status': 'ready'}
-    except Exception as e:
-        return {'status': 'error', 'message': str(e)}
+    return {'status': 'ready'}
 
 
 @app.get('/{full_path:path}', include_in_schema=False, response_model=None)

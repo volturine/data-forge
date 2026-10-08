@@ -4,6 +4,7 @@ import { getClientIdentity } from '$lib/stores/clientIdentity.svelte';
 import { configStore } from '$lib/stores/config.svelte';
 import { idbGet, idbSet } from '$lib/utils/indexeddb';
 import { nowEpochMs } from '$lib/utils/temporal';
+import { uuid } from '$lib/utils/uuid';
 
 export type AuditField = {
 	name: string;
@@ -51,7 +52,7 @@ if (browser) {
 function ensureSessionId(): string {
 	if (!browser) return '';
 	if (state.session) return state.session;
-	state.session = `s-${Math.random().toString(16).slice(2)}-${nowEpochMs().toString(16)}`;
+	state.session = `s-${uuid()}`;
 	idbSet('audit_session', state.session).catch(() => {});
 	return state.session;
 }
