@@ -1,5 +1,5 @@
 import { afterEach, describe, expect, test, vi } from 'vitest';
-import { QueryClient } from '@tanstack/svelte-query';
+import { CancelledError, QueryClient } from '@tanstack/svelte-query';
 import { err, okAsync, ResultAsync, type Result } from 'neverthrow';
 import type { ApiError } from '$lib/api/client';
 import type { StepPreviewRequest, StepPreviewResponse } from '$lib/api/compute';
@@ -36,9 +36,13 @@ describe('fetchPreviewQueryData', () => {
 		const client = new QueryClient({ defaultOptions: { queries: { retry: false } } });
 		const request = makePreviewRequest();
 		const queryKey = ['datasource-preview', 'default', 'datasource-1', request] as const;
+		let controller = new AbortController();
 		const queryOptions = {
 			queryKey,
-			queryFn: ({ signal }: { signal: AbortSignal }) => fetchPreviewQueryData(request, signal)
+			queryFn: () =>
+				fetchPreviewQueryData(request, controller.signal, () =>
+					client.cancelQueries({ queryKey, exact: true })
+				)
 		};
 		let firstSignal: AbortSignal | undefined;
 		let markRequestStarted!: () => void;
@@ -67,15 +71,20 @@ describe('fetchPreviewQueryData', () => {
 			);
 		});
 
-		const cancelledFetch = client.fetchQuery(queryOptions).catch(() => undefined);
+		const cancelledFetch = client.fetchQuery(queryOptions).then(
+			() => null,
+			(error: unknown) => error
+		);
 		await requestStarted;
-		await client.cancelQueries({ queryKey });
-		await cancelledFetch;
+		controller.abort();
+		const cancellationError = await cancelledFetch;
 
 		expect(firstSignal?.aborted).toBe(true);
+		expect(cancellationError).toBeInstanceOf(CancelledError);
 		expect(client.getQueryState(queryKey)?.status).toBe('pending');
 		expect(client.getQueryState(queryKey)?.fetchStatus).toBe('idle');
 
+		controller = new AbortController();
 		const response = makePreviewResponse();
 		previewStepData.mockReturnValueOnce(okAsync(response));
 		await expect(client.fetchQuery(queryOptions)).resolves.toEqual(response);

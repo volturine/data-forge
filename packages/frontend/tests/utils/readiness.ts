@@ -197,7 +197,9 @@ export async function waitForDatasourcePreviewReady(
 	page: Page,
 	timeout = previewReadinessTimeoutMs()
 ): Promise<void> {
-	await waitForLayoutReady(page, timeout);
+	// Datasource selection updates this panel in place; its visible config and
+	// ready preview are more precise than rechecking the shell route mid-transition.
+	await expect(page.locator('[data-shell-interactive="true"]')).toBeVisible({ timeout });
 	await expect(page.locator('[data-ds-config]')).toBeVisible({ timeout });
 	const preview = page.locator('[data-testid="datasource-preview"]');
 	await expect(preview).toBeVisible({ timeout });

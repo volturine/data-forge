@@ -1,5 +1,6 @@
 <script lang="ts">
-	import { createQuery } from '@tanstack/svelte-query';
+	import { createQuery, useQueryClient } from '@tanstack/svelte-query';
+	import { onDestroy } from 'svelte';
 	import type { StepPreviewRequest, StepPreviewResponse } from '$lib/api/compute';
 	import DataTable from '$lib/components/common/DataTable.svelte';
 	import ColumnStatsPanel from '$lib/components/datasources/ColumnStatsPanel.svelte';
@@ -18,12 +19,30 @@
 	let { datasourceId, datasource, datasourceConfig = {} }: Props = $props();
 
 	const ns = useNamespace();
+	const queryClient = useQueryClient();
 
 	let page = $state(1);
 	let rowLimit = $state(100);
 	let columnSearch = $state('');
 	let statsColumn = $state<string | null>(null);
 	let statsOpen = $state(false);
+	let previewRequestKey: string | null = null;
+	let previewRequestController = new AbortController();
+
+	function previewSignal(request: StepPreviewRequest, namespace: string | null): AbortSignal {
+		const nextKey = JSON.stringify({ namespace, request });
+		if (previewRequestKey !== nextKey || previewRequestController.signal.aborted) {
+			if (previewRequestKey !== null && !previewRequestController.signal.aborted) {
+				previewRequestController.abort();
+			}
+			previewRequestKey = nextKey;
+			previewRequestController = new AbortController();
+		}
+		return previewRequestController.signal;
+	}
+
+	onDestroy(() => previewRequestController.abort());
+
 	function handleColumnStats(columnName: string) {
 		statsColumn = columnName;
 		statsOpen = true;
@@ -68,10 +87,13 @@
 			datasourceId,
 			previewRequestState
 		] as const,
-		queryFn: async ({ queryKey, signal }): Promise<StepPreviewResponse> => {
+		queryFn: async ({ queryKey }): Promise<StepPreviewResponse> => {
 			const state = queryKey[3];
 			if (!state) throw new Error('Datasource preview command is not ready');
-			return fetchPreviewQueryData(state.request, signal);
+			const signal = previewSignal(state.request, queryKey[1]);
+			return fetchPreviewQueryData(state.request, signal, () =>
+				queryClient.cancelQueries({ queryKey, exact: true })
+			);
 		},
 		staleTime: 30000,
 		refetchOnMount: false,
