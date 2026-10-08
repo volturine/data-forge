@@ -114,14 +114,19 @@ if [[ "$TEST_TARGET" == "test-e2e" ]]; then
 fi
 if [[ "$TEST_TARGET" == test-e2e* ]]; then
     export E2E_API_WORKERS="${E2E_API_WORKERS:-${WORKERS:-}}"
-    # Worktrees share the main workspace's git common directory, where local
-    # secrets live. Compose interpolates them into the runner at startup; the
-    # image build context excludes .env, so nothing secret is baked into images.
-    common_git_dir="$(git -C "$ROOT_DIR" rev-parse --path-format=absolute --git-common-dir)"
-    main_workspace_root="$(dirname "$common_git_dir")"
-    main_workspace_env="${main_workspace_root}/.env"
-    if [[ -f "$main_workspace_env" ]]; then
-        set -a; source "$main_workspace_env"; set +a
+    # Prefer worktree-local settings; otherwise use the main checkout's .env
+    # when its common Git directory has the standard <workspace>/.git layout.
+    # Compose interpolates secrets into the runner at startup; the image build
+    # context excludes .env, so nothing secret is baked into images.
+    env_file="$ROOT_DIR/.env"
+    if [[ ! -f "$env_file" ]]; then
+        common_git_dir="$(git -C "$ROOT_DIR" rev-parse --path-format=absolute --git-common-dir 2>/dev/null || true)"
+        if [[ "$(basename "$common_git_dir")" == .git ]]; then
+            env_file="$(dirname "$common_git_dir")/.env"
+        fi
+    fi
+    if [[ -f "$env_file" ]]; then
+        set -a; source "$env_file"; set +a
     fi
 fi
 export TEST_IMAGE_TAG TEST_TARGET
