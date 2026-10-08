@@ -486,6 +486,53 @@ def test_engine_launch_reports_every_host_when_all_fail(monkeypatch) -> None:
     assert engine.container_id is None
 
 
+def test_reconciliation_frees_the_slot_of_a_detached_container(monkeypatch) -> None:
+    import docker.errors
+
+    registry = _prepare_launch(monkeypatch, clients={})
+    monkeypatch.setattr(settings, "deployment_id", "test-deployment")
+    engine = DockerComputeWorker()
+    engine._host = registry.get("a")
+    engine._container_id = "a-detached"
+    registry.record_placement("a", "a-detached")
+    registry.record_placement("a", "a-already-gone")
+    registry.record_placement("a", "a-stuck")
+    # The engine let go of its handles but the container kept running.
+    engine._detach_local_handles()
+    assert registry.snapshot()[0].placements == 3
+
+    class Api:
+        def containers(self, *, all: bool, filters: dict[str, object]):
+            return [
+                {"Id": "a-detached", "State": "running"},
+                {"Id": "a-already-gone", "State": "exited"},
+                {"Id": "a-stuck", "State": "exited"},
+            ]
+
+        def remove_container(self, container_id: str, *, force: bool) -> None:
+            if container_id == "a-already-gone":
+                raise docker.errors.NotFound("gone")
+            if container_id == "a-stuck":
+                raise RuntimeError("daemon busy")
+
+    class Client:
+        api = Api()
+
+        def close(self) -> None:
+            return None
+
+    def open_client(spec: DockerHostSpec, **_kwargs):
+        return Client() if spec.name == "a" else _HostClient("b", [])
+
+    monkeypatch.setattr("runtime.docker_compute_worker.open_docker_client", open_client)
+    monkeypatch.setattr(_HostClient, "api", property(lambda self: type("Api", (), {"containers": lambda *_a, **_k: []})()), raising=False)
+
+    # Removed and already-absent containers give their slots back; the one
+    # the daemon would not remove keeps its slot until a later sweep.
+    assert reconcile_deployment_containers() == 2
+    assert {status.name: status.placements for status in registry.snapshot()} == {"a": 1, "b": 0}
+
+
 def test_reconciliation_sweeps_every_host_and_skips_unreachable_ones(monkeypatch) -> None:
     removed: list[str] = []
     monkeypatch.setattr(settings, "engine_docker_hosts", _TWO_HOSTS)

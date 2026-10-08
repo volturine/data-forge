@@ -213,6 +213,7 @@ def reconcile_deployment_containers(
         try:
             removed += _reconcile_host_containers(
                 client,
+                host=spec,
                 supervisor_id=supervisor_id,
                 coordinator_generation=coordinator_generation,
                 coordinator_guard=coordinator_guard,
@@ -227,9 +228,24 @@ def reconcile_deployment_containers(
     return removed
 
 
+def _remove_reconciled_container(client: Any, host: DockerHostSpec, container_id: str) -> bool:
+    """Force-remove a swept container and free its placement slot once it is gone.
+
+    A container a live engine detached from (fenced coordinator, failed
+    removal) still holds its slot on the host; the sweep is what finally
+    removes it, so the sweep returns the slot. ``NotFound`` means someone else
+    already removed it, which frees the slot just the same.
+    """
+    with contextlib.suppress(docker.errors.NotFound):  # type: ignore[attr-defined]  # docker-py has no Python 3.14 stubs.
+        client.api.remove_container(container_id, force=True)
+    docker_host_registry().release_placement(host.name, container_id)
+    return True
+
+
 def _reconcile_host_containers(
     client: Any,
     *,
+    host: DockerHostSpec,
     supervisor_id: str | None,
     coordinator_generation: int | None,
     coordinator_guard: Callable[[], None] | None,
@@ -256,7 +272,7 @@ def _reconcile_host_containers(
             if coordinator_guard is not None:
                 coordinator_guard()
             try:
-                client.api.remove_container(container_id, force=True)
+                _remove_reconciled_container(client, host, container_id)
                 removed += 1
             except Exception:
                 logger.warning(
@@ -281,7 +297,7 @@ def _reconcile_host_containers(
         if coordinator_guard is not None:
             coordinator_guard()
         try:
-            client.api.remove_container(container_id, force=True)
+            _remove_reconciled_container(client, host, container_id)
             removed += 1
         except Exception:
             logger.warning(
