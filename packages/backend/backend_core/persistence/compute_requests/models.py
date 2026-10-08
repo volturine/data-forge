@@ -9,12 +9,12 @@ class ComputeRequest(SQLModel, table=True):  # type: ignore[call-arg, assignment
     __table_args__ = (
         Index('ix_compute_requests_active_source', 'artifact_path', 'status'),
         Index(
-            'ix_compute_requests_engine_identity',
+            'ix_compute_requests_compute_worker_identity',
             'namespace',
             'status',
-            'engine_scope',
-            'engine_reuse_policy',
-            'engine_resource_id',
+            'compute_worker_scope',
+            'compute_worker_reuse_policy',
+            'compute_worker_resource_id',
         ),
     )
 
@@ -22,9 +22,9 @@ class ComputeRequest(SQLModel, table=True):  # type: ignore[call-arg, assignment
     namespace: str = Field(sa_column=Column(String, nullable=False, index=True))
     kind: int = Field(sa_column=Column(Integer, nullable=False, index=True))
     status: int = Field(sa_column=Column(Integer, nullable=False, index=True))
-    engine_scope: int | None = Field(default=None, sa_column=Column(Integer, nullable=True))
-    engine_reuse_policy: int | None = Field(default=None, sa_column=Column(Integer, nullable=True))
-    engine_resource_id: str | None = Field(default=None, sa_column=Column(String, nullable=True))
+    compute_worker_scope: int | None = Field(default=None, sa_column=Column(Integer, nullable=True))
+    compute_worker_reuse_policy: int | None = Field(default=None, sa_column=Column(Integer, nullable=True))
+    compute_worker_resource_id: str | None = Field(default=None, sa_column=Column(String, nullable=True))
     command_envelope: bytes = Field(sa_column=Column(LargeBinary, nullable=False))
     response_envelope: bytes | None = Field(default=None, sa_column=Column(LargeBinary, nullable=True))
     error_message: str | None = Field(default=None, sa_column=Column(String, nullable=True))

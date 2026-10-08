@@ -32,8 +32,8 @@ from backend_core.exceptions import EngineRunComparisonError, engine_run_not_fou
 from backend_core.json_utils import copy_json_dict
 from backend_core.namespace import get_namespace
 from backend_core.persistence.analysis.models import Analysis
+from backend_core.persistence.compute_worker_runs.models import ComputeWorkerRun
 from backend_core.persistence.datasource.models import DataSource
-from backend_core.persistence.engine_runs.models import EngineRun
 from backend_core.sqlmodel_typing import col, sa
 from backend_core.transactions import committed
 
@@ -165,8 +165,8 @@ def _latest_completed_step_name(result_json: dict[str, Any]) -> str | None:
 
 
 def stage_cancel_engine_run(session: Session, run_id: str, *, cancelled_by: str | None) -> compute_schemas.CancelBuildResponse:
-    table = EngineRun.metadata.tables[EngineRun.__tablename__]
-    run = session.execute(select(EngineRun).where(table.c.id == run_id).where(table.c.namespace == get_namespace()).with_for_update()).scalars().first()
+    table = ComputeWorkerRun.metadata.tables[ComputeWorkerRun.__tablename__]
+    run = session.execute(select(ComputeWorkerRun).where(table.c.id == run_id).where(table.c.namespace == get_namespace()).with_for_update()).scalars().first()
     if run is None:
         raise ValueError('Engine run not found')
     if run.status_kind() != EngineRunStatus.RUNNING:
@@ -221,7 +221,7 @@ def stage_cancel_engine_run(session: Session, run_id: str, *, cancelled_by: str 
 cancel_engine_run = committed(stage_cancel_engine_run)
 
 
-def _serialize_run(run: EngineRun) -> EngineRunResponseSchema:
+def _serialize_run(run: ComputeWorkerRun) -> EngineRunResponseSchema:
     result_json = run.result_json if isinstance(run.result_json, dict) else {}
     execution_entries_raw = result_json.get('execution_entries')
     execution_entries = (
@@ -235,7 +235,7 @@ def _serialize_run(run: EngineRun) -> EngineRunResponseSchema:
 
 
 def get_engine_run(session: Session, run_id: str) -> EngineRunResponseSchema | None:
-    run = session.get(EngineRun, run_id)
+    run = session.get(ComputeWorkerRun, run_id)
     if run is None:
         return None
     if run.namespace != get_namespace():
@@ -252,7 +252,7 @@ def stage_create_engine_run(session: Session, payload: EngineRunPayload) -> Engi
         )
         session.execute(text('SELECT pg_advisory_xact_lock(:key)'), {'key': lock_key})
     if payload.idempotency_key is not None:
-        existing = session.get(EngineRun, payload.id)
+        existing = session.get(ComputeWorkerRun, payload.id)
         if existing is not None:
             same_request = (
                 existing.namespace == get_namespace()
@@ -270,7 +270,7 @@ def stage_create_engine_run(session: Session, payload: EngineRunPayload) -> Engi
         result_json = result_json or {}
         result_json['execution_entries'] = [EngineRunExecutionEntry.model_validate(entry).model_dump(mode='json') for entry in payload.execution_entries]
 
-    run = EngineRun(
+    run = ComputeWorkerRun(
         id=payload.id,
         namespace=get_namespace(),
         analysis_id=payload.analysis_id,
@@ -319,8 +319,8 @@ def stage_update_engine_run(
     triggered_by: str | None | _UnsetType = _UNSET,
     serialize_response: bool = True,
 ) -> EngineRunResponseSchema | bool:
-    table = EngineRun.metadata.tables[EngineRun.__tablename__]
-    run = session.execute(select(EngineRun).where(table.c.id == run_id).where(table.c.namespace == get_namespace()).with_for_update()).scalars().first()
+    table = ComputeWorkerRun.metadata.tables[ComputeWorkerRun.__tablename__]
+    run = session.execute(select(ComputeWorkerRun).where(table.c.id == run_id).where(table.c.namespace == get_namespace()).with_for_update()).scalars().first()
     if run is None:
         raise engine_run_not_found(run_id)
 
@@ -445,51 +445,51 @@ def list_engine_runs(
     limit: int = 100,
     offset: int = 0,
 ) -> list[EngineRunResponseSchema]:
-    stmt = select(EngineRun).where(sa(EngineRun.namespace == get_namespace()))
+    stmt = select(ComputeWorkerRun).where(sa(ComputeWorkerRun.namespace == get_namespace()))
     stmt = stmt.join(
         DataSource,
-        col(EngineRun.datasource_id) == col(DataSource.id),
+        col(ComputeWorkerRun.datasource_id) == col(DataSource.id),
         isouter=True,
     )
     stmt = stmt.join(
         Analysis,
-        col(EngineRun.analysis_id) == col(Analysis.id),
+        col(ComputeWorkerRun.analysis_id) == col(Analysis.id),
         isouter=True,
     )
     if analysis_id is not None:
-        stmt = stmt.where(sa(EngineRun.analysis_id == analysis_id))
+        stmt = stmt.where(sa(ComputeWorkerRun.analysis_id == analysis_id))
     if datasource_id is not None:
-        stmt = stmt.where(sa(EngineRun.datasource_id == datasource_id))
+        stmt = stmt.where(sa(ComputeWorkerRun.datasource_id == datasource_id))
     if kind is not None:
         coerced_kind = EngineRunKind.require(kind)
         if coerced_kind == EngineRunKind.BUILD:
             return []
-        stmt = stmt.where(sa(EngineRun.kind == coerced_kind.value))
+        stmt = stmt.where(sa(ComputeWorkerRun.kind == coerced_kind.value))
     else:
-        stmt = stmt.where(sa(EngineRun.kind != EngineRunKind.BUILD.value))
+        stmt = stmt.where(sa(ComputeWorkerRun.kind != EngineRunKind.BUILD.value))
     if status is not None:
-        stmt = stmt.where(sa(EngineRun.status == EngineRunStatus.require(status).value))
+        stmt = stmt.where(sa(ComputeWorkerRun.status == EngineRunStatus.require(status).value))
     if search:
         q = f'%{search}%'
         stmt = stmt.where(
             or_(
-                col(EngineRun.id).ilike(q),
-                col(EngineRun.analysis_id).ilike(q),
-                col(EngineRun.datasource_id).ilike(q),
+                col(ComputeWorkerRun.id).ilike(q),
+                col(ComputeWorkerRun.analysis_id).ilike(q),
+                col(ComputeWorkerRun.datasource_id).ilike(q),
                 col(DataSource.name).ilike(q),
                 col(Analysis.name).ilike(q),
             )
         )
 
-    stmt = stmt.order_by(desc(sa(EngineRun.created_at)), sa(EngineRun.id)).limit(limit).offset(offset)
+    stmt = stmt.order_by(desc(sa(ComputeWorkerRun.created_at)), sa(ComputeWorkerRun.id)).limit(limit).offset(offset)
     runs = session.execute(stmt).scalars().all()
     return [_serialize_run(run) for run in runs]
 
 
 def compare_engine_runs(session: Session, run_a_id: str, run_b_id: str, datasource_id: str | None = None) -> BuildComparisonResponse:
     """Compare two engine runs side-by-side: schema diff, row count delta, timing delta."""
-    run_a = session.get(EngineRun, run_a_id)
-    run_b = session.get(EngineRun, run_b_id)
+    run_a = session.get(ComputeWorkerRun, run_a_id)
+    run_b = session.get(ComputeWorkerRun, run_b_id)
     namespace = get_namespace()
     if run_a is not None and run_a.namespace != namespace:
         run_a = None
@@ -762,14 +762,14 @@ def duration_stats(
         build_durations = [float(row.duration_ms) for row in chronological_builds if row.duration_ms is not None]
         return _duration_stats_response(build_runs, build_durations)
 
-    engine_stmt = select(EngineRun).where(sa(EngineRun.namespace == get_namespace()))
+    engine_stmt = select(ComputeWorkerRun).where(sa(ComputeWorkerRun.namespace == get_namespace()))
     if analysis_id is not None:
-        engine_stmt = engine_stmt.where(sa(EngineRun.analysis_id == analysis_id))
+        engine_stmt = engine_stmt.where(sa(ComputeWorkerRun.analysis_id == analysis_id))
     if datasource_id is not None:
-        engine_stmt = engine_stmt.where(sa(EngineRun.datasource_id == datasource_id))
-    engine_stmt = engine_stmt.where(sa(EngineRun.kind == coerced_kind.value))
+        engine_stmt = engine_stmt.where(sa(ComputeWorkerRun.datasource_id == datasource_id))
+    engine_stmt = engine_stmt.where(sa(ComputeWorkerRun.kind == coerced_kind.value))
     engine_stmt = engine_stmt.where(
-        col(EngineRun.status).in_(
+        col(ComputeWorkerRun.status).in_(
             [
                 EngineRunStatus.SUCCESS,
                 EngineRunStatus.FAILED,
@@ -777,7 +777,7 @@ def duration_stats(
             ]
         )
     )
-    engine_stmt = engine_stmt.order_by(desc(sa(EngineRun.created_at)), sa(EngineRun.id)).limit(capped)
+    engine_stmt = engine_stmt.order_by(desc(sa(ComputeWorkerRun.created_at)), sa(ComputeWorkerRun.id)).limit(capped)
     engine_rows = list(session.execute(engine_stmt).scalars().all())
     chronological_engines = list(reversed(engine_rows))
     engine_runs = [

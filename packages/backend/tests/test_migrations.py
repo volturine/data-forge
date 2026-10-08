@@ -40,6 +40,8 @@ def test_runtime_schema_has_only_public_and_tenant_creation_revisions() -> None:
         '0022_telegram_part_receipts.py',
         '0023_drop_datasource_freshness.py',
         '0024_pivot_value_columns.py',
+        '0025_compute_worker_instances.py',
+        '0026_compute_worker_runs.py',
     ]
 
 
@@ -76,9 +78,11 @@ def test_pivot_values_migration_rewrites_only_legacy_pivot_configs() -> None:
         rewrite_pipeline_definition(multiple_value_pipeline, downgrade=True)
 
 
-def test_public_revision_is_runtime_namespace_work_wakes_head() -> None:
-    assert _PUBLIC_REVISION == '0020_runtime_wakes'
+def test_runtime_revisions_point_to_compute_worker_rename_heads() -> None:
+    assert _PUBLIC_REVISION == '0025_compute_worker_instances'
+    assert _TENANT_REVISION == '0026_compute_worker_runs'
     assert len(_PUBLIC_REVISION) <= 32
+    assert len(_TENANT_REVISION) <= 32
 
 
 def test_public_schema_registers_telegram_runtime_tables(monkeypatch: pytest.MonkeyPatch) -> None:

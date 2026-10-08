@@ -46,7 +46,7 @@ def test_durable_command_preserves_source_revision_and_revision_changes_split_fl
     assert compute_requests_service._flight_key(cast(enums_pb2.ComputeRequestKind, first.kind), first_command) != compute_requests_service._flight_key(
         cast(enums_pb2.ComputeRequestKind, second.kind), second_command
     )
-    assert first.engine_resource_id == second.engine_resource_id == datasource_id
+    assert first.compute_worker_resource_id == second.compute_worker_resource_id == datasource_id
 
 
 def test_create_request_preallocates_its_exact_datasource_worker_rid(test_db_session: Session) -> None:
@@ -57,9 +57,9 @@ def test_create_request_preallocates_its_exact_datasource_worker_rid(test_db_ses
     request = compute_requests_service.create_request(
         test_db_session, namespace='default', kind=enums_pb2.COMPUTE_REQUEST_KIND_CREATE_DATABASE_DATASOURCE, command=command
     )
-    assert request.engine_resource_id == request.id
-    assert request.engine_scope == enums_pb2.COMPUTE_WORKER_SCOPE_DATASOURCE_PREVIEW
-    assert request.engine_reuse_policy == enums_pb2.COMPUTE_WORKER_REUSE_POLICY_SHARED
+    assert request.compute_worker_resource_id == request.id
+    assert request.compute_worker_scope == enums_pb2.COMPUTE_WORKER_SCOPE_DATASOURCE_PREVIEW
+    assert request.compute_worker_reuse_policy == enums_pb2.COMPUTE_WORKER_REUSE_POLICY_SHARED
 
 
 def test_preflight_initial_and_preview_jobs_share_only_the_stable_draft_rid(test_db_session: Session) -> None:
@@ -82,7 +82,7 @@ def test_preflight_initial_and_preview_jobs_share_only_the_stable_draft_rid(test
         requests[-1].status = enums_pb2.COMPUTE_REQUEST_STATUS_COMPLETED
         test_db_session.commit()
     assert requests[0].id != requests[1].id
-    assert {request.engine_resource_id for request in requests} == {preflight_id}
+    assert {request.compute_worker_resource_id for request in requests} == {preflight_id}
 
 
 def test_datasource_enqueue_transfers_preflight_source_ownership_atomically(test_db_session: Session) -> None:

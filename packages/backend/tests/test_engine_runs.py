@@ -7,7 +7,7 @@ from backend_core import build_runs_service, engine_runs_service as engine_run_s
 from backend_core.domain.build_runs.models import BuildRunStatus
 from backend_core.domain.engine_runs.schemas import EngineRunKind, EngineRunStatus
 from backend_core.namespace import reset_namespace, set_namespace_context
-from backend_core.persistence.engine_runs.models import EngineRun
+from backend_core.persistence.compute_worker_runs.models import ComputeWorkerRun
 
 
 def _create_payload(
@@ -36,7 +36,7 @@ def test_create_engine_run_persists(test_db_session):
     )
 
     result = engine_run_service.create_engine_run(test_db_session, payload)
-    run = test_db_session.get(EngineRun, result.id)
+    run = test_db_session.get(ComputeWorkerRun, result.id)
 
     assert run is not None
     assert run.kind == EngineRunKind.PREVIEW
@@ -60,7 +60,7 @@ def test_create_engine_run_is_idempotent_for_the_same_request(test_db_session):
     retry = engine_run_service.create_engine_run(test_db_session, payload)
 
     assert first.id == retry.id == payload.id
-    assert test_db_session.get(EngineRun, payload.id) is not None
+    assert test_db_session.get(ComputeWorkerRun, payload.id) is not None
 
     conflicting = engine_run_service.create_engine_run_payload(
         analysis_id='analysis-idempotent',
@@ -99,7 +99,7 @@ def test_create_engine_run_persists_execution_entries(test_db_session):
     )
 
     result = engine_run_service.create_engine_run(test_db_session, payload)
-    run = test_db_session.get(EngineRun, result.id)
+    run = test_db_session.get(ComputeWorkerRun, result.id)
 
     assert run is not None
     assert isinstance(run.result_json, dict)
@@ -286,7 +286,7 @@ def test_update_engine_run_keeps_terminal_run_immutable(test_db_session):
     )
 
     assert updated.status == EngineRunStatus.SUCCESS
-    stored = test_db_session.get(EngineRun, created.id)
+    stored = test_db_session.get(ComputeWorkerRun, created.id)
     assert stored is not None
     assert stored.status == EngineRunStatus.SUCCESS
     assert stored.error_message is None
@@ -315,7 +315,7 @@ def test_update_engine_run_reports_rejected_terminal_conflict(test_db_session):
 
     assert rejected.applied is False
     assert rejected.status == EngineRunStatus.SUCCESS
-    stored = test_db_session.get(EngineRun, created.id)
+    stored = test_db_session.get(ComputeWorkerRun, created.id)
     assert stored is not None
     assert stored.result_json == {'row_count': 1}
     assert stored.progress == 0.0
@@ -354,7 +354,7 @@ def test_update_engine_run_applies_changes_to_running_run(test_db_session):
 
     assert updated.applied is True
     assert updated.status == EngineRunStatus.SUCCESS
-    stored = test_db_session.get(EngineRun, created.id)
+    stored = test_db_session.get(ComputeWorkerRun, created.id)
     assert stored is not None
     assert stored.result_json == {'row_count': 5, 'execution_entries': []}
 

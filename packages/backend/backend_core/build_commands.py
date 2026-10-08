@@ -78,7 +78,7 @@ def fail_build_job(session: Session, claim: BuildClaimCommand, *, error: str) ->
             tab_name=run.current_tab_name,
             current_output_id=run.current_output_id,
             current_output_name=run.current_output_name,
-            engine_run_id=run.current_engine_run_id,
+            engine_run_id=run.current_compute_worker_run_id,
             progress=run.progress,
             elapsed_ms=run.elapsed_ms,
             total_steps=run.total_steps,

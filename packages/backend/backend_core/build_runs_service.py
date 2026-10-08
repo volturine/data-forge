@@ -235,7 +235,7 @@ def stage_build_run(
         starter_json=copy_json_dict(starter_json),
         resource_config_json=copy_json_dict(resource_config_json) if isinstance(resource_config_json, dict) else None,
         result_json=copy_json_dict(result_json) if isinstance(result_json, dict) else None,
-        current_engine_run_id=current_engine_run_id,
+        current_compute_worker_run_id=current_engine_run_id,
         current_kind=current_kind,
         current_datasource_id=current_datasource_id,
         current_tab_id=current_tab_id,
@@ -276,7 +276,7 @@ def has_active_build_for_datasource(session: Session, *, namespace: str, datasou
 
 
 def get_build_run_by_engine_run(session: Session, engine_run_id: str) -> BuildRun | None:
-    stmt = select(BuildRun).where(sa(BuildRun.current_engine_run_id == engine_run_id)).order_by(desc(sa(BuildRun.updated_at)), sa(BuildRun.id)).limit(1)
+    stmt = select(BuildRun).where(sa(BuildRun.current_compute_worker_run_id == engine_run_id)).order_by(desc(sa(BuildRun.updated_at)), sa(BuildRun.id)).limit(1)
     return session.execute(stmt).scalars().first()
 
 
@@ -311,7 +311,7 @@ def list_build_runs(
     if status is not None:
         stmt = stmt.where(sa(BuildRun.status == BuildRunStatus.require(status)))
     if current_engine_run_id is not None:
-        stmt = stmt.where(sa(BuildRun.current_engine_run_id == current_engine_run_id))
+        stmt = stmt.where(sa(BuildRun.current_compute_worker_run_id == current_engine_run_id))
     if search:
         q = f'%{search}%'
         stmt = stmt.where(
@@ -506,7 +506,7 @@ def stage_build_event(
         sequence=sequence,
         type=event.type,
         payload_json=payload_json,
-        engine_run_id=event.engine_run_id,
+        compute_worker_run_id=event.engine_run_id,
         emitted_at=event.emitted_at,
         created_at=created_at,
     )
@@ -557,7 +557,7 @@ def stage_build_event(
         sequence=sequence,
         type=event.type,
         payload_json=payload_json,
-        engine_run_id=event.engine_run_id,
+        compute_worker_run_id=event.engine_run_id,
         emitted_at=event.emitted_at,
         created_at=created_at,
     )
@@ -794,7 +794,7 @@ def fold_build_detail(session: Session, build_run: BuildRun) -> compute_schemas.
         current_tab_name=build_run.current_tab_name,
         current_output_id=build_run.current_output_id,
         current_output_name=build_run.current_output_name,
-        current_engine_run_id=build_run.current_engine_run_id,
+        current_engine_run_id=build_run.current_compute_worker_run_id,
         total_tabs=build_run.total_tabs,
         cancelled_at=build_run.cancelled_at,
         cancelled_by=build_run.cancelled_by,
@@ -838,7 +838,7 @@ def build_summary(build_run: BuildRun) -> compute_schemas.BuildRunSummary:
         current_tab_name=build_run.current_tab_name,
         current_output_id=build_run.current_output_id,
         current_output_name=build_run.current_output_name,
-        current_engine_run_id=build_run.current_engine_run_id,
+        current_engine_run_id=build_run.current_compute_worker_run_id,
         total_tabs=build_run.total_tabs,
         cancelled_at=build_run.cancelled_at,
         cancelled_by=build_run.cancelled_by,

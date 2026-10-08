@@ -100,7 +100,7 @@ def _staged_request(
     namespace: str,
     command: compute_pb2.ComputeCommand,
     *,
-    engine_resource_id: str | None = None,
+    compute_worker_resource_id: str | None = None,
 ) -> SimpleNamespace:
     kind = enums_pb2.COMPUTE_REQUEST_KIND_PREVIEW
     envelope = command_envelope(
@@ -112,7 +112,7 @@ def _staged_request(
         id=request_id,
         namespace=namespace,
         kind=kind,
-        engine_resource_id=engine_resource_id,
+        compute_worker_resource_id=compute_worker_resource_id,
         command_envelope=envelope.SerializeToString(),
     )
 
@@ -425,7 +425,7 @@ async def test_local_recovery_delivers_batched_terminal_state_without_another_db
 async def test_shared_flight_wait_skips_per_viewer_disconnect_polling(monkeypatch: pytest.MonkeyPatch) -> None:
     request_id = 'shared-preview-request'
     command = compute_pb2.ComputeCommand()
-    staged = _staged_request(request_id, 'default', command, engine_resource_id='analysis-1')
+    staged = _staged_request(request_id, 'default', command, compute_worker_resource_id='analysis-1')
     running = SimpleNamespace(status=enums_pb2.COMPUTE_REQUEST_STATUS_RUNNING)
     completed = compute_requests_service.TerminalComputeRequest(
         id=request_id,
@@ -492,7 +492,7 @@ async def test_shared_flight_wait_skips_per_viewer_disconnect_polling(monkeypatc
 async def test_cancelling_a_shared_flight_waiter_does_not_cancel_the_durable_request(monkeypatch: pytest.MonkeyPatch) -> None:
     request_id = 'shared-preview-cancelled-viewer'
     command = compute_pb2.ComputeCommand()
-    staged = _staged_request(request_id, 'default', command, engine_resource_id='analysis-1')
+    staged = _staged_request(request_id, 'default', command, compute_worker_resource_id='analysis-1')
     running = SimpleNamespace(status=enums_pb2.COMPUTE_REQUEST_STATUS_RUNNING)
 
     class Recovery:

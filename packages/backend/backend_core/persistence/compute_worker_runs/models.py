@@ -6,8 +6,8 @@ from sqlmodel import Field, SQLModel
 from backend_core.domain.engine_runs.schemas import EngineRunKind, EngineRunStatus
 
 
-class EngineRun(SQLModel, table=True):  # type: ignore[call-arg, assignment]
-    __tablename__ = 'engine_runs'  # type: ignore[assignment]
+class ComputeWorkerRun(SQLModel, table=True):  # type: ignore[call-arg, assignment]
+    __tablename__ = 'compute_worker_runs'  # type: ignore[assignment]
 
     def kind_kind(self) -> EngineRunKind:
         return EngineRunKind.require(self.kind)

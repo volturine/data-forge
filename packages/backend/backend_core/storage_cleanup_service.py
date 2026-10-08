@@ -342,7 +342,7 @@ def register_stage(
         raise ValueError('Datasource staging requires one complete compute or build claim')
     if owner is None:
         raise StorageCleanupConflict('Datasource staging claim is no longer active')
-    if isinstance(owner, ComputeRequest) and owner.engine_resource_id != datasource_id:
+    if isinstance(owner, ComputeRequest) and owner.compute_worker_resource_id != datasource_id:
         raise StorageCleanupConflict('Datasource staging claim targets a different exact RID')
     staging_id = f'{datasource_id}__claim_{claim_token.replace("-", "_")}'
     expected_prefix = f's3://{get_namespace()}/clean/{staging_id}/'
@@ -648,7 +648,7 @@ def _source_in_use(session: Session, *, url: str, resource_id: str) -> bool:
         select(col(ComputeRequest.id))
         .where(sa(ComputeRequest.namespace == get_namespace()))
         .where(col(ComputeRequest.status).in_(_ACTIVE_REQUEST_STATUSES))
-        .where(or_(sa(ComputeRequest.engine_resource_id == resource_id), sa(ComputeRequest.artifact_path == url)))
+        .where(or_(sa(ComputeRequest.compute_worker_resource_id == resource_id), sa(ComputeRequest.artifact_path == url)))
         .limit(1)
     )
     return session.execute(statement).first() is not None

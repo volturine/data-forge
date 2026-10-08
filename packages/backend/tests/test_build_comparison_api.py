@@ -3,7 +3,7 @@ from datetime import UTC, datetime
 
 from sqlmodel import Session
 
-from backend_core.persistence.engine_runs.models import EngineRun
+from backend_core.persistence.compute_worker_runs.models import ComputeWorkerRun
 
 
 def _create_run(
@@ -15,8 +15,8 @@ def _create_run(
     result_json: dict | None = None,
     step_timings: dict | None = None,
     duration_ms: int | None = None,
-) -> EngineRun:
-    run = EngineRun(
+) -> ComputeWorkerRun:
+    run = ComputeWorkerRun(
         id=str(uuid.uuid4()),
         analysis_id=str(uuid.uuid4()),
         datasource_id=datasource_id or str(uuid.uuid4()),
@@ -43,7 +43,7 @@ class TestCompareEndpoint:
             step_timings={'s1': 50},
             duration_ms=50,
         )
-        run_b = EngineRun(
+        run_b = ComputeWorkerRun(
             id=str(uuid.uuid4()),
             analysis_id=run_a.analysis_id,
             datasource_id=run_a.datasource_id,
