@@ -43,12 +43,24 @@ def _rename_index(old_name: str, new_name: str) -> None:
     op.execute(sa.text(f'ALTER INDEX {schema}.{old} RENAME TO {new}'))
 
 
+def _rename_constraint(table_name: str, old_name: str, new_name: str) -> None:
+    preparer = op.get_context().dialect.identifier_preparer
+    schema = preparer.quote_schema(_schema())
+    table = preparer.quote(table_name)
+    old = preparer.quote(old_name)
+    new = preparer.quote(new_name)
+    op.execute(sa.text(f'ALTER TABLE {schema}.{table} RENAME CONSTRAINT {old} TO {new}'))
+
+
 def upgrade() -> None:
     if _scope() != 'tenant':
         return
 
     schema = _schema()
     op.rename_table('engine_runs', 'compute_worker_runs', schema=schema)
+    _rename_constraint('compute_worker_runs', 'engine_runs_pkey', 'compute_worker_runs_pkey')
+    for column_name in ('id', 'datasource_id', 'kind', 'status', 'request_json', 'created_at', 'step_timings', 'progress', 'namespace'):
+        _rename_constraint('compute_worker_runs', f'engine_runs_{column_name}_not_null', f'compute_worker_runs_{column_name}_not_null')
     for table_name, old_name, new_name in (
         ('compute_requests', 'engine_scope', 'compute_worker_scope'),
         ('compute_requests', 'engine_reuse_policy', 'compute_worker_reuse_policy'),
@@ -86,4 +98,7 @@ def downgrade() -> None:
         ('build_events', 'compute_worker_run_id', 'engine_run_id'),
     ):
         op.alter_column(table_name, old_name, new_column_name=new_name, schema=schema)
+    _rename_constraint('compute_worker_runs', 'compute_worker_runs_pkey', 'engine_runs_pkey')
+    for column_name in ('id', 'datasource_id', 'kind', 'status', 'request_json', 'created_at', 'step_timings', 'progress', 'namespace'):
+        _rename_constraint('compute_worker_runs', f'compute_worker_runs_{column_name}_not_null', f'engine_runs_{column_name}_not_null')
     op.rename_table('compute_worker_runs', 'engine_runs', schema=schema)

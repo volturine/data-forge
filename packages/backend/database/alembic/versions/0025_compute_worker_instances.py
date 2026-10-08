@@ -43,12 +43,38 @@ def _rename_index(old_name: str, new_name: str) -> None:
     op.execute(sa.text(f'ALTER INDEX {schema}.{old} RENAME TO {new}'))
 
 
+def _rename_constraint(table_name: str, old_name: str, new_name: str) -> None:
+    preparer = op.get_context().dialect.identifier_preparer
+    schema = preparer.quote_schema(_schema())
+    table = preparer.quote(table_name)
+    old = preparer.quote(old_name)
+    new = preparer.quote(new_name)
+    op.execute(sa.text(f'ALTER TABLE {schema}.{table} RENAME CONSTRAINT {old} TO {new}'))
+
+
 def upgrade() -> None:
     if _scope() != 'public':
         return
 
     schema = _schema()
     op.rename_table('engine_instances', 'compute_worker_instances', schema=schema)
+    _rename_constraint('compute_worker_instances', 'engine_instances_pkey', 'compute_worker_instances_pkey')
+    for old_column, new_column in (
+        ('id', 'id'),
+        ('worker_id', 'worker_id'),
+        ('namespace', 'namespace'),
+        ('analysis_id', 'analysis_id'),
+        ('engine_scope', 'compute_worker_scope'),
+        ('engine_reuse_policy', 'compute_worker_reuse_policy'),
+        ('status', 'status'),
+        ('last_seen_at', 'last_seen_at'),
+        ('updated_at', 'updated_at'),
+    ):
+        _rename_constraint(
+            'compute_worker_instances',
+            f'engine_instances_{old_column}_not_null',
+            f'compute_worker_instances_{new_column}_not_null',
+        )
     for old_name, new_name in (
         ('engine_scope', 'compute_worker_scope'),
         ('engine_reuse_policy', 'compute_worker_reuse_policy'),
@@ -80,6 +106,23 @@ def downgrade() -> None:
         ('ix_compute_worker_instances_last_seen_at', 'ix_engine_instances_last_seen_at'),
     ):
         _rename_index(old_name, new_name)
+    _rename_constraint('compute_worker_instances', 'compute_worker_instances_pkey', 'engine_instances_pkey')
+    for old_column, new_column in (
+        ('compute_worker_scope', 'engine_scope'),
+        ('compute_worker_reuse_policy', 'engine_reuse_policy'),
+        ('id', 'id'),
+        ('worker_id', 'worker_id'),
+        ('namespace', 'namespace'),
+        ('analysis_id', 'analysis_id'),
+        ('status', 'status'),
+        ('last_seen_at', 'last_seen_at'),
+        ('updated_at', 'updated_at'),
+    ):
+        _rename_constraint(
+            'compute_worker_instances',
+            f'compute_worker_instances_{old_column}_not_null',
+            f'engine_instances_{new_column}_not_null',
+        )
     for old_name, new_name in (
         ('compute_worker_scope', 'engine_scope'),
         ('compute_worker_reuse_policy', 'engine_reuse_policy'),
