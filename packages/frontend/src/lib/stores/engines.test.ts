@@ -164,6 +164,10 @@ describe('EnginesStore', () => {
 		const firstStream = mockStreamConnection();
 		store.loadSnapshotOnce();
 		firstStream.emitSnapshot([]);
+		store.refreshSnapshot();
+		expect(mockConnectEnginesStream).toHaveBeenCalledOnce();
+
+		vi.advanceTimersByTime(30_000);
 
 		const refreshStream = mockStreamConnection();
 		store.refreshSnapshot();
