@@ -237,6 +237,14 @@
 		schema: schemaStore
 	});
 
+	$effect(() => {
+		if (!appBootstrap.appReady || onAuthPage || !isNamespaceReady()) return;
+		if (configStore.authRequired && !authStore.authenticated) return;
+		const namespace = namespaceState.value;
+		if (!namespace) return;
+		enginesStore.loadSnapshotOnce();
+	});
+
 	onMount(() => {
 		void appBootstrap.start().then(() => {
 			bindNamespaceServices();

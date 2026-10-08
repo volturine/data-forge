@@ -20,6 +20,8 @@ export class EnginesStore {
 	private shuttingDown = new SvelteSet<string>();
 
 	private connection: { close: () => void } | null = null;
+	private snapshotConnection: { close: () => void } | null = null;
+	private snapshotGeneration = 0;
 	private reconnect = new ReconnectionManager(RECONNECT_DELAY_MS);
 	private shouldReconnect = false;
 	private subscribers = 0;
@@ -27,7 +29,55 @@ export class EnginesStore {
 
 	count = $derived(this.engines.length);
 
+	loadSnapshotOnce(): void {
+		if (this.shouldReconnect || this.snapshotConnection || this.status === 'connected') return;
+
+		const generation = ++this.snapshotGeneration;
+		let receivedSnapshot = false;
+		let failed = false;
+		let connection: { close: () => void } | null = null;
+		this.loading = true;
+		this.error = null;
+		this.status = 'connecting';
+
+		const clearConnection = () => {
+			if (this.snapshotGeneration === generation && this.snapshotConnection === connection) {
+				this.snapshotConnection = null;
+			}
+		};
+
+		connection = connectEnginesStream({
+			onSnapshot: (engines) => {
+				if (this.snapshotGeneration !== generation) {
+					connection?.close();
+					return;
+				}
+				receivedSnapshot = true;
+				this.applySnapshot(engines);
+				connection?.close();
+				clearConnection();
+			},
+			onError: (message) => {
+				if (this.snapshotGeneration !== generation) return;
+				failed = true;
+				this.loading = false;
+				this.error = message;
+				this.status = 'error';
+				connection?.close();
+				clearConnection();
+			},
+			onClose: () => {
+				clearConnection();
+				if (this.snapshotGeneration !== generation || receivedSnapshot || failed) return;
+				this.loading = false;
+				this.status = 'disconnected';
+			}
+		});
+		this.snapshotConnection = connection;
+	}
+
 	startStream(): void {
+		this.cancelSnapshot();
 		this.subscribers++;
 		this.holdUntilEmpty = false;
 		if (this.shouldReconnect) return;
@@ -38,6 +88,12 @@ export class EnginesStore {
 	stopStream(): void {
 		this.subscribers = Math.max(0, this.subscribers - 1);
 		if (this.subscribers > 0) return;
+		if (this.snapshotConnection) {
+			this.cancelSnapshot();
+			this.loading = false;
+			this.status = this.engines.length > 0 ? 'connected' : 'disconnected';
+			return;
+		}
 		if (this.engines.length > 0 || this.loading || this.connection) {
 			this.holdUntilEmpty = true;
 			this.shouldReconnect = true;
@@ -99,6 +155,7 @@ export class EnginesStore {
 	}
 
 	reset(): void {
+		this.cancelSnapshot();
 		this.holdUntilEmpty = false;
 		this.shouldReconnect = false;
 		this.subscribers = 0;
@@ -127,24 +184,7 @@ export class EnginesStore {
 		}
 
 		this.connection = connectEnginesStream({
-			onSnapshot: (engines) => {
-				for (const key of this.shuttingDown) {
-					if (engines.some((engine) => engineIdentityKey(engine) === key)) continue;
-					this.shuttingDown.delete(key);
-				}
-				this.engines = engines.filter(
-					(engine) => !this.shuttingDown.has(engineIdentityKey(engine))
-				);
-				this.loading = false;
-				this.error = null;
-				this.status = 'connected';
-				if (this.holdUntilEmpty && this.subscribers === 0 && this.engines.length === 0) {
-					this.holdUntilEmpty = false;
-					this.shouldReconnect = false;
-					this.clearReconnectTimer();
-					this.connection?.close();
-				}
-			},
+			onSnapshot: (engines) => this.applySnapshot(engines),
 			onError: (message) => {
 				if (/not authenticated/i.test(message)) {
 					this.holdUntilEmpty = false;
@@ -165,6 +205,30 @@ export class EnginesStore {
 				this.scheduleReconnect();
 			}
 		});
+	}
+
+	private applySnapshot(engines: EngineStatusResponse[]): void {
+		for (const key of this.shuttingDown) {
+			if (engines.some((engine) => engineIdentityKey(engine) === key)) continue;
+			this.shuttingDown.delete(key);
+		}
+		this.engines = engines.filter((engine) => !this.shuttingDown.has(engineIdentityKey(engine)));
+		this.loading = false;
+		this.error = null;
+		this.status = 'connected';
+		if (this.holdUntilEmpty && this.subscribers === 0 && this.engines.length === 0) {
+			this.holdUntilEmpty = false;
+			this.shouldReconnect = false;
+			this.clearReconnectTimer();
+			this.connection?.close();
+		}
+	}
+
+	private cancelSnapshot(): void {
+		this.snapshotGeneration++;
+		const connection = this.snapshotConnection;
+		this.snapshotConnection = null;
+		connection?.close();
 	}
 
 	private scheduleReconnect(): void {

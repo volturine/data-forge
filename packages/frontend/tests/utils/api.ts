@@ -211,7 +211,8 @@ export async function deleteDatasource(
 export async function createAnalysis(
 	request: E2ERequest,
 	name: string,
-	datasourceId: string
+	datasourceId: string,
+	namespace?: string
 ): Promise<string> {
 	const datasourceRef = `source-${crypto.randomUUID()}`;
 	const viewId = crypto.randomUUID();
@@ -234,7 +235,9 @@ export async function createAnalysis(
 				}
 			]
 		},
-		{ [datasourceRef]: datasourceId }
+		{ [datasourceRef]: datasourceId },
+		undefined,
+		namespace
 	);
 }
 
@@ -261,14 +264,15 @@ export async function createImportedAnalysis(
 	name: string,
 	pipeline: Record<string, unknown>,
 	datasourceRemap?: Record<string, string>,
-	description?: string
+	description?: string,
+	namespace?: string
 ): Promise<string> {
 	return withAuthedPage(request, async (page) => {
-		await prepareHelperNamespace(page);
+		await prepareHelperNamespace(page, namespace);
 		const response = await page.request.post(
 			new URL('/api/v1/analysis/import', page.url()).toString(),
 			{
-				headers: { 'X-Namespace': helperDefaultNamespace },
+				headers: { 'X-Namespace': namespace ?? helperDefaultNamespace },
 				data: {
 					name,
 					description,
