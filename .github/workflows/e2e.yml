@@ -124,4 +124,5 @@ jobs:
       - name: Cleanup E2E runner Docker resources
         if: always()
         shell: bash
+        # Post-checkout uses the checked-out merge ref; pre-checkout uses trusted master.
         run: bash scripts/ci/cleanup_e2e_runner.sh post
