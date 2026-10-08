@@ -147,6 +147,7 @@ def test_engine_snapshot_reads_active_rows_once_and_stops_missing_engines(test_e
         'OOM_KILLED',
         'SUPERVISOR_ID',
         'OWNER_ID',
+        'DOCKER_HOST',
         'STATUS',
         'COMPUTE_WORKER_SCOPE',
         'COMPUTE_WORKER_REUSE_POLICY',
