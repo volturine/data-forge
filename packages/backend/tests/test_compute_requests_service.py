@@ -781,9 +781,9 @@ def test_cancel_active_requests_for_engine_retires_only_matching_work(test_db_se
     cancelled = compute_requests_service.cancel_active_requests_for_engine(
         test_db_session,
         namespace='default',
-        identity=compute_pb2.EngineIdentity(
-            scope=enums_pb2.ENGINE_SCOPE_ANALYSIS_INTERACTIVE,
-            reuse_policy=enums_pb2.ENGINE_REUSE_POLICY_SHARED,
+        identity=compute_pb2.ComputeWorkerIdentity(
+            scope=enums_pb2.COMPUTE_WORKER_SCOPE_ANALYSIS_INTERACTIVE,
+            reuse_policy=enums_pb2.COMPUTE_WORKER_REUSE_POLICY_SHARED,
             analysis_id='analysis-1',
             resource_id='analysis-1',
         ),
@@ -791,8 +791,8 @@ def test_cancel_active_requests_for_engine_retires_only_matching_work(test_db_se
     )
 
     assert cancelled == 1
-    assert matching.engine_scope == enums_pb2.ENGINE_SCOPE_ANALYSIS_INTERACTIVE
-    assert matching.engine_reuse_policy == enums_pb2.ENGINE_REUSE_POLICY_SHARED
+    assert matching.engine_scope == enums_pb2.COMPUTE_WORKER_SCOPE_ANALYSIS_INTERACTIVE
+    assert matching.engine_reuse_policy == enums_pb2.COMPUTE_WORKER_REUSE_POLICY_SHARED
     assert matching.engine_resource_id == 'analysis-1'
     assert other.engine_resource_id == 'analysis-2'
     test_db_session.refresh(matching)
@@ -1084,8 +1084,8 @@ def test_staged_schema_request_uses_pipeline_analysis_rid_for_engine_ownership(t
         request_json={'target_step_id': 'source', 'tab_id': 'tab-1', 'analysis_pipeline': pipeline},
     )
 
-    assert request.engine_scope == enums_pb2.ENGINE_SCOPE_ANALYSIS_INTERACTIVE
-    assert request.engine_reuse_policy == enums_pb2.ENGINE_REUSE_POLICY_SHARED
+    assert request.engine_scope == enums_pb2.COMPUTE_WORKER_SCOPE_ANALYSIS_INTERACTIVE
+    assert request.engine_reuse_policy == enums_pb2.COMPUTE_WORKER_REUSE_POLICY_SHARED
     assert request.engine_resource_id == 'analysis-1'
 
 
@@ -1215,7 +1215,7 @@ def test_create_request_stores_typed_command_envelope(test_db_session) -> None:
     assert envelope.idempotency_key == request.id
     assert envelope.correlation_id == request.id
     assert envelope.command.WhichOneof('command') == 'spawn_engine'
-    assert envelope.command.spawn_engine.engine_identity.scope == enums_pb2.ENGINE_SCOPE_ANALYSIS_INTERACTIVE
+    assert envelope.command.spawn_engine.engine_identity.scope == enums_pb2.COMPUTE_WORKER_SCOPE_ANALYSIS_INTERACTIVE
     assert envelope.command.spawn_engine.engine_identity.resource_id == 'analysis-1'
     assert envelope.command.spawn_engine.resource_config.max_memory_mb == 512
 
@@ -1840,8 +1840,8 @@ def test_engine_status_response_restores_enum_token_and_zero_defaults(test_db_se
             {
                 'analysis_id': 'analysis-1',
                 'resource_id': 'analysis-1',
-                'status': 'ENGINE_STATUS_HEALTHY',
-                'lifecycle_status': 'ENGINE_INSTANCE_STATUS_IDLE',
+                'status': 'COMPUTE_WORKER_STATUS_HEALTHY',
+                'lifecycle_status': 'COMPUTE_WORKER_INSTANCE_STATUS_IDLE',
                 'defaults': {},
             },
         ),

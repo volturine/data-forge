@@ -6,43 +6,51 @@ from pydantic import BaseModel, ConfigDict, Field, StringConstraints, TypeAdapte
 from dataforge_protocol import enums_pb2
 from runtime.domain.analysis.step_types import is_step_type
 from runtime.domain.domain_enums import DomainEnumValue, domain_token
-from runtime.domain.engine_runs.schemas import EngineRunKind
+from runtime.domain.engine_runs.schemas import ComputeWorkerRunKind
 
 
-class EngineStatus(DomainEnumValue):
+class ComputeWorkerStatus(DomainEnumValue):
     HEALTHY: ClassVar[Self]
     TERMINATED: ClassVar[Self]
 
 
-EngineStatus.HEALTHY = EngineStatus(enums_pb2.ENGINE_STATUS_HEALTHY, domain_token("EngineStatus", enums_pb2.ENGINE_STATUS_HEALTHY))
-EngineStatus.TERMINATED = EngineStatus(enums_pb2.ENGINE_STATUS_TERMINATED, domain_token("EngineStatus", enums_pb2.ENGINE_STATUS_TERMINATED))
+ComputeWorkerStatus.HEALTHY = ComputeWorkerStatus(
+    enums_pb2.COMPUTE_WORKER_STATUS_HEALTHY, domain_token("ComputeWorkerStatus", enums_pb2.COMPUTE_WORKER_STATUS_HEALTHY)
+)
+ComputeWorkerStatus.TERMINATED = ComputeWorkerStatus(
+    enums_pb2.COMPUTE_WORKER_STATUS_TERMINATED, domain_token("ComputeWorkerStatus", enums_pb2.COMPUTE_WORKER_STATUS_TERMINATED)
+)
 
 
-class EngineScope(DomainEnumValue):
+class ComputeWorkerScope(DomainEnumValue):
     DATASOURCE_PREVIEW: ClassVar[Self]
     ANALYSIS_INTERACTIVE: ClassVar[Self]
     BUILD: ClassVar[Self]
 
 
-EngineScope.DATASOURCE_PREVIEW = EngineScope(enums_pb2.ENGINE_SCOPE_DATASOURCE_PREVIEW, domain_token("EngineScope", enums_pb2.ENGINE_SCOPE_DATASOURCE_PREVIEW))
-EngineScope.ANALYSIS_INTERACTIVE = EngineScope(
-    enums_pb2.ENGINE_SCOPE_ANALYSIS_INTERACTIVE, domain_token("EngineScope", enums_pb2.ENGINE_SCOPE_ANALYSIS_INTERACTIVE)
+ComputeWorkerScope.DATASOURCE_PREVIEW = ComputeWorkerScope(
+    enums_pb2.COMPUTE_WORKER_SCOPE_DATASOURCE_PREVIEW, domain_token("ComputeWorkerScope", enums_pb2.COMPUTE_WORKER_SCOPE_DATASOURCE_PREVIEW)
 )
-EngineScope.BUILD = EngineScope(enums_pb2.ENGINE_SCOPE_BUILD, domain_token("EngineScope", enums_pb2.ENGINE_SCOPE_BUILD))
+ComputeWorkerScope.ANALYSIS_INTERACTIVE = ComputeWorkerScope(
+    enums_pb2.COMPUTE_WORKER_SCOPE_ANALYSIS_INTERACTIVE, domain_token("ComputeWorkerScope", enums_pb2.COMPUTE_WORKER_SCOPE_ANALYSIS_INTERACTIVE)
+)
+ComputeWorkerScope.BUILD = ComputeWorkerScope(enums_pb2.COMPUTE_WORKER_SCOPE_BUILD, domain_token("ComputeWorkerScope", enums_pb2.COMPUTE_WORKER_SCOPE_BUILD))
 
 
-class EngineReusePolicy(DomainEnumValue):
+class ComputeWorkerReusePolicy(DomainEnumValue):
     SHARED: ClassVar[Self]
     EXCLUSIVE: ClassVar[Self]
 
 
-EngineReusePolicy.SHARED = EngineReusePolicy(enums_pb2.ENGINE_REUSE_POLICY_SHARED, domain_token("EngineReusePolicy", enums_pb2.ENGINE_REUSE_POLICY_SHARED))
-EngineReusePolicy.EXCLUSIVE = EngineReusePolicy(
-    enums_pb2.ENGINE_REUSE_POLICY_EXCLUSIVE, domain_token("EngineReusePolicy", enums_pb2.ENGINE_REUSE_POLICY_EXCLUSIVE)
+ComputeWorkerReusePolicy.SHARED = ComputeWorkerReusePolicy(
+    enums_pb2.COMPUTE_WORKER_REUSE_POLICY_SHARED, domain_token("ComputeWorkerReusePolicy", enums_pb2.COMPUTE_WORKER_REUSE_POLICY_SHARED)
+)
+ComputeWorkerReusePolicy.EXCLUSIVE = ComputeWorkerReusePolicy(
+    enums_pb2.COMPUTE_WORKER_REUSE_POLICY_EXCLUSIVE, domain_token("ComputeWorkerReusePolicy", enums_pb2.COMPUTE_WORKER_REUSE_POLICY_EXCLUSIVE)
 )
 
 
-class EngineResourceConfig(BaseModel):
+class ComputeWorkerResourceConfig(BaseModel):
     """Optional resource overrides for compute engine.
 
     All fields are optional - None means use default from settings/env vars.
@@ -81,7 +89,7 @@ class EngineResourceConfig(BaseModel):
         return v
 
 
-class EngineDefaults(BaseModel):
+class ComputeWorkerDefaults(BaseModel):
     """Default engine resource settings from environment."""
 
     model_config = ConfigDict(from_attributes=True)
@@ -177,12 +185,12 @@ class AnalysisPipelinePayload(BaseModel):
         return value
 
 
-class EngineStatusSchema(BaseModel):
+class ComputeWorkerStatusSchema(BaseModel):
     model_config = ConfigDict(from_attributes=True)
 
     analysis_id: str
     resource_id: str
-    status: EngineStatus
+    status: ComputeWorkerStatus
     container_id: str | None = None
     image_digest: str | None = None
     lifecycle_status: str | None = None
@@ -193,11 +201,11 @@ class EngineStatusSchema(BaseModel):
     owner_id: str | None = None
     last_activity: str | None = None
     current_job_id: str | None = None
-    resource_config: EngineResourceConfig | None = None  # Overrides provided by user
-    effective_resources: EngineResourceConfig | None = None  # Actual values being used
-    defaults: EngineDefaults | None = None  # Default values from env vars
-    scope: EngineScope | None = None
-    reuse_policy: EngineReusePolicy | None = None
+    resource_config: ComputeWorkerResourceConfig | None = None  # Overrides provided by user
+    effective_resources: ComputeWorkerResourceConfig | None = None  # Actual values being used
+    defaults: ComputeWorkerDefaults | None = None  # Default values from env vars
+    scope: ComputeWorkerScope | None = None
+    reuse_policy: ComputeWorkerReusePolicy | None = None
     datasource_id: str | None = None
     build_id: str | None = None
     current_build_id: str | None = None
@@ -462,7 +470,7 @@ class BuildRunSummary(BaseModel):
     current_step: str | None = None
     current_step_index: int | None = None
     total_steps: int = 0
-    current_kind: EngineRunKind | None = None
+    current_kind: ComputeWorkerRunKind | None = None
     current_datasource_id: str | None = None
     current_tab_id: str | None = None
     current_tab_name: str | None = None
@@ -593,7 +601,7 @@ class BuildStreamEvent(BaseModel):
     analysis_id: str
     emitted_at: datetime
     sequence: int | None = None
-    current_kind: EngineRunKind | None = None
+    current_kind: ComputeWorkerRunKind | None = None
     current_datasource_id: str | None = None
     tab_id: str | None = None
     tab_name: str | None = None

@@ -591,16 +591,16 @@ def list_terminal_requests(session: Session, request_ids: Collection[str]) -> li
     ]
 
 
-def _datasource_engine_identity(resource_id: str) -> compute_pb2.EngineIdentity:
-    return compute_pb2.EngineIdentity(
-        scope=enums_pb2.ENGINE_SCOPE_DATASOURCE_PREVIEW,
-        reuse_policy=enums_pb2.ENGINE_REUSE_POLICY_SHARED,
+def _datasource_engine_identity(resource_id: str) -> compute_pb2.ComputeWorkerIdentity:
+    return compute_pb2.ComputeWorkerIdentity(
+        scope=enums_pb2.COMPUTE_WORKER_SCOPE_DATASOURCE_PREVIEW,
+        reuse_policy=enums_pb2.COMPUTE_WORKER_REUSE_POLICY_SHARED,
         datasource_id=resource_id,
         resource_id=resource_id,
     )
 
 
-def _engine_identity_for_command(command: compute_pb2.ComputeCommand, *, request_id: str) -> compute_pb2.EngineIdentity | None:
+def _engine_identity_for_command(command: compute_pb2.ComputeCommand, *, request_id: str) -> compute_pb2.ComputeWorkerIdentity | None:
     command_name = command.WhichOneof('command')
     if command_name in {'spawn_engine', 'configure_engine', 'shutdown_engine'}:
         return getattr(command, command_name).engine_identity
@@ -610,9 +610,9 @@ def _engine_identity_for_command(command: compute_pb2.ComputeCommand, *, request
             return preview.engine_identity
         analysis_id = preview.analysis_pipeline.analysis_id or preview.analysis_id
         if analysis_id:
-            return compute_pb2.EngineIdentity(
-                scope=enums_pb2.ENGINE_SCOPE_ANALYSIS_INTERACTIVE,
-                reuse_policy=enums_pb2.ENGINE_REUSE_POLICY_SHARED,
+            return compute_pb2.ComputeWorkerIdentity(
+                scope=enums_pb2.COMPUTE_WORKER_SCOPE_ANALYSIS_INTERACTIVE,
+                reuse_policy=enums_pb2.COMPUTE_WORKER_REUSE_POLICY_SHARED,
                 analysis_id=analysis_id,
                 resource_id=analysis_id,
             )
@@ -621,9 +621,9 @@ def _engine_identity_for_command(command: compute_pb2.ComputeCommand, *, request
         interactive = getattr(command, command_name)
         analysis_id = interactive.analysis_pipeline.analysis_id or interactive.analysis_id
         if analysis_id:
-            return compute_pb2.EngineIdentity(
-                scope=enums_pb2.ENGINE_SCOPE_ANALYSIS_INTERACTIVE,
-                reuse_policy=enums_pb2.ENGINE_REUSE_POLICY_SHARED,
+            return compute_pb2.ComputeWorkerIdentity(
+                scope=enums_pb2.COMPUTE_WORKER_SCOPE_ANALYSIS_INTERACTIVE,
+                reuse_policy=enums_pb2.COMPUTE_WORKER_REUSE_POLICY_SHARED,
                 analysis_id=analysis_id,
                 resource_id=analysis_id,
             )
@@ -759,7 +759,7 @@ def cancel_active_requests_for_engine(
     session: Session,
     *,
     namespace: str,
-    identity: compute_pb2.EngineIdentity,
+    identity: compute_pb2.ComputeWorkerIdentity,
     reason: str,
 ) -> int:
     """Retire active requests that target an engine being explicitly shut down.

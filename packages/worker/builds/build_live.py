@@ -13,7 +13,7 @@ from datetime import datetime
 from fastapi import WebSocket
 
 from runtime.domain.compute import schemas
-from runtime.domain.engine_runs.schemas import EngineRunKind
+from runtime.domain.engine_runs.schemas import ComputeWorkerRunKind
 from runtime.time import utc_now as _utcnow
 
 logger = logging.getLogger(__name__)
@@ -346,7 +346,7 @@ class RuntimeBuild:
             current_step=self.current_step,
             current_step_index=self.current_step_index,
             total_steps=self.total_steps,
-            current_kind=EngineRunKind.parse(self.current_kind),
+            current_kind=ComputeWorkerRunKind.parse(self.current_kind),
             current_datasource_id=self.current_datasource_id,
             current_tab_id=self.current_tab_id,
             current_tab_name=self.current_tab_name,

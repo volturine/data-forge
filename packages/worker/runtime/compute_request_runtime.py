@@ -21,10 +21,10 @@ from datasources import execution as datasource_execution
 from operations.step_converter import analysis_pipeline_to_execution_payload
 from runtime import compute_service as service
 from runtime.compute_manager import (
-    ENGINE_ADMISSION_PRIORITY_DATASOURCE,
-    ENGINE_ADMISSION_PRIORITY_INTERACTIVE,
-    ENGINE_ADMISSION_PRIORITY_LIFECYCLE,
-    EngineCapacityFull,
+    COMPUTE_WORKER_ADMISSION_PRIORITY_DATASOURCE,
+    COMPUTE_WORKER_ADMISSION_PRIORITY_INTERACTIVE,
+    COMPUTE_WORKER_ADMISSION_PRIORITY_LIFECYCLE,
+    ComputeWorkerCapacityFull,
     ProcessManager,
 )
 from runtime.compute_request_context import reset_compute_request_id, set_compute_request_id
@@ -40,8 +40,8 @@ from runtime.object_store import object_store_url, upload_bytes
 from runtime.worker_runtime import NamespaceRecovery, RuntimeNamespaceDirectory
 from runtime.worker_runtime_client import (
     BackendWorkerRpcError,
+    ComputeWorkerRunFinalization,
     DatasourceMetadata,
-    EngineRunFinalization,
     WorkerRuntimeClient,
     async_client_from_env,
     client_from_env,
@@ -157,13 +157,13 @@ def _freeze_claimed_input_metadata(
 
 def _engine_admission_priority(
     kind: enums_pb2.ComputeRequestKind,
-    identity: compute_pb2.EngineIdentity | None,
+    identity: compute_pb2.ComputeWorkerIdentity | None,
 ) -> int:
-    if identity is not None and identity.scope == enums_pb2.ENGINE_SCOPE_DATASOURCE_PREVIEW:
-        return ENGINE_ADMISSION_PRIORITY_DATASOURCE
+    if identity is not None and identity.scope == enums_pb2.COMPUTE_WORKER_SCOPE_DATASOURCE_PREVIEW:
+        return COMPUTE_WORKER_ADMISSION_PRIORITY_DATASOURCE
     if kind in ENGINE_LIFECYCLE_REQUEST_KINDS:
-        return ENGINE_ADMISSION_PRIORITY_LIFECYCLE
-    return ENGINE_ADMISSION_PRIORITY_INTERACTIVE
+        return COMPUTE_WORKER_ADMISSION_PRIORITY_LIFECYCLE
+    return COMPUTE_WORKER_ADMISSION_PRIORITY_INTERACTIVE
 
 
 async def _wait_after_engine_capacity_race(manager: ProcessManager) -> None:
@@ -635,7 +635,7 @@ async def _execute_request(
                 if execution in execution_done:
                     try:
                         await execution
-                    except EngineCapacityFull:
+                    except ComputeWorkerCapacityFull:
                         if renewal not in execution_done:
                             # Direct lifecycle work may have claimed the slot
                             # between reuse admission and execution. Rejoin the
@@ -865,7 +865,7 @@ def _datasource_engine_job(
     kind: str,
     payload: dict[str, object],
 ) -> dict[str, object]:
-    from runtime.compute_utils import await_engine_result
+    from runtime.compute_utils import await_compute_worker_result
     from runtime.exceptions import PipelineExecutionError
 
     identity = _engine_identity_for_claimed(claimed)
@@ -873,7 +873,7 @@ def _datasource_engine_job(
         raise ValueError("Datasource work requires an exact RID engine identity")
     with manager.acquire_engine(identity) as engine:
         job_id = engine.datasource_job(kind, payload)
-        result = await_engine_result(engine, job_id=job_id)
+        result = await_compute_worker_result(engine, job_id=job_id)
     if result.get("error"):
         error_kind = result.get("error_kind", "-")
         error_details = result.get("error_details")
@@ -1160,7 +1160,7 @@ def _execute_request_sync(
         artifact_path: str | None = None,
         artifact_name: str | None = None,
         artifact_content_type: str | None = None,
-        engine_run_finalization: EngineRunFinalization | None = None,
+        engine_run_finalization: ComputeWorkerRunFinalization | None = None,
     ) -> None:
         if terminal_publication_started is not None:
             terminal_publication_started.set()
@@ -1324,11 +1324,11 @@ def _execute_request_sync(
             command = _lifecycle_command_from_claimed(claimed, "spawn_engine")
             identity = command.engine_identity
             resource_config = _resource_config_from_lifecycle_command(command)
-            manager.spawn_engine(
+            manager.spawn_compute_worker(
                 identity,
                 resource_config=resource_config,
             )
-            response = compute_schemas.EngineStatusSchema.model_validate(manager.get_engine_status(identity))
+            response = compute_schemas.ComputeWorkerStatusSchema.model_validate(manager.get_engine_status(identity))
             publish_complete(response=_engine_status_result(response))
         elif claimed.kind == enums_pb2.COMPUTE_REQUEST_KIND_CONFIGURE_ENGINE:
             command = _lifecycle_command_from_claimed(claimed, "configure_engine")
@@ -1337,7 +1337,7 @@ def _execute_request_sync(
             if resource_config is None:
                 raise ValueError("resource_config is required")
             manager.restart_engine_with_config(identity, resource_config)
-            response = compute_schemas.EngineStatusSchema.model_validate(manager.get_engine_status(identity))
+            response = compute_schemas.ComputeWorkerStatusSchema.model_validate(manager.get_engine_status(identity))
             publish_complete(response=_engine_status_result(response))
         elif claimed.kind == enums_pb2.COMPUTE_REQUEST_KIND_SHUTDOWN_ENGINE:
             command = _lifecycle_command_from_claimed(claimed, "shutdown_engine")
@@ -1353,12 +1353,12 @@ def _execute_request_sync(
     except ComputeRequestLeaseLost:
         # Stale claim / replaced publication fence: drain without failing the request as an infrastructure error.
         raise
-    except EngineCapacityFull:
+    except ComputeWorkerCapacityFull:
         # Propagate so the async runner can park without holding a pool thread.
         raise
     except Exception as exc:
         error_to_report = exc
-        engine_run_finalization: EngineRunFinalization | None = None
+        engine_run_finalization: ComputeWorkerRunFinalization | None = None
         if isinstance(exc, service.PreviewExecutionError):
             error_to_report = exc.error
             engine_run_finalization = exc.engine_run_finalization
@@ -1399,7 +1399,7 @@ def _stateless_engine_identity_for_command(
     *,
     target_step_id: str,
     tab_id: str | None,
-) -> compute_pb2.EngineIdentity:
+) -> compute_pb2.ComputeWorkerIdentity:
     pipeline = getattr(command, "analysis_pipeline", None)
     if pipeline is None:
         raise ValueError("stateless compute command is missing analysis_pipeline")
@@ -1407,7 +1407,7 @@ def _stateless_engine_identity_for_command(
     return service.default_stateless_engine_identity(analysis_pipeline, target_step_id, tab_id)
 
 
-def _engine_identity_for_claimed(claimed: ClaimedComputeRequest) -> compute_pb2.EngineIdentity | None:
+def _engine_identity_for_claimed(claimed: ClaimedComputeRequest) -> compute_pb2.ComputeWorkerIdentity | None:
     """Identity that will need a capacity slot, or None if no Polars engine is required."""
     kind = claimed.kind
     if kind in _DATASOURCE_REQUEST_KINDS:
@@ -1421,9 +1421,9 @@ def _engine_identity_for_claimed(claimed: ClaimedComputeRequest) -> compute_pb2.
             resource_id = command.preflight.preflight_id
         else:
             resource_id = getattr(command, command_name).datasource_id
-        return compute_pb2.EngineIdentity(
-            scope=enums_pb2.ENGINE_SCOPE_DATASOURCE_PREVIEW,
-            reuse_policy=enums_pb2.ENGINE_REUSE_POLICY_SHARED,
+        return compute_pb2.ComputeWorkerIdentity(
+            scope=enums_pb2.COMPUTE_WORKER_SCOPE_DATASOURCE_PREVIEW,
+            reuse_policy=enums_pb2.COMPUTE_WORKER_REUSE_POLICY_SHARED,
             datasource_id=resource_id,
             resource_id=resource_id,
         )
@@ -1486,7 +1486,7 @@ def _engine_identity_for_claimed(claimed: ClaimedComputeRequest) -> compute_pb2.
     return None
 
 
-def _lifecycle_command_from_claimed(claimed: ClaimedComputeRequest, field_name: str) -> compute_pb2.EngineLifecycleCommand:
+def _lifecycle_command_from_claimed(claimed: ClaimedComputeRequest, field_name: str) -> compute_pb2.ComputeWorkerLifecycleCommand:
     command = claimed.command_envelope.command
     if command.WhichOneof("command") != field_name:
         raise ValueError(f"compute command envelope must contain {field_name}")
@@ -1541,7 +1541,7 @@ def _resource_config_from_preview_command(command: compute_pb2.StepPreviewComman
     return result
 
 
-def _resource_config_from_lifecycle_command(command: compute_pb2.EngineLifecycleCommand) -> dict[str, object] | None:
+def _resource_config_from_lifecycle_command(command: compute_pb2.ComputeWorkerLifecycleCommand) -> dict[str, object] | None:
     if not command.HasField("resource_config"):
         return None
     config = command.resource_config
@@ -1584,10 +1584,10 @@ def _row_count_result(value: compute_schemas.StepRowCountResponse) -> compute_pb
     return compute_pb2.ComputeResponse(row_count=compute_pb2.StepRowCountResult(step_id=value.step_id, row_count=value.row_count))
 
 
-def _resource_config_proto(value: compute_schemas.EngineResourceConfig | None) -> compute_pb2.EngineResourceConfig | None:
+def _resource_config_proto(value: compute_schemas.ComputeWorkerResourceConfig | None) -> compute_pb2.ComputeWorkerResourceConfig | None:
     if value is None:
         return None
-    result = compute_pb2.EngineResourceConfig()
+    result = compute_pb2.ComputeWorkerResourceConfig()
     if value.max_threads is not None:
         result.max_threads = value.max_threads
     if value.max_memory_mb is not None:
@@ -1597,11 +1597,11 @@ def _resource_config_proto(value: compute_schemas.EngineResourceConfig | None) -
     return result
 
 
-def _engine_status_result(value: compute_schemas.EngineStatusSchema) -> compute_pb2.ComputeResponse:
-    result = compute_pb2.EngineStatusResult(
+def _engine_status_result(value: compute_schemas.ComputeWorkerStatusSchema) -> compute_pb2.ComputeResponse:
+    result = compute_pb2.ComputeWorkerStatusResult(
         analysis_id=value.analysis_id,
         resource_id=value.resource_id,
-        status=cast(enums_pb2.EngineStatus, value.status.number),
+        status=cast(enums_pb2.ComputeWorkerStatus, value.status.number),
     )
     optional_scalars = {
         "last_activity": value.last_activity,
@@ -1622,18 +1622,18 @@ def _engine_status_result(value: compute_schemas.EngineStatusSchema) -> compute_
         if field_value is not None:
             setattr(result, field_name, field_value)
     if value.scope is not None:
-        result.scope = cast(enums_pb2.EngineScope, value.scope.number)
+        result.scope = cast(enums_pb2.ComputeWorkerScope, value.scope.number)
     if value.reuse_policy is not None:
-        result.reuse_policy = cast(enums_pb2.EngineReusePolicy, value.reuse_policy.number)
+        result.reuse_policy = cast(enums_pb2.ComputeWorkerReusePolicy, value.reuse_policy.number)
     if value.lifecycle_status is not None:
-        result.lifecycle_status = getattr(enums_pb2, f"ENGINE_INSTANCE_STATUS_{value.lifecycle_status.upper()}")
+        result.lifecycle_status = getattr(enums_pb2, f"COMPUTE_WORKER_INSTANCE_STATUS_{value.lifecycle_status.upper()}")
     for field_name, config in (("resource_config", value.resource_config), ("effective_resources", value.effective_resources)):
         proto_config = _resource_config_proto(config)
         if proto_config is not None:
             getattr(result, field_name).CopyFrom(proto_config)
     if value.defaults is not None:
         result.defaults.CopyFrom(
-            compute_pb2.EngineDefaults(
+            compute_pb2.ComputeWorkerDefaults(
                 max_threads=value.defaults.max_threads,
                 max_memory_mb=value.defaults.max_memory_mb,
                 streaming_chunk_size=value.defaults.streaming_chunk_size,
@@ -1680,7 +1680,7 @@ def _complete_request_once(
     artifact_path: str | None = None,
     artifact_name: str | None = None,
     artifact_content_type: str | None = None,
-    engine_run_finalization: EngineRunFinalization | None = None,
+    engine_run_finalization: ComputeWorkerRunFinalization | None = None,
 ) -> None:
     client.complete_compute_request(
         namespace=claimed.namespace,
@@ -1710,7 +1710,7 @@ def _complete_request(
     artifact_path: str | None = None,
     artifact_name: str | None = None,
     artifact_content_type: str | None = None,
-    engine_run_finalization: EngineRunFinalization | None = None,
+    engine_run_finalization: ComputeWorkerRunFinalization | None = None,
 ) -> None:
     for attempt, delay in enumerate((*_TERMINAL_PUBLISH_BACKOFF_SECONDS, None), start=1):
         try:
@@ -1742,7 +1742,7 @@ def _fail_request_with_retry(
     *,
     error_message: str,
     error: compute_pb2.ComputeErrorResult,
-    engine_run_finalization: EngineRunFinalization | None = None,
+    engine_run_finalization: ComputeWorkerRunFinalization | None = None,
 ) -> None:
     for attempt, delay in enumerate((*_TERMINAL_PUBLISH_BACKOFF_SECONDS, None), start=1):
         try:

@@ -285,7 +285,7 @@ def clear_compute_request_hubs():
 
 @pytest.fixture(autouse=True, scope='function')
 def clear_engine_registry():
-    from backend_core.engine_live import registry
+    from backend_core.compute_worker_live import registry
 
     asyncio.run(registry.clear())
     yield

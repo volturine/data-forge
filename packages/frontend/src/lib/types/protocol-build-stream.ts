@@ -7,17 +7,21 @@ import type {
 import type {
 	BuildLogLevelJson,
 	BuildTabStatusJson,
-	EngineRunKindJson
+	ComputeWorkerRunKindJson
 } from '$lib/protocol/dataforge_protocol/enums_pb';
 import type { BuildEvent, BuildTabResult } from '$lib/types/build-stream';
 import {
 	BUILD_LOG_LEVEL_JSON_TOKENS,
 	BUILD_TAB_STATUS_JSON_TOKENS,
-	ENGINE_RUN_EXECUTION_CATEGORY_JSON_TOKENS,
-	ENGINE_RUN_KIND_JSON_TOKENS,
+	COMPUTE_WORKER_RUN_EXECUTION_CATEGORY_JSON_TOKENS,
+	COMPUTE_WORKER_RUN_KIND_JSON_TOKENS,
 	STEP_TYPE_JSON_TOKENS
 } from '$lib/types/protocol-enum-tokens';
-import type { BuildLogLevel, BuildTabStatus, EngineRunKind } from '$lib/types/protocol-enum-tokens';
+import type {
+	BuildLogLevel,
+	BuildTabStatus,
+	ComputeWorkerRunKind
+} from '$lib/types/protocol-enum-tokens';
 
 type BuildEventOneofKey =
 	| 'cancelled'
@@ -100,8 +104,10 @@ function optionalInt64(value: unknown): number | null {
 	return null;
 }
 
-function engineRunKindToken(value: EngineRunKindJson | undefined): EngineRunKind | null {
-	return value === undefined ? null : (ENGINE_RUN_KIND_JSON_TOKENS[value] ?? null);
+function engineRunKindToken(
+	value: ComputeWorkerRunKindJson | undefined
+): ComputeWorkerRunKind | null {
+	return value === undefined ? null : (COMPUTE_WORKER_RUN_KIND_JSON_TOKENS[value] ?? null);
 }
 
 function buildTabStatusToken(value: BuildTabStatusJson | undefined): BuildTabStatus | null {
@@ -117,7 +123,7 @@ function stepTypeToken(kind: BuildStepKindJson | undefined): string | null {
 		return STEP_TYPE_JSON_TOKENS[kind.pipeline] ?? null;
 	}
 	if (kind?.executionCategory !== undefined) {
-		return ENGINE_RUN_EXECUTION_CATEGORY_JSON_TOKENS[kind.executionCategory] ?? null;
+		return COMPUTE_WORKER_RUN_EXECUTION_CATEGORY_JSON_TOKENS[kind.executionCategory] ?? null;
 	}
 	return null;
 }

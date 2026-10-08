@@ -17,14 +17,14 @@ import {
 	DeduplicateKeep as ProtocolDeduplicateKeep,
 	DisplayUnits as ProtocolDisplayUnits,
 	DurationUnit as ProtocolDurationUnit,
-	EngineReusePolicy as ProtocolEngineReusePolicy,
-	EngineInstanceStatus as ProtocolEngineInstanceStatus,
-	EngineRunExecutionCategory as ProtocolEngineRunExecutionCategory,
-	EngineRunExecutionCategorySchema as ProtocolEngineRunExecutionCategorySchema,
-	EngineRunKind as ProtocolEngineRunKind,
-	EngineRunKindSchema as ProtocolEngineRunKindSchema,
-	EngineScope as ProtocolEngineScope,
-	EngineStatus as ProtocolEngineStatus,
+	ComputeWorkerReusePolicy as ProtocolComputeWorkerReusePolicy,
+	ComputeWorkerInstanceStatus as ProtocolComputeWorkerInstanceStatus,
+	ComputeWorkerRunExecutionCategory as ProtocolComputeWorkerRunExecutionCategory,
+	ComputeWorkerRunExecutionCategorySchema as ProtocolComputeWorkerRunExecutionCategorySchema,
+	ComputeWorkerRunKind as ProtocolComputeWorkerRunKind,
+	ComputeWorkerRunKindSchema as ProtocolComputeWorkerRunKindSchema,
+	ComputeWorkerScope as ProtocolComputeWorkerScope,
+	ComputeWorkerStatus as ProtocolComputeWorkerStatus,
 	ExportDestination as ProtocolExportDestination,
 	ExportFormat as ProtocolExportFormat,
 	FillNullStrategy as ProtocolFillNullStrategy,
@@ -55,8 +55,8 @@ import {
 import type {
 	BuildLogLevelJson as ProtocolBuildLogLevelJson,
 	BuildTabStatusJson as ProtocolBuildTabStatusJson,
-	EngineRunExecutionCategoryJson as ProtocolEngineRunExecutionCategoryJson,
-	EngineRunKindJson as ProtocolEngineRunKindJson,
+	ComputeWorkerRunExecutionCategoryJson as ProtocolComputeWorkerRunExecutionCategoryJson,
+	ComputeWorkerRunKindJson as ProtocolComputeWorkerRunKindJson,
 	StepTypeJson as ProtocolStepTypeJson
 } from '$lib/protocol/dataforge_protocol/enums_pb';
 
@@ -399,38 +399,38 @@ export const STRING_TRANSFORM_METHOD_TOKENS = {
 	[ProtocolStringTransformMethod.SPLIT_TAKE]: 'split_take'
 } as const satisfies Partial<Record<ProtocolStringTransformMethod, string>>;
 
-export const ENGINE_RUN_KIND_TOKENS = {
-	[ProtocolEngineRunKind.BUILD]: 'build',
-	[ProtocolEngineRunKind.PREVIEW]: 'preview',
-	[ProtocolEngineRunKind.ROW_COUNT]: 'row_count',
-	[ProtocolEngineRunKind.DOWNLOAD]: 'download',
-	[ProtocolEngineRunKind.INGEST]: 'ingest'
-} as const satisfies Partial<Record<ProtocolEngineRunKind, string>>;
+export const COMPUTE_WORKER_RUN_KIND_TOKENS = {
+	[ProtocolComputeWorkerRunKind.BUILD]: 'build',
+	[ProtocolComputeWorkerRunKind.PREVIEW]: 'preview',
+	[ProtocolComputeWorkerRunKind.ROW_COUNT]: 'row_count',
+	[ProtocolComputeWorkerRunKind.DOWNLOAD]: 'download',
+	[ProtocolComputeWorkerRunKind.INGEST]: 'ingest'
+} as const satisfies Partial<Record<ProtocolComputeWorkerRunKind, string>>;
 
-export const ENGINE_STATUS_TOKENS = {
-	[ProtocolEngineStatus.HEALTHY]: 'healthy',
-	[ProtocolEngineStatus.TERMINATED]: 'terminated'
-} as const satisfies Partial<Record<ProtocolEngineStatus, string>>;
+export const COMPUTE_WORKER_STATUS_TOKENS = {
+	[ProtocolComputeWorkerStatus.HEALTHY]: 'healthy',
+	[ProtocolComputeWorkerStatus.TERMINATED]: 'terminated'
+} as const satisfies Partial<Record<ProtocolComputeWorkerStatus, string>>;
 
-export const ENGINE_INSTANCE_STATUS_TOKENS = {
-	[ProtocolEngineInstanceStatus.STARTING]: 'starting',
-	[ProtocolEngineInstanceStatus.IDLE]: 'idle',
-	[ProtocolEngineInstanceStatus.RUNNING]: 'running',
-	[ProtocolEngineInstanceStatus.STOPPING]: 'stopping',
-	[ProtocolEngineInstanceStatus.STOPPED]: 'stopped',
-	[ProtocolEngineInstanceStatus.FAILED]: 'failed'
-} as const satisfies Partial<Record<ProtocolEngineInstanceStatus, string>>;
+export const COMPUTE_WORKER_INSTANCE_STATUS_TOKENS = {
+	[ProtocolComputeWorkerInstanceStatus.STARTING]: 'starting',
+	[ProtocolComputeWorkerInstanceStatus.IDLE]: 'idle',
+	[ProtocolComputeWorkerInstanceStatus.RUNNING]: 'running',
+	[ProtocolComputeWorkerInstanceStatus.STOPPING]: 'stopping',
+	[ProtocolComputeWorkerInstanceStatus.STOPPED]: 'stopped',
+	[ProtocolComputeWorkerInstanceStatus.FAILED]: 'failed'
+} as const satisfies Partial<Record<ProtocolComputeWorkerInstanceStatus, string>>;
 
-export const ENGINE_SCOPE_TOKENS = {
-	[ProtocolEngineScope.DATASOURCE_PREVIEW]: 'datasource_preview',
-	[ProtocolEngineScope.ANALYSIS_INTERACTIVE]: 'analysis_interactive',
-	[ProtocolEngineScope.BUILD]: 'build'
-} as const satisfies Partial<Record<ProtocolEngineScope, string>>;
+export const COMPUTE_WORKER_SCOPE_TOKENS = {
+	[ProtocolComputeWorkerScope.DATASOURCE_PREVIEW]: 'datasource_preview',
+	[ProtocolComputeWorkerScope.ANALYSIS_INTERACTIVE]: 'analysis_interactive',
+	[ProtocolComputeWorkerScope.BUILD]: 'build'
+} as const satisfies Partial<Record<ProtocolComputeWorkerScope, string>>;
 
-export const ENGINE_REUSE_POLICY_TOKENS = {
-	[ProtocolEngineReusePolicy.SHARED]: 'shared',
-	[ProtocolEngineReusePolicy.EXCLUSIVE]: 'exclusive'
-} as const satisfies Partial<Record<ProtocolEngineReusePolicy, string>>;
+export const COMPUTE_WORKER_REUSE_POLICY_TOKENS = {
+	[ProtocolComputeWorkerReusePolicy.SHARED]: 'shared',
+	[ProtocolComputeWorkerReusePolicy.EXCLUSIVE]: 'exclusive'
+} as const satisfies Partial<Record<ProtocolComputeWorkerReusePolicy, string>>;
 
 export const BUILD_STEP_STATE_TOKENS = {
 	[ProtocolBuildStepState.PENDING]: 'pending',
@@ -459,13 +459,13 @@ export const BUILD_LOG_LEVEL_TOKENS = {
 	[ProtocolBuildLogLevel.ERROR]: 'error'
 } as const satisfies Partial<Record<ProtocolBuildLogLevel, string>>;
 
-export const ENGINE_RUN_EXECUTION_CATEGORY_TOKENS = {
-	[ProtocolEngineRunExecutionCategory.READ]: 'read',
-	[ProtocolEngineRunExecutionCategory.STEP]: 'step',
-	[ProtocolEngineRunExecutionCategory.PLAN]: 'plan',
-	[ProtocolEngineRunExecutionCategory.COMPUTE]: 'compute',
-	[ProtocolEngineRunExecutionCategory.WRITE]: 'write'
-} as const satisfies Partial<Record<ProtocolEngineRunExecutionCategory, string>>;
+export const COMPUTE_WORKER_RUN_EXECUTION_CATEGORY_TOKENS = {
+	[ProtocolComputeWorkerRunExecutionCategory.READ]: 'read',
+	[ProtocolComputeWorkerRunExecutionCategory.STEP]: 'step',
+	[ProtocolComputeWorkerRunExecutionCategory.PLAN]: 'plan',
+	[ProtocolComputeWorkerRunExecutionCategory.COMPUTE]: 'compute',
+	[ProtocolComputeWorkerRunExecutionCategory.WRITE]: 'write'
+} as const satisfies Partial<Record<ProtocolComputeWorkerRunExecutionCategory, string>>;
 
 function protocolJsonTokens<JsonName extends string, Token extends string>(
 	schema: { values: readonly { name: string; number: number }[] },
@@ -476,10 +476,10 @@ function protocolJsonTokens<JsonName extends string, Token extends string>(
 	) as Record<JsonName, Token | null>;
 }
 
-export const ENGINE_RUN_KIND_JSON_TOKENS = protocolJsonTokens<
-	ProtocolEngineRunKindJson,
-	EngineRunKind
->(ProtocolEngineRunKindSchema, ENGINE_RUN_KIND_TOKENS);
+export const COMPUTE_WORKER_RUN_KIND_JSON_TOKENS = protocolJsonTokens<
+	ProtocolComputeWorkerRunKindJson,
+	ComputeWorkerRunKind
+>(ProtocolComputeWorkerRunKindSchema, COMPUTE_WORKER_RUN_KIND_TOKENS);
 
 export const BUILD_TAB_STATUS_JSON_TOKENS = protocolJsonTokens<
 	ProtocolBuildTabStatusJson,
@@ -496,10 +496,10 @@ export const STEP_TYPE_JSON_TOKENS = protocolJsonTokens<
 	ProtocolPipelineStepType
 >(ProtocolStepTypeSchema, STEP_TYPE_TOKENS);
 
-export const ENGINE_RUN_EXECUTION_CATEGORY_JSON_TOKENS = protocolJsonTokens<
-	ProtocolEngineRunExecutionCategoryJson,
-	EngineRunExecutionCategory
->(ProtocolEngineRunExecutionCategorySchema, ENGINE_RUN_EXECUTION_CATEGORY_TOKENS);
+export const COMPUTE_WORKER_RUN_EXECUTION_CATEGORY_JSON_TOKENS = protocolJsonTokens<
+	ProtocolComputeWorkerRunExecutionCategoryJson,
+	ComputeWorkerRunExecutionCategory
+>(ProtocolComputeWorkerRunExecutionCategorySchema, COMPUTE_WORKER_RUN_EXECUTION_CATEGORY_TOKENS);
 
 export type FilterOperator = EnumToken<typeof FILTER_OPERATOR_TOKENS>;
 export type FilterValueType = EnumToken<typeof FILTER_VALUE_TYPE_TOKENS>;
@@ -538,13 +538,15 @@ export type TimeComponent = EnumToken<typeof TIME_COMPONENT_TOKENS>;
 export type DurationUnit = EnumToken<typeof DURATION_UNIT_TOKENS>;
 export type TimeDirection = EnumToken<typeof TIME_DIRECTION_TOKENS>;
 export type StringTransformMethod = EnumToken<typeof STRING_TRANSFORM_METHOD_TOKENS>;
-export type EngineRunKind = EnumToken<typeof ENGINE_RUN_KIND_TOKENS>;
-export type EngineStatus = EnumToken<typeof ENGINE_STATUS_TOKENS>;
-export type EngineInstanceStatus = EnumToken<typeof ENGINE_INSTANCE_STATUS_TOKENS>;
-export type EngineScope = EnumToken<typeof ENGINE_SCOPE_TOKENS>;
-export type EngineReusePolicy = EnumToken<typeof ENGINE_REUSE_POLICY_TOKENS>;
+export type ComputeWorkerRunKind = EnumToken<typeof COMPUTE_WORKER_RUN_KIND_TOKENS>;
+export type ComputeWorkerStatus = EnumToken<typeof COMPUTE_WORKER_STATUS_TOKENS>;
+export type ComputeWorkerInstanceStatus = EnumToken<typeof COMPUTE_WORKER_INSTANCE_STATUS_TOKENS>;
+export type ComputeWorkerScope = EnumToken<typeof COMPUTE_WORKER_SCOPE_TOKENS>;
+export type ComputeWorkerReusePolicy = EnumToken<typeof COMPUTE_WORKER_REUSE_POLICY_TOKENS>;
 export type BuildStepState = EnumToken<typeof BUILD_STEP_STATE_TOKENS>;
 export type BuildLifecycleStatus = EnumToken<typeof BUILD_LIFECYCLE_STATUS_TOKENS>;
 export type BuildTabStatus = EnumToken<typeof BUILD_TAB_STATUS_TOKENS>;
 export type BuildLogLevel = EnumToken<typeof BUILD_LOG_LEVEL_TOKENS>;
-export type EngineRunExecutionCategory = EnumToken<typeof ENGINE_RUN_EXECUTION_CATEGORY_TOKENS>;
+export type ComputeWorkerRunExecutionCategory = EnumToken<
+	typeof COMPUTE_WORKER_RUN_EXECUTION_CATEGORY_TOKENS
+>;

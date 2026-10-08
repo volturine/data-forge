@@ -2,7 +2,7 @@ import { afterEach, beforeEach, describe, expect, test, vi } from 'vitest';
 import { render } from '@testing-library/svelte';
 import { tick } from 'svelte';
 import { flushSync } from 'svelte';
-import type { EngineStatusResponse } from '$lib/types/compute';
+import type { ComputeWorkerStatusResponse } from '$lib/types/compute';
 
 const mockConnectEnginesStream = vi.fn();
 const mockShutdownEngine = vi.fn();
@@ -15,7 +15,9 @@ vi.mock('$lib/api/compute', () => ({
 const { enginesStore } = await import('$lib/stores/engines.svelte');
 const { default: EnginesPopup } = await import('./EnginesPopup.svelte');
 
-function makeEngine(overrides: Partial<EngineStatusResponse> = {}): EngineStatusResponse {
+function makeEngine(
+	overrides: Partial<ComputeWorkerStatusResponse> = {}
+): ComputeWorkerStatusResponse {
 	return {
 		analysis_id: 'analysis-1',
 		resource_id: 'analysis-1',
@@ -45,7 +47,7 @@ function makeEngine(overrides: Partial<EngineStatusResponse> = {}): EngineStatus
 
 function mockStreamConnection() {
 	const callbacks: {
-		onSnapshot: (engines: EngineStatusResponse[]) => void;
+		onSnapshot: (engines: ComputeWorkerStatusResponse[]) => void;
 		onError: (error: string) => void;
 		onClose: () => void;
 	}[] = [];
@@ -54,7 +56,7 @@ function mockStreamConnection() {
 	mockConnectEnginesStream.mockImplementation((nextCallbacks) => {
 		callbacks.push(
 			nextCallbacks as {
-				onSnapshot: (engines: EngineStatusResponse[]) => void;
+				onSnapshot: (engines: ComputeWorkerStatusResponse[]) => void;
 				onError: (error: string) => void;
 				onClose: () => void;
 			}
@@ -64,7 +66,7 @@ function mockStreamConnection() {
 
 	return {
 		close,
-		emitSnapshot(engines: EngineStatusResponse[]) {
+		emitSnapshot(engines: ComputeWorkerStatusResponse[]) {
 			callbacks.at(-1)?.onSnapshot(engines);
 		},
 		emitError(message: string) {

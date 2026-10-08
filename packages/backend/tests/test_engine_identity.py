@@ -31,16 +31,16 @@ def _preview_payload(engine_identity: dict[str, object]) -> dict[str, object]:
 
 
 def test_analysis_interactive_identity_uses_generated_proto_directly() -> None:
-    identity = compute_pb2.EngineIdentity(
-        scope=enums_pb2.ENGINE_SCOPE_ANALYSIS_INTERACTIVE,
-        reuse_policy=enums_pb2.ENGINE_REUSE_POLICY_SHARED,
+    identity = compute_pb2.ComputeWorkerIdentity(
+        scope=enums_pb2.COMPUTE_WORKER_SCOPE_ANALYSIS_INTERACTIVE,
+        reuse_policy=enums_pb2.COMPUTE_WORKER_REUSE_POLICY_SHARED,
         analysis_id='analysis-1',
         resource_id='analysis-1',
     )
 
-    assert isinstance(identity, compute_pb2.EngineIdentity)
-    assert identity.scope == enums_pb2.ENGINE_SCOPE_ANALYSIS_INTERACTIVE
-    assert identity.reuse_policy == enums_pb2.ENGINE_REUSE_POLICY_SHARED
+    assert isinstance(identity, compute_pb2.ComputeWorkerIdentity)
+    assert identity.scope == enums_pb2.COMPUTE_WORKER_SCOPE_ANALYSIS_INTERACTIVE
+    assert identity.reuse_policy == enums_pb2.COMPUTE_WORKER_REUSE_POLICY_SHARED
     assert identity.analysis_id == 'analysis-1'
     assert identity.resource_id == 'analysis-1'
     assert not identity.HasField('datasource_id')
@@ -48,16 +48,16 @@ def test_analysis_interactive_identity_uses_generated_proto_directly() -> None:
 
 
 def test_datasource_preview_identity_uses_generated_proto_directly() -> None:
-    identity = compute_pb2.EngineIdentity(
-        scope=enums_pb2.ENGINE_SCOPE_DATASOURCE_PREVIEW,
-        reuse_policy=enums_pb2.ENGINE_REUSE_POLICY_SHARED,
+    identity = compute_pb2.ComputeWorkerIdentity(
+        scope=enums_pb2.COMPUTE_WORKER_SCOPE_DATASOURCE_PREVIEW,
+        reuse_policy=enums_pb2.COMPUTE_WORKER_REUSE_POLICY_SHARED,
         datasource_id='ds-1',
         resource_id='ds-1',
     )
 
-    assert isinstance(identity, compute_pb2.EngineIdentity)
-    assert identity.scope == enums_pb2.ENGINE_SCOPE_DATASOURCE_PREVIEW
-    assert identity.reuse_policy == enums_pb2.ENGINE_REUSE_POLICY_SHARED
+    assert isinstance(identity, compute_pb2.ComputeWorkerIdentity)
+    assert identity.scope == enums_pb2.COMPUTE_WORKER_SCOPE_DATASOURCE_PREVIEW
+    assert identity.reuse_policy == enums_pb2.COMPUTE_WORKER_REUSE_POLICY_SHARED
     assert not identity.HasField('analysis_id')
     assert identity.datasource_id == 'ds-1'
     assert identity.resource_id == 'ds-1'
@@ -65,16 +65,16 @@ def test_datasource_preview_identity_uses_generated_proto_directly() -> None:
 
 
 def test_build_identity_uses_generated_proto_directly() -> None:
-    identity = compute_pb2.EngineIdentity(
-        scope=enums_pb2.ENGINE_SCOPE_BUILD,
-        reuse_policy=enums_pb2.ENGINE_REUSE_POLICY_EXCLUSIVE,
+    identity = compute_pb2.ComputeWorkerIdentity(
+        scope=enums_pb2.COMPUTE_WORKER_SCOPE_BUILD,
+        reuse_policy=enums_pb2.COMPUTE_WORKER_REUSE_POLICY_EXCLUSIVE,
         build_id='build-1',
         resource_id='build-1',
     )
 
-    assert isinstance(identity, compute_pb2.EngineIdentity)
-    assert identity.scope == enums_pb2.ENGINE_SCOPE_BUILD
-    assert identity.reuse_policy == enums_pb2.ENGINE_REUSE_POLICY_EXCLUSIVE
+    assert isinstance(identity, compute_pb2.ComputeWorkerIdentity)
+    assert identity.scope == enums_pb2.COMPUTE_WORKER_SCOPE_BUILD
+    assert identity.reuse_policy == enums_pb2.COMPUTE_WORKER_REUSE_POLICY_EXCLUSIVE
     assert not identity.HasField('analysis_id')
     assert not identity.HasField('datasource_id')
     assert identity.build_id == 'build-1'
@@ -82,9 +82,9 @@ def test_build_identity_uses_generated_proto_directly() -> None:
 
 
 def test_engine_identity_is_carried_directly_in_lifecycle_command() -> None:
-    identity = compute_pb2.EngineIdentity(
-        scope=enums_pb2.ENGINE_SCOPE_DATASOURCE_PREVIEW,
-        reuse_policy=enums_pb2.ENGINE_REUSE_POLICY_SHARED,
+    identity = compute_pb2.ComputeWorkerIdentity(
+        scope=enums_pb2.COMPUTE_WORKER_SCOPE_DATASOURCE_PREVIEW,
+        reuse_policy=enums_pb2.COMPUTE_WORKER_REUSE_POLICY_SHARED,
         datasource_id='ds-1',
         resource_id='ds-1',
     )
@@ -108,9 +108,9 @@ def test_step_preview_request_uses_generated_engine_identity() -> None:
         )
     )
 
-    assert isinstance(request.engine_identity, compute_pb2.EngineIdentity)
-    assert request.engine_identity.scope == enums_pb2.ENGINE_SCOPE_ANALYSIS_INTERACTIVE
-    assert request.engine_identity.reuse_policy == enums_pb2.ENGINE_REUSE_POLICY_SHARED
+    assert isinstance(request.engine_identity, compute_pb2.ComputeWorkerIdentity)
+    assert request.engine_identity.scope == enums_pb2.COMPUTE_WORKER_SCOPE_ANALYSIS_INTERACTIVE
+    assert request.engine_identity.reuse_policy == enums_pb2.COMPUTE_WORKER_REUSE_POLICY_SHARED
     assert request.engine_identity.analysis_id == 'analysis-1'
     assert request.model_dump(mode='json')['engine_identity'] == {
         'scope': 'analysis_interactive',
@@ -127,8 +127,8 @@ def test_default_preview_identity_uses_the_analysis_rid() -> None:
 
     identity = default_preview_engine_identity(request)
 
-    assert identity.scope == enums_pb2.ENGINE_SCOPE_ANALYSIS_INTERACTIVE
-    assert identity.reuse_policy == enums_pb2.ENGINE_REUSE_POLICY_SHARED
+    assert identity.scope == enums_pb2.COMPUTE_WORKER_SCOPE_ANALYSIS_INTERACTIVE
+    assert identity.reuse_policy == enums_pb2.COMPUTE_WORKER_REUSE_POLICY_SHARED
     assert identity.analysis_id == 'analysis-1'
     assert identity.resource_id == 'analysis-1'
 
@@ -142,8 +142,8 @@ def test_datasource_preview_identity_uses_the_exact_datasource_rid() -> None:
 
     identity = default_preview_engine_identity(request)
 
-    assert identity.scope == enums_pb2.ENGINE_SCOPE_DATASOURCE_PREVIEW
-    assert identity.reuse_policy == enums_pb2.ENGINE_REUSE_POLICY_SHARED
+    assert identity.scope == enums_pb2.COMPUTE_WORKER_SCOPE_DATASOURCE_PREVIEW
+    assert identity.reuse_policy == enums_pb2.COMPUTE_WORKER_REUSE_POLICY_SHARED
     assert identity.datasource_id == 'datasource-1'
     assert identity.resource_id == 'datasource-1'
 

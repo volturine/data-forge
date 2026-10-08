@@ -1,4 +1,4 @@
-from runtime.compute_engine import PolarsComputeEngine
+from runtime.compute_worker import PolarsComputeWorker
 
 
 def test_query_plan_merges_eager_segments(tmp_path):
@@ -51,7 +51,7 @@ def test_query_plan_merges_eager_segments(tmp_path):
         },
     ]
 
-    result = PolarsComputeEngine.execute_preview(
+    result = PolarsComputeWorker.execute_preview(
         datasource_config=datasource_config,
         steps=steps,
         row_limit=10,
@@ -99,7 +99,7 @@ def test_chart_preview_metadata_includes_overlays_and_reference_lines(tmp_path):
         },
     ]
 
-    result = PolarsComputeEngine.execute_preview(
+    result = PolarsComputeWorker.execute_preview(
         datasource_config=datasource_config,
         steps=steps,
         row_limit=10,

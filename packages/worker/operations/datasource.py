@@ -278,7 +278,7 @@ def _build_tab_pipeline(
     steps = apply_steps(steps)
     additional = _collect_analysis_sources(steps, pipeline, cache)
 
-    from runtime.compute_engine import PolarsComputeEngine
+    from runtime.compute_worker import PolarsComputeWorker
 
     for step in steps:
         step_id = step.get("id") or "step"
@@ -286,7 +286,7 @@ def _build_tab_pipeline(
         right_source_raw = backend_step.params.get("right_source")
         right_source_id = right_source_raw if isinstance(right_source_raw, str) else None
         right_lf = cache.get(right_source_id) if right_source_id is not None else None
-        base_frame = PolarsComputeEngine._apply_step(
+        base_frame = PolarsComputeWorker._apply_step(
             base_frame,
             backend_step,
             step_id=str(step_id),

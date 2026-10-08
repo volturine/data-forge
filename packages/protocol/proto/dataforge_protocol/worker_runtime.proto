@@ -32,7 +32,7 @@ service WorkerRuntimeService {
   rpc CompleteStorageCleanup(WorkerCompleteStorageCleanupRequest) returns (BoolResponse);
   rpc GetDatasourceMetadata(WorkerDatasourceMetadataRequest) returns (WorkerDatasourceMetadataResponse);
   rpc GetUdfCodes(WorkerUdfCodesRequest) returns (WorkerUdfCodesResponse);
-  rpc GetEngineCredentials(WorkerEngineCredentialsRequest) returns (WorkerEngineCredentialsResponse);
+  rpc GetComputeWorkerCredentials(WorkerComputeWorkerCredentialsRequest) returns (WorkerComputeWorkerCredentialsResponse);
   rpc GetAnalysisMetadata(WorkerAnalysisMetadataRequest) returns (WorkerAnalysisMetadataResponse);
   rpc GetBuildCancelStatus(WorkerBuildCancelStatusRequest) returns (WorkerBuildCancelStatusResponse);
   rpc UpdateBuildResult(WorkerUpdateBuildResultRequest) returns (RuntimeWorkerResponse);
@@ -41,9 +41,9 @@ service WorkerRuntimeService {
   rpc ListHealthChecks(WorkerListHealthChecksRequest) returns (WorkerListHealthChecksResponse);
   rpc RecordHealthCheckResults(WorkerRecordHealthCheckResultsRequest) returns (CountResponse);
 
-  rpc CreateEngineRun(WorkerCreateEngineRunRequest) returns (IdResponse);
-  rpc UpdateEngineRun(WorkerUpdateEngineRunRequest) returns (IdResponse);
-  rpc GetEngineRunState(WorkerEngineRunStateRequest) returns (WorkerEngineRunStateResponse);
+  rpc CreateComputeWorkerRun(WorkerCreateComputeWorkerRunRequest) returns (IdResponse);
+  rpc UpdateComputeWorkerRun(WorkerUpdateComputeWorkerRunRequest) returns (IdResponse);
+  rpc GetComputeWorkerRunState(WorkerComputeWorkerRunStateRequest) returns (WorkerComputeWorkerRunStateResponse);
 
   rpc FailBuildJob(WorkerFailBuildJobRequest) returns (BoolResponse);
   rpc FinalizeBuildJob(WorkerFinalizeBuildJobRequest) returns (BoolResponse);
@@ -55,7 +55,7 @@ service WorkerRuntimeService {
   rpc ListPendingRuntimeWorkNamespaces(WorkerPendingRuntimeWorkNamespacesRequest) returns (WorkerNamespacesResponse);
   rpc PersistBuildEvent(WorkerPersistBuildEventRequest) returns (WorkerPersistBuildEventResponse);
   rpc StartBuildRun(WorkerStartBuildRunRequest) returns (WorkerStartBuildRunResponse);
-  rpc PersistEngineSnapshot(WorkerPersistEngineSnapshotRequest) returns (CountResponse);
+  rpc PersistComputeWorkerSnapshot(WorkerPersistComputeWorkerSnapshotRequest) returns (CountResponse);
   rpc ListPendingDatasourceDeletes(EmptyRequest) returns (WorkerPendingDatasourceDeletesResponse);
   rpc FinalizeDatasourceDelete(WorkerFinalizeDatasourceDeleteRequest) returns (WorkerFinalizeDatasourceDeleteResponse);
 
@@ -176,7 +176,7 @@ message WorkerCompleteComputeRequestRequest {
   string worker_id = 8 [(buf.validate.field).string.min_len = 1];
   string claim_token = 9 [(buf.validate.field).string.min_len = 1];
   int64 lease_generation = 10 [(buf.validate.field).int64.gte = 1];
-  optional WorkerEngineRunFinalization engine_run_finalization = 11;
+  optional WorkerComputeWorkerRunFinalization engine_run_finalization = 11;
 }
 
 message WorkerFailComputeRequestRequest {
@@ -190,7 +190,7 @@ message WorkerFailComputeRequestRequest {
   string worker_id = 6 [(buf.validate.field).string.min_len = 1];
   string claim_token = 7 [(buf.validate.field).string.min_len = 1];
   int64 lease_generation = 8 [(buf.validate.field).int64.gte = 1];
-  optional WorkerEngineRunFinalization engine_run_finalization = 9;
+  optional WorkerComputeWorkerRunFinalization engine_run_finalization = 9;
 }
 
 message WorkerRegisterDatasourceStageRequest {
@@ -337,7 +337,7 @@ message WorkerUdfCodesResponse {
   map<string, string> codes = 1;
 }
 
-message WorkerEngineCredentialsRequest {
+message WorkerComputeWorkerCredentialsRequest {
   string namespace = 1 [(buf.validate.field).string.pattern = "^[a-zA-Z0-9_-]+$"];
   string role = 2 [(buf.validate.field).string = {
     in: [
@@ -347,7 +347,7 @@ message WorkerEngineCredentialsRequest {
   }];
 }
 
-message WorkerEngineCredentialsResponse {
+message WorkerComputeWorkerCredentialsResponse {
   string access_key = 1;
   string secret_key = 2;
 }
@@ -466,18 +466,18 @@ message WorkerRecordHealthCheckResultsRequest {
   repeated WorkerHealthCheckResultPayload results = 2 [(buf.validate.field).repeated.min_items = 1];
 }
 
-message WorkerCreateEngineRunRequest {
+message WorkerCreateComputeWorkerRunRequest {
   reserved 12, 14;
   reserved "step_timings", "execution_entries";
 
   string namespace = 1 [(buf.validate.field).string.pattern = "^[a-zA-Z0-9_-]+$"];
   optional string analysis_id = 2 [(buf.validate.field).string.min_len = 1];
   string datasource_id = 3 [(buf.validate.field).string.min_len = 1];
-  EngineRunKind kind = 4 [(buf.validate.field).enum = {
+  ComputeWorkerRunKind kind = 4 [(buf.validate.field).enum = {
     defined_only: true
     not_in: 0
   }];
-  EngineRunStatus status = 5 [(buf.validate.field).enum = {
+  ComputeWorkerRunStatus status = 5 [(buf.validate.field).enum = {
     defined_only: true
     not_in: 0
   }];
@@ -495,26 +495,26 @@ message WorkerCreateEngineRunRequest {
   optional string current_step = 16 [(buf.validate.field).string.min_len = 1];
   optional string triggered_by = 17 [(buf.validate.field).string.min_len = 1];
   map<string, double> timing_by_key = 18;
-  repeated EngineRunExecutionEntry execution_entry = 19;
+  repeated ComputeWorkerRunExecutionEntry execution_entry = 19;
   optional string idempotency_key = 20 [(buf.validate.field).string.min_len = 1];
 }
 
-message EngineRunStepTimings {
+message ComputeWorkerRunStepTimings {
   map<string, double> values = 1;
 }
 
-message EngineRunExecutionEntryList {
-  repeated EngineRunExecutionEntry entries = 1;
+message ComputeWorkerRunExecutionEntryList {
+  repeated ComputeWorkerRunExecutionEntry entries = 1;
 }
 
-message WorkerEngineRunUpdateFields {
+message WorkerComputeWorkerRunUpdateFields {
   optional string analysis_id = 1 [(buf.validate.field).string.min_len = 1];
   optional string datasource_id = 2 [(buf.validate.field).string.min_len = 1];
-  optional EngineRunKind kind = 3 [(buf.validate.field).enum = {
+  optional ComputeWorkerRunKind kind = 3 [(buf.validate.field).enum = {
     defined_only: true
     not_in: 0
   }];
-  optional EngineRunStatus status = 4 [(buf.validate.field).enum = {
+  optional ComputeWorkerRunStatus status = 4 [(buf.validate.field).enum = {
     defined_only: true
     not_in: 0
   }];
@@ -523,9 +523,9 @@ message WorkerEngineRunUpdateFields {
   optional string error_message = 7 [(buf.validate.field).string.min_len = 1];
   optional google.protobuf.Timestamp completed_at = 8;
   optional int64 duration_ms = 9 [(buf.validate.field).int64.gte = 0];
-  EngineRunStepTimings step_timings = 10;
+  ComputeWorkerRunStepTimings step_timings = 10;
   optional string query_plan = 11 [(buf.validate.field).string.min_len = 1];
-  EngineRunExecutionEntryList execution_entries = 12;
+  ComputeWorkerRunExecutionEntryList execution_entries = 12;
   optional double progress = 13 [(buf.validate.field).double = {
     gte: 0
     lte: 1
@@ -535,30 +535,30 @@ message WorkerEngineRunUpdateFields {
   bool clear_current_step = 16;
 }
 
-message WorkerEngineRunFinalization {
+message WorkerComputeWorkerRunFinalization {
   string run_id = 1 [(buf.validate.field).string.min_len = 1];
   bool merge_result = 2;
-  WorkerEngineRunUpdateFields update = 3 [(buf.validate.field).required = true];
+  WorkerComputeWorkerRunUpdateFields update = 3 [(buf.validate.field).required = true];
 }
 
-message WorkerUpdateEngineRunRequest {
+message WorkerUpdateComputeWorkerRunRequest {
   reserved 3;
   reserved "fields";
 
   string namespace = 1 [(buf.validate.field).string.pattern = "^[a-zA-Z0-9_-]+$"];
   string run_id = 2 [(buf.validate.field).string.min_len = 1];
   bool merge_result = 4;
-  WorkerEngineRunUpdateFields update = 5 [(buf.validate.field).required = true];
+  WorkerComputeWorkerRunUpdateFields update = 5 [(buf.validate.field).required = true];
 }
 
-message WorkerEngineRunStateRequest {
+message WorkerComputeWorkerRunStateRequest {
   string namespace = 1 [(buf.validate.field).string.pattern = "^[a-zA-Z0-9_-]+$"];
   string run_id = 2 [(buf.validate.field).string.min_len = 1];
 }
 
-message WorkerEngineRunStateResponse {
+message WorkerComputeWorkerRunStateResponse {
   bool found = 1;
-  optional EngineRunStatus status = 2 [(buf.validate.field).enum = {
+  optional ComputeWorkerRunStatus status = 2 [(buf.validate.field).enum = {
     defined_only: true
     not_in: 0
   }];
@@ -620,7 +620,7 @@ message WorkerBuildRunPayload {
   string namespace = 2 [(buf.validate.field).string.pattern = "^[a-zA-Z0-9_-]+$"];
   string analysis_id = 3 [(buf.validate.field).string.min_len = 1];
   string analysis_name = 4 [(buf.validate.field).string.min_len = 1];
-  optional EngineRunKind current_kind = 8 [(buf.validate.field).enum = {
+  optional ComputeWorkerRunKind current_kind = 8 [(buf.validate.field).enum = {
     defined_only: true
     not_in: 0
   }];
@@ -650,13 +650,13 @@ message WorkerStartBuildRunResponse {
   optional WorkerBuildRunPayload run = 1;
 }
 
-message WorkerPersistEngineSnapshotRequest {
+message WorkerPersistComputeWorkerSnapshotRequest {
   reserved 3;
   reserved "statuses";
 
   string worker_id = 1 [(buf.validate.field).string.min_len = 1];
   string namespace = 2 [(buf.validate.field).string.pattern = "^[a-zA-Z0-9_-]+$"];
-  repeated EngineStatusResult engine_status = 4;
+  repeated ComputeWorkerStatusResult engine_status = 4;
 }
 
 message WorkerPendingDatasourceDelete {

@@ -3,7 +3,7 @@ import type { BuildEventJson } from '$lib/protocol/dataforge_protocol/compute_pb
 import {
 	BUILD_LOG_LEVEL_JSON_TOKENS,
 	BUILD_TAB_STATUS_JSON_TOKENS,
-	ENGINE_RUN_KIND_JSON_TOKENS
+	COMPUTE_WORKER_RUN_KIND_JSON_TOKENS
 } from '$lib/types/protocol-enum-tokens';
 import { isProtocolBuildEvent, protocolBuildEventToBuildEvent } from './protocol-build-stream';
 
@@ -12,7 +12,7 @@ const BASE_CONTEXT = {
 	analysisId: 'analysis-1',
 	emittedAt: '2025-01-01T00:00:00Z',
 	sequence: 7,
-	currentKind: 'ENGINE_RUN_KIND_BUILD',
+	currentKind: 'COMPUTE_WORKER_RUN_KIND_BUILD',
 	currentDatasourceId: 'ds-1',
 	tabId: 'tab-1',
 	tabName: 'Tab 1',
@@ -100,7 +100,7 @@ describe('protocol build stream conversion', () => {
 				stepIndex: 0,
 				stepId: 'tab-1:initial_read',
 				stepName: 'Initial Read',
-				stepKind: { executionCategory: 'ENGINE_RUN_EXECUTION_CATEGORY_READ' },
+				stepKind: { executionCategory: 'COMPUTE_WORKER_RUN_EXECUTION_CATEGORY_READ' },
 				durationMs: 25,
 				totalSteps: 4
 			}
@@ -130,8 +130,8 @@ describe('protocol build stream conversion', () => {
 	});
 
 	test('uses protocol enum JSON token tables for generated build stream enums', () => {
-		expect(ENGINE_RUN_KIND_JSON_TOKENS.ENGINE_RUN_KIND_ROW_COUNT).toBe('row_count');
-		expect(ENGINE_RUN_KIND_JSON_TOKENS.ENGINE_RUN_KIND_UNSPECIFIED).toBeNull();
+		expect(COMPUTE_WORKER_RUN_KIND_JSON_TOKENS.COMPUTE_WORKER_RUN_KIND_ROW_COUNT).toBe('row_count');
+		expect(COMPUTE_WORKER_RUN_KIND_JSON_TOKENS.COMPUTE_WORKER_RUN_KIND_UNSPECIFIED).toBeNull();
 		expect(BUILD_TAB_STATUS_JSON_TOKENS.BUILD_TAB_STATUS_FAILED).toBe('failed');
 		expect(BUILD_TAB_STATUS_JSON_TOKENS.BUILD_TAB_STATUS_UNSPECIFIED).toBeNull();
 		expect(BUILD_LOG_LEVEL_JSON_TOKENS.BUILD_LOG_LEVEL_WARNING).toBe('warning');

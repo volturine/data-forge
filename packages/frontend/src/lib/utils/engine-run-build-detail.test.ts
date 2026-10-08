@@ -1,6 +1,6 @@
 import { describe, expect, it } from 'vitest';
 
-import type { EngineRun } from '$lib/api/engine-runs';
+import type { ComputeWorkerRun } from '$lib/api/engine-runs';
 import {
 	engineRunBuildDetail,
 	engineRunDatasourceId,
@@ -9,7 +9,7 @@ import {
 	engineRunStatus
 } from '$lib/utils/engine-run-build-detail';
 
-function makeRun(overrides: Partial<EngineRun> = {}): EngineRun {
+function makeRun(overrides: Partial<ComputeWorkerRun> = {}): ComputeWorkerRun {
 	return {
 		id: 'run-1',
 		analysis_id: 'analysis-1',

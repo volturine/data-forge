@@ -29,7 +29,7 @@ from datasources.schemas import (
 )
 from runtime.compute_manager import ProcessManager
 from runtime.domain.datasource.source_types import DataSourceType
-from runtime.domain.engine_runs.schemas import EngineRunKind, EngineRunStatus, SchemaDiffStatus
+from runtime.domain.engine_runs.schemas import ComputeWorkerRunKind, ComputeWorkerRunStatus, SchemaDiffStatus
 from runtime.exceptions import DataSourceConnectionError, DataSourceValidationError
 from runtime.iceberg_catalog import ensure_catalog_namespace, load_runtime_catalog
 from runtime.namespace import get_namespace
@@ -372,7 +372,7 @@ def _create_ingest_run(
     request_json: Mapping[str, object] | None = None,
 ) -> str:
     payload: dict[str, object] = {
-        "kind": EngineRunKind.INGEST.value,
+        "kind": ComputeWorkerRunKind.INGEST.value,
         "mode": mode,
         "source_type": source_type.value,
         "branch": branch,
@@ -383,8 +383,8 @@ def _create_ingest_run(
         namespace=namespace,
         analysis_id=None,
         datasource_id=datasource_id,
-        kind=EngineRunKind.INGEST.value,
-        status=EngineRunStatus.RUNNING.value,
+        kind=ComputeWorkerRunKind.INGEST.value,
+        status=ComputeWorkerRunStatus.RUNNING.value,
         request_json=payload,
         created_at=datetime.now(UTC).replace(tzinfo=None),
         current_step="Reading source",
@@ -423,7 +423,7 @@ def _complete_ingest_run(
         namespace=namespace,
         run_id=run_id,
         fields={
-            "status": EngineRunStatus.SUCCESS.value,
+            "status": ComputeWorkerRunStatus.SUCCESS.value,
             "completed_at": datetime.now(UTC).replace(tzinfo=None),
             "duration_ms": int((monotonic() - started) * 1000),
             "progress": 1.0,
@@ -439,7 +439,7 @@ def _fail_ingest_run(client: WorkerRuntimeClient, *, namespace: str, run_id: str
             namespace=namespace,
             run_id=run_id,
             fields={
-                "status": EngineRunStatus.FAILED.value,
+                "status": ComputeWorkerRunStatus.FAILED.value,
                 "completed_at": datetime.now(UTC).replace(tzinfo=None),
                 "duration_ms": int((monotonic() - started) * 1000),
                 "progress": 1.0,
@@ -498,7 +498,7 @@ def ingest_datasource_for_schedule(
     build_id: str,
 ) -> DataSourceRecord:
     from dataforge_protocol import compute_pb2, enums_pb2
-    from runtime.compute_utils import await_engine_result
+    from runtime.compute_utils import await_compute_worker_result
 
     metadata = _require_metadata(client, namespace=namespace, datasource_id=datasource_id)
     if metadata.revision is None:
@@ -508,9 +508,9 @@ def ingest_datasource_for_schedule(
             "This datasource has no external source to re-ingest. Schedule an analysis output instead.",
             details={"datasource_id": datasource_id},
         )
-    identity = compute_pb2.EngineIdentity(
-        scope=enums_pb2.ENGINE_SCOPE_DATASOURCE_PREVIEW,
-        reuse_policy=enums_pb2.ENGINE_REUSE_POLICY_SHARED,
+    identity = compute_pb2.ComputeWorkerIdentity(
+        scope=enums_pb2.COMPUTE_WORKER_SCOPE_DATASOURCE_PREVIEW,
+        reuse_policy=enums_pb2.COMPUTE_WORKER_REUSE_POLICY_SHARED,
         datasource_id=datasource_id,
         resource_id=datasource_id,
     )
@@ -538,7 +538,7 @@ def ingest_datasource_for_schedule(
             )
             source, _source_type = _external_source(metadata)
             engine_job = engine.datasource_job("datasource_stage", {"source_config": source, "table_path": target, "manifest_url": manifest_url})
-            result = await_engine_result(engine, job_id=engine_job)
+            result = await_compute_worker_result(engine, job_id=engine_job)
             if result.get("error") or not isinstance(result.get("data"), dict):
                 raise DataSourceConnectionError("Scheduled datasource computation failed", details={"datasource_id": datasource_id})
             # Reuse the published table identity so snapshots from earlier

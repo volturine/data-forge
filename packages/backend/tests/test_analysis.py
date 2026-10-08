@@ -1395,7 +1395,7 @@ class TestAnalysisDelete:
 
         executor_client.request_engine_shutdown(
             cast(Session, object()),
-            identity=compute_pb2.EngineIdentity(analysis_id='analysis-1', resource_id='analysis-1'),
+            identity=compute_pb2.ComputeWorkerIdentity(analysis_id='analysis-1', resource_id='analysis-1'),
             runtime_probe=cast(Any, object()),
         )
 
@@ -1403,7 +1403,7 @@ class TestAnalysisDelete:
         assert 'dispatch' not in submitted[0]
 
     def test_delete_analysis_queues_engine_shutdown_without_waiting(self, client, sample_analysis: Analysis, monkeypatch):
-        shutdown_calls: list[compute_pb2.EngineIdentity] = []
+        shutdown_calls: list[compute_pb2.ComputeWorkerIdentity] = []
 
         def request_shutdown(session, *, identity, runtime_probe) -> None:
             shutdown_calls.append(identity)

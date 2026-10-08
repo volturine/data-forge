@@ -1,8 +1,8 @@
 import { describe, test, expect } from 'vitest';
 import { buildSnapshotMap } from './build-snapshot-map';
-import type { EngineRun } from '$lib/api/engine-runs';
+import type { ComputeWorkerRun } from '$lib/api/engine-runs';
 
-function makeRun(id: string, snapshotId?: unknown): EngineRun {
+function makeRun(id: string, snapshotId?: unknown): ComputeWorkerRun {
 	return {
 		id,
 		analysis_id: null,

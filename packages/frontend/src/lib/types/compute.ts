@@ -1,17 +1,17 @@
 import type {
-	EngineDefaultsJson as ProtocolEngineDefaultsJson,
-	EngineIdentityJson as ProtocolEngineIdentityJson,
-	EngineResourceConfigJson as ProtocolEngineResourceConfigJson,
-	EngineStatusResultJson as ProtocolEngineStatusResultJson
+	ComputeWorkerDefaultsJson as ProtocolComputeWorkerDefaultsJson,
+	ComputeWorkerIdentityJson as ProtocolComputeWorkerIdentityJson,
+	ComputeWorkerResourceConfigJson as ProtocolComputeWorkerResourceConfigJson,
+	ComputeWorkerStatusResultJson as ProtocolComputeWorkerStatusResultJson
 } from '$lib/protocol/dataforge_protocol/compute_pb';
 import type {
-	EngineInstanceStatus,
-	EngineReusePolicy,
-	EngineScope,
-	EngineStatus
+	ComputeWorkerInstanceStatus,
+	ComputeWorkerReusePolicy,
+	ComputeWorkerScope,
+	ComputeWorkerStatus
 } from '$lib/types/protocol-enum-tokens';
 
-export type { EngineReusePolicy, EngineScope, EngineStatus };
+export type { ComputeWorkerReusePolicy, ComputeWorkerScope, ComputeWorkerStatus };
 
 type Field<T, K extends keyof T> = NonNullable<T[K]>;
 type NumberField<T, K extends keyof T> = Extract<Field<T, K>, number>;
@@ -20,51 +20,60 @@ type OptionalNumberField<T, K extends keyof T> = NumberField<T, K> | null;
 type OptionalStringField<T, K extends keyof T> = StringField<T, K> | null;
 type OptionalObjectField<T, K extends keyof T> = Field<T, K> | null;
 
-export interface EngineResourceConfig {
-	max_threads?: OptionalNumberField<ProtocolEngineResourceConfigJson, 'maxThreads'>;
-	max_memory_mb?: OptionalNumberField<ProtocolEngineResourceConfigJson, 'maxMemoryMb'>;
+export interface ComputeWorkerResourceConfig {
+	max_threads?: OptionalNumberField<ProtocolComputeWorkerResourceConfigJson, 'maxThreads'>;
+	max_memory_mb?: OptionalNumberField<ProtocolComputeWorkerResourceConfigJson, 'maxMemoryMb'>;
 	streaming_chunk_size?: OptionalNumberField<
-		ProtocolEngineResourceConfigJson,
+		ProtocolComputeWorkerResourceConfigJson,
 		'streamingChunkSize'
 	>;
 }
 
-export interface EngineDefaults {
-	max_threads: NumberField<ProtocolEngineDefaultsJson, 'maxThreads'>;
-	max_memory_mb: NumberField<ProtocolEngineDefaultsJson, 'maxMemoryMb'>;
-	streaming_chunk_size: NumberField<ProtocolEngineDefaultsJson, 'streamingChunkSize'>;
+export interface ComputeWorkerDefaults {
+	max_threads: NumberField<ProtocolComputeWorkerDefaultsJson, 'maxThreads'>;
+	max_memory_mb: NumberField<ProtocolComputeWorkerDefaultsJson, 'maxMemoryMb'>;
+	streaming_chunk_size: NumberField<ProtocolComputeWorkerDefaultsJson, 'streamingChunkSize'>;
 }
 
-export interface EngineStatusResponse {
-	analysis_id: OptionalStringField<ProtocolEngineStatusResultJson, 'analysisId'>;
-	resource_id: StringField<ProtocolEngineStatusResultJson, 'resourceId'>;
-	status: EngineStatus;
-	container_id: OptionalStringField<ProtocolEngineStatusResultJson, 'containerId'>;
-	image_digest: OptionalStringField<ProtocolEngineStatusResultJson, 'imageDigest'>;
-	lifecycle_status: EngineInstanceStatus | null;
-	termination_reason: OptionalStringField<ProtocolEngineStatusResultJson, 'terminationReason'>;
-	exit_code: OptionalNumberField<ProtocolEngineStatusResultJson, 'exitCode'>;
+export interface ComputeWorkerStatusResponse {
+	analysis_id: OptionalStringField<ProtocolComputeWorkerStatusResultJson, 'analysisId'>;
+	resource_id: StringField<ProtocolComputeWorkerStatusResultJson, 'resourceId'>;
+	status: ComputeWorkerStatus;
+	container_id: OptionalStringField<ProtocolComputeWorkerStatusResultJson, 'containerId'>;
+	image_digest: OptionalStringField<ProtocolComputeWorkerStatusResultJson, 'imageDigest'>;
+	lifecycle_status: ComputeWorkerInstanceStatus | null;
+	termination_reason: OptionalStringField<
+		ProtocolComputeWorkerStatusResultJson,
+		'terminationReason'
+	>;
+	exit_code: OptionalNumberField<ProtocolComputeWorkerStatusResultJson, 'exitCode'>;
 	oom_killed: boolean | null;
-	supervisor_id: OptionalStringField<ProtocolEngineStatusResultJson, 'supervisorId'>;
-	owner_id: OptionalStringField<ProtocolEngineStatusResultJson, 'ownerId'>;
-	last_activity: OptionalStringField<ProtocolEngineStatusResultJson, 'lastActivity'>;
-	current_job_id: OptionalStringField<ProtocolEngineStatusResultJson, 'currentJobId'>;
-	resource_config: OptionalObjectField<ProtocolEngineStatusResultJson, 'resourceConfig'>;
-	effective_resources: OptionalObjectField<ProtocolEngineStatusResultJson, 'effectiveResources'>;
-	defaults: OptionalObjectField<ProtocolEngineStatusResultJson, 'defaults'>;
-	scope: EngineScope | null;
-	reuse_policy: EngineReusePolicy | null;
-	datasource_id: OptionalStringField<ProtocolEngineStatusResultJson, 'datasourceId'>;
-	build_id: OptionalStringField<ProtocolEngineStatusResultJson, 'buildId'>;
-	current_build_id: OptionalStringField<ProtocolEngineStatusResultJson, 'currentBuildId'>;
-	current_engine_run_id: OptionalStringField<ProtocolEngineStatusResultJson, 'currentEngineRunId'>;
+	supervisor_id: OptionalStringField<ProtocolComputeWorkerStatusResultJson, 'supervisorId'>;
+	owner_id: OptionalStringField<ProtocolComputeWorkerStatusResultJson, 'ownerId'>;
+	last_activity: OptionalStringField<ProtocolComputeWorkerStatusResultJson, 'lastActivity'>;
+	current_job_id: OptionalStringField<ProtocolComputeWorkerStatusResultJson, 'currentJobId'>;
+	resource_config: OptionalObjectField<ProtocolComputeWorkerStatusResultJson, 'resourceConfig'>;
+	effective_resources: OptionalObjectField<
+		ProtocolComputeWorkerStatusResultJson,
+		'effectiveResources'
+	>;
+	defaults: OptionalObjectField<ProtocolComputeWorkerStatusResultJson, 'defaults'>;
+	scope: ComputeWorkerScope | null;
+	reuse_policy: ComputeWorkerReusePolicy | null;
+	datasource_id: OptionalStringField<ProtocolComputeWorkerStatusResultJson, 'datasourceId'>;
+	build_id: OptionalStringField<ProtocolComputeWorkerStatusResultJson, 'buildId'>;
+	current_build_id: OptionalStringField<ProtocolComputeWorkerStatusResultJson, 'currentBuildId'>;
+	current_engine_run_id: OptionalStringField<
+		ProtocolComputeWorkerStatusResultJson,
+		'currentEngineRunId'
+	>;
 }
 
-export interface EngineIdentityPayload {
-	scope: EngineScope;
-	reuse_policy: EngineReusePolicy;
-	resource_id: StringField<ProtocolEngineIdentityJson, 'resourceId'>;
-	analysis_id?: OptionalStringField<ProtocolEngineIdentityJson, 'analysisId'>;
-	datasource_id?: OptionalStringField<ProtocolEngineIdentityJson, 'datasourceId'>;
-	build_id?: OptionalStringField<ProtocolEngineIdentityJson, 'buildId'>;
+export interface ComputeWorkerIdentityPayload {
+	scope: ComputeWorkerScope;
+	reuse_policy: ComputeWorkerReusePolicy;
+	resource_id: StringField<ProtocolComputeWorkerIdentityJson, 'resourceId'>;
+	analysis_id?: OptionalStringField<ProtocolComputeWorkerIdentityJson, 'analysisId'>;
+	datasource_id?: OptionalStringField<ProtocolComputeWorkerIdentityJson, 'datasourceId'>;
+	build_id?: OptionalStringField<ProtocolComputeWorkerIdentityJson, 'buildId'>;
 }

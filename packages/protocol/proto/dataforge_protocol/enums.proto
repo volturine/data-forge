@@ -89,23 +89,23 @@ enum BuildRunStatus {
   BUILD_RUN_STATUS_ORPHANED = 6 [(dataforge_token) = "orphaned"];
 }
 
-enum EngineStatus {
-  ENGINE_STATUS_UNSPECIFIED = 0;
-  ENGINE_STATUS_HEALTHY = 1 [(dataforge_token) = "healthy"];
-  ENGINE_STATUS_TERMINATED = 2 [(dataforge_token) = "terminated"];
+enum ComputeWorkerStatus {
+  COMPUTE_WORKER_STATUS_UNSPECIFIED = 0;
+  COMPUTE_WORKER_STATUS_HEALTHY = 1 [(dataforge_token) = "healthy"];
+  COMPUTE_WORKER_STATUS_TERMINATED = 2 [(dataforge_token) = "terminated"];
 }
 
-enum EngineScope {
-  ENGINE_SCOPE_UNSPECIFIED = 0;
-  ENGINE_SCOPE_DATASOURCE_PREVIEW = 1 [(dataforge_token) = "datasource_preview"];
-  ENGINE_SCOPE_ANALYSIS_INTERACTIVE = 2 [(dataforge_token) = "analysis_interactive"];
-  ENGINE_SCOPE_BUILD = 3 [(dataforge_token) = "build"];
+enum ComputeWorkerScope {
+  COMPUTE_WORKER_SCOPE_UNSPECIFIED = 0;
+  COMPUTE_WORKER_SCOPE_DATASOURCE_PREVIEW = 1 [(dataforge_token) = "datasource_preview"];
+  COMPUTE_WORKER_SCOPE_ANALYSIS_INTERACTIVE = 2 [(dataforge_token) = "analysis_interactive"];
+  COMPUTE_WORKER_SCOPE_BUILD = 3 [(dataforge_token) = "build"];
 }
 
-enum EngineReusePolicy {
-  ENGINE_REUSE_POLICY_UNSPECIFIED = 0;
-  ENGINE_REUSE_POLICY_SHARED = 1 [(dataforge_token) = "shared"];
-  ENGINE_REUSE_POLICY_EXCLUSIVE = 2 [(dataforge_token) = "exclusive"];
+enum ComputeWorkerReusePolicy {
+  COMPUTE_WORKER_REUSE_POLICY_UNSPECIFIED = 0;
+  COMPUTE_WORKER_REUSE_POLICY_SHARED = 1 [(dataforge_token) = "shared"];
+  COMPUTE_WORKER_REUSE_POLICY_EXCLUSIVE = 2 [(dataforge_token) = "exclusive"];
 }
 
 enum ExportFormat {
@@ -275,40 +275,40 @@ enum IcebergReader {
   ICEBERG_READER_PYICEBERG = 2 [(dataforge_token) = "pyiceberg"];
 }
 
-enum EngineInstanceStatus {
-  ENGINE_INSTANCE_STATUS_UNSPECIFIED = 0;
-  ENGINE_INSTANCE_STATUS_STARTING = 1 [(dataforge_token) = "starting"];
-  ENGINE_INSTANCE_STATUS_IDLE = 2 [(dataforge_token) = "idle"];
-  ENGINE_INSTANCE_STATUS_RUNNING = 3 [(dataforge_token) = "running"];
-  ENGINE_INSTANCE_STATUS_STOPPING = 4 [(dataforge_token) = "stopping"];
-  ENGINE_INSTANCE_STATUS_STOPPED = 5 [(dataforge_token) = "stopped"];
-  ENGINE_INSTANCE_STATUS_FAILED = 6 [(dataforge_token) = "failed"];
+enum ComputeWorkerInstanceStatus {
+  COMPUTE_WORKER_INSTANCE_STATUS_UNSPECIFIED = 0;
+  COMPUTE_WORKER_INSTANCE_STATUS_STARTING = 1 [(dataforge_token) = "starting"];
+  COMPUTE_WORKER_INSTANCE_STATUS_IDLE = 2 [(dataforge_token) = "idle"];
+  COMPUTE_WORKER_INSTANCE_STATUS_RUNNING = 3 [(dataforge_token) = "running"];
+  COMPUTE_WORKER_INSTANCE_STATUS_STOPPING = 4 [(dataforge_token) = "stopping"];
+  COMPUTE_WORKER_INSTANCE_STATUS_STOPPED = 5 [(dataforge_token) = "stopped"];
+  COMPUTE_WORKER_INSTANCE_STATUS_FAILED = 6 [(dataforge_token) = "failed"];
 }
 
-enum EngineRunKind {
-  ENGINE_RUN_KIND_UNSPECIFIED = 0;
-  ENGINE_RUN_KIND_BUILD = 1 [(dataforge_token) = "build"];
-  ENGINE_RUN_KIND_PREVIEW = 2 [(dataforge_token) = "preview"];
-  ENGINE_RUN_KIND_ROW_COUNT = 3 [(dataforge_token) = "row_count"];
-  ENGINE_RUN_KIND_DOWNLOAD = 4 [(dataforge_token) = "download"];
-  ENGINE_RUN_KIND_INGEST = 5 [(dataforge_token) = "ingest"];
+enum ComputeWorkerRunKind {
+  COMPUTE_WORKER_RUN_KIND_UNSPECIFIED = 0;
+  COMPUTE_WORKER_RUN_KIND_BUILD = 1 [(dataforge_token) = "build"];
+  COMPUTE_WORKER_RUN_KIND_PREVIEW = 2 [(dataforge_token) = "preview"];
+  COMPUTE_WORKER_RUN_KIND_ROW_COUNT = 3 [(dataforge_token) = "row_count"];
+  COMPUTE_WORKER_RUN_KIND_DOWNLOAD = 4 [(dataforge_token) = "download"];
+  COMPUTE_WORKER_RUN_KIND_INGEST = 5 [(dataforge_token) = "ingest"];
 }
 
-enum EngineRunStatus {
-  ENGINE_RUN_STATUS_UNSPECIFIED = 0;
-  ENGINE_RUN_STATUS_RUNNING = 1 [(dataforge_token) = "running"];
-  ENGINE_RUN_STATUS_SUCCESS = 2 [(dataforge_token) = "success"];
-  ENGINE_RUN_STATUS_FAILED = 3 [(dataforge_token) = "failed"];
-  ENGINE_RUN_STATUS_CANCELLED = 4 [(dataforge_token) = "cancelled"];
+enum ComputeWorkerRunStatus {
+  COMPUTE_WORKER_RUN_STATUS_UNSPECIFIED = 0;
+  COMPUTE_WORKER_RUN_STATUS_RUNNING = 1 [(dataforge_token) = "running"];
+  COMPUTE_WORKER_RUN_STATUS_SUCCESS = 2 [(dataforge_token) = "success"];
+  COMPUTE_WORKER_RUN_STATUS_FAILED = 3 [(dataforge_token) = "failed"];
+  COMPUTE_WORKER_RUN_STATUS_CANCELLED = 4 [(dataforge_token) = "cancelled"];
 }
 
-enum EngineRunExecutionCategory {
-  ENGINE_RUN_EXECUTION_CATEGORY_UNSPECIFIED = 0;
-  ENGINE_RUN_EXECUTION_CATEGORY_READ = 1 [(dataforge_token) = "read"];
-  ENGINE_RUN_EXECUTION_CATEGORY_STEP = 2 [(dataforge_token) = "step"];
-  ENGINE_RUN_EXECUTION_CATEGORY_PLAN = 3 [(dataforge_token) = "plan"];
-  ENGINE_RUN_EXECUTION_CATEGORY_COMPUTE = 4 [(dataforge_token) = "compute"];
-  ENGINE_RUN_EXECUTION_CATEGORY_WRITE = 5 [(dataforge_token) = "write"];
+enum ComputeWorkerRunExecutionCategory {
+  COMPUTE_WORKER_RUN_EXECUTION_CATEGORY_UNSPECIFIED = 0;
+  COMPUTE_WORKER_RUN_EXECUTION_CATEGORY_READ = 1 [(dataforge_token) = "read"];
+  COMPUTE_WORKER_RUN_EXECUTION_CATEGORY_STEP = 2 [(dataforge_token) = "step"];
+  COMPUTE_WORKER_RUN_EXECUTION_CATEGORY_PLAN = 3 [(dataforge_token) = "plan"];
+  COMPUTE_WORKER_RUN_EXECUTION_CATEGORY_COMPUTE = 4 [(dataforge_token) = "compute"];
+  COMPUTE_WORKER_RUN_EXECUTION_CATEGORY_WRITE = 5 [(dataforge_token) = "write"];
 }
 
 enum SchemaDiffStatus {

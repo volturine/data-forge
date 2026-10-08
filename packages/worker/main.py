@@ -19,12 +19,12 @@ from runtime.compute_request_runtime import (
     compute_request_loop,
     compute_request_worker_count,
 )
+from runtime.compute_worker_notifications import create_snapshot_notifier
 from runtime.config import settings
 from runtime.datasource_delete_runtime import datasource_delete_loop
 from runtime.dispatcher_health import DispatcherHealth
-from runtime.docker_engine import reconcile_deployment_containers, validate_engine_runtime_readiness
+from runtime.docker_compute_worker import reconcile_deployment_containers, validate_compute_worker_runtime_readiness
 from runtime.domain.runtime_workers.models import RuntimeWorkerKind
-from runtime.engine_notifications import create_snapshot_notifier
 from runtime.executors import run_control_in_thread
 from runtime.logging import configure_logging
 from runtime.namespace import get_namespace, reset_namespace, set_namespace_context
@@ -158,7 +158,7 @@ async def _run_runtime_coordinator(
     _configure_blocking_executor(max_workers=_DEFAULT_EXECUTOR_WORKERS, thread_name_prefix="runtime-default")
     await run_control_in_thread(configure_logging)
     logger.info("Starting runtime coordinator...")
-    await run_control_in_thread(validate_engine_runtime_readiness)
+    await run_control_in_thread(validate_compute_worker_runtime_readiness)
     if coordinator_generation is not None:
         os.environ["RUNTIME_COORDINATOR_GENERATION"] = str(coordinator_generation)
     removed = await run_control_in_thread(

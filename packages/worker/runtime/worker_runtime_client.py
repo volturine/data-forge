@@ -31,7 +31,7 @@ from dataforge_protocol import (
     worker_runtime_pb2,
     worker_runtime_pb2_grpc,
 )
-from runtime.domain.compute.base import EngineStatusInfo
+from runtime.domain.compute.base import ComputeWorkerStatusInfo
 from runtime.protocol_mapping import (
     datasource_record_payload as _datasource_record_payload,
     datetime_to_timestamp,
@@ -360,7 +360,7 @@ class StorageCleanupClaim:
 
 
 @dataclass(frozen=True)
-class EngineRunFinalization:
+class ComputeWorkerRunFinalization:
     run_id: str
     fields: Mapping[str, object]
     merge_result_json: bool = False
@@ -927,7 +927,7 @@ class WorkerRuntimeClient:
         artifact_path: str | None = None,
         artifact_name: str | None = None,
         artifact_content_type: str | None = None,
-        engine_run_finalization: EngineRunFinalization | None = None,
+        engine_run_finalization: ComputeWorkerRunFinalization | None = None,
         timeout_seconds: float | None = None,
     ) -> None:
         request = worker_runtime_pb2.WorkerCompleteComputeRequestRequest(
@@ -965,7 +965,7 @@ class WorkerRuntimeClient:
         lease_generation: int,
         error_message: str,
         error: compute_pb2.ComputeErrorResult,
-        engine_run_finalization: EngineRunFinalization | None = None,
+        engine_run_finalization: ComputeWorkerRunFinalization | None = None,
         timeout_seconds: float | None = None,
     ) -> None:
         timeout = self._control_timeout(timeout_seconds)
@@ -1251,10 +1251,10 @@ class WorkerRuntimeClient:
         )
         return dict(response.codes)
 
-    def engine_credentials(self, *, namespace: str, role: str) -> worker_runtime_pb2.WorkerEngineCredentialsResponse:
+    def engine_credentials(self, *, namespace: str, role: str) -> worker_runtime_pb2.WorkerComputeWorkerCredentialsResponse:
         return self._call(
-            lambda: self._stub.GetEngineCredentials(
-                worker_runtime_pb2.WorkerEngineCredentialsRequest(namespace=namespace, role=role),
+            lambda: self._stub.GetComputeWorkerCredentials(
+                worker_runtime_pb2.WorkerComputeWorkerCredentialsRequest(namespace=namespace, role=role),
                 timeout=self._control_timeout(),
                 metadata=self._metadata(),
             )
@@ -1431,11 +1431,11 @@ class WorkerRuntimeClient:
         triggered_by: str | None = None,
         idempotency_key: str | None = None,
     ) -> str:
-        request = worker_runtime_pb2.WorkerCreateEngineRunRequest(
+        request = worker_runtime_pb2.WorkerCreateComputeWorkerRunRequest(
             namespace=namespace,
             datasource_id=datasource_id,
-            kind=enum_to_proto_value("ENGINE_RUN_KIND", kind),
-            status=enum_to_proto_value("ENGINE_RUN_STATUS", status),
+            kind=enum_to_proto_value("COMPUTE_WORKER_RUN_KIND", kind),
+            status=enum_to_proto_value("COMPUTE_WORKER_RUN_STATUS", status),
             request=dict_to_struct(request_json),
             execution_entry=[_engine_run_execution_entry_proto(entry) for entry in execution_entries or []],
             progress=progress,
@@ -1464,10 +1464,10 @@ class WorkerRuntimeClient:
             request.idempotency_key = idempotency_key
 
         def create():
-            return self._stub.CreateEngineRun(request, timeout=self._control_timeout(), metadata=self._metadata())
+            return self._stub.CreateComputeWorkerRun(request, timeout=self._control_timeout(), metadata=self._metadata())
 
         if idempotency_key is not None:
-            return self._call_with_reconnect(create, operation="CreateEngineRun").id
+            return self._call_with_reconnect(create, operation="CreateComputeWorkerRun").id
         return self._call(create).id
 
     def update_engine_run(
@@ -1479,8 +1479,8 @@ class WorkerRuntimeClient:
         merge_result_json: bool = True,
     ) -> str:
         response = self._call(
-            lambda: self._stub.UpdateEngineRun(
-                worker_runtime_pb2.WorkerUpdateEngineRunRequest(
+            lambda: self._stub.UpdateComputeWorkerRun(
+                worker_runtime_pb2.WorkerUpdateComputeWorkerRunRequest(
                     namespace=namespace,
                     run_id=run_id,
                     merge_result=merge_result_json,
@@ -1494,8 +1494,8 @@ class WorkerRuntimeClient:
 
     def engine_run_state(self, *, namespace: str, run_id: str) -> dict[str, object] | None:
         response = self._call(
-            lambda: self._stub.GetEngineRunState(
-                worker_runtime_pb2.WorkerEngineRunStateRequest(namespace=namespace, run_id=run_id),
+            lambda: self._stub.GetComputeWorkerRunState(
+                worker_runtime_pb2.WorkerComputeWorkerRunStateRequest(namespace=namespace, run_id=run_id),
                 timeout=self._control_timeout(),
                 metadata=self._metadata(),
             )
@@ -1503,7 +1503,7 @@ class WorkerRuntimeClient:
         if not response.found:
             return None
         return {
-            "status": _optional_proto_enum_name(response, "status", enums_pb2.EngineRunStatus, "ENGINE_RUN_STATUS"),
+            "status": _optional_proto_enum_name(response, "status", enums_pb2.ComputeWorkerRunStatus, "COMPUTE_WORKER_RUN_STATUS"),
             "result_json": optional_struct_to_dict(response, "result") or {},
             "cancelled_at": _optional_timestamp_iso(response, "cancelled_at"),
             "cancelled_by": _optional_str(response, "cancelled_by"),
@@ -1788,10 +1788,10 @@ class WorkerRuntimeClient:
         )
         return _started_build_run_from_response(response)
 
-    def persist_engine_snapshot(self, *, worker_id: str, namespace: str, statuses: Sequence[EngineStatusInfo]) -> int:
+    def persist_compute_worker_snapshot(self, *, worker_id: str, namespace: str, statuses: Sequence[ComputeWorkerStatusInfo]) -> int:
         response = self._call(
-            lambda: self._stub.PersistEngineSnapshot(
-                worker_runtime_pb2.WorkerPersistEngineSnapshotRequest(
+            lambda: self._stub.PersistComputeWorkerSnapshot(
+                worker_runtime_pb2.WorkerPersistComputeWorkerSnapshotRequest(
                     worker_id=worker_id,
                     namespace=namespace,
                     engine_status=[_engine_status_result_proto(status) for status in statuses],
@@ -2250,11 +2250,11 @@ def _engine_run_entry_step_type(payload: Mapping[str, object]) -> enums_pb2.Step
     return cast(enums_pb2.StepType, enum_to_proto_value("STEP_TYPE", value))
 
 
-def _engine_run_execution_entry_proto(payload: Mapping[str, object]) -> compute_pb2.EngineRunExecutionEntry:
-    entry = compute_pb2.EngineRunExecutionEntry(
+def _engine_run_execution_entry_proto(payload: Mapping[str, object]) -> compute_pb2.ComputeWorkerRunExecutionEntry:
+    entry = compute_pb2.ComputeWorkerRunExecutionEntry(
         key=_required_mapping_str(payload, "key"),
         label=_required_mapping_str(payload, "label"),
-        category=enum_to_proto_value("ENGINE_RUN_EXECUTION_CATEGORY", _required_mapping_str(payload, "category")),
+        category=enum_to_proto_value("COMPUTE_WORKER_RUN_EXECUTION_CATEGORY", _required_mapping_str(payload, "category")),
         order=_required_mapping_int(payload, "order"),
     )
     duration_ms = _optional_mapping_float(payload, "duration_ms")
@@ -2290,8 +2290,8 @@ def _mapping_dict_field(payload: Mapping[str, object], key: str) -> dict[str, ob
     return value
 
 
-def _engine_resource_config_proto(payload: Mapping[str, object]) -> compute_pb2.EngineResourceConfig:
-    config = compute_pb2.EngineResourceConfig()
+def _engine_resource_config_proto(payload: Mapping[str, object]) -> compute_pb2.ComputeWorkerResourceConfig:
+    config = compute_pb2.ComputeWorkerResourceConfig()
     for field in ("max_threads", "max_memory_mb", "streaming_chunk_size"):
         value = payload.get(field)
         if value is not None:
@@ -2301,25 +2301,25 @@ def _engine_resource_config_proto(payload: Mapping[str, object]) -> compute_pb2.
     return config
 
 
-def _engine_defaults_proto(payload: Mapping[str, object]) -> compute_pb2.EngineDefaults:
-    return compute_pb2.EngineDefaults(
+def _engine_defaults_proto(payload: Mapping[str, object]) -> compute_pb2.ComputeWorkerDefaults:
+    return compute_pb2.ComputeWorkerDefaults(
         max_threads=_required_mapping_int(payload, "max_threads"),
         max_memory_mb=_required_mapping_int(payload, "max_memory_mb"),
         streaming_chunk_size=_required_mapping_int(payload, "streaming_chunk_size"),
     )
 
 
-def _engine_status_result_proto(status_info: EngineStatusInfo) -> compute_pb2.EngineStatusResult:
+def _engine_status_result_proto(status_info: ComputeWorkerStatusInfo) -> compute_pb2.ComputeWorkerStatusResult:
     if not isinstance(status_info.analysis_id, str):
         raise RuntimeError(f"Engine status analysis_id must be a string: {status_info!r}")
     if not isinstance(status_info.resource_id, str) or not status_info.resource_id:
         raise RuntimeError(f"Engine status resource_id must be a non-empty string: {status_info!r}")
     if not isinstance(status_info.status, str):
         raise RuntimeError(f"Engine status status must be a string: {status_info!r}")
-    status = compute_pb2.EngineStatusResult(
+    status = compute_pb2.ComputeWorkerStatusResult(
         analysis_id=status_info.analysis_id,
         resource_id=status_info.resource_id,
-        status=enum_to_proto_value("ENGINE_STATUS", status_info.status),
+        status=enum_to_proto_value("COMPUTE_WORKER_STATUS", status_info.status),
     )
     for field in (
         "last_activity",
@@ -2362,30 +2362,30 @@ def _engine_status_result_proto(status_info: EngineStatusInfo) -> compute_pb2.En
     if scope is not None:
         if not isinstance(scope, str):
             raise RuntimeError(f"Engine status scope must be a string: {status_info!r}")
-        status.scope = enum_to_proto_value("ENGINE_SCOPE", scope)
+        status.scope = enum_to_proto_value("COMPUTE_WORKER_SCOPE", scope)
     reuse_policy = status_info.reuse_policy
     if reuse_policy is not None:
         if not isinstance(reuse_policy, str):
             raise RuntimeError(f"Engine status reuse_policy must be a string: {status_info!r}")
-        status.reuse_policy = enum_to_proto_value("ENGINE_REUSE_POLICY", reuse_policy)
+        status.reuse_policy = enum_to_proto_value("COMPUTE_WORKER_REUSE_POLICY", reuse_policy)
     lifecycle_status = status_info.lifecycle_status
     if lifecycle_status is not None:
         if not isinstance(lifecycle_status, str):
             raise RuntimeError(f"Engine lifecycle status must be a string: {status_info!r}")
-        status.lifecycle_status = enum_to_proto_value("ENGINE_INSTANCE_STATUS", lifecycle_status)
+        status.lifecycle_status = enum_to_proto_value("COMPUTE_WORKER_INSTANCE_STATUS", lifecycle_status)
     return status
 
 
-def _engine_run_update_proto(fields: Mapping[str, object]) -> worker_runtime_pb2.WorkerEngineRunUpdateFields:
-    update = worker_runtime_pb2.WorkerEngineRunUpdateFields()
+def _engine_run_update_proto(fields: Mapping[str, object]) -> worker_runtime_pb2.WorkerComputeWorkerRunUpdateFields:
+    update = worker_runtime_pb2.WorkerComputeWorkerRunUpdateFields()
     if "analysis_id" in fields:
         update.analysis_id = _required_mapping_str(fields, "analysis_id")
     if "datasource_id" in fields:
         update.datasource_id = _required_mapping_str(fields, "datasource_id")
     if "kind" in fields:
-        update.kind = enum_to_proto_value("ENGINE_RUN_KIND", _required_mapping_str(fields, "kind"))
+        update.kind = enum_to_proto_value("COMPUTE_WORKER_RUN_KIND", _required_mapping_str(fields, "kind"))
     if "status" in fields:
-        update.status = enum_to_proto_value("ENGINE_RUN_STATUS", _required_mapping_str(fields, "status"))
+        update.status = enum_to_proto_value("COMPUTE_WORKER_RUN_STATUS", _required_mapping_str(fields, "status"))
     if "request_json" in fields:
         update.request_json.CopyFrom(dict_to_struct(_mapping_dict_field(fields, "request_json")))
     if "result_json" in fields:
@@ -2432,8 +2432,8 @@ def _engine_run_update_proto(fields: Mapping[str, object]) -> worker_runtime_pb2
     return update
 
 
-def _engine_run_finalization_proto(finalization: EngineRunFinalization) -> worker_runtime_pb2.WorkerEngineRunFinalization:
-    return worker_runtime_pb2.WorkerEngineRunFinalization(
+def _engine_run_finalization_proto(finalization: ComputeWorkerRunFinalization) -> worker_runtime_pb2.WorkerComputeWorkerRunFinalization:
+    return worker_runtime_pb2.WorkerComputeWorkerRunFinalization(
         run_id=finalization.run_id,
         merge_result=finalization.merge_result_json,
         update=_engine_run_update_proto(finalization.fields),
@@ -2529,7 +2529,7 @@ def _started_build_run_from_response(response: Any) -> StartedBuildRun | None:
         tab_id=_optional_str(run, "tab_id"),
         starter_json=_build_starter_payload(run.build_starter),
         resource_config_json=_build_resource_config_payload(run.build_resource_config) if run.HasField("build_resource_config") else None,
-        current_kind=_optional_proto_enum_name(run, "current_kind", enums_pb2.EngineRunKind, "ENGINE_RUN_KIND"),
+        current_kind=_optional_proto_enum_name(run, "current_kind", enums_pb2.ComputeWorkerRunKind, "COMPUTE_WORKER_RUN_KIND"),
         current_datasource_id=_optional_str(run, "current_datasource_id"),
         current_tab_id=_optional_str(run, "current_tab_id"),
         current_tab_name=_optional_str(run, "current_tab_name"),
@@ -2605,8 +2605,8 @@ def _build_step_kind_proto(step_type: object) -> compute_pb2.BuildStepKind:
         message.pipeline = _enum_number_from_token(enums_pb2.StepType.DESCRIPTOR, step_type, field_name="step_type")
         return message
     except ValueError:
-        category = _enum_number_from_token(enums_pb2.EngineRunExecutionCategory.DESCRIPTOR, step_type, field_name="step_type")
-        if category not in {enums_pb2.ENGINE_RUN_EXECUTION_CATEGORY_READ, enums_pb2.ENGINE_RUN_EXECUTION_CATEGORY_WRITE}:
+        category = _enum_number_from_token(enums_pb2.ComputeWorkerRunExecutionCategory.DESCRIPTOR, step_type, field_name="step_type")
+        if category not in {enums_pb2.COMPUTE_WORKER_RUN_EXECUTION_CATEGORY_READ, enums_pb2.COMPUTE_WORKER_RUN_EXECUTION_CATEGORY_WRITE}:
             raise ValueError(f"Unsupported build execution category for protocol step event: {step_type!r}") from None
         message.execution_category = category
         return message
@@ -2662,7 +2662,7 @@ def _build_event_proto(namespace: str, payload: Mapping[str, object]) -> compute
         context.sequence = sequence
     current_kind = payload.get("current_kind")
     if current_kind is not None:
-        context.current_kind = _enum_number_from_token(enums_pb2.EngineRunKind.DESCRIPTOR, current_kind, field_name="current_kind")
+        context.current_kind = _enum_number_from_token(enums_pb2.ComputeWorkerRunKind.DESCRIPTOR, current_kind, field_name="current_kind")
     for field in ("current_datasource_id", "tab_id", "tab_name", "current_output_id", "current_output_name", "engine_run_id"):
         value = _optional_event_str(payload, field)
         if value is not None:

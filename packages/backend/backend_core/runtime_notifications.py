@@ -11,10 +11,10 @@ from sqlmodel import Session, col, select
 
 from backend_core.api_execution_budget import run_api_blocking
 from backend_core.compute_response_recovery import response_recovery
+from backend_core.compute_worker_live import registry as compute_worker_registry
 from backend_core.database import run_db
 from backend_core.domain.build_runs.live import BuildNotification, hub as build_hub
 from backend_core.domain.runtime.events import RuntimePayloadKind
-from backend_core.engine_live import registry as engine_registry
 from backend_core.namespace import reset_namespace, set_namespace_context
 from backend_core.persistence.build_runs.models import BuildRun
 from backend_core.persistence.locks.models import ResourceLock
@@ -163,7 +163,7 @@ async def handle_runtime_payload(payload: dict[str, object]) -> None:
     if kind == RuntimePayloadKind.ENGINE:
         namespace = payload.get('namespace')
         if isinstance(namespace, str):
-            await engine_registry.publish_namespace(namespace)
+            await compute_worker_registry.publish_namespace(namespace)
         return
     if kind == RuntimePayloadKind.COMPUTE_RESPONSE:
         request_id = payload.get('request_id')

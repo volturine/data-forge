@@ -3,7 +3,7 @@ from typing import Any
 import polars as pl
 
 from runtime.config import settings
-from runtime.domain.compute.base import ComputeEngine, EngineResult
+from runtime.domain.compute.base import ComputeWorker, ComputeWorkerResult
 from runtime.exceptions import step_not_found
 
 
@@ -102,7 +102,7 @@ def resolve_applied_target(steps: list[dict], target_step_id: str) -> str:
         current = parent_id
 
 
-def _engine_result_to_dict(result: EngineResult) -> dict[str, Any]:
+def _compute_worker_result_to_dict(result: ComputeWorkerResult) -> dict[str, Any]:
     """Normalize compute engine result payloads for service-layer consumption."""
     return {
         "job_id": result.job_id,
@@ -118,10 +118,10 @@ def _engine_result_to_dict(result: EngineResult) -> dict[str, Any]:
     }
 
 
-def await_engine_result(engine: ComputeEngine, job_id: str | None = None) -> dict:
+def await_compute_worker_result(engine: ComputeWorker, job_id: str | None = None) -> dict:
     result = engine.get_result(timeout=0, job_id=job_id)
     if result is not None:
-        return _engine_result_to_dict(result)
+        return _compute_worker_result_to_dict(result)
     while True:
         if not engine.is_process_alive():
             return {
@@ -133,7 +133,7 @@ def await_engine_result(engine: ComputeEngine, job_id: str | None = None) -> dic
             }
         result = engine.get_result(timeout=0.1, job_id=job_id)
         if result is not None:
-            return _engine_result_to_dict(result)
+            return _compute_worker_result_to_dict(result)
 
 
 def build_datasource_config(datasource, overrides: dict | None = None) -> dict:

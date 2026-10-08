@@ -25,8 +25,8 @@ class EngineStatus(ApiEnumValue):
     TERMINATED: ClassVar[Self]
 
 
-EngineStatus.HEALTHY = EngineStatus(enums_pb2.ENGINE_STATUS_HEALTHY, api_token('EngineStatus', enums_pb2.ENGINE_STATUS_HEALTHY))
-EngineStatus.TERMINATED = EngineStatus(enums_pb2.ENGINE_STATUS_TERMINATED, api_token('EngineStatus', enums_pb2.ENGINE_STATUS_TERMINATED))
+EngineStatus.HEALTHY = EngineStatus(enums_pb2.COMPUTE_WORKER_STATUS_HEALTHY, api_token('ComputeWorkerStatus', enums_pb2.COMPUTE_WORKER_STATUS_HEALTHY))
+EngineStatus.TERMINATED = EngineStatus(enums_pb2.COMPUTE_WORKER_STATUS_TERMINATED, api_token('ComputeWorkerStatus', enums_pb2.COMPUTE_WORKER_STATUS_TERMINATED))
 
 
 class EngineScope(ApiEnumValue):
@@ -35,11 +35,13 @@ class EngineScope(ApiEnumValue):
     BUILD: ClassVar[Self]
 
 
-EngineScope.DATASOURCE_PREVIEW = EngineScope(enums_pb2.ENGINE_SCOPE_DATASOURCE_PREVIEW, api_token('EngineScope', enums_pb2.ENGINE_SCOPE_DATASOURCE_PREVIEW))
-EngineScope.ANALYSIS_INTERACTIVE = EngineScope(
-    enums_pb2.ENGINE_SCOPE_ANALYSIS_INTERACTIVE, api_token('EngineScope', enums_pb2.ENGINE_SCOPE_ANALYSIS_INTERACTIVE)
+EngineScope.DATASOURCE_PREVIEW = EngineScope(
+    enums_pb2.COMPUTE_WORKER_SCOPE_DATASOURCE_PREVIEW, api_token('ComputeWorkerScope', enums_pb2.COMPUTE_WORKER_SCOPE_DATASOURCE_PREVIEW)
 )
-EngineScope.BUILD = EngineScope(enums_pb2.ENGINE_SCOPE_BUILD, api_token('EngineScope', enums_pb2.ENGINE_SCOPE_BUILD))
+EngineScope.ANALYSIS_INTERACTIVE = EngineScope(
+    enums_pb2.COMPUTE_WORKER_SCOPE_ANALYSIS_INTERACTIVE, api_token('ComputeWorkerScope', enums_pb2.COMPUTE_WORKER_SCOPE_ANALYSIS_INTERACTIVE)
+)
+EngineScope.BUILD = EngineScope(enums_pb2.COMPUTE_WORKER_SCOPE_BUILD, api_token('ComputeWorkerScope', enums_pb2.COMPUTE_WORKER_SCOPE_BUILD))
 
 
 class EngineReusePolicy(ApiEnumValue):
@@ -47,9 +49,11 @@ class EngineReusePolicy(ApiEnumValue):
     EXCLUSIVE: ClassVar[Self]
 
 
-EngineReusePolicy.SHARED = EngineReusePolicy(enums_pb2.ENGINE_REUSE_POLICY_SHARED, api_token('EngineReusePolicy', enums_pb2.ENGINE_REUSE_POLICY_SHARED))
+EngineReusePolicy.SHARED = EngineReusePolicy(
+    enums_pb2.COMPUTE_WORKER_REUSE_POLICY_SHARED, api_token('ComputeWorkerReusePolicy', enums_pb2.COMPUTE_WORKER_REUSE_POLICY_SHARED)
+)
 EngineReusePolicy.EXCLUSIVE = EngineReusePolicy(
-    enums_pb2.ENGINE_REUSE_POLICY_EXCLUSIVE, api_token('EngineReusePolicy', enums_pb2.ENGINE_REUSE_POLICY_EXCLUSIVE)
+    enums_pb2.COMPUTE_WORKER_REUSE_POLICY_EXCLUSIVE, api_token('ComputeWorkerReusePolicy', enums_pb2.COMPUTE_WORKER_REUSE_POLICY_EXCLUSIVE)
 )
 
 
@@ -254,55 +258,55 @@ def _engine_identity_resource_from_payload(payload: dict[str, object], field_nam
     return resource_id
 
 
-def _engine_identity_from_payload(value: object) -> compute_pb2.EngineIdentity:
-    if isinstance(value, compute_pb2.EngineIdentity):
+def _engine_identity_from_payload(value: object) -> compute_pb2.ComputeWorkerIdentity:
+    if isinstance(value, compute_pb2.ComputeWorkerIdentity):
         return value
     if not isinstance(value, dict):
         raise ValueError('engine identity must be a protocol message or object payload')
     scope = value.get('scope')
     if scope == 'analysis_interactive':
         resource_id = _engine_identity_resource_from_payload(value, 'analysis_id')
-        return compute_pb2.EngineIdentity(
-            scope=enums_pb2.ENGINE_SCOPE_ANALYSIS_INTERACTIVE,
-            reuse_policy=enums_pb2.ENGINE_REUSE_POLICY_SHARED,
+        return compute_pb2.ComputeWorkerIdentity(
+            scope=enums_pb2.COMPUTE_WORKER_SCOPE_ANALYSIS_INTERACTIVE,
+            reuse_policy=enums_pb2.COMPUTE_WORKER_REUSE_POLICY_SHARED,
             analysis_id=resource_id,
             resource_id=resource_id,
         )
     if scope == 'datasource_preview':
         resource_id = _engine_identity_resource_from_payload(value, 'datasource_id')
-        return compute_pb2.EngineIdentity(
-            scope=enums_pb2.ENGINE_SCOPE_DATASOURCE_PREVIEW,
-            reuse_policy=enums_pb2.ENGINE_REUSE_POLICY_SHARED,
+        return compute_pb2.ComputeWorkerIdentity(
+            scope=enums_pb2.COMPUTE_WORKER_SCOPE_DATASOURCE_PREVIEW,
+            reuse_policy=enums_pb2.COMPUTE_WORKER_REUSE_POLICY_SHARED,
             datasource_id=resource_id,
             resource_id=resource_id,
         )
     if scope == 'build':
         resource_id = _engine_identity_resource_from_payload(value, 'build_id')
-        return compute_pb2.EngineIdentity(
-            scope=enums_pb2.ENGINE_SCOPE_BUILD,
-            reuse_policy=enums_pb2.ENGINE_REUSE_POLICY_EXCLUSIVE,
+        return compute_pb2.ComputeWorkerIdentity(
+            scope=enums_pb2.COMPUTE_WORKER_SCOPE_BUILD,
+            reuse_policy=enums_pb2.COMPUTE_WORKER_REUSE_POLICY_EXCLUSIVE,
             build_id=resource_id,
             resource_id=resource_id,
         )
     raise ValueError('engine identity scope is invalid')
 
 
-def _engine_identity_to_payload(identity: compute_pb2.EngineIdentity) -> dict[str, str]:
-    if identity.scope == enums_pb2.ENGINE_SCOPE_ANALYSIS_INTERACTIVE and identity.HasField('analysis_id'):
+def _engine_identity_to_payload(identity: compute_pb2.ComputeWorkerIdentity) -> dict[str, str]:
+    if identity.scope == enums_pb2.COMPUTE_WORKER_SCOPE_ANALYSIS_INTERACTIVE and identity.HasField('analysis_id'):
         return {
             'scope': 'analysis_interactive',
             'reuse_policy': 'shared',
             'resource_id': identity.resource_id,
             'analysis_id': identity.analysis_id,
         }
-    if identity.scope == enums_pb2.ENGINE_SCOPE_DATASOURCE_PREVIEW and identity.HasField('datasource_id'):
+    if identity.scope == enums_pb2.COMPUTE_WORKER_SCOPE_DATASOURCE_PREVIEW and identity.HasField('datasource_id'):
         return {
             'scope': 'datasource_preview',
             'reuse_policy': 'shared',
             'resource_id': identity.resource_id,
             'datasource_id': identity.datasource_id,
         }
-    if identity.scope == enums_pb2.ENGINE_SCOPE_BUILD and identity.HasField('build_id'):
+    if identity.scope == enums_pb2.COMPUTE_WORKER_SCOPE_BUILD and identity.HasField('build_id'):
         return {
             'scope': 'build',
             'reuse_policy': 'exclusive',
@@ -313,7 +317,7 @@ def _engine_identity_to_payload(identity: compute_pb2.EngineIdentity) -> dict[st
 
 
 EngineIdentityField = Annotated[
-    compute_pb2.EngineIdentity,
+    compute_pb2.ComputeWorkerIdentity,
     BeforeValidator(_engine_identity_from_payload),
     PlainSerializer(_engine_identity_to_payload, return_type=dict[str, str], when_used='json'),
     WithJsonSchema(
@@ -352,7 +356,7 @@ class StepPreviewRequest(BaseModel):
         return self
 
 
-def default_preview_engine_identity(request: StepPreviewRequest) -> compute_pb2.EngineIdentity:
+def default_preview_engine_identity(request: StepPreviewRequest) -> compute_pb2.ComputeWorkerIdentity:
     """Derive the shared physical engine identity from the requested resource RID."""
     if request.analysis_id and request.datasource_id:
         raise ValueError('preview request must identify either an analysis or datasource, not both')
@@ -373,9 +377,9 @@ def default_preview_engine_identity(request: StepPreviewRequest) -> compute_pb2.
             selected = next((tab for tab in tabs if tab.steps), tabs[0])
         if selected.datasource.id != request.datasource_id:
             raise ValueError('datasource_id must match the selected pipeline datasource')
-        expected = compute_pb2.EngineIdentity(
-            scope=enums_pb2.ENGINE_SCOPE_DATASOURCE_PREVIEW,
-            reuse_policy=enums_pb2.ENGINE_REUSE_POLICY_SHARED,
+        expected = compute_pb2.ComputeWorkerIdentity(
+            scope=enums_pb2.COMPUTE_WORKER_SCOPE_DATASOURCE_PREVIEW,
+            reuse_policy=enums_pb2.COMPUTE_WORKER_REUSE_POLICY_SHARED,
             datasource_id=request.datasource_id,
             resource_id=request.datasource_id,
         )
@@ -385,9 +389,9 @@ def default_preview_engine_identity(request: StepPreviewRequest) -> compute_pb2.
             raise ValueError('analysis_id or datasource_id is required for a preview')
         if request.analysis_id and request.analysis_pipeline.analysis_id != request.analysis_id:
             raise ValueError('analysis_id must match analysis_pipeline.analysis_id')
-        expected = compute_pb2.EngineIdentity(
-            scope=enums_pb2.ENGINE_SCOPE_ANALYSIS_INTERACTIVE,
-            reuse_policy=enums_pb2.ENGINE_REUSE_POLICY_SHARED,
+        expected = compute_pb2.ComputeWorkerIdentity(
+            scope=enums_pb2.COMPUTE_WORKER_SCOPE_ANALYSIS_INTERACTIVE,
+            reuse_policy=enums_pb2.COMPUTE_WORKER_REUSE_POLICY_SHARED,
             analysis_id=analysis_id,
             resource_id=analysis_id,
         )

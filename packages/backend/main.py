@@ -33,6 +33,7 @@ from backend_core.api_execution_budget import (
 )
 from backend_core.auth_config import settings as auth_settings
 from backend_core.compute_response_recovery import response_recovery
+from backend_core.compute_worker_live import registry as compute_worker_registry
 from backend_core.config import settings
 from backend_core.database import (
     database_pool_snapshot,
@@ -41,7 +42,6 @@ from backend_core.database import (
     run_db,
     run_settings_db,
 )
-from backend_core.engine_live import registry as engine_registry
 from backend_core.error_handlers import (
     app_error_handler,
     client_disconnect_handler,
@@ -579,7 +579,7 @@ async def _start_api_lifespan(app: FastAPI, cleanup: AsyncExitStack) -> None:
 
 async def _recover_api_notifications() -> None:
     await recover_runtime_notifications(
-        refresh_builds=refresh_build_projections, refresh_engines=engine_registry.recover_active, refresh_locks=refresh_lock_projections
+        refresh_builds=refresh_build_projections, refresh_engines=compute_worker_registry.recover_active, refresh_locks=refresh_lock_projections
     )
 
 

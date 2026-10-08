@@ -13,17 +13,17 @@ import pyarrow as pa
 import pytest
 from openpyxl import Workbook
 
-from dataforge_protocol import compute_pb2, engine_runtime_pb2, engine_runtime_pb2_grpc, enums_pb2
+from dataforge_protocol import compute_pb2, compute_worker_runtime_pb2, compute_worker_runtime_pb2_grpc, enums_pb2
 from datasources import execution
 from datasources.excel_batches import iter_excel_batches
 from runtime import compute_request_runtime
-from runtime.engine_server import ENGINE_PROTOCOL_VERSION, run_engine_server
+from runtime.compute_worker_server import COMPUTE_WORKER_PROTOCOL_VERSION, run_compute_worker_server
 from runtime.exceptions import StaleComputeInputError
 from runtime.worker_runtime_client import DatasourceMetadata
 
 
 def _run_engine(port: int) -> None:
-    run_engine_server(host="127.0.0.1", port=port, engine_identity="source-1", token="engine-test-token", heartbeat_timeout_seconds=60)
+    run_compute_worker_server(host="127.0.0.1", port=port, engine_identity="source-1", token="engine-test-token", heartbeat_timeout_seconds=60)
 
 
 def test_datasource_schema_executes_in_separate_engine_pid_and_survives_engine_crash(tmp_path, monkeypatch) -> None:
@@ -42,14 +42,14 @@ def test_datasource_schema_executes_in_separate_engine_pid_and_survives_engine_c
     channel = grpc.insecure_channel(f"127.0.0.1:{port}")
     try:
         grpc.channel_ready_future(channel).result(timeout=30)
-        stub = engine_runtime_pb2_grpc.PolarsEngineServiceStub(channel)
+        stub = compute_worker_runtime_pb2_grpc.PolarsComputeWorkerServiceStub(channel)
         payload = {
             "resource_id": "source-1",
             "datasource_metadata": {"id": "source-1", "source_type": "file", "revision": 1, "config": {"file_path": str(source), "file_type": "csv"}},
         }
         stub.SubmitJob(
-            engine_runtime_pb2.EngineSubmitJobRequest(
-                protocol_version=ENGINE_PROTOCOL_VERSION,
+            compute_worker_runtime_pb2.ComputeWorkerSubmitJobRequest(
+                protocol_version=COMPUTE_WORKER_PROTOCOL_VERSION,
                 job_id="schema-1",
                 kind="datasource_schema",
                 payload_json=json.dumps(payload).encode(),
@@ -58,7 +58,9 @@ def test_datasource_schema_executes_in_separate_engine_pid_and_survives_engine_c
             timeout=10,
         )
         events = list(
-            stub.WatchJob(engine_runtime_pb2.EngineWatchJobRequest(job_id="schema-1"), metadata=(("x-engine-token", "engine-test-token"),), timeout=30)
+            stub.WatchJob(
+                compute_worker_runtime_pb2.ComputeWorkerWatchJobRequest(job_id="schema-1"), metadata=(("x-engine-token", "engine-test-token"),), timeout=30
+            )
         )
         result = json.loads(events[-1].result.data_json)
         assert process.pid != os.getpid()
@@ -67,7 +69,7 @@ def test_datasource_schema_executes_in_separate_engine_pid_and_survives_engine_c
         process.kill()
         process.join(timeout=10)
         with pytest.raises(grpc.RpcError):
-            stub.Health(engine_runtime_pb2.EngineHealthRequest(), metadata=(("x-engine-token", "engine-test-token"),), timeout=1)
+            stub.Health(compute_worker_runtime_pb2.ComputeWorkerHealthRequest(), metadata=(("x-engine-token", "engine-test-token"),), timeout=1)
         assert pl.DataFrame({"manager": [1]}).height == 1
     finally:
         channel.close()
@@ -316,7 +318,7 @@ def test_scheduled_ingest_uses_the_same_manifest_commit_path_as_manual_ingest(mo
     monkeypatch.setattr(
         execution, "import_staged_parquet_files", lambda received, **kwargs: (calls.append(("import", received, kwargs)), (table, kwargs["table_path"]))[1]
     )
-    monkeypatch.setattr("runtime.compute_utils.await_engine_result", lambda *_args, **_kwargs: {"data": manifest})
+    monkeypatch.setattr("runtime.compute_utils.await_compute_worker_result", lambda *_args, **_kwargs: {"data": manifest})
     monkeypatch.setattr("runtime.object_store.delete_object", lambda _path: None)
 
     execution.ingest_datasource_for_schedule(

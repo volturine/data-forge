@@ -124,7 +124,7 @@ def test_engine_run_creation_retries_only_when_idempotency_key_is_present() -> N
         def __init__(self) -> None:
             self.requests = []
 
-        def CreateEngineRun(self, request, *, timeout: float, metadata):
+        def CreateComputeWorkerRun(self, request, *, timeout: float, metadata):
             self.requests.append((request, timeout, metadata))
             return SimpleNamespace(id="run-id")
 
@@ -155,7 +155,7 @@ def test_engine_run_creation_retries_only_when_idempotency_key_is_present() -> N
         "request_json": {"target_step_id": "source"},
     }
     assert client.create_engine_run(**common, idempotency_key="request-1") == "run-id"
-    assert calls == [("reconnect", "CreateEngineRun")]
+    assert calls == [("reconnect", "CreateComputeWorkerRun")]
     request, timeout, _metadata = client._stub.requests[-1]
     assert request.idempotency_key == "request-1"
     assert timeout == 15.0
@@ -714,9 +714,9 @@ async def test_cancelled_build_only_stops_its_exclusive_engine(monkeypatch) -> N
         await build_execution.run_queued_build_job(manager=cast(Any, Manager()), worker_id="worker-1", claim=claim)
 
     assert [name for name, _ in calls] == ["shutdown_engine"]
-    identity, namespace = cast(tuple[compute_pb2.EngineIdentity, str | None], calls[0][1])
-    assert identity.scope == enums_pb2.ENGINE_SCOPE_BUILD
-    assert identity.reuse_policy == enums_pb2.ENGINE_REUSE_POLICY_EXCLUSIVE
+    identity, namespace = cast(tuple[compute_pb2.ComputeWorkerIdentity, str | None], calls[0][1])
+    assert identity.scope == enums_pb2.COMPUTE_WORKER_SCOPE_BUILD
+    assert identity.reuse_policy == enums_pb2.COMPUTE_WORKER_REUSE_POLICY_EXCLUSIVE
     assert identity.build_id == claim.build_id
     assert namespace == claim.namespace
     assert control_type_errors == []
@@ -732,7 +732,7 @@ async def test_build_waiting_for_worker_admission_does_not_hold_execution_permit
     class Manager:
         async def await_engine_request_admission(self, _identity, *, namespace, priority):
             assert namespace == "default"
-            assert priority == build_execution.ENGINE_ADMISSION_PRIORITY_LIFECYCLE
+            assert priority == build_execution.COMPUTE_WORKER_ADMISSION_PRIORITY_LIFECYCLE
             admission_started.set()
             await release_admission.wait()
             return True
@@ -747,9 +747,9 @@ async def test_build_waiting_for_worker_admission_does_not_hold_execution_permit
             assert namespace == "default"
             assert owned is True
 
-    identity = compute_pb2.EngineIdentity(
-        scope=enums_pb2.ENGINE_SCOPE_BUILD,
-        reuse_policy=enums_pb2.ENGINE_REUSE_POLICY_EXCLUSIVE,
+    identity = compute_pb2.ComputeWorkerIdentity(
+        scope=enums_pb2.COMPUTE_WORKER_SCOPE_BUILD,
+        reuse_policy=enums_pb2.COMPUTE_WORKER_REUSE_POLICY_EXCLUSIVE,
         build_id="build-gated",
         resource_id="build-gated",
     )
@@ -783,7 +783,7 @@ async def test_engine_build_does_not_wait_for_duplicate_execution_permit() -> No
     class Manager:
         async def await_engine_request_admission(self, _identity, *, namespace, priority):
             assert namespace == "default"
-            assert priority == build_execution.ENGINE_ADMISSION_PRIORITY_LIFECYCLE
+            assert priority == build_execution.COMPUTE_WORKER_ADMISSION_PRIORITY_LIFECYCLE
             return True
 
         def reserve_engine_request(self, _identity, *, namespace):
@@ -796,9 +796,9 @@ async def test_engine_build_does_not_wait_for_duplicate_execution_permit() -> No
             assert namespace == "default"
             assert owned is True
 
-    identity = compute_pb2.EngineIdentity(
-        scope=enums_pb2.ENGINE_SCOPE_BUILD,
-        reuse_policy=enums_pb2.ENGINE_REUSE_POLICY_EXCLUSIVE,
+    identity = compute_pb2.ComputeWorkerIdentity(
+        scope=enums_pb2.COMPUTE_WORKER_SCOPE_BUILD,
+        reuse_policy=enums_pb2.COMPUTE_WORKER_REUSE_POLICY_EXCLUSIVE,
         build_id="build-with-manager-capacity",
         resource_id="build-with-manager-capacity",
     )
@@ -1305,7 +1305,7 @@ async def test_run_runtime_coordinator_shares_compute_budget_across_lanes(
     monkeypatch.setattr(runtime_process, "async_client_from_env", lambda: asyncio.sleep(0, result=client))
     monkeypatch.setattr(runtime_process, "coordinator_id", lambda: "manager-1")
     monkeypatch.setattr(runtime_process, "configure_logging", lambda: logging_threads.append(threading.get_ident()))
-    monkeypatch.setattr(runtime_process, "validate_engine_runtime_readiness", lambda: None)
+    monkeypatch.setattr(runtime_process, "validate_compute_worker_runtime_readiness", lambda: None)
     monkeypatch.setattr(runtime_process, "reconcile_deployment_containers", lambda **_kwargs: 0)
 
     class FakeDataPlaneServer:
@@ -1405,7 +1405,7 @@ async def test_runtime_coordinator_cleans_up_when_registration_fails(monkeypatch
     monkeypatch.setattr(runtime_process, "async_client_from_env", lambda: asyncio.sleep(0, result=client))
     monkeypatch.setattr(runtime_process, "coordinator_id", lambda: "manager-1")
     monkeypatch.setattr(runtime_process, "configure_logging", lambda: None)
-    monkeypatch.setattr(runtime_process, "validate_engine_runtime_readiness", lambda: None)
+    monkeypatch.setattr(runtime_process, "validate_compute_worker_runtime_readiness", lambda: None)
     monkeypatch.setattr(runtime_process, "reconcile_deployment_containers", lambda **_kwargs: 0)
     monkeypatch.setattr(
         runtime_process,

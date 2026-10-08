@@ -223,8 +223,8 @@ async def test_get_engine_credentials_aborts_on_grpc_event_loop(monkeypatch: pyt
     context = FakeGrpcContext(settings.internal_api_token)
 
     with pytest.raises(RuntimeError, match='credentials are missing'):
-        await WorkerRuntimeServicer().GetEngineCredentials(
-            worker_runtime_pb2.WorkerEngineCredentialsRequest(namespace='tenant-a', role='reader'),
+        await WorkerRuntimeServicer().GetComputeWorkerCredentials(
+            worker_runtime_pb2.WorkerComputeWorkerCredentialsRequest(namespace='tenant-a', role='reader'),
             context,
         )
 
@@ -1243,8 +1243,8 @@ async def test_internal_worker_grpc_claims_completes_and_fails_compute_requests(
     assert response.request.kind == enums_pb2.COMPUTE_REQUEST_KIND_SHUTDOWN_ENGINE
     assert response.request.command.command.WhichOneof('command') == 'shutdown_engine'
     engine_identity = response.request.command.command.shutdown_engine.engine_identity
-    assert engine_identity.scope == enums_pb2.ENGINE_SCOPE_ANALYSIS_INTERACTIVE
-    assert engine_identity.reuse_policy == enums_pb2.ENGINE_REUSE_POLICY_SHARED
+    assert engine_identity.scope == enums_pb2.COMPUTE_WORKER_SCOPE_ANALYSIS_INTERACTIVE
+    assert engine_identity.reuse_policy == enums_pb2.COMPUTE_WORKER_REUSE_POLICY_SHARED
     assert engine_identity.analysis_id == 'analysis-1'
     assert engine_identity.resource_id == 'analysis-1'
     test_db_session.refresh(request)
@@ -1355,8 +1355,8 @@ async def test_preview_completion_finalizes_engine_run_in_the_same_rpc(test_db_s
     )
     assert claimed.HasField('request')
     completed_at = datetime.now(UTC)
-    update = worker_runtime_pb2.WorkerEngineRunUpdateFields(
-        status=enums_pb2.ENGINE_RUN_STATUS_SUCCESS,
+    update = worker_runtime_pb2.WorkerComputeWorkerRunUpdateFields(
+        status=enums_pb2.COMPUTE_WORKER_RUN_STATUS_SUCCESS,
         progress=1.0,
     )
     update.result_json.CopyFrom(dict_to_struct({'results': [{'status': 'success'}]}))
@@ -1375,7 +1375,7 @@ async def test_preview_completion_finalizes_engine_run_in_the_same_rpc(test_db_s
                 status=enums_pb2.COMPUTE_REQUEST_STATUS_COMPLETED,
                 payload={'step_id': 'source', 'columns': [], 'column_types': {}, 'data': [], 'total_rows': 0, 'page': 1, 'page_size': 100},
             ),
-            engine_run_finalization=worker_runtime_pb2.WorkerEngineRunFinalization(
+            engine_run_finalization=worker_runtime_pb2.WorkerComputeWorkerRunFinalization(
                 run_id=engine_run.id,
                 update=update,
             ),
@@ -1687,7 +1687,7 @@ async def test_internal_worker_grpc_uses_typed_schema_info_for_datasource_metada
     ('method_name', 'expected_phases'),
     [
         (
-            'CreateEngineRun',
+            'CreateComputeWorkerRun',
             (
                 'payload_conversion_ms',
                 'db_unit_ms',
@@ -1751,7 +1751,7 @@ async def test_slow_metadata_and_engine_run_rpcs_log_ordered_phase_timings(
 
     servicer = WorkerRuntimeServicer()
     request: Any
-    if method_name == 'CreateEngineRun':
+    if method_name == 'CreateComputeWorkerRun':
         monkeypatch.setattr(backend_grpc_server.engine_run_service, 'create_engine_run_payload', lambda **fields: fields)
         monkeypatch.setattr(
             backend_grpc_server.engine_run_commands,
@@ -1759,11 +1759,11 @@ async def test_slow_metadata_and_engine_run_rpcs_log_ordered_phase_timings(
             lambda _session, _payload: SimpleNamespace(id='phase-test-run'),
         )
         monkeypatch.setattr(backend_grpc_server, 'run_db', lambda function, *args, **kwargs: function(object(), *args, **kwargs))
-        request = worker_runtime_pb2.WorkerCreateEngineRunRequest(
+        request = worker_runtime_pb2.WorkerCreateComputeWorkerRunRequest(
             namespace='default',
             datasource_id='phase-test-datasource',
-            kind=enums_pb2.ENGINE_RUN_KIND_PREVIEW,
-            status=enums_pb2.ENGINE_RUN_STATUS_SUCCESS,
+            kind=enums_pb2.COMPUTE_WORKER_RUN_KIND_PREVIEW,
+            status=enums_pb2.COMPUTE_WORKER_RUN_STATUS_SUCCESS,
             request=dict_to_struct({'target_step_id': 'source'}),
         )
     else:
@@ -2103,20 +2103,20 @@ async def test_internal_worker_grpc_returns_datasource_telegram_targets(test_db_
 @pytest.mark.asyncio
 async def test_internal_worker_grpc_creates_engine_run_with_typed_execution_entries(test_db_session: Session, monkeypatch: pytest.MonkeyPatch) -> None:
     context = _context(monkeypatch)
-    request = worker_runtime_pb2.WorkerCreateEngineRunRequest(
+    request = worker_runtime_pb2.WorkerCreateComputeWorkerRunRequest(
         namespace='default',
         analysis_id='analysis-1',
         datasource_id='datasource-1',
-        kind=enums_pb2.ENGINE_RUN_KIND_PREVIEW,
-        status=enums_pb2.ENGINE_RUN_STATUS_SUCCESS,
+        kind=enums_pb2.COMPUTE_WORKER_RUN_KIND_PREVIEW,
+        status=enums_pb2.COMPUTE_WORKER_RUN_STATUS_SUCCESS,
         request=dict_to_struct({'target_step_id': 'source'}),
         result=dict_to_struct({'row_count': 1}),
         timing_by_key={'filter': 12.5},
         execution_entry=[
-            compute_pb2.EngineRunExecutionEntry(
+            compute_pb2.ComputeWorkerRunExecutionEntry(
                 key='filter',
                 label='Filter',
-                category=enums_pb2.ENGINE_RUN_EXECUTION_CATEGORY_STEP,
+                category=enums_pb2.COMPUTE_WORKER_RUN_EXECUTION_CATEGORY_STEP,
                 order=0,
                 duration_ms=12.5,
                 share_pct=100.0,
@@ -2127,8 +2127,8 @@ async def test_internal_worker_grpc_creates_engine_run_with_typed_execution_entr
         idempotency_key='preview-request-grpc',
     )
     servicer = WorkerRuntimeServicer()
-    response = await servicer.CreateEngineRun(request, context)
-    retry = await servicer.CreateEngineRun(request, context)
+    response = await servicer.CreateComputeWorkerRun(request, context)
+    retry = await servicer.CreateComputeWorkerRun(request, context)
 
     assert retry.id == response.id == request.idempotency_key
 
@@ -2143,13 +2143,13 @@ async def test_internal_worker_grpc_creates_engine_run_with_typed_execution_entr
 async def test_internal_worker_grpc_updates_engine_run_with_typed_fields(test_db_session: Session, monkeypatch: pytest.MonkeyPatch) -> None:
     context = _context(monkeypatch)
     servicer = WorkerRuntimeServicer()
-    created = await servicer.CreateEngineRun(
-        worker_runtime_pb2.WorkerCreateEngineRunRequest(
+    created = await servicer.CreateComputeWorkerRun(
+        worker_runtime_pb2.WorkerCreateComputeWorkerRunRequest(
             namespace='default',
             analysis_id='analysis-1',
             datasource_id='datasource-1',
-            kind=enums_pb2.ENGINE_RUN_KIND_PREVIEW,
-            status=enums_pb2.ENGINE_RUN_STATUS_RUNNING,
+            kind=enums_pb2.COMPUTE_WORKER_RUN_KIND_PREVIEW,
+            status=enums_pb2.COMPUTE_WORKER_RUN_STATUS_RUNNING,
             request=dict_to_struct({'target_step_id': 'source'}),
             progress=0.25,
         ),
@@ -2157,23 +2157,23 @@ async def test_internal_worker_grpc_updates_engine_run_with_typed_fields(test_db
     )
 
     completed_at = datetime.now(UTC)
-    response = await servicer.UpdateEngineRun(
-        worker_runtime_pb2.WorkerUpdateEngineRunRequest(
+    response = await servicer.UpdateComputeWorkerRun(
+        worker_runtime_pb2.WorkerUpdateComputeWorkerRunRequest(
             namespace='default',
             run_id=created.id,
             merge_result=False,
-            update=worker_runtime_pb2.WorkerEngineRunUpdateFields(
-                status=enums_pb2.ENGINE_RUN_STATUS_SUCCESS,
+            update=worker_runtime_pb2.WorkerComputeWorkerRunUpdateFields(
+                status=enums_pb2.COMPUTE_WORKER_RUN_STATUS_SUCCESS,
                 result_json=dict_to_struct({'row_count': 2}),
                 completed_at=datetime_to_timestamp(completed_at),
                 duration_ms=42,
-                step_timings=worker_runtime_pb2.EngineRunStepTimings(values={'filter': 2.5}),
-                execution_entries=worker_runtime_pb2.EngineRunExecutionEntryList(
+                step_timings=worker_runtime_pb2.ComputeWorkerRunStepTimings(values={'filter': 2.5}),
+                execution_entries=worker_runtime_pb2.ComputeWorkerRunExecutionEntryList(
                     entries=[
-                        compute_pb2.EngineRunExecutionEntry(
+                        compute_pb2.ComputeWorkerRunExecutionEntry(
                             key='filter',
                             label='Filter',
-                            category=enums_pb2.ENGINE_RUN_EXECUTION_CATEGORY_STEP,
+                            category=enums_pb2.COMPUTE_WORKER_RUN_EXECUTION_CATEGORY_STEP,
                             order=0,
                             duration_ms=2.5,
                             step_type=enums_pb2.STEP_TYPE_FILTER,
@@ -2214,27 +2214,27 @@ async def test_internal_worker_grpc_persists_typed_engine_snapshot(monkeypatch: 
     monkeypatch.setattr(engine_instances_service.runtime_ipc, 'notify_runtime_payload_on_commit', queue_notification)
     monkeypatch.setattr(engine_instances_service.runtime_ipc, 'notify_api_engine', reject_direct_notification)
 
-    response = await WorkerRuntimeServicer().PersistEngineSnapshot(
-        worker_runtime_pb2.WorkerPersistEngineSnapshotRequest(
+    response = await WorkerRuntimeServicer().PersistComputeWorkerSnapshot(
+        worker_runtime_pb2.WorkerPersistComputeWorkerSnapshotRequest(
             worker_id='worker-typed-snapshot',
             namespace='default',
             engine_status=[
-                compute_pb2.EngineStatusResult(
+                compute_pb2.ComputeWorkerStatusResult(
                     analysis_id='analysis-1',
                     resource_id='datasource-1',
-                    status=enums_pb2.ENGINE_STATUS_HEALTHY,
+                    status=enums_pb2.COMPUTE_WORKER_STATUS_HEALTHY,
                     container_id='container-1234',
                     image_digest='sha256:abc',
-                    lifecycle_status=enums_pb2.ENGINE_INSTANCE_STATUS_RUNNING,
+                    lifecycle_status=enums_pb2.COMPUTE_WORKER_INSTANCE_STATUS_RUNNING,
                     supervisor_id='worker-typed-snapshot',
                     owner_id='worker-typed-snapshot',
                     last_activity=datetime.now(UTC).isoformat(),
                     current_job_id='job-1',
-                    resource_config=compute_pb2.EngineResourceConfig(max_threads=2),
-                    effective_resources=compute_pb2.EngineResourceConfig(max_threads=2, max_memory_mb=1024),
-                    defaults=compute_pb2.EngineDefaults(max_threads=2, max_memory_mb=1024, streaming_chunk_size=500),
-                    scope=enums_pb2.ENGINE_SCOPE_DATASOURCE_PREVIEW,
-                    reuse_policy=enums_pb2.ENGINE_REUSE_POLICY_SHARED,
+                    resource_config=compute_pb2.ComputeWorkerResourceConfig(max_threads=2),
+                    effective_resources=compute_pb2.ComputeWorkerResourceConfig(max_threads=2, max_memory_mb=1024),
+                    defaults=compute_pb2.ComputeWorkerDefaults(max_threads=2, max_memory_mb=1024, streaming_chunk_size=500),
+                    scope=enums_pb2.COMPUTE_WORKER_SCOPE_DATASOURCE_PREVIEW,
+                    reuse_policy=enums_pb2.COMPUTE_WORKER_REUSE_POLICY_SHARED,
                     datasource_id='datasource-1',
                 )
             ],
@@ -2243,7 +2243,7 @@ async def test_internal_worker_grpc_persists_typed_engine_snapshot(monkeypatch: 
     )
 
     assert response.count == 1
-    phase_log = next(record.getMessage() for record in caplog.records if 'Slow PersistEngineSnapshot phases' in record.getMessage())
+    phase_log = next(record.getMessage() for record in caplog.records if 'Slow PersistComputeWorkerSnapshot phases' in record.getMessage())
     assert 'worker_id=worker-typed-snapshot' in phase_log
     assert 'namespace=default' in phase_log
     assert 'status_count=1' in phase_log
@@ -2461,7 +2461,7 @@ async def test_internal_worker_grpc_starts_build_run_and_returns_payload(test_db
     assert response.run.analysis_pipeline.analysis_id == analysis_id
     assert response.run.analysis_pipeline.tabs[0].datasource.source_type == enums_pb2.DATA_SOURCE_TYPE_SCHEDULE
     assert response.run.tab_id == 'tab-1'
-    assert response.run.current_kind == enums_pb2.ENGINE_RUN_KIND_BUILD
+    assert response.run.current_kind == enums_pb2.COMPUTE_WORKER_RUN_KIND_BUILD
     assert response.run.build_starter.triggered_by == 'test'
     assert response.run.build_resource_config.max_threads == 4
     assert response.run.build_resource_config.max_memory_mb == 1024

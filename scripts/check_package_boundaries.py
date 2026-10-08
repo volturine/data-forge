@@ -138,16 +138,16 @@ FORBIDDEN_SOURCE_TOKENS = {
     '__preview__': 'engine identity prefix parsing',
     'engine_key': 'engine-key string identity',
     'storage_key': 'engine storage-key string identity',
-    'EngineIdentityInput': 'engine identity aliases hide generated dataforge_protocol.compute_pb2.EngineIdentity',
-    'analysis_interactive_engine_identity': 'engine identity constructor helper; construct dataforge_protocol.compute_pb2.EngineIdentity directly',
-    'datasource_preview_engine_identity': 'engine identity constructor helper; construct dataforge_protocol.compute_pb2.EngineIdentity directly',
-    'build_engine_identity': 'engine identity constructor helper; construct dataforge_protocol.compute_pb2.EngineIdentity directly',
-    'engine_identity_resource_id': 'engine identity resource helper; read dataforge_protocol.compute_pb2.EngineIdentity.resource_id directly',
-    '_analysis_interactive_engine_identity': 'engine identity constructor helper; construct dataforge_protocol.compute_pb2.EngineIdentity directly',
-    '_datasource_preview_engine_identity': 'engine identity constructor helper; construct dataforge_protocol.compute_pb2.EngineIdentity directly',
-    '_build_engine_identity': 'engine identity constructor helper; construct dataforge_protocol.compute_pb2.EngineIdentity directly',
-    '_engine_identity_resource_id': 'engine identity resource helper; read dataforge_protocol.compute_pb2.EngineIdentity.resource_id directly',
-    'def _resolve_identity(self, identity': 'string-derived engine identity resolver; use dataforge_protocol.compute_pb2.EngineIdentity',
+    'EngineIdentityInput': 'engine identity aliases hide generated dataforge_protocol.compute_pb2.ComputeWorkerIdentity',
+    'analysis_interactive_engine_identity': 'engine identity constructor helper; construct dataforge_protocol.compute_pb2.ComputeWorkerIdentity directly',
+    'datasource_preview_engine_identity': 'engine identity constructor helper; construct dataforge_protocol.compute_pb2.ComputeWorkerIdentity directly',
+    'build_engine_identity': 'engine identity constructor helper; construct dataforge_protocol.compute_pb2.ComputeWorkerIdentity directly',
+    'engine_identity_resource_id': 'engine identity resource helper; read dataforge_protocol.compute_pb2.ComputeWorkerIdentity.resource_id directly',
+    '_analysis_interactive_engine_identity': 'engine identity constructor helper; construct dataforge_protocol.compute_pb2.ComputeWorkerIdentity directly',
+    '_datasource_preview_engine_identity': 'engine identity constructor helper; construct dataforge_protocol.compute_pb2.ComputeWorkerIdentity directly',
+    '_build_engine_identity': 'engine identity constructor helper; construct dataforge_protocol.compute_pb2.ComputeWorkerIdentity directly',
+    '_engine_identity_resource_id': 'engine identity resource helper; read dataforge_protocol.compute_pb2.ComputeWorkerIdentity.resource_id directly',
+    'def _resolve_identity(self, identity': 'string-derived engine identity resolver; use dataforge_protocol.compute_pb2.ComputeWorkerIdentity',
     'data_plane_object_store': 'deleted backend data-plane object-store facade',
     'data_plane_iceberg': 'deleted backend data-plane Iceberg facade',
     'generate_ts_step_types.py': 'deleted backend-derived frontend type generator',
@@ -195,7 +195,7 @@ FRONTEND_OPERATION_COMPONENT_FORBIDDEN_PATTERNS = {
     re.compile(r'\bconst\s+CAST_TYPES\s*=\s*\['): 'select cast options must come from generated protocol enum tokens',
 }
 FRONTEND_BUILD_STREAM_ADAPTER_FORBIDDEN_PATTERNS = {
-    re.compile(r'\bconst\s+ENGINE_RUN_KIND_TOKENS\s*:'): 'build-stream generated JSON enum tokens must live in protocol-enum-tokens.ts',
+    re.compile(r'\bconst\s+COMPUTE_WORKER_RUN_KIND_TOKENS\s*:'): 'build-stream generated JSON enum tokens must live in protocol-enum-tokens.ts',
     re.compile(r'\bconst\s+BUILD_TAB_STATUS_TOKENS\s*:'): 'build-stream generated JSON enum tokens must live in protocol-enum-tokens.ts',
     re.compile(r'\bconst\s+BUILD_LOG_LEVEL_TOKENS\s*:'): 'build-stream generated JSON enum tokens must live in protocol-enum-tokens.ts',
 }
@@ -209,9 +209,9 @@ FRONTEND_BUILD_API_FORBIDDEN_PATTERNS = {
     re.compile(r'\binterface\s+BuildRunListResponse\b'): 'build list response must be imported from protocol-anchored build-stream types',
 }
 FRONTEND_COMPUTE_TYPES_REQUIRED_TOKENS = {
-    'EngineIdentityJson as ProtocolEngineIdentityJson': 'engine identity payload must be anchored to generated protocol JSON',
-    'EngineStatusResultJson as ProtocolEngineStatusResultJson': 'engine status response must be anchored to generated protocol JSON',
-    'EngineResourceConfigJson as ProtocolEngineResourceConfigJson': 'engine resource config must be anchored to generated protocol JSON',
+	'ComputeWorkerIdentityJson as ProtocolComputeWorkerIdentityJson': 'compute worker identity payload must be anchored to generated protocol JSON',
+	'ComputeWorkerStatusResultJson as ProtocolComputeWorkerStatusResultJson': 'compute worker status response must be anchored to generated protocol JSON',
+	'ComputeWorkerResourceConfigJson as ProtocolComputeWorkerResourceConfigJson': 'compute worker resource config must be anchored to generated protocol JSON',
 }
 FRONTEND_COMPUTE_API_REQUIRED_TOKENS = {
     'StepPreviewCommandJson as ProtocolStepPreviewCommandJson': 'step preview request must be anchored to generated protocol JSON',
@@ -221,20 +221,20 @@ FRONTEND_COMPUTE_API_REQUIRED_TOKENS = {
     'StepRowCountResultJson as ProtocolStepRowCountResultJson': 'row-count response must be anchored to generated protocol JSON',
 }
 FRONTEND_COMPUTE_TYPES_FORBIDDEN_PATTERNS = {
-    re.compile(r"export\s+type\s+EngineStatus\s*=\s*'healthy'"): 'engine status literals must come from generated protocol enum tokens',
-    re.compile(r"export\s+type\s+EngineScope\s*=\s*'datasource_preview'"): 'engine scope literals must come from generated protocol enum tokens',
-    re.compile(r"export\s+type\s+EngineReusePolicy\s*=\s*'shared'"): 'engine reuse policy literals must come from generated protocol enum tokens',
+	re.compile(r"export\s+type\s+ComputeWorkerStatus\s*=\s*'healthy'"): 'compute worker status literals must come from generated protocol enum tokens',
+	re.compile(r"export\s+type\s+ComputeWorkerScope\s*=\s*'datasource_preview'"): 'compute worker scope literals must come from generated protocol enum tokens',
+	re.compile(r"export\s+type\s+ComputeWorkerReusePolicy\s*=\s*'shared'"): 'compute worker reuse policy literals must come from generated protocol enum tokens',
 }
 PROTOCOL_COMPUTE_REQUIRED_TOKENS = {
     'message BuildRunSummary': 'protocol must own build-run summary DTOs',
     'message BuildRunDetail': 'protocol must own build-run detail DTOs',
     'message BuildSnapshotMessage': 'protocol must own build snapshot websocket DTOs',
     'message BuildWebsocketErrorMessage': 'protocol must own build websocket error DTOs',
-    'string resource_id = 6': 'protocol EngineIdentity must explicitly carry resource_id',
-    'id: "engine_identity.scope_resource"': 'protocol EngineIdentity must enforce scope, reuse policy, and resource ID consistency',
+    'string resource_id = 6': 'protocol ComputeWorkerIdentity must explicitly carry resource_id',
+    'id: "engine_identity.scope_resource"': 'protocol ComputeWorkerIdentity must enforce scope, reuse policy, and resource ID consistency',
 }
 WORKER_COMPUTE_SCHEMA_FORBIDDEN_TOKENS = {
-    'class EngineIdentityPayload(BaseModel)': 'worker compute schemas must use dataforge_protocol.compute_pb2.EngineIdentity directly',
+    'class EngineIdentityPayload(BaseModel)': 'worker compute schemas must use dataforge_protocol.compute_pb2.ComputeWorkerIdentity directly',
     'class SpawnEngineRequest(': 'worker must consume generated engine command messages instead of mirrored HTTP request models',
     'class StepPreviewRequest(': 'worker must consume generated preview command messages instead of mirrored HTTP request models',
     'class ExportRequest(': 'worker must consume generated export command messages instead of mirrored HTTP request models',
@@ -246,7 +246,7 @@ WORKER_STEP_CONVERTER_REQUIRED_TOKENS = {
     'analysis_pb2.StepConfig.DESCRIPTOR': 'worker execution conversion must unwrap the generated StepConfig oneof',
 }
 BACKEND_COMPUTE_SCHEMA_FORBIDDEN_TOKENS = {
-    'class EngineIdentityPayload(BaseModel)': 'backend compute schemas must use dataforge_protocol.compute_pb2.EngineIdentity directly',
+    'class EngineIdentityPayload(BaseModel)': 'backend compute schemas must use dataforge_protocol.compute_pb2.ComputeWorkerIdentity directly',
 }
 COMPUTE_ENVELOPE_FORBIDDEN_TOKENS = {
     'return struct_to_dict(envelope.payload)': 'compute envelopes must reject deprecated payload-only messages',
@@ -255,7 +255,7 @@ COMPUTE_ENVELOPE_FORBIDDEN_TOKENS = {
 }
 COMPUTE_ENVELOPE_REQUIRED_TOKENS = {
     'compute_pb2.ComputeErrorResult': 'compute failures must use typed protocol error responses',
-    'compute_pb2.EngineStatusResult': 'engine lifecycle responses must use typed protocol engine status responses',
+    'compute_pb2.ComputeWorkerStatusResult': 'compute worker lifecycle responses must use typed protocol status responses',
     'compute_pb2.ComputeAckResult': 'acknowledgement responses must use typed protocol ack responses',
 }
 PROTOCOL_FORBIDDEN_TOKENS = {
@@ -278,8 +278,8 @@ PROTOCOL_FORBIDDEN_TOKENS = {
     'google.protobuf.Struct schema_cache = 6': 'datasource output upserts must use typed SchemaInfo messages',
     'optional google.protobuf.Struct step_timings = 12': 'engine-run timing maps must use typed protocol maps',
     'repeated google.protobuf.Struct execution_entries = 14': 'engine-run execution entries must use typed protocol messages',
-    'google.protobuf.Struct fields = 3': 'engine-run updates must use typed WorkerEngineRunUpdateFields',
-    'repeated google.protobuf.Struct statuses = 3': 'engine snapshots must use typed EngineStatusResult messages',
+    'google.protobuf.Struct fields = 3': 'compute worker run updates must use typed WorkerComputeWorkerRunUpdateFields',
+    'repeated google.protobuf.Struct statuses = 3': 'compute worker snapshots must use typed ComputeWorkerStatusResult messages',
     'message JsonResponse': 'worker runtime RPCs must return typed protocol responses, not generic JSON envelopes',
     'returns (JsonResponse)': 'worker runtime RPCs must return typed protocol responses, not generic JSON envelopes',
 }
@@ -303,7 +303,7 @@ PROTO_STRUCT_ALLOWLIST = {
     'proto/dataforge_protocol/datasource.proto:SnapshotPreview.rows': 'snapshot previews contain arbitrary row objects',
     'proto/dataforge_protocol/datasource.proto:ColumnStatsResult.top_values': 'top-value stats contain arbitrary value/count records by column type',
     'proto/dataforge_protocol/errors.proto:ErrorInfo.details': 'error details are intentionally extensible diagnostics',
-    'proto/dataforge_protocol/engine_runtime.proto:EngineJobResult.step_timings': 'engine timing keys are derived from user-defined pipeline step types',
+    'proto/dataforge_protocol/compute_worker_runtime.proto:ComputeWorkerJobResult.step_timings': 'compute worker timing keys are derived from user-defined pipeline step types',
     'proto/dataforge_protocol/iceberg.proto:IcebergSnapshotScanResponse.rows': 'Iceberg snapshot scans return arbitrary row objects',
     'proto/dataforge_protocol/worker_runtime.proto:WorkerDatasourceMetadataResponse.config': 'datasource metadata exposes provider/user-defined config JSON',
     'proto/dataforge_protocol/worker_runtime.proto:WorkerUpdateBuildResultRequest.result': 'build result is persisted runtime JSON at the database boundary',
@@ -313,11 +313,11 @@ PROTO_STRUCT_ALLOWLIST = {
     'proto/dataforge_protocol/worker_runtime.proto:WorkerPublishDatasourceIngestRequest.config': 'ingested datasource config is provider/user-defined JSON published after worker execution',
     'proto/dataforge_protocol/worker_runtime.proto:WorkerHealthCheckSpec.config': 'healthcheck config is check-type-specific JSON',
     'proto/dataforge_protocol/worker_runtime.proto:WorkerHealthCheckResultPayload.details': 'healthcheck result details are check-type-specific diagnostics',
-    'proto/dataforge_protocol/worker_runtime.proto:WorkerCreateEngineRunRequest.request': 'engine-run request is persisted runtime JSON at the database boundary',
-    'proto/dataforge_protocol/worker_runtime.proto:WorkerCreateEngineRunRequest.result': 'engine-run result is persisted runtime JSON at the database boundary',
-    'proto/dataforge_protocol/worker_runtime.proto:WorkerEngineRunUpdateFields.request_json': 'engine-run request updates write persisted runtime JSON at the database boundary',
-    'proto/dataforge_protocol/worker_runtime.proto:WorkerEngineRunUpdateFields.result_json': 'engine-run result updates write persisted runtime JSON at the database boundary',
-    'proto/dataforge_protocol/worker_runtime.proto:WorkerEngineRunStateResponse.result': 'engine-run state exposes persisted runtime result JSON',
+    'proto/dataforge_protocol/worker_runtime.proto:WorkerCreateComputeWorkerRunRequest.request': 'compute worker run request is persisted runtime JSON at the database boundary',
+    'proto/dataforge_protocol/worker_runtime.proto:WorkerCreateComputeWorkerRunRequest.result': 'compute worker run result is persisted runtime JSON at the database boundary',
+    'proto/dataforge_protocol/worker_runtime.proto:WorkerComputeWorkerRunUpdateFields.request_json': 'compute worker run request updates write persisted runtime JSON at the database boundary',
+    'proto/dataforge_protocol/worker_runtime.proto:WorkerComputeWorkerRunUpdateFields.result_json': 'compute worker run result updates write persisted runtime JSON at the database boundary',
+    'proto/dataforge_protocol/worker_runtime.proto:WorkerComputeWorkerRunStateResponse.result': 'compute worker run state exposes persisted runtime result JSON',
     'proto/dataforge_protocol/worker_runtime.proto:WorkerGenerateAIRequest.options': 'AI generation options are provider-specific JSON',
 }
 WORKER_RUNTIME_RPC_FORBIDDEN_TOKENS = {
@@ -418,15 +418,15 @@ def imported_roots(path: Path) -> set[str]:
     return roots
 
 
-def engine_identity_constructor_lines(path: Path) -> list[int]:
+def compute_worker_identity_constructor_lines(path: Path) -> list[int]:
     tree = ast.parse(path.read_text(), filename=str(path))
     lines: list[int] = []
     for node in ast.walk(tree):
         if not isinstance(node, ast.Call):
             continue
         func = node.func
-        is_engine_identity = (isinstance(func, ast.Attribute) and func.attr == 'EngineIdentity') or (isinstance(func, ast.Name) and func.id == 'EngineIdentity')
-        if not is_engine_identity:
+        is_compute_worker_identity = (isinstance(func, ast.Attribute) and func.attr == 'ComputeWorkerIdentity') or (isinstance(func, ast.Name) and func.id == 'ComputeWorkerIdentity')
+        if not is_compute_worker_identity:
             continue
         if not any(keyword.arg == 'resource_id' for keyword in node.keywords):
             lines.append(node.lineno)
@@ -683,9 +683,9 @@ def main() -> int:
             if legacy:
                 rel = path.relative_to(ROOT)
                 errors.append(f'{rel} imports deleted legacy contract roots: {", ".join(legacy)}')
-            for line in engine_identity_constructor_lines(path):
+            for line in compute_worker_identity_constructor_lines(path):
                 rel = path.relative_to(ROOT)
-                errors.append(f'{rel}:{line} constructs EngineIdentity without explicit resource_id')
+                errors.append(f'{rel}:{line} constructs ComputeWorkerIdentity without explicit resource_id')
             for line in raw_compute_request_creation_lines(path):
                 rel = path.relative_to(ROOT)
                 errors.append(f'{rel}:{line} calls compute_requests_service.create_request with raw request_json; pass a typed ComputeCommand')

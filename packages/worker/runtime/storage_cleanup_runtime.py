@@ -102,9 +102,9 @@ def delete_cleanup_target(claim: StorageCleanupClaim) -> None:
 
 
 async def process_cleanup(manager: ProcessManager, client: StorageCleanupClient, claim: StorageCleanupClaim) -> bool:
-    identity = compute_pb2.EngineIdentity(
-        scope=enums_pb2.ENGINE_SCOPE_DATASOURCE_PREVIEW,
-        reuse_policy=enums_pb2.ENGINE_REUSE_POLICY_SHARED,
+    identity = compute_pb2.ComputeWorkerIdentity(
+        scope=enums_pb2.COMPUTE_WORKER_SCOPE_DATASOURCE_PREVIEW,
+        reuse_policy=enums_pb2.COMPUTE_WORKER_REUSE_POLICY_SHARED,
         resource_id=claim.resource_id,
         datasource_id=claim.resource_id,
     )
@@ -141,7 +141,7 @@ async def process_cleanup(manager: ProcessManager, client: StorageCleanupClient,
         await run_control_in_thread(manager.release_engine_job_slot, identity, namespace=claim.namespace)
 
 
-def _has_active_datasource_writer(manager: ProcessManager, identity: compute_pb2.EngineIdentity, *, namespace: str) -> bool:
+def _has_active_datasource_writer(manager: ProcessManager, identity: compute_pb2.ComputeWorkerIdentity, *, namespace: str) -> bool:
     info = manager.get_engine_info(identity, namespace=namespace)
     return info is not None and (info.active_reservations > 0 or bool(info.engine.current_job_id))
 

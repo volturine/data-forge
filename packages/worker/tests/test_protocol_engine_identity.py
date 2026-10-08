@@ -8,25 +8,25 @@ from runtime import compute_request_runtime, compute_service
 
 
 def test_step_preview_request_uses_generated_engine_identity() -> None:
-    identity = compute_pb2.EngineIdentity(
-        scope=enums_pb2.ENGINE_SCOPE_DATASOURCE_PREVIEW,
-        reuse_policy=enums_pb2.ENGINE_REUSE_POLICY_SHARED,
+    identity = compute_pb2.ComputeWorkerIdentity(
+        scope=enums_pb2.COMPUTE_WORKER_SCOPE_DATASOURCE_PREVIEW,
+        reuse_policy=enums_pb2.COMPUTE_WORKER_REUSE_POLICY_SHARED,
         datasource_id="datasource-1",
         resource_id="datasource-1",
     )
     request = compute_pb2.StepPreviewCommand(engine_identity=identity)
 
-    assert isinstance(request.engine_identity, compute_pb2.EngineIdentity)
-    assert request.engine_identity.scope == enums_pb2.ENGINE_SCOPE_DATASOURCE_PREVIEW
-    assert request.engine_identity.reuse_policy == enums_pb2.ENGINE_REUSE_POLICY_SHARED
+    assert isinstance(request.engine_identity, compute_pb2.ComputeWorkerIdentity)
+    assert request.engine_identity.scope == enums_pb2.COMPUTE_WORKER_SCOPE_DATASOURCE_PREVIEW
+    assert request.engine_identity.reuse_policy == enums_pb2.COMPUTE_WORKER_REUSE_POLICY_SHARED
     assert request.engine_identity.datasource_id == "datasource-1"
     assert request.engine_identity.resource_id == "datasource-1"
 
 
 def test_step_preview_request_rejects_invalid_engine_identity_payload() -> None:
-    identity = compute_pb2.EngineIdentity(
-        scope=enums_pb2.ENGINE_SCOPE_DATASOURCE_PREVIEW,
-        reuse_policy=enums_pb2.ENGINE_REUSE_POLICY_SHARED,
+    identity = compute_pb2.ComputeWorkerIdentity(
+        scope=enums_pb2.COMPUTE_WORKER_SCOPE_DATASOURCE_PREVIEW,
+        reuse_policy=enums_pb2.COMPUTE_WORKER_REUSE_POLICY_SHARED,
         datasource_id="datasource-1",
         resource_id="",
     )
@@ -86,7 +86,7 @@ def test_analysis_requests_share_analysis_engine_identity(kind, field_name, comm
         },
         "source",
     )
-    assert identity.scope == enums_pb2.ENGINE_SCOPE_ANALYSIS_INTERACTIVE
+    assert identity.scope == enums_pb2.COMPUTE_WORKER_SCOPE_ANALYSIS_INTERACTIVE
     assert identity.analysis_id == "analysis-1"
 
 
@@ -113,21 +113,21 @@ def test_distinct_transforms_share_only_the_exact_analysis_engine() -> None:
 @pytest.mark.parametrize(
     "identity",
     [
-        compute_pb2.EngineIdentity(
-            scope=enums_pb2.ENGINE_SCOPE_DATASOURCE_PREVIEW,
-            reuse_policy=enums_pb2.ENGINE_REUSE_POLICY_SHARED,
+        compute_pb2.ComputeWorkerIdentity(
+            scope=enums_pb2.COMPUTE_WORKER_SCOPE_DATASOURCE_PREVIEW,
+            reuse_policy=enums_pb2.COMPUTE_WORKER_REUSE_POLICY_SHARED,
             datasource_id="datasource-1",
             resource_id="other",
         ),
-        compute_pb2.EngineIdentity(
-            scope=enums_pb2.ENGINE_SCOPE_ANALYSIS_INTERACTIVE,
-            reuse_policy=enums_pb2.ENGINE_REUSE_POLICY_EXCLUSIVE,
+        compute_pb2.ComputeWorkerIdentity(
+            scope=enums_pb2.COMPUTE_WORKER_SCOPE_ANALYSIS_INTERACTIVE,
+            reuse_policy=enums_pb2.COMPUTE_WORKER_REUSE_POLICY_EXCLUSIVE,
             analysis_id="analysis-1",
             resource_id="analysis-1",
         ),
-        compute_pb2.EngineIdentity(
-            scope=enums_pb2.ENGINE_SCOPE_BUILD,
-            reuse_policy=enums_pb2.ENGINE_REUSE_POLICY_EXCLUSIVE,
+        compute_pb2.ComputeWorkerIdentity(
+            scope=enums_pb2.COMPUTE_WORKER_SCOPE_BUILD,
+            reuse_policy=enums_pb2.COMPUTE_WORKER_REUSE_POLICY_EXCLUSIVE,
             analysis_id="analysis-1",
             build_id="build-1",
             resource_id="build-1",
@@ -135,6 +135,6 @@ def test_distinct_transforms_share_only_the_exact_analysis_engine() -> None:
     ],
     ids=["mismatched-resource-id", "invalid-reuse-policy", "multiple-scoped-ids"],
 )
-def test_engine_identity_rejects_scope_invariant_violations(identity: compute_pb2.EngineIdentity) -> None:
+def test_engine_identity_rejects_scope_invariant_violations(identity: compute_pb2.ComputeWorkerIdentity) -> None:
     with pytest.raises(ValidationError):
         Validator().validate(identity)

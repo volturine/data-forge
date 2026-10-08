@@ -58,8 +58,8 @@ def test_create_request_preallocates_its_exact_datasource_worker_rid(test_db_ses
         test_db_session, namespace='default', kind=enums_pb2.COMPUTE_REQUEST_KIND_CREATE_DATABASE_DATASOURCE, command=command
     )
     assert request.engine_resource_id == request.id
-    assert request.engine_scope == enums_pb2.ENGINE_SCOPE_DATASOURCE_PREVIEW
-    assert request.engine_reuse_policy == enums_pb2.ENGINE_REUSE_POLICY_SHARED
+    assert request.engine_scope == enums_pb2.COMPUTE_WORKER_SCOPE_DATASOURCE_PREVIEW
+    assert request.engine_reuse_policy == enums_pb2.COMPUTE_WORKER_REUSE_POLICY_SHARED
 
 
 def test_preflight_initial_and_preview_jobs_share_only_the_stable_draft_rid(test_db_session: Session) -> None:

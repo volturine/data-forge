@@ -9,10 +9,10 @@ from sqlalchemy import event
 from sqlmodel import Session, select
 
 import backend_core.engine_instances_service as engine_instances_service
-from backend_core.domain.compute.base import EngineStatusInfo
+from backend_core.domain.compute.base import ComputeWorkerStatusInfo
 from backend_core.domain.engine_instances.models import EngineInstanceStatus
 from backend_core.domain.runtime_workers.models import RuntimeWorkerKind
-from backend_core.engine_instances_service import persist_engine_snapshot
+from backend_core.engine_instances_service import persist_compute_worker_snapshot
 from backend_core.persistence.engine_instances.models import EngineInstance
 
 
@@ -25,8 +25,8 @@ def _no_reclaimable_coordinator_workers(monkeypatch) -> None:
     monkeypatch.setattr(engine_instances_service.runtime_workers_service, 'reclaimable_worker_ids', reclaimable_worker_ids)
 
 
-def _engine_status(resource_id: str, *, container_id: str, last_activity: str | None = None) -> EngineStatusInfo:
-    return EngineStatusInfo(
+def _engine_status(resource_id: str, *, container_id: str, last_activity: str | None = None) -> ComputeWorkerStatusInfo:
+    return ComputeWorkerStatusInfo(
         analysis_id=resource_id,
         resource_id=resource_id,
         status='healthy',
@@ -74,7 +74,7 @@ def test_concurrent_engine_snapshots_upsert_one_identity(test_engine) -> None:
         status = _engine_status('analysis-shared', container_id=f'container-{index}')
         barrier.wait()
         with Session(test_engine) as session:
-            persist_engine_snapshot(
+            persist_compute_worker_snapshot(
                 session,
                 worker_id='worker-snapshots',
                 namespace='default',
@@ -99,7 +99,7 @@ def test_engine_snapshot_reads_active_rows_once_and_stops_missing_engines(test_e
     second_stamp = first_stamp + timedelta(seconds=5)
     statuses = [_engine_status(f'analysis-{index}', container_id=f'container-{index}', last_activity=last_activity) for index in range(20)]
     with Session(test_engine) as session:
-        persist_engine_snapshot(session, worker_id='worker-batch', namespace='default', statuses=statuses, now=first_stamp)
+        persist_compute_worker_snapshot(session, worker_id='worker-batch', namespace='default', statuses=statuses, now=first_stamp)
 
     engine_selects: list[str] = []
     engine_updates = 0
@@ -117,7 +117,7 @@ def test_engine_snapshot_reads_active_rows_once_and_stops_missing_engines(test_e
     event.listen(test_engine, 'before_cursor_execute', count_engine_selects)
     try:
         with Session(test_engine) as session:
-            persist_engine_snapshot(
+            persist_compute_worker_snapshot(
                 session,
                 worker_id='worker-batch',
                 namespace='default',
@@ -196,7 +196,7 @@ def test_engine_snapshot_generation_stops_reclaimable_prior_coordinator_rows(tes
         session.commit()
 
     with Session(test_engine) as session:
-        persist_engine_snapshot(
+        persist_compute_worker_snapshot(
             session,
             worker_id='worker-current',
             namespace='default',
@@ -246,7 +246,7 @@ def test_engine_snapshot_generation_preserves_fresh_prior_coordinator_rows(test_
         session.commit()
 
     with Session(test_engine) as session:
-        persist_engine_snapshot(session, worker_id='worker-current', namespace='default', statuses=[], now=snapshot_stamp)
+        persist_compute_worker_snapshot(session, worker_id='worker-current', namespace='default', statuses=[], now=snapshot_stamp)
 
     with Session(test_engine) as session:
         rows = session.exec(select(EngineInstance)).all()
@@ -286,7 +286,7 @@ def test_engine_snapshot_reports_advisory_wait_and_snapshot_write_phases(test_en
     phases: dict[str, float] = {}
 
     with Session(test_engine) as session:
-        persist_engine_snapshot(
+        persist_compute_worker_snapshot(
             session,
             worker_id='worker-timed-snapshot',
             namespace='default',

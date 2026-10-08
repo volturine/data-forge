@@ -6,7 +6,7 @@ from typing import Any, Literal, Protocol, runtime_checkable
 import polars as pl
 from pydantic import BaseModel, ConfigDict
 
-from runtime.domain.compute.result import EngineResult
+from runtime.domain.compute.result import ComputeWorkerResult
 
 
 class OperationParams(BaseModel):
@@ -76,7 +76,7 @@ class RowCountCommand:
     type: Literal["row_count"] = "row_count"
 
 
-EngineCommand = ShutdownCommand | PreviewCommand | ExportCommand | SchemaCommand | RowCountCommand
+ComputeWorkerCommand = ShutdownCommand | PreviewCommand | ExportCommand | SchemaCommand | RowCountCommand
 
 
 # ---------------------------------------------------------------------------
@@ -85,7 +85,7 @@ EngineCommand = ShutdownCommand | PreviewCommand | ExportCommand | SchemaCommand
 
 
 @dataclass(slots=True)
-class EngineProgressEvent:
+class ComputeWorkerProgressEvent:
     job_id: str
     event: dict[str, Any]
 
@@ -101,7 +101,7 @@ class ShutdownAck:
 
 
 @dataclass(frozen=True, slots=True)
-class EngineStatusInfo:
+class ComputeWorkerStatusInfo:
     analysis_id: str
     resource_id: str
     status: str
@@ -132,7 +132,7 @@ class EngineStatusInfo:
 
 
 @runtime_checkable
-class ComputeEngine(Protocol):
+class ComputeWorker(Protocol):
     """Protocol defining the interface any compute engine must satisfy."""
 
     analysis_id: str
@@ -196,10 +196,10 @@ class ComputeEngine(Protocol):
     def datasource_job(self, kind: str, payload: dict[str, Any]) -> str:
         raise NotImplementedError
 
-    def get_result(self, timeout: float = 1.0, job_id: str | None = None) -> EngineResult | None:
+    def get_result(self, timeout: float = 1.0, job_id: str | None = None) -> ComputeWorkerResult | None:
         raise NotImplementedError
 
-    def get_progress_event(self, timeout: float = 1.0, job_id: str | None = None) -> EngineProgressEvent | None:
+    def get_progress_event(self, timeout: float = 1.0, job_id: str | None = None) -> ComputeWorkerProgressEvent | None:
         raise NotImplementedError
 
     def cancel_job(self, job_id: str | None = None) -> bool:

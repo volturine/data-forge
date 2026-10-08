@@ -282,9 +282,9 @@ async def delete_analysis(
         with contextlib.suppress(HTTPException):
             executor_client.request_engine_shutdown(
                 session,
-                identity=compute_pb2.EngineIdentity(
-                    scope=enums_pb2.ENGINE_SCOPE_ANALYSIS_INTERACTIVE,
-                    reuse_policy=enums_pb2.ENGINE_REUSE_POLICY_SHARED,
+                identity=compute_pb2.ComputeWorkerIdentity(
+                    scope=enums_pb2.COMPUTE_WORKER_SCOPE_ANALYSIS_INTERACTIVE,
+                    reuse_policy=enums_pb2.COMPUTE_WORKER_REUSE_POLICY_SHARED,
                     analysis_id=analysis_id_value,
                     resource_id=analysis_id_value,
                 ),
@@ -353,9 +353,9 @@ async def preview_analysis(
     preview = await executor_client.preview_step(
         compute_schemas.StepPreviewRequest(
             analysis_id=analysis_id_value,
-            engine_identity=compute_pb2.EngineIdentity(
-                scope=enums_pb2.ENGINE_SCOPE_ANALYSIS_INTERACTIVE,
-                reuse_policy=enums_pb2.ENGINE_REUSE_POLICY_SHARED,
+            engine_identity=compute_pb2.ComputeWorkerIdentity(
+                scope=enums_pb2.COMPUTE_WORKER_SCOPE_ANALYSIS_INTERACTIVE,
+                reuse_policy=enums_pb2.COMPUTE_WORKER_REUSE_POLICY_SHARED,
                 analysis_id=analysis_id_value,
                 resource_id=analysis_id_value,
             ),

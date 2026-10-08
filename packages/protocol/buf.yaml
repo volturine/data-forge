@@ -20,3 +20,10 @@ breaking:
     - ENUM_VALUE_NO_DELETE_UNLESS_NUMBER_RESERVED
     - RPC_SAME_REQUEST_TYPE
     - RPC_SAME_RESPONSE_TYPE
+  # Temporary for layer 2 of #224: these internal message type names are
+  # changing without changing field numbers, field names, or persisted tokens.
+  # Remove this exception in the next stacked PR after this schema is the base.
+  ignore_only:
+    FIELD_WIRE_JSON_COMPATIBLE_TYPE:
+      - proto/dataforge_protocol/compute.proto
+      - proto/dataforge_protocol/worker_runtime.proto

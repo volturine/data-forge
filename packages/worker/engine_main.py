@@ -22,9 +22,9 @@ def _load_bootstrap_if_present() -> None:
 
 def main() -> None:
     _load_bootstrap_if_present()
-    from runtime.engine_server import main as run_engine_server
+    from runtime.compute_worker_server import main as run_compute_worker_server
 
-    run_engine_server()
+    run_compute_worker_server()
 
 
 if __name__ == "__main__":

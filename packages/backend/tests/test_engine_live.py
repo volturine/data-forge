@@ -4,14 +4,14 @@ import asyncio
 
 import pytest
 
-import backend_core.engine_live as engine_live
+import backend_core.compute_worker_live as engine_live
+from backend_core.compute_worker_live import ComputeWorkerRegistry
 from backend_core.domain.compute import schemas
-from backend_core.engine_live import EngineRegistry
 
 
 @pytest.mark.asyncio
 async def test_engine_snapshot_load_is_single_flight_and_versioned() -> None:
-    registry = EngineRegistry()
+    registry = ComputeWorkerRegistry()
     snapshot = schemas.EngineListSnapshotMessage(engines=[], total=0)
     started = asyncio.Event()
     release = asyncio.Event()
@@ -40,7 +40,7 @@ async def test_engine_snapshot_load_is_single_flight_and_versioned() -> None:
 
 @pytest.mark.asyncio
 async def test_serialized_engine_snapshot_is_shared_per_version(monkeypatch: pytest.MonkeyPatch) -> None:
-    registry = EngineRegistry()
+    registry = ComputeWorkerRegistry()
     snapshot = schemas.EngineListSnapshotMessage(engines=[], total=0)
     loads = 0
     serializations = 0
@@ -74,7 +74,7 @@ async def test_serialized_engine_snapshot_is_shared_per_version(monkeypatch: pyt
 async def test_stale_engine_snapshot_load_does_not_replace_new_version(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
-    registry = EngineRegistry()
+    registry = ComputeWorkerRegistry()
     stale_snapshot = schemas.EngineListSnapshotMessage(engines=[], total=0)
     current_snapshot = schemas.EngineListSnapshotMessage(engines=[], total=1)
     stale_started = asyncio.Event()

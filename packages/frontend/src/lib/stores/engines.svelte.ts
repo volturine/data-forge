@@ -1,4 +1,4 @@
-import type { EngineStatusResponse } from '$lib/types/compute';
+import type { ComputeWorkerStatusResponse } from '$lib/types/compute';
 import {
 	connectEnginesStream,
 	shutdownAnalysisEngine as shutdownAnalysisEngineApi,
@@ -14,7 +14,7 @@ const SNAPSHOT_REFRESH_COOLDOWN_MS = 15_000;
 export type EnginesConnectionStatus = 'disconnected' | 'connecting' | 'connected' | 'error';
 
 export class EnginesStore {
-	engines = $state.raw<EngineStatusResponse[]>([]);
+	engines = $state.raw<ComputeWorkerStatusResponse[]>([]);
 	loading = $state(false);
 	error = $state<string | null>(null);
 	status = $state<EnginesConnectionStatus>('disconnected');
@@ -132,7 +132,7 @@ export class EnginesStore {
 	 * Shut down an engine via the API. Backend cancels any active job first,
 	 * then stops the container. 404 means already gone (race with reaper).
 	 */
-	async shutdownEngine(engine: EngineStatusResponse): Promise<void> {
+	async shutdownEngine(engine: ComputeWorkerStatusResponse): Promise<void> {
 		const key = engineIdentityKey(engine);
 		this.shuttingDown.add(key);
 		await shutdownEngineByIdentity(
@@ -229,7 +229,7 @@ export class EnginesStore {
 		});
 	}
 
-	private applySnapshot(engines: EngineStatusResponse[]): void {
+	private applySnapshot(engines: ComputeWorkerStatusResponse[]): void {
 		this.snapshotRequested = true;
 		this.lastSnapshotAt = Date.now();
 		for (const key of this.shuttingDown) {

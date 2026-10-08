@@ -538,7 +538,7 @@ def test_serialize_step_event_includes_protocol_execution_category_kind(test_db_
     step_completed = serialized['stepCompleted']
     assert isinstance(step_completed, dict)
     assert 'stepType' not in step_completed
-    assert step_completed['stepKind'] == {'executionCategory': 'ENGINE_RUN_EXECUTION_CATEGORY_READ'}
+    assert step_completed['stepKind'] == {'executionCategory': 'COMPUTE_WORKER_RUN_EXECUTION_CATEGORY_READ'}
 
 
 def test_serialize_step_event_rejects_untyped_step_kind(test_db_session) -> None:

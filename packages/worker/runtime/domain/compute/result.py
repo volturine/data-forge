@@ -5,7 +5,7 @@ from typing import Any
 
 
 @dataclass(slots=True)
-class EngineResult:
+class ComputeWorkerResult:
     job_id: str | None
     data: dict[str, Any] | None
     error: str | None

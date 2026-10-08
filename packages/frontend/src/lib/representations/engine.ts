@@ -1,13 +1,13 @@
-import type { EngineStatus, EngineStatusResponse } from '$lib/types/compute';
+import type { ComputeWorkerStatus, ComputeWorkerStatusResponse } from '$lib/types/compute';
 
-export function engineIdentityKey(engine: EngineStatusResponse): string {
+export function engineIdentityKey(engine: ComputeWorkerStatusResponse): string {
 	return `${engine.scope ?? 'analysis_interactive'}:${engine.resource_id}`;
 }
 
-export function engineStatusColor(status: EngineStatus): string {
+export function engineStatusColor(status: ComputeWorkerStatus): string {
 	return status === 'healthy' ? 'fg.success' : 'fg.error';
 }
 
-export function engineStatusLabel(status: EngineStatus): string {
+export function engineStatusLabel(status: ComputeWorkerStatus): string {
 	return status === 'healthy' ? 'Healthy' : 'Terminated';
 }

@@ -5,10 +5,10 @@ from collections.abc import AsyncIterator
 
 import psutil  # type: ignore[import-untyped]  # psutil does not ship type hints in this environment.
 
-from runtime.domain.compute.base import ComputeEngine
+from runtime.domain.compute.base import ComputeWorker
 
 
-async def monitor_engine_resources(engine: ComputeEngine, interval: float = 1.0) -> AsyncIterator[dict[str, float | int | None]]:
+async def monitor_compute_worker_resources(engine: ComputeWorker, interval: float = 1.0) -> AsyncIterator[dict[str, float | int | None]]:
     pid = engine.process_id
     if pid is None:
         return

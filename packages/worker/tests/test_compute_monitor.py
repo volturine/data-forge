@@ -3,8 +3,8 @@ from contextlib import contextmanager
 from types import SimpleNamespace
 from typing import cast
 
-from runtime.compute_monitor import monitor_engine_resources
-from runtime.domain.compute.base import ComputeEngine
+from runtime.compute_monitor import monitor_compute_worker_resources
+from runtime.domain.compute.base import ComputeWorker
 
 
 class _StubProcess:
@@ -52,7 +52,7 @@ def test_monitor_engine_resources_normalizes_cpu_to_allocated_capacity(
     engine = _StubEngine()
 
     async def collect() -> list[dict[str, float | int | None]]:
-        return [item async for item in monitor_engine_resources(cast(ComputeEngine, engine), interval=0)]
+        return [item async for item in monitor_compute_worker_resources(cast(ComputeWorker, engine), interval=0)]
 
     snapshots = asyncio.run(collect())
 

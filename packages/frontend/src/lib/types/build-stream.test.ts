@@ -1,6 +1,6 @@
 import { describe, expect, it } from 'vitest';
 
-import type { EngineRunExecutionEntry } from '$lib/api/engine-runs';
+import type { ComputeWorkerRunExecutionEntry } from '$lib/api/engine-runs';
 import {
 	buildStatusLabel,
 	buildStatusTone,
@@ -30,7 +30,7 @@ describe('build-stream ownership helpers', () => {
 	});
 
 	it('owns execution-entry step typing and counting', () => {
-		const entries: EngineRunExecutionEntry[] = [
+		const entries: ComputeWorkerRunExecutionEntry[] = [
 			{
 				key: 'plan',
 				label: 'Plan',

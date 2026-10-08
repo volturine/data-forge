@@ -178,7 +178,7 @@ class EngineStartError(ComputeError):
         super().__init__(message=message, error_code='ENGINE_START_ERROR', details=details)
 
 
-class EngineBusyError(ComputeError):
+class ComputeWorkerBusyError(ComputeError):
     def __init__(self, analysis_id: str | None = None):
         details = {'analysis_id': analysis_id} if analysis_id is not None else None
         super().__init__(message='Engine has an active job', error_code='ENGINE_BUSY', details=details)

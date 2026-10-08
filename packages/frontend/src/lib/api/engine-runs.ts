@@ -4,7 +4,7 @@ import type { ResultAsync } from 'neverthrow';
 import { isNamespaceReady, requireNamespace } from '$lib/stores/namespace.svelte';
 import { shareInFlight } from './in-flight';
 
-export interface EngineRunExecutionEntry {
+export interface ComputeWorkerRunExecutionEntry {
 	key: string;
 	label: string;
 	category: 'read' | 'step' | 'plan' | 'compute' | 'write';
@@ -16,7 +16,7 @@ export interface EngineRunExecutionEntry {
 	metadata: Record<string, unknown> | null;
 }
 
-export interface EngineRun {
+export interface ComputeWorkerRun {
 	id: string;
 	analysis_id: string | null;
 	datasource_id: string;
@@ -33,7 +33,7 @@ export interface EngineRun {
 	progress: number;
 	current_step: string | null;
 	triggered_by: string | null;
-	execution_entries: EngineRunExecutionEntry[];
+	execution_entries: ComputeWorkerRunExecutionEntry[];
 }
 
 export interface ListEngineRunsParams {
@@ -58,7 +58,7 @@ function buildQueryString(params?: ListEngineRunsParams): string {
 	return str ? `?${str}` : '';
 }
 
-const inFlight = new Map<string, ResultAsync<EngineRun[], ApiError>>();
+const inFlight = new Map<string, ResultAsync<ComputeWorkerRun[], ApiError>>();
 
 function namespaceKey(): string {
 	if (!isNamespaceReady()) return '';
@@ -68,11 +68,11 @@ function namespaceKey(): string {
 export function listEngineRuns(
 	params?: ListEngineRunsParams,
 	signal?: AbortSignal
-): ResultAsync<EngineRun[], ApiError> {
+): ResultAsync<ComputeWorkerRun[], ApiError> {
 	const endpoint = `/v1/engine-runs${buildQueryString(params)}`;
-	if (signal) return apiRequest<EngineRun[]>(endpoint, { signal });
+	if (signal) return apiRequest<ComputeWorkerRun[]>(endpoint, { signal });
 	return shareInFlight(inFlight, `${namespaceKey()}:${endpoint}`, () =>
-		apiRequest<EngineRun[]>(endpoint)
+		apiRequest<ComputeWorkerRun[]>(endpoint)
 	);
 }
 

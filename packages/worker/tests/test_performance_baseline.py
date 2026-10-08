@@ -4,8 +4,8 @@ import uuid
 from unittest.mock import MagicMock, patch
 
 from runtime import compute_service
-from runtime.compute_engine import PolarsComputeEngine
 from runtime.compute_manager import ProcessManager
+from runtime.compute_worker import PolarsComputeWorker
 
 
 def _measure(func, *args, **kwargs):
@@ -38,7 +38,7 @@ def test_performance_baseline(sample_datasource):
         ],
     }
 
-    manager = ProcessManager(engine_factory=lambda engine_identity, config: PolarsComputeEngine(engine_identity.resource_id, config))
+    manager = ProcessManager(engine_factory=lambda engine_identity, config: PolarsComputeWorker(engine_identity.resource_id, config))
     internal_client = MagicMock()
     internal_client.create_engine_run.return_value = "run-1"
     internal_client.engine_run_state.return_value = {"result_json": {}}

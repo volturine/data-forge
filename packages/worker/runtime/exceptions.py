@@ -107,13 +107,13 @@ class StaleComputeInputError(ComputeError):
         )
 
 
-class EngineBusyError(ComputeError):
+class ComputeWorkerBusyError(ComputeError):
     def __init__(self, analysis_id: str | None = None):
         details = {"analysis_id": analysis_id} if analysis_id is not None else None
         super().__init__(message="Engine has an active job", error_code="ENGINE_BUSY", details=details)
 
 
-class EngineShutdownError(ComputeError):
+class ComputeWorkerShutdownError(ComputeError):
     def __init__(self, details: dict | None = None):
         super().__init__(message="Engine shutdown requested", error_code="JOB_CANCELLED", details=details)
 

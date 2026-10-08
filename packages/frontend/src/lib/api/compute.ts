@@ -1,8 +1,8 @@
 import type {
-	EngineDefaults,
-	EngineResourceConfig,
-	EngineScope,
-	EngineStatusResponse
+	ComputeWorkerDefaults,
+	ComputeWorkerResourceConfig,
+	ComputeWorkerScope,
+	ComputeWorkerStatusResponse
 } from '$lib/types/compute';
 import type {
 	DownloadCommandJson as ProtocolDownloadCommandJson,
@@ -40,7 +40,7 @@ export interface StepPreviewRequest {
 	tab_id?: OptionalStringField<ProtocolStepPreviewCommandJson, 'tabId'>;
 	row_limit?: NumberField<ProtocolStepPreviewCommandJson, 'rowLimit'>;
 	page?: NumberField<ProtocolStepPreviewCommandJson, 'page'>;
-	resource_config?: EngineResourceConfig | null;
+	resource_config?: ComputeWorkerResourceConfig | null;
 }
 
 export interface StepPreviewResponse {
@@ -60,7 +60,7 @@ const schemaInFlight = new Map<string, ResultAsync<StepSchemaResponse, ApiError>
 const schemaSignalInFlight = new Map<string, SharedInFlight<StepSchemaResponse, ApiError>>();
 const rowCountInFlight = new Map<string, ResultAsync<StepRowCountResponse, ApiError>>();
 const rowCountSignalInFlight = new Map<string, SharedInFlight<StepRowCountResponse, ApiError>>();
-const spawnInFlight = new Map<string, ResultAsync<EngineStatusResponse, ApiError>>();
+const spawnInFlight = new Map<string, ResultAsync<ComputeWorkerStatusResponse, ApiError>>();
 const shutdownInFlight = new Map<string, ResultAsync<void, ApiError>>();
 
 export interface ComputeRequestOptions {
@@ -108,13 +108,13 @@ export function previewStepData(
 
 export function spawnAnalysisEngine(
 	analysisId: string,
-	resourceConfig?: EngineResourceConfig
-): ResultAsync<EngineStatusResponse, ApiError> {
+	resourceConfig?: ComputeWorkerResourceConfig
+): ResultAsync<ComputeWorkerStatusResponse, ApiError> {
 	const body = resourceConfig ? JSON.stringify({ resource_config: resourceConfig }) : undefined;
 	const endpoint = `/v1/compute/engine/spawn/analysis/${analysisId}`;
 	return shareInFlight(spawnInFlight, requestKey(endpoint, body), () =>
 		computeActivityStore.track(
-			apiRequest<EngineStatusResponse>(endpoint, {
+			apiRequest<ComputeWorkerStatusResponse>(endpoint, {
 				method: 'POST',
 				body
 			})
@@ -134,7 +134,7 @@ export function shutdownAnalysisEngine(analysisId: string): ResultAsync<void, Ap
 }
 
 export function shutdownEngineByIdentity(
-	scope: EngineScope,
+	scope: ComputeWorkerScope,
 	resourceId: string
 ): ResultAsync<void, ApiError> {
 	const segment =
@@ -155,8 +155,8 @@ export function shutdownEngineByIdentity(
 
 export function getEngineDefaults(
 	options?: ComputeRequestOptions
-): ResultAsync<EngineDefaults, ApiError> {
-	return apiRequest<EngineDefaults>(
+): ResultAsync<ComputeWorkerDefaults, ApiError> {
+	return apiRequest<ComputeWorkerDefaults>(
 		'/v1/compute/defaults',
 		options?.signal ? { signal: options.signal } : undefined
 	);
@@ -290,14 +290,14 @@ export interface BuildRequest {
 
 export type EnginesSnapshotMessage = {
 	type: 'snapshot';
-	engines: EngineStatusResponse[];
+	engines: ComputeWorkerStatusResponse[];
 	total: number;
 };
 export type EnginesErrorMessage = { type: 'error'; error: string; status_code?: number };
 export type EnginesStreamMessage = EnginesSnapshotMessage | EnginesErrorMessage;
 
 export interface EnginesStreamCallbacks {
-	onSnapshot: (engines: EngineStatusResponse[]) => void;
+	onSnapshot: (engines: ComputeWorkerStatusResponse[]) => void;
 	onError: (error: string) => void;
 	onClose: () => void;
 }
@@ -311,7 +311,7 @@ function parseEnginesStreamMessage(data: string): EnginesStreamMessage | null {
 }
 
 export function connectEnginesStream(callbacks: EnginesStreamCallbacks): StreamHandle {
-	return createStream<EngineStatusResponse[]>('/v1/compute/ws/engines', {
+	return createStream<ComputeWorkerStatusResponse[]>('/v1/compute/ws/engines', {
 		parse: parseEnginesStreamMessage,
 		isSnapshot: (msg) => msg.type === 'snapshot',
 		extractSnapshot: (msg) => (msg as EnginesSnapshotMessage).engines,

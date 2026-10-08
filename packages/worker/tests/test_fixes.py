@@ -23,17 +23,17 @@ from operations.notification import NotificationHandler, NotificationParams
 from operations.plot import ChartHandler, ChartParams, compute_chart_data
 from operations.step_converter import analysis_pipeline_to_execution_payload
 from runtime import compute_request_runtime, compute_service, datasource_delete_runtime, worker_runtime_client
-from runtime.compute_engine import PolarsComputeEngine
 from runtime.compute_manager import (
-    ENGINE_ADMISSION_PRIORITY_DATASOURCE,
-    ENGINE_ADMISSION_PRIORITY_INTERACTIVE,
-    ENGINE_ADMISSION_PRIORITY_LIFECYCLE,
+    COMPUTE_WORKER_ADMISSION_PRIORITY_DATASOURCE,
+    COMPUTE_WORKER_ADMISSION_PRIORITY_INTERACTIVE,
+    COMPUTE_WORKER_ADMISSION_PRIORITY_LIFECYCLE,
     ProcessManager,
 )
 from runtime.compute_service import ExportDatasourceResult
+from runtime.compute_worker import PolarsComputeWorker
 from runtime.domain.compute import schemas as compute_schemas
-from runtime.domain.compute.base import EngineStatusInfo
-from runtime.domain.engine_runs.schemas import EngineRunResponseSchema
+from runtime.domain.compute.base import ComputeWorkerStatusInfo
+from runtime.domain.engine_runs.schemas import ComputeWorkerRunResponseSchema
 from runtime.executors import (
     CLEANUP_EXECUTOR,
     COMPUTE_EXECUTOR,
@@ -53,7 +53,7 @@ from runtime.worker_runtime_client import BackendWorkerRpcError, PendingDatasour
 def test_datasource_schema_publication_carries_metadata_revision_and_claim(monkeypatch) -> None:
     from contextlib import contextmanager
 
-    from runtime.domain.compute.result import EngineResult
+    from runtime.domain.compute.result import ComputeWorkerResult
 
     schema_info = datasource_pb2.SchemaInfo(columns=[datasource_pb2.ColumnSchema(name="value", dtype="Int64", nullable=True)])
     published: dict[str, object] = {}
@@ -82,7 +82,7 @@ def test_datasource_schema_publication_carries_metadata_revision_and_claim(monke
             return "engine-job"
 
         def get_result(self, **_kwargs):
-            return EngineResult(job_id="engine-job", data={"columns": [{"name": "value", "dtype": "Int64", "nullable": True}]}, error=None)
+            return ComputeWorkerResult(job_id="engine-job", data={"columns": [{"name": "value", "dtype": "Int64", "nullable": True}]}, error=None)
 
     class Manager:
         @contextmanager
@@ -521,15 +521,15 @@ async def test_cancelled_compute_keeps_its_slot_until_thread_stops() -> None:
 
 
 def test_engine_admission_prioritizes_shared_datasource_preview() -> None:
-    datasource_identity = compute_pb2.EngineIdentity(
-        scope=enums_pb2.ENGINE_SCOPE_DATASOURCE_PREVIEW,
-        reuse_policy=enums_pb2.ENGINE_REUSE_POLICY_SHARED,
+    datasource_identity = compute_pb2.ComputeWorkerIdentity(
+        scope=enums_pb2.COMPUTE_WORKER_SCOPE_DATASOURCE_PREVIEW,
+        reuse_policy=enums_pb2.COMPUTE_WORKER_REUSE_POLICY_SHARED,
         datasource_id="datasource-rid",
         resource_id="datasource-rid",
     )
-    analysis_identity = compute_pb2.EngineIdentity(
-        scope=enums_pb2.ENGINE_SCOPE_ANALYSIS_INTERACTIVE,
-        reuse_policy=enums_pb2.ENGINE_REUSE_POLICY_SHARED,
+    analysis_identity = compute_pb2.ComputeWorkerIdentity(
+        scope=enums_pb2.COMPUTE_WORKER_SCOPE_ANALYSIS_INTERACTIVE,
+        reuse_policy=enums_pb2.COMPUTE_WORKER_REUSE_POLICY_SHARED,
         analysis_id="analysis-rid",
         resource_id="analysis-rid",
     )
@@ -539,21 +539,21 @@ def test_engine_admission_prioritizes_shared_datasource_preview() -> None:
             enums_pb2.COMPUTE_REQUEST_KIND_PREVIEW,
             datasource_identity,
         )
-        == ENGINE_ADMISSION_PRIORITY_DATASOURCE
+        == COMPUTE_WORKER_ADMISSION_PRIORITY_DATASOURCE
     )
     assert (
         compute_request_runtime._engine_admission_priority(
             enums_pb2.COMPUTE_REQUEST_KIND_PREVIEW,
             analysis_identity,
         )
-        == ENGINE_ADMISSION_PRIORITY_INTERACTIVE
+        == COMPUTE_WORKER_ADMISSION_PRIORITY_INTERACTIVE
     )
     assert (
         compute_request_runtime._engine_admission_priority(
             enums_pb2.COMPUTE_REQUEST_KIND_SPAWN_ENGINE,
             analysis_identity,
         )
-        == ENGINE_ADMISSION_PRIORITY_LIFECYCLE
+        == COMPUTE_WORKER_ADMISSION_PRIORITY_LIFECYCLE
     )
 
 
@@ -603,8 +603,8 @@ def test_engine_run_execution_entry_proto_uses_typed_fields() -> None:
         }
     )
 
-    assert isinstance(entry, compute_pb2.EngineRunExecutionEntry)
-    assert entry.category == enums_pb2.ENGINE_RUN_EXECUTION_CATEGORY_STEP
+    assert isinstance(entry, compute_pb2.ComputeWorkerRunExecutionEntry)
+    assert entry.category == enums_pb2.COMPUTE_WORKER_RUN_EXECUTION_CATEGORY_STEP
     assert entry.step_type == enums_pb2.STEP_TYPE_FILTER
     assert entry.duration_ms == 12.5
     assert entry.share_pct == 100.0
@@ -670,7 +670,7 @@ def test_engine_run_update_proto_uses_typed_patch_fields() -> None:
         }
     )
 
-    assert update.status == enums_pb2.ENGINE_RUN_STATUS_SUCCESS
+    assert update.status == enums_pb2.COMPUTE_WORKER_RUN_STATUS_SUCCESS
     assert update.HasField("result_json")
     assert update.HasField("completed_at")
     assert update.step_timings.values["filter"] == 2.5
@@ -681,7 +681,7 @@ def test_engine_run_update_proto_uses_typed_patch_fields() -> None:
 
 def test_engine_run_finalization_uses_the_existing_typed_update() -> None:
     finalization = worker_runtime_client._engine_run_finalization_proto(
-        worker_runtime_client.EngineRunFinalization(
+        worker_runtime_client.ComputeWorkerRunFinalization(
             run_id="run-1",
             fields={
                 "status": "success",
@@ -693,14 +693,14 @@ def test_engine_run_finalization_uses_the_existing_typed_update() -> None:
 
     assert finalization.run_id == "run-1"
     assert finalization.merge_result is False
-    assert finalization.update.status == enums_pb2.ENGINE_RUN_STATUS_SUCCESS
+    assert finalization.update.status == enums_pb2.COMPUTE_WORKER_RUN_STATUS_SUCCESS
     assert finalization.update.result_json.fields["row_count"].number_value == 5
     assert finalization.update.HasField("completed_at")
 
 
 def test_engine_status_result_proto_uses_typed_snapshot_fields() -> None:
     status = worker_runtime_client._engine_status_result_proto(
-        EngineStatusInfo(
+        ComputeWorkerStatusInfo(
             analysis_id="analysis-1",
             resource_id="datasource-1",
             status="healthy",
@@ -726,11 +726,11 @@ def test_engine_status_result_proto_uses_typed_snapshot_fields() -> None:
         )
     )
 
-    assert status.status == enums_pb2.ENGINE_STATUS_HEALTHY
+    assert status.status == enums_pb2.COMPUTE_WORKER_STATUS_HEALTHY
     assert status.resource_config.max_threads == 2
     assert status.effective_resources.max_memory_mb == 1024
     assert status.defaults.streaming_chunk_size == 500
-    assert status.scope == enums_pb2.ENGINE_SCOPE_DATASOURCE_PREVIEW
+    assert status.scope == enums_pb2.COMPUTE_WORKER_SCOPE_DATASOURCE_PREVIEW
 
 
 def _engine_identity_payload(identity) -> dict[str, str]:
@@ -748,19 +748,19 @@ def _engine_identity_payload(identity) -> dict[str, str]:
     return payload
 
 
-def _analysis_identity(analysis_id: str) -> compute_pb2.EngineIdentity:
-    return compute_pb2.EngineIdentity(
-        scope=enums_pb2.ENGINE_SCOPE_ANALYSIS_INTERACTIVE,
-        reuse_policy=enums_pb2.ENGINE_REUSE_POLICY_SHARED,
+def _analysis_identity(analysis_id: str) -> compute_pb2.ComputeWorkerIdentity:
+    return compute_pb2.ComputeWorkerIdentity(
+        scope=enums_pb2.COMPUTE_WORKER_SCOPE_ANALYSIS_INTERACTIVE,
+        reuse_policy=enums_pb2.COMPUTE_WORKER_REUSE_POLICY_SHARED,
         analysis_id=analysis_id,
         resource_id=analysis_id,
     )
 
 
-def _datasource_preview_identity(datasource_id: str) -> compute_pb2.EngineIdentity:
-    return compute_pb2.EngineIdentity(
-        scope=enums_pb2.ENGINE_SCOPE_DATASOURCE_PREVIEW,
-        reuse_policy=enums_pb2.ENGINE_REUSE_POLICY_SHARED,
+def _datasource_preview_identity(datasource_id: str) -> compute_pb2.ComputeWorkerIdentity:
+    return compute_pb2.ComputeWorkerIdentity(
+        scope=enums_pb2.COMPUTE_WORKER_SCOPE_DATASOURCE_PREVIEW,
+        reuse_policy=enums_pb2.COMPUTE_WORKER_REUSE_POLICY_SHARED,
         datasource_id=datasource_id,
         resource_id=datasource_id,
     )
@@ -1038,7 +1038,7 @@ async def test_compute_waiting_for_worker_admission_does_not_hold_execution_perm
     class _Manager:
         async def await_engine_request_admission(self, _identity, *, namespace, priority):
             assert namespace == "tenant-a"
-            assert priority == compute_request_runtime.ENGINE_ADMISSION_PRIORITY_INTERACTIVE
+            assert priority == compute_request_runtime.COMPUTE_WORKER_ADMISSION_PRIORITY_INTERACTIVE
             admission_started.set()
             await release_admission.wait()
             return True
@@ -1235,7 +1235,7 @@ async def test_compute_capacity_race_releases_permit_before_rejoining_admission(
         del kwargs
         executions += 1
         if executions == 1:
-            raise compute_request_runtime.EngineCapacityFull("lost admission race")
+            raise compute_request_runtime.ComputeWorkerCapacityFull("lost admission race")
         function(*args)
 
     async def wait_after_capacity_race(_manager) -> None:
@@ -1369,7 +1369,7 @@ async def test_compute_request_lease_loss_cancels_shared_job_without_stopping_wo
     class _Manager:
         async def await_engine_request_admission(self, _identity, *, namespace, priority):
             assert namespace == "tenant-a"
-            assert priority == compute_request_runtime.ENGINE_ADMISSION_PRIORITY_INTERACTIVE
+            assert priority == compute_request_runtime.COMPUTE_WORKER_ADMISSION_PRIORITY_INTERACTIVE
             return False
 
         def release_engine_request(self, _identity, *, namespace):
@@ -1395,7 +1395,7 @@ async def test_compute_request_lease_loss_cancels_shared_job_without_stopping_wo
             cancelled.set()
 
         def shutdown_engine_after_request_lease_loss(self, identity, *, namespace):
-            assert identity.reuse_policy == enums_pb2.ENGINE_REUSE_POLICY_SHARED
+            assert identity.reuse_policy == enums_pb2.COMPUTE_WORKER_REUSE_POLICY_SHARED
             assert namespace == "tenant-a"
 
     async def lose_lease(_claimed, *, stop_event: asyncio.Event, lease_confirmed: asyncio.Event) -> None:
@@ -1422,7 +1422,7 @@ async def test_compute_request_lease_loss_cancels_shared_job_without_stopping_wo
     )
     identity = compute_request_runtime._engine_identity_for_claimed(claimed)
     assert identity is not None
-    assert identity.reuse_policy == enums_pb2.ENGINE_REUSE_POLICY_SHARED
+    assert identity.reuse_policy == enums_pb2.COMPUTE_WORKER_REUSE_POLICY_SHARED
 
     with pytest.raises(compute_request_runtime.ComputeRequestLeaseLost, match="lease lost"):
         await asyncio.wait_for(
@@ -1917,7 +1917,7 @@ async def test_terminal_compute_publication_wins_late_lease_loss(monkeypatch) ->
     class _Manager:
         async def await_engine_request_admission(self, _identity, *, namespace, priority):
             assert namespace == "tenant-a"
-            assert priority == compute_request_runtime.ENGINE_ADMISSION_PRIORITY_INTERACTIVE
+            assert priority == compute_request_runtime.COMPUTE_WORKER_ADMISSION_PRIORITY_INTERACTIVE
             return False
 
         def release_spawn_admission(self, _identity, *, namespace: str, owned: bool) -> None:
@@ -2037,7 +2037,7 @@ def test_shutdown_compute_request_removes_active_engine_and_emits_empty_snapshot
     monkeypatch.setattr(compute_request_runtime, "worker_runtime_client", lambda: _Client())
 
     manager = ProcessManager(engine_factory=lambda _identity, _resource_config: cast(Any, engine), on_snapshot=snapshots.append)
-    manager.spawn_engine(identity)
+    manager.spawn_compute_worker(identity)
     assert manager.get_engine(identity) is engine
     claimed = compute_request_runtime.ClaimedComputeRequest(
         id="req-1",
@@ -2408,7 +2408,7 @@ async def test_run_analysis_build_stream_shuts_down_build_engine_after_completio
 
 
 # ---------------------------------------------------------------------------
-# EngineRunResponseSchema.progress default
+# ComputeWorkerRunResponseSchema.progress default
 # ---------------------------------------------------------------------------
 
 
@@ -2432,7 +2432,7 @@ class TestEngineRunProgressDefault:
             "query_plan": None,
             "current_step": None,
         }
-        schema = EngineRunResponseSchema.model_validate(data)
+        schema = ComputeWorkerRunResponseSchema.model_validate(data)
         assert schema.progress == 0.0
 
     def test_progress_explicit_value(self):
@@ -2454,7 +2454,7 @@ class TestEngineRunProgressDefault:
             "progress": 0.75,
             "current_step": "filter",
         }
-        schema = EngineRunResponseSchema.model_validate(data)
+        schema = ComputeWorkerRunResponseSchema.model_validate(data)
         assert schema.progress == 0.75
 
 
@@ -3257,7 +3257,7 @@ class TestStepTimingLabels:
     def test_missing_object_store_metadata_is_datasource_metadata_missing(self):
         error = RuntimeError("AWS Error NO_SUCH_KEY during GetObject operation: The specified key does not exist.")
 
-        error_kind, error_details = PolarsComputeEngine._classify_engine_error(error)
+        error_kind, error_details = PolarsComputeWorker._classify_engine_error(error)
 
         assert error_kind == "datasource_metadata_missing"
         assert error_details == {}
@@ -3282,7 +3282,7 @@ class TestStepTimingLabels:
                     "depends_on": [],
                 },
             ]
-            _, timings, _plan_frames, _read_duration_ms = PolarsComputeEngine._build_pipeline(config, steps, "job-1")
+            _, timings, _plan_frames, _read_duration_ms = PolarsComputeWorker._build_pipeline(config, steps, "job-1")
             assert "select" in timings
             assert "id-abc123" not in timings
         finally:
@@ -3306,7 +3306,7 @@ class TestStepTimingLabels:
                     "depends_on": ["id-1"],
                 },
             ]
-            _, timings, _plan_frames, _read_duration_ms = PolarsComputeEngine._build_pipeline(config, steps, "job-2")
+            _, timings, _plan_frames, _read_duration_ms = PolarsComputeWorker._build_pipeline(config, steps, "job-2")
             assert "select" in timings
             assert "select_2" in timings
         finally:

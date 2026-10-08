@@ -203,7 +203,7 @@ async def test_engine_shutdown_creates_uses_and_closes_session_in_its_db_thread(
     namespace_token = set_namespace_context('shutdown-test')
     try:
         await compute_routes._shutdown_engine_identity(
-            compute_pb2.EngineIdentity(resource_id='analysis-1'),
+            compute_pb2.ComputeWorkerIdentity(resource_id='analysis-1'),
             cast(Any, object()),
             _AvailableRuntimeProbe(),
         )
@@ -312,7 +312,7 @@ class _StubManager:
             status['analysis_id'] = identity.analysis_id
         return status
 
-    def spawn_engine(self, identity, resource_config: dict | None = None) -> None:
+    def spawn_compute_worker(self, identity, resource_config: dict | None = None) -> None:
         self.spawn_calls.append((self._identity_key(identity), resource_config))
 
     def restart_engine_with_config(self, identity, resource_config: dict) -> None:
@@ -328,7 +328,7 @@ async def test_override_engine_lifecycle_runs_outside_event_loop(monkeypatch) ->
     operation_threads: list[int] = []
 
     class Manager:
-        def spawn_engine(self, *_args, **_kwargs) -> None:
+        def spawn_compute_worker(self, *_args, **_kwargs) -> None:
             operation_threads.append(threading.get_ident())
 
         def get_engine_status(self, _identity):
@@ -347,9 +347,9 @@ async def test_override_engine_lifecycle_runs_outside_event_loop(monkeypatch) ->
 
     manager = Manager()
     monkeypatch.setattr(compute_routes, '_override_manager', lambda _request: manager)
-    identity = compute_pb2.EngineIdentity(
-        scope=enums_pb2.ENGINE_SCOPE_ANALYSIS_INTERACTIVE,
-        reuse_policy=enums_pb2.ENGINE_REUSE_POLICY_SHARED,
+    identity = compute_pb2.ComputeWorkerIdentity(
+        scope=enums_pb2.COMPUTE_WORKER_SCOPE_ANALYSIS_INTERACTIVE,
+        reuse_policy=enums_pb2.COMPUTE_WORKER_REUSE_POLICY_SHARED,
         analysis_id='analysis-1',
         resource_id='analysis-1',
     )
@@ -531,7 +531,7 @@ def test_shutdown_engine_returns_not_found_for_unknown_identity(client) -> None:
 
 
 def test_shutdown_engine_queues_worker_shutdown_without_waiting(client, monkeypatch) -> None:
-    shutdown_calls: list[compute_pb2.EngineIdentity] = []
+    shutdown_calls: list[compute_pb2.ComputeWorkerIdentity] = []
 
     def request_shutdown(session, *, identity, runtime_probe) -> None:
         del session, runtime_probe
