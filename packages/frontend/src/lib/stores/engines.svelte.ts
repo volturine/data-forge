@@ -22,6 +22,7 @@ export class EnginesStore {
 	private connection: { close: () => void } | null = null;
 	private snapshotConnection: { close: () => void } | null = null;
 	private snapshotGeneration = 0;
+	private snapshotRequested = false;
 	private reconnect = new ReconnectionManager(RECONNECT_DELAY_MS);
 	private shouldReconnect = false;
 	private subscribers = 0;
@@ -30,8 +31,17 @@ export class EnginesStore {
 	count = $derived(this.engines.length);
 
 	loadSnapshotOnce(): void {
-		if (this.shouldReconnect || this.snapshotConnection || this.status === 'connected') return;
+		if (this.shouldReconnect || this.snapshotConnection || this.snapshotRequested) return;
+		this.snapshotRequested = true;
+		this.openSnapshotRequest();
+	}
 
+	refreshSnapshot(): void {
+		if (this.shouldReconnect || this.snapshotConnection) return;
+		this.openSnapshotRequest();
+	}
+
+	private openSnapshotRequest(): void {
 		const generation = ++this.snapshotGeneration;
 		let receivedSnapshot = false;
 		let failed = false;
@@ -60,6 +70,7 @@ export class EnginesStore {
 			onError: (message) => {
 				if (this.snapshotGeneration !== generation) return;
 				failed = true;
+				this.snapshotRequested = false;
 				this.loading = false;
 				this.error = message;
 				this.status = 'error';
@@ -69,6 +80,7 @@ export class EnginesStore {
 			onClose: () => {
 				clearConnection();
 				if (this.snapshotGeneration !== generation || receivedSnapshot || failed) return;
+				this.snapshotRequested = false;
 				this.loading = false;
 				this.status = 'disconnected';
 			}
@@ -156,6 +168,7 @@ export class EnginesStore {
 
 	reset(): void {
 		this.cancelSnapshot();
+		this.snapshotRequested = false;
 		this.holdUntilEmpty = false;
 		this.shouldReconnect = false;
 		this.subscribers = 0;
@@ -189,6 +202,7 @@ export class EnginesStore {
 				if (/not authenticated/i.test(message)) {
 					this.holdUntilEmpty = false;
 					this.shouldReconnect = false;
+					this.snapshotRequested = false;
 					this.clearReconnectTimer();
 				}
 				this.loading = false;
@@ -208,6 +222,7 @@ export class EnginesStore {
 	}
 
 	private applySnapshot(engines: EngineStatusResponse[]): void {
+		this.snapshotRequested = true;
 		for (const key of this.shuttingDown) {
 			if (engines.some((engine) => engineIdentityKey(engine) === key)) continue;
 			this.shuttingDown.delete(key);
