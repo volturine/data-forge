@@ -164,6 +164,10 @@ describe('EnginesStore', () => {
 		const firstStream = mockStreamConnection();
 		store.loadSnapshotOnce();
 		firstStream.emitSnapshot([]);
+		store.refreshSnapshot();
+		expect(mockConnectEnginesStream).toHaveBeenCalledOnce();
+
+		vi.advanceTimersByTime(15_000);
 
 		const refreshStream = mockStreamConnection();
 		store.refreshSnapshot();
@@ -174,6 +178,19 @@ describe('EnginesStore', () => {
 		expect(store.engines).toEqual(engines);
 		expect(store.isStreaming).toBe(false);
 		expect(refreshStream.close).toHaveBeenCalledOnce();
+	});
+
+	test('refreshSnapshot leaves engines untouched while the live stream is active', () => {
+		const stream = mockStreamConnection();
+		const engines = [makeEngine({ analysis_id: 'a-1', resource_id: 'a-1' })];
+
+		store.startStream();
+		stream.emitSnapshot(engines);
+		store.refreshSnapshot();
+
+		expect(mockConnectEnginesStream).toHaveBeenCalledOnce();
+		expect(store.engines).toEqual(engines);
+		expect(store.isStreaming).toBe(true);
 	});
 
 	test('snapshot updates engines and connection state', () => {
