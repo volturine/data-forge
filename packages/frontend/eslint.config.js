@@ -50,13 +50,13 @@ export default defineConfig(
 				'error',
 				{
 					selector:
-						"CallExpression[callee.type='MemberExpression'][callee.object.name='request'][callee.property.name=/^(post|put|patch|delete)$/]",
+						"CallExpression[callee.type='MemberExpression'][callee.property.name=/^(post|put|patch|delete)$/]:matches([callee.object.type='Identifier'][callee.object.name='request'], [callee.object.type='MemberExpression'][callee.object.property.name='request'])",
 					message:
 						'Use tests/utils/api.ts for API setup and teardown; exercise the behavior under test through the UI.'
 				},
 				{
 					selector:
-						"CallExpression[callee.type='MemberExpression'][callee.property.name=/^(post|put|patch|delete)$/][callee.object.type='MemberExpression'][callee.object.property.name='request'][callee.object.object.type='CallExpression'][callee.object.object.callee.property.name='context'][callee.object.object.callee.object.name='page']",
+						"CallExpression[callee.property.name='fetch']:matches([callee.object.type='Identifier'][callee.object.name='request'], [callee.object.type='MemberExpression'][callee.object.property.name='request']) > ObjectExpression > Property[key.name='method']:not([value.type='Literal'][value.value=/^GET$/i])",
 					message:
 						'Use tests/utils/api.ts for API setup and teardown; exercise the behavior under test through the UI.'
 				}

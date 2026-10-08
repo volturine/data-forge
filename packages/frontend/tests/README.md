@@ -9,7 +9,8 @@ Rules:
 - Setup and teardown may use the helpers in `tests/utils/api.ts` (or UI cleanup
   helpers).
 - Exercise the behavior under test through the UI. Do not mutate the resource
-  under test through the API between the user action and its assertion.
+  under test through the API between the user action and its assertion,
+  including non-GET `request.fetch` calls.
 - The runtime-contract probes named above are explicitly exempt because their
   purpose is to test the HTTP, runtime, and isolation contracts directly.
 - The required `tests/concurrency.test.ts` probe opens 50 authenticated tabs
