@@ -7,6 +7,7 @@ import type {
 import type {
 	BuildLogLevelJson,
 	BuildTabStatusJson,
+	ComputeWorkerRunExecutionCategoryJson,
 	ComputeWorkerRunKindJson
 } from '$lib/protocol/dataforge_protocol/enums_pb';
 import type { BuildEvent, BuildTabResult } from '$lib/types/build-stream';
@@ -104,10 +105,24 @@ function optionalInt64(value: unknown): number | null {
 	return null;
 }
 
-function engineRunKindToken(
-	value: ComputeWorkerRunKindJson | undefined
-): ComputeWorkerRunKind | null {
-	return value === undefined ? null : (COMPUTE_WORKER_RUN_KIND_JSON_TOKENS[value] ?? null);
+function currentRunEnumJsonName(
+	value: string,
+	legacyPrefix: string,
+	currentPrefix: string
+): string {
+	return value.startsWith(legacyPrefix)
+		? `${currentPrefix}${value.slice(legacyPrefix.length)}`
+		: value;
+}
+
+function engineRunKindToken(value: string | undefined): ComputeWorkerRunKind | null {
+	if (value === undefined) return null;
+	const currentValue = currentRunEnumJsonName(
+		value,
+		'ENGINE_RUN_KIND_',
+		'COMPUTE_WORKER_RUN_KIND_'
+	);
+	return COMPUTE_WORKER_RUN_KIND_JSON_TOKENS[currentValue as ComputeWorkerRunKindJson] ?? null;
 }
 
 function buildTabStatusToken(value: BuildTabStatusJson | undefined): BuildTabStatus | null {
@@ -123,7 +138,16 @@ function stepTypeToken(kind: BuildStepKindJson | undefined): string | null {
 		return STEP_TYPE_JSON_TOKENS[kind.pipeline] ?? null;
 	}
 	if (kind?.executionCategory !== undefined) {
-		return COMPUTE_WORKER_RUN_EXECUTION_CATEGORY_JSON_TOKENS[kind.executionCategory] ?? null;
+		const currentValue = currentRunEnumJsonName(
+			kind.executionCategory,
+			'ENGINE_RUN_EXECUTION_CATEGORY_',
+			'COMPUTE_WORKER_RUN_EXECUTION_CATEGORY_'
+		);
+		return (
+			COMPUTE_WORKER_RUN_EXECUTION_CATEGORY_JSON_TOKENS[
+				currentValue as ComputeWorkerRunExecutionCategoryJson
+			] ?? null
+		);
 	}
 	return null;
 }

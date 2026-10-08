@@ -59,6 +59,29 @@ describe('protocol build stream conversion', () => {
 		});
 	});
 
+	test('accepts legacy run enum JSON names while the API rename is deferred', () => {
+		const legacyProtocolEvent = {
+			context: { ...BASE_CONTEXT, currentKind: 'ENGINE_RUN_KIND_BUILD' },
+			namespace: 'default',
+			stepCompleted: {
+				buildStepIndex: 1,
+				stepIndex: 0,
+				stepId: 'step-1',
+				stepName: 'Read',
+				stepKind: { executionCategory: 'ENGINE_RUN_EXECUTION_CATEGORY_READ' },
+				durationMs: 125,
+				totalSteps: 1
+			}
+		} as unknown as BuildEventJson;
+
+		expect(protocolBuildEventToBuildEvent(legacyProtocolEvent)).toMatchObject({
+			type: 'step_complete',
+			current_kind: 'build',
+			step_type: 'read',
+			duration_ms: 125
+		});
+	});
+
 	test('rejects legacy flat build event JSON', () => {
 		expect(
 			isProtocolBuildEvent({
