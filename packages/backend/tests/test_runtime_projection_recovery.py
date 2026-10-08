@@ -13,9 +13,9 @@ from fastapi import HTTPException, WebSocket, WebSocketDisconnect
 from sqlmodel import Session
 
 from backend_core import runtime_notifications
+from backend_core.compute_worker_live import ComputeWorkerRegistry
 from backend_core.domain.build_runs.live import BuildNotification, BuildNotificationHub
 from backend_core.domain.compute.schemas import EngineListSnapshotMessage
-from backend_core.engine_live import EngineRegistry
 from backend_core.namespace import get_namespace
 from backend_core.persistence.locks.models import ResourceLock
 from modules.compute import routes as compute_routes
@@ -91,8 +91,8 @@ async def test_build_detail_registers_before_snapshot_and_replays_notification_r
 
 @pytest.mark.asyncio
 async def test_engine_stream_registers_before_snapshot_and_refreshes_on_racing_recovery(monkeypatch, projection_socket) -> None:
-    registry = EngineRegistry()
-    monkeypatch.setattr(compute_routes, 'engine_registry', registry)
+    registry = ComputeWorkerRegistry()
+    monkeypatch.setattr(compute_routes, 'compute_worker_registry', registry)
     snapshots = 0
 
     async def snapshot(_socket: WebSocket) -> str:
@@ -153,7 +153,7 @@ async def test_build_recovery_batches_only_active_exact_ids_and_retains_a_newer_
 
 @pytest.mark.asyncio
 async def test_engine_recovery_during_initial_snapshot_retains_before_read_version_and_one_load_per_namespace() -> None:
-    registry = EngineRegistry()
+    registry = ComputeWorkerRegistry()
     before = EngineListSnapshotMessage(engines=[], total=0)
     after = EngineListSnapshotMessage(engines=[], total=1)
     started = asyncio.Event()
@@ -488,5 +488,5 @@ async def test_main_api_listener_recovery_wiring_has_mandatory_projection_callba
     monkeypatch.setattr(main, 'recover_runtime_notifications', recover)
     await main._recover_api_notifications()
     recover.assert_awaited_once_with(
-        refresh_builds=main.refresh_build_projections, refresh_engines=main.engine_registry.recover_active, refresh_locks=main.refresh_lock_projections
+        refresh_builds=main.refresh_build_projections, refresh_engines=main.compute_worker_registry.recover_active, refresh_locks=main.refresh_lock_projections
     )

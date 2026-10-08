@@ -10,7 +10,7 @@ from backend_core import (
 )
 from backend_core.database import run_db, run_settings_db
 from backend_core.domain.build_jobs.models import BuildJobStatus
-from backend_core.domain.compute.base import EngineStatusInfo
+from backend_core.domain.compute.base import ComputeWorkerStatusInfo
 from backend_core.domain.runtime_workers.models import RuntimeWorkerKind
 from backend_core.namespace import namespace_paths
 
@@ -48,7 +48,7 @@ def test_runtime_overview_reports_runtime_state(client, monkeypatch) -> None:
         engine_instance_service.upsert_engine_status,
         worker_id='build-worker-1',
         namespace='default',
-        status=EngineStatusInfo(
+        status=ComputeWorkerStatusInfo(
             analysis_id='',
             resource_id='preview-ds',
             status='healthy',
@@ -74,7 +74,7 @@ def test_runtime_overview_reports_runtime_state(client, monkeypatch) -> None:
         engine_instance_service.upsert_engine_status,
         worker_id='build-worker-1',
         namespace='default',
-        status=EngineStatusInfo(
+        status=ComputeWorkerStatusInfo(
             analysis_id='',
             resource_id='build-live',
             status='healthy',

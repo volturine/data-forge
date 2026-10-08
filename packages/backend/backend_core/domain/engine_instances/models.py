@@ -36,20 +36,20 @@ class EngineInstanceStatus(ApiEnumValue):
 
 
 EngineInstanceStatus.STARTING = EngineInstanceStatus(
-    enums_pb2.ENGINE_INSTANCE_STATUS_STARTING, api_token('EngineInstanceStatus', enums_pb2.ENGINE_INSTANCE_STATUS_STARTING)
+    enums_pb2.COMPUTE_WORKER_INSTANCE_STATUS_STARTING, api_token('ComputeWorkerInstanceStatus', enums_pb2.COMPUTE_WORKER_INSTANCE_STATUS_STARTING)
 )
 EngineInstanceStatus.IDLE = EngineInstanceStatus(
-    enums_pb2.ENGINE_INSTANCE_STATUS_IDLE, api_token('EngineInstanceStatus', enums_pb2.ENGINE_INSTANCE_STATUS_IDLE)
+    enums_pb2.COMPUTE_WORKER_INSTANCE_STATUS_IDLE, api_token('ComputeWorkerInstanceStatus', enums_pb2.COMPUTE_WORKER_INSTANCE_STATUS_IDLE)
 )
 EngineInstanceStatus.RUNNING = EngineInstanceStatus(
-    enums_pb2.ENGINE_INSTANCE_STATUS_RUNNING, api_token('EngineInstanceStatus', enums_pb2.ENGINE_INSTANCE_STATUS_RUNNING)
+    enums_pb2.COMPUTE_WORKER_INSTANCE_STATUS_RUNNING, api_token('ComputeWorkerInstanceStatus', enums_pb2.COMPUTE_WORKER_INSTANCE_STATUS_RUNNING)
 )
 EngineInstanceStatus.STOPPING = EngineInstanceStatus(
-    enums_pb2.ENGINE_INSTANCE_STATUS_STOPPING, api_token('EngineInstanceStatus', enums_pb2.ENGINE_INSTANCE_STATUS_STOPPING)
+    enums_pb2.COMPUTE_WORKER_INSTANCE_STATUS_STOPPING, api_token('ComputeWorkerInstanceStatus', enums_pb2.COMPUTE_WORKER_INSTANCE_STATUS_STOPPING)
 )
 EngineInstanceStatus.STOPPED = EngineInstanceStatus(
-    enums_pb2.ENGINE_INSTANCE_STATUS_STOPPED, api_token('EngineInstanceStatus', enums_pb2.ENGINE_INSTANCE_STATUS_STOPPED)
+    enums_pb2.COMPUTE_WORKER_INSTANCE_STATUS_STOPPED, api_token('ComputeWorkerInstanceStatus', enums_pb2.COMPUTE_WORKER_INSTANCE_STATUS_STOPPED)
 )
 EngineInstanceStatus.FAILED = EngineInstanceStatus(
-    enums_pb2.ENGINE_INSTANCE_STATUS_FAILED, api_token('EngineInstanceStatus', enums_pb2.ENGINE_INSTANCE_STATUS_FAILED)
+    enums_pb2.COMPUTE_WORKER_INSTANCE_STATUS_FAILED, api_token('ComputeWorkerInstanceStatus', enums_pb2.COMPUTE_WORKER_INSTANCE_STATUS_FAILED)
 )

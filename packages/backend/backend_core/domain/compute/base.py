@@ -5,7 +5,7 @@ from typing import Any
 
 
 @dataclass(frozen=True, slots=True)
-class EngineStatusInfo:
+class ComputeWorkerStatusInfo:
     """Worker-reported engine snapshot fields persisted by the API process."""
 
     analysis_id: str

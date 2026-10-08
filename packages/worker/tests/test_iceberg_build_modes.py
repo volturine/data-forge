@@ -9,7 +9,7 @@ from pyiceberg.schema import Schema as IcebergSchema
 from pyiceberg.types import NestedField, StringType
 
 from runtime.compute_service import _schema_cache_payload_from_arrow, _sync_iceberg_schema, export_data
-from runtime.domain.compute.base import EngineResult
+from runtime.domain.compute.base import ComputeWorkerResult
 from runtime.namespace import namespace_paths
 from runtime.worker_runtime_client import ClaimedBuildJob
 
@@ -157,7 +157,7 @@ class TestBuildModeWiring:
         engine = MagicMock()
         engine.is_process_alive.return_value = True
         engine.export.return_value = "job-1"
-        engine.get_result.return_value = EngineResult(
+        engine.get_result.return_value = ComputeWorkerResult(
             job_id="job-1",
             data={"row_count": 1},
             error=None,

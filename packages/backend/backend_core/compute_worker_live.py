@@ -9,7 +9,7 @@ from backend_core.domain.compute import schemas
 from backend_core.websocket import serialize_json
 
 
-class EngineRegistry:
+class ComputeWorkerRegistry:
     def __init__(self) -> None:
         self._waiters: dict[str, list[asyncio.Future[str]]] = {}
         self._lock = asyncio.Lock()
@@ -233,10 +233,10 @@ class EngineRegistry:
             return str(current)
 
 
-registry = EngineRegistry()
+registry = ComputeWorkerRegistry()
 
 
-def load_engine_snapshot(session, *, namespace: str, defaults: dict[str, object]) -> schemas.EngineListSnapshotMessage:
+def load_compute_worker_snapshot(session, *, namespace: str, defaults: dict[str, object]) -> schemas.EngineListSnapshotMessage:
     rows = engine_instance_service.list_engine_projection(session, namespace=namespace)
     statuses = [schemas.EngineStatusSchema.model_validate(engine_instance_service.serialize_engine_instance(row, defaults=defaults)) for row in rows]
     return schemas.EngineListSnapshotMessage(engines=statuses, total=len(statuses))

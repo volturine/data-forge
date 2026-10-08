@@ -8,7 +8,7 @@ from sqlalchemy.exc import IntegrityError
 from sqlmodel import Session, select
 
 from backend_core import runtime_ipc, runtime_workers_service
-from backend_core.domain.compute.base import EngineStatusInfo
+from backend_core.domain.compute.base import ComputeWorkerStatusInfo
 from backend_core.domain.engine_instances.models import EngineInstanceStatus
 from backend_core.domain.runtime.events import RuntimePayloadKind
 from backend_core.domain.runtime_workers.models import RuntimeWorkerKind
@@ -66,7 +66,7 @@ def _lock_engine_snapshot(session: Session, *, worker_id: str, namespace: str) -
     session.execute(text('SELECT pg_advisory_xact_lock(:key)'), {'key': key})
 
 
-def _engine_status_projection(*, status: EngineStatusInfo, last_activity_at: datetime | None, stamp: datetime) -> dict[str, object]:
+def _engine_status_projection(*, status: ComputeWorkerStatusInfo, last_activity_at: datetime | None, stamp: datetime) -> dict[str, object]:
     return {
         'container_id': status.container_id,
         'image_digest': status.image_digest,
@@ -93,7 +93,7 @@ def _engine_status_projection(*, status: EngineStatusInfo, last_activity_at: dat
     }
 
 
-def _apply_engine_status(row: EngineInstance, *, status: EngineStatusInfo, stamp: datetime) -> None:
+def _apply_engine_status(row: EngineInstance, *, status: ComputeWorkerStatusInfo, stamp: datetime) -> None:
     projection = _engine_status_projection(status=status, last_activity_at=row.last_activity_at, stamp=stamp)
     changed = {field: value for field, value in projection.items() if getattr(row, field, None) != value}
     if not changed:
@@ -109,7 +109,7 @@ def _upsert_engine_status(
     *,
     worker_id: str,
     namespace: str,
-    status: EngineStatusInfo,
+    status: ComputeWorkerStatusInfo,
     now: datetime | None = None,
     commit: bool,
 ) -> EngineInstance:
@@ -167,17 +167,17 @@ def _upsert_engine_status(
     return row
 
 
-def upsert_engine_status(session: Session, *, worker_id: str, namespace: str, status: EngineStatusInfo, now: datetime | None = None) -> EngineInstance:
+def upsert_engine_status(session: Session, *, worker_id: str, namespace: str, status: ComputeWorkerStatusInfo, now: datetime | None = None) -> EngineInstance:
     """Persist one engine projection for callers that own a single update."""
     return _upsert_engine_status(session, worker_id=worker_id, namespace=namespace, status=status, now=now, commit=True)
 
 
-def persist_engine_snapshot(
+def persist_compute_worker_snapshot(
     session: Session,
     *,
     worker_id: str,
     namespace: str,
-    statuses: list[EngineStatusInfo],
+    statuses: list[ComputeWorkerStatusInfo],
     now: datetime | None = None,
     phase_timings: dict[str, float] | None = None,
 ) -> None:
@@ -223,13 +223,13 @@ def _persist_engine_snapshot_locked(
     *,
     worker_id: str,
     namespace: str,
-    statuses: list[EngineStatusInfo],
+    statuses: list[ComputeWorkerStatusInfo],
     now: datetime | None,
     phase_timings: dict[str, float] | None,
 ) -> None:
     stamp = now or _utcnow()
     phase_started = _start_snapshot_phase(phase_timings)
-    active_by_id: dict[str, EngineStatusInfo] = {}
+    active_by_id: dict[str, ComputeWorkerStatusInfo] = {}
     for status in statuses:
         scope = _required_identity_value(status.scope, 'scope')
         resource_id = _required_identity_value(status.resource_id, 'resource_id')

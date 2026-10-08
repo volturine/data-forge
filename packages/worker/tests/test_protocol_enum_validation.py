@@ -14,10 +14,10 @@ from dataforge_protocol import analysis_pb2, compute_pb2, enums_pb2
             idempotency_key="request-1",
             correlation_id="request-1",
         ),
-        compute_pb2.EngineStatusResult(
+        compute_pb2.ComputeWorkerStatusResult(
             resource_id="analysis-1",
-            status=enums_pb2.ENGINE_STATUS_HEALTHY,
-            scope=enums_pb2.ENGINE_SCOPE_UNSPECIFIED,
+            status=enums_pb2.COMPUTE_WORKER_STATUS_HEALTHY,
+            scope=enums_pb2.COMPUTE_WORKER_SCOPE_UNSPECIFIED,
         ),
         compute_pb2.BuildLogEvent(level=enums_pb2.BUILD_LOG_LEVEL_UNSPECIFIED, message="message"),
     ],

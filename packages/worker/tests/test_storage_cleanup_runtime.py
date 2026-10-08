@@ -45,10 +45,10 @@ def _manager() -> ProcessManager:
     return manager
 
 
-def _identity() -> compute_pb2.EngineIdentity:
-    return compute_pb2.EngineIdentity(
-        scope=enums_pb2.ENGINE_SCOPE_DATASOURCE_PREVIEW,
-        reuse_policy=enums_pb2.ENGINE_REUSE_POLICY_SHARED,
+def _identity() -> compute_pb2.ComputeWorkerIdentity:
+    return compute_pb2.ComputeWorkerIdentity(
+        scope=enums_pb2.COMPUTE_WORKER_SCOPE_DATASOURCE_PREVIEW,
+        reuse_policy=enums_pb2.COMPUTE_WORKER_REUSE_POLICY_SHARED,
         datasource_id="datasource-1",
         resource_id="datasource-1",
     )

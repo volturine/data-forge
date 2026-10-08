@@ -6,20 +6,20 @@ import "buf/validate/validate.proto";
 import "google/protobuf/struct.proto";
 import "google/protobuf/timestamp.proto";
 
-// The worker-to-engine transport. This service is intentionally independent of
+// The worker-to-compute-worker transport. This service is intentionally independent of
 // the durable backend compute-request protocol: it carries already-normalized
-// Polars work to exactly one engine identity.
-service PolarsEngineService {
-  rpc Initialize(EngineInitializeRequest) returns (EngineInitializeResponse);
-  rpc Health(EngineHealthRequest) returns (EngineHealthResponse);
-  rpc SubmitJob(EngineSubmitJobRequest) returns (EngineJobReference);
-  rpc WatchJob(EngineWatchJobRequest) returns (stream EngineJobEvent);
-  rpc GetJobResult(EngineGetJobResultRequest) returns (EngineJobResult);
-  rpc CancelJob(EngineCancelJobRequest) returns (EngineCancelJobResponse);
-  rpc Shutdown(EngineShutdownRequest) returns (EngineShutdownResponse);
+// Polars work to exactly one compute worker identity.
+service PolarsComputeWorkerService {
+  rpc Initialize(ComputeWorkerInitializeRequest) returns (ComputeWorkerInitializeResponse);
+  rpc Health(ComputeWorkerHealthRequest) returns (ComputeWorkerHealthResponse);
+  rpc SubmitJob(ComputeWorkerSubmitJobRequest) returns (ComputeWorkerJobReference);
+  rpc WatchJob(ComputeWorkerWatchJobRequest) returns (stream ComputeWorkerJobEvent);
+  rpc GetJobResult(ComputeWorkerGetJobResultRequest) returns (ComputeWorkerJobResult);
+  rpc CancelJob(ComputeWorkerCancelJobRequest) returns (ComputeWorkerCancelJobResponse);
+  rpc Shutdown(ComputeWorkerShutdownRequest) returns (ComputeWorkerShutdownResponse);
 }
 
-message EngineInitializeRequest {
+message ComputeWorkerInitializeRequest {
   int32 protocol_version = 1 [(buf.validate.field).int32.gte = 1];
   string engine_identity = 2 [(buf.validate.field).string.min_len = 1];
   string token = 3 [(buf.validate.field).string.min_len = 1];
@@ -32,21 +32,21 @@ message EngineInitializeRequest {
   int32 polars_streaming_chunk_size = 10 [(buf.validate.field).int32.gte = 0];
 }
 
-message EngineInitializeResponse {
+message ComputeWorkerInitializeResponse {
   string engine_identity = 1 [(buf.validate.field).string.min_len = 1];
   bool ready = 2;
 }
 
-message EngineHealthRequest {}
+message ComputeWorkerHealthRequest {}
 
-message EngineHealthResponse {
+message ComputeWorkerHealthResponse {
   string engine_identity = 1 [(buf.validate.field).string.min_len = 1];
   int32 protocol_version = 2 [(buf.validate.field).int32.gte = 1];
   string application_version = 3 [(buf.validate.field).string.min_len = 1];
   bool ready = 4;
 }
 
-message EngineSubmitJobRequest {
+message ComputeWorkerSubmitJobRequest {
   reserved 4;
   reserved "payload";
 
@@ -68,28 +68,28 @@ message EngineSubmitJobRequest {
   bytes payload_json = 5 [(buf.validate.field).bytes.min_len = 2];
 }
 
-message EngineJobReference {
+message ComputeWorkerJobReference {
   string job_id = 1 [(buf.validate.field).string.min_len = 1];
 }
 
-message EngineWatchJobRequest {
+message ComputeWorkerWatchJobRequest {
   string job_id = 1 [(buf.validate.field).string.min_len = 1];
   int32 after_sequence = 2 [(buf.validate.field).int32.gte = 0];
 }
 
-message EngineGetJobResultRequest {
+message ComputeWorkerGetJobResultRequest {
   string job_id = 1 [(buf.validate.field).string.min_len = 1];
 }
 
-message EngineCancelJobRequest {
+message ComputeWorkerCancelJobRequest {
   string job_id = 1 [(buf.validate.field).string.min_len = 1];
 }
 
-message EngineCancelJobResponse {
+message ComputeWorkerCancelJobResponse {
   bool accepted = 1;
 }
 
-message EngineJobEvent {
+message ComputeWorkerJobEvent {
   reserved 4;
   reserved "progress";
 
@@ -97,12 +97,12 @@ message EngineJobEvent {
   int32 sequence = 2 [(buf.validate.field).int32.gte = 1];
   google.protobuf.Timestamp emitted_at = 3 [(buf.validate.field).required = true];
   oneof event {
-    EngineJobResult result = 5;
+    ComputeWorkerJobResult result = 5;
     bytes progress_json = 6;
   }
 }
 
-message EngineJobResult {
+message ComputeWorkerJobResult {
   reserved 2, 5;
   reserved "data", "error_details";
 
@@ -118,8 +118,8 @@ message EngineJobResult {
   optional bytes error_details_json = 13;
 }
 
-message EngineShutdownRequest {}
+message ComputeWorkerShutdownRequest {}
 
-message EngineShutdownResponse {
+message ComputeWorkerShutdownResponse {
   bool accepted = 1;
 }

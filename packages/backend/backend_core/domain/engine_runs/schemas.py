@@ -17,11 +17,15 @@ class EngineRunKind(ApiEnumValue):
     INGEST: ClassVar[Self]
 
 
-EngineRunKind.BUILD = EngineRunKind(enums_pb2.ENGINE_RUN_KIND_BUILD, api_token('EngineRunKind', enums_pb2.ENGINE_RUN_KIND_BUILD))
-EngineRunKind.PREVIEW = EngineRunKind(enums_pb2.ENGINE_RUN_KIND_PREVIEW, api_token('EngineRunKind', enums_pb2.ENGINE_RUN_KIND_PREVIEW))
-EngineRunKind.ROW_COUNT = EngineRunKind(enums_pb2.ENGINE_RUN_KIND_ROW_COUNT, api_token('EngineRunKind', enums_pb2.ENGINE_RUN_KIND_ROW_COUNT))
-EngineRunKind.DOWNLOAD = EngineRunKind(enums_pb2.ENGINE_RUN_KIND_DOWNLOAD, api_token('EngineRunKind', enums_pb2.ENGINE_RUN_KIND_DOWNLOAD))
-EngineRunKind.INGEST = EngineRunKind(enums_pb2.ENGINE_RUN_KIND_INGEST, api_token('EngineRunKind', enums_pb2.ENGINE_RUN_KIND_INGEST))
+EngineRunKind.BUILD = EngineRunKind(enums_pb2.COMPUTE_WORKER_RUN_KIND_BUILD, api_token('ComputeWorkerRunKind', enums_pb2.COMPUTE_WORKER_RUN_KIND_BUILD))
+EngineRunKind.PREVIEW = EngineRunKind(enums_pb2.COMPUTE_WORKER_RUN_KIND_PREVIEW, api_token('ComputeWorkerRunKind', enums_pb2.COMPUTE_WORKER_RUN_KIND_PREVIEW))
+EngineRunKind.ROW_COUNT = EngineRunKind(
+    enums_pb2.COMPUTE_WORKER_RUN_KIND_ROW_COUNT, api_token('ComputeWorkerRunKind', enums_pb2.COMPUTE_WORKER_RUN_KIND_ROW_COUNT)
+)
+EngineRunKind.DOWNLOAD = EngineRunKind(
+    enums_pb2.COMPUTE_WORKER_RUN_KIND_DOWNLOAD, api_token('ComputeWorkerRunKind', enums_pb2.COMPUTE_WORKER_RUN_KIND_DOWNLOAD)
+)
+EngineRunKind.INGEST = EngineRunKind(enums_pb2.COMPUTE_WORKER_RUN_KIND_INGEST, api_token('ComputeWorkerRunKind', enums_pb2.COMPUTE_WORKER_RUN_KIND_INGEST))
 
 
 class EngineRunStatus(ApiEnumValue):
@@ -38,10 +42,18 @@ class EngineRunStatus(ApiEnumValue):
         return self.is_terminal and next_status != self
 
 
-EngineRunStatus.RUNNING = EngineRunStatus(enums_pb2.ENGINE_RUN_STATUS_RUNNING, api_token('EngineRunStatus', enums_pb2.ENGINE_RUN_STATUS_RUNNING))
-EngineRunStatus.SUCCESS = EngineRunStatus(enums_pb2.ENGINE_RUN_STATUS_SUCCESS, api_token('EngineRunStatus', enums_pb2.ENGINE_RUN_STATUS_SUCCESS))
-EngineRunStatus.FAILED = EngineRunStatus(enums_pb2.ENGINE_RUN_STATUS_FAILED, api_token('EngineRunStatus', enums_pb2.ENGINE_RUN_STATUS_FAILED))
-EngineRunStatus.CANCELLED = EngineRunStatus(enums_pb2.ENGINE_RUN_STATUS_CANCELLED, api_token('EngineRunStatus', enums_pb2.ENGINE_RUN_STATUS_CANCELLED))
+EngineRunStatus.RUNNING = EngineRunStatus(
+    enums_pb2.COMPUTE_WORKER_RUN_STATUS_RUNNING, api_token('ComputeWorkerRunStatus', enums_pb2.COMPUTE_WORKER_RUN_STATUS_RUNNING)
+)
+EngineRunStatus.SUCCESS = EngineRunStatus(
+    enums_pb2.COMPUTE_WORKER_RUN_STATUS_SUCCESS, api_token('ComputeWorkerRunStatus', enums_pb2.COMPUTE_WORKER_RUN_STATUS_SUCCESS)
+)
+EngineRunStatus.FAILED = EngineRunStatus(
+    enums_pb2.COMPUTE_WORKER_RUN_STATUS_FAILED, api_token('ComputeWorkerRunStatus', enums_pb2.COMPUTE_WORKER_RUN_STATUS_FAILED)
+)
+EngineRunStatus.CANCELLED = EngineRunStatus(
+    enums_pb2.COMPUTE_WORKER_RUN_STATUS_CANCELLED, api_token('ComputeWorkerRunStatus', enums_pb2.COMPUTE_WORKER_RUN_STATUS_CANCELLED)
+)
 
 
 class EngineRunExecutionCategory(ApiEnumValue):
@@ -65,19 +77,20 @@ class EngineRunExecutionCategory(ApiEnumValue):
 
 
 EngineRunExecutionCategory.READ = EngineRunExecutionCategory(
-    enums_pb2.ENGINE_RUN_EXECUTION_CATEGORY_READ, api_token('EngineRunExecutionCategory', enums_pb2.ENGINE_RUN_EXECUTION_CATEGORY_READ)
+    enums_pb2.COMPUTE_WORKER_RUN_EXECUTION_CATEGORY_READ, api_token('ComputeWorkerRunExecutionCategory', enums_pb2.COMPUTE_WORKER_RUN_EXECUTION_CATEGORY_READ)
 )
 EngineRunExecutionCategory.STEP = EngineRunExecutionCategory(
-    enums_pb2.ENGINE_RUN_EXECUTION_CATEGORY_STEP, api_token('EngineRunExecutionCategory', enums_pb2.ENGINE_RUN_EXECUTION_CATEGORY_STEP)
+    enums_pb2.COMPUTE_WORKER_RUN_EXECUTION_CATEGORY_STEP, api_token('ComputeWorkerRunExecutionCategory', enums_pb2.COMPUTE_WORKER_RUN_EXECUTION_CATEGORY_STEP)
 )
 EngineRunExecutionCategory.PLAN = EngineRunExecutionCategory(
-    enums_pb2.ENGINE_RUN_EXECUTION_CATEGORY_PLAN, api_token('EngineRunExecutionCategory', enums_pb2.ENGINE_RUN_EXECUTION_CATEGORY_PLAN)
+    enums_pb2.COMPUTE_WORKER_RUN_EXECUTION_CATEGORY_PLAN, api_token('ComputeWorkerRunExecutionCategory', enums_pb2.COMPUTE_WORKER_RUN_EXECUTION_CATEGORY_PLAN)
 )
 EngineRunExecutionCategory.COMPUTE = EngineRunExecutionCategory(
-    enums_pb2.ENGINE_RUN_EXECUTION_CATEGORY_COMPUTE, api_token('EngineRunExecutionCategory', enums_pb2.ENGINE_RUN_EXECUTION_CATEGORY_COMPUTE)
+    enums_pb2.COMPUTE_WORKER_RUN_EXECUTION_CATEGORY_COMPUTE,
+    api_token('ComputeWorkerRunExecutionCategory', enums_pb2.COMPUTE_WORKER_RUN_EXECUTION_CATEGORY_COMPUTE),
 )
 EngineRunExecutionCategory.WRITE = EngineRunExecutionCategory(
-    enums_pb2.ENGINE_RUN_EXECUTION_CATEGORY_WRITE, api_token('EngineRunExecutionCategory', enums_pb2.ENGINE_RUN_EXECUTION_CATEGORY_WRITE)
+    enums_pb2.COMPUTE_WORKER_RUN_EXECUTION_CATEGORY_WRITE, api_token('ComputeWorkerRunExecutionCategory', enums_pb2.COMPUTE_WORKER_RUN_EXECUTION_CATEGORY_WRITE)
 )
 
 

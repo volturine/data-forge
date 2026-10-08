@@ -11,18 +11,18 @@ from pathlib import Path
 import grpc
 import pytest
 
-from dataforge_protocol import compute_pb2, engine_runtime_pb2, enums_pb2, worker_runtime_pb2
+from dataforge_protocol import compute_pb2, compute_worker_runtime_pb2, enums_pb2, worker_runtime_pb2
+from runtime.compute_worker_credentials import ObjectStoreCredentials, resolve_compute_worker_credentials
 from runtime.config import settings
-from runtime.docker_engine import (
-    DockerComputeEngine,
+from runtime.docker_compute_worker import (
+    DockerComputeWorker,
+    _compute_worker_object_store_endpoint,
     _container_name,
     _container_rpc_target,
     _effective_resources,
-    _engine_object_store_endpoint,
     reconcile_deployment_containers,
-    validate_engine_runtime_readiness,
+    validate_compute_worker_runtime_readiness,
 )
-from runtime.engine_credentials import ObjectStoreCredentials, resolve_engine_credentials
 
 
 def test_effective_resources_resolves_zero_threads_to_logical_cpu_count(monkeypatch) -> None:
@@ -46,10 +46,10 @@ def test_effective_resources_uses_docker_cpu_count_for_auto(monkeypatch) -> None
     assert _effective_resources({}, runtime_cpu_count=5)["max_threads"] == 5
 
 
-def _identity(scope: int = enums_pb2.ENGINE_SCOPE_ANALYSIS_INTERACTIVE) -> compute_pb2.EngineIdentity:
-    return compute_pb2.EngineIdentity(
+def _identity(scope: int = enums_pb2.COMPUTE_WORKER_SCOPE_ANALYSIS_INTERACTIVE) -> compute_pb2.ComputeWorkerIdentity:
+    return compute_pb2.ComputeWorkerIdentity(
         scope=scope,
-        reuse_policy=enums_pb2.ENGINE_REUSE_POLICY_SHARED,
+        reuse_policy=enums_pb2.COMPUTE_WORKER_REUSE_POLICY_SHARED,
         resource_id="analysis-1",
         analysis_id="analysis-1",
     )
@@ -61,44 +61,44 @@ def test_engine_credentials_fetch_namespace_scoped_identity_from_backend(monkeyp
     class FakeClient:
         def engine_credentials(self, *, namespace: str, role: str):
             requests.append((namespace, role))
-            return worker_runtime_pb2.WorkerEngineCredentialsResponse(
+            return worker_runtime_pb2.WorkerComputeWorkerCredentialsResponse(
                 access_key="ns-reader",
                 secret_key="ns-secret",
             )
 
-    monkeypatch.setattr("runtime.engine_credentials.client_from_env", lambda: FakeClient())
+    monkeypatch.setattr("runtime.compute_worker_credentials.client_from_env", lambda: FakeClient())
 
-    credentials = resolve_engine_credentials("tenant-a", _identity())
+    credentials = resolve_compute_worker_credentials("tenant-a", _identity())
 
     assert requests == [("tenant-a", "reader")]
     assert credentials.access_key == "ns-reader"
     assert credentials.secret_key == "ns-secret"
 
-    resolve_engine_credentials("tenant-b", _identity(enums_pb2.ENGINE_SCOPE_BUILD))
+    resolve_compute_worker_credentials("tenant-b", _identity(enums_pb2.COMPUTE_WORKER_SCOPE_BUILD))
     assert requests[-1] == ("tenant-b", "builder")
 
 
 def test_unpinned_engine_image_warns_in_prod_but_is_allowed(monkeypatch, caplog) -> None:
-    from runtime.docker_engine import _warn_unpinned_engine_image
+    from runtime.docker_compute_worker import _warn_unpinned_compute_worker_image
 
     monkeypatch.setattr(settings, "prod_mode_enabled", True)
     monkeypatch.setattr(settings, "engine_image", "registry.example/dataforge-engine:latest")
 
     with caplog.at_level(logging.WARNING):
-        _warn_unpinned_engine_image()
+        _warn_unpinned_compute_worker_image()
 
     assert "not digest-pinned" in caplog.text
 
     monkeypatch.setattr(settings, "engine_image", f"registry.example/dataforge-engine@sha256:{'a' * 64}")
-    _warn_unpinned_engine_image()
+    _warn_unpinned_compute_worker_image()
     assert caplog.text.count("not digest-pinned") == 1
 
 
 def test_container_name_is_dns_safe_and_bounded(monkeypatch) -> None:
     monkeypatch.setattr(settings, "engine_connect_host", "")
-    identity = compute_pb2.EngineIdentity(
-        scope=enums_pb2.ENGINE_SCOPE_ANALYSIS_INTERACTIVE,
-        reuse_policy=enums_pb2.ENGINE_REUSE_POLICY_SHARED,
+    identity = compute_pb2.ComputeWorkerIdentity(
+        scope=enums_pb2.COMPUTE_WORKER_SCOPE_ANALYSIS_INTERACTIVE,
+        reuse_policy=enums_pb2.COMPUTE_WORKER_REUSE_POLICY_SHARED,
         resource_id="4675dc19-dced-4163-b9b2-d168e2cad57d",
         analysis_id="analysis-1",
     )
@@ -150,9 +150,9 @@ def test_await_listening_waits_for_channel_then_checks_health_once(monkeypatch) 
     class Stub:
         def Health(self, _request, *, timeout: float):  # noqa: N802 - generated gRPC method
             calls.append(("health", timeout))
-            return engine_runtime_pb2.EngineHealthResponse()
+            return compute_worker_runtime_pb2.ComputeWorkerHealthResponse()
 
-    engine = DockerComputeEngine(_identity())
+    engine = DockerComputeWorker(_identity())
     engine._channel = object()  # type: ignore[assignment]
     engine._stub = Stub()  # type: ignore[assignment]
     monkeypatch.setattr(settings, "engine_start_timeout_seconds", 30)
@@ -188,14 +188,14 @@ def test_await_listening_retries_transient_health_deadlines_within_start_deadlin
             self.attempts += 1
             if self.attempts == 1:
                 raise TransientHealthError()
-            return engine_runtime_pb2.EngineHealthResponse()
+            return compute_worker_runtime_pb2.ComputeWorkerHealthResponse()
 
-    engine = DockerComputeEngine(_identity())
+    engine = DockerComputeWorker(_identity())
     engine._channel = object()  # type: ignore[assignment]
     engine._stub = Stub()  # type: ignore[assignment]
     monkeypatch.setattr(settings, "engine_start_timeout_seconds", 30)
     monkeypatch.setattr(grpc, "channel_ready_future", lambda channel: ReadyFuture())
-    monkeypatch.setattr("runtime.docker_engine.time.sleep", retry_delays.append)
+    monkeypatch.setattr("runtime.docker_compute_worker.time.sleep", retry_delays.append)
 
     engine._await_listening()
 
@@ -207,11 +207,11 @@ def test_engine_object_store_endpoint_prefers_private_network_override(monkeypat
     monkeypatch.setattr(settings, "object_store_endpoint", "http://127.0.0.1:9000")
     monkeypatch.setattr(settings, "engine_object_store_endpoint", "http://rustfs:9000")
 
-    assert _engine_object_store_endpoint() == "http://rustfs:9000"
+    assert _compute_worker_object_store_endpoint() == "http://rustfs:9000"
 
 
 def test_export_submits_object_store_artifact_instead_of_worker_path(monkeypatch, tmp_path: Path) -> None:
-    engine = DockerComputeEngine(_identity(), namespace="tenant-a")
+    engine = DockerComputeWorker(_identity(), namespace="tenant-a")
     submitted: dict[str, object] = {}
     presigned: dict[str, object] = {}
 
@@ -221,7 +221,7 @@ def test_export_submits_object_store_artifact_instead_of_worker_path(monkeypatch
 
     monkeypatch.setattr(engine, "_submit", submit)
     monkeypatch.setattr(
-        "runtime.docker_engine.presigned_put_url",
+        "runtime.docker_compute_worker.presigned_put_url",
         lambda target_url, **options: presigned.update(target_url=target_url, **options) or "http://object-store/presigned-put",
     )
     monkeypatch.setattr(settings, "engine_connect_host", "127.0.0.1")
@@ -260,7 +260,7 @@ def test_startup_reconciliation_removes_only_current_deployment_engines(monkeypa
             return None
 
     monkeypatch.setattr(settings, "deployment_id", "test-deployment")
-    monkeypatch.setattr("runtime.docker_engine.docker.DockerClient", lambda **_kwargs: Client())
+    monkeypatch.setattr("runtime.docker_compute_worker.docker.DockerClient", lambda **_kwargs: Client())
 
     assert reconcile_deployment_containers() == 1
     assert removed == ["container-1"]
@@ -297,7 +297,7 @@ def test_periodic_reconciliation_removes_only_stopped_owned_containers(monkeypat
             return None
 
     monkeypatch.setattr(settings, "deployment_id", "test-deployment")
-    monkeypatch.setattr("runtime.docker_engine.docker.DockerClient", lambda **_kwargs: Client())
+    monkeypatch.setattr("runtime.docker_compute_worker.docker.DockerClient", lambda **_kwargs: Client())
 
     assert reconcile_deployment_containers(supervisor_id="worker-1", remove_running=False) == 2
     assert removed == ["stopped", "dead"]
@@ -328,7 +328,7 @@ def test_periodic_reconciliation_removes_old_untracked_running_containers(monkey
             return None
 
     monkeypatch.setattr(settings, "deployment_id", "test-deployment")
-    monkeypatch.setattr("runtime.docker_engine.docker.DockerClient", lambda **_kwargs: Client())
+    monkeypatch.setattr("runtime.docker_compute_worker.docker.DockerClient", lambda **_kwargs: Client())
 
     assert (
         reconcile_deployment_containers(
@@ -363,7 +363,7 @@ def test_startup_reconciliation_removes_untracked_running_containers(monkeypatch
             return None
 
     monkeypatch.setattr(settings, "deployment_id", "test-deployment")
-    monkeypatch.setattr("runtime.docker_engine.docker.DockerClient", lambda **_kwargs: Client())
+    monkeypatch.setattr("runtime.docker_compute_worker.docker.DockerClient", lambda **_kwargs: Client())
 
     assert reconcile_deployment_containers(supervisor_id="worker-1", keep_container_ids={"tracked"}) == 2
     assert removed == ["orphan-running", "orphan-created"]
@@ -393,7 +393,7 @@ def test_coordinator_takeover_removes_stale_generation_and_keeps_current_generat
             return None
 
     monkeypatch.setattr(settings, "deployment_id", "test-deployment")
-    monkeypatch.setattr("runtime.docker_engine.docker.DockerClient", lambda **_kwargs: Client())
+    monkeypatch.setattr("runtime.docker_compute_worker.docker.DockerClient", lambda **_kwargs: Client())
 
     assert reconcile_deployment_containers(coordinator_generation=5, keep_container_ids=("current-running",)) == 2
     assert removed == ["stale-running", "unlabeled-running"]
@@ -406,8 +406,8 @@ def test_stale_coordinator_is_rejected_before_engine_start_or_submit(monkeypatch
     def docker_client_must_not_be_opened(**_kwargs):
         raise AssertionError("stale coordinator reached Docker")
 
-    monkeypatch.setattr("runtime.docker_engine.docker.DockerClient", docker_client_must_not_be_opened)
-    engine = DockerComputeEngine(_identity(), coordinator_guard=fenced)
+    monkeypatch.setattr("runtime.docker_compute_worker.docker.DockerClient", docker_client_must_not_be_opened)
+    engine = DockerComputeWorker(_identity(), coordinator_guard=fenced)
 
     with pytest.raises(RuntimeError, match="stale coordinator"):
         engine.start()
@@ -441,7 +441,7 @@ def test_stale_coordinator_cannot_remove_containers_during_reconciliation(monkey
             raise RuntimeError("stale coordinator")
 
     monkeypatch.setattr(settings, "deployment_id", "test-deployment")
-    monkeypatch.setattr("runtime.docker_engine.docker.DockerClient", lambda **_kwargs: Client())
+    monkeypatch.setattr("runtime.docker_compute_worker.docker.DockerClient", lambda **_kwargs: Client())
 
     with pytest.raises(RuntimeError, match="stale coordinator"):
         reconcile_deployment_containers(coordinator_generation=5, coordinator_guard=fenced)
@@ -476,7 +476,7 @@ def test_stale_coordinator_shutdown_detaches_without_mutating_container(monkeypa
     def fenced() -> None:
         raise RuntimeError("stale")
 
-    engine = DockerComputeEngine(_identity(), coordinator_generation=4, coordinator_guard=fenced)
+    engine = DockerComputeWorker(_identity(), coordinator_generation=4, coordinator_guard=fenced)
     engine._container = Container()
     engine._container_id = "engine-container"
     engine._stub = Stub()  # type: ignore[assignment]
@@ -484,7 +484,7 @@ def test_stale_coordinator_shutdown_detaches_without_mutating_container(monkeypa
     engine._client = Handle()
     engine._artifact_transfers["job"] = (Path("/tmp/artifact"), "s3://bucket/artifact")
     monkeypatch.setattr(settings, "engine_shutdown_grace_seconds", 0)
-    monkeypatch.setattr("runtime.docker_engine.delete_object", lambda _url: actions.append("delete-artifact"))
+    monkeypatch.setattr("runtime.docker_compute_worker.delete_object", lambda _url: actions.append("delete-artifact"))
 
     engine.shutdown()
 
@@ -511,7 +511,7 @@ def test_failed_start_leaves_container_for_current_generation_reconciliation() -
     def fenced() -> None:
         raise RuntimeError("stale")
 
-    engine = DockerComputeEngine(_identity(), coordinator_generation=4, coordinator_guard=fenced)
+    engine = DockerComputeWorker(_identity(), coordinator_generation=4, coordinator_guard=fenced)
     engine._container_id = "partially-started"
 
     engine._cleanup_failed_start(Container(), Client())
@@ -550,7 +550,7 @@ def test_coordinator_loss_mid_shutdown_prevents_stop_remove_and_artifact_delete(
         if guard_calls == 2:
             raise RuntimeError("stale")
 
-    engine = DockerComputeEngine(_identity(), coordinator_generation=4, coordinator_guard=guard)
+    engine = DockerComputeWorker(_identity(), coordinator_generation=4, coordinator_guard=guard)
     engine._container = Container()
     engine._container_id = "engine-container"
     engine._stub = Stub()  # type: ignore[assignment]
@@ -558,7 +558,7 @@ def test_coordinator_loss_mid_shutdown_prevents_stop_remove_and_artifact_delete(
     engine._client = Handle()
     engine._artifact_transfers["job"] = (Path("/tmp/artifact"), "s3://bucket/artifact")
     monkeypatch.setattr(settings, "engine_shutdown_grace_seconds", 0)
-    monkeypatch.setattr("runtime.docker_engine.delete_object", lambda _url: actions.append("delete-artifact"))
+    monkeypatch.setattr("runtime.docker_compute_worker.delete_object", lambda _url: actions.append("delete-artifact"))
 
     engine.shutdown()
 
@@ -570,7 +570,7 @@ def test_coordinator_loss_mid_shutdown_prevents_stop_remove_and_artifact_delete(
 
 
 def test_intentional_shutdown_is_not_reported_as_container_crash(monkeypatch) -> None:
-    engine = DockerComputeEngine(_identity())
+    engine = DockerComputeWorker(_identity())
     engine._shutdown_requested = True
     monkeypatch.setattr(engine, "is_process_alive", lambda: False)
 
@@ -582,7 +582,7 @@ def test_intentional_shutdown_is_not_reported_as_container_crash(monkeypatch) ->
 
 
 def test_initialize_fails_fast_on_identity_collision(monkeypatch) -> None:
-    engine = DockerComputeEngine(_identity())
+    engine = DockerComputeWorker(_identity())
     calls = 0
 
     class AlreadyInitialized(grpc.RpcError):
@@ -612,7 +612,7 @@ def test_initialize_fails_fast_on_identity_collision(monkeypatch) -> None:
 
 
 def test_initialize_does_not_retry_transient_rpc_failures(monkeypatch) -> None:
-    engine = DockerComputeEngine(_identity())
+    engine = DockerComputeWorker(_identity())
     calls = 0
 
     class Unavailable(grpc.RpcError):
@@ -642,7 +642,7 @@ def test_initialize_does_not_retry_transient_rpc_failures(monkeypatch) -> None:
 
 
 def test_oom_exit_is_reported_with_container_details() -> None:
-    engine = DockerComputeEngine(_identity())
+    engine = DockerComputeWorker(_identity())
 
     class Container:
         id = "container-oom"
@@ -679,7 +679,7 @@ def test_repeated_grpc_health_failures_do_not_evict_a_running_container(monkeypa
         def reload(self) -> None:
             self.reloads += 1
 
-    engine = DockerComputeEngine(_identity())
+    engine = DockerComputeWorker(_identity())
     container = Container()
     notifications: list[bool] = []
     engine._container = container
@@ -688,7 +688,7 @@ def test_repeated_grpc_health_failures_do_not_evict_a_running_container(monkeypa
     engine.bind_capacity_notifier(lambda: notifications.append(True))
     engine._heartbeat_stop.clear()
     monkeypatch.setattr(settings, "engine_heartbeat_interval_seconds", 0)
-    monkeypatch.setattr("runtime.docker_engine._LIVENESS_CACHE_SECONDS", 0.0)
+    monkeypatch.setattr("runtime.docker_compute_worker._LIVENESS_CACHE_SECONDS", 0.0)
 
     class Stub:
         calls = 0
@@ -711,11 +711,11 @@ def test_repeated_grpc_health_failures_do_not_evict_a_running_container(monkeypa
 
 
 def test_job_watch_resumes_clean_stream_close_without_leaking_active_job(monkeypatch) -> None:
-    engine = DockerComputeEngine(_identity())
+    engine = DockerComputeWorker(_identity())
     job_id = "job-resume"
-    result = engine_runtime_pb2.EngineJobResult(job_id=job_id, data_json=b'{"rows":[1]}')
-    progress = engine_runtime_pb2.EngineJobEvent(job_id=job_id, sequence=1, progress_json=b'{"type":"compute_start"}')
-    terminal = engine_runtime_pb2.EngineJobEvent(job_id=job_id, sequence=2, result=result)
+    result = compute_worker_runtime_pb2.ComputeWorkerJobResult(job_id=job_id, data_json=b'{"rows":[1]}')
+    progress = compute_worker_runtime_pb2.ComputeWorkerJobEvent(job_id=job_id, sequence=1, progress_json=b'{"type":"compute_start"}')
+    terminal = compute_worker_runtime_pb2.ComputeWorkerJobEvent(job_id=job_id, sequence=2, result=result)
 
     class Stub:
         requests: list[int] = []
@@ -746,9 +746,9 @@ def test_job_watch_resumes_clean_stream_close_without_leaking_active_job(monkeyp
 
 
 def test_job_watch_recovers_terminal_result_after_progress_cursor_eviction() -> None:
-    engine = DockerComputeEngine(_identity())
+    engine = DockerComputeWorker(_identity())
     job_id = "job-evicted"
-    result = engine_runtime_pb2.EngineJobResult(job_id=job_id, data_json=b'{"rows":[1]}')
+    result = compute_worker_runtime_pb2.ComputeWorkerJobResult(job_id=job_id, data_json=b'{"rows":[1]}')
 
     class CursorEvicted(grpc.RpcError):
         def code(self):
@@ -782,17 +782,17 @@ def test_runtime_readiness_checks_credentials_image_and_network(monkeypatch) -> 
         def close(self) -> None:
             calls.append("close")
 
-    monkeypatch.setattr("runtime.docker_engine._warn_unpinned_engine_image", lambda: calls.append("image-reference"))
-    monkeypatch.setattr("runtime.docker_engine._resolve_launch_context", lambda client: calls.append("docker") or (4, "sha256:abc"))
-    monkeypatch.setattr("runtime.docker_engine.docker.DockerClient", lambda **_kwargs: Client())
+    monkeypatch.setattr("runtime.docker_compute_worker._warn_unpinned_compute_worker_image", lambda: calls.append("image-reference"))
+    monkeypatch.setattr("runtime.docker_compute_worker._resolve_launch_context", lambda client: calls.append("docker") or (4, "sha256:abc"))
+    monkeypatch.setattr("runtime.docker_compute_worker.docker.DockerClient", lambda **_kwargs: Client())
 
-    validate_engine_runtime_readiness()
+    validate_compute_worker_runtime_readiness()
 
     assert calls == ["image-reference", "docker", "close"]
 
 
 def test_container_nano_cpus_skips_hard_quota_for_host_connected_engines(monkeypatch) -> None:
-    from runtime.docker_engine import _container_nano_cpus
+    from runtime.docker_compute_worker import _container_nano_cpus
 
     monkeypatch.setattr(settings, "engine_connect_host", "127.0.0.1")
     assert _container_nano_cpus(1) is None
@@ -804,7 +804,7 @@ def test_container_nano_cpus_skips_hard_quota_for_host_connected_engines(monkeyp
 
 
 def test_resolve_launch_context_caches_daemon_and_image_lookups(monkeypatch) -> None:
-    from runtime import docker_engine
+    from runtime import docker_compute_worker
 
     class Image:
         id = "sha256:abc"
@@ -837,14 +837,14 @@ def test_resolve_launch_context_caches_daemon_and_image_lookups(monkeypatch) -> 
 
     monkeypatch.setattr(settings, "engine_image", "engine:test")
     monkeypatch.setattr(settings, "engine_docker_network", "net-test")
-    docker_engine._cached_daemon_cpu_count = None
-    docker_engine._validated_image_ref = None
-    docker_engine._validated_image_id = None
-    docker_engine._validated_network = None
+    docker_compute_worker._cached_daemon_cpu_count = None
+    docker_compute_worker._validated_image_ref = None
+    docker_compute_worker._validated_image_id = None
+    docker_compute_worker._validated_network = None
 
     client = Client()
-    first = docker_engine._resolve_launch_context(client)
-    second = docker_engine._resolve_launch_context(client)
+    first = docker_compute_worker._resolve_launch_context(client)
+    second = docker_compute_worker._resolve_launch_context(client)
 
     assert first == (6, "sha256:abc")
     assert second == first
@@ -859,12 +859,12 @@ def test_engine_credentials_are_cached_per_namespace_and_role(monkeypatch) -> No
     class FakeClient:
         def engine_credentials(self, *, namespace: str, role: str):
             requests.append((namespace, role))
-            return worker_runtime_pb2.WorkerEngineCredentialsResponse(access_key="ns-reader", secret_key="ns-secret")
+            return worker_runtime_pb2.WorkerComputeWorkerCredentialsResponse(access_key="ns-reader", secret_key="ns-secret")
 
-    monkeypatch.setattr("runtime.engine_credentials.client_from_env", lambda: FakeClient())
+    monkeypatch.setattr("runtime.compute_worker_credentials.client_from_env", lambda: FakeClient())
 
-    first = resolve_engine_credentials("tenant-a", _identity())
-    second = resolve_engine_credentials("tenant-a", _identity())
+    first = resolve_compute_worker_credentials("tenant-a", _identity())
+    second = resolve_compute_worker_credentials("tenant-a", _identity())
 
     assert first == second
     assert requests == [("tenant-a", "reader")]
@@ -882,13 +882,13 @@ def test_engine_credentials_singleflight_concurrent_cold_starts(monkeypatch) -> 
             requests.append((namespace, role))
             request_started.set()
             assert release_response.wait(2)
-            return worker_runtime_pb2.WorkerEngineCredentialsResponse(access_key="ns-reader", secret_key="ns-secret")
+            return worker_runtime_pb2.WorkerComputeWorkerCredentialsResponse(access_key="ns-reader", secret_key="ns-secret")
 
-    monkeypatch.setattr("runtime.engine_credentials.client_from_env", lambda: FakeClient())
+    monkeypatch.setattr("runtime.compute_worker_credentials.client_from_env", lambda: FakeClient())
 
     def resolve() -> ObjectStoreCredentials:
         barrier.wait(timeout=2)
-        return resolve_engine_credentials("tenant-a", _identity())
+        return resolve_compute_worker_credentials("tenant-a", _identity())
 
     with ThreadPoolExecutor(max_workers=callers) as executor:
         futures = [executor.submit(resolve) for _ in range(callers)]
@@ -913,11 +913,11 @@ def test_engine_start_closes_docker_client_when_container_creation_fails(monkeyp
             self.closed = True
 
     client = Client()
-    engine = DockerComputeEngine(_identity(), namespace="tenant-a")
-    monkeypatch.setattr("runtime.docker_engine.resolve_engine_credentials", lambda *_args: ObjectStoreCredentials("key", "secret"))
-    monkeypatch.setattr("runtime.docker_engine._resolve_launch_context", lambda _client: (1, "image-id"))
-    monkeypatch.setattr("runtime.docker_engine._effective_resources", lambda *_args, **_kwargs: {"max_threads": 1, "max_memory_mb": 256})
-    monkeypatch.setattr("runtime.docker_engine.docker.DockerClient", lambda **_kwargs: client)
+    engine = DockerComputeWorker(_identity(), namespace="tenant-a")
+    monkeypatch.setattr("runtime.docker_compute_worker.resolve_compute_worker_credentials", lambda *_args: ObjectStoreCredentials("key", "secret"))
+    monkeypatch.setattr("runtime.docker_compute_worker._resolve_launch_context", lambda _client: (1, "image-id"))
+    monkeypatch.setattr("runtime.docker_compute_worker._effective_resources", lambda *_args, **_kwargs: {"max_threads": 1, "max_memory_mb": 256})
+    monkeypatch.setattr("runtime.docker_compute_worker.docker.DockerClient", lambda **_kwargs: client)
 
     with pytest.raises(RuntimeError, match="Docker create failed"):
         engine.start()
@@ -928,9 +928,9 @@ def test_engine_start_closes_docker_client_when_container_creation_fails(monkeyp
 def test_engine_start_waits_for_rpc_listener_before_initializing(monkeypatch, caplog) -> None:
     calls: list[str] = []
     created: dict[str, object] = {}
-    monkeypatch.setattr("runtime.docker_engine._SLOW_ENGINE_START_SECONDS", 0.0)
-    monkeypatch.setattr("runtime.docker_engine.get_compute_request_id", lambda: "cold-preview-request")
-    caplog.set_level(logging.WARNING, logger="runtime.docker_engine")
+    monkeypatch.setattr("runtime.docker_compute_worker._SLOW_COMPUTE_WORKER_START_SECONDS", 0.0)
+    monkeypatch.setattr("runtime.docker_compute_worker.get_compute_request_id", lambda: "cold-preview-request")
+    caplog.set_level(logging.WARNING, logger="runtime.docker_compute_worker")
 
     class Container:
         id = "engine-container"
@@ -951,17 +951,17 @@ def test_engine_start_waits_for_rpc_listener_before_initializing(monkeypatch, ca
             calls.append("client.close")
 
     client = Client()
-    engine = DockerComputeEngine(_identity(), namespace="tenant-a")
-    monkeypatch.setattr("runtime.docker_engine.resolve_engine_credentials", lambda *_args: ObjectStoreCredentials("key", "secret"))
-    monkeypatch.setattr("runtime.docker_engine._resolve_launch_context", lambda _client: (1, "image-id"))
+    engine = DockerComputeWorker(_identity(), namespace="tenant-a")
+    monkeypatch.setattr("runtime.docker_compute_worker.resolve_compute_worker_credentials", lambda *_args: ObjectStoreCredentials("key", "secret"))
+    monkeypatch.setattr("runtime.docker_compute_worker._resolve_launch_context", lambda _client: (1, "image-id"))
     monkeypatch.setattr(
-        "runtime.docker_engine._effective_resources",
+        "runtime.docker_compute_worker._effective_resources",
         lambda *_args, **_kwargs: {"max_threads": 1, "max_memory_mb": 256, "streaming_chunk_size": 0},
     )
-    monkeypatch.setattr("runtime.docker_engine.docker.DockerClient", lambda **_kwargs: client)
-    monkeypatch.setattr("runtime.docker_engine._container_rpc_target", lambda _container: "engine:50053")
-    monkeypatch.setattr("runtime.docker_engine.grpc.insecure_channel", lambda *_args, **_kwargs: object())
-    monkeypatch.setattr("runtime.docker_engine.engine_runtime_pb2_grpc.PolarsEngineServiceStub", lambda _channel: object())
+    monkeypatch.setattr("runtime.docker_compute_worker.docker.DockerClient", lambda **_kwargs: client)
+    monkeypatch.setattr("runtime.docker_compute_worker._container_rpc_target", lambda _container: "engine:50053")
+    monkeypatch.setattr("runtime.docker_compute_worker.grpc.insecure_channel", lambda *_args, **_kwargs: object())
+    monkeypatch.setattr("runtime.docker_compute_worker.compute_worker_runtime_pb2_grpc.PolarsComputeWorkerServiceStub", lambda _channel: object())
     monkeypatch.setattr(engine, "_await_listening", lambda: calls.append("rpc.listener_ready"))
     monkeypatch.setattr(engine, "_initialize", lambda **_kwargs: calls.append("rpc.initialize"))
     monkeypatch.setattr(engine, "_heartbeat_loop", lambda: None)
@@ -1003,17 +1003,17 @@ def test_warm_worker_uses_the_standard_engine_runtime(monkeypatch) -> None:
             return None
 
     client = Client()
-    engine = DockerComputeEngine()
+    engine = DockerComputeWorker()
     monkeypatch.setattr(settings, "engine_connect_host", "")
-    monkeypatch.setattr("runtime.docker_engine._resolve_launch_context", lambda _client: (1, "image-id"))
+    monkeypatch.setattr("runtime.docker_compute_worker._resolve_launch_context", lambda _client: (1, "image-id"))
     monkeypatch.setattr(
-        "runtime.docker_engine._effective_resources",
+        "runtime.docker_compute_worker._effective_resources",
         lambda *_args, **_kwargs: {"max_threads": 1, "max_memory_mb": 256, "streaming_chunk_size": 0},
     )
-    monkeypatch.setattr("runtime.docker_engine.docker.DockerClient", lambda **_kwargs: client)
-    monkeypatch.setattr("runtime.docker_engine._container_rpc_target", lambda _container: "warm-engine:50053")
-    monkeypatch.setattr("runtime.docker_engine.grpc.insecure_channel", lambda *_args, **_kwargs: Channel())
-    monkeypatch.setattr("runtime.docker_engine.engine_runtime_pb2_grpc.PolarsEngineServiceStub", lambda _channel: object())
+    monkeypatch.setattr("runtime.docker_compute_worker.docker.DockerClient", lambda **_kwargs: client)
+    monkeypatch.setattr("runtime.docker_compute_worker._container_rpc_target", lambda _container: "warm-engine:50053")
+    monkeypatch.setattr("runtime.docker_compute_worker.grpc.insecure_channel", lambda *_args, **_kwargs: Channel())
+    monkeypatch.setattr("runtime.docker_compute_worker.compute_worker_runtime_pb2_grpc.PolarsComputeWorkerServiceStub", lambda _channel: object())
     monkeypatch.setattr(engine, "_await_listening", lambda: None)
 
     engine.start_warm_worker()
@@ -1036,7 +1036,7 @@ class _FakeContainer:
 
 
 def test_liveness_probe_is_rate_limited(monkeypatch) -> None:
-    engine = DockerComputeEngine(_identity(), namespace="tenant-a")
+    engine = DockerComputeWorker(_identity(), namespace="tenant-a")
     container = _FakeContainer()
     engine._container = container
     engine._alive = True
@@ -1051,7 +1051,7 @@ def test_liveness_probe_is_rate_limited(monkeypatch) -> None:
 
 
 def test_liveness_probe_does_not_wait_for_the_lifecycle_lock() -> None:
-    engine = DockerComputeEngine(_identity(), namespace="tenant-a")
+    engine = DockerComputeWorker(_identity(), namespace="tenant-a")
     engine._container = _FakeContainer()
     engine._alive = True
     lock_held = threading.Event()
@@ -1077,7 +1077,7 @@ def test_liveness_probe_does_not_wait_for_the_lifecycle_lock() -> None:
 
 
 def test_submit_releases_the_lifecycle_lock_during_the_rpc(monkeypatch) -> None:
-    engine = DockerComputeEngine(_identity(), namespace="tenant-a")
+    engine = DockerComputeWorker(_identity(), namespace="tenant-a")
     engine._container = _FakeContainer()
     engine._alive = True
     engine._token = "token"
@@ -1088,7 +1088,7 @@ def test_submit_releases_the_lifecycle_lock_during_the_rpc(monkeypatch) -> None:
             probe = threading.Thread(target=lambda: engine._lock.acquire(timeout=2) and (lock_free_during_rpc.set(), engine._lock.release()))
             probe.start()
             probe.join(timeout=3)
-            return engine_runtime_pb2.EngineJobReference(job_id=request.job_id)
+            return compute_worker_runtime_pb2.ComputeWorkerJobReference(job_id=request.job_id)
 
     engine._stub = FakeStub()
     monkeypatch.setattr(engine, "_watch_job", lambda job_id: None)
@@ -1101,13 +1101,13 @@ def test_submit_releases_the_lifecycle_lock_during_the_rpc(monkeypatch) -> None:
 
 def test_submit_restarts_an_engine_that_was_shut_down(monkeypatch) -> None:
     """A reaped or crashed engine is restarted by the next job, not reported broken."""
-    engine = DockerComputeEngine(_identity(), namespace="tenant-a")
+    engine = DockerComputeWorker(_identity(), namespace="tenant-a")
     submitted: list[str] = []
 
     class FakeStub:
         def SubmitJob(self, request, timeout=None, metadata=None):  # noqa: N802 - gRPC stub name
             submitted.append(request.job_id)
-            return engine_runtime_pb2.EngineJobReference(job_id=request.job_id)
+            return compute_worker_runtime_pb2.ComputeWorkerJobReference(job_id=request.job_id)
 
     def fake_start() -> None:
         engine._container = _FakeContainer()

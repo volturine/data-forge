@@ -10,10 +10,10 @@ from builds.build_live import RuntimeBuild
 from dataforge_protocol import compute_pb2, enums_pb2
 from operations.step_converter import analysis_pipeline_to_execution_payload
 from runtime import compute_service as service
-from runtime.compute_manager import ENGINE_ADMISSION_PRIORITY_LIFECYCLE, EngineCapacityFull, ProcessManager
+from runtime.compute_manager import COMPUTE_WORKER_ADMISSION_PRIORITY_LIFECYCLE, ComputeWorkerCapacityFull, ProcessManager
 from runtime.domain.compute import schemas
 from runtime.domain.datasource.models import DataSourceTargetKind
-from runtime.domain.engine_runs.schemas import EngineRunKind
+from runtime.domain.engine_runs.schemas import ComputeWorkerRunKind
 from runtime.executors import run_compute_in_thread, run_control_in_thread
 from runtime.namespace import reset_namespace, set_namespace_context
 from runtime.worker_runtime_client import BuildJobLeaseLost, ClaimedBuildJob, WorkerRuntimeClient, async_client_from_env, client_from_env
@@ -35,7 +35,7 @@ async def _work_slot(semaphore: asyncio.Semaphore | None) -> AsyncIterator[None]
 @contextlib.asynccontextmanager
 async def _admitted_build_work_slot(
     manager: ProcessManager,
-    identity: compute_pb2.EngineIdentity,
+    identity: compute_pb2.ComputeWorkerIdentity,
     *,
     namespace: str,
     work_semaphore: asyncio.Semaphore | None,
@@ -47,7 +47,7 @@ async def _admitted_build_work_slot(
     owns_admission = await manager.await_engine_request_admission(
         identity,
         namespace=namespace,
-        priority=ENGINE_ADMISSION_PRIORITY_LIFECYCLE,
+        priority=COMPUTE_WORKER_ADMISSION_PRIORITY_LIFECYCLE,
     )
     request_reserved = not owns_admission
     try:
@@ -139,7 +139,7 @@ async def _run_build_task(
                     build_id=build.build_id,
                     analysis_id=build.analysis_id,
                     emitted_at=service._utcnow(),
-                    current_kind=EngineRunKind.parse(build.current_kind),
+                    current_kind=ComputeWorkerRunKind.parse(build.current_kind),
                     current_datasource_id=build.current_datasource_id,
                     tab_id=build.current_tab_id,
                     tab_name=build.current_tab_name,
@@ -202,9 +202,9 @@ async def _run_queued_build_job(
     if build is None or pipeline is None or starter is None:
         return
     current_kind = build.current_kind or ""
-    engine_run_kind = EngineRunKind.parse(build.current_kind)
+    engine_run_kind = ComputeWorkerRunKind.parse(build.current_kind)
     is_schedule_ingest = (
-        engine_run_kind == EngineRunKind.BUILD
+        engine_run_kind == ComputeWorkerRunKind.BUILD
         and starter.is_schedule_trigger()
         and len(run.analysis_pipeline.tabs) == 1
         and run.analysis_pipeline.tabs[0].datasource.source_type == enums_pb2.DATA_SOURCE_TYPE_SCHEDULE
@@ -217,9 +217,9 @@ async def _run_queued_build_job(
             from datasources import execution as datasource_execution
             from runtime.config import settings as worker_settings
 
-            datasource_identity = compute_pb2.EngineIdentity(
-                scope=enums_pb2.ENGINE_SCOPE_DATASOURCE_PREVIEW,
-                reuse_policy=enums_pb2.ENGINE_REUSE_POLICY_SHARED,
+            datasource_identity = compute_pb2.ComputeWorkerIdentity(
+                scope=enums_pb2.COMPUTE_WORKER_SCOPE_DATASOURCE_PREVIEW,
+                reuse_policy=enums_pb2.COMPUTE_WORKER_REUSE_POLICY_SHARED,
                 datasource_id=datasource_id,
                 resource_id=datasource_id,
             )
@@ -232,7 +232,7 @@ async def _run_queued_build_job(
                     build_id=build.build_id,
                     analysis_id=build.analysis_id,
                     emitted_at=service._utcnow(),
-                    current_kind=EngineRunKind.parse(build.current_kind),
+                    current_kind=ComputeWorkerRunKind.parse(build.current_kind),
                     current_datasource_id=build.current_datasource_id,
                     tab_id=build.current_tab_id,
                     tab_name=build.current_tab_name,
@@ -274,7 +274,7 @@ async def _run_queued_build_job(
                         build_id=build.build_id,
                         analysis_id=build.analysis_id,
                         emitted_at=service._utcnow(),
-                        current_kind=EngineRunKind.parse(build.current_kind),
+                        current_kind=ComputeWorkerRunKind.parse(build.current_kind),
                         current_datasource_id=build.current_datasource_id,
                         tab_id=build.current_tab_id,
                         tab_name=build.current_tab_name,
@@ -298,7 +298,7 @@ async def _run_queued_build_job(
                         build_id=build.build_id,
                         analysis_id=build.analysis_id,
                         emitted_at=service._utcnow(),
-                        current_kind=EngineRunKind.parse(build.current_kind),
+                        current_kind=ComputeWorkerRunKind.parse(build.current_kind),
                         current_datasource_id=build.current_datasource_id,
                         tab_id=build.current_tab_id,
                         tab_name=build.current_tab_name,
@@ -325,7 +325,7 @@ async def _run_queued_build_job(
                     build_id=build.build_id,
                     analysis_id=build.analysis_id,
                     emitted_at=service._utcnow(),
-                    current_kind=EngineRunKind.parse(build.current_kind),
+                    current_kind=ComputeWorkerRunKind.parse(build.current_kind),
                     current_datasource_id=build.current_datasource_id,
                     tab_id=build.current_tab_id,
                     tab_name=build.current_tab_name,
@@ -349,7 +349,7 @@ async def _run_queued_build_job(
                     build_id=build.build_id,
                     analysis_id=build.analysis_id,
                     emitted_at=service._utcnow(),
-                    current_kind=EngineRunKind.parse(build.current_kind),
+                    current_kind=ComputeWorkerRunKind.parse(build.current_kind),
                     current_datasource_id=build.current_datasource_id,
                     tab_id=build.current_tab_id,
                     tab_name=build.current_tab_name,
@@ -381,7 +381,7 @@ async def _run_queued_build_job(
                     build_id=build.build_id,
                     analysis_id=build.analysis_id,
                     emitted_at=service._utcnow(),
-                    current_kind=EngineRunKind.parse(build.current_kind),
+                    current_kind=ComputeWorkerRunKind.parse(build.current_kind),
                     current_datasource_id=build.current_datasource_id,
                     tab_id=build.current_tab_id,
                     tab_name=build.current_tab_name,
@@ -400,9 +400,9 @@ async def _run_queued_build_job(
             )
             return
     triggered_by = starter.user_id or starter.email or starter.display_name or starter.triggered_by
-    build_identity = compute_pb2.EngineIdentity(
-        scope=enums_pb2.ENGINE_SCOPE_BUILD,
-        reuse_policy=enums_pb2.ENGINE_REUSE_POLICY_EXCLUSIVE,
+    build_identity = compute_pb2.ComputeWorkerIdentity(
+        scope=enums_pb2.COMPUTE_WORKER_SCOPE_BUILD,
+        reuse_policy=enums_pb2.COMPUTE_WORKER_REUSE_POLICY_EXCLUSIVE,
         build_id=build.build_id,
         resource_id=build.build_id,
     )
@@ -423,7 +423,7 @@ async def _run_queued_build_job(
                     triggered_by=triggered_by,
                 )
             return
-        except EngineCapacityFull:
+        except ComputeWorkerCapacityFull:
             await _wait_after_capacity_race(manager)
             continue
 
@@ -437,9 +437,9 @@ async def _cancel_build_engine(manager: ProcessManager, claim: ClaimedBuildJob) 
     The exclusive build engine's shutdown cancels its active engine job before
     stopping it, while leaving the manager available for the next durable claim.
     """
-    identity = compute_pb2.EngineIdentity(
-        scope=enums_pb2.ENGINE_SCOPE_BUILD,
-        reuse_policy=enums_pb2.ENGINE_REUSE_POLICY_EXCLUSIVE,
+    identity = compute_pb2.ComputeWorkerIdentity(
+        scope=enums_pb2.COMPUTE_WORKER_SCOPE_BUILD,
+        reuse_policy=enums_pb2.COMPUTE_WORKER_REUSE_POLICY_EXCLUSIVE,
         build_id=claim.build_id,
         resource_id=claim.build_id,
     )

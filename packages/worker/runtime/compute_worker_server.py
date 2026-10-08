@@ -18,30 +18,30 @@ import grpc
 import requests
 from google.protobuf.timestamp_pb2 import Timestamp
 
-from dataforge_protocol import engine_runtime_pb2, engine_runtime_pb2_grpc
+from dataforge_protocol import compute_worker_runtime_pb2, compute_worker_runtime_pb2_grpc
 from runtime.config import settings
-from runtime.domain.compute.result import EngineResult
+from runtime.domain.compute.result import ComputeWorkerResult
 from runtime.json_values import dict_to_struct, encode_json_bytes
 from runtime.object_store import reset_object_store_client
 
 logger = logging.getLogger(__name__)
 
 if TYPE_CHECKING:
-    from runtime.compute_engine import PolarsComputeEngine
+    from runtime.compute_worker import PolarsComputeWorker
 
-ENGINE_PROTOCOL_VERSION = 2
+COMPUTE_WORKER_PROTOCOL_VERSION = 2
 _TOKEN_METADATA_KEY = "x-engine-token"
 _MAX_RETAINED_COMPLETED_JOBS = 8
 _MAX_TOTAL_JOBS = 100
 _MAX_PROGRESS_EVENTS = 256
-_ENGINE_RPC_WORKERS = 2
+_COMPUTE_WORKER_RPC_WORKERS = 2
 
 
-def _load_compute_engine() -> type[PolarsComputeEngine]:
+def _load_compute_engine() -> type[PolarsComputeWorker]:
     """Load Polars only when a cold worker receives its first compute job."""
-    from runtime.compute_engine import PolarsComputeEngine
+    from runtime.compute_worker import PolarsComputeWorker
 
-    return PolarsComputeEngine
+    return PolarsComputeWorker
 
 
 class _EngineJobCancelled(Exception):
@@ -53,7 +53,7 @@ class _JobState:
     job_id: str
     events: deque[tuple[int, dict[str, object]]] = field(default_factory=lambda: deque(maxlen=_MAX_PROGRESS_EVENTS))
     next_sequence: int = 1
-    result: EngineResult | None = None
+    result: ComputeWorkerResult | None = None
     done: bool = False
     cancel_requested: threading.Event = field(default_factory=threading.Event)
     future: Future[None] | None = None
@@ -69,7 +69,7 @@ class _JobState:
         if self.cancel_requested.is_set():
             raise _EngineJobCancelled(f"Engine job {self.job_id} was cancelled")
 
-    def complete(self, result: EngineResult) -> bool:
+    def complete(self, result: ComputeWorkerResult) -> bool:
         with self.condition:
             if self.done:
                 return False
@@ -150,7 +150,7 @@ class _EngineJobs:
         future = state.future
         if future is not None and future.cancel():
             state.complete(
-                EngineResult(
+                ComputeWorkerResult(
                     job_id=state.job_id,
                     data=None,
                     error=f"Engine job {state.job_id} was cancelled",
@@ -173,7 +173,7 @@ class _EngineJobs:
             result = _execute_job(job_id=state.job_id, kind=kind, payload=payload, progress_callback=emit_progress)
             state.raise_if_cancelled()
         except _EngineJobCancelled as exc:
-            result = EngineResult(
+            result = ComputeWorkerResult(
                 job_id=state.job_id,
                 data=None,
                 error=str(exc),
@@ -187,7 +187,7 @@ class _EngineJobs:
                 error_kind, error_details = "execution_error", {}
             error_details = {**error_details, "exception_type": type(exc).__name__}
             logger.exception("Engine job %s failed", state.job_id)
-            result = EngineResult(
+            result = ComputeWorkerResult(
                 job_id=state.job_id,
                 data=None,
                 error=str(exc),
@@ -316,9 +316,9 @@ def _execute_job(
     kind: str,
     payload: dict[str, object],
     progress_callback: Callable[[dict[str, object]], None],
-) -> EngineResult:
+) -> ComputeWorkerResult:
     if kind.startswith("datasource_") or kind.startswith("excel_"):
-        return EngineResult(
+        return ComputeWorkerResult(
             job_id=job_id,
             data=_execute_datasource_job(kind, payload, progress_callback),
             error=None,
@@ -377,7 +377,7 @@ def _execute_job(
     raw_read = result_data.pop("read_duration_ms", None)
     raw_write = result_data.pop("write_duration_ms", None)
     raw_collect = result_data.pop("collect_duration_ms", None)
-    return EngineResult(
+    return ComputeWorkerResult(
         job_id=job_id,
         data=result_data,
         error=None,
@@ -389,8 +389,8 @@ def _execute_job(
     )
 
 
-def _result_message(result: EngineResult) -> engine_runtime_pb2.EngineJobResult:
-    message = engine_runtime_pb2.EngineJobResult(job_id=result.job_id or "unknown", step_timings=dict_to_struct(result.step_timings))
+def _result_message(result: ComputeWorkerResult) -> compute_worker_runtime_pb2.ComputeWorkerJobResult:
+    message = compute_worker_runtime_pb2.ComputeWorkerJobResult(job_id=result.job_id or "unknown", step_timings=dict_to_struct(result.step_timings))
     if result.data is not None:
         message.data_json = encode_json_bytes(result.data)
     if result.error is not None:
@@ -416,7 +416,7 @@ def _timestamp(value: datetime) -> Timestamp:
     return message
 
 
-class PolarsEngineServicer(engine_runtime_pb2_grpc.PolarsEngineServiceServicer):
+class PolarsComputeWorkerServicer(compute_worker_runtime_pb2_grpc.PolarsComputeWorkerServiceServicer):
     def __init__(
         self,
         *,
@@ -476,11 +476,13 @@ class PolarsEngineServicer(engine_runtime_pb2_grpc.PolarsEngineServiceServicer):
         context.abort(grpc.StatusCode.UNAUTHENTICATED, "Invalid engine token")
         return False
 
-    def Initialize(self, request: engine_runtime_pb2.EngineInitializeRequest, context: grpc.ServicerContext) -> engine_runtime_pb2.EngineInitializeResponse:
-        if request.protocol_version != ENGINE_PROTOCOL_VERSION:
+    def Initialize(
+        self, request: compute_worker_runtime_pb2.ComputeWorkerInitializeRequest, context: grpc.ServicerContext
+    ) -> compute_worker_runtime_pb2.ComputeWorkerInitializeResponse:
+        if request.protocol_version != COMPUTE_WORKER_PROTOCOL_VERSION:
             context.abort(
                 grpc.StatusCode.FAILED_PRECONDITION,
-                f"Engine protocol version mismatch: expected {ENGINE_PROTOCOL_VERSION}, got {request.protocol_version}",
+                f"Engine protocol version mismatch: expected {COMPUTE_WORKER_PROTOCOL_VERSION}, got {request.protocol_version}",
             )
         with self._lock:
             if self._initialized and (self._engine_identity != request.engine_identity or self._token != request.token):
@@ -515,36 +517,40 @@ class PolarsEngineServicer(engine_runtime_pb2_grpc.PolarsEngineServiceServicer):
             reset_object_store_client()
             self._initialized = True
             self._last_heartbeat = time.monotonic()
-            return engine_runtime_pb2.EngineInitializeResponse(
+            return compute_worker_runtime_pb2.ComputeWorkerInitializeResponse(
                 engine_identity=self._engine_identity,
                 ready=True,
             )
 
-    def Health(self, request: engine_runtime_pb2.EngineHealthRequest, context: grpc.ServicerContext) -> engine_runtime_pb2.EngineHealthResponse:
+    def Health(
+        self, request: compute_worker_runtime_pb2.ComputeWorkerHealthRequest, context: grpc.ServicerContext
+    ) -> compute_worker_runtime_pb2.ComputeWorkerHealthResponse:
         with self._lock:
             if not self._initialized:
-                return engine_runtime_pb2.EngineHealthResponse(
+                return compute_worker_runtime_pb2.ComputeWorkerHealthResponse(
                     engine_identity="",
-                    protocol_version=ENGINE_PROTOCOL_VERSION,
+                    protocol_version=COMPUTE_WORKER_PROTOCOL_VERSION,
                     application_version=self._application_version,
                     ready=False,
                 )
         self._require_token(context)
         with self._lock:
             self._last_heartbeat = time.monotonic()
-            return engine_runtime_pb2.EngineHealthResponse(
+            return compute_worker_runtime_pb2.ComputeWorkerHealthResponse(
                 engine_identity=self._engine_identity,
-                protocol_version=ENGINE_PROTOCOL_VERSION,
+                protocol_version=COMPUTE_WORKER_PROTOCOL_VERSION,
                 application_version=self._application_version,
                 ready=not self._shutdown.is_set(),
             )
 
-    def SubmitJob(self, request: engine_runtime_pb2.EngineSubmitJobRequest, context: grpc.ServicerContext) -> engine_runtime_pb2.EngineJobReference:
+    def SubmitJob(
+        self, request: compute_worker_runtime_pb2.ComputeWorkerSubmitJobRequest, context: grpc.ServicerContext
+    ) -> compute_worker_runtime_pb2.ComputeWorkerJobReference:
         self._require_token(context)
         with self._lock:
             if not self._initialized:
                 context.abort(grpc.StatusCode.FAILED_PRECONDITION, "Engine is not initialized")
-        if request.protocol_version != ENGINE_PROTOCOL_VERSION:
+        if request.protocol_version != COMPUTE_WORKER_PROTOCOL_VERSION:
             context.abort(grpc.StatusCode.FAILED_PRECONDITION, "Engine protocol version mismatch")
         try:
             payload = json.loads(request.payload_json)
@@ -565,9 +571,11 @@ class PolarsEngineServicer(engine_runtime_pb2_grpc.PolarsEngineServiceServicer):
             self._jobs.submit(job_id=request.job_id, kind=request.kind, payload=payload)
         except RuntimeError as exc:
             context.abort(grpc.StatusCode.UNAVAILABLE, str(exc))
-        return engine_runtime_pb2.EngineJobReference(job_id=request.job_id)
+        return compute_worker_runtime_pb2.ComputeWorkerJobReference(job_id=request.job_id)
 
-    def WatchJob(self, request: engine_runtime_pb2.EngineWatchJobRequest, context: grpc.ServicerContext) -> Iterator[engine_runtime_pb2.EngineJobEvent]:
+    def WatchJob(
+        self, request: compute_worker_runtime_pb2.ComputeWorkerWatchJobRequest, context: grpc.ServicerContext
+    ) -> Iterator[compute_worker_runtime_pb2.ComputeWorkerJobEvent]:
         self._require_token(context)
         with self._lock:
             if not self._initialized:
@@ -581,7 +589,7 @@ class PolarsEngineServicer(engine_runtime_pb2_grpc.PolarsEngineServiceServicer):
             # Snapshot events under the lock, yield outside it: holding the
             # condition across yields would stall producers for the whole
             # downstream iteration.
-            batch: list[engine_runtime_pb2.EngineJobEvent] = []
+            batch: list[compute_worker_runtime_pb2.ComputeWorkerJobEvent] = []
             finished = False
             with state.condition:
                 while state.next_sequence <= sequence + 1 and not state.done and context.is_active():
@@ -589,7 +597,7 @@ class PolarsEngineServicer(engine_runtime_pb2_grpc.PolarsEngineServiceServicer):
                 if state.done and state.events and sequence < state.events[0][0] - 1:
                     if state.result is not None:
                         batch.append(
-                            engine_runtime_pb2.EngineJobEvent(
+                            compute_worker_runtime_pb2.ComputeWorkerJobEvent(
                                 job_id=request.job_id,
                                 sequence=max(sequence + 1, state.next_sequence),
                                 emitted_at=_timestamp(datetime.now(UTC)),
@@ -607,7 +615,7 @@ class PolarsEngineServicer(engine_runtime_pb2_grpc.PolarsEngineServiceServicer):
                         sequence = event_sequence
                         emitted_at = datetime.fromisoformat(str(event.pop("emitted_at")).replace("Z", "+00:00"))
                         batch.append(
-                            engine_runtime_pb2.EngineJobEvent(
+                            compute_worker_runtime_pb2.ComputeWorkerJobEvent(
                                 job_id=request.job_id,
                                 sequence=event_sequence,
                                 emitted_at=_timestamp(emitted_at),
@@ -617,7 +625,7 @@ class PolarsEngineServicer(engine_runtime_pb2_grpc.PolarsEngineServiceServicer):
                     if state.done:
                         if state.result is not None:
                             batch.append(
-                                engine_runtime_pb2.EngineJobEvent(
+                                compute_worker_runtime_pb2.ComputeWorkerJobEvent(
                                     job_id=request.job_id,
                                     sequence=sequence + 1,
                                     emitted_at=_timestamp(datetime.now(UTC)),
@@ -629,7 +637,9 @@ class PolarsEngineServicer(engine_runtime_pb2_grpc.PolarsEngineServiceServicer):
             if finished:
                 return
 
-    def GetJobResult(self, request: engine_runtime_pb2.EngineGetJobResultRequest, context: grpc.ServicerContext) -> engine_runtime_pb2.EngineJobResult:
+    def GetJobResult(
+        self, request: compute_worker_runtime_pb2.ComputeWorkerGetJobResultRequest, context: grpc.ServicerContext
+    ) -> compute_worker_runtime_pb2.ComputeWorkerJobResult:
         self._require_token(context)
         with self._lock:
             if not self._initialized:
@@ -645,24 +655,26 @@ class PolarsEngineServicer(engine_runtime_pb2_grpc.PolarsEngineServiceServicer):
 
     def CancelJob(
         self,
-        request: engine_runtime_pb2.EngineCancelJobRequest,
+        request: compute_worker_runtime_pb2.ComputeWorkerCancelJobRequest,
         context: grpc.ServicerContext,
-    ) -> engine_runtime_pb2.EngineCancelJobResponse:
+    ) -> compute_worker_runtime_pb2.ComputeWorkerCancelJobResponse:
         self._require_token(context)
         with self._lock:
             if not self._initialized:
                 context.abort(grpc.StatusCode.FAILED_PRECONDITION, "Engine is not initialized")
-        return engine_runtime_pb2.EngineCancelJobResponse(accepted=self._jobs.cancel(request.job_id))
+        return compute_worker_runtime_pb2.ComputeWorkerCancelJobResponse(accepted=self._jobs.cancel(request.job_id))
 
-    def Shutdown(self, request: engine_runtime_pb2.EngineShutdownRequest, context: grpc.ServicerContext) -> engine_runtime_pb2.EngineShutdownResponse:
+    def Shutdown(
+        self, request: compute_worker_runtime_pb2.ComputeWorkerShutdownRequest, context: grpc.ServicerContext
+    ) -> compute_worker_runtime_pb2.ComputeWorkerShutdownResponse:
         self._require_token(context)
         self._shutdown.set()
         self._jobs.shutdown()
         self._on_shutdown()
-        return engine_runtime_pb2.EngineShutdownResponse(accepted=True)
+        return compute_worker_runtime_pb2.ComputeWorkerShutdownResponse(accepted=True)
 
 
-def run_engine_server(
+def run_compute_worker_server(
     *,
     host: str,
     port: int,
@@ -676,15 +688,15 @@ def run_engine_server(
         # One active WatchJob stream per exact engine identity plus one control
         # RPC (health/cancel/shutdown). This is per container, not multiplied
         # by the application's global compute budget.
-        ThreadPoolExecutor(max_workers=_ENGINE_RPC_WORKERS),
+        ThreadPoolExecutor(max_workers=_COMPUTE_WORKER_RPC_WORKERS),
         options=(("grpc.max_send_message_length", 128 * 1024 * 1024), ("grpc.max_receive_message_length", 128 * 1024 * 1024)),
     )
 
     def stop_server() -> None:
         threading.Thread(target=lambda: server.stop(grace=1), name="polars-engine-stop", daemon=True).start()
 
-    engine_runtime_pb2_grpc.add_PolarsEngineServiceServicer_to_server(
-        PolarsEngineServicer(
+    compute_worker_runtime_pb2_grpc.add_PolarsComputeWorkerServiceServicer_to_server(
+        PolarsComputeWorkerServicer(
             engine_identity=engine_identity,
             application_version=application_version,
             token=token,
@@ -708,7 +720,7 @@ def main() -> None:
     # them before gRPC accepts health/control RPCs so a cold engine cannot be
     # mistaken for a dead one while its first job imports the compute stack.
     _load_compute_engine()
-    run_engine_server(
+    run_compute_worker_server(
         host=os.environ.get("ENGINE_RPC_HOST", "0.0.0.0"),
         port=int(os.environ.get("ENGINE_RPC_PORT", "50053")),
         engine_identity=os.environ.get("ENGINE_IDENTITY", "unknown"),

@@ -4,8 +4,8 @@ from unittest.mock import MagicMock, patch
 import pytest
 
 from runtime import compute_service
-from runtime.compute_engine import PolarsComputeEngine
 from runtime.compute_manager import ProcessManager
+from runtime.compute_worker import PolarsComputeWorker
 
 
 def _pipeline(sample_datasource, analysis_id: str) -> dict[str, object]:
@@ -51,7 +51,7 @@ def test_preview_step_persists_engine_run_by_default(sample_datasource, monkeypa
     caplog.set_level("WARNING", logger="runtime.compute_service")
     analysis_id = f"preview-log-{uuid.uuid4()}"
     pipeline = _pipeline(sample_datasource, analysis_id)
-    manager = ProcessManager(engine_factory=lambda identity, config: PolarsComputeEngine(identity.resource_id, config))
+    manager = ProcessManager(engine_factory=lambda identity, config: PolarsComputeWorker(identity.resource_id, config))
     internal_client = _internal_client_mock()
     try:
         with patch("runtime.compute_service.client_from_env", return_value=internal_client):
@@ -93,7 +93,7 @@ def test_preview_step_skips_engine_run_persistence_when_disabled(sample_datasour
     monkeypatch.setattr(compute_service.settings, "persist_preview_runs", False)
     analysis_id = f"preview-no-log-{uuid.uuid4()}"
     pipeline = _pipeline(sample_datasource, analysis_id)
-    manager = ProcessManager(engine_factory=lambda identity, config: PolarsComputeEngine(identity.resource_id, config))
+    manager = ProcessManager(engine_factory=lambda identity, config: PolarsComputeWorker(identity.resource_id, config))
     internal_client = _internal_client_mock()
     try:
         with patch("runtime.compute_service.client_from_env", return_value=internal_client):
@@ -122,7 +122,7 @@ def test_preview_step_finalizes_run_when_engine_fails(sample_datasource, monkeyp
     pipeline = _pipeline(sample_datasource, analysis_id)
     internal_client = _internal_client_mock()
 
-    manager = ProcessManager(engine_factory=lambda identity, config: PolarsComputeEngine(identity.resource_id, config))
+    manager = ProcessManager(engine_factory=lambda identity, config: PolarsComputeWorker(identity.resource_id, config))
     with (
         patch("runtime.compute_service.client_from_env", return_value=internal_client),
         patch("runtime.compute_service._acquire_engine", side_effect=RuntimeError("engine failed")),
@@ -202,7 +202,7 @@ def test_row_count_records_run_when_engine_acquire_fails(sample_datasource) -> N
     pipeline = _pipeline(sample_datasource, analysis_id)
     internal_client = _internal_client_mock()
     internal_client.engine_run_state.return_value = None
-    manager = ProcessManager(engine_factory=lambda identity, config: PolarsComputeEngine(identity.resource_id, config))
+    manager = ProcessManager(engine_factory=lambda identity, config: PolarsComputeWorker(identity.resource_id, config))
 
     with (
         patch("runtime.compute_service.client_from_env", return_value=internal_client),

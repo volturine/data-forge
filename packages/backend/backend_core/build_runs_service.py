@@ -646,15 +646,30 @@ def latest_namespace_update(session: Session, *, namespace: str) -> datetime | N
     return updated if isinstance(updated, datetime) else None
 
 
+def _preserve_legacy_run_enum_names(value: object) -> object:
+    if isinstance(value, dict):
+        return {key: _preserve_legacy_run_enum_names(child) for key, child in value.items()}
+    if isinstance(value, list):
+        return [_preserve_legacy_run_enum_names(child) for child in value]
+    if isinstance(value, str):
+        for current_prefix, legacy_prefix in (
+            ('COMPUTE_WORKER_RUN_KIND_', 'ENGINE_RUN_KIND_'),
+            ('COMPUTE_WORKER_RUN_EXECUTION_CATEGORY_', 'ENGINE_RUN_EXECUTION_CATEGORY_'),
+        ):
+            if value.startswith(current_prefix):
+                return legacy_prefix + value[len(current_prefix) :]
+    return value
+
+
 def serialize_event_row(row: BuildEvent) -> dict[str, object]:
     event = compute_schemas.BuildEventAdapter.validate_python(row.payload_json)
-    return cast(
-        dict[str, object],
-        json_format.MessageToDict(
-            _build_event_proto(event, namespace=row.namespace, sequence=row.sequence),
-            always_print_fields_with_no_presence=True,
-        ),
+    # MessageToDict emits enum value identifiers. Keep the existing build-stream
+    # JSON names until the public API/WebSocket rename lands in the later #224 layer.
+    payload = json_format.MessageToDict(
+        _build_event_proto(event, namespace=row.namespace, sequence=row.sequence),
+        always_print_fields_with_no_presence=True,
     )
+    return cast(dict[str, object], _preserve_legacy_run_enum_names(payload))
 
 
 def fold_build_detail(session: Session, build_run: BuildRun) -> compute_schemas.BuildRunDetail:

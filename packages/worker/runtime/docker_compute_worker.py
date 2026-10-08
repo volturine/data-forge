@@ -19,12 +19,12 @@ import docker
 import grpc
 from google.protobuf import json_format
 
-from dataforge_protocol import compute_pb2, engine_runtime_pb2, engine_runtime_pb2_grpc, enums_pb2
+from dataforge_protocol import compute_pb2, compute_worker_runtime_pb2, compute_worker_runtime_pb2_grpc, enums_pb2
 from runtime.compute_request_context import get_compute_request_id
+from runtime.compute_worker_credentials import ObjectStoreCredentials, resolve_compute_worker_credentials
+from runtime.compute_worker_server import COMPUTE_WORKER_PROTOCOL_VERSION
 from runtime.config import settings
-from runtime.domain.compute.base import ComputeEngine, EngineProgressEvent, EngineResult
-from runtime.engine_credentials import ObjectStoreCredentials, resolve_engine_credentials
-from runtime.engine_server import ENGINE_PROTOCOL_VERSION
+from runtime.domain.compute.base import ComputeWorker, ComputeWorkerProgressEvent, ComputeWorkerResult
 from runtime.export_formats import get_export_format
 from runtime.json_values import encode_json_bytes
 from runtime.namespace import get_namespace
@@ -32,16 +32,16 @@ from runtime.object_store import delete_object, download_file, object_store_url,
 
 logger = logging.getLogger(__name__)
 
-_ENGINE_TOKEN_METADATA_KEY = "x-engine-token"
-_ENGINE_APPLICATION_VERSION = "engine"
+_COMPUTE_WORKER_TOKEN_METADATA_KEY = "x-engine-token"
+_COMPUTE_WORKER_APPLICATION_VERSION = "engine"
 _COORDINATOR_GENERATION_LABEL = "io.dataforge.coordinator-generation"
 _MIB = 1024 * 1024
-_SLOW_ENGINE_START_SECONDS = 5.0
+_SLOW_COMPUTE_WORKER_START_SECONDS = 5.0
 # Relative scheduling weight only (not a cap): one engine gets 1/16 the weight
 # of an API, runtime, database, or worker-manager service under CPU contention.
-_COMPUTE_ENGINE_CPU_SHARES = 128
+_COMPUTE_WORKER_CPU_SHARES = 128
 _IMAGE_DIGEST_RE = re.compile(r"^.+@sha256:[0-9a-f]{64}$")
-_ENGINE_CHANNEL_OPTIONS = (
+_COMPUTE_WORKER_CHANNEL_OPTIONS = (
     ("grpc.max_send_message_length", 128 * 1024 * 1024),
     ("grpc.max_receive_message_length", 128 * 1024 * 1024),
     ("grpc.initial_reconnect_backoff_ms", 100),
@@ -59,7 +59,7 @@ _LIVENESS_CACHE_SECONDS = 1.0
 _validated_network: str | None = None
 
 
-def _warn_unpinned_engine_image() -> None:
+def _warn_unpinned_compute_worker_image() -> None:
     """Report an unpinned engine image once, at worker startup.
 
     Digest pinning keeps every engine launch on a byte-identical image, but tag
@@ -98,9 +98,9 @@ def _resolve_launch_context(client: Any) -> tuple[int | None, str]:
         return daemon_cpu, _validated_image_id
 
 
-def validate_engine_runtime_readiness() -> None:
+def validate_compute_worker_runtime_readiness() -> None:
     """Fail before worker registration if Docker or launch inputs are unavailable."""
-    _warn_unpinned_engine_image()
+    _warn_unpinned_compute_worker_image()
     client: Any = docker.DockerClient(base_url=settings.engine_docker_host)  # type: ignore[attr-defined]
     try:
         _resolve_launch_context(client)
@@ -185,8 +185,8 @@ def reconcile_deployment_containers(
     return removed
 
 
-def _identity_scope(identity: compute_pb2.EngineIdentity) -> str:
-    return enums_pb2.EngineScope.Name(identity.scope).removeprefix("ENGINE_SCOPE_").lower()
+def _identity_scope(identity: compute_pb2.ComputeWorkerIdentity) -> str:
+    return enums_pb2.ComputeWorkerScope.Name(identity.scope).removeprefix("COMPUTE_WORKER_SCOPE_").lower()
 
 
 def _safe_name(value: str) -> str:
@@ -194,7 +194,7 @@ def _safe_name(value: str) -> str:
     return normalized or "engine"
 
 
-def _container_name(*, identity: compute_pb2.EngineIdentity, namespace: str) -> str:
+def _container_name(*, identity: compute_pb2.ComputeWorkerIdentity, namespace: str) -> str:
     payload = f"{namespace}:{identity.scope}:{identity.resource_id}:{uuid.uuid4()}".encode()
     suffix = sha256(payload).hexdigest()[:12]
     # Docker DNS resolves container names as DNS labels, capped at 63 chars.
@@ -235,7 +235,7 @@ def _container_nano_cpus(max_threads: int) -> int | None:
     return max(100_000_000, max_threads * 1_000_000_000)
 
 
-def _engine_object_store_endpoint() -> str:
+def _compute_worker_object_store_endpoint() -> str:
     if settings.engine_object_store_endpoint:
         return settings.engine_object_store_endpoint
     endpoint = settings.object_store_endpoint
@@ -260,10 +260,10 @@ def _container_rpc_target(container: Any) -> str:
 # Credential bootstrap is passed in-memory via gRPC Initialize RPC, eliminating exec_run.
 
 
-class DockerComputeEngine(ComputeEngine):
+class DockerComputeWorker(ComputeWorker):
     def __init__(
         self,
-        identity: compute_pb2.EngineIdentity | None = None,
+        identity: compute_pb2.ComputeWorkerIdentity | None = None,
         resource_config: dict[str, object] | None = None,
         *,
         namespace: str | None = None,
@@ -271,7 +271,7 @@ class DockerComputeEngine(ComputeEngine):
         coordinator_generation: int | None = None,
         coordinator_guard: Callable[[], None] | None = None,
     ) -> None:
-        self.identity = identity if identity is not None else compute_pb2.EngineIdentity(resource_id="")
+        self.identity = identity if identity is not None else compute_pb2.ComputeWorkerIdentity(resource_id="")
         self.analysis_id = self.identity.resource_id
         self.resource_config = resource_config or {}
         self.effective_resources: dict[str, object] = {}
@@ -284,7 +284,7 @@ class DockerComputeEngine(ComputeEngine):
         self._container: Any | None = None
         self._container_id: str | None = None
         self._channel: grpc.Channel | None = None
-        self._stub: engine_runtime_pb2_grpc.PolarsEngineServiceStub | None = None
+        self._stub: compute_worker_runtime_pb2_grpc.PolarsComputeWorkerServiceStub | None = None
         self._rpc_target: str | None = None
         self._token = ""
         self._alive = False
@@ -300,8 +300,8 @@ class DockerComputeEngine(ComputeEngine):
         # boot takes, and no status or capacity decision may queue behind that.
         self._liveness_lock = threading.Lock()
         self._liveness_checked_at = 0.0
-        self._pending_results: dict[str, EngineResult] = {}
-        self._pending_progress: dict[str, deque[EngineProgressEvent]] = {}
+        self._pending_results: dict[str, ComputeWorkerResult] = {}
+        self._pending_progress: dict[str, deque[ComputeWorkerProgressEvent]] = {}
         self._active_job_ids: set[str] = set()
         self._artifact_transfers: dict[str, tuple[Path, str]] = {}
         self._heartbeat_stop = threading.Event()
@@ -441,7 +441,7 @@ class DockerComputeEngine(ComputeEngine):
                 return
             self._shutdown_requested = False
             phase_started = time.perf_counter()
-            credentials = resolve_engine_credentials(self._namespace, self.identity)
+            credentials = resolve_compute_worker_credentials(self._namespace, self.identity)
             client: Any = docker.DockerClient(base_url=settings.engine_docker_host)  # type: ignore[attr-defined]  # docker-py has no Python 3.14 stubs.
             try:
                 daemon_cpu_count, image_id = _resolve_launch_context(client)
@@ -459,11 +459,13 @@ class DockerComputeEngine(ComputeEngine):
                 "io.dataforge.deployment": settings.deployment_id,
                 "io.dataforge.namespace": self._namespace,
                 "io.dataforge.scope": _identity_scope(self.identity),
-                "io.dataforge.reuse-policy": enums_pb2.EngineReusePolicy.Name(self.identity.reuse_policy).removeprefix("ENGINE_REUSE_POLICY_").lower(),
+                "io.dataforge.reuse-policy": enums_pb2.ComputeWorkerReusePolicy.Name(self.identity.reuse_policy)
+                .removeprefix("COMPUTE_WORKER_REUSE_POLICY_")
+                .lower(),
                 "io.dataforge.resource-id": self.identity.resource_id,
                 "io.dataforge.supervisor": self._supervisor_id,
                 "io.dataforge.owner": self.identity.build_id if self.identity.HasField("build_id") else self._supervisor_id,
-                "io.dataforge.protocol-version": str(ENGINE_PROTOCOL_VERSION),
+                "io.dataforge.protocol-version": str(COMPUTE_WORKER_PROTOCOL_VERSION),
                 "io.dataforge.image-digest": self.image_digest,
                 "io.dataforge.created-at": datetime.now(UTC).isoformat(),
             }
@@ -480,11 +482,11 @@ class DockerComputeEngine(ComputeEngine):
                     # Orphan guard: if the worker dies between container start and
                     # initialization, the engine stops itself instead of leaking.
                     "ENGINE_INIT_TIMEOUT_SECONDS": str(max(120, settings.engine_start_timeout_seconds * 2)),
-                    "APP_VERSION": _ENGINE_APPLICATION_VERSION,
+                    "APP_VERSION": _COMPUTE_WORKER_APPLICATION_VERSION,
                 },
                 "labels": labels,
                 "network": settings.engine_docker_network,
-                "cpu_shares": _COMPUTE_ENGINE_CPU_SHARES,
+                "cpu_shares": _COMPUTE_WORKER_CPU_SHARES,
                 "mem_limit": resources["max_memory_mb"] * _MIB if resources["max_memory_mb"] else None,
                 "pids_limit": 256,
                 "cap_drop": ["ALL"],
@@ -529,9 +531,9 @@ class DockerComputeEngine(ComputeEngine):
                 self._rpc_target = target
                 self._channel = grpc.insecure_channel(
                     target,
-                    options=_ENGINE_CHANNEL_OPTIONS,
+                    options=_COMPUTE_WORKER_CHANNEL_OPTIONS,
                 )
-                self._stub = engine_runtime_pb2_grpc.PolarsEngineServiceStub(self._channel)
+                self._stub = compute_worker_runtime_pb2_grpc.PolarsComputeWorkerServiceStub(self._channel)
                 phase_started = time.perf_counter()
                 self._await_listening()
                 startup_phases["listener_ready_ms"] = (time.perf_counter() - phase_started) * 1000
@@ -547,7 +549,7 @@ class DockerComputeEngine(ComputeEngine):
                 )
                 self._heartbeat_thread.start()
                 startup_duration_ms = (time.perf_counter() - start_started) * 1000
-                if startup_duration_ms >= _SLOW_ENGINE_START_SECONDS * 1000:
+                if startup_duration_ms >= _SLOW_COMPUTE_WORKER_START_SECONDS * 1000:
                     phase_timings = " ".join(f"{name}={duration:.1f}" for name, duration in startup_phases.items())
                     logger.warning(
                         "Slow engine startup request_id=%s namespace=%s engine_scope=%s resource_id=%s duration_ms=%.1f %s",
@@ -563,15 +565,15 @@ class DockerComputeEngine(ComputeEngine):
                 raise
 
     def _metadata(self) -> tuple[tuple[str, str], ...]:
-        return ((_ENGINE_TOKEN_METADATA_KEY, self._token),)
+        return ((_COMPUTE_WORKER_TOKEN_METADATA_KEY, self._token),)
 
     def _initialize(self, *, resources: dict[str, int], credentials: ObjectStoreCredentials) -> None:
         assert self._stub is not None
-        req = engine_runtime_pb2.EngineInitializeRequest(
-            protocol_version=ENGINE_PROTOCOL_VERSION,
+        req = compute_worker_runtime_pb2.ComputeWorkerInitializeRequest(
+            protocol_version=COMPUTE_WORKER_PROTOCOL_VERSION,
             engine_identity=self.identity.resource_id,
             token=self._token,
-            object_store_endpoint=_engine_object_store_endpoint(),
+            object_store_endpoint=_compute_worker_object_store_endpoint(),
             object_store_region=settings.object_store_region,
             object_store_access_key=credentials.access_key,
             object_store_secret_key=credentials.secret_key,
@@ -609,7 +611,7 @@ class DockerComputeEngine(ComputeEngine):
                 raise RuntimeError(f"Timed out waiting for engine health check; container status={status}: {last_error}") from last_error
             try:
                 self._stub.Health(
-                    engine_runtime_pb2.EngineHealthRequest(),
+                    compute_worker_runtime_pb2.ComputeWorkerHealthRequest(),
                     timeout=min(2.0, remaining),
                 )
                 return
@@ -656,7 +658,7 @@ class DockerComputeEngine(ComputeEngine):
                 "io.dataforge.scope": "warm-worker",
                 "io.dataforge.supervisor": self._supervisor_id,
                 "io.dataforge.owner": self._supervisor_id,
-                "io.dataforge.protocol-version": str(ENGINE_PROTOCOL_VERSION),
+                "io.dataforge.protocol-version": str(COMPUTE_WORKER_PROTOCOL_VERSION),
                 "io.dataforge.image-digest": self.image_digest,
                 "io.dataforge.created-at": datetime.now(UTC).isoformat(),
             }
@@ -672,11 +674,11 @@ class DockerComputeEngine(ComputeEngine):
                     "ENGINE_HEARTBEAT_TIMEOUT_SECONDS": str(settings.engine_heartbeat_interval_seconds * 6),
                     # Warm workers stay uninitialized until assigned; no deadline.
                     "ENGINE_INIT_TIMEOUT_SECONDS": "0",
-                    "APP_VERSION": _ENGINE_APPLICATION_VERSION,
+                    "APP_VERSION": _COMPUTE_WORKER_APPLICATION_VERSION,
                 },
                 "labels": labels,
                 "network": settings.engine_docker_network,
-                "cpu_shares": _COMPUTE_ENGINE_CPU_SHARES,
+                "cpu_shares": _COMPUTE_WORKER_CPU_SHARES,
                 "mem_limit": resources["max_memory_mb"] * _MIB if resources["max_memory_mb"] else None,
                 "pids_limit": 256,
                 "cap_drop": ["ALL"],
@@ -711,9 +713,9 @@ class DockerComputeEngine(ComputeEngine):
                 self._rpc_target = target
                 self._channel = grpc.insecure_channel(
                     target,
-                    options=_ENGINE_CHANNEL_OPTIONS,
+                    options=_COMPUTE_WORKER_CHANNEL_OPTIONS,
                 )
-                self._stub = engine_runtime_pb2_grpc.PolarsEngineServiceStub(self._channel)
+                self._stub = compute_worker_runtime_pb2_grpc.PolarsComputeWorkerServiceStub(self._channel)
                 self._await_listening()
                 self._alive = True
             except Exception:
@@ -722,7 +724,7 @@ class DockerComputeEngine(ComputeEngine):
 
     def bind_identity(
         self,
-        identity: compute_pb2.EngineIdentity,
+        identity: compute_pb2.ComputeWorkerIdentity,
         *,
         resource_config: dict[str, object] | None = None,
         namespace: str | None = None,
@@ -736,7 +738,7 @@ class DockerComputeEngine(ComputeEngine):
             self._namespace = namespace or get_namespace()
             if resource_config is not None:
                 self.resource_config = resource_config
-            credentials = resolve_engine_credentials(self._namespace, self.identity)
+            credentials = resolve_compute_worker_credentials(self._namespace, self.identity)
             resources = _effective_resources(self.resource_config)
             self.effective_resources = cast(dict[str, object], resources)
             self._token = uuid.uuid4().hex
@@ -758,7 +760,7 @@ class DockerComputeEngine(ComputeEngine):
                 stub = self._stub
                 if stub is None:
                     return
-                stub.Health(engine_runtime_pb2.EngineHealthRequest(), timeout=2, metadata=self._metadata())
+                stub.Health(compute_worker_runtime_pb2.ComputeWorkerHealthRequest(), timeout=2, metadata=self._metadata())
                 consecutive_failures = 0
             except Exception as exc:
                 consecutive_failures += 1
@@ -832,7 +834,7 @@ class DockerComputeEngine(ComputeEngine):
             is_warm_worker = self._is_warm_worker
             metadata = () if is_warm_worker else self._metadata()
         try:
-            health = stub.Health(engine_runtime_pb2.EngineHealthRequest(), timeout=1, metadata=metadata)
+            health = stub.Health(compute_worker_runtime_pb2.ComputeWorkerHealthRequest(), timeout=1, metadata=metadata)
             return True if is_warm_worker else bool(health.ready)
         except grpc.RpcError:
             return False
@@ -857,8 +859,8 @@ class DockerComputeEngine(ComputeEngine):
         try:
             self._assert_coordinator_current()
             stub.SubmitJob(
-                engine_runtime_pb2.EngineSubmitJobRequest(
-                    protocol_version=ENGINE_PROTOCOL_VERSION,
+                compute_worker_runtime_pb2.ComputeWorkerSubmitJobRequest(
+                    protocol_version=COMPUTE_WORKER_PROTOCOL_VERSION,
                     job_id=job_id,
                     kind=kind,
                     payload_json=encode_json_bytes(payload),
@@ -906,7 +908,7 @@ class DockerComputeEngine(ComputeEngine):
             upload_url = presigned_put_url(
                 artifact_url,
                 expires_seconds=max(settings.engine_start_timeout_seconds * 10, 3600),
-                endpoint_url=_engine_object_store_endpoint(),
+                endpoint_url=_compute_worker_object_store_endpoint(),
                 content_type=export.content_type,
             )
             return self._submit(
@@ -951,7 +953,7 @@ class DockerComputeEngine(ComputeEngine):
             return False
         try:
             response = cancel(
-                engine_runtime_pb2.EngineCancelJobRequest(job_id=expected),
+                compute_worker_runtime_pb2.ComputeWorkerCancelJobRequest(job_id=expected),
                 timeout=settings.engine_shutdown_grace_seconds,
                 metadata=metadata,
             )
@@ -960,7 +962,7 @@ class DockerComputeEngine(ComputeEngine):
             return False
         return bool(response.accepted)
 
-    def _publish_job_result(self, job_id: str, result: EngineResult) -> None:
+    def _publish_job_result(self, job_id: str, result: ComputeWorkerResult) -> None:
         with self._lock:
             transfer = self._artifact_transfers.pop(job_id, None)
         if transfer is not None:
@@ -971,7 +973,7 @@ class DockerComputeEngine(ComputeEngine):
                     if result.data is not None:
                         result.data["output_path"] = str(local_path)
             except Exception as exc:
-                result = EngineResult(
+                result = ComputeWorkerResult(
                     job_id=job_id,
                     data=None,
                     error=f"Failed to retrieve staged engine artifact: {exc}",
@@ -996,7 +998,7 @@ class DockerComputeEngine(ComputeEngine):
             while True:
                 try:
                     stream = self._stub.WatchJob(
-                        engine_runtime_pb2.EngineWatchJobRequest(job_id=job_id, after_sequence=sequence),
+                        compute_worker_runtime_pb2.ComputeWorkerWatchJobRequest(job_id=job_id, after_sequence=sequence),
                         metadata=self._metadata(),
                     )
                     for event in stream:
@@ -1007,14 +1009,14 @@ class DockerComputeEngine(ComputeEngine):
                             if not isinstance(payload, dict):
                                 raise RuntimeError("Engine progress payload must be an object")
                             with self._lock:
-                                self._pending_progress.setdefault(job_id, deque(maxlen=1000)).append(EngineProgressEvent(job_id=job_id, event=payload))
+                                self._pending_progress.setdefault(job_id, deque(maxlen=1000)).append(ComputeWorkerProgressEvent(job_id=job_id, event=payload))
                                 while len(self._pending_progress) > 100:
                                     self._pending_progress.pop(next(iter(self._pending_progress)))
                         elif which == "result":
                             result = _result_from_message(event.result)
                             with contextlib.suppress(Exception):
                                 self._stub.GetJobResult(
-                                    engine_runtime_pb2.EngineGetJobResultRequest(job_id=job_id),
+                                    compute_worker_runtime_pb2.ComputeWorkerGetJobResultRequest(job_id=job_id),
                                     timeout=2,
                                     metadata=self._metadata(),
                                 )
@@ -1026,7 +1028,7 @@ class DockerComputeEngine(ComputeEngine):
                     # cursor eviction or transport interruption as job loss.
                     try:
                         message = self._stub.GetJobResult(
-                            engine_runtime_pb2.EngineGetJobResultRequest(job_id=job_id),
+                            compute_worker_runtime_pb2.ComputeWorkerGetJobResultRequest(job_id=job_id),
                             timeout=2,
                             metadata=self._metadata(),
                         )
@@ -1049,7 +1051,7 @@ class DockerComputeEngine(ComputeEngine):
             with self._lock:
                 intentional_shutdown = self._shutdown_requested
                 transfer = self._artifact_transfers.pop(job_id, None)
-                self._pending_results[job_id] = EngineResult(
+                self._pending_results[job_id] = ComputeWorkerResult(
                     job_id=job_id,
                     data=None,
                     error="Engine shutdown requested" if intentional_shutdown else str(exc),
@@ -1067,7 +1069,7 @@ class DockerComputeEngine(ComputeEngine):
                 with contextlib.suppress(Exception):
                     delete_object(transfer[1])
 
-    def get_result(self, timeout: float = 1.0, job_id: str | None = None) -> EngineResult | None:
+    def get_result(self, timeout: float = 1.0, job_id: str | None = None) -> ComputeWorkerResult | None:
         expected = job_id or self.current_job_id
         deadline = time.monotonic() + timeout
         while True:
@@ -1078,7 +1080,7 @@ class DockerComputeEngine(ComputeEngine):
                 intentional_shutdown = self._shutdown_requested
                 error_kind = "engine_shutdown" if intentional_shutdown else "engine_oom_killed" if self.oom_killed else "engine_container_exited"
                 reason = self.termination_reason or "unknown"
-                return EngineResult(
+                return ComputeWorkerResult(
                     job_id=expected,
                     data=None,
                     error=(
@@ -1098,7 +1100,7 @@ class DockerComputeEngine(ComputeEngine):
                 return None
             time.sleep(min(0.05, max(0.0, deadline - time.monotonic())))
 
-    def get_progress_event(self, timeout: float = 1.0, job_id: str | None = None) -> EngineProgressEvent | None:
+    def get_progress_event(self, timeout: float = 1.0, job_id: str | None = None) -> ComputeWorkerProgressEvent | None:
         expected = job_id or self.current_job_id
         deadline = time.monotonic() + timeout
         while True:
@@ -1134,7 +1136,9 @@ class DockerComputeEngine(ComputeEngine):
                 return
             if stub is not None:
                 with contextlib.suppress(Exception):
-                    stub.Shutdown(engine_runtime_pb2.EngineShutdownRequest(), timeout=settings.engine_shutdown_grace_seconds, metadata=self._metadata())
+                    stub.Shutdown(
+                        compute_worker_runtime_pb2.ComputeWorkerShutdownRequest(), timeout=settings.engine_shutdown_grace_seconds, metadata=self._metadata()
+                    )
             deadline = time.monotonic() + settings.engine_shutdown_grace_seconds
             while time.monotonic() < deadline:
                 with contextlib.suppress(Exception):
@@ -1180,11 +1184,11 @@ class DockerComputeEngine(ComputeEngine):
                 delete_object(artifact_url)
 
 
-def _result_from_message(message: engine_runtime_pb2.EngineJobResult) -> EngineResult:
+def _result_from_message(message: compute_worker_runtime_pb2.ComputeWorkerJobResult) -> ComputeWorkerResult:
     data = json.loads(message.data_json) if message.HasField("data_json") else None
     details = json.loads(message.error_details_json) if message.HasField("error_details_json") else None
     timings = json_format.MessageToDict(message.step_timings, preserving_proto_field_name=True)
-    return EngineResult(
+    return ComputeWorkerResult(
         job_id=message.job_id,
         data=data,
         error=message.error if message.HasField("error") else None,

@@ -22,6 +22,7 @@ from backend_core import (
 )
 from backend_core.api_execution_budget import run_api_blocking
 from backend_core.auth_config import settings as auth_settings
+from backend_core.compute_worker_live import load_compute_worker_snapshot, registry as compute_worker_registry
 from backend_core.config import settings
 from backend_core.data_plane_client import client_from_settings
 from backend_core.database import run_db, run_settings_db
@@ -33,7 +34,6 @@ from backend_core.dependencies import (
 from backend_core.domain.build_runs.live import BuildNotification, hub as build_hub
 from backend_core.domain.compute import schemas
 from backend_core.domain.engine_runs.schemas import EngineRunKind
-from backend_core.engine_live import load_engine_snapshot, registry as engine_registry
 from backend_core.error_handlers import handle_errors
 from backend_core.exceptions import engine_not_found
 from backend_core.namespace import get_namespace, reset_namespace, set_namespace_context
@@ -385,9 +385,9 @@ async def _send_engine_snapshot(websocket: WebSocket) -> str:
         'streaming_chunk_size': settings.polars_streaming_chunk_size,
     }
 
-    version, serialized = await engine_registry.load_serialized_snapshot(
+    version, serialized = await compute_worker_registry.load_serialized_snapshot(
         namespace,
-        lambda: run_api_blocking(run_settings_db, lambda session: load_engine_snapshot(session, namespace=namespace, defaults=defaults)),
+        lambda: run_api_blocking(run_settings_db, lambda session: load_compute_worker_snapshot(session, namespace=namespace, defaults=defaults)),
     )
     await safe_send_serialized_json(websocket, serialized)
     return str(version)
@@ -395,7 +395,7 @@ async def _send_engine_snapshot(websocket: WebSocket) -> str:
 
 async def _wait_for_engine_notification(websocket: WebSocket, namespace: str, last_seen: str | None) -> str | None:
     receive_task = asyncio.create_task(_wait_for_websocket_disconnect(websocket))
-    notify_task = asyncio.create_task(engine_registry.wait_for_namespace(namespace, last_seen))
+    notify_task = asyncio.create_task(compute_worker_registry.wait_for_namespace(namespace, last_seen))
     done, pending = await asyncio.wait({receive_task, notify_task}, return_when=asyncio.FIRST_COMPLETED)
     for task in pending:
         task.cancel()
@@ -812,11 +812,11 @@ async def _spawn_engine_identity(
     if manager is not None:
 
         def spawn_and_read_status():
-            manager.spawn_engine(identity, resource_config=resource_config)
+            manager.spawn_compute_worker(identity, resource_config=resource_config)
             return manager.get_engine_status(identity)
 
         return await run_api_blocking(spawn_and_read_status)
-    return await executor_client.spawn_engine(
+    return await executor_client.spawn_compute_worker(
         identity=identity,
         resource_config=resource_config,
         runtime_probe=runtime_probe,
@@ -895,9 +895,9 @@ async def spawn_analysis_engine(
     runtime_probe: RuntimeAvailabilityProbe = Depends(get_runtime_availability_probe),
 ):
     return await _spawn_engine_identity(
-        compute_pb2.EngineIdentity(
-            scope=enums_pb2.ENGINE_SCOPE_ANALYSIS_INTERACTIVE,
-            reuse_policy=enums_pb2.ENGINE_REUSE_POLICY_SHARED,
+        compute_pb2.ComputeWorkerIdentity(
+            scope=enums_pb2.COMPUTE_WORKER_SCOPE_ANALYSIS_INTERACTIVE,
+            reuse_policy=enums_pb2.COMPUTE_WORKER_REUSE_POLICY_SHARED,
             analysis_id=analysis_id,
             resource_id=analysis_id,
         ),
@@ -918,9 +918,9 @@ async def spawn_datasource_preview_engine(
 ):
     datasource_id_value = parse_datasource_id(datasource_id)
     return await _spawn_engine_identity(
-        compute_pb2.EngineIdentity(
-            scope=enums_pb2.ENGINE_SCOPE_DATASOURCE_PREVIEW,
-            reuse_policy=enums_pb2.ENGINE_REUSE_POLICY_SHARED,
+        compute_pb2.ComputeWorkerIdentity(
+            scope=enums_pb2.COMPUTE_WORKER_SCOPE_DATASOURCE_PREVIEW,
+            reuse_policy=enums_pb2.COMPUTE_WORKER_REUSE_POLICY_SHARED,
             datasource_id=datasource_id_value,
             resource_id=datasource_id_value,
         ),
@@ -940,9 +940,9 @@ async def configure_analysis_engine(
     runtime_probe: RuntimeAvailabilityProbe = Depends(get_runtime_availability_probe),
 ):
     return await _configure_engine_identity(
-        compute_pb2.EngineIdentity(
-            scope=enums_pb2.ENGINE_SCOPE_ANALYSIS_INTERACTIVE,
-            reuse_policy=enums_pb2.ENGINE_REUSE_POLICY_SHARED,
+        compute_pb2.ComputeWorkerIdentity(
+            scope=enums_pb2.COMPUTE_WORKER_SCOPE_ANALYSIS_INTERACTIVE,
+            reuse_policy=enums_pb2.COMPUTE_WORKER_REUSE_POLICY_SHARED,
             analysis_id=analysis_id,
             resource_id=analysis_id,
         ),
@@ -963,9 +963,9 @@ async def configure_datasource_preview_engine(
 ):
     datasource_id_value = parse_datasource_id(datasource_id)
     return await _configure_engine_identity(
-        compute_pb2.EngineIdentity(
-            scope=enums_pb2.ENGINE_SCOPE_DATASOURCE_PREVIEW,
-            reuse_policy=enums_pb2.ENGINE_REUSE_POLICY_SHARED,
+        compute_pb2.ComputeWorkerIdentity(
+            scope=enums_pb2.COMPUTE_WORKER_SCOPE_DATASOURCE_PREVIEW,
+            reuse_policy=enums_pb2.COMPUTE_WORKER_REUSE_POLICY_SHARED,
             datasource_id=datasource_id_value,
             resource_id=datasource_id_value,
         ),
@@ -984,9 +984,9 @@ async def shutdown_analysis_engine(
     runtime_probe: RuntimeAvailabilityProbe = Depends(get_runtime_availability_probe),
 ):
     await _shutdown_engine_identity(
-        compute_pb2.EngineIdentity(
-            scope=enums_pb2.ENGINE_SCOPE_ANALYSIS_INTERACTIVE,
-            reuse_policy=enums_pb2.ENGINE_REUSE_POLICY_SHARED,
+        compute_pb2.ComputeWorkerIdentity(
+            scope=enums_pb2.COMPUTE_WORKER_SCOPE_ANALYSIS_INTERACTIVE,
+            reuse_policy=enums_pb2.COMPUTE_WORKER_REUSE_POLICY_SHARED,
             analysis_id=analysis_id,
             resource_id=analysis_id,
         ),
@@ -1005,9 +1005,9 @@ async def shutdown_datasource_preview_engine(
 ):
     datasource_id_value = parse_datasource_id(datasource_id)
     await _shutdown_engine_identity(
-        compute_pb2.EngineIdentity(
-            scope=enums_pb2.ENGINE_SCOPE_DATASOURCE_PREVIEW,
-            reuse_policy=enums_pb2.ENGINE_REUSE_POLICY_SHARED,
+        compute_pb2.ComputeWorkerIdentity(
+            scope=enums_pb2.COMPUTE_WORKER_SCOPE_DATASOURCE_PREVIEW,
+            reuse_policy=enums_pb2.COMPUTE_WORKER_REUSE_POLICY_SHARED,
             datasource_id=datasource_id_value,
             resource_id=datasource_id_value,
         ),
@@ -1025,9 +1025,9 @@ async def shutdown_build_engine(
     runtime_probe: RuntimeAvailabilityProbe = Depends(get_runtime_availability_probe),
 ):
     await _shutdown_engine_identity(
-        compute_pb2.EngineIdentity(
-            scope=enums_pb2.ENGINE_SCOPE_BUILD,
-            reuse_policy=enums_pb2.ENGINE_REUSE_POLICY_EXCLUSIVE,
+        compute_pb2.ComputeWorkerIdentity(
+            scope=enums_pb2.COMPUTE_WORKER_SCOPE_BUILD,
+            reuse_policy=enums_pb2.COMPUTE_WORKER_REUSE_POLICY_EXCLUSIVE,
             build_id=build_id,
             resource_id=build_id,
         ),
@@ -1044,7 +1044,7 @@ async def engine_list_stream(websocket: WebSocket) -> None:
     await websocket.accept()
     try:
         await _require_websocket_user(websocket)
-        await engine_registry.subscribe(namespace)
+        await compute_worker_registry.subscribe(namespace)
         subscribed = True
         last_seen = await _send_engine_snapshot(websocket)
         while True:
@@ -1081,7 +1081,7 @@ async def engine_list_stream(websocket: WebSocket) -> None:
     finally:
         if subscribed:
             with anyio.CancelScope(shield=True):
-                await engine_registry.unsubscribe(namespace)
+                await compute_worker_registry.unsubscribe(namespace)
         reset_namespace(token)
         await safe_close_websocket(websocket)
 

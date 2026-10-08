@@ -23,11 +23,11 @@ _inflight: dict[tuple[str, str], Future[ObjectStoreCredentials]] = {}
 _cache_lock = threading.Lock()
 
 
-def _credential_role(identity: compute_pb2.EngineIdentity) -> str:
-    return "builder" if identity.scope in {enums_pb2.ENGINE_SCOPE_BUILD, enums_pb2.ENGINE_SCOPE_DATASOURCE_PREVIEW} else "reader"
+def _credential_role(identity: compute_pb2.ComputeWorkerIdentity) -> str:
+    return "builder" if identity.scope in {enums_pb2.COMPUTE_WORKER_SCOPE_BUILD, enums_pb2.COMPUTE_WORKER_SCOPE_DATASOURCE_PREVIEW} else "reader"
 
 
-def resolve_engine_credentials(namespace: str, identity: compute_pb2.EngineIdentity) -> ObjectStoreCredentials:
+def resolve_compute_worker_credentials(namespace: str, identity: compute_pb2.ComputeWorkerIdentity) -> ObjectStoreCredentials:
     """Fetch namespace-scoped engine credentials from the backend.
 
     The backend provisions one reader and one builder identity per namespace.

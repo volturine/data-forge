@@ -3,14 +3,14 @@ import { idbGet, idbSet, idbDelete } from '$lib/utils/indexeddb';
 import { ensureTabDefaults } from '$lib/utils/analysis-tab';
 import { cloneJson } from '$lib/utils/json';
 import type { AnalysisTab } from '$lib/types/analysis';
-import type { EngineResourceConfig } from '$lib/types/compute';
+import type { ComputeWorkerResourceConfig } from '$lib/types/compute';
 
 export type AnalysisDraftSnapshot = {
 	analysisId: string | null;
 	version?: string | null;
 	tabs: AnalysisTab[];
 	activeTabId: string | null;
-	resourceConfig: EngineResourceConfig | null;
+	resourceConfig: ComputeWorkerResourceConfig | null;
 	selectedStepId: string | null;
 	leftPaneCollapsed: boolean;
 	rightPaneCollapsed: boolean;

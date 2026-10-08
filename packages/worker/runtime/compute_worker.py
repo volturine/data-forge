@@ -34,8 +34,8 @@ from runtime.compute_utils import apply_steps, normalize_timezones
 from runtime.config import settings
 from runtime.domain.analysis.step_types import is_chart_step_type
 from runtime.domain.compute.base import (
-    EngineProgressEvent,
-    EngineResult,
+    ComputeWorkerProgressEvent,
+    ComputeWorkerResult,
     ExportCommand,
     PreviewCommand,
     RowCountCommand,
@@ -53,7 +53,7 @@ def _compute_mp_context() -> Any:
     return mp.get_context("spawn")
 
 
-class PolarsComputeEngine:
+class PolarsComputeWorker:
     @staticmethod
     def _classify_engine_error(exc: Exception) -> tuple[str, dict[str, object]]:
         if isinstance(exc, PipelineValidationError):
@@ -89,8 +89,8 @@ class PolarsComputeEngine:
         self.current_job_id: str | None = None
         self._command_lock = threading.Lock()
         self._lifecycle_lock = threading.RLock()
-        self._pending_results: dict[str, EngineResult] = {}
-        self._pending_progress: dict[str, deque[EngineProgressEvent]] = {}
+        self._pending_results: dict[str, ComputeWorkerResult] = {}
+        self._pending_progress: dict[str, deque[ComputeWorkerProgressEvent]] = {}
         self._capacity_notifier: Callable[[], None] | None = None
 
     def bind_capacity_notifier(self, notifier: Callable[[], None]) -> None:
@@ -345,12 +345,12 @@ class PolarsComputeEngine:
             return "process_exit", None
         return "timeout", None
 
-    def get_result(self, timeout: float = 1.0, job_id: str | None = None) -> EngineResult | None:
+    def get_result(self, timeout: float = 1.0, job_id: str | None = None) -> ComputeWorkerResult | None:
         """Get result from result queue."""
         if self.current_job_id and not self.is_process_alive():
             exit_code = self.process.exitcode if self.process else None
             self._reset_state()
-            return EngineResult(
+            return ComputeWorkerResult(
                 job_id=job_id,
                 data=None,
                 error=(f"Compute process died unexpectedly (exit code: {exit_code}). This may be due to out of memory or another system error."),
@@ -376,7 +376,7 @@ class PolarsComputeEngine:
             if status == "process_exit":
                 exit_code = self.process.exitcode if self.process else None
                 self._reset_state()
-                return EngineResult(
+                return ComputeWorkerResult(
                     job_id=job_id,
                     data=None,
                     error=(f"Compute process died unexpectedly (exit code: {exit_code}). This may be due to out of memory or another system error."),
@@ -386,7 +386,7 @@ class PolarsComputeEngine:
             message = payload
             if isinstance(message, ShutdownAck):
                 continue
-            if not isinstance(message, EngineResult):
+            if not isinstance(message, ComputeWorkerResult):
                 continue
             result = message
             if expected and result.job_id and result.job_id != expected:
@@ -396,7 +396,7 @@ class PolarsComputeEngine:
                 self._clear_current_job_if_match(expected)
             return result
 
-    def get_progress_event(self, timeout: float = 1.0, job_id: str | None = None) -> EngineProgressEvent | None:
+    def get_progress_event(self, timeout: float = 1.0, job_id: str | None = None) -> ComputeWorkerProgressEvent | None:
         expected = job_id or self.current_job_id
         if expected:
             pending = self._pending_progress.get(expected)
@@ -412,7 +412,7 @@ class PolarsComputeEngine:
             if status != "message":
                 return None
             event = payload
-            if not isinstance(event, EngineProgressEvent):
+            if not isinstance(event, ComputeWorkerProgressEvent):
                 continue
             if expected and event.job_id != expected:
                 self._pending_progress.setdefault(event.job_id, deque()).append(event)
@@ -423,7 +423,7 @@ class PolarsComputeEngine:
                 continue
             return event
 
-    def _store_pending_result(self, result: EngineResult) -> None:
+    def _store_pending_result(self, result: ComputeWorkerResult) -> None:
         if result.job_id is None:
             return
         self._pending_results[result.job_id] = result
@@ -449,7 +449,7 @@ class PolarsComputeEngine:
             message = payload
             if isinstance(message, ShutdownAck):
                 return True
-            if isinstance(message, EngineResult):
+            if isinstance(message, ComputeWorkerResult):
                 self._store_pending_result(message)
         return False
 
@@ -579,13 +579,13 @@ class PolarsComputeEngine:
 
                     def progress_callback(event: dict[str, object], *, current_job_id: str = job_id) -> None:
                         payload = {"emitted_at": datetime.now(UTC).isoformat(), **event}
-                        progress_queue.put(EngineProgressEvent(job_id=current_job_id, event=payload))
+                        progress_queue.put(ComputeWorkerProgressEvent(job_id=current_job_id, event=payload))
 
                     try:
                         step_timings: dict[str, float] = {}
                         query_plan = None
                         if isinstance(command, PreviewCommand):
-                            result_data = PolarsComputeEngine.execute_preview(
+                            result_data = PolarsComputeWorker.execute_preview(
                                 datasource_config,
                                 steps,
                                 command.row_limit,
@@ -595,7 +595,7 @@ class PolarsComputeEngine:
                                 progress_callback,
                             )
                         elif isinstance(command, ExportCommand):
-                            result_data = PolarsComputeEngine.execute_export(
+                            result_data = PolarsComputeWorker.execute_export(
                                 datasource_config,
                                 steps,
                                 command.output_path,
@@ -605,7 +605,7 @@ class PolarsComputeEngine:
                                 progress_callback,
                             )
                         elif isinstance(command, SchemaCommand):
-                            result_data = PolarsComputeEngine.execute_schema(
+                            result_data = PolarsComputeWorker.execute_schema(
                                 datasource_config,
                                 steps,
                                 job_id,
@@ -613,7 +613,7 @@ class PolarsComputeEngine:
                                 progress_callback,
                             )
                         elif isinstance(command, RowCountCommand):
-                            result_data = PolarsComputeEngine.execute_row_count(
+                            result_data = PolarsComputeWorker.execute_row_count(
                                 datasource_config,
                                 steps,
                                 job_id,
@@ -638,7 +638,7 @@ class PolarsComputeEngine:
 
                         logger.debug(f"Job {job_id}: Completed successfully")
                         result_queue.put(
-                            EngineResult(
+                            ComputeWorkerResult(
                                 job_id=job_id,
                                 data=result_data,
                                 error=None,
@@ -651,7 +651,7 @@ class PolarsComputeEngine:
                         )
 
                     except Exception as e:
-                        error_kind, error_details = PolarsComputeEngine._classify_engine_error(e)
+                        error_kind, error_details = PolarsComputeWorker._classify_engine_error(e)
                         if error_kind in {
                             "pipeline_validation",
                             "datasource_metadata_missing",
@@ -661,7 +661,7 @@ class PolarsComputeEngine:
                         else:
                             logger.error(f"Job {job_id}: Failed with error: {e}", exc_info=True)
                         result_queue.put(
-                            EngineResult(
+                            ComputeWorkerResult(
                                 job_id=job_id,
                                 data=None,
                                 error=str(e),
@@ -673,7 +673,7 @@ class PolarsComputeEngine:
                 except Exception as e:
                     logger.error(f"Compute loop error: {e}", exc_info=True)
                     result_queue.put(
-                        EngineResult(
+                        ComputeWorkerResult(
                             job_id=None,
                             data=None,
                             error=f"Compute loop error: {e!s}",
@@ -696,7 +696,7 @@ class PolarsComputeEngine:
         additional_datasources: dict[str, dict] | None = None,
         progress_callback: Callable[[dict[str, object]], None] | None = None,
     ) -> pl.LazyFrame:
-        lf, _step_timings, _plan_frames, _read_duration_ms = PolarsComputeEngine._build_pipeline(
+        lf, _step_timings, _plan_frames, _read_duration_ms = PolarsComputeWorker._build_pipeline(
             datasource_config,
             steps,
             job_id,
@@ -831,7 +831,7 @@ class PolarsComputeEngine:
                     }
                 )
             try:
-                schema_map[step_id] = PolarsComputeEngine._apply_step(
+                schema_map[step_id] = PolarsComputeWorker._apply_step(
                     parent_frame,
                     backend_step,
                     step_id=str(step_id),
@@ -928,8 +928,8 @@ class PolarsComputeEngine:
         plan_frames: list[pl.LazyFrame],
     ) -> tuple[dict | None, str | None]:
         """Build merged query plans and return (query_plans, optimized_plan_str)."""
-        segments = [PolarsComputeEngine._get_query_plans(f) for f in plan_frames]
-        query_plans = PolarsComputeEngine._merge_query_plans(segments)
+        segments = [PolarsComputeWorker._get_query_plans(f) for f in plan_frames]
+        query_plans = PolarsComputeWorker._merge_query_plans(segments)
         query_plan = query_plans.get("optimized") if query_plans else None
         return query_plans, query_plan
 
@@ -984,14 +984,14 @@ class PolarsComputeEngine:
         progress_callback: Callable[[dict[str, object]], None] | None = None,
     ) -> dict:
         """Execute pipeline and return limited rows for preview."""
-        lf, step_timings, plan_frames, read_duration_ms = PolarsComputeEngine._build_pipeline(
+        lf, step_timings, plan_frames, read_duration_ms = PolarsComputeWorker._build_pipeline(
             datasource_config,
             steps,
             job_id,
             additional_datasources,
             progress_callback,
         )
-        query_plans, query_plan = PolarsComputeEngine._extract_plans(plan_frames)
+        query_plans, query_plan = PolarsComputeWorker._extract_plans(plan_frames)
         if progress_callback is not None and query_plans:
             progress_callback(
                 {
@@ -1001,7 +1001,7 @@ class PolarsComputeEngine:
                 }
             )
 
-        preview_lf, metadata = PolarsComputeEngine._resolve_chart_preview(lf, steps, row_limit, offset)
+        preview_lf, metadata = PolarsComputeWorker._resolve_chart_preview(lf, steps, row_limit, offset)
 
         # Get schema from lazy frame (no collection needed)
         schema_obj = preview_lf.collect_schema()
@@ -1040,14 +1040,14 @@ class PolarsComputeEngine:
         progress_callback: Callable[[dict[str, object]], None] | None = None,
     ) -> dict:
         """Execute pipeline and write full results to file."""
-        lf, step_timings, plan_frames, read_duration_ms = PolarsComputeEngine._build_pipeline(
+        lf, step_timings, plan_frames, read_duration_ms = PolarsComputeWorker._build_pipeline(
             datasource_config,
             steps,
             job_id,
             additional_datasources,
             progress_callback,
         )
-        query_plans, query_plan = PolarsComputeEngine._extract_plans(plan_frames)
+        query_plans, query_plan = PolarsComputeWorker._extract_plans(plan_frames)
         if progress_callback is not None and query_plans:
             progress_callback(
                 {
@@ -1091,7 +1091,7 @@ class PolarsComputeEngine:
         progress_callback: Callable[[dict[str, object]], None] | None = None,
     ) -> dict:
         """Execute pipeline and return schema without collecting full data."""
-        lf, step_timings, plan_frames, read_duration_ms = PolarsComputeEngine._build_pipeline(
+        lf, step_timings, plan_frames, read_duration_ms = PolarsComputeWorker._build_pipeline(
             datasource_config,
             steps,
             job_id,
@@ -1103,7 +1103,7 @@ class PolarsComputeEngine:
         schema_obj = lf.collect_schema()
         schema = {col: str(dtype) for col, dtype in schema_obj.items()}
 
-        query_plans, query_plan = PolarsComputeEngine._extract_plans(plan_frames)
+        query_plans, query_plan = PolarsComputeWorker._extract_plans(plan_frames)
         if progress_callback is not None and query_plans:
             progress_callback(
                 {
@@ -1131,7 +1131,7 @@ class PolarsComputeEngine:
         progress_callback: Callable[[dict[str, object]], None] | None = None,
     ) -> dict:
         """Execute pipeline and return row count without collecting full data."""
-        lf, step_timings, plan_frames, read_duration_ms = PolarsComputeEngine._build_pipeline(
+        lf, step_timings, plan_frames, read_duration_ms = PolarsComputeWorker._build_pipeline(
             datasource_config,
             steps,
             job_id,
@@ -1139,7 +1139,7 @@ class PolarsComputeEngine:
             progress_callback,
         )
 
-        query_plans, query_plan = PolarsComputeEngine._extract_plans(plan_frames)
+        query_plans, query_plan = PolarsComputeWorker._extract_plans(plan_frames)
         if progress_callback is not None and query_plans:
             progress_callback(
                 {

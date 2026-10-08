@@ -34,7 +34,7 @@ from modules.analysis.step_schemas import normalize_step_config_for_protocol
 from modules.datasource import schemas as datasource_schemas
 from modules.datasource.schema_protocol import schema_info_proto
 
-EngineIdentity = compute_pb2.EngineIdentity
+ComputeWorkerIdentity = compute_pb2.ComputeWorkerIdentity
 _ENGINE_SHUTDOWN_CANCELLATION = 'Compute request cancelled because its engine was shut down'
 _HTTP_DISCONNECT_POLL_SECONDS = 0.5
 logger = logging.getLogger(__name__)
@@ -534,7 +534,7 @@ def _cancel_disconnected_request_in_new_session(request_id: str, namespace: str,
         reset_namespace(token)
 
 
-def _cancel_active_requests_for_engine_in_new_session(identity: EngineIdentity) -> int:
+def _cancel_active_requests_for_engine_in_new_session(identity: ComputeWorkerIdentity) -> int:
     return run_db(
         compute_requests_service.cancel_active_requests_for_engine,
         namespace=get_namespace(),
@@ -543,8 +543,8 @@ def _cancel_active_requests_for_engine_in_new_session(identity: EngineIdentity) 
     )
 
 
-def _resource_config_message(resource_config: dict[str, object]) -> compute_pb2.EngineResourceConfig:
-    config = compute_pb2.EngineResourceConfig()
+def _resource_config_message(resource_config: dict[str, object]) -> compute_pb2.ComputeWorkerResourceConfig:
+    config = compute_pb2.ComputeWorkerResourceConfig()
     for key in ('max_threads', 'max_memory_mb', 'streaming_chunk_size'):
         value = resource_config.get(key)
         if isinstance(value, int) and not isinstance(value, bool):
@@ -552,9 +552,9 @@ def _resource_config_message(resource_config: dict[str, object]) -> compute_pb2.
     return config
 
 
-def _lifecycle_command(field_name: str, identity: EngineIdentity, resource_config: dict[str, object] | None = None) -> compute_pb2.ComputeCommand:
+def _lifecycle_command(field_name: str, identity: ComputeWorkerIdentity, resource_config: dict[str, object] | None = None) -> compute_pb2.ComputeCommand:
     command = compute_pb2.ComputeCommand()
-    lifecycle = compute_pb2.EngineLifecycleCommand(engine_identity=identity)
+    lifecycle = compute_pb2.ComputeWorkerLifecycleCommand(engine_identity=identity)
     if resource_config is not None:
         lifecycle.resource_config.CopyFrom(_resource_config_message(resource_config))
     getattr(command, field_name).CopyFrom(lifecycle)
@@ -888,9 +888,9 @@ async def compare_iceberg_snapshots(
     return await _validated_response(datasource_schemas.SnapshotCompareResponse, completed)
 
 
-async def spawn_engine(
+async def spawn_compute_worker(
     *,
-    identity: EngineIdentity,
+    identity: ComputeWorkerIdentity,
     runtime_probe: RuntimeAvailabilityProbe,
     resource_config: dict[str, object] | None,
 ) -> compute_schemas.EngineStatusSchema:
@@ -904,7 +904,7 @@ async def spawn_engine(
 
 async def configure_engine(
     *,
-    identity: EngineIdentity,
+    identity: ComputeWorkerIdentity,
     runtime_probe: RuntimeAvailabilityProbe,
     resource_config: dict[str, object],
 ) -> compute_schemas.EngineStatusSchema:
@@ -918,7 +918,7 @@ async def configure_engine(
 
 async def shutdown_engine(
     *,
-    identity: EngineIdentity,
+    identity: ComputeWorkerIdentity,
     runtime_probe: RuntimeAvailabilityProbe,
 ) -> None:
     await run_api_blocking(
@@ -935,7 +935,7 @@ async def shutdown_engine(
 def request_engine_shutdown(
     session: Session,
     *,
-    identity: EngineIdentity,
+    identity: ComputeWorkerIdentity,
     runtime_probe: RuntimeAvailabilityProbe,
 ) -> None:
     """Durably queue engine shutdown without coupling an API response to its completion."""

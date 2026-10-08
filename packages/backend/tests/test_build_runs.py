@@ -541,6 +541,38 @@ def test_serialize_step_event_includes_protocol_execution_category_kind(test_db_
     assert step_completed['stepKind'] == {'executionCategory': 'ENGINE_RUN_EXECUTION_CATEGORY_READ'}
 
 
+def test_build_stream_keeps_legacy_run_enum_json_names(test_db_session) -> None:
+    run = _create_run(test_db_session)
+    row = build_run_service.append_build_event(
+        test_db_session,
+        build_id=run.id,
+        event=compute_schemas.BuildStepCompleteEvent(
+            build_id=run.id,
+            analysis_id=run.analysis_id,
+            emitted_at=datetime.now(UTC),
+            current_kind=EngineRunKind.BUILD,
+            build_step_index=1,
+            step_index=0,
+            step_id='step-1',
+            step_name='Read',
+            step_type='read',
+            duration_ms=125,
+            total_steps=1,
+        ),
+    )
+
+    assert row is not None
+    serialized = build_run_service.serialize_event_row(row)
+    context = serialized['context']
+    step_completed = serialized['stepCompleted']
+    assert isinstance(context, dict)
+    assert isinstance(step_completed, dict)
+    assert context['currentKind'] == 'ENGINE_RUN_KIND_BUILD'
+    step_kind = step_completed['stepKind']
+    assert isinstance(step_kind, dict)
+    assert step_kind['executionCategory'] == 'ENGINE_RUN_EXECUTION_CATEGORY_READ'
+
+
 def test_serialize_step_event_rejects_untyped_step_kind(test_db_session) -> None:
     run = _create_run(test_db_session)
     row = build_run_service.append_build_event(

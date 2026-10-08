@@ -1,6 +1,6 @@
 import { afterEach, beforeEach, describe, expect, test, vi } from 'vitest';
 import { EngineRunsStore } from './engine-runs.svelte';
-import type { EngineRun } from '$lib/api/engine-runs';
+import type { ComputeWorkerRun } from '$lib/api/engine-runs';
 
 const mockListEngineRuns = vi.fn();
 
@@ -8,7 +8,7 @@ vi.mock('$lib/api/engine-runs', () => ({
 	listEngineRuns: (...args: unknown[]) => mockListEngineRuns(...args)
 }));
 
-function makeRun(overrides: Partial<EngineRun> = {}): EngineRun {
+function makeRun(overrides: Partial<ComputeWorkerRun> = {}): ComputeWorkerRun {
 	return {
 		id: 'run-1',
 		analysis_id: null,
@@ -31,8 +31,10 @@ function makeRun(overrides: Partial<EngineRun> = {}): EngineRun {
 	};
 }
 
-function mockOk(runs: EngineRun[]) {
-	return { match: (onOk: (v: EngineRun[]) => void, _onErr: (e: unknown) => void) => onOk(runs) };
+function mockOk(runs: ComputeWorkerRun[]) {
+	return {
+		match: (onOk: (v: ComputeWorkerRun[]) => void, _onErr: (e: unknown) => void) => onOk(runs)
+	};
 }
 
 function mockErr(message: string) {
@@ -44,11 +46,14 @@ function mockErr(message: string) {
 
 function mockPending() {
 	const pending: {
-		resolve: ((runs: EngineRun[]) => void) | null;
+		resolve: ((runs: ComputeWorkerRun[]) => void) | null;
 		reject: ((error: { message: string }) => void) | null;
 	} = { resolve: null, reject: null };
 	const result = {
-		match: (onOk: (runs: EngineRun[]) => void, onErr: (error: { message: string }) => void) => {
+		match: (
+			onOk: (runs: ComputeWorkerRun[]) => void,
+			onErr: (error: { message: string }) => void
+		) => {
 			pending.resolve = onOk;
 			pending.reject = onErr;
 		}

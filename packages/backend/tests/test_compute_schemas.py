@@ -62,11 +62,11 @@ def test_compute_domain_enums_are_protocol_descriptor_backed() -> None:
 def test_proto_engine_resource_config_matches_memory_bounds() -> None:
     validator = Validator()
 
-    validator.validate(compute_pb2.EngineResourceConfig(max_memory_mb=0))
-    validator.validate(compute_pb2.EngineResourceConfig(max_memory_mb=256))
+    validator.validate(compute_pb2.ComputeWorkerResourceConfig(max_memory_mb=0))
+    validator.validate(compute_pb2.ComputeWorkerResourceConfig(max_memory_mb=256))
 
     with pytest.raises(ProtoValidationError) as exc_info:
-        validator.validate(compute_pb2.EngineResourceConfig(max_memory_mb=255))
+        validator.validate(compute_pb2.ComputeWorkerResourceConfig(max_memory_mb=255))
     violations = list(exc_info.value.to_proto().violations)
     assert len(violations) == 1
     assert violations[0].rule_id == 'engine_resource_config.max_memory_mb.minimum_when_set'
@@ -137,12 +137,12 @@ def test_proto_compute_response_uses_typed_engine_ack_and_error_oneofs() -> None
         correlation_id='request-1',
         status=enums_pb2.COMPUTE_REQUEST_STATUS_COMPLETED,
         response=compute_pb2.ComputeResponse(
-            engine_status=compute_pb2.EngineStatusResult(
+            engine_status=compute_pb2.ComputeWorkerStatusResult(
                 analysis_id='analysis-1',
                 resource_id='analysis-1',
-                status=enums_pb2.ENGINE_STATUS_HEALTHY,
-                scope=enums_pb2.ENGINE_SCOPE_ANALYSIS_INTERACTIVE,
-                reuse_policy=enums_pb2.ENGINE_REUSE_POLICY_SHARED,
+                status=enums_pb2.COMPUTE_WORKER_STATUS_HEALTHY,
+                scope=enums_pb2.COMPUTE_WORKER_SCOPE_ANALYSIS_INTERACTIVE,
+                reuse_policy=enums_pb2.COMPUTE_WORKER_REUSE_POLICY_SHARED,
             )
         ),
     )

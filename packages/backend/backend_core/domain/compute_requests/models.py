@@ -107,24 +107,28 @@ def _resource_id_for_scope(payload: dict[str, object], key: str) -> str:
     return resource_id
 
 
-def _engine_identity_from_payload(payload: dict[str, object]) -> compute_pb2.EngineIdentity:
+def _engine_identity_from_payload(payload: dict[str, object]) -> compute_pb2.ComputeWorkerIdentity:
     scope = payload.get('scope')
     reuse_policy = payload.get('reuse_policy')
     if scope == 'analysis_interactive':
         resource_id = _resource_id_for_scope(payload, 'analysis_id')
-        identity = compute_pb2.EngineIdentity(scope=enums_pb2.ENGINE_SCOPE_ANALYSIS_INTERACTIVE, analysis_id=resource_id, resource_id=resource_id)
+        identity = compute_pb2.ComputeWorkerIdentity(
+            scope=enums_pb2.COMPUTE_WORKER_SCOPE_ANALYSIS_INTERACTIVE, analysis_id=resource_id, resource_id=resource_id
+        )
     elif scope == 'datasource_preview':
         resource_id = _resource_id_for_scope(payload, 'datasource_id')
-        identity = compute_pb2.EngineIdentity(scope=enums_pb2.ENGINE_SCOPE_DATASOURCE_PREVIEW, datasource_id=resource_id, resource_id=resource_id)
+        identity = compute_pb2.ComputeWorkerIdentity(
+            scope=enums_pb2.COMPUTE_WORKER_SCOPE_DATASOURCE_PREVIEW, datasource_id=resource_id, resource_id=resource_id
+        )
     elif scope == 'build':
         resource_id = _resource_id_for_scope(payload, 'build_id')
-        identity = compute_pb2.EngineIdentity(scope=enums_pb2.ENGINE_SCOPE_BUILD, build_id=resource_id, resource_id=resource_id)
+        identity = compute_pb2.ComputeWorkerIdentity(scope=enums_pb2.COMPUTE_WORKER_SCOPE_BUILD, build_id=resource_id, resource_id=resource_id)
     else:
         raise ValueError('engine identity scope is invalid')
     if reuse_policy == 'shared':
-        identity.reuse_policy = enums_pb2.ENGINE_REUSE_POLICY_SHARED
+        identity.reuse_policy = enums_pb2.COMPUTE_WORKER_REUSE_POLICY_SHARED
     elif reuse_policy == 'exclusive':
-        identity.reuse_policy = enums_pb2.ENGINE_REUSE_POLICY_EXCLUSIVE
+        identity.reuse_policy = enums_pb2.COMPUTE_WORKER_REUSE_POLICY_EXCLUSIVE
     else:
         raise ValueError('engine identity reuse_policy is invalid')
     return identity
@@ -139,10 +143,10 @@ def _read_int(payload: dict[str, object], key: str) -> int | None:
     return None
 
 
-def _resource_config_from_payload(payload: object) -> compute_pb2.EngineResourceConfig | None:
+def _resource_config_from_payload(payload: object) -> compute_pb2.ComputeWorkerResourceConfig | None:
     if not isinstance(payload, dict):
         return None
-    config = compute_pb2.EngineResourceConfig()
+    config = compute_pb2.ComputeWorkerResourceConfig()
     for key in ('max_threads', 'max_memory_mb', 'streaming_chunk_size'):
         value = _read_int(payload, key)
         if value is not None:
@@ -150,8 +154,8 @@ def _resource_config_from_payload(payload: object) -> compute_pb2.EngineResource
     return config
 
 
-def _lifecycle_command(payload: dict[str, object]) -> compute_pb2.EngineLifecycleCommand:
-    command = compute_pb2.EngineLifecycleCommand(engine_identity=_engine_identity_from_payload(_required_payload_dict(payload, 'engine_identity')))
+def _lifecycle_command(payload: dict[str, object]) -> compute_pb2.ComputeWorkerLifecycleCommand:
+    command = compute_pb2.ComputeWorkerLifecycleCommand(engine_identity=_engine_identity_from_payload(_required_payload_dict(payload, 'engine_identity')))
     resource_config = _resource_config_from_payload(payload.get('resource_config'))
     if resource_config is not None:
         command.resource_config.CopyFrom(resource_config)
@@ -602,7 +606,7 @@ def _response_from_payload(kind: enums_pb2.ComputeRequestKind, payload: dict[str
         enums_pb2.COMPUTE_REQUEST_KIND_SPAWN_ENGINE,
         enums_pb2.COMPUTE_REQUEST_KIND_CONFIGURE_ENGINE,
     }:
-        response.engine_status.CopyFrom(_parse_proto_message(compute_pb2.EngineStatusResult, payload))
+        response.engine_status.CopyFrom(_parse_proto_message(compute_pb2.ComputeWorkerStatusResult, payload))
     elif kind in {
         enums_pb2.COMPUTE_REQUEST_KIND_DOWNLOAD,
         enums_pb2.COMPUTE_REQUEST_KIND_SHUTDOWN_ENGINE,
@@ -661,9 +665,9 @@ def response_payload(envelope: compute_pb2.ComputeResponseEnvelope) -> dict[str,
         payload.setdefault('row_count', 0)
         _restore_int64(payload, 'row_count')
     if selected == 'engine_status':
-        engine_result = cast(compute_pb2.EngineStatusResult, value)
+        engine_result = cast(compute_pb2.ComputeWorkerStatusResult, value)
         if engine_result.HasField('lifecycle_status'):
-            payload['lifecycle_status'] = _enum_token_from_number(enums_pb2.EngineInstanceStatus.DESCRIPTOR, engine_result.lifecycle_status)
+            payload['lifecycle_status'] = _enum_token_from_number(enums_pb2.ComputeWorkerInstanceStatus.DESCRIPTOR, engine_result.lifecycle_status)
         defaults = payload.get('defaults')
         if isinstance(defaults, dict):
             for key in ('max_threads', 'max_memory_mb', 'streaming_chunk_size'):

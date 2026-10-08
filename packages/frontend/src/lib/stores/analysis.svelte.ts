@@ -1,7 +1,7 @@
 import type { Analysis, AnalysisTab, AnalysisUpdate, PipelineStep } from '$lib/types/analysis';
 
 import type { SchemaInfo } from '$lib/types/datasource';
-import type { EngineResourceConfig } from '$lib/types/compute';
+import type { ComputeWorkerResourceConfig } from '$lib/types/compute';
 import { getAnalysisWithHeaders, updateAnalysis } from '$lib/api/analysis';
 import {
 	buildOutputConfig,
@@ -44,7 +44,7 @@ export class AnalysisStore {
 	savedTabs = $state<AnalysisTab[]>([]);
 	activeTabId = $state<string | null>(null);
 	sourceSchemas = $state(new SvelteMap<string, SchemaInfo>());
-	resourceConfig = $state<EngineResourceConfig | null>(null);
+	resourceConfig = $state<ComputeWorkerResourceConfig | null>(null);
 	loading = $state(false);
 	error = $state<string | null>(null);
 	loadId = $state(0);
@@ -618,7 +618,7 @@ export class AnalysisStore {
 		this.loading = false;
 	}
 
-	setResourceConfig(config: EngineResourceConfig | null): void {
+	setResourceConfig(config: ComputeWorkerResourceConfig | null): void {
 		this.resourceConfig = config;
 	}
 

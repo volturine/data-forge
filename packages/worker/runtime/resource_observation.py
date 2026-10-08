@@ -4,14 +4,14 @@ import logging
 
 from builds.build_live import RuntimeBuild
 from runtime.build_events import BuildEmitter, build_event, emit_build_event
-from runtime.compute_monitor import monitor_engine_resources
-from runtime.domain.compute.base import ComputeEngine
+from runtime.compute_monitor import monitor_compute_worker_resources
+from runtime.domain.compute.base import ComputeWorker
 from runtime.worker_runtime_client import BuildJobLeaseLost
 
 logger = logging.getLogger(__name__)
 
 
-def resource_summary(engine: ComputeEngine) -> dict[str, int | None]:
+def resource_summary(engine: ComputeWorker) -> dict[str, int | None]:
     # Runtime engines expose effective_resources after their process handshake.
     effective = engine.effective_resources if getattr(engine, "effective_resources", None) else {}
     return {
@@ -28,12 +28,12 @@ async def stream_resource_events(
     *,
     build: RuntimeBuild,
     analysis_id: str,
-    engine: ComputeEngine,
+    engine: ComputeWorker,
     emitter: BuildEmitter | None,
     tab_id: str | None,
     tab_name: str | None,
 ) -> None:
-    async for resource in monitor_engine_resources(engine):
+    async for resource in monitor_compute_worker_resources(engine):
         await emit_build_event(
             emitter,
             event=build_event(

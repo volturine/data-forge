@@ -1,11 +1,11 @@
 from threading import Event
 
-import runtime.engine_notifications as engine_notifications
-from runtime.domain.compute.base import EngineStatusInfo
+import runtime.compute_worker_notifications as engine_notifications
+from runtime.domain.compute.base import ComputeWorkerStatusInfo
 
 
-def _status(resource_id: str) -> EngineStatusInfo:
-    return EngineStatusInfo(
+def _status(resource_id: str) -> ComputeWorkerStatusInfo:
+    return ComputeWorkerStatusInfo(
         analysis_id=resource_id,
         resource_id=resource_id,
         status="running",
@@ -37,7 +37,7 @@ def test_snapshot_projection_failure_retries_without_failing_engine_lifecycle(mo
             raise RuntimeError("api worker replaced")
         succeeded.set()
 
-    monkeypatch.setattr(engine_notifications, "persist_engine_snapshot", fail_once)
+    monkeypatch.setattr(engine_notifications, "persist_compute_worker_snapshot", fail_once)
     notify = engine_notifications.create_snapshot_notifier(
         namespace_provider=lambda: "default",
         worker_id="build-manager-1",
@@ -56,7 +56,7 @@ def test_snapshot_publisher_coalesces_to_latest_per_namespace() -> None:
     release_first = Event()
     calls: list[tuple[str, list[str]]] = []
 
-    def persist(namespace: str, statuses: list[EngineStatusInfo]) -> None:
+    def persist(namespace: str, statuses: list[ComputeWorkerStatusInfo]) -> None:
         resource_ids = [status.resource_id for status in statuses]
         calls.append((namespace, resource_ids))
         if resource_ids == ["first"]:
@@ -85,7 +85,7 @@ def test_snapshot_publisher_logs_slow_round_trip_with_engine_count(monkeypatch, 
     completed = Event()
     monkeypatch.setattr(engine_notifications, "_SLOW_SNAPSHOT_PUBLISH_SECONDS", 0.0)
 
-    def persist(_namespace: str, _statuses: list[EngineStatusInfo]) -> None:
+    def persist(_namespace: str, _statuses: list[ComputeWorkerStatusInfo]) -> None:
         completed.set()
 
     notify = engine_notifications.create_snapshot_notifier(
@@ -93,7 +93,7 @@ def test_snapshot_publisher_logs_slow_round_trip_with_engine_count(monkeypatch, 
         persist=persist,
     )
     try:
-        with caplog.at_level("WARNING", logger="runtime.engine_notifications"):
+        with caplog.at_level("WARNING", logger="runtime.compute_worker_notifications"):
             notify([_status("analysis-1"), _status("analysis-2")])
             assert completed.wait(2)
             notify.close()

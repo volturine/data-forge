@@ -2,7 +2,7 @@
 	import { X, Power, LoaderCircle } from '@lucide/svelte';
 	import { SvelteSet } from 'svelte/reactivity';
 	import { enginesStore } from '$lib/stores/engines.svelte';
-	import type { EngineStatusResponse } from '$lib/types/compute';
+	import type { ComputeWorkerStatusResponse } from '$lib/types/compute';
 	import {
 		engineActivityLabel,
 		engineHasActiveJob,
@@ -30,9 +30,9 @@
 	const activeAnchor = $derived(open ? anchor : null);
 
 	let confirmOpen = $state(false);
-	let pendingEngine = $state<EngineStatusResponse | null>(null);
+	let pendingEngine = $state<ComputeWorkerStatusResponse | null>(null);
 
-	function requestShutdown(engine: EngineStatusResponse) {
+	function requestShutdown(engine: ComputeWorkerStatusResponse) {
 		pendingEngine = engine;
 		confirmOpen = true;
 	}

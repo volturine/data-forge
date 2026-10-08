@@ -1,4 +1,4 @@
-import type { EngineRun, EngineRunExecutionEntry } from '$lib/api/engine-runs';
+import type { ComputeWorkerRun, ComputeWorkerRunExecutionEntry } from '$lib/api/engine-runs';
 import type {
 	BuildRunDetail,
 	BuildLogEntry,
@@ -73,7 +73,7 @@ function readResourceConfig(value: unknown): BuildResourceConfigSummary | null {
 }
 
 function readBuildResults(
-	run: EngineRun,
+	run: ComputeWorkerRun,
 	result: Record<string, unknown> | null
 ): BuildTabResult[] {
 	const results = readArray<Record<string, unknown>>(result?.results);
@@ -95,57 +95,59 @@ function readBuildResults(
 	});
 }
 
-export function engineRunStatus(run: EngineRun): 'running' | 'completed' | 'failed' | 'cancelled' {
+export function engineRunStatus(
+	run: ComputeWorkerRun
+): 'running' | 'completed' | 'failed' | 'cancelled' {
 	return engineRunStatusToBuildLifecycleStatus(run.status);
 }
 
-export function engineRunOutputName(run: EngineRun): string | null {
+export function engineRunOutputName(run: ComputeWorkerRun): string | null {
 	const result = readObject(run.result_json);
 	return readString(result?.current_output_name);
 }
 
-export function engineRunDatasourceId(run: EngineRun): string {
+export function engineRunDatasourceId(run: ComputeWorkerRun): string {
 	const result = readObject(run.result_json);
 	const sourceId = readString(result?.source_datasource_id);
 	if (sourceId !== null) return sourceId;
 	return run.datasource_id;
 }
 
-export function engineRunDatasourceName(run: EngineRun): string | null {
+export function engineRunDatasourceName(run: ComputeWorkerRun): string | null {
 	const result = readObject(run.result_json);
 	return readString(result?.source_datasource_name);
 }
 
-export function engineRunEstimatedRemainingMs(run: EngineRun): number | null {
+export function engineRunEstimatedRemainingMs(run: ComputeWorkerRun): number | null {
 	const result = readObject(run.result_json);
 	return readNumber(result?.estimated_remaining_ms);
 }
 
-export function engineRunCurrentStepIndex(run: EngineRun): number | null {
+export function engineRunCurrentStepIndex(run: ComputeWorkerRun): number | null {
 	const result = readObject(run.result_json);
 	return readNumber(result?.current_step_index);
 }
 
-export function engineRunTotalSteps(run: EngineRun): number {
+export function engineRunTotalSteps(run: ComputeWorkerRun): number {
 	const result = readObject(run.result_json);
 	return readNumber(result?.total_steps) ?? countEngineRunSteps(run.execution_entries);
 }
 
-export function engineRunTotalTabs(run: EngineRun): number {
+export function engineRunTotalTabs(run: ComputeWorkerRun): number {
 	const result = readObject(run.result_json);
 	return readNumber(result?.total_tabs) ?? 0;
 }
 
-export function engineRunResourceConfig(run: EngineRun): BuildResourceConfigSummary | null {
+export function engineRunResourceConfig(run: ComputeWorkerRun): BuildResourceConfigSummary | null {
 	const result = readObject(run.result_json);
 	return readResourceConfig(result?.resource_config);
 }
 
 function stepsFromExecutionEntries(
-	entries: EngineRunExecutionEntry[],
+	entries: ComputeWorkerRunExecutionEntry[],
 	tabId: string | null,
 	tabName: string | null,
-	runStatus: EngineRun['status']
+	runStatus: ComputeWorkerRun['status']
 ): BuildStepSnapshot[] {
 	const steps = entries
 		.filter((entry) => !isPlanExecutionEntry(entry))
@@ -168,7 +170,7 @@ function stepsFromExecutionEntries(
 }
 
 function queryPlansFromExecutionEntries(
-	entries: EngineRunExecutionEntry[],
+	entries: ComputeWorkerRunExecutionEntry[],
 	tabId: string | null,
 	tabName: string | null
 ): BuildQueryPlanSnapshot[] {
@@ -183,7 +185,7 @@ function queryPlansFromExecutionEntries(
 		}));
 }
 
-export function engineRunBuildDetail(run: EngineRun): BuildRunDetail {
+export function engineRunBuildDetail(run: ComputeWorkerRun): BuildRunDetail {
 	const result = readObject(run.result_json);
 	const tabId = readString(result?.current_tab_id);
 	const tabName = readString(result?.current_tab_name);

@@ -76,7 +76,7 @@ async def test_build_cancellation_hands_off_exact_job_before_joining_thread(monk
     monkeypatch.setattr(compute_service, "run_compute_in_thread", run_compute)
 
     def cancel_engine_job(identity, *, namespace=None, job_id):
-        assert identity.scope == enums_pb2.ENGINE_SCOPE_BUILD
+        assert identity.scope == enums_pb2.COMPUTE_WORKER_SCOPE_BUILD
         assert identity.resource_id == "build-rid"
         assert namespace == "tenant-a"
         assert job_id == "engine-job-id"
@@ -135,8 +135,8 @@ async def test_build_cancellation_hands_off_exact_job_before_joining_thread(monk
         manager.shutdown_engine.assert_called_once()
         shutdown_identity = manager.shutdown_engine.call_args.args[0]
         assert shutdown_identity.resource_id == "build-rid"
-        assert shutdown_identity.scope == enums_pb2.ENGINE_SCOPE_BUILD
-        assert shutdown_identity.reuse_policy == enums_pb2.ENGINE_REUSE_POLICY_EXCLUSIVE
+        assert shutdown_identity.scope == enums_pb2.COMPUTE_WORKER_SCOPE_BUILD
+        assert shutdown_identity.reuse_policy == enums_pb2.COMPUTE_WORKER_REUSE_POLICY_EXCLUSIVE
         assert manager.shutdown_engine.call_args.kwargs == {"namespace": "tenant-a"}
         await asyncio.sleep(0)
         assert lane._semaphore(loop)._value == 1

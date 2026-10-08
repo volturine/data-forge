@@ -1,6 +1,6 @@
 import type {
-	EngineRun,
-	EngineRunExecutionEntry,
+	ComputeWorkerRun,
+	ComputeWorkerRunExecutionEntry,
 	ListEngineRunsParams
 } from '$lib/api/engine-runs';
 import type {
@@ -23,10 +23,16 @@ import type {
 	BuildLogLevel,
 	BuildStepState,
 	BuildTabStatus,
-	EngineRunKind
+	ComputeWorkerRunKind
 } from '$lib/types/protocol-enum-tokens';
 
-export type { BuildLifecycleStatus, BuildLogLevel, BuildStepState, BuildTabStatus, EngineRunKind };
+export type {
+	BuildLifecycleStatus,
+	BuildLogLevel,
+	BuildStepState,
+	BuildTabStatus,
+	ComputeWorkerRunKind
+};
 
 type Field<T, K extends keyof T> = NonNullable<T[K]>;
 type StringField<T, K extends keyof T> = Extract<Field<T, K>, string>;
@@ -49,7 +55,7 @@ export interface BuildPlanEvent {
 	analysis_id: string;
 	emitted_at: string;
 	sequence: number | null;
-	current_kind: EngineRunKind | null;
+	current_kind: ComputeWorkerRunKind | null;
 	current_datasource_id: string | null;
 	tab_id: string | null;
 	tab_name: string | null;
@@ -66,7 +72,7 @@ export interface BuildStepStartEvent {
 	analysis_id: string;
 	emitted_at: string;
 	sequence: number | null;
-	current_kind: EngineRunKind | null;
+	current_kind: ComputeWorkerRunKind | null;
 	current_datasource_id: string | null;
 	tab_id: string | null;
 	tab_name: string | null;
@@ -87,7 +93,7 @@ export interface BuildStepCompleteEvent {
 	analysis_id: string;
 	emitted_at: string;
 	sequence: number | null;
-	current_kind: EngineRunKind | null;
+	current_kind: ComputeWorkerRunKind | null;
 	current_datasource_id: string | null;
 	tab_id: string | null;
 	tab_name: string | null;
@@ -110,7 +116,7 @@ export interface BuildStepFailedEvent {
 	analysis_id: string;
 	emitted_at: string;
 	sequence: number | null;
-	current_kind: EngineRunKind | null;
+	current_kind: ComputeWorkerRunKind | null;
 	current_datasource_id: string | null;
 	tab_id: string | null;
 	tab_name: string | null;
@@ -132,7 +138,7 @@ export interface BuildProgressEvent {
 	analysis_id: string;
 	emitted_at: string;
 	sequence: number | null;
-	current_kind: EngineRunKind | null;
+	current_kind: ComputeWorkerRunKind | null;
 	current_datasource_id: string | null;
 	tab_id: string | null;
 	tab_name: string | null;
@@ -153,7 +159,7 @@ export interface BuildResourceEvent {
 	analysis_id: string;
 	emitted_at: string;
 	sequence: number | null;
-	current_kind: EngineRunKind | null;
+	current_kind: ComputeWorkerRunKind | null;
 	current_datasource_id: string | null;
 	tab_id: string | null;
 	tab_name: string | null;
@@ -173,7 +179,7 @@ export interface BuildLogEvent {
 	analysis_id: string;
 	emitted_at: string;
 	sequence: number | null;
-	current_kind: EngineRunKind | null;
+	current_kind: ComputeWorkerRunKind | null;
 	current_datasource_id: string | null;
 	tab_id: string | null;
 	tab_name: string | null;
@@ -201,7 +207,7 @@ export interface BuildCompleteEvent {
 	analysis_id: string;
 	emitted_at: string;
 	sequence: number | null;
-	current_kind: EngineRunKind | null;
+	current_kind: ComputeWorkerRunKind | null;
 	current_datasource_id: string | null;
 	tab_id: string | null;
 	tab_name: string | null;
@@ -222,7 +228,7 @@ export interface BuildFailedEvent {
 	analysis_id: string;
 	emitted_at: string;
 	sequence: number | null;
-	current_kind: EngineRunKind | null;
+	current_kind: ComputeWorkerRunKind | null;
 	current_datasource_id: string | null;
 	tab_id: string | null;
 	tab_name: string | null;
@@ -244,7 +250,7 @@ export interface BuildCancelledEvent {
 	analysis_id: string;
 	emitted_at: string;
 	sequence: number | null;
-	current_kind: EngineRunKind | null;
+	current_kind: ComputeWorkerRunKind | null;
 	current_datasource_id: string | null;
 	tab_id: string | null;
 	tab_name: string | null;
@@ -304,7 +310,7 @@ export interface BuildRunSummary {
 	current_step: OptionalStringField<ProtocolBuildRunSummaryJson, 'currentStep'>;
 	current_step_index: OptionalNumberField<ProtocolBuildRunSummaryJson, 'currentStepIndex'>;
 	total_steps: NumberField<ProtocolBuildRunSummaryJson, 'totalSteps'>;
-	current_kind: EngineRunKind | null;
+	current_kind: ComputeWorkerRunKind | null;
 	current_datasource_id: OptionalStringField<ProtocolBuildRunSummaryJson, 'currentDatasourceId'>;
 	current_tab_id: OptionalStringField<ProtocolBuildRunSummaryJson, 'currentTabId'>;
 	current_tab_name: OptionalStringField<ProtocolBuildRunSummaryJson, 'currentTabName'>;
@@ -422,7 +428,7 @@ export type QueryPlan = {
 	unoptimized: string;
 };
 
-const ENGINE_RUN_KINDS = new Set<EngineRunKind>([
+const COMPUTE_WORKER_RUN_KINDS = new Set<ComputeWorkerRunKind>([
 	'build',
 	'preview',
 	'row_count',
@@ -460,7 +466,7 @@ const BUILD_LIFECYCLE_STATUS_TONES: Record<BuildLifecycleStatus, BuildLifecycleS
 	failed: 'error',
 	cancelled: 'warning'
 };
-const ENGINE_RUN_KIND_LABELS: Record<EngineRunKind, string> = {
+const COMPUTE_WORKER_RUN_KIND_LABELS: Record<ComputeWorkerRunKind, string> = {
 	build: 'Build',
 	preview: 'Preview',
 	row_count: 'Row Count',
@@ -476,9 +482,9 @@ const BUILD_TAB_STATUS_TONES: Record<BuildTabResult['status'], 'success' | 'erro
 	failed: 'error'
 };
 
-export function readEngineRunKind(value: unknown): EngineRunKind | null {
-	return typeof value === 'string' && ENGINE_RUN_KINDS.has(value as EngineRunKind)
-		? (value as EngineRunKind)
+export function readEngineRunKind(value: unknown): ComputeWorkerRunKind | null {
+	return typeof value === 'string' && COMPUTE_WORKER_RUN_KINDS.has(value as ComputeWorkerRunKind)
+		? (value as ComputeWorkerRunKind)
 		: null;
 }
 
@@ -536,7 +542,7 @@ export function canCancelBuildLifecycleStatus(status: BuildLifecycleStatus): boo
 }
 
 export function engineRunStatusToBuildLifecycleStatus(
-	status: EngineRun['status']
+	status: ComputeWorkerRun['status']
 ): Exclude<BuildLifecycleStatus, 'queued'> {
 	return status === 'success' ? 'completed' : status;
 }
@@ -548,16 +554,18 @@ export function engineRunStatusFilterValue(
 	return status === 'completed' ? 'success' : status;
 }
 
-export function engineRunDisplayKind(kind: EngineRunKind | string): EngineRunKind | string {
+export function engineRunDisplayKind(
+	kind: ComputeWorkerRunKind | string
+): ComputeWorkerRunKind | string {
 	if (kind === 'raw') return 'build';
 	const parsed = readEngineRunKind(kind);
 	if (parsed === 'ingest') return 'build';
 	return parsed ?? kind;
 }
 
-export function engineRunKindLabel(kind: EngineRunKind | string): string {
+export function engineRunKindLabel(kind: ComputeWorkerRunKind | string): string {
 	const parsed = readEngineRunKind(engineRunDisplayKind(kind));
-	return parsed === null ? kind : ENGINE_RUN_KIND_LABELS[parsed];
+	return parsed === null ? kind : COMPUTE_WORKER_RUN_KIND_LABELS[parsed];
 }
 
 export function readBuildTabStatus(value: unknown): BuildTabResult['status'] | null {
@@ -574,12 +582,14 @@ export function buildTabStatusTone(status: BuildTabResult['status']): 'success' 
 	return BUILD_TAB_STATUS_TONES[status];
 }
 
-export function isPlanExecutionEntry(entry: Pick<EngineRunExecutionEntry, 'category'>): boolean {
+export function isPlanExecutionEntry(
+	entry: Pick<ComputeWorkerRunExecutionEntry, 'category'>
+): boolean {
 	return entry.category === 'plan';
 }
 
 export function buildStepTypeFromExecutionEntry(
-	entry: Pick<EngineRunExecutionEntry, 'category' | 'metadata'>
+	entry: Pick<ComputeWorkerRunExecutionEntry, 'category' | 'metadata'>
 ): string {
 	const stepType = entry.metadata?.step_type;
 	if (typeof stepType === 'string' && stepType.length > 0) return stepType;
@@ -593,12 +603,12 @@ export function buildStepTypeFromExecutionEntry(
 }
 
 export function buildStepStateFromEngineRunStatus(
-	status: EngineRun['status'],
+	status: ComputeWorkerRun['status'],
 	options: { isLastStep: boolean }
 ): BuildStepState {
 	return status === 'failed' && options.isLastStep ? 'failed' : 'completed';
 }
 
-export function countEngineRunSteps(entries: EngineRunExecutionEntry[]): number {
+export function countEngineRunSteps(entries: ComputeWorkerRunExecutionEntry[]): number {
 	return entries.filter((entry) => !isPlanExecutionEntry(entry)).length;
 }

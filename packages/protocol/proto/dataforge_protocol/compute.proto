@@ -10,18 +10,18 @@ import "dataforge_protocol/errors.proto";
 import "google/protobuf/struct.proto";
 import "google/protobuf/timestamp.proto";
 
-message EngineIdentity {
+message ComputeWorkerIdentity {
   option (buf.validate.message).cel = {
     id: "engine_identity.scope_resource"
     message: "engine identity must carry exactly the resource ID and reuse policy required by its scope"
     expression: "(this.scope == 1 && this.reuse_policy == 1 && has(this.datasource_id) && this.resource_id == this.datasource_id && !has(this.analysis_id) && !has(this.build_id)) || (this.scope == 2 && this.reuse_policy == 1 && has(this.analysis_id) && this.resource_id == this.analysis_id && !has(this.datasource_id) && !has(this.build_id)) || (this.scope == 3 && this.reuse_policy == 2 && has(this.build_id) && this.resource_id == this.build_id && !has(this.analysis_id) && !has(this.datasource_id))"
   };
 
-  EngineScope scope = 1 [(buf.validate.field).enum = {
+  ComputeWorkerScope scope = 1 [(buf.validate.field).enum = {
     defined_only: true
     not_in: 0
   }];
-  EngineReusePolicy reuse_policy = 2 [(buf.validate.field).enum = {
+  ComputeWorkerReusePolicy reuse_policy = 2 [(buf.validate.field).enum = {
     defined_only: true
     not_in: 0
   }];
@@ -31,7 +31,7 @@ message EngineIdentity {
   string resource_id = 6 [(buf.validate.field).string.min_len = 1];
 }
 
-message EngineResourceConfig {
+message ComputeWorkerResourceConfig {
   optional int32 max_threads = 1 [(buf.validate.field).int32 = {
     gte: 0
     lte: 64
@@ -49,7 +49,7 @@ message EngineResourceConfig {
 
 message StepPreviewCommand {
   optional string analysis_id = 1 [(buf.validate.field).string.min_len = 1];
-  optional EngineIdentity engine_identity = 2;
+  optional ComputeWorkerIdentity engine_identity = 2;
   string target_step_id = 3 [(buf.validate.field).string.min_len = 1];
   AnalysisPipelinePayload analysis_pipeline = 4 [(buf.validate.field).required = true];
   optional string tab_id = 5;
@@ -58,7 +58,7 @@ message StepPreviewCommand {
     lte: 5000
   }];
   int32 page = 7 [(buf.validate.field).int32.gte = 1];
-  optional EngineResourceConfig resource_config = 8;
+  optional ComputeWorkerResourceConfig resource_config = 8;
 }
 
 message StepSchemaCommand {
@@ -111,9 +111,9 @@ message ExportCommand {
   optional string result_id = 9 [(buf.validate.field).string.min_len = 1];
 }
 
-message EngineLifecycleCommand {
-  EngineIdentity engine_identity = 1 [(buf.validate.field).required = true];
-  optional EngineResourceConfig resource_config = 2;
+message ComputeWorkerLifecycleCommand {
+  ComputeWorkerIdentity engine_identity = 1 [(buf.validate.field).required = true];
+  optional ComputeWorkerResourceConfig resource_config = 2;
 }
 
 message ComputeCommand {
@@ -128,9 +128,9 @@ message ComputeCommand {
     StepRowCountCommand row_count = 3;
     DownloadCommand download = 4;
     ExportCommand export = 5;
-    EngineLifecycleCommand spawn_engine = 6;
-    EngineLifecycleCommand configure_engine = 7;
-    EngineLifecycleCommand shutdown_engine = 8;
+    ComputeWorkerLifecycleCommand spawn_engine = 6;
+    ComputeWorkerLifecycleCommand configure_engine = 7;
+    ComputeWorkerLifecycleCommand shutdown_engine = 8;
     DatasourceCommand datasource = 10;
   }
 }
@@ -173,16 +173,16 @@ message ExportResult {
   optional string datasource_name = 7 [(buf.validate.field).string.min_len = 1];
 }
 
-message EngineDefaults {
+message ComputeWorkerDefaults {
   int32 max_threads = 1 [(buf.validate.field).int32.gte = 0];
   int32 max_memory_mb = 2 [(buf.validate.field).int32.gte = 0];
   int32 streaming_chunk_size = 3 [(buf.validate.field).int32.gte = 0];
 }
 
-message EngineStatusResult {
+message ComputeWorkerStatusResult {
   string analysis_id = 1;
   string resource_id = 2 [(buf.validate.field).string.min_len = 1];
-  EngineStatus status = 3 [(buf.validate.field).enum = {
+  ComputeWorkerStatus status = 3 [(buf.validate.field).enum = {
     defined_only: true
     not_in: 0
   }];
@@ -190,14 +190,14 @@ message EngineStatusResult {
   reserved "process_id";
   optional string last_activity = 5;
   optional string current_job_id = 6;
-  optional EngineResourceConfig resource_config = 7;
-  optional EngineResourceConfig effective_resources = 8;
-  optional EngineDefaults defaults = 9;
-  optional EngineScope scope = 10 [(buf.validate.field).enum = {
+  optional ComputeWorkerResourceConfig resource_config = 7;
+  optional ComputeWorkerResourceConfig effective_resources = 8;
+  optional ComputeWorkerDefaults defaults = 9;
+  optional ComputeWorkerScope scope = 10 [(buf.validate.field).enum = {
     defined_only: true
     not_in: 0
   }];
-  optional EngineReusePolicy reuse_policy = 11 [(buf.validate.field).enum = {
+  optional ComputeWorkerReusePolicy reuse_policy = 11 [(buf.validate.field).enum = {
     defined_only: true
     not_in: 0
   }];
@@ -207,7 +207,7 @@ message EngineStatusResult {
   optional string current_engine_run_id = 15 [(buf.validate.field).string.min_len = 1];
   optional string container_id = 16 [(buf.validate.field).string.min_len = 1];
   optional string image_digest = 17 [(buf.validate.field).string.min_len = 1];
-  optional EngineInstanceStatus lifecycle_status = 18 [(buf.validate.field).enum = {
+  optional ComputeWorkerInstanceStatus lifecycle_status = 18 [(buf.validate.field).enum = {
     defined_only: true
     not_in: 0
   }];
@@ -246,7 +246,7 @@ message ComputeResponse {
     StepRowCountResult row_count = 3;
     ExportResult export = 4;
     DatasourceResult datasource = 6;
-    EngineStatusResult engine_status = 7;
+    ComputeWorkerStatusResult engine_status = 7;
     ComputeAckResult ack = 8;
     ComputeErrorResult error = 9;
   }
@@ -289,7 +289,7 @@ message BuildEventContext {
   string analysis_id = 2 [(buf.validate.field).string.min_len = 1];
   google.protobuf.Timestamp emitted_at = 3;
   optional int32 sequence = 4 [(buf.validate.field).int32.gte = 0];
-  optional EngineRunKind current_kind = 5 [(buf.validate.field).enum = {
+  optional ComputeWorkerRunKind current_kind = 5 [(buf.validate.field).enum = {
     defined_only: true
     not_in: 0
   }];
@@ -321,14 +321,14 @@ message BuildPlanEvent {
 message BuildStepKind {
   oneof kind {
     StepType pipeline = 1;
-    EngineRunExecutionCategory execution_category = 2;
+    ComputeWorkerRunExecutionCategory execution_category = 2;
   }
 }
 
-message EngineRunExecutionEntry {
+message ComputeWorkerRunExecutionEntry {
   string key = 1 [(buf.validate.field).string.min_len = 1];
   string label = 2 [(buf.validate.field).string.min_len = 1];
-  EngineRunExecutionCategory category = 3 [(buf.validate.field).enum = {
+  ComputeWorkerRunExecutionCategory category = 3 [(buf.validate.field).enum = {
     defined_only: true
     not_in: 0
   }];
@@ -533,7 +533,7 @@ message BuildRunSummary {
   optional string current_step = 12;
   optional int32 current_step_index = 13 [(buf.validate.field).int32.gte = 0];
   int32 total_steps = 14 [(buf.validate.field).int32.gte = 0];
-  optional EngineRunKind current_kind = 15 [(buf.validate.field).enum = {
+  optional ComputeWorkerRunKind current_kind = 15 [(buf.validate.field).enum = {
     defined_only: true
     not_in: 0
   }];
