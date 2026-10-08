@@ -646,30 +646,43 @@ def latest_namespace_update(session: Session, *, namespace: str) -> datetime | N
     return updated if isinstance(updated, datetime) else None
 
 
-def _preserve_legacy_run_enum_names(value: object) -> object:
-    if isinstance(value, dict):
-        return {key: _preserve_legacy_run_enum_names(child) for key, child in value.items()}
-    if isinstance(value, list):
-        return [_preserve_legacy_run_enum_names(child) for child in value]
-    if isinstance(value, str):
-        for current_prefix, legacy_prefix in (
-            ('COMPUTE_WORKER_RUN_KIND_', 'ENGINE_RUN_KIND_'),
-            ('COMPUTE_WORKER_RUN_EXECUTION_CATEGORY_', 'ENGINE_RUN_EXECUTION_CATEGORY_'),
-        ):
-            if value.startswith(current_prefix):
-                return legacy_prefix + value[len(current_prefix) :]
+def _legacy_run_enum_name(value: object, *, current_prefix: str, legacy_prefix: str) -> object:
+    if isinstance(value, str) and value.startswith(current_prefix):
+        return legacy_prefix + value[len(current_prefix) :]
     return value
+
+
+def _preserve_legacy_run_enum_names(payload: dict[str, object]) -> dict[str, object]:
+    # The public build-stream contract keeps its enum names until #224's API/WS layer.
+    context = payload.get('context')
+    if isinstance(context, dict) and 'currentKind' in context:
+        context['currentKind'] = _legacy_run_enum_name(
+            context['currentKind'],
+            current_prefix='COMPUTE_WORKER_RUN_KIND_',
+            legacy_prefix='ENGINE_RUN_KIND_',
+        )
+    for event_key in ('stepStarted', 'stepCompleted', 'stepFailed'):
+        event = payload.get(event_key)
+        if not isinstance(event, dict):
+            continue
+        step_kind = event.get('stepKind')
+        if isinstance(step_kind, dict) and 'executionCategory' in step_kind:
+            step_kind['executionCategory'] = _legacy_run_enum_name(
+                step_kind['executionCategory'],
+                current_prefix='COMPUTE_WORKER_RUN_EXECUTION_CATEGORY_',
+                legacy_prefix='ENGINE_RUN_EXECUTION_CATEGORY_',
+            )
+    return payload
 
 
 def serialize_event_row(row: BuildEvent) -> dict[str, object]:
     event = compute_schemas.BuildEventAdapter.validate_python(row.payload_json)
-    # MessageToDict emits enum value identifiers. Keep the existing build-stream
-    # JSON names until the public API/WebSocket rename lands in the later #224 layer.
+    # MessageToDict emits enum identifiers; retain legacy names only at enum fields.
     payload = json_format.MessageToDict(
         _build_event_proto(event, namespace=row.namespace, sequence=row.sequence),
         always_print_fields_with_no_presence=True,
     )
-    return cast(dict[str, object], _preserve_legacy_run_enum_names(payload))
+    return _preserve_legacy_run_enum_names(cast(dict[str, object], payload))
 
 
 def fold_build_detail(session: Session, build_run: BuildRun) -> compute_schemas.BuildRunDetail:
