@@ -45,7 +45,7 @@ def test_runtime_schema_has_only_public_and_tenant_creation_revisions() -> None:
 
 def test_pivot_values_migration_rewrites_only_legacy_pivot_configs() -> None:
     migration_path = Path(__file__).parents[1] / 'database' / 'alembic' / 'versions' / '0024_pivot_value_columns.py'
-    rewrite_pipeline_definition = runpy.run_path(str(migration_path))['_rewrite_pipeline_definition']
+    rewrite_pipeline_definition = runpy.run_path(str(migration_path))['rewrite_pipeline_definition']
     pipeline_definition = {
         'tabs': [
             {

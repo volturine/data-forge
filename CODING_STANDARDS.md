@@ -15,4 +15,5 @@ These are review-time judgment rules, not an implementation checklist. Keep mech
 ## Pull request risk
 
 - `Merge Danger` must describe the concrete user or data impact and, for one-way changes, the migration or upgrade path.
+- For persisted pipeline config schema changes, include an Alembic data migration and append-only legacy fixture coverage. See [the backend test guidance](packages/backend/tests/README.md).
 - For stacked pull requests, name the base pull request in the description. Once the base merges, retarget to `master` and confirm the full required suite ran. A base-branch edit alone does not start `pull_request` checks; push a commit or close and reopen the pull request. Do not add `edited` solely to trigger tests, because skipped jobs can appear successful as required checks.

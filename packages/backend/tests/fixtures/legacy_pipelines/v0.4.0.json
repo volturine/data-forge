@@ -1,0 +1,289 @@
+{
+  "source_release": "v0.4.0",
+  "source_note": "Curated from the v0.4.0 built-in templates and analysis test payloads. Pivot uses the released `values` field from that schema epoch.",
+  "pipeline_definition": {
+    "tabs": [
+      {
+        "id": "tab-main",
+        "name": "Customer metrics",
+        "parent_id": null,
+        "datasource": {
+          "id": "datasource-main",
+          "analysis_tab_id": null,
+          "config": { "branch": "master" }
+        },
+        "output": {
+          "result_id": "release-v0.4.0-main",
+          "datasource_type": "iceberg",
+          "format": "parquet",
+          "filename": "customer_metrics"
+        },
+        "steps": [
+          {
+            "id": "select-customer",
+            "type": "select",
+            "config": {
+              "columns": ["customer_id", "amount", "created_at"],
+              "cast_map": {}
+            },
+            "depends_on": []
+          },
+          {
+            "id": "drop-temporary",
+            "type": "drop",
+            "config": { "columns": ["temporary"] },
+            "depends_on": []
+          },
+          {
+            "id": "filter-positive",
+            "type": "filter",
+            "config": {
+              "conditions": [
+                {
+                  "column": "amount",
+                  "operator": ">",
+                  "value": 0,
+                  "value_type": "number"
+                }
+              ],
+              "logic": "AND"
+            },
+            "depends_on": []
+          },
+          {
+            "id": "sort-created",
+            "type": "sort",
+            "config": { "columns": ["created_at"], "descending": [false] },
+            "depends_on": []
+          },
+          {
+            "id": "rename-amount",
+            "type": "rename",
+            "config": { "column_mapping": { "amount": "sales" } },
+            "depends_on": []
+          },
+          {
+            "id": "expression-adjusted",
+            "type": "expression",
+            "config": {
+              "expression": "sales * 1.2",
+              "column_name": "adjusted_sales"
+            },
+            "depends_on": []
+          },
+          {
+            "id": "with-columns-flag",
+            "type": "with_columns",
+            "config": {
+              "expressions": [
+                { "name": "is_large", "type": "literal", "value": 1 }
+              ]
+            },
+            "depends_on": []
+          },
+          {
+            "id": "fill-missing",
+            "type": "fill_null",
+            "config": { "strategy": "forward", "columns": ["sales"] },
+            "depends_on": []
+          },
+          {
+            "id": "deduplicate-customer",
+            "type": "deduplicate",
+            "config": { "subset": ["customer_id"], "keep": "first" },
+            "depends_on": []
+          },
+          {
+            "id": "uppercase-customer",
+            "type": "string_transform",
+            "config": {
+              "column": "customer_id",
+              "method": "uppercase",
+              "new_column": "customer_id_upper"
+            },
+            "depends_on": []
+          },
+          {
+            "id": "extract-month",
+            "type": "timeseries",
+            "config": {
+              "column": "created_at",
+              "operation_type": "extract",
+              "component": "month",
+              "new_column": "month"
+            },
+            "depends_on": []
+          },
+          {
+            "id": "limit-rows",
+            "type": "limit",
+            "config": { "n": 500 },
+            "depends_on": []
+          },
+          {
+            "id": "sample-rows",
+            "type": "sample",
+            "config": { "fraction": 0.5, "seed": 42 },
+            "depends_on": []
+          },
+          {
+            "id": "group-by-region",
+            "type": "groupby",
+            "config": {
+              "group_by": ["region"],
+              "aggregations": [
+                { "column": "sales", "function": "sum", "alias": "total_sales" }
+              ]
+            },
+            "depends_on": []
+          },
+          {
+            "id": "top-regions",
+            "type": "topk",
+            "config": { "column": "total_sales", "k": 10, "descending": true },
+            "depends_on": []
+          },
+          {
+            "id": "pivot-month",
+            "type": "pivot",
+            "config": {
+              "index": ["region"],
+              "columns": "month",
+              "values": "sales",
+              "aggregate_function": "first"
+            },
+            "depends_on": []
+          },
+          {
+            "id": "unpivot-month",
+            "type": "unpivot",
+            "config": {
+              "id_vars": ["region"],
+              "value_vars": ["sales"],
+              "variable_name": "month",
+              "value_name": "sales"
+            },
+            "depends_on": []
+          },
+          {
+            "id": "explode-items",
+            "type": "explode",
+            "config": { "columns": ["items"] },
+            "depends_on": []
+          },
+          {
+            "id": "union-regions",
+            "type": "union_by_name",
+            "config": { "sources": ["tab-lookup"], "allow_missing": true },
+            "depends_on": []
+          },
+          {
+            "id": "join-lookup",
+            "type": "join",
+            "config": {
+              "how": "inner",
+              "right_source": "tab-lookup",
+              "join_columns": [
+                {
+                  "id": "join-customer",
+                  "left_column": "customer_id",
+                  "right_column": "customer_id"
+                }
+              ],
+              "right_columns": ["segment"],
+              "suffix": "_right"
+            },
+            "depends_on": []
+          },
+          {
+            "id": "export-table",
+            "type": "export",
+            "config": {
+              "format": "parquet",
+              "filename": "customer_metrics",
+              "destination": "download"
+            },
+            "depends_on": []
+          },
+          {
+            "id": "download-json",
+            "type": "download",
+            "config": { "format": "json", "filename": "customer_metrics" },
+            "depends_on": []
+          },
+          {
+            "id": "view-preview",
+            "type": "view",
+            "config": { "rowLimit": 100 },
+            "depends_on": []
+          },
+          {
+            "id": "chart-sales",
+            "type": "chart",
+            "config": {
+              "chart_type": "bar",
+              "x_column": "region",
+              "y_column": "total_sales"
+            },
+            "depends_on": []
+          },
+          {
+            "id": "plot-sales-line",
+            "type": "plot_line",
+            "config": {
+              "chart_type": "line",
+              "x_column": "month",
+              "y_column": "total_sales"
+            },
+            "depends_on": []
+          },
+          {
+            "id": "ai-insight",
+            "type": "ai",
+            "config": {
+              "provider": "ollama",
+              "model": "llama2",
+              "input_columns": ["total_sales"],
+              "output_column": "sales_insight"
+            },
+            "depends_on": []
+          },
+          {
+            "id": "notify-owner",
+            "type": "notification",
+            "config": {
+              "method": "email",
+              "recipient": "analyst@example.test",
+              "message_template": "{{message}}"
+            },
+            "depends_on": []
+          }
+        ]
+      },
+      {
+        "id": "tab-lookup",
+        "name": "Lookup",
+        "parent_id": null,
+        "datasource": {
+          "id": "datasource-lookup",
+          "analysis_tab_id": null,
+          "config": { "branch": "master" }
+        },
+        "output": {
+          "result_id": "release-v0.4.0-lookup",
+          "datasource_type": "iceberg",
+          "format": "parquet",
+          "filename": "customer_lookup"
+        },
+        "steps": [
+          {
+            "id": "datasource-step",
+            "type": "datasource",
+            "config": {},
+            "depends_on": []
+          }
+        ]
+      }
+    ]
+  }
+}

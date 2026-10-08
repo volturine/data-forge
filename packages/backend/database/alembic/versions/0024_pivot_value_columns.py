@@ -15,7 +15,15 @@ down_revision: str | Sequence[str] | None = '0023_drop_ds_freshness'
 branch_labels: str | Sequence[str] | None = None
 depends_on: str | Sequence[str] | None = None
 
-__all__ = ['revision', 'down_revision', 'branch_labels', 'depends_on', 'upgrade', 'downgrade']
+__all__ = [
+    'revision',
+    'down_revision',
+    'branch_labels',
+    'depends_on',
+    'rewrite_pipeline_definition',
+    'upgrade',
+    'downgrade',
+]
 
 _BATCH_SIZE = 250
 _TABLE_NAMES = ('analyses', 'analysis_versions')
@@ -29,7 +37,8 @@ def _scope() -> str:
     return str(migration_context.opts.get('tag') or config.get_main_option('runtime_scope') or config.attributes.get('runtime_scope', 'public'))
 
 
-def _rewrite_pipeline_definition(pipeline_definition: object, *, downgrade: bool) -> bool:
+def rewrite_pipeline_definition(pipeline_definition: object, *, downgrade: bool) -> bool:
+    """Rewrite one persisted pipeline definition for this migration."""
     if not isinstance(pipeline_definition, dict):
         return False
     tabs = pipeline_definition.get('tabs')
@@ -98,7 +107,7 @@ def _rewrite_table(table_name: str, *, downgrade: bool) -> None:
         updates = []
         for row in batch:
             pipeline_definition = row.pipeline_definition
-            if _rewrite_pipeline_definition(pipeline_definition, downgrade=downgrade):
+            if rewrite_pipeline_definition(pipeline_definition, downgrade=downgrade):
                 updates.append({'_row_id': row.id, '_pipeline_definition': pipeline_definition})
         if updates:
             connection.execute(update, updates)
