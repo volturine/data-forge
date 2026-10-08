@@ -27,6 +27,7 @@ const BASE_BACKOFF = 1_000;
 const MAX_RETRIES = 10;
 
 export type ChatProvider = 'openrouter' | 'ollama';
+export type ChatInitializationState = 'idle' | 'loading' | 'ready' | 'error';
 
 export type AgentMode = 'plan' | 'execute';
 
@@ -106,6 +107,7 @@ export class ChatStore {
 	toolDrafts = $state<SvelteMap<string, ToolDraft>>(new SvelteMap());
 	loading = $state(false);
 	error = $state<string | null>(null);
+	initState = $state<ChatInitializationState>('idle');
 	configured = $state(false);
 	connection = $state<ConnectionStatus>('disconnected');
 	confirmClose = $state(false);
@@ -127,6 +129,7 @@ export class ChatStore {
 	private _lastEventId = 0;
 	private _retries = 0;
 	private _retryTimer: ReturnType<typeof setTimeout> | null = null;
+	private _initPromise: Promise<void> | null = null;
 
 	private _onUnload = () => {
 		this._clearRetry();
@@ -289,7 +292,7 @@ export class ChatStore {
 				this._applyProviderDefaults();
 			},
 			(e) => {
-				this.error = e.message;
+				throw e;
 			}
 		);
 		toolsResult.match(
@@ -297,7 +300,7 @@ export class ChatStore {
 				this.tools = t;
 			},
 			(e) => {
-				this.error = e.message;
+				console.debug('[chat] failed to load tools:', e.message);
 			}
 		);
 	}
@@ -336,14 +339,14 @@ export class ChatStore {
 		this.modelsLoading = false;
 	}
 
-	async loadSessions(): Promise<void> {
+	async loadSessions(reportError = true): Promise<void> {
 		const result = await listSessions();
 		result.match(
 			(s) => {
 				this.sessions = s;
 			},
 			(e) => {
-				this.error = e.message;
+				if (reportError) this.error = e.message;
 			}
 		);
 	}
@@ -381,12 +384,13 @@ export class ChatStore {
 	}
 
 	private _providerCanStart(provider: ChatProvider): boolean {
-		if (!this.settings) return provider === 'ollama';
+		if (!this.settings) return false;
 		if (provider === 'openrouter') return this._hasStoredProviderKey(provider);
 		return (this.settings.ollama_endpoint_url || 'http://localhost:11434').length > 0;
 	}
 
 	private _pickPreferredProvider(): ChatProvider {
+		if (!this.settings) return this.provider;
 		const candidates: ChatProvider[] = [this.provider, 'openrouter', 'ollama'];
 		for (const candidate of candidates) {
 			if (this._providerCanStart(candidate)) return candidate;
@@ -397,6 +401,10 @@ export class ChatStore {
 	private _refreshConfigured(): void {
 		if (this.sessionId) {
 			this.configured = true;
+			return;
+		}
+		if (!this.settings) {
+			this.configured = false;
 			return;
 		}
 		if (this.provider === 'ollama') {
@@ -487,30 +495,46 @@ export class ChatStore {
 		);
 	}
 
-	async open_panel(): Promise<void> {
+	open_panel(): Promise<void> {
 		this.open = true;
-		await this.loadContext();
-		void this.loadSessions();
-		if (this.sessionId) return;
-		const stored = typeof window !== 'undefined' ? localStorage.getItem(SESSION_KEY) : null;
-		if (stored) {
-			const resumed = await this.resumeSession(stored);
-			if (resumed) {
-				if (this.configured && this.models.length === 0) {
-					void this.loadModels();
+		if (this.initState === 'ready') return Promise.resolve();
+		if (this._initPromise) return this._initPromise;
+
+		this.initState = 'loading';
+		this.error = null;
+		const initialization = this._initializePanel();
+		this._initPromise = initialization;
+		void initialization.finally(() => {
+			if (this._initPromise === initialization) this._initPromise = null;
+		});
+		return initialization;
+	}
+
+	private async _initializePanel(): Promise<void> {
+		try {
+			await this.loadContext();
+			void this.loadSessions(false).catch((error: unknown) => {
+				console.debug('[chat] failed to load sessions:', error);
+			});
+
+			if (!this.sessionId) {
+				const stored = typeof window !== 'undefined' ? localStorage.getItem(SESSION_KEY) : null;
+				if (stored) {
+					const resumed = await this.resumeSession(stored);
+					if (!resumed) this.error = null;
 				}
-				return;
 			}
-		}
-		if (!this.configured) {
-			this.setProvider(this._pickPreferredProvider());
-		}
-		if (this.configured && this.models.length === 0) {
-			void this.loadModels();
-		}
-		if (!this.configured) {
-			if (typeof window !== 'undefined') localStorage.removeItem(SESSION_KEY);
-			return;
+
+			if (!this.sessionId && !this.configured) {
+				this.setProvider(this._pickPreferredProvider());
+			}
+			if (this.configured && this.models.length === 0) {
+				await this.loadModels();
+			}
+			this.initState = 'ready';
+		} catch (error) {
+			this.error = error instanceof Error ? error.message : String(error);
+			this.initState = 'error';
 		}
 	}
 

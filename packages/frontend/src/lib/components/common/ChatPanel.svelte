@@ -391,6 +391,7 @@
 							configOpen && css({ color: 'fg.primary' })
 						]}
 						onclick={() => togglePanel('config')}
+						disabled={chatStore.initState === 'loading'}
 						title="Configure"
 						aria-label="Configure"
 					>
@@ -407,6 +408,7 @@
 					<button
 						class={iconButton()}
 						onclick={() => void chatStore.newSession()}
+						disabled={chatStore.initState === 'loading'}
 						title="New session"
 						aria-label="New session"
 					>
@@ -425,7 +427,7 @@
 		</div>
 
 		<!-- Config panel -->
-		{#if configOpen}
+		{#if configOpen && chatStore.initState !== 'loading'}
 			<ChatConfigPanel maximized={layout.maximized} onClose={() => (configOpen = false)} />
 		{/if}
 

@@ -1,5 +1,5 @@
 import { describe, test, expect, vi, beforeEach, afterEach } from 'vitest';
-import { okAsync } from 'neverthrow';
+import { errAsync, okAsync, ResultAsync } from 'neverthrow';
 import type { ChatEvent, ChatModel } from '$lib/api/chat';
 import type { MCPTool } from '$lib/api/mcp';
 import type { AppSettings } from '$lib/api/settings';
@@ -190,6 +190,7 @@ describe('ChatStore — pure local logic', () => {
 			await store.open_panel();
 
 			expect(store.sessionId).toBe('session-1');
+			expect(store.initState).toBe('ready');
 			expect(store.configured).toBe(true);
 			expect(chatApi.getHistory).toHaveBeenCalledWith('session-1');
 			expect(chatApi.openEventStream).toHaveBeenLastCalledWith('session-1', 0);
@@ -214,8 +215,50 @@ describe('ChatStore — pure local logic', () => {
 			await store.open_panel();
 
 			expect(store.provider).toBe('ollama');
+			expect(store.initState).toBe('ready');
 			expect(store.configured).toBe(true);
 			expect(chatApi.listModels).toHaveBeenCalled();
+		});
+
+		test('open_panel stays neutral while settings load and coalesces concurrent opens', async () => {
+			let resolveSettings!: (settings: AppSettings) => void;
+			const settingsPromise = new Promise<AppSettings>((resolve) => {
+				resolveSettings = resolve;
+			});
+			vi.mocked(settingsApi.getSettings).mockReturnValue(
+				ResultAsync.fromSafePromise(settingsPromise)
+			);
+			vi.mocked(mcpApi.listTools).mockReturnValue(okAsync([]));
+			vi.mocked(chatApi.listSessions).mockReturnValue(okAsync([]));
+			vi.mocked(chatApi.listModels).mockReturnValue(okAsync([]));
+
+			const firstOpen = store.open_panel();
+			const secondOpen = store.open_panel();
+
+			expect(store.initState).toBe('loading');
+			expect(store.provider).toBe('openrouter');
+			expect(store.configured).toBe(false);
+			expect(settingsApi.getSettings).toHaveBeenCalledTimes(1);
+
+			resolveSettings(makeSettings({ openrouter_api_key: 'sk-test' }));
+			await Promise.all([firstOpen, secondOpen]);
+
+			expect(store.initState).toBe('ready');
+			expect(store.provider).toBe('openrouter');
+			expect(store.configured).toBe(true);
+		});
+
+		test('settings failure keeps provider unresolved and exposes the actual initialization error', async () => {
+			vi.mocked(settingsApi.getSettings).mockReturnValue(
+				errAsync(new Error('settings unavailable')) as never
+			);
+
+			await store.open_panel();
+
+			expect(store.initState).toBe('error');
+			expect(store.provider).toBe('openrouter');
+			expect(store.configured).toBe(false);
+			expect(store.error).toBe('settings unavailable');
 		});
 
 		test('empty openrouter apply does not erase the stored key', async () => {

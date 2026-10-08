@@ -444,6 +444,88 @@ test.describe('Navigation – chat panel smoke', () => {
 		// Model button should update to Ollama default
 		await expect(panel.getByRole('button', { name: 'llama3.2' })).toBeVisible({ timeout: 5_000 });
 	});
+
+	test('first chat open stays neutral while provider settings and tools load', async ({ page }) => {
+		await page.addInitScript(() => localStorage.setItem('chat_session_id', 'session-1'));
+		await page.route('**/api/v1/settings', async (route) => {
+			if (route.request().method() === 'GET')
+				await new Promise((resolve) => setTimeout(resolve, 800));
+			await route.fulfill({
+				status: 200,
+				contentType: 'application/json',
+				body: JSON.stringify({
+					smtp_host: '',
+					smtp_port: 587,
+					smtp_user: '',
+					smtp_password: '',
+					telegram_bot_token: '',
+					telegram_bot_enabled: false,
+					openrouter_api_key: 'sk-test',
+					openrouter_default_model: 'openai/gpt-4o-mini',
+					ollama_endpoint_url: 'http://ollama.test',
+					ollama_default_model: 'llama3.2',
+					public_idb_debug: false
+				})
+			});
+		});
+		await page.route('**/api/v1/mcp/tools', async (route) => {
+			await new Promise((resolve) => setTimeout(resolve, 800));
+			await route.fulfill({ status: 200, contentType: 'application/json', body: '[]' });
+		});
+		await page.route('**/api/v1/ai/chat/sessions', (route) =>
+			route.fulfill({ status: 200, contentType: 'application/json', body: '[]' })
+		);
+		await page.route('**/api/v1/ai/chat/history/session-1', (route) =>
+			route.fulfill({
+				status: 200,
+				contentType: 'application/json',
+				body: JSON.stringify({
+					session_id: 'session-1',
+					history: [{ type: 'message', role: 'assistant', content: 'OpenRouter session ready' }],
+					last_event_id: 0,
+					history_gap: false
+				})
+			})
+		);
+		await page.route('**/api/v1/ai/chat/stream/session-1**', (route) =>
+			route.fulfill({ status: 200, contentType: 'text/event-stream', body: '' })
+		);
+		await page.route('**/api/v1/ai/chat/models', (route) =>
+			route.fulfill({
+				status: 200,
+				contentType: 'application/json',
+				body: JSON.stringify([{ id: 'openai/gpt-4o-mini', name: 'gpt-4o-mini', context_length: 0 }])
+			})
+		);
+
+		await gotoAuthedRoute(page, '/');
+		await page.reload();
+		const settingsRequest = page.waitForRequest(
+			(request) =>
+				request.method() === 'GET' && new URL(request.url()).pathname === '/api/v1/settings'
+		);
+		const toolsRequest = page.waitForRequest(
+			(request) =>
+				request.method() === 'GET' && new URL(request.url()).pathname === '/api/v1/mcp/tools'
+		);
+		await page.getByRole('button', { name: 'AI Assistant' }).click();
+		const panel = page.locator('#chat-panel');
+		await expect(panel).toBeVisible();
+		await Promise.all([settingsRequest, toolsRequest]);
+
+		await expect(panel.getByRole('status').first()).toContainText('Loading chat');
+		await expect(panel.getByRole('button', { name: 'Configure' })).toBeDisabled();
+		await expect(panel.getByText(/No AI provider is configured/)).toHaveCount(0);
+		await expect(panel.locator('select[title="Chat provider"]')).toHaveCount(0);
+		await expect(panel.getByText(/Ollama|settings unavailable|failed|not configured/i)).toHaveCount(
+			0
+		);
+
+		await expect(panel.locator('select[title="Chat provider"]')).toHaveValue('openrouter', {
+			timeout: 5_000
+		});
+		await expect(panel.getByText('OpenRouter session ready')).toBeVisible({ timeout: 5_000 });
+	});
 });
 
 test.describe('Navigation – namespace persistence', () => {
