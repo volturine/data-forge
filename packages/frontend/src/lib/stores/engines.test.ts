@@ -100,7 +100,7 @@ describe('EnginesStore', () => {
 	});
 
 	afterEach(() => {
-		store.stopStream();
+		store.reset();
 		vi.useRealTimers();
 	});
 
@@ -123,6 +123,41 @@ describe('EnginesStore', () => {
 		expect(store.isStreaming).toBe(true);
 		expect(store.loading).toBe(true);
 		expect(store.status).toBe('connecting');
+	});
+
+	test('loadSnapshotOnce applies the initial snapshot and closes its socket', () => {
+		const stream = mockStreamConnection();
+		const engines = [makeEngine({ analysis_id: 'a-1', resource_id: 'a-1' })];
+
+		store.loadSnapshotOnce();
+		store.loadSnapshotOnce();
+		stream.emitSnapshot(engines);
+		store.loadSnapshotOnce();
+
+		expect(store.engines).toEqual(engines);
+		expect(store.count).toBe(1);
+		expect(store.isStreaming).toBe(false);
+		expect(store.status).toBe('connected');
+		expect(stream.close).toHaveBeenCalledOnce();
+		expect(mockConnectEnginesStream).toHaveBeenCalledOnce();
+	});
+
+	test('starting the live stream cancels a pending snapshot', () => {
+		const snapshotStream = mockStreamConnection();
+		store.loadSnapshotOnce();
+
+		const liveStream = mockStreamConnection();
+		store.startStream();
+		const staleEngine = makeEngine({ analysis_id: 'stale', resource_id: 'stale' });
+		snapshotStream.emitSnapshot([staleEngine]);
+
+		expect(snapshotStream.close).toHaveBeenCalled();
+		expect(store.engines).toEqual([]);
+
+		const engine = makeEngine({ analysis_id: 'a-1', resource_id: 'a-1' });
+		liveStream.emitSnapshot([engine]);
+		expect(store.engines).toEqual([engine]);
+		expect(store.isStreaming).toBe(true);
 	});
 
 	test('snapshot updates engines and connection state', () => {

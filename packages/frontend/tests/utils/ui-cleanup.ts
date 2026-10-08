@@ -33,11 +33,14 @@ function engineApiSegment(scope: EngineUiScope): string {
 async function shutdownEngineForCleanup(
 	page: Page,
 	scope: EngineUiScope,
-	resourceId: string
+	resourceId: string,
+	namespace = DEFAULT_NAMESPACE
 ): Promise<void> {
 	const endpoint =
 		'/api/v1/compute/engine/' + engineApiSegment(scope) + '/' + encodeURIComponent(resourceId);
-	const response = await page.context().request.delete(endpoint, { headers: cleanupHeaders() });
+	const response = await page
+		.context()
+		.request.delete(endpoint, { headers: cleanupHeaders(namespace) });
 	if (!response.ok() && response.status() !== 404) {
 		throw new Error(
 			`Failed to shut down ${scope} engine ${resourceId}: ${(await responseFailure(response)).message}`
@@ -209,8 +212,8 @@ type CleanupSession = {
 	page: Page;
 };
 
-function cleanupHeaders(): Record<string, string> {
-	return { 'X-Namespace': DEFAULT_NAMESPACE };
+function cleanupHeaders(namespace = DEFAULT_NAMESPACE): Record<string, string> {
+	return { 'X-Namespace': namespace };
 }
 
 async function responseFailure(response: import('@playwright/test').APIResponse): Promise<Error> {
@@ -218,15 +221,20 @@ async function responseFailure(response: import('@playwright/test').APIResponse)
 	return new Error(`HTTP ${response.status()} ${body.slice(0, 300)}`);
 }
 
-async function deleteDatasourceById(page: Page, name: string, datasourceId: string): Promise<void> {
+async function deleteDatasourceById(
+	page: Page,
+	name: string,
+	datasourceId: string,
+	namespace = DEFAULT_NAMESPACE
+): Promise<void> {
 	// DELETE marks the row pending and the worker finalizes it after its
 	// preview engine drains. Stop the exact owned engine first so teardown
 	// cannot leave a running preview holding the datasource open.
-	await shutdownEngineForCleanup(page, 'datasource_preview', datasourceId);
+	await shutdownEngineForCleanup(page, 'datasource_preview', datasourceId, namespace);
 	const response = await page
 		.context()
 		.request.delete(`/api/v1/datasource/${encodeURIComponent(datasourceId)}`, {
-			headers: cleanupHeaders()
+			headers: cleanupHeaders(namespace)
 		});
 	if (!response.ok() && response.status() !== 404) {
 		throw new Error(
@@ -240,10 +248,11 @@ async function deleteAnalysisByRequest(
 	request: APIRequestContext,
 	name: string,
 	analysisId: string,
-	editorClientId?: string | null
+	editorClientId?: string | null,
+	namespace = DEFAULT_NAMESPACE
 ): Promise<void> {
 	const headers = {
-		...cleanupHeaders(),
+		...cleanupHeaders(namespace),
 		...(editorClientId ? { 'X-Editor-Client-Id': editorClientId } : {})
 	};
 	const current = await request.get(`/api/v1/analysis/${encodeURIComponent(analysisId)}`, {
@@ -277,7 +286,12 @@ async function deleteAnalysisByRequest(
 	unregisterAnalysis(analysisId);
 }
 
-async function deleteAnalysisById(page: Page, name: string, analysisId: string): Promise<void> {
+async function deleteAnalysisById(
+	page: Page,
+	name: string,
+	analysisId: string,
+	namespace = DEFAULT_NAMESPACE
+): Promise<void> {
 	const editorClientId = await page.evaluate(() => {
 		try {
 			return window.sessionStorage.getItem('dataforge_editor_client_id');
@@ -285,7 +299,13 @@ async function deleteAnalysisById(page: Page, name: string, analysisId: string):
 			return null;
 		}
 	});
-	await deleteAnalysisByRequest(page.context().request, name, analysisId, editorClientId);
+	await deleteAnalysisByRequest(
+		page.context().request,
+		name,
+		analysisId,
+		editorClientId,
+		namespace
+	);
 }
 
 const cleanupSessions = new WeakMap<BrowserContext, Promise<CleanupSession>>();
@@ -372,12 +392,12 @@ async function runCleanupWithFallback(
 async function deleteDatasourceViaUIOnPage(
 	page: Page,
 	name: string,
-	options?: { id?: string }
+	options?: { id?: string; namespace?: string }
 ): Promise<void> {
 	const registeredIds = findDatasourceIdsByName(name);
 	const datasourceId = options?.id ?? (registeredIds.length === 1 ? registeredIds[0] : undefined);
 	if (datasourceId) {
-		await deleteDatasourceById(page, name, datasourceId);
+		await deleteDatasourceById(page, name, datasourceId, options?.namespace);
 		return;
 	}
 	if (registeredIds.length > 1) {
@@ -430,7 +450,7 @@ async function deleteDatasourceViaUIOnPage(
 export async function deleteDatasourceViaUI(
 	page: Page,
 	name: string,
-	options?: { id?: string }
+	options?: { id?: string; namespace?: string }
 ): Promise<void> {
 	await runCleanupWithFallback(page, 'deleteDatasourceViaUI', name, async (cleanupPage) => {
 		await deleteDatasourceViaUIOnPage(cleanupPage, name, options);
@@ -461,11 +481,11 @@ async function resolveAnalysisIdFromCard(card: Locator, name: string): Promise<s
 async function deleteAnalysisViaUIOnPage(
 	page: Page,
 	name: string,
-	options?: { id?: string; skipNavigation?: boolean }
+	options?: { id?: string; skipNavigation?: boolean; namespace?: string }
 ): Promise<void> {
 	const ownedAnalysisId = options?.id ?? findAnalysisIdByName(name);
 	if (ownedAnalysisId) {
-		await deleteAnalysisById(page, name, ownedAnalysisId);
+		await deleteAnalysisById(page, name, ownedAnalysisId, options?.namespace);
 		return;
 	}
 	if (!options?.skipNavigation) {
@@ -513,7 +533,7 @@ async function deleteAnalysisViaUIOnPage(
 export async function deleteAnalysisViaUI(
 	page: Page,
 	name: string,
-	options?: { id?: string; skipNavigation?: boolean }
+	options?: { id?: string; skipNavigation?: boolean; namespace?: string }
 ): Promise<void> {
 	try {
 		await runCleanupWithFallback(page, 'deleteAnalysisViaUI', name, async (cleanupPage) => {
@@ -530,7 +550,13 @@ export async function deleteAnalysisViaUI(
 				baseURL: e2eBaseURL(),
 				storageState: structuredClone(sessionState)
 			});
-			await deleteAnalysisByRequest(cleanupRequest, name, analysisId);
+			await deleteAnalysisByRequest(
+				cleanupRequest,
+				name,
+				analysisId,
+				undefined,
+				options?.namespace
+			);
 		} catch (requestError) {
 			throw new AggregateError(
 				[cleanupError, requestError],
