@@ -130,6 +130,8 @@ export class ChatStore {
 	private _retries = 0;
 	private _retryTimer: ReturnType<typeof setTimeout> | null = null;
 	private _initPromise: Promise<void> | null = null;
+	private _settingsRefreshPromise: Promise<void> | null = null;
+	private _contextGeneration = 0;
 
 	private _onUnload = () => {
 		this._clearRetry();
@@ -284,15 +286,16 @@ export class ChatStore {
 		return !this.disabledTags.has(tag);
 	}
 
-	async loadContext(): Promise<void> {
+	async loadContext(generation = this._contextGeneration): Promise<void> {
 		const [settingsResult, toolsResult] = await Promise.all([getSettings(), listTools()]);
+		if (generation !== this._contextGeneration) return;
 		settingsResult.match(
 			(s) => {
 				this.settings = s;
 				this._applyProviderDefaults();
 			},
 			(e) => {
-				throw e;
+				throw new Error(e.message);
 			}
 		);
 		toolsResult.match(
@@ -339,8 +342,9 @@ export class ChatStore {
 		this.modelsLoading = false;
 	}
 
-	async loadSessions(reportError = true): Promise<void> {
+	async loadSessions(reportError = true, generation = this._contextGeneration): Promise<void> {
 		const result = await listSessions();
+		if (generation !== this._contextGeneration) return;
 		result.match(
 			(s) => {
 				this.sessions = s;
@@ -497,12 +501,24 @@ export class ChatStore {
 
 	open_panel(): Promise<void> {
 		this.open = true;
-		if (this.initState === 'ready') return Promise.resolve();
+		if (this.initState === 'ready') {
+			if (!this.sessionId && !this.configured) {
+				if (this._settingsRefreshPromise) return this._settingsRefreshPromise;
+				this.initState = 'loading';
+				this.error = null;
+				return this._trackInitialization(this._refreshSettingsOnOpen(true));
+			}
+			void this._refreshSettingsOnOpen(false);
+			return Promise.resolve();
+		}
 		if (this._initPromise) return this._initPromise;
 
 		this.initState = 'loading';
 		this.error = null;
-		const initialization = this._initializePanel();
+		return this._trackInitialization(this._initializePanel(this._contextGeneration));
+	}
+
+	private _trackInitialization(initialization: Promise<void>): Promise<void> {
 		this._initPromise = initialization;
 		void initialization.finally(() => {
 			if (this._initPromise === initialization) this._initPromise = null;
@@ -510,10 +526,63 @@ export class ChatStore {
 		return initialization;
 	}
 
-	private async _initializePanel(): Promise<void> {
+	private _refreshSettingsOnOpen(surfaceErrors: boolean): Promise<void> {
+		if (this._settingsRefreshPromise) return this._settingsRefreshPromise;
+		const generation = this._contextGeneration;
+		const refresh = this._refreshSettings(generation, surfaceErrors)
+			.catch((error: unknown) => {
+				if (generation !== this._contextGeneration) return;
+				if (surfaceErrors) {
+					this.error = error instanceof Error ? error.message : String(error);
+					this.initState = 'error';
+				} else {
+					console.debug('[chat] failed to refresh settings:', error);
+				}
+			})
+			.finally(() => {
+				if (this._settingsRefreshPromise === refresh) this._settingsRefreshPromise = null;
+			});
+		this._settingsRefreshPromise = refresh;
+		return refresh;
+	}
+
+	private async _refreshSettings(generation: number, surfaceErrors: boolean): Promise<void> {
+		const result = await getSettings();
+		if (generation !== this._contextGeneration) return;
+		let settingsError: string | null = null;
+		result.match(
+			(settings) => {
+				this.settings = settings;
+				if (!this.sessionId) {
+					this._applyProviderDefaults();
+					if (!this.configured) this.setProvider(this._pickPreferredProvider());
+				}
+			},
+			(error) => {
+				settingsError = error.message;
+			}
+		);
+		if (settingsError) {
+			if (surfaceErrors) {
+				this.error = settingsError;
+				this.initState = 'error';
+			} else {
+				console.debug('[chat] failed to refresh settings:', settingsError);
+			}
+			return;
+		}
+		if (this.configured && this.models.length === 0) {
+			if (surfaceErrors) await this.loadModels();
+			else void this.loadModels();
+		}
+		if (surfaceErrors && this.initState === 'loading') this.initState = 'ready';
+	}
+
+	private async _initializePanel(generation: number): Promise<void> {
 		try {
-			await this.loadContext();
-			void this.loadSessions(false).catch((error: unknown) => {
+			await this.loadContext(generation);
+			if (generation !== this._contextGeneration) return;
+			void this.loadSessions(false, generation).catch((error: unknown) => {
 				console.debug('[chat] failed to load sessions:', error);
 			});
 
@@ -524,6 +593,7 @@ export class ChatStore {
 					if (!resumed) this.error = null;
 				}
 			}
+			if (generation !== this._contextGeneration) return;
 
 			if (!this.sessionId && !this.configured) {
 				this.setProvider(this._pickPreferredProvider());
@@ -531,8 +601,10 @@ export class ChatStore {
 			if (this.configured && this.models.length === 0) {
 				await this.loadModels();
 			}
+			if (generation !== this._contextGeneration) return;
 			this.initState = 'ready';
 		} catch (error) {
+			if (generation !== this._contextGeneration) return;
 			this.error = error instanceof Error ? error.message : String(error);
 			this.initState = 'error';
 		}
@@ -1007,6 +1079,26 @@ export class ChatStore {
 	reset(): void {
 		this.close();
 		this._resetState();
+	}
+
+	resetForSignOut(): void {
+		this._contextGeneration += 1;
+		this._initPromise = null;
+		this._settingsRefreshPromise = null;
+		this.close();
+		this._resetState();
+		this.settings = null;
+		this.tools = [];
+		this.models = [];
+		this.modelsLoading = false;
+		this.sessions = [];
+		this.provider = 'openrouter';
+		this.apiKey = '';
+		this.endpointUrl = '';
+		this.organizationId = '';
+		this.configured = false;
+		this.initState = 'idle';
+		this.error = null;
 	}
 }
 

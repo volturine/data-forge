@@ -8,6 +8,8 @@ import {
 	gotoNewAnalysis,
 	gotoNewUdfPage,
 	gotoUdfLibrary,
+	gotoProfile,
+	waitForProfileTab,
 	readyTimeoutMs,
 	waitForAppShell,
 	waitForLayoutReady
@@ -525,6 +527,90 @@ test.describe('Navigation – chat panel smoke', () => {
 			timeout: 5_000
 		});
 		await expect(panel.getByText('OpenRouter session ready')).toBeVisible({ timeout: 5_000 });
+	});
+
+	test('chat reloads provider settings after saving them in Profile', async ({ page }) => {
+		let delayNextSettingsGet = false;
+		let settings: Record<string, unknown> = {
+			smtp_host: '',
+			smtp_port: 587,
+			smtp_user: '',
+			smtp_password: '',
+			telegram_bot_token: '',
+			telegram_bot_enabled: false,
+			openrouter_api_key: '',
+			openrouter_default_model: 'openai/gpt-4o-mini',
+			ollama_endpoint_url: 'http://ollama.test',
+			ollama_default_model: 'llama3.2',
+			public_idb_debug: false
+		};
+		await page.route('**/api/v1/settings', async (route) => {
+			if (route.request().method() === 'GET') {
+				if (delayNextSettingsGet) {
+					delayNextSettingsGet = false;
+					await new Promise((resolve) => setTimeout(resolve, 700));
+				}
+				await route.fulfill({
+					status: 200,
+					contentType: 'application/json',
+					body: JSON.stringify(settings)
+				});
+				return;
+			}
+			if (route.request().method() === 'PUT') {
+				const update = route.request().postDataJSON() as Record<string, unknown>;
+				settings = { ...settings, ...update };
+				if (typeof update.openrouter_api_key === 'string' && update.openrouter_api_key.length > 0) {
+					settings.openrouter_api_key = '••••••••';
+				}
+				await route.fulfill({
+					status: 200,
+					contentType: 'application/json',
+					body: JSON.stringify(settings)
+				});
+				return;
+			}
+			await route.continue();
+		});
+		await page.route('**/api/v1/mcp/tools', (route) =>
+			route.fulfill({ status: 200, contentType: 'application/json', body: '[]' })
+		);
+		await page.route('**/api/v1/ai/chat/sessions', (route) =>
+			route.fulfill({ status: 200, contentType: 'application/json', body: '[]' })
+		);
+		await page.route('**/api/v1/ai/chat/models', (route) =>
+			route.fulfill({
+				status: 200,
+				contentType: 'application/json',
+				body: JSON.stringify([{ id: 'openai/gpt-4o-mini', name: 'gpt-4o-mini', context_length: 0 }])
+			})
+		);
+
+		await gotoAuthedRoute(page, '/');
+		await page.getByRole('button', { name: 'AI Assistant' }).click();
+		let panel = page.locator('#chat-panel');
+		await expect(panel.locator('select[title="Chat provider"]')).toBeVisible();
+		await panel.locator('select[title="Chat provider"]').selectOption('openrouter');
+		await expect(panel.getByText(/No AI provider is configured/)).toBeVisible();
+		await panel.getByRole('button', { name: 'Close chat' }).click();
+
+		await gotoProfile(page, 'ai-providers');
+		await waitForProfileTab(page, 'AI Providers');
+		await page.locator('input[type="password"]').first().fill('sk-test-profile-key');
+		await page.getByRole('button', { name: 'Save' }).click();
+		await expect(page.getByText('AI provider settings saved')).toBeVisible({ timeout: 5_000 });
+
+		await gotoAuthedRoute(page, '/');
+		delayNextSettingsGet = true;
+		await page.getByRole('button', { name: 'AI Assistant' }).click();
+		panel = page.locator('#chat-panel');
+		await expect(panel.getByRole('status').first()).toContainText('Loading chat');
+		await expect(panel.getByText(/No AI provider is configured/)).toHaveCount(0);
+		await expect(panel.locator('select[title="Chat provider"]')).toHaveCount(0);
+		await expect(panel.locator('select[title="Chat provider"]')).toHaveValue('openrouter');
+		await expect(panel.getByText('Start a session and ask anything.')).toBeVisible({
+			timeout: 5_000
+		});
 	});
 });
 
