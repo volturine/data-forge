@@ -245,18 +245,23 @@ class DockerHostRegistry:
         (tests) invalidates the cached image id.
         """
         state = self._states[spec.name]
+        # Read the cache under the lock, talk to the daemon outside it: a slow
+        # or hung remote daemon must not stall placement on the other hosts.
         with self._lock:
-            if state.cpu_count is None:
-                ncpu = client.info().get("NCPU")
-                state.cpu_count = ncpu if isinstance(ncpu, int) and ncpu > 0 else 0
-            if state.image_ref != self._engine_image or not state.image_id:
-                image = client.images.get(self._engine_image)
-                state.image_ref = self._engine_image
-                state.image_id = str(image.id)
-            client.networks.get(spec.engine_network)
-            cpu_count = state.cpu_count if state.cpu_count else None
-            assert state.image_id is not None
-            return cpu_count, state.image_id
+            cpu_count = state.cpu_count
+            image_id = state.image_id if state.image_ref == self._engine_image else None
+        if cpu_count is None:
+            ncpu = client.info().get("NCPU")
+            cpu_count = ncpu if isinstance(ncpu, int) and ncpu > 0 else 0
+        if not image_id:
+            image = client.images.get(self._engine_image)
+            image_id = str(image.id)
+        client.networks.get(spec.engine_network)
+        with self._lock:
+            state.cpu_count = cpu_count
+            state.image_ref = self._engine_image
+            state.image_id = image_id
+        return (cpu_count or None), image_id
 
     def probe(self, spec: DockerHostSpec) -> bool:
         """Ping one daemon and validate its launch context; record the outcome."""

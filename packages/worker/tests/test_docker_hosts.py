@@ -227,6 +227,25 @@ def test_select_skips_unhealthy_hosts_until_the_cooldown_passes(monkeypatch) -> 
         registry.select(exclude={"a"})
 
 
+def test_launch_context_does_not_hold_the_registry_lock_during_daemon_calls(monkeypatch) -> None:
+    registry = DockerHostRegistry([_spec("a")], engine_image="engine:test")
+    seen: list[bool] = []
+
+    class Client(_ProbeClient):
+        def info(self) -> dict[str, object]:
+            seen.append(registry._lock.locked())
+            return super().info()
+
+    cpu_count, image_id = registry.launch_context(registry.get("a"), Client(cpus=3))
+
+    assert (cpu_count, image_id) == (3, "sha256:img")
+    assert seen == [False]
+    # The second call serves the cached values without touching the daemon.
+    registry.launch_context(registry.get("a"), Client(cpus=99))
+    assert seen == [False]
+    assert registry.launch_context(registry.get("a"), _ProbeClient())[0] == 3
+
+
 def test_hosts_never_probed_are_not_placement_candidates() -> None:
     registry = DockerHostRegistry([_spec("a")], engine_image="engine:test")
 
@@ -362,21 +381,90 @@ def test_engine_launch_moves_on_when_the_listener_never_becomes_ready(monkeypatc
         nonlocal attempts
         attempts += 1
         if attempts == 1:
-            raise ComputeWorkerStartTimeout("Timed out waiting for engine listener")
+            raise ComputeWorkerStartTimeout("Timed out waiting for engine listener", container_status="running")
         events.append("listener-ready")
 
     monkeypatch.setattr(engine, "_await_listening", await_listening)
 
     engine.start_warm_worker()
 
-    # The half-started container on the failing host is removed, its slot is
-    # released, and the warm worker lands on the other host.
+    # The container on the failing host is still running but unreachable, so
+    # it is removed, its slot is released, and the warm worker lands on the
+    # other host.
     assert events == ["create:a", "start:a-container", "remove:a-container", "create:b", "start:b-container", "listener-ready"]
     assert engine.docker_host == "b"
     statuses = {status.name: status for status in registry.snapshot()}
     assert statuses["a"].placements == 0
     assert statuses["b"].placements == 1
     assert not statuses["a"].healthy
+
+
+def test_engine_that_exits_during_start_does_not_fail_over_or_exclude_the_host(monkeypatch) -> None:
+    events: list[str] = []
+    clients = {"a": _HostClient("a", events), "b": _HostClient("b", events)}
+    registry = _prepare_launch(monkeypatch, clients=clients)
+    engine = DockerComputeWorker(_identity(), namespace="tenant-a")
+
+    def await_listening() -> None:
+        raise ComputeWorkerStartTimeout("Timed out waiting for engine listener; container status=exited", container_status="exited")
+
+    monkeypatch.setattr(engine, "_await_listening", await_listening)
+
+    with pytest.raises(ComputeWorkerStartTimeout, match="status=exited"):
+        engine.start()
+
+    # The crash is the engine's, not the host's: no second host is tried, the
+    # host stays eligible, and the removed container no longer holds a slot.
+    assert events == ["create:a", "start:a-container", "remove:a-container"]
+    statuses = {status.name: status for status in registry.snapshot()}
+    assert statuses["a"].healthy and statuses["b"].healthy
+    assert statuses["a"].placements == 0
+    assert engine.container_id is None
+
+
+def test_placement_slot_is_released_only_when_the_container_is_gone(monkeypatch) -> None:
+    import docker.errors
+
+    registry = _prepare_launch(monkeypatch, clients={})
+    engine = DockerComputeWorker()
+
+    class Client:
+        def close(self) -> None:
+            return None
+
+    class Container:
+        def __init__(self, error: BaseException | None = None) -> None:
+            self.error = error
+
+        def remove(self, *, force: bool) -> None:
+            if self.error is not None:
+                raise self.error
+
+    def place(container_id: str) -> None:
+        engine._host = registry.get("a")
+        engine._container_id = container_id
+        registry.record_placement("a", container_id)
+
+    # Detaching (fenced-out coordinator, failed removal) keeps the slot.
+    place("c-detached")
+    engine._detach_local_handles()
+    assert registry.snapshot()[0].placements == 1
+
+    # A removal that fails for any reason other than "already gone" keeps it too.
+    place("c-stuck")
+    engine._cleanup_failed_start(Container(error=RuntimeError("daemon busy")), Client())
+    assert registry.snapshot()[0].placements == 2
+
+    # A successful removal, or a container Docker no longer knows, frees it.
+    place("c-removed")
+    engine._cleanup_failed_start(Container(), Client())
+    place("c-missing")
+    engine._cleanup_failed_start(Container(error=docker.errors.NotFound("gone")), Client())
+    assert registry.snapshot()[0].placements == 2
+    assert {status.name: status.placements for status in registry.snapshot()}["a"] == 2
+    registry.release_placement("a", "c-detached")
+    registry.release_placement("a", "c-stuck")
+    assert registry.snapshot()[0].placements == 0
 
 
 def test_engine_launch_reports_every_host_when_all_fail(monkeypatch) -> None:

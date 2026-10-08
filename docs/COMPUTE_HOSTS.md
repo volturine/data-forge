@@ -15,10 +15,13 @@ manager, API, PostgreSQL and RustFS stay where they are.
   `placed containers / daemon CPUs`; ties go to the host with fewer containers,
   then to configuration order. A host's `max_workers` caps what it receives.
   `COMPUTE_WORKERS` and `COMPUTE_WARM_WORKERS` stay the only cluster-wide
-  budgets.
-- A failed probe or a failed launch takes the host out of placement for 30
-  seconds and the launch moves to the next host. A half-started container on
-  the failing host is removed. The launch fails only when every host fails.
+  budgets, so the per-host caps must add up to at least `COMPUTE_WORKERS`.
+- A failed probe, a Docker API error, or a container that is still running
+  but never answers takes the host out of placement for 30 seconds and the
+  launch moves to the next host. A half-started container on the failing host
+  is removed. An engine that exits during start-up is the engine's failure,
+  not the host's: that launch fails without trying other hosts or excluding
+  the one it ran on. The launch fails only when every host fails.
 - Start-up reconciliation sweeps every reachable host for leftover containers
   of this deployment; an unreachable host is logged and re-probed later.
 - The host a container runs on is recorded as `docker_host` on the engine row
@@ -71,7 +74,7 @@ DF_ENGINE_DOCKER_HOSTS='[
 | `connect_host`          | remote   | Address the worker dials for the engine's published RPC port. Required for every non-`unix://` host. Empty on a local socket means Docker DNS on the engine network. |
 | `engine_network`        | no       | Defaults to `DF_ENGINE_DOCKER_NETWORK`.                                                                                                                           |
 | `object_store_endpoint` | no       | Endpoint handed to engines on this host. Defaults to `ENGINE_OBJECT_STORE_ENDPOINT`, then the worker's `OBJECT_STORE_ENDPOINT`.                                    |
-| `max_workers`           | no       | Hard cap of containers on this host. `0` (default) means bounded only by `COMPUTE_WORKERS`.                                                                       |
+| `max_workers`           | no       | Hard cap of containers on this host. `0` (default) means bounded only by `COMPUTE_WORKERS`. The caps must add up to at least `COMPUTE_WORKERS` (or one host must stay uncapped); the worker refuses to start otherwise. |
 | `tls_cert_path`         | no       | Directory with `ca.pem`, `cert.pem` and `key.pem` for a TLS `tcp://` daemon. Mount it into the worker container.                                                   |
 
 Fields left out fall back to the single-host variables, so the entry for the

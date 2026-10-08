@@ -15,7 +15,9 @@ services:
     deploy:
       replicas: ${DF_API_REPLICAS:-2}
     environment:
-      # One proxy hop is added in front of whatever the operator configured.
+      # Replaces DF_TRUSTED_PROXY_HOPS for the replicas. Count the ingress
+      # itself plus every proxy in front of it: with a TLS terminator ahead
+      # of the ingress, set DF_API_REPLICA_TRUSTED_PROXY_HOPS=2.
       TRUSTED_PROXY_HOPS: ${DF_API_REPLICA_TRUSTED_PROXY_HOPS:-1}
 
   ingress:

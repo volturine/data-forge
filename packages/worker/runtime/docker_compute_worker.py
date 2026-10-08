@@ -73,12 +73,21 @@ _HOST_FAILURE_TYPES: tuple[type[BaseException], ...] = (
 
 
 class ComputeWorkerStartTimeout(RuntimeError):
-    """The container started but its RPC listener never became ready."""
+    """The container started but its RPC listener never became ready.
 
+    ``container_status`` is the Docker status observed when readiness failed.
+    A container that is still ``running`` (or could not be inspected) points at
+    the host or its network; a container that exited points at the engine
+    itself, which no other host would fix.
+    """
 
-# Everything that makes a launch move to another host, including a container
-# whose listener never came up on the chosen host.
-_LAUNCH_FAILURE_TYPES: tuple[type[BaseException], ...] = (*_HOST_FAILURE_TYPES, ComputeWorkerStartTimeout)
+    def __init__(self, message: str, *, container_status: str = "unknown") -> None:
+        super().__init__(message)
+        self.container_status = container_status
+
+    @property
+    def is_host_failure(self) -> bool:
+        return self.container_status in {"running", "unknown"}
 
 
 class _HostLaunchFailure(Exception):
@@ -155,10 +164,12 @@ def validate_compute_worker_runtime_readiness() -> None:
         logger.warning("Docker host is not ready at startup name=%s error=%s", status.name, status.last_error)
     capacity = registry.placement_capacity()
     if capacity is not None and capacity < settings.compute_workers:
-        logger.warning(
-            "COMPUTE_WORKERS=%s exceeds the summed Docker host max_workers=%s; launches beyond that cap wait for a host slot",
-            settings.compute_workers,
-            capacity,
+        # Admission is budgeted by COMPUTE_WORKERS alone; a smaller summed host
+        # cap would make admitted launches fail at placement instead of
+        # waiting, so the configuration is refused rather than papered over.
+        raise RuntimeError(
+            f"COMPUTE_WORKERS={settings.compute_workers} exceeds the summed max_workers={capacity} of ENGINE_DOCKER_HOSTS; "
+            "raise the host caps (or leave one host uncapped) or lower COMPUTE_WORKERS"
         )
     logger.info(
         "Docker hosts configured: %s",
@@ -468,7 +479,10 @@ class DockerComputeWorker(ComputeWorker):
         if self._client is not None:
             with contextlib.suppress(Exception):
                 self._client.close()
-        self._release_placement()
+        # The container may still be running on its host (a fenced-out
+        # coordinator, or a removal that failed), so its placement slot stays
+        # taken: releasing it here would let max_workers be exceeded.
+        self._host = None
         self._channel = None
         self._client = None
         self._container = None
@@ -481,18 +495,32 @@ class DockerComputeWorker(ComputeWorker):
         self._publish_current_job_id(None)
 
     def _release_placement(self) -> None:
-        """Return this container's placement slot to its Docker host."""
+        """Return this container's placement slot to its Docker host.
+
+        Only called once the container is known to be gone from the daemon.
+        """
         host = self._host
         container_id = self._container_id
         self._host = None
         if host is not None and container_id is not None:
             docker_host_registry().release_placement(host.name, container_id)
 
+    def _remove_container(self, container: Any) -> bool:
+        """Force-remove a container; True when it is gone (removed or already absent)."""
+        try:
+            container.remove(force=True)
+        except docker.errors.NotFound:  # type: ignore[attr-defined]  # docker-py has no Python 3.14 stubs.
+            return True
+        except Exception:
+            logger.warning("Failed to remove engine container container_id=%s", self._container_id, exc_info=True)
+            return False
+        return True
+
     def _cleanup_failed_start(self, container: Any, client: Any) -> None:
         """Remove a partially started container only while this generation owns it."""
         if self._coordinator_can_mutate("failed-start-container-remove"):
-            with contextlib.suppress(Exception):
-                container.remove(force=True)
+            if self._remove_container(container):
+                self._release_placement()
         else:
             logger.warning(
                 "Leaving failed-start container for active coordinator reconciliation container_id=%s generation=%s",
@@ -784,9 +812,17 @@ class DockerComputeWorker(ComputeWorker):
                 phase_started = time.perf_counter()
                 ready(resources)
                 startup_phases["initialize_ms"] = (time.perf_counter() - phase_started) * 1000
-        except _LAUNCH_FAILURE_TYPES as exc:
+        except _HOST_FAILURE_TYPES as exc:
             self._cleanup_failed_start(container, client)
             raise _HostLaunchFailure(host, exc) from exc
+        except ComputeWorkerStartTimeout as exc:
+            self._cleanup_failed_start(container, client)
+            # A container that is still running but unreachable points at the
+            # host; one that exited would fail the same way anywhere, so that
+            # is the engine's failure and must not exclude the host.
+            if exc.is_host_failure:
+                raise _HostLaunchFailure(host, exc) from exc
+            raise
         except Exception:
             self._cleanup_failed_start(container, client)
             raise
@@ -834,7 +870,7 @@ class DockerComputeWorker(ComputeWorker):
             grpc.channel_ready_future(self._channel).result(timeout=max(0.0, deadline - time.monotonic()))
         except grpc.FutureTimeoutError as exc:
             status = self._container_status_after_start_failure()
-            raise ComputeWorkerStartTimeout(f"Timed out waiting for engine listener; container status={status}") from exc
+            raise ComputeWorkerStartTimeout(f"Timed out waiting for engine listener; container status={status}", container_status=status) from exc
 
         retry_delay = 0.1
         last_error: grpc.RpcError | None = None
@@ -842,7 +878,10 @@ class DockerComputeWorker(ComputeWorker):
             remaining = deadline - time.monotonic()
             if remaining <= 0:
                 status = self._container_status_after_start_failure()
-                raise ComputeWorkerStartTimeout(f"Timed out waiting for engine health check; container status={status}: {last_error}") from last_error
+                raise ComputeWorkerStartTimeout(
+                    f"Timed out waiting for engine health check; container status={status}: {last_error}",
+                    container_status=status,
+                ) from last_error
             try:
                 self._stub.Health(
                     compute_worker_runtime_pb2.ComputeWorkerHealthRequest(),
@@ -1305,10 +1344,7 @@ class DockerComputeWorker(ComputeWorker):
             if not self._coordinator_can_mutate("engine-container-remove"):
                 self._detach_local_handles()
                 return
-            try:
-                container.remove(force=True)
-            except Exception:
-                logger.warning("Failed to remove engine container during shutdown container_id=%s", self._container_id, exc_info=True)
+            if not self._remove_container(container):
                 self._detach_local_handles()
                 return
             if self._channel is not None:

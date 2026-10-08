@@ -176,9 +176,10 @@ docker compose --env-file docker/env/prod.env \
   up -d
 ```
 
-The ingress is one proxy hop; the override sets `TRUSTED_PROXY_HOPS=1` for the
-API, and `DF_API_REPLICA_TRUSTED_PROXY_HOPS` raises it when a TLS terminator
-sits in front of the ingress. Replicas share the `data` volume only for
+The ingress is one proxy hop; the override replaces `DF_TRUSTED_PROXY_HOPS`
+with `DF_API_REPLICA_TRUSTED_PROXY_HOPS` (default `1`) for the API replicas,
+so set it to the ingress plus every proxy in front of it, for example `2` with
+a TLS terminator ahead of the ingress. Replicas share the `data` volume only for
 scratch files. The runtime coordinator, scheduler and worker manager remain
 single fenced instances; do not add replicas of those services.
 

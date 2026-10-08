@@ -22,6 +22,7 @@ from runtime.docker_compute_worker import (
     _effective_resources,
     docker_host_registry,
     reconcile_deployment_containers,
+    reset_docker_host_registry,
     validate_compute_worker_runtime_readiness,
 )
 from runtime.docker_hosts import DockerHostRegistry, DockerHostSpec
@@ -872,6 +873,27 @@ def test_runtime_readiness_fails_when_no_host_answers(monkeypatch) -> None:
         validate_compute_worker_runtime_readiness()
 
 
+def test_runtime_readiness_rejects_host_caps_below_compute_workers(monkeypatch) -> None:
+    monkeypatch.setattr(
+        settings,
+        "engine_docker_hosts",
+        '[{"name": "a", "docker_host": "tcp://10.0.0.5:2375", "connect_host": "10.0.0.5", "max_workers": 2},'
+        ' {"name": "b", "docker_host": "tcp://10.0.0.6:2375", "connect_host": "10.0.0.6", "max_workers": 3}]',
+    )
+    monkeypatch.setattr(settings, "compute_workers", 6)
+    _ready_registry(monkeypatch)
+
+    with pytest.raises(RuntimeError, match="COMPUTE_WORKERS=6 exceeds the summed max_workers=5"):
+        validate_compute_worker_runtime_readiness()
+
+    # Caps that add up to the budget (or an uncapped host) are accepted.
+    monkeypatch.setattr(settings, "compute_workers", 5)
+    reset_docker_host_registry()
+    _ready_registry(monkeypatch)
+    validate_compute_worker_runtime_readiness()
+    docker_host_registry().stop_health_monitor()
+
+
 def test_container_nano_cpus_skips_hard_quota_only_for_host_connected_local_engines() -> None:
     from runtime.docker_compute_worker import _container_nano_cpus
 
@@ -1114,8 +1136,9 @@ def test_warm_worker_uses_the_standard_engine_runtime(monkeypatch) -> None:
     assert "ENGINE_PRELOAD_COMPUTE" not in environment
     assert captured["cpu_shares"] == 128
     assert docker_host_registry().snapshot()[0].placements == 1
+    # Detaching leaves the container (and its slot) on the host.
     engine._detach_local_handles()
-    assert docker_host_registry().snapshot()[0].placements == 0
+    assert docker_host_registry().snapshot()[0].placements == 1
 
 
 class _FakeContainer:

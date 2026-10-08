@@ -188,6 +188,29 @@ def test_migrate_runtime_upgrades_durable_chat_revision_to_telegram_head(monkeyp
     assert calls == [('public', f'public:{_PUBLIC_REVISION}')]
 
 
+@pytest.mark.parametrize(
+    'existing_revision',
+    [
+        '0016_telegram_runtime',
+        '0017_compute_source_index',
+        '0018_runtime_work_generations',
+        '0020_runtime_wakes',
+        '0025_compute_worker_instances',
+        '0027_compute_worker_instance',
+    ],
+)
+def test_migrate_runtime_upgrades_every_shipped_public_revision_to_head(monkeypatch: pytest.MonkeyPatch, existing_revision: str) -> None:
+    # A database migrated by an earlier release must upgrade in place, never be recreated.
+    calls: list[tuple[str, str]] = []
+    monkeypatch.setattr('backend_core.migrations._current_revision', lambda schema: existing_revision if schema == 'public' else _TENANT_REVISION)
+    monkeypatch.setattr('backend_core.migrations.ensure_database_exists', lambda _database_url=None: None)
+    monkeypatch.setattr('backend_core.migrations._upgrade_schema', lambda *, scope, schema, revision: calls.append((scope, f'{schema}:{revision}')))
+
+    migrate_runtime(['default'])
+
+    assert calls == [('public', f'public:{_PUBLIC_REVISION}')]
+
+
 def test_ensure_database_exists_creates_missing_database(monkeypatch: pytest.MonkeyPatch) -> None:
     calls: list[tuple[str, Any]] = []
 
