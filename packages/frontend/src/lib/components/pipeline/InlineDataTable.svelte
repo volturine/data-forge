@@ -1,9 +1,8 @@
 <script lang="ts">
 	import { createQuery } from '@tanstack/svelte-query';
-	import { onDestroy } from 'svelte';
-	import { previewStepData, throwIfAborted, type StepPreviewResponse } from '$lib/api/compute';
+	import type { StepPreviewResponse } from '$lib/api/compute';
 	import { applySteps } from '$lib/utils/pipeline';
-	import { toComputeError } from '$lib/utils/compute-error';
+	import { fetchPreviewQueryData } from '$lib/utils/preview-query';
 	import { hashPipeline } from '$lib/utils/hash';
 	import { analysisStore } from '$lib/stores/analysis.svelte';
 	import { datasourceStore } from '$lib/stores/datasource.svelte';
@@ -29,23 +28,6 @@
 	let { analysisId, datasourceId, pipeline, stepId, rowLimit = 100 }: Props = $props();
 	let currentPage = $state(1);
 	let columnSearch = $state('');
-	let previewRequestKey: string | null = null;
-	let previewRequestController = new AbortController();
-
-	function previewSignal(request: Parameters<typeof previewStepData>[0]): AbortSignal {
-		const nextKey = JSON.stringify(request);
-		if (previewRequestKey !== nextKey || previewRequestController.signal.aborted) {
-			if (previewRequestKey !== null && !previewRequestController.signal.aborted) {
-				previewRequestController.abort();
-			}
-			previewRequestKey = nextKey;
-			previewRequestController = new AbortController();
-		}
-		return previewRequestController.signal;
-	}
-
-	onDestroy(() => previewRequestController.abort());
-
 	const activePipeline = $derived(applySteps(pipeline));
 	const isActiveStep = $derived(activePipeline.some((step) => step.id === stepId));
 	const pipelineKey = $derived(hashPipeline(activePipeline));
@@ -78,18 +60,12 @@
 		// Cache and execute from the exact command in the key. A pipeline-only
 		// hash omits tab, resource settings, and other result-changing inputs.
 		queryKey: ['step-preview', namespace, analysisId, datasourceId, previewRequestState] as const,
-		queryFn: async ({ queryKey }): Promise<StepPreviewResponse> => {
+		queryFn: async ({ queryKey, signal }): Promise<StepPreviewResponse> => {
 			const state = queryKey[4];
 			if (!state) throw new Error('Preview command is not ready');
-			const { request } = state;
-			const signal = previewSignal(request);
-			const result = await previewStepData(request, { signal });
-			throwIfAborted(signal);
-			if (result.isErr()) {
-				throw toComputeError(result.error);
-			}
-			schemaStore.syncPreviewSchema(stepId, result.value, state.pipelineKey);
-			return result.value;
+			const data = await fetchPreviewQueryData(state.request, signal);
+			schemaStore.syncPreviewSchema(stepId, data, state.pipelineKey);
+			return data;
 		},
 		staleTime: Infinity,
 		gcTime: Infinity,
