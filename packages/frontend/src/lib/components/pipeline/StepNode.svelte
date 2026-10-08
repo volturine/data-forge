@@ -6,6 +6,7 @@
 	import ChartPreview from '$lib/components/pipeline/ChartPreview.svelte';
 	import { createQuery } from '@tanstack/svelte-query';
 	import {
+		previewStepData,
 		getStepRowCount,
 		throwIfAborted,
 		downloadStep,
@@ -13,7 +14,7 @@
 	} from '$lib/api/compute';
 	import { applySteps } from '$lib/utils/pipeline';
 	import { hashPipeline } from '$lib/utils/hash';
-	import { fetchPreviewQueryData } from '$lib/utils/preview-query';
+	import { toComputeError } from '$lib/utils/compute-error';
 	import { GripVertical, Hash, RefreshCw, Copy, Trash2 } from '@lucide/svelte';
 	import { analysisStore } from '$lib/stores/analysis.svelte';
 	import { datasourceStore } from '$lib/stores/datasource.svelte';
@@ -103,10 +104,14 @@
 		// The request captured in the cache key is also the request executed;
 		// a reactive component update cannot make an older query run a newer command.
 		queryKey: ['chart-preview', namespace, chartPreviewRequest] as const,
-		queryFn: async ({ queryKey, signal }): Promise<StepPreviewResponse> => {
+		queryFn: async ({ queryKey }): Promise<StepPreviewResponse> => {
 			const request = queryKey[2];
 			if (!request) throw new Error('Chart preview command is not ready');
-			return fetchPreviewQueryData(request, signal);
+			const signal = previewSignal(request);
+			const result = await previewStepData(request, { signal });
+			throwIfAborted(signal);
+			if (result.isErr()) throw toComputeError(result.error);
+			return result.value;
 		},
 		staleTime: Infinity,
 		gcTime: Infinity,
@@ -171,6 +176,20 @@
 		`${analysisId ?? ''}:${datasourceId ?? ''}:${step.id}:${previewRowLimit}:${rowCountPipelineKey}:${JSON.stringify(rowCountDatasourceConfig)}`
 	);
 	let rowCountAbortController: AbortController | null = null;
+	let previewRequestKey: string | null = null;
+	let previewRequestController = new AbortController();
+
+	function previewSignal(request: Parameters<typeof previewStepData>[0]): AbortSignal {
+		const nextKey = JSON.stringify(request);
+		if (previewRequestKey !== nextKey || previewRequestController.signal.aborted) {
+			if (previewRequestKey !== null && !previewRequestController.signal.aborted) {
+				previewRequestController.abort();
+			}
+			previewRequestKey = nextKey;
+			previewRequestController = new AbortController();
+		}
+		return previewRequestController.signal;
+	}
 
 	async function calculateRowCount() {
 		if (!analysisId || !analysisPipeline) return;
@@ -231,6 +250,7 @@
 	}
 
 	onDestroy(() => {
+		previewRequestController.abort();
 		rowCountAbortController?.abort();
 		if (copyTimer !== null) window.clearTimeout(copyTimer);
 	});
