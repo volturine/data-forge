@@ -2,8 +2,8 @@ import asyncio
 import logging
 import mimetypes
 import os
+import socket
 import sys
-import tempfile
 import threading
 import time
 import traceback
@@ -59,7 +59,7 @@ from backend_core.logging import (
     flush_request_logs,
     shutdown_logging,
 )
-from backend_core.namespace import namespace_paths, normalize_namespace, reset_namespace, set_namespace_context
+from backend_core.namespace import normalize_namespace, reset_namespace, set_namespace_context
 from backend_core.namespaces_service import register_namespace
 from backend_core.runtime_ipc import RuntimeListenerKind
 from backend_core.runtime_notifications import handle_runtime_payload, recover_runtime_notifications, refresh_build_projections, refresh_lock_projections
@@ -519,9 +519,6 @@ async def _start_api_lifespan(app: FastAPI, cleanup: AsyncExitStack) -> None:
     from api.v1.router import verify_v1_auth_coverage
 
     verify_v1_auth_coverage()
-    # A production deployment silently writing uploads to /tmp is never correct.
-    if settings.prod_mode_enabled and str(settings.data_dir).startswith(tempfile.gettempdir()):
-        raise RuntimeError('DATA_DIR must be set to a persistent location in production')
     await init_db()
     # Frontend asset serving is on the API process in the containerized
     # deployment. Load it before accepting requests so the first browser burst
@@ -533,8 +530,9 @@ async def _start_api_lifespan(app: FastAPI, cleanup: AsyncExitStack) -> None:
     logger.info('Starting application...')
     # This is an observability identity only. API children do not register as
     # runtime workers and never own runtime leases, gRPC listeners, or engine
-    # lifecycle state.
-    app.state.api_worker_id = f'api:{os.getpid()}'
+    # lifecycle state. The hostname keeps it unique across API replicas, which
+    # commonly share a PID inside their containers.
+    app.state.api_worker_id = f'api:{socket.gethostname()}:{os.getpid()}'
     from backend_core.public_schema import ensure_backend_public_tables
     from modules.auth.service import ensure_default_user
 
@@ -818,17 +816,6 @@ def _readiness_checks() -> tuple[dict[str, str], bool]:
     except Exception as e:
         logger.warning('Database readiness check failed: %s', e)
         checks['database'] = 'error'
-        is_ready = False
-
-    # Local DATA_DIR remains for process-local scratch; product data lives in object storage.
-    try:
-        paths = namespace_paths(settings.default_namespace)
-        checks['data_dir'] = 'ok' if paths.base_dir.exists() else 'missing'
-        if not paths.base_dir.exists():
-            is_ready = False
-    except Exception as e:
-        logger.warning('Data dir readiness check failed: %s', e)
-        checks['data_dir'] = 'error'
         is_ready = False
 
     # Fail fast when the S3-compatible object store is unreachable or misconfigured.

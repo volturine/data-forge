@@ -2333,6 +2333,7 @@ def _engine_status_result_proto(status_info: ComputeWorkerStatusInfo) -> compute
         "termination_reason",
         "supervisor_id",
         "owner_id",
+        "docker_host",
     ):
         value = getattr(status_info, field)
         if value is not None:

@@ -357,7 +357,6 @@ async def test_recovery_read_racing_watch_heartbeat_does_not_drop_committed_muta
         remote.append(payload.model_dump(mode='json'))
         published.set()
 
-    monkeypatch.setattr(lock_routes.settings, 'distributed_runtime_enabled', True)
     monkeypatch.setattr(lock_routes, '_require_websocket_user', AsyncMock(return_value='owner'))
     monkeypatch.setattr(lock_routes, '_heartbeat_lock', heartbeat)
     monkeypatch.setattr(lock_routes, '_release_lock', AsyncMock(return_value=False))

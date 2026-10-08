@@ -540,7 +540,8 @@ def test_init_db_bootstraps_public_and_tenant_schemas_in_postgres(monkeypatch, t
     from backend_core import compute_requests_service, database
     from backend_core.config import settings
     from backend_core.migrations import _alembic_config, migrate_runtime
-    from backend_core.namespace import namespace_paths, reset_namespace, set_namespace_context
+    from backend_core.namespace import reset_namespace, set_namespace_context
+    from backend_core.namespaces_service import register_namespace
 
     with PostgresContainer() as container:
         _clear_database_state()
@@ -550,9 +551,11 @@ def test_init_db_bootstraps_public_and_tenant_schemas_in_postgres(monkeypatch, t
         monkeypatch.setattr(settings, 'data_dir', data_dir, raising=False)
         monkeypatch.setattr(settings, 'distributed_runtime_enabled', True, raising=False)
         database.set_settings_engine_override(database._create_public_engine())
-        namespace_paths('default')
-        namespace_paths('alpha')
 
+        asyncio.run(database.init_db())
+        # A namespace registered by any replica is migrated by every replica's
+        # bootstrap, without a shared filesystem.
+        database.run_settings_db(register_namespace, 'alpha')
         asyncio.run(database.init_db())
 
         with container.connect() as connection:
@@ -2770,7 +2773,6 @@ def test_init_db_postgres_namespace_bootstrap_does_not_deadlock(monkeypatch, tmp
 
     from backend_core import database
     from backend_core.config import settings
-    from backend_core.namespace import namespace_paths
 
     with PostgresContainer() as container:
         _clear_database_state()
@@ -2780,7 +2782,6 @@ def test_init_db_postgres_namespace_bootstrap_does_not_deadlock(monkeypatch, tmp
         monkeypatch.setattr(settings, 'data_dir', data_dir, raising=False)
         monkeypatch.setattr(settings, 'distributed_runtime_enabled', True, raising=False)
         database.set_settings_engine_override(database._create_public_engine())
-        namespace_paths('default')
 
         thread = threading.Thread(target=lambda: asyncio.run(database.init_db()))
         thread.start()

@@ -6,6 +6,7 @@ import json
 import logging
 import os
 import threading
+import uuid
 from collections.abc import Awaitable, Callable
 
 import psycopg
@@ -19,6 +20,10 @@ from backend_core.domain.enums import DataForgeStrEnum
 from backend_core.domain.runtime.events import RuntimePayloadKind
 
 logger = logging.getLogger(__name__)
+# Identifies this API process in the notifications it publishes so it can skip
+# its own echoes. A PID is not enough: containerized replicas usually all run
+# their single API process as PID 1.
+API_PROCESS_ID = uuid.uuid4().hex
 
 _CHANNEL = 'runtime_events'
 _database_url_provider: Callable[[], str] | None = None
@@ -282,7 +287,7 @@ def notify_api_lock(
             'resource_type': resource_type,
             'resource_id': resource_id,
             'status': status_payload,
-            'source_pid': os.getpid(),
+            'source_process': API_PROCESS_ID,
         },
         listener=RuntimeListenerKind.API,
     )

@@ -44,6 +44,7 @@ def test_runtime_schema_has_only_public_and_tenant_creation_revisions() -> None:
         '0026_compute_worker_runs.py',
         '0027_compute_worker_instance_constraints.py',
         '0028_compute_worker_run_constraints.py',
+        '0029_compute_worker_docker_host.py',
     ]
 
 
@@ -81,7 +82,7 @@ def test_pivot_values_migration_rewrites_only_legacy_pivot_configs() -> None:
 
 
 def test_runtime_revisions_point_to_compute_worker_rename_heads() -> None:
-    assert _PUBLIC_REVISION == '0027_compute_worker_instance'
+    assert _PUBLIC_REVISION == '0029_compute_worker_host'
     assert _TENANT_REVISION == '0028_compute_worker_run'
     assert len(_PUBLIC_REVISION) <= 32
     assert len(_TENANT_REVISION) <= 32
@@ -179,6 +180,29 @@ def test_migrate_runtime_upgrades_existing_public_schema(monkeypatch: pytest.Mon
 def test_migrate_runtime_upgrades_durable_chat_revision_to_telegram_head(monkeypatch: pytest.MonkeyPatch) -> None:
     calls: list[tuple[str, str]] = []
     monkeypatch.setattr('backend_core.migrations._current_revision', lambda schema: '0015_durable_chat_turns' if schema == 'public' else _TENANT_REVISION)
+    monkeypatch.setattr('backend_core.migrations.ensure_database_exists', lambda _database_url=None: None)
+    monkeypatch.setattr('backend_core.migrations._upgrade_schema', lambda *, scope, schema, revision: calls.append((scope, f'{schema}:{revision}')))
+
+    migrate_runtime(['default'])
+
+    assert calls == [('public', f'public:{_PUBLIC_REVISION}')]
+
+
+@pytest.mark.parametrize(
+    'existing_revision',
+    [
+        '0016_telegram_runtime',
+        '0017_compute_source_index',
+        '0018_runtime_work_generations',
+        '0020_runtime_wakes',
+        '0025_compute_worker_instances',
+        '0027_compute_worker_instance',
+    ],
+)
+def test_migrate_runtime_upgrades_every_shipped_public_revision_to_head(monkeypatch: pytest.MonkeyPatch, existing_revision: str) -> None:
+    # A database migrated by an earlier release must upgrade in place, never be recreated.
+    calls: list[tuple[str, str]] = []
+    monkeypatch.setattr('backend_core.migrations._current_revision', lambda schema: existing_revision if schema == 'public' else _TENANT_REVISION)
     monkeypatch.setattr('backend_core.migrations.ensure_database_exists', lambda _database_url=None: None)
     monkeypatch.setattr('backend_core.migrations._upgrade_schema', lambda *, scope, schema, revision: calls.append((scope, f'{schema}:{revision}')))
 

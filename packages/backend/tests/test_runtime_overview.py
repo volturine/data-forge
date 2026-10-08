@@ -12,7 +12,7 @@ from backend_core.database import run_db, run_settings_db
 from backend_core.domain.build_jobs.models import BuildJobStatus
 from backend_core.domain.compute.base import ComputeWorkerStatusInfo
 from backend_core.domain.runtime_workers.models import RuntimeWorkerKind
-from backend_core.namespace import namespace_paths
+from backend_core.namespaces_service import register_namespace
 
 
 def test_runtime_overview_reports_runtime_state(client, monkeypatch) -> None:
@@ -153,11 +153,11 @@ def _set_running_job_owner(session, build_id: str, worker_id: str) -> None:
     session.commit()
 
 
-def test_runtime_overview_includes_filesystem_namespaces(client, monkeypatch) -> None:
+def test_runtime_overview_includes_registered_namespaces(client, monkeypatch) -> None:
     from backend_core.config import settings
 
     monkeypatch.setattr(settings, 'distributed_runtime_enabled', False, raising=False)
-    namespace_paths('beta')
+    run_settings_db(register_namespace, 'beta')
 
     response = client.get('/api/v1/runtime/overview')
 
@@ -229,7 +229,7 @@ def test_queue_summary_reuses_the_runtime_overview_settings_session(monkeypatch)
 
     monkeypatch.setattr(service.runtime_workers_service, 'reclaimable_worker_ids', reclaimable_worker_ids)
     monkeypatch.setattr(service, 'run_db', read_namespace)
-    monkeypatch.setattr(service, 'list_namespaces', lambda: ['default'])
+    monkeypatch.setattr(service, 'list_runtime_namespaces', lambda session: ['default'])
 
     summary = service.queue_summary(session)
 

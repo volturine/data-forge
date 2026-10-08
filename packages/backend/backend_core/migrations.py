@@ -10,7 +10,7 @@ from sqlalchemy import create_engine, pool, text
 from backend_core.config import settings
 from backend_core.namespace import namespace_database_schema
 
-_PUBLIC_REVISION = '0027_compute_worker_instance'
+_PUBLIC_REVISION = '0029_compute_worker_host'
 _TENANT_REVISION = '0028_compute_worker_run'
 _MISSING_DATABASE_SQLSTATE = '3D000'
 
@@ -162,6 +162,12 @@ def migrate_runtime(namespaces: list[str]) -> None:
         '0013_runtime_work_wakes',
         '0014_runtime_coordinator_fencing',
         '0015_durable_chat_turns',
+        '0016_telegram_runtime',
+        '0017_compute_source_index',
+        '0018_runtime_work_generations',
+        '0020_runtime_wakes',
+        '0025_compute_worker_instances',
+        '0027_compute_worker_instance',
     }:
         _upgrade_schema(scope='public', schema='public', revision=_PUBLIC_REVISION)
     elif public_revision != _PUBLIC_REVISION:

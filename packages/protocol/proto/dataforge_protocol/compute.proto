@@ -216,6 +216,7 @@ message ComputeWorkerStatusResult {
   optional bool oom_killed = 21;
   optional string supervisor_id = 22 [(buf.validate.field).string.min_len = 1];
   optional string owner_id = 23 [(buf.validate.field).string.min_len = 1];
+  optional string docker_host = 24 [(buf.validate.field).string.min_len = 1];
 }
 
 message ComputeAckResult {

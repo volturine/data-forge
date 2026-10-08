@@ -1,7 +1,6 @@
 import asyncio
 from concurrent.futures import ThreadPoolExecutor
 from contextlib import contextmanager, nullcontext
-from pathlib import Path
 from threading import Barrier, Event
 
 import pytest
@@ -10,9 +9,7 @@ from backend_core.api_execution_budget import BoundedThreadPoolExecutor
 from backend_core.config import settings
 from backend_core.namespace import (
     get_namespace,
-    list_namespaces,
     namespace_database_schema,
-    namespace_paths,
     normalize_namespace,
     set_namespace_context,
 )
@@ -39,21 +36,6 @@ def test_normalize_namespace_allows_underscores():
     assert normalize_namespace('my_namespace') == 'my_namespace'
 
 
-def test_namespace_paths_creates_dirs(tmp_path: Path, monkeypatch):
-    monkeypatch.setenv('DATA_DIR', str(tmp_path))
-    monkeypatch.setenv('ENV_FILE', '')
-    from backend_core.config import Settings
-
-    Settings()
-    paths = namespace_paths('alpha')
-
-    assert paths.base_dir == tmp_path / 'data' / 'namespaces' / 'alpha'
-    assert paths.upload_dir.is_dir()
-    assert paths.clean_dir.is_dir()
-    assert paths.exports_dir.is_dir()
-    assert paths.db_path == tmp_path / 'data' / 'namespaces' / 'alpha' / 'namespace.db'
-
-
 def test_set_namespace_context():
     token = set_namespace_context('alpha')
     try:
@@ -72,22 +54,9 @@ def test_namespace_database_schema_maps_public_namespace_away_from_public_schema
     assert namespace_database_schema('public') == 'df$tenant$public'
 
 
-def test_list_namespaces(tmp_path: Path, monkeypatch):
-    monkeypatch.setenv('DATA_DIR', str(tmp_path))
-    monkeypatch.setenv('ENV_FILE', '')
-    from backend_core.config import Settings
-
-    Settings()
-    base = tmp_path / 'data' / 'namespaces'
-    (base / 'alpha').mkdir(parents=True)
-    (base / 'beta').mkdir(parents=True)
-    (base / 'file.txt').write_text('x')
-
-    assert list_namespaces() == ['alpha', 'beta']
-
-
-def test_list_namespaces_endpoint_merges_filesystem_and_runtime_namespaces(monkeypatch):
-    monkeypatch.setattr(namespace_routes, 'list_namespaces', lambda: ['alpha', 'default'])
+def test_namespaces_endpoint_reads_only_the_runtime_registry(monkeypatch):
+    # Every API replica must answer identically, so the list comes from
+    # PostgreSQL alone and never from a replica's local filesystem.
     monkeypatch.setattr(namespace_routes, 'list_runtime_namespaces', lambda session: ['beta', 'default'])
 
     from main import app
@@ -96,7 +65,7 @@ def test_list_namespaces_endpoint_merges_filesystem_and_runtime_namespaces(monke
     response = client.get('/api/v1/namespaces')
 
     assert response.status_code == 200
-    assert response.json() == {'namespaces': ['alpha', 'beta', 'default']}
+    assert response.json() == {'namespaces': ['beta', 'default']}
 
 
 @pytest.mark.asyncio
@@ -133,11 +102,9 @@ async def test_namespace_work_waits_for_bounded_executor_capacity(monkeypatch: p
 
 
 def test_create_namespace_endpoint_registers_namespace(monkeypatch: pytest.MonkeyPatch) -> None:
-    created: list[str] = []
     registered: list[str] = []
     provisioned: list[str] = []
 
-    monkeypatch.setattr(namespace_routes, 'namespace_paths', lambda name: created.append(name))
     monkeypatch.setattr(namespace_routes, 'register_namespace', lambda session, name: registered.append(name))
     monkeypatch.setattr(namespace_routes, '_provision_namespace_bucket', lambda name: provisioned.append(name))
     monkeypatch.setattr(namespace_routes, 'initialize_namespace_db', lambda name: None)
@@ -154,7 +121,6 @@ def test_create_namespace_endpoint_registers_namespace(monkeypatch: pytest.Monke
     assert body['created_bucket'] is True
     assert body['storage']['bucket'] == 'test'
     assert body['storage']['uploads_root'].startswith('s3://test/')
-    assert created == ['test']
     assert registered == ['test']
     assert provisioned == ['test']
 
@@ -164,8 +130,6 @@ def test_create_namespace_provisions_bucket_and_credentials_in_parallel(
 ) -> None:
     started: list[str] = []
     both_started = Barrier(2)
-
-    monkeypatch.setattr(namespace_routes, 'namespace_paths', lambda name: None)
 
     def provision_bucket(name: str) -> None:
         started.append('bucket')
@@ -208,7 +172,6 @@ def test_create_namespace_reuses_published_namespace_without_reprovisioning(
         return True
 
     monkeypatch.setattr(namespace_routes, 'run_settings_db', run_settings_db)
-    monkeypatch.setattr(namespace_routes, 'namespace_paths', lambda name: calls.append(f'paths:{name}'))
     monkeypatch.setattr(namespace_routes, '_provision_namespace_bucket', lambda name: calls.append(f'bucket:{name}'))
     monkeypatch.setattr(namespace_routes, 'namespace_provision_lock', lambda _name: nullcontext())
 
@@ -252,7 +215,6 @@ def test_namespace_provisioning_failure_waits_for_sibling_work_before_unlocking(
 
     monkeypatch.setattr(namespace_routes, 'namespace_provision_lock', provisioning_lock)
     monkeypatch.setattr(namespace_routes, 'run_settings_db', run_settings_db)
-    monkeypatch.setattr(namespace_routes, 'namespace_paths', lambda _name: None)
     monkeypatch.setattr(namespace_routes, '_provision_namespace_bucket', provision_bucket)
     monkeypatch.setattr(namespace_routes, 'initialize_namespace_db', initialize_database)
 

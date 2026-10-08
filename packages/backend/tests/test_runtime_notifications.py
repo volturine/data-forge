@@ -1,6 +1,5 @@
 import asyncio
 import json
-import os
 import threading
 from collections.abc import AsyncGenerator, Iterable
 from types import SimpleNamespace
@@ -31,7 +30,7 @@ async def test_lock_notification_fans_out_to_watchers_from_another_api_process(m
             'resource_type': 'analysis',
             'resource_id': 'analysis-1',
             'status': status,
-            'source_pid': os.getpid() + 1,
+            'source_process': 'another-api-replica',
         }
     )
 
@@ -40,7 +39,7 @@ async def test_lock_notification_fans_out_to_watchers_from_another_api_process(m
 
 @pytest.mark.asyncio
 async def test_lock_notification_does_not_echo_to_the_publishing_api_process(monkeypatch) -> None:
-    from backend_core import runtime_notifications
+    from backend_core import runtime_ipc, runtime_notifications
 
     async def fail_notify(*args) -> None:
         raise AssertionError('same-process lock notification should be handled locally')
@@ -54,7 +53,7 @@ async def test_lock_notification_does_not_echo_to_the_publishing_api_process(mon
             'resource_type': 'analysis',
             'resource_id': 'analysis-1',
             'status': {'lock': None},
-            'source_pid': os.getpid(),
+            'source_process': runtime_ipc.API_PROCESS_ID,
         }
     )
 
@@ -80,7 +79,7 @@ def test_notify_api_lock_includes_process_identity(monkeypatch) -> None:
                 'resource_type': 'analysis',
                 'resource_id': 'analysis-1',
                 'status': status,
-                'source_pid': os.getpid(),
+                'source_process': runtime_ipc.API_PROCESS_ID,
             },
             runtime_ipc.RuntimeListenerKind.API,
         )
@@ -118,7 +117,7 @@ def test_notify_api_lock_converts_pydantic_payload_to_json_value(monkeypatch) ->
                     'resource_id': 'analysis-1',
                     'lock': None,
                 },
-                'source_pid': os.getpid(),
+                'source_process': runtime_ipc.API_PROCESS_ID,
             },
             runtime_ipc.RuntimeListenerKind.API,
         )
