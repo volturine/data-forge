@@ -45,6 +45,8 @@ Code/config: `just verify` && `just test` && `just test-e2e` before done or revi
 
 ## Docs
 
+Before designing a change or debugging a failure, read [`docs/agent-guidance.md`](docs/agent-guidance.md). Before changing runtime coordination, durable work, locks, previews, capacity, scheduler behavior, or private storage cleanup, read [`docs/runtime-invariants.md`](docs/runtime-invariants.md) first.
+
 | Doc                                                                                           | Use for                                                               |
 | --------------------------------------------------------------------------------------------- | --------------------------------------------------------------------- |
 | [`STYLE_GUIDE.md`](STYLE_GUIDE.md)                                                            | Code style                                                            |

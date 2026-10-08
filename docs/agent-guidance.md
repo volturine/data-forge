@@ -4,7 +4,8 @@ Use these principles when choosing an implementation and investigating a failure
 
 ## Principles
 
-- Remove obsolete paths instead of adding permissive fallbacks. When a schema change affects persisted user configuration, use an explicit data migration rather than fallback parsing.
+- Remove obsolete runtime/API paths and avoid permissive fallback parsing. When a schema change affects persisted user configuration, use an explicit data migration rather than fallback parsing.
+- For deployment-facing identifiers such as environment variable names and image tags, a deprecated alias may remain for one release; emit a deprecation log where the alias is read at runtime, and remove it after that release.
 - Choose the simplest implementation that fully meets the current requirements. Avoid speculative abstractions, configuration, and indirection.
 - Grow the system in layers. Start from the smallest version that works end to end, and add each new capability on top of a product that already works. Never trade a working product for unfinished complexity.
 - Keep components modular and concerns clearly separated.
