@@ -45,6 +45,7 @@ class EngineInstanceSummary(BaseModel):
     oom_killed: bool | None
     supervisor_id: str | None
     owner_id: str | None
+    docker_host: str | None = None
     status: EngineInstanceStatus
     current_job_id: str | None
     current_build_id: str | None

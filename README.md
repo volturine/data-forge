@@ -186,6 +186,10 @@ The repository defaults are tuned for concurrent clients:
   Telegram network delivery runs outside the database transaction.
 - The capacity-first optimization plan and measured scale gates are in
   [Capacity-First Runtime Optimization](docs/prd/active/elastic-runtime-scale-out.md).
+- API containers are stateless and can run as replicas behind an ingress;
+  the single worker manager can place engine containers on several Docker
+  hosts. See [Deployment](docs/DEPLOYMENT.md#scale-out) and
+  [Compute hosts](docs/COMPUTE_HOSTS.md).
 
 ### Development (local runtime)
 

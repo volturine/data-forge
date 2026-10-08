@@ -17,6 +17,7 @@ from typing import Any, cast
 
 import docker
 import grpc
+import requests
 from google.protobuf import json_format
 
 from dataforge_protocol import compute_pb2, compute_worker_runtime_pb2, compute_worker_runtime_pb2_grpc, enums_pb2
@@ -24,6 +25,13 @@ from runtime.compute_request_context import get_compute_request_id
 from runtime.compute_worker_credentials import ObjectStoreCredentials, resolve_compute_worker_credentials
 from runtime.compute_worker_server import COMPUTE_WORKER_PROTOCOL_VERSION
 from runtime.config import settings
+from runtime.docker_hosts import (
+    DockerHostRegistry,
+    DockerHostSpec,
+    NoEligibleDockerHost,
+    open_docker_client,
+    parse_docker_hosts,
+)
 from runtime.domain.compute.base import ComputeWorker, ComputeWorkerProgressEvent, ComputeWorkerResult
 from runtime.export_formats import get_export_format
 from runtime.json_values import encode_json_bytes
@@ -47,16 +55,65 @@ _COMPUTE_WORKER_CHANNEL_OPTIONS = (
     ("grpc.initial_reconnect_backoff_ms", 100),
     ("grpc.max_reconnect_backoff_ms", 1000),
 )
-_docker_runtime_lock = threading.Lock()
-_cached_daemon_cpu_count: int | None = None
-_validated_image_ref: str | None = None
-_validated_image_id: str | None = None
+_DOCKER_HOST_LABEL = "io.dataforge.docker-host"
 
 # Docker inspections are the most frequent engine I/O in the runtime (capacity
 # decisions, status snapshots, idle reaping). One second of staleness is
 # invisible to those decisions and keeps the daemon off the hot path.
 _LIVENESS_CACHE_SECONDS = 1.0
-_validated_network: str | None = None
+_registry_lock = threading.Lock()
+_registry: DockerHostRegistry | None = None
+# Errors that mean the Docker host, not the request, is at fault. A launch
+# that hits one of these fails over to another host.
+_HOST_FAILURE_TYPES: tuple[type[BaseException], ...] = (
+    docker.errors.DockerException,  # type: ignore[attr-defined]  # docker-py has no Python 3.14 stubs.
+    requests.exceptions.RequestException,
+    OSError,
+)
+
+
+class ComputeWorkerStartTimeout(RuntimeError):
+    """The container started but its RPC listener never became ready."""
+
+
+# Everything that makes a launch move to another host, including a container
+# whose listener never came up on the chosen host.
+_LAUNCH_FAILURE_TYPES: tuple[type[BaseException], ...] = (*_HOST_FAILURE_TYPES, ComputeWorkerStartTimeout)
+
+
+class _HostLaunchFailure(Exception):
+    """A launch failed because of the Docker host it was placed on."""
+
+    def __init__(self, host: DockerHostSpec, cause: BaseException) -> None:
+        super().__init__(f"{host.name}: {cause}")
+        self.host = host
+        self.cause = cause
+
+
+def docker_host_registry() -> DockerHostRegistry:
+    """Return the process-wide host registry, built from settings on first use."""
+    global _registry
+    with _registry_lock:
+        if _registry is None:
+            hosts = parse_docker_hosts(
+                settings.engine_docker_hosts,
+                default_docker_host=settings.engine_docker_host,
+                default_connect_host=settings.engine_connect_host,
+                default_engine_network=settings.engine_docker_network,
+                default_object_store_endpoint=settings.engine_object_store_endpoint,
+            )
+            _registry = DockerHostRegistry(hosts, engine_image=settings.engine_image)
+        return _registry
+
+
+def reset_docker_host_registry() -> None:
+    """Drop the cached registry so the next use re-reads settings (tests)."""
+    global _registry
+    with _registry_lock:
+        registry = _registry
+        _registry = None
+    if registry is not None:
+        registry.stop_health_monitor()
 
 
 def _warn_unpinned_compute_worker_image() -> None:
@@ -75,37 +132,42 @@ def _warn_unpinned_compute_worker_image() -> None:
         )
 
 
-def _resolve_launch_context(client: Any) -> tuple[int | None, str]:
-    """Cache daemon/image/network lookups across engine starts on this worker.
-
-    Each Docker API round-trip is cheap alone but multiplies across hundreds of
-    e2e engine spawns. Image and network are immutable for a worker process.
-    """
-    global _cached_daemon_cpu_count, _validated_image_ref, _validated_image_id, _validated_network
-    with _docker_runtime_lock:
-        if _cached_daemon_cpu_count is None:
-            ncpu = client.info().get("NCPU")
-            _cached_daemon_cpu_count = ncpu if isinstance(ncpu, int) else 0
-        if _validated_image_ref != settings.engine_image or not _validated_image_id:
-            image = client.images.get(settings.engine_image)
-            _validated_image_ref = settings.engine_image
-            _validated_image_id = str(image.id)
-        if _validated_network != settings.engine_docker_network:
-            client.networks.get(settings.engine_docker_network)
-            _validated_network = settings.engine_docker_network
-        daemon_cpu = _cached_daemon_cpu_count if _cached_daemon_cpu_count and _cached_daemon_cpu_count > 0 else None
-        assert _validated_image_id is not None
-        return daemon_cpu, _validated_image_id
+def _resolve_launch_context(spec: DockerHostSpec, client: Any) -> tuple[int | None, str]:
+    """Daemon CPU count and image id for one host, cached by the registry."""
+    return docker_host_registry().launch_context(spec, client)
 
 
 def validate_compute_worker_runtime_readiness() -> None:
-    """Fail before worker registration if Docker or launch inputs are unavailable."""
+    """Fail before worker registration if no Docker host can launch engines.
+
+    Every configured host is probed; unreachable hosts are reported and kept
+    out of placement until the health monitor sees them answer again. At
+    least one host must be ready, otherwise the worker cannot serve work.
+    """
     _warn_unpinned_compute_worker_image()
-    client: Any = docker.DockerClient(base_url=settings.engine_docker_host)  # type: ignore[attr-defined]
-    try:
-        _resolve_launch_context(client)
-    finally:
-        client.close()
+    registry = docker_host_registry()
+    results = registry.probe_all()
+    unhealthy = [status for status in registry.snapshot() if not status.healthy]
+    if not any(results.values()):
+        details = "; ".join(f"{status.name}: {status.last_error}" for status in unhealthy)
+        raise RuntimeError(f"No Docker host is available for compute workers ({details})")
+    for status in unhealthy:
+        logger.warning("Docker host is not ready at startup name=%s error=%s", status.name, status.last_error)
+    capacity = registry.placement_capacity()
+    if capacity is not None and capacity < settings.compute_workers:
+        logger.warning(
+            "COMPUTE_WORKERS=%s exceeds the summed Docker host max_workers=%s; launches beyond that cap wait for a host slot",
+            settings.compute_workers,
+            capacity,
+        )
+    logger.info(
+        "Docker hosts configured: %s",
+        ", ".join(
+            f"{status.name}(cpus={status.cpu_count}, max_workers={status.max_workers or 'unbounded'}, healthy={status.healthy})"
+            for status in registry.snapshot()
+        ),
+    )
+    registry.start_health_monitor(settings.engine_docker_host_health_interval_seconds)
 
 
 def reconcile_deployment_containers(
@@ -124,50 +186,62 @@ def reconcile_deployment_containers(
     containers. That protects a container created after the Docker snapshot
     but before it can be registered in the manager, while still retiring
     containers that the manager has lost.
+
+    Every configured host is swept. A host that cannot be reached is skipped
+    and excluded from placement; its containers are reconciled on a later
+    sweep once it answers again.
     """
-    client: Any = docker.DockerClient(base_url=settings.engine_docker_host)  # type: ignore[attr-defined]
+    registry = docker_host_registry()
     removed = 0
-    try:
-        if coordinator_guard is not None:
-            coordinator_guard()
-        labels = ["io.dataforge.managed=true", f"io.dataforge.deployment={settings.deployment_id}"]
-        if supervisor_id is not None and coordinator_generation is None:
-            labels.append(f"io.dataforge.supervisor={supervisor_id}")
-        containers = client.api.containers(all=True, filters={"label": labels})
-        for container in containers:
-            container_id = str(container["Id"])
-            if container_id in keep_container_ids:
+    for spec in registry.hosts:
+        try:
+            client: Any = open_docker_client(spec)
+        except _HOST_FAILURE_TYPES as exc:
+            registry.report_failure(spec.name, exc)
+            continue
+        try:
+            removed += _reconcile_host_containers(
+                client,
+                supervisor_id=supervisor_id,
+                coordinator_generation=coordinator_generation,
+                coordinator_guard=coordinator_guard,
+                remove_running=remove_running,
+                keep_container_ids=keep_container_ids,
+                running_grace_seconds=running_grace_seconds,
+            )
+        except _HOST_FAILURE_TYPES as exc:
+            registry.report_failure(spec.name, exc)
+        finally:
+            client.close()
+    return removed
+
+
+def _reconcile_host_containers(
+    client: Any,
+    *,
+    supervisor_id: str | None,
+    coordinator_generation: int | None,
+    coordinator_guard: Callable[[], None] | None,
+    remove_running: bool,
+    keep_container_ids: Collection[str],
+    running_grace_seconds: float,
+) -> int:
+    removed = 0
+    if coordinator_guard is not None:
+        coordinator_guard()
+    labels = ["io.dataforge.managed=true", f"io.dataforge.deployment={settings.deployment_id}"]
+    if supervisor_id is not None and coordinator_generation is None:
+        labels.append(f"io.dataforge.supervisor={supervisor_id}")
+    containers = client.api.containers(all=True, filters={"label": labels})
+    for container in containers:
+        container_id = str(container["Id"])
+        if container_id in keep_container_ids:
+            continue
+        container_labels = container.get("Labels") or {}
+        container_generation = container_labels.get(_COORDINATOR_GENERATION_LABEL) if isinstance(container_labels, dict) else None
+        if coordinator_generation is not None and container_generation != str(coordinator_generation):
+            if not remove_running and container.get("State") not in {"dead", "exited"}:
                 continue
-            container_labels = container.get("Labels") or {}
-            container_generation = container_labels.get(_COORDINATOR_GENERATION_LABEL) if isinstance(container_labels, dict) else None
-            if coordinator_generation is not None and container_generation != str(coordinator_generation):
-                if not remove_running and container.get("State") not in {"dead", "exited"}:
-                    continue
-                if coordinator_guard is not None:
-                    coordinator_guard()
-                try:
-                    client.api.remove_container(container_id, force=True)
-                    removed += 1
-                except Exception:
-                    logger.warning(
-                        "Failed to remove stale-generation engine container %s (generation=%s current=%s)",
-                        container_id[:12],
-                        container_generation or "missing",
-                        coordinator_generation,
-                        exc_info=True,
-                    )
-                continue
-            state = container.get("State")
-            if not remove_running and state not in {"dead", "exited"}:
-                continue
-            if remove_running and state not in {"dead", "exited"} and running_grace_seconds > 0:
-                created_at_raw = container_labels.get("io.dataforge.created-at") if isinstance(container_labels, dict) else None
-                try:
-                    created_at = datetime.fromisoformat(str(created_at_raw)) if created_at_raw else None
-                except ValueError:
-                    created_at = None
-                if created_at is None or (datetime.now(UTC) - created_at).total_seconds() < running_grace_seconds:
-                    continue
             if coordinator_guard is not None:
                 coordinator_guard()
             try:
@@ -175,13 +249,36 @@ def reconcile_deployment_containers(
                 removed += 1
             except Exception:
                 logger.warning(
-                    "Failed to remove reconciled engine container %s (state=%s)",
+                    "Failed to remove stale-generation engine container %s (generation=%s current=%s)",
                     container_id[:12],
-                    state,
+                    container_generation or "missing",
+                    coordinator_generation,
                     exc_info=True,
                 )
-    finally:
-        client.close()
+            continue
+        state = container.get("State")
+        if not remove_running and state not in {"dead", "exited"}:
+            continue
+        if remove_running and state not in {"dead", "exited"} and running_grace_seconds > 0:
+            created_at_raw = container_labels.get("io.dataforge.created-at") if isinstance(container_labels, dict) else None
+            try:
+                created_at = datetime.fromisoformat(str(created_at_raw)) if created_at_raw else None
+            except ValueError:
+                created_at = None
+            if created_at is None or (datetime.now(UTC) - created_at).total_seconds() < running_grace_seconds:
+                continue
+        if coordinator_guard is not None:
+            coordinator_guard()
+        try:
+            client.api.remove_container(container_id, force=True)
+            removed += 1
+        except Exception:
+            logger.warning(
+                "Failed to remove reconciled engine container %s (state=%s)",
+                container_id[:12],
+                state,
+                exc_info=True,
+            )
     return removed
 
 
@@ -220,34 +317,40 @@ def _effective_resources(resource_config: dict[str, object], *, runtime_cpu_coun
     return values
 
 
-def _container_nano_cpus(max_threads: int) -> int | None:
+def _container_nano_cpus(max_threads: int, *, host: DockerHostSpec) -> int | None:
     """Translate thread budget into Docker CPU quota.
 
-    Production compose workers run engines on a dedicated runtime network and
-    enforce hard CPU limits. Host-connected topologies (local/e2e harnesses)
-    share cores with the API, worker, and browser, so hard nano_cpu quotas are
-    omitted there; Polars still honors POLARS_MAX_THREADS inside the container.
+    Production compose workers and remote compute hosts enforce hard CPU
+    limits. Host-connected local topologies (dev/e2e harnesses) share cores
+    with the API, worker, and browser, so hard nano_cpu quotas are omitted
+    there; Polars still honors POLARS_MAX_THREADS inside the container.
     """
     if max_threads <= 0:
         return None
-    if settings.engine_connect_host:
+    if not host.enforces_cpu_quota:
         return None
     return max(100_000_000, max_threads * 1_000_000_000)
 
 
-def _compute_worker_object_store_endpoint() -> str:
-    if settings.engine_object_store_endpoint:
-        return settings.engine_object_store_endpoint
+def _compute_worker_object_store_endpoint(host: DockerHostSpec) -> str:
+    if host.object_store_endpoint:
+        return host.object_store_endpoint
     endpoint = settings.object_store_endpoint
-    if settings.engine_connect_host and endpoint.startswith("http://127.0.0.1"):
+    if host.is_local and host.uses_published_ports and endpoint.startswith("http://127.0.0.1"):
         return endpoint.replace("http://127.0.0.1", "http://host.docker.internal", 1)
-    if settings.engine_connect_host and endpoint.startswith("http://localhost"):
+    if host.is_local and host.uses_published_ports and endpoint.startswith("http://localhost"):
         return endpoint.replace("http://localhost", "http://host.docker.internal", 1)
     return endpoint
 
 
-def _container_rpc_target(container: Any) -> str:
-    """Return the unique Docker-DNS address; gRPC readiness handles startup."""
+def _container_rpc_target(container: Any, host: DockerHostSpec) -> str:
+    """Return the engine RPC address on its host; gRPC readiness handles startup."""
+    if host.uses_published_ports:
+        container.reload()
+        bindings = container.attrs["NetworkSettings"]["Ports"].get(f"{settings.engine_rpc_port}/tcp") or []
+        if not bindings:
+            raise RuntimeError("Docker did not publish an engine RPC port")
+        return f"{host.connect_host}:{bindings[0]['HostPort']}"
     # Container names are unique per launch and Docker DNS resolves them. Do
     # not poll Docker's API here: channel readiness below already waits for the
     # listener, while repeated reloads multiply daemon traffic during bursts.
@@ -255,6 +358,32 @@ def _container_rpc_target(container: Any) -> str:
     if not name:
         raise RuntimeError("Docker did not return a name for the engine container")
     return f"{name}:{settings.engine_rpc_port}"
+
+
+def _container_security_kwargs(*, host: DockerHostSpec, resources: dict[str, int]) -> dict[str, object]:
+    """Shared create arguments for identity and warm compute containers."""
+    kwargs: dict[str, object] = {
+        "image": settings.engine_image,
+        "command": ["python3", "engine_main.py"],
+        "network": host.engine_network,
+        "cpu_shares": _COMPUTE_WORKER_CPU_SHARES,
+        "mem_limit": resources["max_memory_mb"] * _MIB if resources["max_memory_mb"] else None,
+        "pids_limit": 256,
+        "cap_drop": ["ALL"],
+        "security_opt": ["no-new-privileges:true"],
+        "read_only": True,
+        "tmpfs": {"/tmp": "rw,noexec,nosuid,size=256m"},
+        "restart_policy": {"Name": "no"},
+        "auto_remove": False,
+    }
+    nano_cpus = _container_nano_cpus(resources["max_threads"], host=host)
+    if nano_cpus is not None:
+        kwargs["nano_cpus"] = nano_cpus
+    if host.uses_published_ports:
+        kwargs["ports"] = {f"{settings.engine_rpc_port}/tcp": None}
+        if host.is_local:
+            kwargs["extra_hosts"] = {"host.docker.internal": "host-gateway"}
+    return kwargs
 
 
 # Credential bootstrap is passed in-memory via gRPC Initialize RPC, eliminating exec_run.
@@ -281,6 +410,7 @@ class DockerComputeWorker(ComputeWorker):
         self._coordinator_generation = coordinator_generation
         self._coordinator_guard = coordinator_guard
         self._client: Any | None = None  # docker-py does not publish Python 3.14 type stubs.
+        self._host: DockerHostSpec | None = None
         self._container: Any | None = None
         self._container_id: str | None = None
         self._channel: grpc.Channel | None = None
@@ -338,6 +468,7 @@ class DockerComputeWorker(ComputeWorker):
         if self._client is not None:
             with contextlib.suppress(Exception):
                 self._client.close()
+        self._release_placement()
         self._channel = None
         self._client = None
         self._container = None
@@ -348,6 +479,14 @@ class DockerComputeWorker(ComputeWorker):
         self._active_job_ids.clear()
         self._artifact_transfers.clear()
         self._publish_current_job_id(None)
+
+    def _release_placement(self) -> None:
+        """Return this container's placement slot to its Docker host."""
+        host = self._host
+        container_id = self._container_id
+        self._host = None
+        if host is not None and container_id is not None:
+            docker_host_registry().release_placement(host.name, container_id)
 
     def _cleanup_failed_start(self, container: Any, client: Any) -> None:
         """Remove a partially started container only while this generation owns it."""
@@ -381,6 +520,12 @@ class DockerComputeWorker(ComputeWorker):
     @property
     def container_id(self) -> str | None:
         return self._container_id
+
+    @property
+    def docker_host(self) -> str | None:
+        """Name of the Docker host running this container, if any."""
+        host = self._host
+        return host.name if host is not None else None
 
     @property
     def is_warm_worker(self) -> bool:
@@ -435,24 +580,13 @@ class DockerComputeWorker(ComputeWorker):
             return
         self._assert_coordinator_current()
         start_started = time.perf_counter()
-        startup_phases: dict[str, float] = {}
         with self._lock:
             if self._alive:
                 return
             self._shutdown_requested = False
             phase_started = time.perf_counter()
             credentials = resolve_compute_worker_credentials(self._namespace, self.identity)
-            client: Any = docker.DockerClient(base_url=settings.engine_docker_host)  # type: ignore[attr-defined]  # docker-py has no Python 3.14 stubs.
-            try:
-                daemon_cpu_count, image_id = _resolve_launch_context(client)
-                resources = _effective_resources(self.resource_config, runtime_cpu_count=daemon_cpu_count)
-            except Exception:
-                client.close()
-                raise
-            startup_phases["credentials_and_docker_context_ms"] = (time.perf_counter() - phase_started) * 1000
-            self.effective_resources = cast(dict[str, object], resources)
-            self.image_digest = settings.engine_image.split("@", 1)[1] if "@" in settings.engine_image else image_id
-
+            credentials_ms = (time.perf_counter() - phase_started) * 1000
             self._token = uuid.uuid4().hex
             labels = {
                 "io.dataforge.managed": "true",
@@ -466,103 +600,203 @@ class DockerComputeWorker(ComputeWorker):
                 "io.dataforge.supervisor": self._supervisor_id,
                 "io.dataforge.owner": self.identity.build_id if self.identity.HasField("build_id") else self._supervisor_id,
                 "io.dataforge.protocol-version": str(COMPUTE_WORKER_PROTOCOL_VERSION),
-                "io.dataforge.image-digest": self.image_digest,
-                "io.dataforge.created-at": datetime.now(UTC).isoformat(),
             }
-            if self._coordinator_generation is not None:
-                labels[_COORDINATOR_GENERATION_LABEL] = str(self._coordinator_generation)
-            create_kwargs: dict[str, object] = {
-                "image": settings.engine_image,
-                "name": _container_name(identity=self.identity, namespace=self._namespace),
-                "command": ["python3", "engine_main.py"],
-                "environment": {
-                    "ENGINE_RPC_HOST": "0.0.0.0",
-                    "ENGINE_RPC_PORT": str(settings.engine_rpc_port),
-                    "ENGINE_HEARTBEAT_TIMEOUT_SECONDS": str(settings.engine_heartbeat_interval_seconds * 6),
-                    # Orphan guard: if the worker dies between container start and
-                    # initialization, the engine stops itself instead of leaking.
-                    "ENGINE_INIT_TIMEOUT_SECONDS": str(max(120, settings.engine_start_timeout_seconds * 2)),
-                    "APP_VERSION": _COMPUTE_WORKER_APPLICATION_VERSION,
-                },
-                "labels": labels,
-                "network": settings.engine_docker_network,
-                "cpu_shares": _COMPUTE_WORKER_CPU_SHARES,
-                "mem_limit": resources["max_memory_mb"] * _MIB if resources["max_memory_mb"] else None,
-                "pids_limit": 256,
-                "cap_drop": ["ALL"],
-                "security_opt": ["no-new-privileges:true"],
-                "read_only": True,
-                "tmpfs": {"/tmp": "rw,noexec,nosuid,size=256m"},
-                "restart_policy": {"Name": "no"},
-                "auto_remove": False,
+            environment = {
+                "ENGINE_RPC_HOST": "0.0.0.0",
+                "ENGINE_RPC_PORT": str(settings.engine_rpc_port),
+                "ENGINE_HEARTBEAT_TIMEOUT_SECONDS": str(settings.engine_heartbeat_interval_seconds * 6),
+                # Orphan guard: if the worker dies between container start and
+                # initialization, the engine stops itself instead of leaking.
+                "ENGINE_INIT_TIMEOUT_SECONDS": str(max(120, settings.engine_start_timeout_seconds * 2)),
+                "APP_VERSION": _COMPUTE_WORKER_APPLICATION_VERSION,
             }
-            nano_cpus = _container_nano_cpus(resources["max_threads"])
-            if nano_cpus is not None:
-                create_kwargs["nano_cpus"] = nano_cpus
-            if settings.engine_connect_host:
-                create_kwargs["ports"] = {f"{settings.engine_rpc_port}/tcp": None}
-                create_kwargs["extra_hosts"] = {"host.docker.internal": "host-gateway"}
+            startup_phases = self._launch_with_failover(
+                name=lambda: _container_name(identity=self.identity, namespace=self._namespace),
+                labels=labels,
+                environment=environment,
+                ready=lambda resources: self._initialize(resources=resources, credentials=credentials),
+            )
+            startup_phases = {"credentials_ms": credentials_ms, **startup_phases}
+            self._alive = True
+            self._heartbeat_stop.clear()
+            self._heartbeat_thread = threading.Thread(
+                target=self._heartbeat_loop,
+                name=f"engine-heartbeat-{self.identity.resource_id}",
+                daemon=True,
+            )
+            self._heartbeat_thread.start()
+            startup_duration_ms = (time.perf_counter() - start_started) * 1000
+            if startup_duration_ms >= _SLOW_COMPUTE_WORKER_START_SECONDS * 1000:
+                phase_timings = " ".join(f"{name}={duration:.1f}" for name, duration in startup_phases.items())
+                logger.warning(
+                    "Slow engine startup request_id=%s namespace=%s engine_scope=%s resource_id=%s docker_host=%s duration_ms=%.1f %s",
+                    get_compute_request_id() or "-",
+                    self._namespace,
+                    _identity_scope(self.identity),
+                    self.identity.resource_id,
+                    self.docker_host,
+                    startup_duration_ms,
+                    phase_timings,
+                )
+
+    def start_warm_worker(self) -> None:
+        self._assert_coordinator_current()
+        with self._lock:
+            if self._alive:
+                return
+            self._shutdown_requested = False
+            worker_id = uuid.uuid4().hex[:12]
+            labels = {
+                "io.dataforge.managed": "true",
+                "io.dataforge.deployment": settings.deployment_id,
+                "io.dataforge.scope": "warm-worker",
+                "io.dataforge.supervisor": self._supervisor_id,
+                "io.dataforge.owner": self._supervisor_id,
+                "io.dataforge.protocol-version": str(COMPUTE_WORKER_PROTOCOL_VERSION),
+            }
+            environment = {
+                "ENGINE_RPC_HOST": "0.0.0.0",
+                "ENGINE_RPC_PORT": str(settings.engine_rpc_port),
+                "ENGINE_HEARTBEAT_TIMEOUT_SECONDS": str(settings.engine_heartbeat_interval_seconds * 6),
+                # Warm workers stay uninitialized until assigned; no deadline.
+                "ENGINE_INIT_TIMEOUT_SECONDS": "0",
+                "APP_VERSION": _COMPUTE_WORKER_APPLICATION_VERSION,
+            }
+            self._launch_with_failover(
+                name=lambda: f"dataforge-compute-worker-warm-{worker_id}",
+                labels=labels,
+                environment=environment,
+                ready=None,
+            )
+            self._alive = True
+
+    def _launch_with_failover(
+        self,
+        *,
+        name: Callable[[], str],
+        labels: dict[str, str],
+        environment: dict[str, str],
+        ready: Callable[[dict[str, int]], None] | None,
+    ) -> dict[str, float]:
+        """Place the container on the least-loaded host, moving on when a host fails.
+
+        A host failure (Docker API error, unreachable daemon, listener that
+        never became ready) excludes that host for a cooldown and the launch
+        is retried on the next eligible host. Request-level errors, such as a
+        rejected coordinator generation or an engine identity collision,
+        propagate unchanged.
+        """
+        registry = docker_host_registry()
+        attempted: set[str] = set()
+        last_failure: _HostLaunchFailure | None = None
+        while True:
+            try:
+                host = registry.select(exclude=attempted)
+            except NoEligibleDockerHost as exc:
+                if last_failure is not None:
+                    raise RuntimeError(f"Engine launch failed on every eligible Docker host; last host {last_failure}") from last_failure.cause
+                raise RuntimeError(str(exc)) from exc
+            attempted.add(host.name)
+            try:
+                return self._launch_on_host(host, name=name(), labels=labels, environment=environment, ready=ready)
+            except _HostLaunchFailure as failure:
+                last_failure = failure
+                registry.report_failure(host.name, failure.cause)
+                logger.warning(
+                    "Engine launch failed on Docker host %s; trying another host resource_id=%s error=%s",
+                    host.name,
+                    self.identity.resource_id or "warm-worker",
+                    failure.cause,
+                )
+
+    def _launch_on_host(
+        self,
+        host: DockerHostSpec,
+        *,
+        name: str,
+        labels: dict[str, str],
+        environment: dict[str, str],
+        ready: Callable[[dict[str, int]], None] | None,
+    ) -> dict[str, float]:
+        startup_phases: dict[str, float] = {}
+        phase_started = time.perf_counter()
+        try:
+            client: Any = open_docker_client(host)
+        except _HOST_FAILURE_TYPES as exc:
+            raise _HostLaunchFailure(host, exc) from exc
+        try:
+            daemon_cpu_count, image_id = _resolve_launch_context(host, client)
+            resources = _effective_resources(self.resource_config, runtime_cpu_count=daemon_cpu_count)
+        except _HOST_FAILURE_TYPES as exc:
+            client.close()
+            raise _HostLaunchFailure(host, exc) from exc
+        except Exception:
+            client.close()
+            raise
+        startup_phases["docker_context_ms"] = (time.perf_counter() - phase_started) * 1000
+        self.effective_resources = cast(dict[str, object], resources)
+        self.image_digest = settings.engine_image.split("@", 1)[1] if "@" in settings.engine_image else image_id
+        create_kwargs = _container_security_kwargs(host=host, resources=resources)
+        create_kwargs["name"] = name
+        create_kwargs["environment"] = environment
+        container_labels = {
+            **labels,
+            "io.dataforge.image-digest": self.image_digest,
+            "io.dataforge.created-at": datetime.now(UTC).isoformat(),
+            _DOCKER_HOST_LABEL: host.name,
+        }
+        if self._coordinator_generation is not None:
+            container_labels[_COORDINATOR_GENERATION_LABEL] = str(self._coordinator_generation)
+        create_kwargs["labels"] = container_labels
+        phase_started = time.perf_counter()
+        try:
+            self._assert_coordinator_current()
+            container = client.containers.create(**create_kwargs)
+        except _HOST_FAILURE_TYPES as exc:
+            client.close()
+            raise _HostLaunchFailure(host, exc) from exc
+        except Exception:
+            client.close()
+            raise
+        startup_phases["container_create_ms"] = (time.perf_counter() - phase_started) * 1000
+        self._container_id = str(container.id)
+        self._host = host
+        docker_host_registry().record_placement(host.name, self._container_id)
+        try:
             phase_started = time.perf_counter()
-            try:
-                self._assert_coordinator_current()
-                container = client.containers.create(**create_kwargs)
-            except Exception:
-                client.close()
-                raise
-            startup_phases["container_create_ms"] = (time.perf_counter() - phase_started) * 1000
-            self._container_id = str(container.id)
-            try:
+            self._assert_coordinator_current()
+            container.start()
+            startup_phases["container_start_ms"] = (time.perf_counter() - phase_started) * 1000
+            self._client = client
+            self._container = container
+            phase_started = time.perf_counter()
+            self._rpc_target = _container_rpc_target(container, host)
+            startup_phases["rpc_target_ms"] = (time.perf_counter() - phase_started) * 1000
+            self._channel = grpc.insecure_channel(
+                self._rpc_target,
+                options=_COMPUTE_WORKER_CHANNEL_OPTIONS,
+            )
+            self._stub = compute_worker_runtime_pb2_grpc.PolarsComputeWorkerServiceStub(self._channel)
+            phase_started = time.perf_counter()
+            self._await_listening()
+            startup_phases["listener_ready_ms"] = (time.perf_counter() - phase_started) * 1000
+            if ready is not None:
                 phase_started = time.perf_counter()
-                self._assert_coordinator_current()
-                container.start()
-                startup_phases["container_start_ms"] = (time.perf_counter() - phase_started) * 1000
-                self._client = client
-                self._container = container
-                phase_started = time.perf_counter()
-                if settings.engine_connect_host:
-                    container.reload()
-                    bindings = container.attrs["NetworkSettings"]["Ports"].get(f"{settings.engine_rpc_port}/tcp") or []
-                    if not bindings:
-                        raise RuntimeError("Docker did not publish an engine RPC port")
-                    target = f"{settings.engine_connect_host}:{bindings[0]['HostPort']}"
-                else:
-                    target = _container_rpc_target(container)
-                startup_phases["rpc_target_ms"] = (time.perf_counter() - phase_started) * 1000
-                self._rpc_target = target
-                self._channel = grpc.insecure_channel(
-                    target,
-                    options=_COMPUTE_WORKER_CHANNEL_OPTIONS,
-                )
-                self._stub = compute_worker_runtime_pb2_grpc.PolarsComputeWorkerServiceStub(self._channel)
-                phase_started = time.perf_counter()
-                self._await_listening()
-                startup_phases["listener_ready_ms"] = (time.perf_counter() - phase_started) * 1000
-                phase_started = time.perf_counter()
-                self._initialize(resources=resources, credentials=credentials)
+                ready(resources)
                 startup_phases["initialize_ms"] = (time.perf_counter() - phase_started) * 1000
-                self._alive = True
-                self._heartbeat_stop.clear()
-                self._heartbeat_thread = threading.Thread(
-                    target=self._heartbeat_loop,
-                    name=f"engine-heartbeat-{self.identity.resource_id}",
-                    daemon=True,
-                )
-                self._heartbeat_thread.start()
-                startup_duration_ms = (time.perf_counter() - start_started) * 1000
-                if startup_duration_ms >= _SLOW_COMPUTE_WORKER_START_SECONDS * 1000:
-                    phase_timings = " ".join(f"{name}={duration:.1f}" for name, duration in startup_phases.items())
-                    logger.warning(
-                        "Slow engine startup request_id=%s namespace=%s engine_scope=%s resource_id=%s duration_ms=%.1f %s",
-                        get_compute_request_id() or "-",
-                        self._namespace,
-                        _identity_scope(self.identity),
-                        self.identity.resource_id,
-                        startup_duration_ms,
-                        phase_timings,
-                    )
-            except Exception:
-                self._cleanup_failed_start(container, client)
-                raise
+        except _LAUNCH_FAILURE_TYPES as exc:
+            self._cleanup_failed_start(container, client)
+            raise _HostLaunchFailure(host, exc) from exc
+        except Exception:
+            self._cleanup_failed_start(container, client)
+            raise
+        return startup_phases
+
+    def _require_host(self) -> DockerHostSpec:
+        host = self._host
+        if host is None:
+            raise RuntimeError("Engine container has no Docker host; it has not been started")
+        return host
 
     def _metadata(self) -> tuple[tuple[str, str], ...]:
         return ((_COMPUTE_WORKER_TOKEN_METADATA_KEY, self._token),)
@@ -573,7 +807,7 @@ class DockerComputeWorker(ComputeWorker):
             protocol_version=COMPUTE_WORKER_PROTOCOL_VERSION,
             engine_identity=self.identity.resource_id,
             token=self._token,
-            object_store_endpoint=_compute_worker_object_store_endpoint(),
+            object_store_endpoint=_compute_worker_object_store_endpoint(self._require_host()),
             object_store_region=settings.object_store_region,
             object_store_access_key=credentials.access_key,
             object_store_secret_key=credentials.secret_key,
@@ -600,7 +834,7 @@ class DockerComputeWorker(ComputeWorker):
             grpc.channel_ready_future(self._channel).result(timeout=max(0.0, deadline - time.monotonic()))
         except grpc.FutureTimeoutError as exc:
             status = self._container_status_after_start_failure()
-            raise RuntimeError(f"Timed out waiting for engine listener; container status={status}") from exc
+            raise ComputeWorkerStartTimeout(f"Timed out waiting for engine listener; container status={status}") from exc
 
         retry_delay = 0.1
         last_error: grpc.RpcError | None = None
@@ -608,7 +842,7 @@ class DockerComputeWorker(ComputeWorker):
             remaining = deadline - time.monotonic()
             if remaining <= 0:
                 status = self._container_status_after_start_failure()
-                raise RuntimeError(f"Timed out waiting for engine health check; container status={status}: {last_error}") from last_error
+                raise ComputeWorkerStartTimeout(f"Timed out waiting for engine health check; container status={status}: {last_error}") from last_error
             try:
                 self._stub.Health(
                     compute_worker_runtime_pb2.ComputeWorkerHealthRequest(),
@@ -634,93 +868,6 @@ class DockerComputeWorker(ComputeWorker):
         with contextlib.suppress(Exception):
             container.reload()
         return str(getattr(container, "status", "unknown"))
-
-    def start_warm_worker(self) -> None:
-        self._assert_coordinator_current()
-        with self._lock:
-            if self._alive:
-                return
-            self._shutdown_requested = False
-            client: Any = docker.DockerClient(base_url=settings.engine_docker_host)  # type: ignore[attr-defined]
-            try:
-                daemon_cpu_count, image_id = _resolve_launch_context(client)
-                resources = _effective_resources(self.resource_config, runtime_cpu_count=daemon_cpu_count)
-            except Exception:
-                client.close()
-                raise
-            self.effective_resources = cast(dict[str, object], resources)
-            self.image_digest = settings.engine_image.split("@", 1)[1] if "@" in settings.engine_image else image_id
-
-            worker_id = uuid.uuid4().hex[:12]
-            labels = {
-                "io.dataforge.managed": "true",
-                "io.dataforge.deployment": settings.deployment_id,
-                "io.dataforge.scope": "warm-worker",
-                "io.dataforge.supervisor": self._supervisor_id,
-                "io.dataforge.owner": self._supervisor_id,
-                "io.dataforge.protocol-version": str(COMPUTE_WORKER_PROTOCOL_VERSION),
-                "io.dataforge.image-digest": self.image_digest,
-                "io.dataforge.created-at": datetime.now(UTC).isoformat(),
-            }
-            if self._coordinator_generation is not None:
-                labels[_COORDINATOR_GENERATION_LABEL] = str(self._coordinator_generation)
-            create_kwargs: dict[str, object] = {
-                "image": settings.engine_image,
-                "name": f"dataforge-compute-worker-warm-{worker_id}",
-                "command": ["python3", "engine_main.py"],
-                "environment": {
-                    "ENGINE_RPC_HOST": "0.0.0.0",
-                    "ENGINE_RPC_PORT": str(settings.engine_rpc_port),
-                    "ENGINE_HEARTBEAT_TIMEOUT_SECONDS": str(settings.engine_heartbeat_interval_seconds * 6),
-                    # Warm workers stay uninitialized until assigned; no deadline.
-                    "ENGINE_INIT_TIMEOUT_SECONDS": "0",
-                    "APP_VERSION": _COMPUTE_WORKER_APPLICATION_VERSION,
-                },
-                "labels": labels,
-                "network": settings.engine_docker_network,
-                "cpu_shares": _COMPUTE_WORKER_CPU_SHARES,
-                "mem_limit": resources["max_memory_mb"] * _MIB if resources["max_memory_mb"] else None,
-                "pids_limit": 256,
-                "cap_drop": ["ALL"],
-                "security_opt": ["no-new-privileges:true"],
-                "read_only": True,
-                "tmpfs": {"/tmp": "rw,noexec,nosuid,size=256m"},
-                "restart_policy": {"Name": "no"},
-                "auto_remove": False,
-            }
-            nano_cpus = _container_nano_cpus(resources["max_threads"])
-            if nano_cpus is not None:
-                create_kwargs["nano_cpus"] = nano_cpus
-            if settings.engine_connect_host:
-                create_kwargs["ports"] = {f"{settings.engine_rpc_port}/tcp": None}
-                create_kwargs["extra_hosts"] = {"host.docker.internal": "host-gateway"}
-            self._assert_coordinator_current()
-            container = client.containers.create(**create_kwargs)
-            self._container_id = str(container.id)
-            try:
-                self._assert_coordinator_current()
-                container.start()
-                self._client = client
-                self._container = container
-                if settings.engine_connect_host:
-                    container.reload()
-                    bindings = container.attrs["NetworkSettings"]["Ports"].get(f"{settings.engine_rpc_port}/tcp") or []
-                    if not bindings:
-                        raise RuntimeError("Docker did not publish an engine RPC port")
-                    target = f"{settings.engine_connect_host}:{bindings[0]['HostPort']}"
-                else:
-                    target = _container_rpc_target(container)
-                self._rpc_target = target
-                self._channel = grpc.insecure_channel(
-                    target,
-                    options=_COMPUTE_WORKER_CHANNEL_OPTIONS,
-                )
-                self._stub = compute_worker_runtime_pb2_grpc.PolarsComputeWorkerServiceStub(self._channel)
-                self._await_listening()
-                self._alive = True
-            except Exception:
-                self._cleanup_failed_start(container, client)
-                raise
 
     def bind_identity(
         self,
@@ -908,7 +1055,7 @@ class DockerComputeWorker(ComputeWorker):
             upload_url = presigned_put_url(
                 artifact_url,
                 expires_seconds=max(settings.engine_start_timeout_seconds * 10, 3600),
-                endpoint_url=_compute_worker_object_store_endpoint(),
+                endpoint_url=_compute_worker_object_store_endpoint(self._require_host()),
                 content_type=export.content_type,
             )
             return self._submit(
@@ -1168,9 +1315,11 @@ class DockerComputeWorker(ComputeWorker):
                 self._channel.close()
             if self._client is not None:
                 self._client.close()
+            self._release_placement()
             self._channel = None
             self._client = None
             self._container = None
+            self._container_id = None
             self._stub = None
             self._rpc_target = None
             self._alive = False

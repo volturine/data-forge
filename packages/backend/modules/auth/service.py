@@ -23,9 +23,8 @@ from backend_core.auth_exceptions import (
     TokenExpiredError,
     TokenInvalidError,
 )
-from backend_core.config import settings
-from backend_core.database import namespace_connection
-from backend_core.namespace import list_namespaces
+from backend_core.database import namespace_connection, run_settings_db
+from backend_core.namespaces_service import list_runtime_namespaces
 from backend_core.smtp import send_smtp_message
 from backend_core.sqlmodel_typing import col, sa
 from backend_core.time import naive_utc_now as _utcnow
@@ -86,9 +85,8 @@ def _clear_owned_resources(session: Session, user_id: str) -> None:
 
 
 def _clear_owned_resources_in_namespaces(user_id: str) -> None:
-    namespaces = list_namespaces()
-    if settings.default_namespace not in namespaces:
-        namespaces = [*namespaces, settings.default_namespace]
+    # The registry already includes the default namespace.
+    namespaces = run_settings_db(list_runtime_namespaces)
     for namespace in namespaces:
         with (
             namespace_connection(namespace) as connection,

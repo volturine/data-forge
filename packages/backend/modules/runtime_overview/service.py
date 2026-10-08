@@ -10,7 +10,8 @@ from backend_core.config import settings
 from backend_core.database import run_db, supports_distributed_runtime
 from backend_core.domain.build_jobs.models import BuildJobStatus
 from backend_core.domain.runtime_workers.models import RuntimeWorkerKind
-from backend_core.namespace import list_namespaces, reset_namespace, set_namespace_context
+from backend_core.namespace import reset_namespace, set_namespace_context
+from backend_core.namespaces_service import list_runtime_namespaces
 from backend_core.persistence.build_jobs.models import BuildJob
 from backend_core.persistence.compute_worker_instances.models import ComputeWorkerInstance
 from backend_core.persistence.runtime_workers.models import RuntimeWorker
@@ -91,6 +92,7 @@ def list_engine_summaries(session: Session) -> list[schemas.EngineInstanceSummar
                 oom_killed=row.oom_killed,
                 supervisor_id=row.supervisor_id,
                 owner_id=row.owner_id,
+                docker_host=row.docker_host,
                 status=row.status,
                 current_job_id=row.current_job_id,
                 current_build_id=row.current_build_id,
@@ -117,7 +119,7 @@ def _engine_resource_id(row: ComputeWorkerInstance) -> str:
 def queue_summary(session: Session) -> schemas.QueueSummary:
     names = [
         settings.default_namespace,
-        *[name for name in list_namespaces() if name != settings.default_namespace],
+        *[name for name in list_runtime_namespaces(session) if name != settings.default_namespace],
     ]
     seen: set[str] = set()
     items: list[schemas.QueueNamespaceSummary] = []

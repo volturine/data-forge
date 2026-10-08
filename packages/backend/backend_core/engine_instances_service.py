@@ -26,6 +26,7 @@ _ENGINE_STATUS_PROJECTION_FIELDS = (
     'oom_killed',
     'supervisor_id',
     'owner_id',
+    'docker_host',
     'status',
     'compute_worker_scope',
     'compute_worker_reuse_policy',
@@ -75,6 +76,7 @@ def _engine_status_projection(*, status: ComputeWorkerStatusInfo, last_activity_
         'oom_killed': status.oom_killed,
         'supervisor_id': status.supervisor_id,
         'owner_id': status.owner_id,
+        'docker_host': status.docker_host,
         'status': (
             EngineInstanceStatus.require(status.lifecycle_status)
             if status.lifecycle_status
@@ -136,6 +138,7 @@ def _upsert_engine_status(
             oom_killed=status.oom_killed,
             supervisor_id=status.supervisor_id,
             owner_id=status.owner_id,
+            docker_host=status.docker_host,
             status=EngineInstanceStatus.require(status.lifecycle_status)
             if status.lifecycle_status
             else EngineInstanceStatus.from_engine_status(status.status, status.current_job_id),
@@ -406,6 +409,7 @@ def serialize_engine_instance(row: ComputeWorkerInstance, *, defaults: dict[str,
         'oom_killed': row.oom_killed,
         'supervisor_id': row.supervisor_id,
         'owner_id': row.owner_id,
+        'docker_host': row.docker_host,
         'last_activity': row.last_activity_at.isoformat() if row.last_activity_at is not None else None,
         'current_job_id': row.current_job_id,
         'resource_config': copy_json_object(row.resource_config_json),

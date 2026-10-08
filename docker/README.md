@@ -58,6 +58,8 @@ every suite, whether it succeeds or fails.
 | --- | --- |
 | `compose.yaml` | Base runtime stack. |
 | `compose.dev.yaml` | Development override with source mounts and Vite. |
+| `compose.replicas.yaml` | Production override: N stateless API replicas behind an nginx ingress. |
+| `ingress/nginx.conf` | Ingress config used by `compose.replicas.yaml`. |
 | `env/prod.env` | Production image tags, ports, credentials, auth, and sizing. |
 | `env/dev.env` | Local Docker development config. |
 | `Dockerfile` | Builds app role images. |

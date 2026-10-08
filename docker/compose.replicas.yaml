@@ -1,0 +1,35 @@
+# Override that runs several stateless API replicas behind one nginx ingress:
+#
+#   docker compose --env-file docker/env/prod.env -p dataforge-prod \
+#     -f docker/compose.yaml -f docker/compose.replicas.yaml up -d
+#
+# The API keeps no authoritative state in its process or on local disk;
+# sessions, locks, namespaces, jobs and runtime events live in PostgreSQL,
+# so any replica can answer any request and WebSocket/SSE delivery fans out
+# through Postgres LISTEN/NOTIFY. The runtime coordinator, scheduler and the
+# worker manager stay single instances: they are fenced, not replicated.
+services:
+  api:
+    # Replicas cannot share one fixed host port; the ingress publishes it.
+    ports: !reset []
+    deploy:
+      replicas: ${DF_API_REPLICAS:-2}
+    environment:
+      # One proxy hop is added in front of whatever the operator configured.
+      TRUSTED_PROXY_HOPS: ${DF_API_REPLICA_TRUSTED_PROXY_HOPS:-1}
+
+  ingress:
+    image: nginx:1.27-alpine
+    depends_on:
+      api:
+        condition: service_healthy
+    ports:
+      - "${DF_API_PORT}:80"
+    volumes:
+      - ./ingress/nginx.conf:/etc/nginx/nginx.conf:ro
+    healthcheck:
+      test: ["CMD-SHELL", "wget -q -O /dev/null http://127.0.0.1/health || exit 1"]
+      interval: 5s
+      timeout: 5s
+      retries: 30
+    restart: unless-stopped

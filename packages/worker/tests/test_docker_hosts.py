@@ -1,0 +1,435 @@
+from __future__ import annotations
+
+import docker
+import pytest
+import requests
+
+from dataforge_protocol import compute_pb2, enums_pb2
+from runtime.compute_worker_credentials import ObjectStoreCredentials
+from runtime.config import settings
+from runtime.docker_compute_worker import (
+    ComputeWorkerStartTimeout,
+    DockerComputeWorker,
+    docker_host_registry,
+    reconcile_deployment_containers,
+)
+from runtime.docker_hosts import (
+    DockerHostConfigError,
+    DockerHostRegistry,
+    DockerHostSpec,
+    NoEligibleDockerHost,
+    open_docker_client,
+    parse_docker_hosts,
+)
+
+_DEFAULTS = {
+    "default_docker_host": "unix:///var/run/docker.sock",
+    "default_connect_host": "",
+    "default_engine_network": "dataforge-engine-runtime",
+    "default_object_store_endpoint": "",
+}
+
+
+def _spec(name: str, *, docker_host: str = "tcp://10.0.0.5:2375", connect_host: str = "10.0.0.5", max_workers: int = 0) -> DockerHostSpec:
+    return DockerHostSpec(name=name, docker_host=docker_host, connect_host=connect_host, engine_network="net", max_workers=max_workers)
+
+
+class _Clock:
+    def __init__(self) -> None:
+        self.now = 1000.0
+
+    def __call__(self) -> float:
+        return self.now
+
+
+class _ProbeClient:
+    def __init__(self, *, cpus: int = 4, fail: bool = False) -> None:
+        self.cpus = cpus
+        self.fail = fail
+        self.images = type("Images", (), {"get": staticmethod(lambda _name: type("Image", (), {"id": "sha256:img"})())})()
+        self.networks = type("Networks", (), {"get": staticmethod(lambda _name: object())})()
+
+    def ping(self) -> bool:
+        if self.fail:
+            raise requests.exceptions.ConnectionError("daemon unreachable")
+        return True
+
+    def info(self) -> dict[str, object]:
+        return {"NCPU": self.cpus}
+
+    def close(self) -> None:
+        return None
+
+
+def _ready(registry: DockerHostRegistry, monkeypatch, *, cpus: dict[str, int] | None = None, failing: set[str] = frozenset()) -> None:
+    cpus = cpus or {}
+    monkeypatch.setattr(
+        "runtime.docker_hosts.open_docker_client",
+        lambda spec, **_kwargs: _ProbeClient(cpus=cpus.get(spec.name, 4), fail=spec.name in failing),
+    )
+    registry.probe_all()
+
+
+# ---------------------------------------------------------------------------
+# Configuration parsing
+# ---------------------------------------------------------------------------
+
+
+def test_empty_host_list_keeps_the_single_legacy_host() -> None:
+    hosts = parse_docker_hosts(
+        "",
+        default_docker_host="unix:///var/run/docker.sock",
+        default_connect_host="127.0.0.1",
+        default_engine_network="net",
+        default_object_store_endpoint="http://rustfs:9000",
+    )
+
+    assert hosts == (
+        DockerHostSpec(
+            name="local",
+            docker_host="unix:///var/run/docker.sock",
+            connect_host="127.0.0.1",
+            engine_network="net",
+            object_store_endpoint="http://rustfs:9000",
+        ),
+    )
+    assert hosts[0].is_local
+    assert hosts[0].uses_published_ports
+    assert not hosts[0].enforces_cpu_quota
+
+
+def test_host_list_fills_omitted_fields_from_single_host_defaults() -> None:
+    raw = """
+    [
+      {"name": "local", "docker_host": "unix:///var/run/docker.sock"},
+      {"name": "node-b", "docker_host": "tcp://10.0.0.5:2376", "connect_host": "10.0.0.5",
+       "object_store_endpoint": "http://10.0.0.1:9000", "max_workers": 6, "tls_cert_path": "/certs/node-b"},
+      {"name": "node-c", "docker_host": "ssh://dataforge@10.0.0.6", "connect_host": "10.0.0.6"}
+    ]
+    """
+
+    local, node_b, node_c = parse_docker_hosts(raw, **_DEFAULTS)
+
+    assert local == DockerHostSpec(name="local", docker_host="unix:///var/run/docker.sock", engine_network="dataforge-engine-runtime")
+    assert node_b.max_workers == 6
+    assert node_b.object_store_endpoint == "http://10.0.0.1:9000"
+    assert node_b.tls_cert_path == "/certs/node-b"
+    assert node_b.engine_network == "dataforge-engine-runtime"
+    assert not node_b.is_local
+    assert node_b.enforces_cpu_quota
+    assert node_c.uses_published_ports
+
+
+@pytest.mark.parametrize(
+    ("raw", "message"),
+    [
+        ("not json", "must be a JSON list"),
+        ("[]", "non-empty JSON list"),
+        ('[{"docker_host": "tcp://a:2375", "connect_host": "a"}, {"docker_host": "tcp://b:2375", "connect_host": "b"}]', "needs a name"),
+        ('[{"name": "Bad Name", "docker_host": "tcp://a:2375", "connect_host": "a"}]', "needs a name"),
+        ('[{"name": "a", "docker_host": "tcp://a:2375", "connect_host": "a"}, {"name": "a", "docker_host": "tcp://b:2375", "connect_host": "b"}]', "duplicate"),
+        ('[{"name": "a", "docker_host": "ftp://a"}]', "must start with"),
+        ('[{"name": "a", "docker_host": "tcp://a:2375"}]', "needs connect_host"),
+        ('[{"name": "a", "docker_host": "tcp://a:2375", "connect_host": "a", "max_workers": -1}]', "max_workers"),
+        ('[{"name": "a", "docker_host": "tcp://a:2375", "connect_host": "a", "max_workers": true}]', "max_workers"),
+        ('[{"name": "a", "docker_host": "unix:///var/run/docker.sock", "tls_cert_path": "/certs"}]', "tls_cert_path"),
+    ],
+)
+def test_invalid_host_lists_are_rejected(raw: str, message: str) -> None:
+    with pytest.raises(DockerHostConfigError, match=message):
+        parse_docker_hosts(raw, **_DEFAULTS)
+
+
+def test_open_docker_client_passes_host_specific_transport_options(monkeypatch, tmp_path) -> None:
+    captured: list[dict[str, object]] = []
+    monkeypatch.setattr(docker, "DockerClient", lambda **kwargs: captured.append(kwargs) or object())
+
+    for name in ("ca.pem", "cert.pem", "key.pem"):
+        (tmp_path / name).write_text("placeholder")
+
+    open_docker_client(_spec("plain"))
+    open_docker_client(_spec("over-ssh", docker_host="ssh://user@10.0.0.6"))
+    open_docker_client(
+        DockerHostSpec(name="tls", docker_host="tcp://10.0.0.7:2376", connect_host="10.0.0.7", tls_cert_path=str(tmp_path)),
+        timeout=3,
+    )
+
+    assert captured[0] == {"base_url": "tcp://10.0.0.5:2375"}
+    assert captured[1] == {"base_url": "ssh://user@10.0.0.6", "use_ssh_client": True}
+    assert captured[2]["timeout"] == 3
+    tls = captured[2]["tls"]
+    assert tls.ca_cert == str(tmp_path / "ca.pem")
+    assert tls.cert == (str(tmp_path / "cert.pem"), str(tmp_path / "key.pem"))
+
+
+# ---------------------------------------------------------------------------
+# Placement
+# ---------------------------------------------------------------------------
+
+
+def test_select_prefers_the_least_loaded_host_per_cpu(monkeypatch) -> None:
+    registry = DockerHostRegistry([_spec("small"), _spec("big")], engine_image="engine:test")
+    _ready(registry, monkeypatch, cpus={"small": 2, "big": 8})
+
+    # Empty hosts tie on load; configuration order breaks the tie.
+    assert registry.select().name == "small"
+    registry.record_placement("small", "c1")
+    # small: 1/2 = 0.5, big: 0/8 = 0 -> big
+    assert registry.select().name == "big"
+    registry.record_placement("big", "c2")
+    registry.record_placement("big", "c3")
+    # small: 0.5, big: 2/8 = 0.25 -> big still has more headroom per CPU
+    assert registry.select().name == "big"
+    registry.release_placement("small", "c1")
+    assert registry.select().name == "small"
+
+
+def test_select_honours_per_host_max_workers_and_exclusions(monkeypatch) -> None:
+    registry = DockerHostRegistry([_spec("a", max_workers=1), _spec("b", max_workers=1)], engine_image="engine:test")
+    _ready(registry, monkeypatch)
+    registry.record_placement("a", "c1")
+
+    assert registry.select().name == "b"
+    with pytest.raises(NoEligibleDockerHost, match="a=full, b=excluded"):
+        registry.select(exclude={"b"})
+    registry.record_placement("b", "c2")
+    with pytest.raises(NoEligibleDockerHost, match="a=full, b=full"):
+        registry.select()
+    assert registry.placement_capacity() == 2
+    # Releasing a placement (idempotent) frees the slot again.
+    registry.release_placement("a", "c1")
+    registry.release_placement("a", "c1")
+    assert registry.select().name == "a"
+
+
+def test_select_skips_unhealthy_hosts_until_the_cooldown_passes(monkeypatch) -> None:
+    clock = _Clock()
+    registry = DockerHostRegistry([_spec("a"), _spec("b")], engine_image="engine:test", failure_cooldown_seconds=30, clock=clock)
+    _ready(registry, monkeypatch)
+
+    registry.report_failure("a", RuntimeError("boom"))
+    assert registry.select().name == "b"
+    status = registry.snapshot()[0]
+    assert not status.healthy
+    assert status.last_error == "RuntimeError: boom"
+
+    # A probe during the cooldown that succeeds restores the host.
+    clock.now += 5
+    assert registry.probe(registry.get("a"))
+    assert registry.select().name == "a"
+
+    # A host that stays broken is never selected, and the error is reported.
+    _ready(registry, monkeypatch, failing={"b"})
+    clock.now += 100
+    assert not registry.probe(registry.get("b"))
+    assert [status.healthy for status in registry.snapshot()] == [True, False]
+    with pytest.raises(NoEligibleDockerHost, match="a=excluded, b=unhealthy"):
+        registry.select(exclude={"a"})
+
+
+def test_hosts_never_probed_are_not_placement_candidates() -> None:
+    registry = DockerHostRegistry([_spec("a")], engine_image="engine:test")
+
+    with pytest.raises(NoEligibleDockerHost):
+        registry.select()
+    assert registry.placement_capacity() is None
+
+
+def test_health_monitor_probes_every_host_periodically(monkeypatch) -> None:
+    import threading
+
+    probed: list[str] = []
+    first_round = threading.Event()
+    registry = DockerHostRegistry([_spec("a"), _spec("b")], engine_image="engine:test")
+
+    def probe(spec: DockerHostSpec) -> bool:
+        probed.append(spec.name)
+        if len(probed) >= 2:
+            first_round.set()
+        return True
+
+    monkeypatch.setattr(registry, "probe", probe)
+    registry.start_health_monitor(0.01)
+    try:
+        assert first_round.wait(2)
+    finally:
+        registry.stop_health_monitor()
+    assert probed[:2] == ["a", "b"]
+
+
+# ---------------------------------------------------------------------------
+# Launch failover and reconciliation across hosts
+# ---------------------------------------------------------------------------
+
+
+def _identity() -> compute_pb2.ComputeWorkerIdentity:
+    return compute_pb2.ComputeWorkerIdentity(
+        scope=enums_pb2.COMPUTE_WORKER_SCOPE_ANALYSIS_INTERACTIVE,
+        reuse_policy=enums_pb2.COMPUTE_WORKER_REUSE_POLICY_SHARED,
+        resource_id="analysis-1",
+        analysis_id="analysis-1",
+    )
+
+
+_TWO_HOSTS = (
+    '[{"name": "a", "docker_host": "tcp://10.0.0.5:2375", "connect_host": "10.0.0.5"},'
+    ' {"name": "b", "docker_host": "tcp://10.0.0.6:2375", "connect_host": "10.0.0.6"}]'
+)
+
+
+def _prepare_launch(monkeypatch, *, clients: dict[str, object]) -> DockerHostRegistry:
+    monkeypatch.setattr(settings, "engine_docker_hosts", _TWO_HOSTS)
+    monkeypatch.setattr("runtime.docker_hosts.open_docker_client", lambda _spec, **_kwargs: _ProbeClient())
+    registry = docker_host_registry()
+    assert all(registry.probe_all().values())
+    monkeypatch.setattr("runtime.docker_compute_worker.open_docker_client", lambda spec, **_kwargs: clients[spec.name])
+    monkeypatch.setattr("runtime.docker_compute_worker.resolve_compute_worker_credentials", lambda *_args: ObjectStoreCredentials("key", "secret"))
+    monkeypatch.setattr("runtime.docker_compute_worker._resolve_launch_context", lambda _host, _client: (1, "image-id"))
+    monkeypatch.setattr(
+        "runtime.docker_compute_worker._effective_resources",
+        lambda *_args, **_kwargs: {"max_threads": 1, "max_memory_mb": 256, "streaming_chunk_size": 0},
+    )
+    monkeypatch.setattr("runtime.docker_compute_worker._container_rpc_target", lambda _container, host: f"{host.connect_host}:50053")
+    monkeypatch.setattr("runtime.docker_compute_worker.grpc.insecure_channel", lambda *_args, **_kwargs: type("Channel", (), {"close": lambda self: None})())
+    monkeypatch.setattr("runtime.docker_compute_worker.compute_worker_runtime_pb2_grpc.PolarsComputeWorkerServiceStub", lambda _channel: object())
+    return registry
+
+
+class _Container:
+    def __init__(self, container_id: str, events: list[str]) -> None:
+        self.id = container_id
+        self.events = events
+
+    def start(self) -> None:
+        self.events.append(f"start:{self.id}")
+
+    def remove(self, *, force: bool) -> None:
+        self.events.append(f"remove:{self.id}")
+
+
+class _HostClient:
+    def __init__(self, name: str, events: list[str], *, create_error: BaseException | None = None) -> None:
+        self.name = name
+        self.events = events
+        self.create_error = create_error
+        self.closed = False
+        client = self
+
+        class Containers:
+            def create(self, **_kwargs):
+                client.events.append(f"create:{client.name}")
+                if client.create_error is not None:
+                    raise client.create_error
+                return _Container(f"{client.name}-container", client.events)
+
+        self.containers = Containers()
+
+    def close(self) -> None:
+        self.closed = True
+
+
+def test_engine_launch_fails_over_to_the_next_host_after_a_docker_error(monkeypatch) -> None:
+    events: list[str] = []
+    broken = _HostClient("a", events, create_error=docker.errors.APIError("daemon exploded"))  # type: ignore[attr-defined]
+    healthy = _HostClient("b", events)
+    registry = _prepare_launch(monkeypatch, clients={"a": broken, "b": healthy})
+    engine = DockerComputeWorker(_identity(), namespace="tenant-a")
+    monkeypatch.setattr(engine, "_await_listening", lambda: events.append("listener-ready"))
+    monkeypatch.setattr(engine, "_initialize", lambda **_kwargs: events.append("initialize"))
+    monkeypatch.setattr(engine, "_heartbeat_loop", lambda: None)
+
+    engine.start()
+
+    assert events == ["create:a", "create:b", "start:b-container", "listener-ready", "initialize"]
+    assert engine.docker_host == "b"
+    assert engine.container_id == "b-container"
+    assert broken.closed
+    statuses = {status.name: status for status in registry.snapshot()}
+    assert not statuses["a"].healthy
+    assert "daemon exploded" in str(statuses["a"].last_error)
+    assert statuses["b"].placements == 1
+    assert statuses["a"].placements == 0
+
+
+def test_engine_launch_moves_on_when_the_listener_never_becomes_ready(monkeypatch) -> None:
+    events: list[str] = []
+    clients = {"a": _HostClient("a", events), "b": _HostClient("b", events)}
+    registry = _prepare_launch(monkeypatch, clients=clients)
+    engine = DockerComputeWorker()
+    attempts = 0
+
+    def await_listening() -> None:
+        nonlocal attempts
+        attempts += 1
+        if attempts == 1:
+            raise ComputeWorkerStartTimeout("Timed out waiting for engine listener")
+        events.append("listener-ready")
+
+    monkeypatch.setattr(engine, "_await_listening", await_listening)
+
+    engine.start_warm_worker()
+
+    # The half-started container on the failing host is removed, its slot is
+    # released, and the warm worker lands on the other host.
+    assert events == ["create:a", "start:a-container", "remove:a-container", "create:b", "start:b-container", "listener-ready"]
+    assert engine.docker_host == "b"
+    statuses = {status.name: status for status in registry.snapshot()}
+    assert statuses["a"].placements == 0
+    assert statuses["b"].placements == 1
+    assert not statuses["a"].healthy
+
+
+def test_engine_launch_reports_every_host_when_all_fail(monkeypatch) -> None:
+    events: list[str] = []
+    clients = {
+        "a": _HostClient("a", events, create_error=requests.exceptions.ConnectionError("a is down")),
+        "b": _HostClient("b", events, create_error=OSError("b is down")),
+    }
+    registry = _prepare_launch(monkeypatch, clients=clients)
+    engine = DockerComputeWorker(_identity(), namespace="tenant-a")
+
+    with pytest.raises(RuntimeError, match="every eligible Docker host") as excinfo:
+        engine.start()
+
+    assert events == ["create:a", "create:b"]
+    assert isinstance(excinfo.value.__cause__, OSError)
+    assert all(not status.healthy for status in registry.snapshot())
+    assert engine.docker_host is None
+    assert engine.container_id is None
+
+
+def test_reconciliation_sweeps_every_host_and_skips_unreachable_ones(monkeypatch) -> None:
+    removed: list[str] = []
+    monkeypatch.setattr(settings, "engine_docker_hosts", _TWO_HOSTS)
+    monkeypatch.setattr(settings, "deployment_id", "test-deployment")
+
+    class Api:
+        def __init__(self, name: str) -> None:
+            self.name = name
+
+        def containers(self, *, all: bool, filters: dict[str, object]):
+            assert all and filters == {"label": ["io.dataforge.managed=true", "io.dataforge.deployment=test-deployment"]}
+            return [{"Id": f"{self.name}-stopped", "State": "exited"}]
+
+        def remove_container(self, container_id: str, *, force: bool) -> None:
+            assert force
+            removed.append(container_id)
+
+    class Client:
+        def __init__(self, name: str) -> None:
+            self.api = Api(name)
+
+        def close(self) -> None:
+            return None
+
+    def open_client(spec: DockerHostSpec, **_kwargs):
+        if spec.name == "b":
+            raise requests.exceptions.ConnectionError("b is down")
+        return Client(spec.name)
+
+    monkeypatch.setattr("runtime.docker_compute_worker.open_docker_client", open_client)
+
+    assert reconcile_deployment_containers() == 1
+    assert removed == ["a-stopped"]
+    statuses = {status.name: status for status in docker_host_registry().snapshot()}
+    assert "b is down" in str(statuses["b"].last_error)

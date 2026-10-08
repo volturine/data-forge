@@ -971,6 +971,7 @@ def _engine_status_info_payload(message: compute_pb2.ComputeWorkerStatusResult) 
         oom_killed=message.oom_killed if message.HasField('oom_killed') else None,
         supervisor_id=message.supervisor_id if message.HasField('supervisor_id') else None,
         owner_id=message.owner_id if message.HasField('owner_id') else None,
+        docker_host=message.docker_host if message.HasField('docker_host') else None,
         last_activity=message.last_activity if message.HasField('last_activity') else None,
         current_job_id=message.current_job_id if message.HasField('current_job_id') else None,
         resource_config=_engine_resource_config_payload(message.resource_config) if message.HasField('resource_config') else None,

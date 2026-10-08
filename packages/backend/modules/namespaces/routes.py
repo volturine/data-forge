@@ -11,7 +11,7 @@ from backend_core.api_execution_budget import BoundedThreadPoolExecutor, run_api
 from backend_core.data_plane_client import client_from_settings
 from backend_core.database import initialize_namespace_db, namespace_provision_lock, run_settings_db
 from backend_core.error_handlers import handle_errors
-from backend_core.namespace import list_namespaces, namespace_paths, normalize_namespace
+from backend_core.namespace import normalize_namespace
 from backend_core.namespace_credentials_service import provision_namespace_engine_credentials
 from backend_core.namespace_storage import NAMESPACE_NAME_RULES, namespace_storage_plan
 from backend_core.namespaces_service import list_runtime_namespaces, register_namespace, runtime_namespace_exists
@@ -115,8 +115,6 @@ def _create_namespace_locked(name: str) -> NamespaceResponse:
         logger.info('Namespace already provisioned name=%s total_ms=%s', name, int((time.perf_counter() - started) * 1000))
         return NamespaceResponse(name=name, storage=storage, created_bucket=False)
 
-    namespace_paths(name)
-
     # Bucket creation, credential provisioning, and tenant migration use
     # independent resources. Start all three together so a namespace request
     # is bounded by the slowest provisioning phase rather than the sum of
@@ -183,12 +181,7 @@ def _create_namespace_locked(name: str) -> NamespaceResponse:
 @handle_errors(operation='list namespaces')
 async def list_namespaces_endpoint() -> NamespaceListResponse:
     """List namespaces. Each name is an S3 bucket."""
-
-    def load_names() -> list[str]:
-        names = {*list_namespaces(), *run_settings_db(list_runtime_namespaces)}
-        return sorted(names)
-
-    return NamespaceListResponse(namespaces=await run_api_blocking(load_names))
+    return NamespaceListResponse(namespaces=await run_api_blocking(run_settings_db, list_runtime_namespaces))
 
 
 @router.get('/storage-plan', response_model=NamespaceStoragePlanResponse, mcp=True)

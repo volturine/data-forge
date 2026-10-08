@@ -22,6 +22,16 @@ def sample_datasource(tmp_path):
 
 
 @pytest.fixture(autouse=True)
+def _reset_docker_host_registry():
+    """The host registry is built from settings once; rebuild it per test."""
+    from runtime.docker_compute_worker import reset_docker_host_registry
+
+    reset_docker_host_registry()
+    yield
+    reset_docker_host_registry()
+
+
+@pytest.fixture(autouse=True)
 def _clear_engine_credential_cache():
     """Engine credentials are cached for the worker's lifetime; isolate tests."""
     from runtime.compute_worker_credentials import _cache

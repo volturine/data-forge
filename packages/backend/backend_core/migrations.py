@@ -10,7 +10,7 @@ from sqlalchemy import create_engine, pool, text
 from backend_core.config import settings
 from backend_core.namespace import namespace_database_schema
 
-_PUBLIC_REVISION = '0025_compute_worker_instances'
+_PUBLIC_REVISION = '0027_compute_worker_host'
 _TENANT_REVISION = '0026_compute_worker_runs'
 _MISSING_DATABASE_SQLSTATE = '3D000'
 

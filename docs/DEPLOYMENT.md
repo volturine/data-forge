@@ -109,7 +109,7 @@ compose files mirror this directory's topology and follow the same registry.
    `https://<your-host>/api/v1/auth/github/callback` in the GitHub OAuth app.
    Set `DF_TRUSTED_PROXY_HOPS` to the number of proxies that provide the
    forwarded public scheme.
-4. Set `DF_DOCKER_SOCKET_PATH` and `DF_DOCKER_GID` for the deployment host. The worker is the only service with Docker access; this permission is equivalent to administrative host access.
+4. Set `DF_DOCKER_SOCKET_PATH` and `DF_DOCKER_GID` for the deployment host. The worker is the only service with Docker access; this permission is equivalent to administrative host access. To run engines on more than one machine, list the daemons in `DF_ENGINE_DOCKER_HOSTS` as described in [Compute hosts](COMPUTE_HOSTS.md).
 5. Start the stack:
 
 ```bash
@@ -158,6 +158,33 @@ Watch the logs and wait for `/health/ready` before returning traffic to the
 deployment. Roll back by restoring the coordinated backups and the previous set
 of image tags; application images and persisted data should not be rolled back
 independently.
+
+### Scale out
+
+API containers are stateless: sessions, locks, namespaces, jobs, projections
+and runtime notifications live in PostgreSQL, every API process has a unique
+identity, and WebSocket/SSE fan-out goes through Postgres `LISTEN/NOTIFY`, so
+any replica can serve any request. `docker/compose.replicas.yaml` removes the
+fixed host port from the API service, runs `DF_API_REPLICAS` copies of it
+(default 2) and publishes `DF_API_PORT` through an nginx ingress that balances
+HTTP and WebSocket traffic across them:
+
+```bash
+docker compose --env-file docker/env/prod.env \
+  -p dataforge-prod \
+  -f docker/compose.yaml -f docker/compose.replicas.yaml \
+  up -d
+```
+
+The ingress is one proxy hop; the override sets `TRUSTED_PROXY_HOPS=1` for the
+API, and `DF_API_REPLICA_TRUSTED_PROXY_HOPS` raises it when a TLS terminator
+sits in front of the ingress. Replicas share the `data` volume only for
+scratch files. The runtime coordinator, scheduler and worker manager remain
+single fenced instances; do not add replicas of those services.
+
+Compute capacity scales across machines instead: the one worker manager can
+place engine containers on several Docker daemons. See
+[Compute hosts](COMPUTE_HOSTS.md) for how to add a host.
 
 ## From source
 
@@ -255,7 +282,7 @@ Use the unauthenticated root health endpoints:
 | Endpoint          | Purpose                                                                               | Healthy response       |
 | ----------------- | ------------------------------------------------------------------------------------- | ---------------------- |
 | `/health`         | Liveness: the API process can answer HTTP                                             | `200`                  |
-| `/health/ready`   | Readiness: PostgreSQL, required local directories, and the object-store probe succeed | `200`; otherwise `503` |
+| `/health/ready`   | Readiness: PostgreSQL and the object-store probe succeed                              | `200`; otherwise `503` |
 | `/health/startup` | Startup: application settings initialized                                             | `200`                  |
 
 Example:

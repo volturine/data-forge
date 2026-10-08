@@ -24,6 +24,7 @@ class ComputeWorkerInstance(SQLModel, table=True):  # type: ignore[call-arg, ass
     oom_killed: bool | None = Field(default=None, sa_column=Column(Boolean, nullable=True))
     supervisor_id: str | None = Field(default=None, sa_column=Column(String, nullable=True))
     owner_id: str | None = Field(default=None, sa_column=Column(String, nullable=True))
+    docker_host: str | None = Field(default=None, sa_column=Column(String, nullable=True))
     status: EngineInstanceStatus = Field(sa_column=Column(String, nullable=False, index=True))
     current_job_id: str | None = Field(default=None, sa_column=Column(String, nullable=True))
     current_build_id: str | None = Field(default=None, sa_column=Column(String, nullable=True))

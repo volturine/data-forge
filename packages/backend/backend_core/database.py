@@ -19,9 +19,7 @@ from backend_core.api_execution_budget import run_api_blocking
 from backend_core.config import settings
 from backend_core.namespace import (
     get_namespace,
-    list_namespaces,
     namespace_database_schema,
-    namespace_paths,
     normalize_namespace,
 )
 
@@ -715,15 +713,18 @@ def initialize_namespace_db(namespace: str) -> None:
 
 def _bootstrap_postgres() -> None:
     from backend_core.migrations import migrate_runtime
+    from backend_core.namespaces_service import list_runtime_namespaces
 
-    namespaces = list_namespaces()
-    if settings.default_namespace not in namespaces:
-        namespaces = [*namespaces, settings.default_namespace]
-    normalized = [normalize_namespace(namespace) for namespace in namespaces]
+    # The namespace registry lives in the public schema, so the public
+    # migration runs first (with the default tenant), then every registered
+    # namespace is migrated. Any API replica can run this: the registry is
+    # shared state, and the surrounding advisory lock serializes replicas.
     with _ALEMBIC_MIGRATION_LOCK:
-        migrate_runtime(normalized)
-    for namespace in normalized:
-        namespace_paths(namespace)
+        migrate_runtime([settings.default_namespace])
+        registered = [normalize_namespace(namespace) for namespace in run_settings_db(list_runtime_namespaces)]
+        remaining = [namespace for namespace in registered if namespace != settings.default_namespace]
+        if remaining:
+            migrate_runtime(remaining)
 
 
 async def init_db() -> None:

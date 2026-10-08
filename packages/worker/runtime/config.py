@@ -32,6 +32,9 @@ class WorkerSettings:
     data_plane_grpc_host: str
     data_plane_grpc_port: int
     engine_docker_host: str
+    # JSON list of Docker hosts; empty means the single ENGINE_DOCKER_HOST.
+    engine_docker_hosts: str
+    engine_docker_host_health_interval_seconds: int
     engine_docker_network: str
     engine_object_store_endpoint: str
     engine_image: str
@@ -94,6 +97,8 @@ settings = WorkerSettings(
     data_plane_grpc_host=os.environ.get("WORKER_DATA_PLANE_GRPC_HOST", "127.0.0.1").strip() or "127.0.0.1",
     data_plane_grpc_port=_read_int("WORKER_DATA_PLANE_GRPC_PORT", 50052, min_value=1, max_value=65535),
     engine_docker_host=os.environ.get("ENGINE_DOCKER_HOST", "unix:///var/run/docker.sock").strip() or "unix:///var/run/docker.sock",
+    engine_docker_hosts=os.environ.get("ENGINE_DOCKER_HOSTS", "").strip(),
+    engine_docker_host_health_interval_seconds=_read_int("ENGINE_DOCKER_HOST_HEALTH_INTERVAL_SECONDS", 15, min_value=1),
     engine_docker_network=os.environ.get("ENGINE_DOCKER_NETWORK", "dataforge-engine-runtime").strip() or "dataforge-engine-runtime",
     engine_object_store_endpoint=os.environ.get("ENGINE_OBJECT_STORE_ENDPOINT", "").strip(),
     engine_image=os.environ.get("ENGINE_IMAGE", "data-forge-polars-engine:latest").strip() or "data-forge-polars-engine:latest",

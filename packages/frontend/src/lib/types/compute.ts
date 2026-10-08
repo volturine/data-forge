@@ -50,6 +50,7 @@ export interface ComputeWorkerStatusResponse {
 	oom_killed: boolean | null;
 	supervisor_id: OptionalStringField<ProtocolComputeWorkerStatusResultJson, 'supervisorId'>;
 	owner_id: OptionalStringField<ProtocolComputeWorkerStatusResultJson, 'ownerId'>;
+	docker_host: OptionalStringField<ProtocolComputeWorkerStatusResultJson, 'dockerHost'>;
 	last_activity: OptionalStringField<ProtocolComputeWorkerStatusResultJson, 'lastActivity'>;
 	current_job_id: OptionalStringField<ProtocolComputeWorkerStatusResultJson, 'currentJobId'>;
 	resource_config: OptionalObjectField<ProtocolComputeWorkerStatusResultJson, 'resourceConfig'>;

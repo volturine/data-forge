@@ -20,9 +20,41 @@ from runtime.docker_compute_worker import (
     _container_name,
     _container_rpc_target,
     _effective_resources,
+    docker_host_registry,
     reconcile_deployment_containers,
     validate_compute_worker_runtime_readiness,
 )
+from runtime.docker_hosts import DockerHostRegistry, DockerHostSpec
+
+_LOCAL_HOST = DockerHostSpec(name="local", docker_host="unix:///var/run/docker.sock", engine_network="net-test")
+_HOST_CONNECTED_LOCAL = DockerHostSpec(name="local", docker_host="unix:///var/run/docker.sock", connect_host="127.0.0.1", engine_network="net-test")
+_REMOTE_HOST = DockerHostSpec(name="node-b", docker_host="tcp://10.0.0.5:2375", connect_host="10.0.0.5", engine_network="net-test")
+
+
+class _ProbeClient:
+    """Minimal daemon answering a host probe."""
+
+    def __init__(self, *, cpus: int = 4, image_id: str = "sha256:abc") -> None:
+        self.images = type("Images", (), {"get": staticmethod(lambda _name: type("Image", (), {"id": image_id})())})()
+        self.networks = type("Networks", (), {"get": staticmethod(lambda _name: object())})()
+        self._cpus = cpus
+
+    def ping(self) -> bool:
+        return True
+
+    def info(self) -> dict[str, object]:
+        return {"NCPU": self._cpus}
+
+    def close(self) -> None:
+        return None
+
+
+def _ready_registry(monkeypatch, *, cpus: int = 4) -> DockerHostRegistry:
+    """Mark every configured host healthy without touching Docker."""
+    monkeypatch.setattr("runtime.docker_hosts.open_docker_client", lambda _spec, **_kwargs: _ProbeClient(cpus=cpus))
+    registry = docker_host_registry()
+    assert all(registry.probe_all().values())
+    return registry
 
 
 def test_effective_resources_resolves_zero_threads_to_logical_cpu_count(monkeypatch) -> None:
@@ -122,7 +154,7 @@ def test_container_rpc_target_uses_unique_container_dns_name(monkeypatch) -> Non
 
     monkeypatch.setattr(settings, "engine_rpc_port", 50053)
 
-    assert _container_rpc_target(Container()) == "dataforge-engine-analysis-abc123:50053"
+    assert _container_rpc_target(Container(), _LOCAL_HOST) == "dataforge-engine-analysis-abc123:50053"
 
 
 def test_container_rpc_target_uses_dns_without_polling_docker(monkeypatch) -> None:
@@ -136,8 +168,21 @@ def test_container_rpc_target_uses_dns_without_polling_docker(monkeypatch) -> No
     monkeypatch.setattr(settings, "engine_rpc_port", 50053)
     container = Container()
 
-    assert _container_rpc_target(container) == "dataforge-engine-analysis-starting:50053"
+    assert _container_rpc_target(container, _LOCAL_HOST) == "dataforge-engine-analysis-starting:50053"
     assert container.status == "created"
+
+
+def test_container_rpc_target_dials_the_host_connect_address_for_published_ports(monkeypatch) -> None:
+    class Container:
+        name = "/dataforge-engine-analysis-remote"
+        attrs = {"NetworkSettings": {"Ports": {"50053/tcp": [{"HostIp": "0.0.0.0", "HostPort": "40123"}]}}}
+
+        def reload(self) -> None:
+            return None
+
+    monkeypatch.setattr(settings, "engine_rpc_port", 50053)
+
+    assert _container_rpc_target(Container(), _REMOTE_HOST) == "10.0.0.5:40123"
 
 
 def test_await_listening_waits_for_channel_then_checks_health_once(monkeypatch) -> None:
@@ -203,11 +248,15 @@ def test_await_listening_retries_transient_health_deadlines_within_start_deadlin
     assert retry_delays == [0.1]
 
 
-def test_engine_object_store_endpoint_prefers_private_network_override(monkeypatch) -> None:
+def test_engine_object_store_endpoint_prefers_the_host_override(monkeypatch) -> None:
     monkeypatch.setattr(settings, "object_store_endpoint", "http://127.0.0.1:9000")
-    monkeypatch.setattr(settings, "engine_object_store_endpoint", "http://rustfs:9000")
+    host = DockerHostSpec(name="local", docker_host="unix:///var/run/docker.sock", object_store_endpoint="http://rustfs:9000")
 
-    assert _compute_worker_object_store_endpoint() == "http://rustfs:9000"
+    assert _compute_worker_object_store_endpoint(host) == "http://rustfs:9000"
+    # A remote host without an override gets the worker's endpoint unchanged;
+    # the loopback rewrite only applies to a host-connected local daemon.
+    assert _compute_worker_object_store_endpoint(_REMOTE_HOST) == "http://127.0.0.1:9000"
+    assert _compute_worker_object_store_endpoint(_HOST_CONNECTED_LOCAL) == "http://host.docker.internal:9000"
 
 
 def test_export_submits_object_store_artifact_instead_of_worker_path(monkeypatch, tmp_path: Path) -> None:
@@ -224,7 +273,7 @@ def test_export_submits_object_store_artifact_instead_of_worker_path(monkeypatch
         "runtime.docker_compute_worker.presigned_put_url",
         lambda target_url, **options: presigned.update(target_url=target_url, **options) or "http://object-store/presigned-put",
     )
-    monkeypatch.setattr(settings, "engine_connect_host", "127.0.0.1")
+    engine._host = _HOST_CONNECTED_LOCAL
     monkeypatch.setattr(settings, "object_store_endpoint", "http://127.0.0.1:9000")
     output_path = tmp_path / "result.parquet"
 
@@ -583,6 +632,7 @@ def test_intentional_shutdown_is_not_reported_as_container_crash(monkeypatch) ->
 
 def test_initialize_fails_fast_on_identity_collision(monkeypatch) -> None:
     engine = DockerComputeWorker(_identity())
+    engine._host = _LOCAL_HOST
     calls = 0
 
     class AlreadyInitialized(grpc.RpcError):
@@ -613,6 +663,7 @@ def test_initialize_fails_fast_on_identity_collision(monkeypatch) -> None:
 
 def test_initialize_does_not_retry_transient_rpc_failures(monkeypatch) -> None:
     engine = DockerComputeWorker(_identity())
+    engine._host = _LOCAL_HOST
     calls = 0
 
     class Unavailable(grpc.RpcError):
@@ -775,37 +826,66 @@ def test_job_watch_recovers_terminal_result_after_progress_cursor_eviction() -> 
     assert published.error is None
 
 
-def test_runtime_readiness_checks_credentials_image_and_network(monkeypatch) -> None:
+def test_runtime_readiness_probes_every_host_and_requires_one_ready(monkeypatch) -> None:
     calls: list[str] = []
+    monkeypatch.setattr(
+        settings,
+        "engine_docker_hosts",
+        '[{"name": "local", "docker_host": "unix:///var/run/docker.sock"},'
+        ' {"name": "node-b", "docker_host": "tcp://10.0.0.5:2375", "connect_host": "10.0.0.5"}]',
+    )
 
-    class Client:
+    class BrokenClient:
+        def ping(self) -> None:
+            raise OSError("connection refused")
+
         def close(self) -> None:
-            calls.append("close")
+            return None
+
+    def open_client(spec: DockerHostSpec, **_kwargs):
+        calls.append(spec.name)
+        return _ProbeClient() if spec.name == "local" else BrokenClient()
 
     monkeypatch.setattr("runtime.docker_compute_worker._warn_unpinned_compute_worker_image", lambda: calls.append("image-reference"))
-    monkeypatch.setattr("runtime.docker_compute_worker._resolve_launch_context", lambda client: calls.append("docker") or (4, "sha256:abc"))
-    monkeypatch.setattr("runtime.docker_compute_worker.docker.DockerClient", lambda **_kwargs: Client())
+    monkeypatch.setattr("runtime.docker_hosts.open_docker_client", open_client)
+    registry = docker_host_registry()
+    monkeypatch.setattr(registry, "start_health_monitor", lambda interval: calls.append(f"monitor:{interval}"))
 
     validate_compute_worker_runtime_readiness()
 
-    assert calls == ["image-reference", "docker", "close"]
+    assert calls == ["image-reference", "local", "node-b", f"monitor:{settings.engine_docker_host_health_interval_seconds}"]
+    statuses = {status.name: status.healthy for status in registry.snapshot()}
+    assert statuses == {"local": True, "node-b": False}
 
 
-def test_container_nano_cpus_skips_hard_quota_for_host_connected_engines(monkeypatch) -> None:
+def test_runtime_readiness_fails_when_no_host_answers(monkeypatch) -> None:
+    class BrokenClient:
+        def ping(self) -> None:
+            raise OSError("connection refused")
+
+        def close(self) -> None:
+            return None
+
+    monkeypatch.setattr("runtime.docker_hosts.open_docker_client", lambda _spec, **_kwargs: BrokenClient())
+
+    with pytest.raises(RuntimeError, match="No Docker host is available"):
+        validate_compute_worker_runtime_readiness()
+
+
+def test_container_nano_cpus_skips_hard_quota_only_for_host_connected_local_engines() -> None:
     from runtime.docker_compute_worker import _container_nano_cpus
 
-    monkeypatch.setattr(settings, "engine_connect_host", "127.0.0.1")
-    assert _container_nano_cpus(1) is None
-    assert _container_nano_cpus(4) is None
+    assert _container_nano_cpus(1, host=_HOST_CONNECTED_LOCAL) is None
+    assert _container_nano_cpus(4, host=_HOST_CONNECTED_LOCAL) is None
 
-    monkeypatch.setattr(settings, "engine_connect_host", "")
-    assert _container_nano_cpus(1) == 1_000_000_000
-    assert _container_nano_cpus(0) is None
+    assert _container_nano_cpus(1, host=_LOCAL_HOST) == 1_000_000_000
+    assert _container_nano_cpus(0, host=_LOCAL_HOST) is None
+    # A remote machine is a dedicated compute host; it keeps the quota even
+    # though it also dials engines through published ports.
+    assert _container_nano_cpus(2, host=_REMOTE_HOST) == 2_000_000_000
 
 
-def test_resolve_launch_context_caches_daemon_and_image_lookups(monkeypatch) -> None:
-    from runtime import docker_compute_worker
-
+def test_resolve_launch_context_caches_daemon_and_image_lookups_per_host(monkeypatch) -> None:
     class Image:
         id = "sha256:abc"
 
@@ -835,22 +915,24 @@ def test_resolve_launch_context_caches_daemon_and_image_lookups(monkeypatch) -> 
             self.info_calls += 1
             return {"NCPU": 6}
 
-    monkeypatch.setattr(settings, "engine_image", "engine:test")
-    monkeypatch.setattr(settings, "engine_docker_network", "net-test")
-    docker_compute_worker._cached_daemon_cpu_count = None
-    docker_compute_worker._validated_image_ref = None
-    docker_compute_worker._validated_image_id = None
-    docker_compute_worker._validated_network = None
+    registry = DockerHostRegistry([_LOCAL_HOST, _REMOTE_HOST], engine_image="engine:test")
 
     client = Client()
-    first = docker_compute_worker._resolve_launch_context(client)
-    second = docker_compute_worker._resolve_launch_context(client)
+    first = registry.launch_context(_LOCAL_HOST, client)
+    second = registry.launch_context(_LOCAL_HOST, client)
 
     assert first == (6, "sha256:abc")
     assert second == first
     assert client.info_calls == 1
     assert client.images.calls == 1
-    assert client.networks.calls == 1
+    # The network is checked on every launch context resolution; it is cheap
+    # and a removed network must fail fast.
+    assert client.networks.calls == 2
+
+    # Another host has its own daemon, image id and CPU count.
+    other = Client()
+    assert registry.launch_context(_REMOTE_HOST, other) == (6, "sha256:abc")
+    assert other.info_calls == 1
 
 
 def test_engine_credentials_are_cached_per_namespace_and_role(monkeypatch) -> None:
@@ -913,16 +995,19 @@ def test_engine_start_closes_docker_client_when_container_creation_fails(monkeyp
             self.closed = True
 
     client = Client()
+    _ready_registry(monkeypatch)
     engine = DockerComputeWorker(_identity(), namespace="tenant-a")
     monkeypatch.setattr("runtime.docker_compute_worker.resolve_compute_worker_credentials", lambda *_args: ObjectStoreCredentials("key", "secret"))
-    monkeypatch.setattr("runtime.docker_compute_worker._resolve_launch_context", lambda _client: (1, "image-id"))
+    monkeypatch.setattr("runtime.docker_compute_worker._resolve_launch_context", lambda _host, _client: (1, "image-id"))
     monkeypatch.setattr("runtime.docker_compute_worker._effective_resources", lambda *_args, **_kwargs: {"max_threads": 1, "max_memory_mb": 256})
     monkeypatch.setattr("runtime.docker_compute_worker.docker.DockerClient", lambda **_kwargs: client)
 
+    # A request-level failure propagates unchanged; it is not a host failure.
     with pytest.raises(RuntimeError, match="Docker create failed"):
         engine.start()
 
     assert client.closed
+    assert docker_host_registry().snapshot()[0].healthy
 
 
 def test_engine_start_waits_for_rpc_listener_before_initializing(monkeypatch, caplog) -> None:
@@ -951,15 +1036,16 @@ def test_engine_start_waits_for_rpc_listener_before_initializing(monkeypatch, ca
             calls.append("client.close")
 
     client = Client()
+    _ready_registry(monkeypatch)
     engine = DockerComputeWorker(_identity(), namespace="tenant-a")
     monkeypatch.setattr("runtime.docker_compute_worker.resolve_compute_worker_credentials", lambda *_args: ObjectStoreCredentials("key", "secret"))
-    monkeypatch.setattr("runtime.docker_compute_worker._resolve_launch_context", lambda _client: (1, "image-id"))
+    monkeypatch.setattr("runtime.docker_compute_worker._resolve_launch_context", lambda _host, _client: (1, "image-id"))
     monkeypatch.setattr(
         "runtime.docker_compute_worker._effective_resources",
         lambda *_args, **_kwargs: {"max_threads": 1, "max_memory_mb": 256, "streaming_chunk_size": 0},
     )
     monkeypatch.setattr("runtime.docker_compute_worker.docker.DockerClient", lambda **_kwargs: client)
-    monkeypatch.setattr("runtime.docker_compute_worker._container_rpc_target", lambda _container: "engine:50053")
+    monkeypatch.setattr("runtime.docker_compute_worker._container_rpc_target", lambda _container, _host: "engine:50053")
     monkeypatch.setattr("runtime.docker_compute_worker.grpc.insecure_channel", lambda *_args, **_kwargs: object())
     monkeypatch.setattr("runtime.docker_compute_worker.compute_worker_runtime_pb2_grpc.PolarsComputeWorkerServiceStub", lambda _channel: object())
     monkeypatch.setattr(engine, "_await_listening", lambda: calls.append("rpc.listener_ready"))
@@ -970,6 +1056,9 @@ def test_engine_start_waits_for_rpc_listener_before_initializing(monkeypatch, ca
 
     assert calls == ["container.create", "container.start", "rpc.listener_ready", "rpc.initialize"]
     assert created["cpu_shares"] == 128
+    assert created["labels"]["io.dataforge.docker-host"] == "local"
+    assert engine.docker_host == "local"
+    assert docker_host_registry().snapshot()[0].placements == 1
     startup_log = next(record.message for record in caplog.records if "Slow engine startup" in record.message)
     assert "request_id=cold-preview-request" in startup_log
     assert "namespace=tenant-a" in startup_log
@@ -1003,15 +1092,16 @@ def test_warm_worker_uses_the_standard_engine_runtime(monkeypatch) -> None:
             return None
 
     client = Client()
-    engine = DockerComputeWorker()
     monkeypatch.setattr(settings, "engine_connect_host", "")
-    monkeypatch.setattr("runtime.docker_compute_worker._resolve_launch_context", lambda _client: (1, "image-id"))
+    _ready_registry(monkeypatch)
+    engine = DockerComputeWorker()
+    monkeypatch.setattr("runtime.docker_compute_worker._resolve_launch_context", lambda _host, _client: (1, "image-id"))
     monkeypatch.setattr(
         "runtime.docker_compute_worker._effective_resources",
         lambda *_args, **_kwargs: {"max_threads": 1, "max_memory_mb": 256, "streaming_chunk_size": 0},
     )
     monkeypatch.setattr("runtime.docker_compute_worker.docker.DockerClient", lambda **_kwargs: client)
-    monkeypatch.setattr("runtime.docker_compute_worker._container_rpc_target", lambda _container: "warm-engine:50053")
+    monkeypatch.setattr("runtime.docker_compute_worker._container_rpc_target", lambda _container, _host: "warm-engine:50053")
     monkeypatch.setattr("runtime.docker_compute_worker.grpc.insecure_channel", lambda *_args, **_kwargs: Channel())
     monkeypatch.setattr("runtime.docker_compute_worker.compute_worker_runtime_pb2_grpc.PolarsComputeWorkerServiceStub", lambda _channel: object())
     monkeypatch.setattr(engine, "_await_listening", lambda: None)
@@ -1023,7 +1113,9 @@ def test_warm_worker_uses_the_standard_engine_runtime(monkeypatch) -> None:
     assert environment["ENGINE_INIT_TIMEOUT_SECONDS"] == "0"
     assert "ENGINE_PRELOAD_COMPUTE" not in environment
     assert captured["cpu_shares"] == 128
+    assert docker_host_registry().snapshot()[0].placements == 1
     engine._detach_local_handles()
+    assert docker_host_registry().snapshot()[0].placements == 0
 
 
 class _FakeContainer:

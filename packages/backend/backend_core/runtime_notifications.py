@@ -2,13 +2,13 @@ from __future__ import annotations
 
 import asyncio
 import logging
-import os
 from collections import defaultdict
 from collections.abc import Awaitable, Callable
 
 from sqlalchemy import tuple_
 from sqlmodel import Session, col, select
 
+from backend_core import runtime_ipc
 from backend_core.api_execution_budget import run_api_blocking
 from backend_core.compute_response_recovery import response_recovery
 from backend_core.compute_worker_live import registry as compute_worker_registry
@@ -108,7 +108,9 @@ async def recover_runtime_notifications(
 
 
 async def _handle_lock_payload(payload: dict[str, object]) -> None:
-    if payload.get('source_pid') == os.getpid():
+    # Replicas behind a load balancer commonly share PID 1, so the publishing
+    # process is identified by a per-process random id rather than its PID.
+    if payload.get('source_process') == runtime_ipc.API_PROCESS_ID:
         return
     namespace = payload.get('namespace')
     resource_type = payload.get('resource_type')

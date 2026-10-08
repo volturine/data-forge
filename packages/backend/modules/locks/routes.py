@@ -8,7 +8,6 @@ from pydantic import ValidationError
 
 from backend_core import runtime_ipc
 from backend_core.api_execution_budget import run_api_blocking
-from backend_core.config import settings
 from backend_core.database import run_db, run_settings_db
 from backend_core.dependencies import get_lock_owner_id, resolve_lock_owner_id
 from backend_core.error_handlers import handle_errors
@@ -79,12 +78,10 @@ async def _notify_watchers(resource_type: str, resource_id: str, lock: schemas.L
     payload = _status_message(resource_type, resource_id, lock)
     namespace = get_namespace()
     await watchers.notify_watchers(namespace, resource_type, resource_id, payload)
-    # A single API process already notified every local websocket above. The
-    # database NOTIFY round trip is still needed when another API container can
-    # own a websocket for this namespace; WORKERS=1 only describes the local
-    # Uvicorn process and does not mean the deployment has one API container.
-    if not settings.distributed_runtime_enabled:
-        return
+    # The local websockets are already notified above. The database NOTIFY
+    # round trip reaches every other API process and replica that owns a
+    # websocket for this namespace; PostgreSQL is the only shared state, so
+    # the publish never depends on a deployment flag.
     try:
         await _run_lock(
             runtime_ipc.notify_api_lock,

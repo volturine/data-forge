@@ -26,6 +26,7 @@ function makeEngine(
 		oom_killed: null,
 		supervisor_id: 'worker-1',
 		owner_id: 'worker-1',
+		docker_host: 'local',
 		last_activity: Temporal.Now.instant().toString(),
 		current_job_id: null,
 		resource_config: null,

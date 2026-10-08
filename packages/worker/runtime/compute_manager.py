@@ -1506,6 +1506,7 @@ class ProcessManager:
                 build_id=_engine_identity_build_id(persisted_identity),
                 current_build_id=info.current_build_id or _engine_identity_build_id(persisted_identity),
                 current_engine_run_id=info.current_engine_run_id,
+                docker_host=getattr(engine, "docker_host", None),
             )
 
     def shutdown_engine(self, identity: ComputeWorkerIdentity, *, namespace: str | None = None, emit_snapshot: bool = True) -> None:

@@ -24,7 +24,6 @@ from backend_core.database import (
     set_settings_engine_override,
 )
 from backend_core.domain.analysis.models import AnalysisStatus
-from backend_core.namespace import namespace_paths
 from backend_core.persistence.analysis.models import Analysis
 from backend_core.persistence.datasource.models import DataSource
 from backend_core.persistence.udfs.models import Udf
@@ -462,7 +461,9 @@ class TestUserService:
         monkeypatch: pytest.MonkeyPatch,
         tmp_path,
     ) -> None:
-        monkeypatch.setattr('backend_core.config.settings.data_dir', tmp_path)
+        # Namespaces come from the shared PostgreSQL registry, not from any
+        # replica's local filesystem.
+        monkeypatch.setattr('modules.auth.service.run_settings_db', lambda function, *args: ['alpha', 'default'])
         user = create_user(
             auth_db_session,
             'delete-namespace@example.com',
@@ -470,7 +471,6 @@ class TestUserService:
             'Delete Namespace',
         )
         now = datetime.now(UTC).replace(tzinfo=None)
-        namespace_paths('alpha')
         namespace_engine, _schema = _make_postgres_engine('authns', schema_name='alpha')
         try:
             with Session(namespace_engine) as namespace_session:
