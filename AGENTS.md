@@ -33,7 +33,7 @@ by local dev/prod stacks, not container-internal test services.
 `packages/{backend,worker,scheduler,frontend,protocol}` — no shared Python package.
 
 - Import boundaries: `scripts/check_package_boundaries.py` (e.g. worker ↛ `backend_core`/`modules`).
-- Protocol: edit protos → run `just generate-protocol` locally. Generated output is git-ignored and must not be committed or hand-edited.
+- Protocol: edit protos → run `just generate-protocol` locally. Generated output (`packages/*/dataforge_protocol/`, `packages/*/buf/`, `frontend/src/lib/protocol`) is git-ignored and must not be committed or hand-edited.
 - Env: `docker/env/` — see `docs/ENV_VARIABLES.md`.
 
 ## Definition of done
