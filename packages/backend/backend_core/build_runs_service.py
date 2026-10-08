@@ -661,6 +661,7 @@ def _preserve_legacy_run_enum_names(payload: dict[str, object]) -> dict[str, obj
             current_prefix='COMPUTE_WORKER_RUN_KIND_',
             legacy_prefix='ENGINE_RUN_KIND_',
         )
+    # Every BuildEvent member carrying BuildStepKind is listed here.
     for event_key in ('stepStarted', 'stepCompleted', 'stepFailed'):
         event = payload.get(event_key)
         if not isinstance(event, dict):
