@@ -822,15 +822,24 @@ def test_compute_worker_instance_migration_preserves_rows_and_downgrades(monkeyp
                     "SELECT indexname FROM pg_indexes WHERE schemaname = 'public' AND tablename = 'compute_worker_instances'"
                 ).fetchall()
             }
+            constraint_names = {
+                constraint[0]
+                for constraint in connection.execute(
+                    "SELECT conname FROM pg_constraint WHERE conrelid = 'public.compute_worker_instances'::regclass"
+                ).fetchall()
+            }
         assert row == ('analysis_interactive', 'shared', 'run-1')
         assert {
+            'compute_worker_instances_pkey',
             'ix_compute_worker_instances_worker_id',
             'ix_compute_worker_instances_namespace',
             'ix_compute_worker_instances_analysis_id',
             'ix_compute_worker_instances_compute_worker_scope',
             'ix_compute_worker_instances_status',
             'ix_compute_worker_instances_last_seen_at',
-        } <= index_names
+        } == index_names
+        assert 'compute_worker_instances_pkey' in constraint_names
+        assert not any('engine' in name for name in index_names | constraint_names)
 
         command.downgrade(config, '0020_runtime_wakes', tag='public')
         with container.connect() as connection:
@@ -842,7 +851,13 @@ def test_compute_worker_instance_migration_preserves_rows_and_downgrades(monkeyp
                 index[0]
                 for index in connection.execute("SELECT indexname FROM pg_indexes WHERE schemaname = 'public' AND tablename = 'engine_instances'").fetchall()
             }
+            constraint_names = {
+                constraint[0]
+                for constraint in connection.execute("SELECT conname FROM pg_constraint WHERE conrelid = 'public.engine_instances'::regclass").fetchall()
+            }
         assert row == ('analysis_interactive', 'shared', 'run-1')
+        assert 'engine_instances_pkey' in index_names
+        assert 'engine_instances_pkey' in constraint_names
         assert 'ix_engine_instances_engine_scope' in index_names
 
 
@@ -910,7 +925,18 @@ def test_compute_worker_tenant_migration_preserves_rows_and_downgrades(monkeypat
                 index_names = {
                     index[0]
                     for index in connection.execute(
-                        'SELECT indexname FROM pg_indexes WHERE schemaname = %s',
+                        'SELECT indexname FROM pg_indexes WHERE schemaname = %s AND tablename IN '
+                        "('compute_worker_runs', 'compute_requests', 'build_runs', 'build_events')",
+                        (schema,),
+                    ).fetchall()
+                }
+                constraint_names = {
+                    constraint[0]
+                    for constraint in connection.execute(
+                        'SELECT c.conname FROM pg_constraint AS c '
+                        'JOIN pg_class AS t ON t.oid = c.conrelid '
+                        'JOIN pg_namespace AS n ON n.oid = t.relnamespace '
+                        "WHERE n.nspname = %s AND t.relname IN ('compute_worker_runs', 'compute_requests', 'build_runs', 'build_events')",
                         (schema,),
                     ).fetchall()
                 }
@@ -924,6 +950,9 @@ def test_compute_worker_tenant_migration_preserves_rows_and_downgrades(monkeypat
                 'ix_build_runs_current_compute_worker_run_id',
                 'ix_build_events_compute_worker_run_id',
             } <= index_names
+            assert 'compute_worker_runs_pkey' in index_names
+            assert 'compute_worker_runs_pkey' in constraint_names
+            assert not any('engine' in name for name in index_names | constraint_names)
 
             command.downgrade(config, '0024_pivot_value_columns', tag='tenant')
             with container.connect() as connection:
@@ -950,10 +979,22 @@ def test_compute_worker_tenant_migration_preserves_rows_and_downgrades(monkeypat
                         (schema,),
                     ).fetchall()
                 }
+                constraint_names = {
+                    constraint[0]
+                    for constraint in connection.execute(
+                        'SELECT c.conname FROM pg_constraint AS c '
+                        'JOIN pg_class AS t ON t.oid = c.conrelid '
+                        'JOIN pg_namespace AS n ON n.oid = t.relnamespace '
+                        "WHERE n.nspname = %s AND t.relname = 'engine_runs'",
+                        (schema,),
+                    ).fetchall()
+                }
             assert run_row == ('default', 'source-1', 'preview', 'completed', {'input': 'kept'})
             assert request_row == (2, 1, 'analysis-1', b'command')
             assert build_run_id == ('run-1',)
             assert event_run_id == ('run-1',)
+            assert 'engine_runs_pkey' in index_names
+            assert 'engine_runs_pkey' in constraint_names
             assert {
                 'ix_engine_runs_namespace',
                 'ix_compute_requests_engine_identity',

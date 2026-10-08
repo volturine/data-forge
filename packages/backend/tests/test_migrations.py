@@ -42,6 +42,8 @@ def test_runtime_schema_has_only_public_and_tenant_creation_revisions() -> None:
         '0024_pivot_value_columns.py',
         '0025_compute_worker_instances.py',
         '0026_compute_worker_runs.py',
+        '0027_compute_worker_instance_constraints.py',
+        '0028_compute_worker_run_constraints.py',
     ]
 
 
@@ -79,8 +81,8 @@ def test_pivot_values_migration_rewrites_only_legacy_pivot_configs() -> None:
 
 
 def test_runtime_revisions_point_to_compute_worker_rename_heads() -> None:
-    assert _PUBLIC_REVISION == '0025_compute_worker_instances'
-    assert _TENANT_REVISION == '0026_compute_worker_runs'
+    assert _PUBLIC_REVISION == '0027_compute_worker_instance'
+    assert _TENANT_REVISION == '0028_compute_worker_run'
     assert len(_PUBLIC_REVISION) <= 32
     assert len(_TENANT_REVISION) <= 32
 
