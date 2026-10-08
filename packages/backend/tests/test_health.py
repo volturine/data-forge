@@ -78,6 +78,22 @@ class TestHealthEndpoints:
         assert 'strict-transport-security' not in response.headers
 
 
+def test_readiness_object_store_failure_does_not_expose_exception_detail(monkeypatch) -> None:
+    import backend_core.object_store_probe as object_store_probe
+    from main import _readiness_checks
+
+    def fail(*, namespace: str | None = None) -> str:
+        raise RuntimeError('endpoint http://internal-s3:9000 bucket secret-bucket')
+
+    monkeypatch.setattr(object_store_probe, 'probe_object_store', fail)
+
+    checks, is_ready = _readiness_checks()
+
+    assert is_ready is False
+    assert checks['object_store'] == 'error'
+    assert 'secret-bucket' not in str(checks)
+
+
 @pytest.mark.asyncio
 async def test_readiness_probe_coalesces_callers_and_survives_one_cancellation() -> None:
     from main import ReadinessProbe
