@@ -9,6 +9,7 @@ import { SvelteSet } from 'svelte/reactivity';
 import { engineIdentityKey } from '$lib/representations/engine';
 
 const RECONNECT_DELAY_MS = 1_000;
+const SNAPSHOT_REFRESH_COOLDOWN_MS = 15_000;
 
 export type EnginesConnectionStatus = 'disconnected' | 'connecting' | 'connected' | 'error';
 
@@ -23,6 +24,7 @@ export class EnginesStore {
 	private snapshotConnection: { close: () => void } | null = null;
 	private snapshotGeneration = 0;
 	private snapshotRequested = false;
+	private lastSnapshotAt: number | null = null;
 	private reconnect = new ReconnectionManager(RECONNECT_DELAY_MS);
 	private shouldReconnect = false;
 	private subscribers = 0;
@@ -38,6 +40,11 @@ export class EnginesStore {
 
 	refreshSnapshot(): void {
 		if (this.shouldReconnect || this.snapshotConnection) return;
+		if (
+			this.lastSnapshotAt !== null &&
+			Date.now() - this.lastSnapshotAt < SNAPSHOT_REFRESH_COOLDOWN_MS
+		)
+			return;
 		this.openSnapshotRequest();
 	}
 
@@ -169,6 +176,7 @@ export class EnginesStore {
 	reset(): void {
 		this.cancelSnapshot();
 		this.snapshotRequested = false;
+		this.lastSnapshotAt = null;
 		this.holdUntilEmpty = false;
 		this.shouldReconnect = false;
 		this.subscribers = 0;
@@ -223,6 +231,7 @@ export class EnginesStore {
 
 	private applySnapshot(engines: EngineStatusResponse[]): void {
 		this.snapshotRequested = true;
+		this.lastSnapshotAt = Date.now();
 		for (const key of this.shuttingDown) {
 			if (engines.some((engine) => engineIdentityKey(engine) === key)) continue;
 			this.shuttingDown.delete(key);
