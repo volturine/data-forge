@@ -38,6 +38,32 @@ export default defineConfig(
 		}
 	},
 	{
+		files: ['tests/**/*.test.ts'],
+		ignores: [
+			'tests/utils/**',
+			'tests/runtime-architecture.test.ts',
+			'tests/datasource-compute-isolation.test.ts',
+			'tests/concurrency.test.ts'
+		],
+		rules: {
+			'no-restricted-syntax': [
+				'error',
+				{
+					selector:
+						"CallExpression[callee.type='MemberExpression'][callee.property.name=/^(post|put|patch|delete)$/]:matches([callee.object.type='Identifier'][callee.object.name='request'], [callee.object.type='MemberExpression'][callee.object.property.name='request'])",
+					message:
+						'Use tests/utils/api.ts for API setup and teardown; exercise the behavior under test through the UI.'
+				},
+				{
+					selector:
+						"CallExpression[callee.property.name='fetch']:matches([callee.object.type='Identifier'][callee.object.name='request'], [callee.object.type='MemberExpression'][callee.object.property.name='request']) > ObjectExpression > Property[key.name='method']:not([value.type='Literal'][value.value=/^GET$/i])",
+					message:
+						'Use tests/utils/api.ts for API setup and teardown; exercise the behavior under test through the UI.'
+				}
+			]
+		}
+	},
+	{
 		files: ['**/*.svelte', '**/*.svelte.ts', '**/*.svelte.js'],
 
 		languageOptions: {

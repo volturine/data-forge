@@ -1,11 +1,18 @@
 # Playwright E2E Scope
 
-These tests are the pure user-driven Playwright suite for the frontend.
+These tests exercise user-facing flows. `runtime-architecture.test.ts`,
+`datasource-compute-isolation.test.ts`, and `concurrency.test.ts` are separate
+runtime-contract probes that deliberately exercise API behavior.
 
 Rules:
 
-- No API seeding for setup, mutation, or teardown.
-- Resource creation and cleanup must go through visible browser flows.
+- Setup and teardown may use the helpers in `tests/utils/api.ts` (or UI cleanup
+  helpers).
+- Exercise the behavior under test through the UI. Do not mutate the resource
+  under test through the API between the user action and its assertion,
+  including non-GET `request.fetch` calls.
+- The runtime-contract probes named above are explicitly exempt because their
+  purpose is to test the HTTP, runtime, and isolation contracts directly.
 - The required `tests/concurrency.test.ts` probe opens 50 authenticated tabs
   against one shared immutable dataset on every E2E run, first verifies the
   shared-preview single-flight path, and then issues a distinct paginated
