@@ -1,7 +1,7 @@
 """record the Docker host that runs each compute worker container.
 
-Revision ID: 0027_compute_worker_host
-Revises: 0025_compute_worker_instances
+Revision ID: 0029_compute_worker_host
+Revises: 0027_compute_worker_instance
 Create Date: 2026-10-08
 
 """
@@ -11,8 +11,8 @@ from collections.abc import Sequence
 import sqlalchemy as sa
 from alembic import op
 
-revision: str = '0027_compute_worker_host'
-down_revision: str | Sequence[str] | None = '0025_compute_worker_instances'
+revision: str = '0029_compute_worker_host'
+down_revision: str | Sequence[str] | None = '0027_compute_worker_instance'
 branch_labels: str | Sequence[str] | None = None
 depends_on: str | Sequence[str] | None = None
 
