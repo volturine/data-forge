@@ -10,8 +10,8 @@ from backend_core.domain.engine_runs.schemas import EngineRunKind, EngineRunStat
 from backend_core.exceptions import DataSourceSnapshotError, datasource_not_found
 from backend_core.namespace import get_namespace
 from backend_core.persistence.build_runs.models import BuildRun
+from backend_core.persistence.compute_worker_runs.models import ComputeWorkerRun
 from backend_core.persistence.datasource.models import DataSource
-from backend_core.persistence.engine_runs.models import EngineRun
 from backend_core.sqlmodel_typing import sa
 
 
@@ -35,7 +35,7 @@ def _matches_branch(payload: dict[str, object] | None, branch: str | None) -> bo
     return isinstance(run_branch, str) and run_branch == branch
 
 
-def _engine_run_end_ms(run: EngineRun) -> int:
+def _engine_run_end_ms(run: ComputeWorkerRun) -> int:
     completed_at = run.completed_at or run.created_at
     marker = completed_at if completed_at.tzinfo is not None else completed_at.replace(tzinfo=UTC)
     return int(marker.timestamp() * 1000)
@@ -77,14 +77,14 @@ def _ingest_run_snapshot_ids(
     snapshots: list[schemas.IcebergSnapshotInfo],
 ) -> set[str]:
     stmt = (
-        select(EngineRun)
-        .where(sa(EngineRun.datasource_id == datasource_id))
-        .where(sa(EngineRun.kind == EngineRunKind.INGEST.value))
-        .where(sa(EngineRun.status == EngineRunStatus.SUCCESS.value))
+        select(ComputeWorkerRun)
+        .where(sa(ComputeWorkerRun.datasource_id == datasource_id))
+        .where(sa(ComputeWorkerRun.kind == EngineRunKind.INGEST.value))
+        .where(sa(ComputeWorkerRun.status == EngineRunStatus.SUCCESS.value))
     )
     runs = session.execute(stmt).scalars().all()
     direct_snapshot_ids: set[str] = set()
-    unresolved_runs: list[EngineRun] = []
+    unresolved_runs: list[ComputeWorkerRun] = []
     for run in runs:
         request_json = run.request_json if isinstance(run.request_json, dict) else None
         result_json = run.result_json if isinstance(run.result_json, dict) else None

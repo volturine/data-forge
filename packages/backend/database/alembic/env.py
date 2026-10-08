@@ -16,8 +16,8 @@ _MODEL_MODULES = (
     'modules.chat.models',
     'backend_core.persistence.compute_requests.models',
     'backend_core.persistence.datasource.models',
-    'backend_core.persistence.engine_instances.models',
-    'backend_core.persistence.engine_runs.models',
+    'backend_core.persistence.compute_worker_instances.models',
+    'backend_core.persistence.compute_worker_runs.models',
     'backend_core.persistence.healthchecks.models',
     'backend_core.persistence.locks.models',
     'backend_core.persistence.mcp_pending.models',
@@ -46,7 +46,7 @@ if config.config_file_name is not None and _should_configure_logging():
 
 _SHARED_TABLES = {
     'app_settings',
-    'engine_instances',
+    'compute_worker_instances',
     'mcp_pending_actions',
     'runtime_namespaces',
     'runtime_namespace_work',
@@ -72,7 +72,7 @@ _TENANT_TABLES = {
     'compute_request_flights',
     'datasources',
     'datasource_column_metadata',
-    'engine_runs',
+    'compute_worker_runs',
     'healthcheck_results',
     'healthchecks',
     'notification_delivery_receipts',

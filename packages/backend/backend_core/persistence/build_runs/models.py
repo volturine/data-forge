@@ -27,7 +27,7 @@ class BuildRun(SQLModel, table=True):  # type: ignore[call-arg, assignment]
         if event.current_output_name is not None:
             self.current_output_name = event.current_output_name
         if event.engine_run_id is not None:
-            self.current_engine_run_id = event.engine_run_id
+            self.current_compute_worker_run_id = event.engine_run_id
 
     def apply_runtime_event(self, event: compute_schemas.BuildEvent) -> None:
         if isinstance(event, compute_schemas.BuildProgressEvent):
@@ -142,7 +142,7 @@ class BuildRun(SQLModel, table=True):  # type: ignore[call-arg, assignment]
     starter_json: dict[str, object] = Field(sa_column=Column(JSON, nullable=False))
     resource_config_json: dict[str, object] | None = Field(default=None, sa_column=Column(JSON, nullable=True))
     result_json: dict[str, object] | None = Field(default=None, sa_column=Column(JSON, nullable=True))
-    current_engine_run_id: str | None = Field(default=None, sa_column=Column(String, nullable=True, index=True))
+    current_compute_worker_run_id: str | None = Field(default=None, sa_column=Column(String, nullable=True, index=True))
     current_kind: str | None = Field(default=None, sa_column=Column(String, nullable=True))
     current_datasource_id: str | None = Field(default=None, sa_column=Column(String, nullable=True))
     current_tab_id: str | None = Field(default=None, sa_column=Column(String, nullable=True))
@@ -179,7 +179,7 @@ class BuildEvent(SQLModel, table=True):  # type: ignore[call-arg, assignment]
     sequence: int = Field(sa_column=Column(Integer, nullable=False))
     type: str = Field(sa_column=Column(String, nullable=False))
     payload_json: dict[str, object] = Field(sa_column=Column(JSON, nullable=False))
-    engine_run_id: str | None = Field(default=None, sa_column=Column(String, nullable=True, index=True))
+    compute_worker_run_id: str | None = Field(default=None, sa_column=Column(String, nullable=True, index=True))
     emitted_at: dt.datetime = Field(sa_column=Column(DateTime(timezone=True), nullable=False))
     created_at: dt.datetime = Field(sa_column=Column(DateTime(timezone=True), nullable=False))
 

@@ -245,7 +245,8 @@ def _upload_datasource(client, name: str, *, content: str = SAMPLE_CSV) -> str:
 def _runtime_failure_context(container: PostgresContainer, **processes: ManagedProcess) -> str:
     with container.connect() as connection:
         requests = connection.execute(
-            'SELECT id, kind, status, engine_resource_id, lease_owner, attempts, error_message FROM "default".compute_requests ORDER BY created_at DESC LIMIT 5'
+            'SELECT id, kind, status, compute_worker_resource_id, lease_owner, attempts, error_message '
+            'FROM "default".compute_requests ORDER BY created_at DESC LIMIT 5'
         ).fetchall()
         wakes = connection.execute(
             'SELECT namespace, kind, pending, generation, processed_generation FROM public.runtime_namespace_work ORDER BY namespace, kind'
@@ -558,7 +559,7 @@ def test_init_db_bootstraps_public_and_tenant_schemas_in_postgres(monkeypatch, t
             assert _table_exists(connection, 'public', 'app_settings')
             assert not _table_exists(connection, 'public', 'users')
             assert _table_exists(connection, 'public', 'runtime_workers')
-            assert _table_exists(connection, 'public', 'engine_instances')
+            assert _table_exists(connection, 'public', 'compute_worker_instances')
             assert _table_exists(connection, 'public', 'runtime_namespace_work')
             assert _table_exists(connection, 'public', 'runtime_namespace_work_wakes')
             assert _table_exists(connection, 'public', 'runtime_coordinator_state')
@@ -783,6 +784,182 @@ def test_pivot_values_migration_rewrites_analysis_and_version_pipelines(monkeypa
             assert analysis_row is not None and snapshot_row is not None
             assert analysis_row[0]['tabs'][0]['steps'][0]['config']['values'] == 'age'
             assert snapshot_row[0]['tabs'][0]['steps'][0]['config']['values'] is None
+        finally:
+            with container.connect() as connection:
+                connection.execute(f'DROP SCHEMA IF EXISTS "{schema}" CASCADE')
+
+
+@pytest.mark.timeout(180)
+def test_compute_worker_instance_migration_preserves_rows_and_downgrades(monkeypatch) -> None:
+    require_docker()
+
+    from backend_core.config import settings
+
+    with PostgresContainer() as container:
+        monkeypatch.setattr(settings, 'database_url', container.url, raising=False)
+        config = _alembic_config(scope='public', schema='public')
+        command.upgrade(config, '0020_runtime_wakes', tag='public')
+        now = datetime.now(UTC)
+        with container.connect() as connection:
+            connection.execute(
+                'INSERT INTO public.engine_instances '
+                '(id, worker_id, namespace, analysis_id, engine_scope, engine_reuse_policy, status, '
+                'current_engine_run_id, last_seen_at, updated_at) '
+                'VALUES (%s, %s, %s, %s, %s, %s, %s, %s, %s, %s)',
+                ('instance-1', 'worker-1', 'default', 'analysis-1', 'analysis_interactive', 'shared', 'idle', 'run-1', now, now),
+            )
+            connection.commit()
+
+        command.upgrade(config, _PUBLIC_REVISION, tag='public')
+        with container.connect() as connection:
+            row = connection.execute(
+                'SELECT compute_worker_scope, compute_worker_reuse_policy, current_compute_worker_run_id FROM public.compute_worker_instances WHERE id = %s',
+                ('instance-1',),
+            ).fetchone()
+            index_names = {
+                index[0]
+                for index in connection.execute(
+                    "SELECT indexname FROM pg_indexes WHERE schemaname = 'public' AND tablename = 'compute_worker_instances'"
+                ).fetchall()
+            }
+        assert row == ('analysis_interactive', 'shared', 'run-1')
+        assert {
+            'ix_compute_worker_instances_worker_id',
+            'ix_compute_worker_instances_namespace',
+            'ix_compute_worker_instances_analysis_id',
+            'ix_compute_worker_instances_compute_worker_scope',
+            'ix_compute_worker_instances_status',
+            'ix_compute_worker_instances_last_seen_at',
+        } <= index_names
+
+        command.downgrade(config, '0020_runtime_wakes', tag='public')
+        with container.connect() as connection:
+            row = connection.execute(
+                'SELECT engine_scope, engine_reuse_policy, current_engine_run_id FROM public.engine_instances WHERE id = %s',
+                ('instance-1',),
+            ).fetchone()
+            index_names = {
+                index[0]
+                for index in connection.execute("SELECT indexname FROM pg_indexes WHERE schemaname = 'public' AND tablename = 'engine_instances'").fetchall()
+            }
+        assert row == ('analysis_interactive', 'shared', 'run-1')
+        assert 'ix_engine_instances_engine_scope' in index_names
+
+
+@pytest.mark.timeout(180)
+def test_compute_worker_tenant_migration_preserves_rows_and_downgrades(monkeypatch) -> None:
+    require_docker()
+
+    from backend_core.config import settings
+
+    with PostgresContainer() as container:
+        monkeypatch.setattr(settings, 'database_url', container.url, raising=False)
+        schema = f'worker_rename_{uuid.uuid4().hex[:12]}'
+        config = _alembic_config(scope='tenant', schema=schema)
+        command.upgrade(config, '0024_pivot_value_columns', tag='tenant')
+        now = datetime.now(UTC)
+        try:
+            with container.connect() as connection:
+                connection.execute(
+                    f'INSERT INTO "{schema}".engine_runs '
+                    '(id, namespace, datasource_id, kind, status, request_json, created_at) '
+                    'VALUES (%s, %s, %s, %s, %s, %s, %s)',
+                    ('run-1', 'default', 'source-1', 'preview', 'completed', Jsonb({'input': 'kept'}), now),
+                )
+                connection.execute(
+                    f'INSERT INTO "{schema}".compute_requests '
+                    '(id, namespace, kind, status, engine_scope, engine_reuse_policy, engine_resource_id, '
+                    'command_envelope, created_at, updated_at) '
+                    'VALUES (%s, %s, %s, %s, %s, %s, %s, %s, %s, %s)',
+                    ('request-1', 'default', 1, 1, 2, 1, 'analysis-1', b'command', now, now),
+                )
+                connection.execute(
+                    f'INSERT INTO "{schema}".build_runs '
+                    '(id, namespace, analysis_id, analysis_name, status, request_json, starter_json, '
+                    'current_engine_run_id, created_at, started_at, updated_at, execution_generation, next_event_sequence) '
+                    'VALUES (%s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s)',
+                    ('build-1', 'default', 'analysis-1', 'Analysis', 'running', Jsonb({}), Jsonb({}), 'run-1', now, now, now, 1, 1),
+                )
+                connection.execute(
+                    f'INSERT INTO "{schema}".build_events '
+                    '(id, build_id, namespace, sequence, type, payload_json, engine_run_id, emitted_at, created_at) '
+                    'VALUES (%s, %s, %s, %s, %s, %s, %s, %s, %s)',
+                    ('event-1', 'build-1', 'default', 1, 'progress', Jsonb({'progress': 0.5}), 'run-1', now, now),
+                )
+                connection.commit()
+
+            command.upgrade(config, _TENANT_REVISION, tag='tenant')
+            with container.connect() as connection:
+                run_row = connection.execute(
+                    f'SELECT namespace, datasource_id, kind, status, request_json FROM "{schema}".compute_worker_runs WHERE id = %s',
+                    ('run-1',),
+                ).fetchone()
+                request_row = connection.execute(
+                    f'SELECT compute_worker_scope, compute_worker_reuse_policy, compute_worker_resource_id, command_envelope '
+                    f'FROM "{schema}".compute_requests WHERE id = %s',
+                    ('request-1',),
+                ).fetchone()
+                build_run_id = connection.execute(
+                    f'SELECT current_compute_worker_run_id FROM "{schema}".build_runs WHERE id = %s',
+                    ('build-1',),
+                ).fetchone()
+                event_run_id = connection.execute(
+                    f'SELECT compute_worker_run_id FROM "{schema}".build_events WHERE id = %s',
+                    ('event-1',),
+                ).fetchone()
+                index_names = {
+                    index[0]
+                    for index in connection.execute(
+                        'SELECT indexname FROM pg_indexes WHERE schemaname = %s',
+                        (schema,),
+                    ).fetchall()
+                }
+            assert run_row == ('default', 'source-1', 'preview', 'completed', {'input': 'kept'})
+            assert request_row == (2, 1, 'analysis-1', b'command')
+            assert build_run_id == ('run-1',)
+            assert event_run_id == ('run-1',)
+            assert {
+                'ix_compute_worker_runs_namespace',
+                'ix_compute_requests_compute_worker_identity',
+                'ix_build_runs_current_compute_worker_run_id',
+                'ix_build_events_compute_worker_run_id',
+            } <= index_names
+
+            command.downgrade(config, '0024_pivot_value_columns', tag='tenant')
+            with container.connect() as connection:
+                run_row = connection.execute(
+                    f'SELECT namespace, datasource_id, kind, status, request_json FROM "{schema}".engine_runs WHERE id = %s',
+                    ('run-1',),
+                ).fetchone()
+                request_row = connection.execute(
+                    f'SELECT engine_scope, engine_reuse_policy, engine_resource_id, command_envelope FROM "{schema}".compute_requests WHERE id = %s',
+                    ('request-1',),
+                ).fetchone()
+                build_run_id = connection.execute(
+                    f'SELECT current_engine_run_id FROM "{schema}".build_runs WHERE id = %s',
+                    ('build-1',),
+                ).fetchone()
+                event_run_id = connection.execute(
+                    f'SELECT engine_run_id FROM "{schema}".build_events WHERE id = %s',
+                    ('event-1',),
+                ).fetchone()
+                index_names = {
+                    index[0]
+                    for index in connection.execute(
+                        'SELECT indexname FROM pg_indexes WHERE schemaname = %s',
+                        (schema,),
+                    ).fetchall()
+                }
+            assert run_row == ('default', 'source-1', 'preview', 'completed', {'input': 'kept'})
+            assert request_row == (2, 1, 'analysis-1', b'command')
+            assert build_run_id == ('run-1',)
+            assert event_run_id == ('run-1',)
+            assert {
+                'ix_engine_runs_namespace',
+                'ix_compute_requests_engine_identity',
+                'ix_build_runs_current_engine_run_id',
+                'ix_build_events_engine_run_id',
+            } <= index_names
         finally:
             with container.connect() as connection:
                 connection.execute(f'DROP SCHEMA IF EXISTS "{schema}" CASCADE')
@@ -1867,9 +2044,9 @@ def test_postgres_compute_claims_are_serialized_per_engine_identity(monkeypatch,
                 namespace='default',
                 kind=enums_pb2.COMPUTE_REQUEST_KIND_PREVIEW,
                 status=enums_pb2.COMPUTE_REQUEST_STATUS_QUEUED,
-                engine_scope=enums_pb2.COMPUTE_WORKER_SCOPE_ANALYSIS_INTERACTIVE,
-                engine_reuse_policy=enums_pb2.COMPUTE_WORKER_REUSE_POLICY_SHARED,
-                engine_resource_id='analysis-shared-identity',
+                compute_worker_scope=enums_pb2.COMPUTE_WORKER_SCOPE_ANALYSIS_INTERACTIVE,
+                compute_worker_reuse_policy=enums_pb2.COMPUTE_WORKER_REUSE_POLICY_SHARED,
+                compute_worker_resource_id='analysis-shared-identity',
                 command_envelope=b'{}',
                 attempts=0,
                 max_attempts=3,
@@ -1970,9 +2147,9 @@ def test_postgres_busy_engine_claim_does_not_block_other_identity(monkeypatch, t
                     namespace='default',
                     kind=enums_pb2.COMPUTE_REQUEST_KIND_PREVIEW,
                     status=enums_pb2.COMPUTE_REQUEST_STATUS_QUEUED,
-                    engine_scope=enums_pb2.COMPUTE_WORKER_SCOPE_ANALYSIS_INTERACTIVE,
-                    engine_reuse_policy=enums_pb2.COMPUTE_WORKER_REUSE_POLICY_SHARED,
-                    engine_resource_id='analysis-busy',
+                    compute_worker_scope=enums_pb2.COMPUTE_WORKER_SCOPE_ANALYSIS_INTERACTIVE,
+                    compute_worker_reuse_policy=enums_pb2.COMPUTE_WORKER_REUSE_POLICY_SHARED,
+                    compute_worker_resource_id='analysis-busy',
                     command_envelope=b'{}',
                     attempts=0,
                     max_attempts=3,
@@ -1986,9 +2163,9 @@ def test_postgres_busy_engine_claim_does_not_block_other_identity(monkeypatch, t
                 namespace='default',
                 kind=enums_pb2.COMPUTE_REQUEST_KIND_PREVIEW,
                 status=enums_pb2.COMPUTE_REQUEST_STATUS_QUEUED,
-                engine_scope=enums_pb2.COMPUTE_WORKER_SCOPE_ANALYSIS_INTERACTIVE,
-                engine_reuse_policy=enums_pb2.COMPUTE_WORKER_REUSE_POLICY_SHARED,
-                engine_resource_id='analysis-other',
+                compute_worker_scope=enums_pb2.COMPUTE_WORKER_SCOPE_ANALYSIS_INTERACTIVE,
+                compute_worker_reuse_policy=enums_pb2.COMPUTE_WORKER_REUSE_POLICY_SHARED,
+                compute_worker_resource_id='analysis-other',
                 command_envelope=b'{}',
                 attempts=0,
                 max_attempts=3,
@@ -3082,7 +3259,7 @@ def test_postgres_runtime_coordinator_takeover_during_compute_terminal_publicati
                 flight_count = _query_value(connection, 'SELECT count(*) FROM "default".compute_request_flights WHERE request_id = %s', (request_id,))
                 run_count = _query_value(
                     connection,
-                    'SELECT count(*) FROM "default".engine_runs WHERE analysis_id = %s AND kind = %s',
+                    'SELECT count(*) FROM "default".compute_worker_runs WHERE analysis_id = %s AND kind = %s',
                     (analysis_id, 'preview'),
                 )
                 accepted_snapshot = connection.execute(
@@ -3341,7 +3518,7 @@ async def test_postgres_runtime_survives_api_crash_during_shared_preview_and_rep
                     )
                     preview_run_count = _query_value(
                         connection,
-                        'SELECT count(*) FROM "default".engine_runs WHERE kind = %s',
+                        'SELECT count(*) FROM "default".compute_worker_runs WHERE kind = %s',
                         ('preview',),
                     )
                 assert preview_request_count == 1

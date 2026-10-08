@@ -12,7 +12,7 @@ from backend_core.domain.build_jobs.models import BuildJobStatus
 from backend_core.domain.runtime_workers.models import RuntimeWorkerKind
 from backend_core.namespace import list_namespaces, reset_namespace, set_namespace_context
 from backend_core.persistence.build_jobs.models import BuildJob
-from backend_core.persistence.engine_instances.models import EngineInstance
+from backend_core.persistence.compute_worker_instances.models import ComputeWorkerInstance
 from backend_core.persistence.runtime_workers.models import RuntimeWorker
 from backend_core.sqlmodel_typing import sa
 from backend_core.time import utc_now as _utcnow
@@ -68,11 +68,11 @@ def list_worker_summaries(session: Session) -> list[schemas.RuntimeWorkerSummary
 
 
 def list_engine_summaries(session: Session) -> list[schemas.EngineInstanceSummary]:
-    stmt = select(EngineInstance).order_by(
-        EngineInstance.namespace,
-        EngineInstance.analysis_id,
-        EngineInstance.engine_scope,
-        EngineInstance.id,
+    stmt = select(ComputeWorkerInstance).order_by(
+        ComputeWorkerInstance.namespace,
+        ComputeWorkerInstance.analysis_id,
+        ComputeWorkerInstance.compute_worker_scope,
+        ComputeWorkerInstance.id,
     )
     rows = list(session.execute(stmt).scalars().all())
     items: list[schemas.EngineInstanceSummary] = []
@@ -94,11 +94,11 @@ def list_engine_summaries(session: Session) -> list[schemas.EngineInstanceSummar
                 status=row.status,
                 current_job_id=row.current_job_id,
                 current_build_id=row.current_build_id,
-                current_engine_run_id=row.current_engine_run_id,
+                current_engine_run_id=row.current_compute_worker_run_id,
                 last_activity_at=row.last_activity_at,
                 last_seen_at=row.last_seen_at,
-                scope=schemas.EngineScope.require(row.engine_scope),
-                reuse_policy=schemas.EngineReusePolicy.require(row.engine_reuse_policy),
+                scope=schemas.EngineScope.require(row.compute_worker_scope),
+                reuse_policy=schemas.EngineReusePolicy.require(row.compute_worker_reuse_policy),
                 datasource_id=row.datasource_id,
                 build_id=row.build_id,
             )
@@ -106,10 +106,10 @@ def list_engine_summaries(session: Session) -> list[schemas.EngineInstanceSummar
     return items
 
 
-def _engine_resource_id(row: EngineInstance) -> str:
-    if row.engine_scope == 'datasource_preview' and row.datasource_id:
+def _engine_resource_id(row: ComputeWorkerInstance) -> str:
+    if row.compute_worker_scope == 'datasource_preview' and row.datasource_id:
         return row.datasource_id
-    if row.engine_scope == 'build' and row.build_id:
+    if row.compute_worker_scope == 'build' and row.build_id:
         return row.build_id
     return row.analysis_id
 

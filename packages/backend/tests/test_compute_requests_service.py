@@ -23,8 +23,8 @@ from backend_core.domain.compute_requests.models import (
 from backend_core.domain.engine_runs.schemas import EngineRunKind, EngineRunStatus
 from backend_core.namespace import reset_namespace, set_namespace_context
 from backend_core.persistence.compute_requests.models import ComputeRequest, ComputeRequestFlight
+from backend_core.persistence.compute_worker_runs.models import ComputeWorkerRun
 from backend_core.persistence.datasource.models import DataSource
-from backend_core.persistence.engine_runs.models import EngineRun
 from backend_core.persistence.runtime_events.models import RuntimeOutboxEvent
 from backend_core.transitions import TransitionOutcome
 from dataforge_protocol import compute_pb2, datasource_pb2, enums_pb2, errors_pb2
@@ -110,8 +110,8 @@ def _stored_response(request: ComputeRequest) -> compute_pb2.ComputeResponseEnve
     return compute_pb2.ComputeResponseEnvelope.FromString(request.response_envelope)
 
 
-def _create_preview_engine_run(session) -> EngineRun:
-    run = EngineRun(
+def _create_preview_engine_run(session) -> ComputeWorkerRun:
+    run = ComputeWorkerRun(
         id=str(uuid4()),
         namespace='default',
         analysis_id='analysis-1',
@@ -791,10 +791,10 @@ def test_cancel_active_requests_for_engine_retires_only_matching_work(test_db_se
     )
 
     assert cancelled == 1
-    assert matching.engine_scope == enums_pb2.COMPUTE_WORKER_SCOPE_ANALYSIS_INTERACTIVE
-    assert matching.engine_reuse_policy == enums_pb2.COMPUTE_WORKER_REUSE_POLICY_SHARED
-    assert matching.engine_resource_id == 'analysis-1'
-    assert other.engine_resource_id == 'analysis-2'
+    assert matching.compute_worker_scope == enums_pb2.COMPUTE_WORKER_SCOPE_ANALYSIS_INTERACTIVE
+    assert matching.compute_worker_reuse_policy == enums_pb2.COMPUTE_WORKER_REUSE_POLICY_SHARED
+    assert matching.compute_worker_resource_id == 'analysis-1'
+    assert other.compute_worker_resource_id == 'analysis-2'
     test_db_session.refresh(matching)
     test_db_session.refresh(other)
     assert matching.status == enums_pb2.COMPUTE_REQUEST_STATUS_FAILED
@@ -961,8 +961,8 @@ def test_claim_next_request_skips_busy_engine_identity_for_claim_call(test_db_se
     lock_attempts: list[str] = []
 
     def try_engine_claim_lock(_session, request: ComputeRequest) -> bool:
-        lock_attempts.append(request.engine_resource_id or '')
-        return request.engine_resource_id != 'analysis-1'
+        lock_attempts.append(request.compute_worker_resource_id or '')
+        return request.compute_worker_resource_id != 'analysis-1'
 
     monkeypatch.setattr(compute_requests_service, '_lock_engine_claim', try_engine_claim_lock)
 
@@ -1002,15 +1002,15 @@ def test_claim_next_request_busy_engine_identity_does_not_filter_non_engine_work
     lock_attempts: list[str | None] = []
 
     def try_engine_claim_lock(_session, request: ComputeRequest) -> bool:
-        lock_attempts.append(request.engine_resource_id)
-        return request.engine_resource_id is None
+        lock_attempts.append(request.compute_worker_resource_id)
+        return request.compute_worker_resource_id is None
 
     monkeypatch.setattr(compute_requests_service, '_lock_engine_claim', try_engine_claim_lock)
 
     claimed = compute_requests_service.claim_next_request(test_db_session, worker_id='worker-1')
 
     assert claimed is not None and claimed.id == non_engine_request.id
-    assert lock_attempts == [busy_request.engine_resource_id, None]
+    assert lock_attempts == [busy_request.compute_worker_resource_id, None]
     test_db_session.refresh(busy_request)
     assert busy_request.status == enums_pb2.COMPUTE_REQUEST_STATUS_QUEUED
     assert claimed.status == enums_pb2.COMPUTE_REQUEST_STATUS_RUNNING
@@ -1027,7 +1027,7 @@ def test_claim_next_request_returns_none_when_all_remaining_engine_identities_ar
     lock_attempts: list[str] = []
 
     def try_engine_claim_lock(_session, request: ComputeRequest) -> bool:
-        lock_attempts.append(request.engine_resource_id or '')
+        lock_attempts.append(request.compute_worker_resource_id or '')
         return False
 
     monkeypatch.setattr(compute_requests_service, '_lock_engine_claim', try_engine_claim_lock)
@@ -1035,7 +1035,7 @@ def test_claim_next_request_returns_none_when_all_remaining_engine_identities_ar
     claimed = compute_requests_service.claim_next_request(test_db_session, worker_id='worker-1')
 
     assert claimed is None
-    assert lock_attempts == [first.engine_resource_id]
+    assert lock_attempts == [first.compute_worker_resource_id]
     test_db_session.refresh(first)
     assert first.status == enums_pb2.COMPUTE_REQUEST_STATUS_QUEUED
 
@@ -1084,9 +1084,9 @@ def test_staged_schema_request_uses_pipeline_analysis_rid_for_engine_ownership(t
         request_json={'target_step_id': 'source', 'tab_id': 'tab-1', 'analysis_pipeline': pipeline},
     )
 
-    assert request.engine_scope == enums_pb2.COMPUTE_WORKER_SCOPE_ANALYSIS_INTERACTIVE
-    assert request.engine_reuse_policy == enums_pb2.COMPUTE_WORKER_REUSE_POLICY_SHARED
-    assert request.engine_resource_id == 'analysis-1'
+    assert request.compute_worker_scope == enums_pb2.COMPUTE_WORKER_SCOPE_ANALYSIS_INTERACTIVE
+    assert request.compute_worker_reuse_policy == enums_pb2.COMPUTE_WORKER_REUSE_POLICY_SHARED
+    assert request.compute_worker_resource_id == 'analysis-1'
 
 
 def test_claim_next_request_filters_engine_work_for_non_engine_lane(test_db_session) -> None:
@@ -1503,7 +1503,7 @@ def test_reclaim_during_completion_preparation_rolls_back_engine_run_finalizatio
         completion = executor.submit(complete_request)
         try:
             assert stage_started.wait(timeout=3)
-            # The completion has staged an EngineRun update but must not yet
+            # The completion has staged an ComputeWorkerRun update but must not yet
             # own the ComputeRequest row. A new worker can expire and reclaim
             # the lease while that work is paused.
             reclaimed = executor.submit(expire_and_reclaim).result(timeout=3)
@@ -1514,7 +1514,7 @@ def test_reclaim_during_completion_preparation_rolls_back_engine_run_finalizatio
         assert completion.result(timeout=5) is None
 
     test_db_session.expire_all()
-    persisted_run = test_db_session.get(EngineRun, engine_run.id)
+    persisted_run = test_db_session.get(ComputeWorkerRun, engine_run.id)
     assert persisted_run is not None
     assert persisted_run.status == EngineRunStatus.RUNNING.value
     persisted_request = compute_requests_service.get_request(test_db_session, request_id)
@@ -1563,7 +1563,7 @@ def test_preview_completion_commits_request_and_engine_run_together(test_db_sess
     assert completed is not None
     test_db_session.expire_all()
     stored_request = test_db_session.get(ComputeRequest, request.id)
-    stored_run = test_db_session.get(EngineRun, engine_run.id)
+    stored_run = test_db_session.get(ComputeWorkerRun, engine_run.id)
     assert stored_request is not None
     assert stored_request.status == enums_pb2.COMPUTE_REQUEST_STATUS_COMPLETED
     assert stored_run is not None
@@ -1610,7 +1610,7 @@ def test_preview_failure_commits_request_and_engine_run_together(test_db_session
     assert failed is not None
     test_db_session.expire_all()
     stored_request = test_db_session.get(ComputeRequest, request.id)
-    stored_run = test_db_session.get(EngineRun, engine_run.id)
+    stored_run = test_db_session.get(ComputeWorkerRun, engine_run.id)
     assert stored_request is not None
     assert stored_request.status == enums_pb2.COMPUTE_REQUEST_STATUS_FAILED
     assert stored_run is not None
@@ -1657,7 +1657,7 @@ def test_preview_completion_rolls_back_when_engine_run_is_already_cancelled(test
     test_db_session.rollback()
     test_db_session.expire_all()
     stored_request = test_db_session.get(ComputeRequest, request.id)
-    stored_run = test_db_session.get(EngineRun, engine_run.id)
+    stored_run = test_db_session.get(ComputeWorkerRun, engine_run.id)
     assert stored_request is not None
     assert stored_request.status == enums_pb2.COMPUTE_REQUEST_STATUS_RUNNING
     assert stored_run is not None
@@ -1908,7 +1908,7 @@ def test_reclaimed_request_rejects_stale_completion(test_db_session) -> None:
     )
     assert stale_completion is None
     test_db_session.expire_all()
-    stored_run = test_db_session.get(EngineRun, engine_run.id)
+    stored_run = test_db_session.get(ComputeWorkerRun, engine_run.id)
     assert stored_run is not None
     assert stored_run.status == EngineRunStatus.RUNNING.value
     assert stored_run.result_json == {}

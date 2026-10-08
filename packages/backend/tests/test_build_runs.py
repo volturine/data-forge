@@ -100,7 +100,7 @@ def test_append_build_event_sequences_and_updates_snapshot(test_db_session) -> N
     assert first.sequence == 1
     assert second.sequence == 2
     assert stored is not None
-    assert stored.current_engine_run_id == 'engine-1'
+    assert stored.current_compute_worker_run_id == 'engine-1'
     assert stored.current_output_name == 'Output 1'
     assert stored.progress == 0.5
     assert stored.current_step == 'Filter rows'

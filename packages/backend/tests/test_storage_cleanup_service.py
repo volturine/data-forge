@@ -741,8 +741,8 @@ def test_ownership_transfer_revokes_a_cleanup_claim_joined_on_the_old_rid(test_d
     request = _preflight(test_db_session)
     source = request.artifact_path
     assert source is not None
-    assert request.engine_resource_id is not None
-    cleanup.register_preflight_source(test_db_session, preflight_id=request.id, resource_id=request.engine_resource_id, source_path=source)
+    assert request.compute_worker_resource_id is not None
+    cleanup.register_preflight_source(test_db_session, preflight_id=request.id, resource_id=request.compute_worker_resource_id, source_path=source)
     test_db_session.commit()
     old_claim = _claim(test_db_session, source)
     consumer = compute_requests_service.create_request(

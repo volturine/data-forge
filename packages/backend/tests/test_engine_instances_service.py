@@ -13,7 +13,7 @@ from backend_core.domain.compute.base import ComputeWorkerStatusInfo
 from backend_core.domain.engine_instances.models import EngineInstanceStatus
 from backend_core.domain.runtime_workers.models import RuntimeWorkerKind
 from backend_core.engine_instances_service import persist_compute_worker_snapshot
-from backend_core.persistence.engine_instances.models import EngineInstance
+from backend_core.persistence.compute_worker_instances.models import ComputeWorkerInstance
 
 
 @pytest.fixture(autouse=True)
@@ -48,26 +48,26 @@ def _engine_status(resource_id: str, *, container_id: str, last_activity: str | 
     )
 
 
-def _engine_instance(worker_id: str, namespace: str, resource_id: str, *, stamp: datetime) -> EngineInstance:
-    return EngineInstance(
+def _engine_instance(worker_id: str, namespace: str, resource_id: str, *, stamp: datetime) -> ComputeWorkerInstance:
+    return ComputeWorkerInstance(
         id=f'{worker_id}:{namespace}:analysis_interactive:{resource_id}',
         worker_id=worker_id,
         namespace=namespace,
         analysis_id=resource_id,
-        engine_scope='analysis_interactive',
-        engine_reuse_policy='shared',
+        compute_worker_scope='analysis_interactive',
+        compute_worker_reuse_policy='shared',
         status=EngineInstanceStatus.RUNNING.value,
         current_job_id=f'job-{resource_id}',
         current_build_id=f'build-{resource_id}',
-        current_engine_run_id=f'run-{resource_id}',
+        current_compute_worker_run_id=f'run-{resource_id}',
         last_seen_at=stamp,
         updated_at=stamp,
     )
 
 
 def test_concurrent_engine_snapshots_upsert_one_identity(test_engine) -> None:
-    table = EngineInstance.metadata.tables[EngineInstance.__tablename__]
-    EngineInstance.metadata.create_all(test_engine, tables=[table])
+    table = ComputeWorkerInstance.metadata.tables[ComputeWorkerInstance.__tablename__]
+    ComputeWorkerInstance.metadata.create_all(test_engine, tables=[table])
     barrier = Barrier(12)
 
     def persist(index: int) -> None:
@@ -85,15 +85,15 @@ def test_concurrent_engine_snapshots_upsert_one_identity(test_engine) -> None:
         list(executor.map(persist, range(12)))
 
     with Session(test_engine) as session:
-        rows = session.exec(select(EngineInstance).where(table.c.id.like('worker-snapshots:%'))).all()
+        rows = session.exec(select(ComputeWorkerInstance).where(table.c.id.like('worker-snapshots:%'))).all()
 
     assert len(rows) == 1
     assert rows[0].container_id in {f'container-{index}' for index in range(12)}
 
 
 def test_engine_snapshot_reads_active_rows_once_and_stops_missing_engines(test_engine) -> None:
-    table = EngineInstance.metadata.tables[EngineInstance.__tablename__]
-    EngineInstance.metadata.create_all(test_engine, tables=[table])
+    table = ComputeWorkerInstance.metadata.tables[ComputeWorkerInstance.__tablename__]
+    ComputeWorkerInstance.metadata.create_all(test_engine, tables=[table])
     last_activity = datetime(2026, 1, 1, tzinfo=UTC).isoformat()
     first_stamp = datetime(2026, 1, 1, tzinfo=UTC)
     second_stamp = first_stamp + timedelta(seconds=5)
@@ -108,9 +108,9 @@ def test_engine_snapshot_reads_active_rows_once_and_stops_missing_engines(test_e
     def count_engine_selects(_conn, _cursor, statement, parameters, _context, executemany) -> None:
         nonlocal engine_updates
         normalized = statement.upper()
-        if normalized.lstrip().startswith('SELECT') and 'ENGINE_INSTANCES' in normalized:
+        if normalized.lstrip().startswith('SELECT') and 'COMPUTE_WORKER_INSTANCES' in normalized:
             engine_selects.append(normalized)
-        if normalized.lstrip().startswith('UPDATE') and 'ENGINE_INSTANCES' in normalized:
+        if normalized.lstrip().startswith('UPDATE') and 'COMPUTE_WORKER_INSTANCES' in normalized:
             engine_updates += 1
             engine_update_batches.append((executemany, len(parameters) if executemany else 1))
 
@@ -133,7 +133,7 @@ def test_engine_snapshot_reads_active_rows_once_and_stops_missing_engines(test_e
         event.remove(test_engine, 'before_cursor_execute', count_engine_selects)
 
     with Session(test_engine) as session:
-        rows = session.exec(select(EngineInstance).where(table.c.worker_id == 'worker-batch')).all()
+        rows = session.exec(select(ComputeWorkerInstance).where(table.c.worker_id == 'worker-batch')).all()
         by_analysis = {row.analysis_id: row for row in rows}
 
     assert len(engine_selects) == 1
@@ -148,13 +148,13 @@ def test_engine_snapshot_reads_active_rows_once_and_stops_missing_engines(test_e
         'SUPERVISOR_ID',
         'OWNER_ID',
         'STATUS',
-        'ENGINE_SCOPE',
-        'ENGINE_REUSE_POLICY',
+        'COMPUTE_WORKER_SCOPE',
+        'COMPUTE_WORKER_REUSE_POLICY',
         'DATASOURCE_ID',
         'BUILD_ID',
         'CURRENT_JOB_ID',
         'CURRENT_BUILD_ID',
-        'CURRENT_ENGINE_RUN_ID',
+        'CURRENT_COMPUTE_WORKER_RUN_ID',
         'RESOURCE_CONFIG_JSON',
         'EFFECTIVE_RESOURCES_JSON',
         'LAST_ACTIVITY_AT',
@@ -176,8 +176,8 @@ def test_engine_snapshot_reads_active_rows_once_and_stops_missing_engines(test_e
 
 
 def test_engine_snapshot_generation_stops_reclaimable_prior_coordinator_rows(test_engine, monkeypatch) -> None:
-    table = EngineInstance.metadata.tables[EngineInstance.__tablename__]
-    EngineInstance.metadata.create_all(test_engine, tables=[table])
+    table = ComputeWorkerInstance.metadata.tables[ComputeWorkerInstance.__tablename__]
+    ComputeWorkerInstance.metadata.create_all(test_engine, tables=[table])
     first_stamp = datetime(2026, 1, 1, tzinfo=UTC)
     snapshot_stamp = first_stamp + timedelta(seconds=5)
     requested_kinds: list[RuntimeWorkerKind] = []
@@ -205,7 +205,7 @@ def test_engine_snapshot_generation_stops_reclaimable_prior_coordinator_rows(tes
         )
 
     with Session(test_engine) as session:
-        rows = session.exec(select(EngineInstance).where(table.c.namespace == 'default')).all()
+        rows = session.exec(select(ComputeWorkerInstance).where(table.c.namespace == 'default')).all()
         by_id = {row.id: row for row in rows}
 
     assert requested_kinds == [RuntimeWorkerKind.COORDINATOR]
@@ -217,7 +217,7 @@ def test_engine_snapshot_generation_stops_reclaimable_prior_coordinator_rows(tes
         assert row.status == EngineInstanceStatus.STOPPED.value
         assert row.current_job_id is None
         assert row.current_build_id is None
-        assert row.current_engine_run_id is None
+        assert row.current_compute_worker_run_id is None
         assert row.last_seen_at == snapshot_stamp
         assert row.updated_at == snapshot_stamp
 
@@ -227,8 +227,8 @@ def test_engine_snapshot_generation_stops_reclaimable_prior_coordinator_rows(tes
 
 
 def test_engine_snapshot_generation_preserves_fresh_prior_coordinator_rows(test_engine, monkeypatch) -> None:
-    table = EngineInstance.metadata.tables[EngineInstance.__tablename__]
-    EngineInstance.metadata.create_all(test_engine, tables=[table])
+    table = ComputeWorkerInstance.metadata.tables[ComputeWorkerInstance.__tablename__]
+    ComputeWorkerInstance.metadata.create_all(test_engine, tables=[table])
     first_stamp = datetime(2026, 1, 1, tzinfo=UTC)
     snapshot_stamp = first_stamp + timedelta(seconds=5)
     monkeypatch.setattr(
@@ -249,7 +249,7 @@ def test_engine_snapshot_generation_preserves_fresh_prior_coordinator_rows(test_
         persist_compute_worker_snapshot(session, worker_id='worker-current', namespace='default', statuses=[], now=snapshot_stamp)
 
     with Session(test_engine) as session:
-        rows = session.exec(select(EngineInstance)).all()
+        rows = session.exec(select(ComputeWorkerInstance)).all()
         by_id = {row.id: row for row in rows}
 
     fresh_row = by_id['worker-fresh:default:analysis_interactive:analysis-fresh']
@@ -272,8 +272,8 @@ def test_engine_snapshot_generation_preserves_fresh_prior_coordinator_rows(test_
 
 
 def test_engine_snapshot_reports_advisory_wait_and_snapshot_write_phases(test_engine, monkeypatch) -> None:
-    table = EngineInstance.metadata.tables[EngineInstance.__tablename__]
-    EngineInstance.metadata.create_all(test_engine, tables=[table])
+    table = ComputeWorkerInstance.metadata.tables[ComputeWorkerInstance.__tablename__]
+    ComputeWorkerInstance.metadata.create_all(test_engine, tables=[table])
     tick = 10.0
 
     def fake_clock() -> float:

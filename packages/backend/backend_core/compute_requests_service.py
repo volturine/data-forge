@@ -231,9 +231,9 @@ def _engine_claim_lock_key(request: ComputeRequest) -> int | None:
 
 
 def _engine_claim_identity(request: ComputeRequest) -> tuple[str, int, int, str] | None:
-    if request.engine_scope is None or request.engine_reuse_policy is None or request.engine_resource_id is None:
+    if request.compute_worker_scope is None or request.compute_worker_reuse_policy is None or request.compute_worker_resource_id is None:
         return None
-    return request.namespace, request.engine_scope, request.engine_reuse_policy, request.engine_resource_id
+    return request.namespace, request.compute_worker_scope, request.compute_worker_reuse_policy, request.compute_worker_resource_id
 
 
 def _try_lock_flight(session: Session, namespace: str, flight_key: str) -> bool:
@@ -415,9 +415,9 @@ def _stage_request(
         namespace=namespace,
         kind=kind,
         status=enums_pb2.COMPUTE_REQUEST_STATUS_QUEUED,
-        engine_scope=identity.scope if identity is not None else None,
-        engine_reuse_policy=identity.reuse_policy if identity is not None else None,
-        engine_resource_id=identity.resource_id if identity is not None else None,
+        compute_worker_scope=identity.scope if identity is not None else None,
+        compute_worker_reuse_policy=identity.reuse_policy if identity is not None else None,
+        compute_worker_resource_id=identity.resource_id if identity is not None else None,
         command_envelope=envelope.SerializeToString(),
         max_attempts=settings.runtime_compute_max_attempts,
         created_at=now,
@@ -784,9 +784,9 @@ def cancel_active_requests_for_engine(
                 ]
             )
         )
-        .where(table.c.engine_scope == identity.scope)
-        .where(table.c.engine_reuse_policy == identity.reuse_policy)
-        .where(table.c.engine_resource_id == identity.resource_id)
+        .where(table.c.compute_worker_scope == identity.scope)
+        .where(table.c.compute_worker_reuse_policy == identity.reuse_policy)
+        .where(table.c.compute_worker_resource_id == identity.resource_id)
         .with_for_update()
     )
     requests = list(session.execute(statement).scalars().all())
@@ -873,9 +873,9 @@ def claim_next_request(
     table = ComputeRequest.metadata.tables[ComputeRequest.__tablename__]
     reclaimable = set(reclaimable_owner_ids or ())
     has_engine_identity = and_(
-        table.c.engine_scope.is_not(None),
-        table.c.engine_reuse_policy.is_not(None),
-        table.c.engine_resource_id.is_not(None),
+        table.c.compute_worker_scope.is_not(None),
+        table.c.compute_worker_reuse_policy.is_not(None),
+        table.c.compute_worker_resource_id.is_not(None),
     )
     blocked_engine_identities: set[tuple[str, int, int, str]] = set()
     while True:
@@ -890,9 +890,9 @@ def claim_next_request(
         has_running_sibling = (
             select(running.c.id)
             .where(running.c.namespace == table.c.namespace)
-            .where(running.c.engine_scope == table.c.engine_scope)
-            .where(running.c.engine_reuse_policy == table.c.engine_reuse_policy)
-            .where(running.c.engine_resource_id == table.c.engine_resource_id)
+            .where(running.c.compute_worker_scope == table.c.compute_worker_scope)
+            .where(running.c.compute_worker_reuse_policy == table.c.compute_worker_reuse_policy)
+            .where(running.c.compute_worker_resource_id == table.c.compute_worker_resource_id)
             .where(running.c.status == enums_pb2.COMPUTE_REQUEST_STATUS_RUNNING)
             .where(running.c.id != table.c.id)
             .exists()
@@ -908,9 +908,9 @@ def claim_next_request(
                         *(
                             and_(
                                 table.c.namespace == namespace,
-                                table.c.engine_scope == scope,
-                                table.c.engine_reuse_policy == reuse_policy,
-                                table.c.engine_resource_id == resource_id,
+                                table.c.compute_worker_scope == scope,
+                                table.c.compute_worker_reuse_policy == reuse_policy,
+                                table.c.compute_worker_resource_id == resource_id,
                             )
                             for namespace, scope, reuse_policy, resource_id in sorted(blocked_engine_identities)
                         )
@@ -934,9 +934,9 @@ def claim_next_request(
         active_sibling = session.execute(
             select(running.c.id)
             .where(running.c.namespace == row.namespace)
-            .where(running.c.engine_scope == row.engine_scope)
-            .where(running.c.engine_reuse_policy == row.engine_reuse_policy)
-            .where(running.c.engine_resource_id == row.engine_resource_id)
+            .where(running.c.compute_worker_scope == row.compute_worker_scope)
+            .where(running.c.compute_worker_reuse_policy == row.compute_worker_reuse_policy)
+            .where(running.c.compute_worker_resource_id == row.compute_worker_resource_id)
             .where(running.c.status == enums_pb2.COMPUTE_REQUEST_STATUS_RUNNING)
             .where(running.c.id != row.id)
             .limit(1)
@@ -1243,7 +1243,7 @@ def _active_request_claim(
         ComputeRequest.namespace,
         ComputeRequest.kind,
         ComputeRequest.status,
-        ComputeRequest.engine_resource_id,
+        ComputeRequest.compute_worker_resource_id,
     ]
     if include_command_envelope:
         selected_columns.append(ComputeRequest.command_envelope)

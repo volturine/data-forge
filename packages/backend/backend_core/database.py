@@ -533,7 +533,7 @@ def database_pool_snapshot() -> dict[str, object]:
 
 
 def _shared_tables():
-    from backend_core.persistence.engine_instances.models import EngineInstance
+    from backend_core.persistence.compute_worker_instances.models import ComputeWorkerInstance
     from backend_core.persistence.mcp_pending.models import McpPendingAction
     from backend_core.persistence.namespaces.models import NamespaceEngineCredential, RuntimeNamespace
     from backend_core.persistence.runtime_events.models import RuntimeCoordinatorState, RuntimeNamespaceWork, RuntimeNamespaceWorkWake
@@ -543,7 +543,7 @@ def _shared_tables():
 
     table_names = {
         AppSettings.__tablename__,
-        EngineInstance.__tablename__,
+        ComputeWorkerInstance.__tablename__,
         McpPendingAction.__tablename__,
         NamespaceEngineCredential.__tablename__,
         RuntimeNamespace.__tablename__,
@@ -565,8 +565,8 @@ def _tenant_tables():
     from backend_core.persistence.build_jobs.models import BuildJob
     from backend_core.persistence.build_runs.models import BuildEvent, BuildRun, BuildRunDatasource
     from backend_core.persistence.compute_requests.models import ComputeRequest, ComputeRequestDatasource, ComputeRequestFlight
+    from backend_core.persistence.compute_worker_runs.models import ComputeWorkerRun
     from backend_core.persistence.datasource.models import DataSource, DataSourceColumnMetadata
-    from backend_core.persistence.engine_runs.models import EngineRun
     from backend_core.persistence.healthchecks.models import HealthCheck, HealthCheckResult
     from backend_core.persistence.locks.models import ResourceLock
     from backend_core.persistence.runtime_events.models import NotificationDeliveryPartReceipt, NotificationDeliveryReceipt, RuntimeOutboxEvent
@@ -588,7 +588,7 @@ def _tenant_tables():
         ComputeRequestFlight.__tablename__,
         DataSource.__tablename__,
         DataSourceColumnMetadata.__tablename__,
-        EngineRun.__tablename__,
+        ComputeWorkerRun.__tablename__,
         HealthCheck.__tablename__,
         HealthCheckResult.__tablename__,
         ResourceLock.__tablename__,

@@ -8,7 +8,7 @@ from sqlmodel import Session
 
 from backend_core.engine_runs_service import _compute_schema_diff, _compute_timing_diff, _safe_int, compare_engine_runs
 from backend_core.exceptions import AppError, EngineRunComparisonError
-from backend_core.persistence.engine_runs.models import EngineRun
+from backend_core.persistence.compute_worker_runs.models import ComputeWorkerRun
 
 
 def _create_run(
@@ -20,8 +20,8 @@ def _create_run(
     result_json: dict | None = None,
     step_timings: dict | None = None,
     duration_ms: int | None = None,
-) -> EngineRun:
-    run = EngineRun(
+) -> ComputeWorkerRun:
+    run = ComputeWorkerRun(
         id=str(uuid.uuid4()),
         analysis_id=str(uuid.uuid4()),
         datasource_id=datasource_id or str(uuid.uuid4()),

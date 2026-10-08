@@ -87,9 +87,9 @@ def _remove_preflight(session: Session, preflight_id: str, *, delete_source: boo
         return None
     source = row.artifact_path if delete_source and row.artifact_name == 'preflight-source' else None
     if source is not None:
-        if row.engine_resource_id is None:
+        if row.compute_worker_resource_id is None:
             raise ValueError('Preflight source ownership requires its exact engine RID')
-        storage_cleanup_service.register_preflight_source(session, preflight_id=preflight_id, resource_id=row.engine_resource_id, source_path=source)
+        storage_cleanup_service.register_preflight_source(session, preflight_id=preflight_id, resource_id=row.compute_worker_resource_id, source_path=source)
     session.delete(row)
     session.commit()
     return source
@@ -104,7 +104,7 @@ def _expire_preflights(session: Session) -> None:
     rows = session.exec(
         select(ComputeRequest)
         .where(ComputeRequest.kind == enums_pb2.COMPUTE_REQUEST_KIND_DATASOURCE_PREFLIGHT)
-        .where(ComputeRequest.id == ComputeRequest.engine_resource_id)
+        .where(ComputeRequest.id == ComputeRequest.compute_worker_resource_id)
         .where(ComputeRequest.created_at < before)
         .where(col(ComputeRequest.status).in_([enums_pb2.COMPUTE_REQUEST_STATUS_COMPLETED, enums_pb2.COMPUTE_REQUEST_STATUS_FAILED]))
         .with_for_update(skip_locked=True)
@@ -113,15 +113,17 @@ def _expire_preflights(session: Session) -> None:
     for row in rows:
         active = session.exec(
             select(ComputeRequest.id)
-            .where(ComputeRequest.engine_resource_id == row.id)
+            .where(ComputeRequest.compute_worker_resource_id == row.id)
             .where(col(ComputeRequest.status).in_([enums_pb2.COMPUTE_REQUEST_STATUS_QUEUED, enums_pb2.COMPUTE_REQUEST_STATUS_RUNNING]))
         ).first()
         if active is not None:
             continue
         if row.artifact_path is not None and row.artifact_name == 'preflight-source':
-            if row.engine_resource_id is None:
+            if row.compute_worker_resource_id is None:
                 raise ValueError('Preflight source ownership requires its exact engine RID')
-            storage_cleanup_service.register_preflight_source(session, preflight_id=row.id, resource_id=row.engine_resource_id, source_path=row.artifact_path)
+            storage_cleanup_service.register_preflight_source(
+                session, preflight_id=row.id, resource_id=row.compute_worker_resource_id, source_path=row.artifact_path
+            )
         session.delete(row)
     session.commit()
 

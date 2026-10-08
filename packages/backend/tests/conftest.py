@@ -77,9 +77,9 @@ def _register_backend_sqlmodel_metadata() -> None:
     from backend_core.persistence.analysis_versions.models import AnalysisVersion
     from backend_core.persistence.build_jobs.models import BuildJob
     from backend_core.persistence.build_runs.models import BuildEvent, BuildRun
+    from backend_core.persistence.compute_worker_instances.models import ComputeWorkerInstance
+    from backend_core.persistence.compute_worker_runs.models import ComputeWorkerRun
     from backend_core.persistence.datasource.models import DataSource, DataSourceColumnMetadata
-    from backend_core.persistence.engine_instances.models import EngineInstance
-    from backend_core.persistence.engine_runs.models import EngineRun
     from backend_core.persistence.healthchecks.models import HealthCheck, HealthCheckResult
     from backend_core.persistence.locks.models import ResourceLock
     from backend_core.persistence.mcp_pending.models import McpPendingAction
@@ -108,8 +108,8 @@ def _register_backend_sqlmodel_metadata() -> None:
     del ChatEvent
     del DataSource
     del DataSourceColumnMetadata
-    del EngineInstance
-    del EngineRun
+    del ComputeWorkerInstance
+    del ComputeWorkerRun
     del HealthCheck
     del HealthCheckResult
     del ResourceLock
@@ -127,7 +127,7 @@ def _register_backend_sqlmodel_metadata() -> None:
 
 
 def _backend_settings_tables() -> list[Any]:
-    from backend_core.persistence.engine_instances.models import EngineInstance
+    from backend_core.persistence.compute_worker_instances.models import ComputeWorkerInstance
     from backend_core.persistence.mcp_pending.models import McpPendingAction
     from backend_core.persistence.namespaces.models import NamespaceEngineCredential, RuntimeNamespace
     from backend_core.persistence.runtime_workers.models import RuntimeWorker
@@ -141,7 +141,7 @@ def _backend_settings_tables() -> list[Any]:
         ChatTurn.__tablename__,
         ChatMessage.__tablename__,
         ChatEvent.__tablename__,
-        EngineInstance.__tablename__,
+        ComputeWorkerInstance.__tablename__,
         McpPendingAction.__tablename__,
         User.__tablename__,
         AuthProvider.__tablename__,
