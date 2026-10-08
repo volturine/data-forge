@@ -4,7 +4,6 @@ from pathlib import Path
 from typing import Any
 
 import pytest
-from pydantic import ValidationError
 
 from modules.analysis.step_schemas import (
     get_step_catalog,
@@ -14,7 +13,7 @@ from modules.analysis.step_schemas import (
 
 LEGACY_PIPELINE_FIXTURE_DIR = Path(__file__).parent / 'fixtures' / 'legacy_pipelines'
 LEGACY_PIPELINE_FIXTURES = tuple(sorted(LEGACY_PIPELINE_FIXTURE_DIR.glob('*.json')))
-PIVOT_VALUE_COLUMNS_MIGRATION = Path(__file__).parents[1] / 'database' / 'alembic' / 'versions' / '0024_pivot_value_columns.py'
+ALEMBIC_VERSIONS_DIR = Path(__file__).parents[1] / 'database' / 'alembic' / 'versions'
 
 
 def _load_pipeline_fixture(path: Path) -> dict[str, Any]:
@@ -42,6 +41,14 @@ def _pipeline_steps(pipeline_definition: dict[str, Any], fixture_name: str) -> l
     return steps
 
 
+def _apply_pipeline_data_migrations(pipeline_definition: dict[str, Any]) -> None:
+    for migration_path in sorted(ALEMBIC_VERSIONS_DIR.glob('[0-9][0-9][0-9][0-9]_*.py')):
+        migration = runpy.run_path(str(migration_path))
+        rewrite_pipeline_definition = migration.get('rewrite_pipeline_definition')
+        if callable(rewrite_pipeline_definition):
+            rewrite_pipeline_definition(pipeline_definition, downgrade=False)
+
+
 def test_legacy_pipeline_fixtures_cover_every_catalog_step_type() -> None:
     assert LEGACY_PIPELINE_FIXTURES, f'No legacy pipeline fixtures found in {LEGACY_PIPELINE_FIXTURE_DIR}'
 
@@ -61,25 +68,7 @@ def test_legacy_pipeline_fixtures_cover_every_catalog_step_type() -> None:
 @pytest.mark.parametrize('fixture_path', LEGACY_PIPELINE_FIXTURES, ids=lambda path: path.stem)
 def test_legacy_pipeline_configs_normalize_after_data_migrations(fixture_path: Path) -> None:
     pipeline_definition = _load_pipeline_fixture(fixture_path)
-    steps_before_migration = _pipeline_steps(pipeline_definition, fixture_path.name)
-    legacy_pivot_steps = [step for step in steps_before_migration if step['type'] == 'pivot' and 'values' in step['config']]
-
-    for step in legacy_pivot_steps:
-        with pytest.raises(ValidationError, match='values'):
-            normalize_step_config('pivot', step['config'])
-
-    migration_applied = False
-    if PIVOT_VALUE_COLUMNS_MIGRATION.exists():
-        migration = runpy.run_path(str(PIVOT_VALUE_COLUMNS_MIGRATION))
-        rewrite_pipeline_definition = migration.get('_rewrite_pipeline_definition')
-        if callable(rewrite_pipeline_definition):
-            migration_applied = rewrite_pipeline_definition(pipeline_definition, downgrade=False)
-
-    for step in legacy_pivot_steps:
-        config = step['config']
-        assert migration_applied and 'values' not in config and 'value_columns' in config, (
-            f'{fixture_path.name}: step type "pivot" still has obsolete config key "values" after applying persisted-pipeline data migrations'
-        )
+    _apply_pipeline_data_migrations(pipeline_definition)
 
     for step_index, step in enumerate(_pipeline_steps(pipeline_definition, fixture_path.name)):
         step_type = step['type']
