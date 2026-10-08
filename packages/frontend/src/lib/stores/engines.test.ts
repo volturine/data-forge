@@ -160,6 +160,22 @@ describe('EnginesStore', () => {
 		expect(store.isStreaming).toBe(true);
 	});
 
+	test('refreshSnapshot reloads a settled snapshot without starting the live stream', () => {
+		const firstStream = mockStreamConnection();
+		store.loadSnapshotOnce();
+		firstStream.emitSnapshot([]);
+
+		const refreshStream = mockStreamConnection();
+		store.refreshSnapshot();
+		const engines = [makeEngine({ analysis_id: 'a-2', resource_id: 'a-2' })];
+		refreshStream.emitSnapshot(engines);
+
+		expect(mockConnectEnginesStream).toHaveBeenCalledTimes(2);
+		expect(store.engines).toEqual(engines);
+		expect(store.isStreaming).toBe(false);
+		expect(refreshStream.close).toHaveBeenCalledOnce();
+	});
+
 	test('snapshot updates engines and connection state', () => {
 		const stream = mockStreamConnection();
 		const engines = [

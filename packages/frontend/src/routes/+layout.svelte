@@ -218,6 +218,14 @@
 		void chatStore.open_panel();
 	}
 
+	function refreshEnginesSnapshotWhenVisible(): void {
+		if (document.visibilityState !== 'visible') return;
+		if (!appBootstrap.appReady || onAuthPage || !isNamespaceReady()) return;
+		if (configStore.authRequired && !authStore.authenticated) return;
+		if (!namespaceState.value) return;
+		enginesStore.refreshSnapshot();
+	}
+
 	const queryClient = new QueryClient({
 		defaultOptions: {
 			queries: {
@@ -246,6 +254,7 @@
 	});
 
 	onMount(() => {
+		document.addEventListener('visibilitychange', refreshEnginesSnapshotWhenVisible);
 		void appBootstrap.start().then(() => {
 			bindNamespaceServices();
 			redirectIfNeeded();
@@ -254,6 +263,7 @@
 		const cleanupAudit = installAuditListeners();
 		return () => {
 			cleanupAudit?.();
+			document.removeEventListener('visibilitychange', refreshEnginesSnapshotWhenVisible);
 			appLifecycle.destroy();
 		};
 	});
