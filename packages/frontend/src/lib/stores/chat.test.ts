@@ -1,6 +1,7 @@
 import { describe, test, expect, vi, beforeEach, afterEach } from 'vitest';
-import { okAsync } from 'neverthrow';
+import { errAsync, okAsync, ResultAsync } from 'neverthrow';
 import type { ChatEvent, ChatModel } from '$lib/api/chat';
+import type { ApiError } from '$lib/api/client';
 import type { MCPTool } from '$lib/api/mcp';
 import type { AppSettings } from '$lib/api/settings';
 
@@ -190,6 +191,7 @@ describe('ChatStore — pure local logic', () => {
 			await store.open_panel();
 
 			expect(store.sessionId).toBe('session-1');
+			expect(store.initState).toBe('ready');
 			expect(store.configured).toBe(true);
 			expect(chatApi.getHistory).toHaveBeenCalledWith('session-1');
 			expect(chatApi.openEventStream).toHaveBeenLastCalledWith('session-1', 0);
@@ -214,8 +216,127 @@ describe('ChatStore — pure local logic', () => {
 			await store.open_panel();
 
 			expect(store.provider).toBe('ollama');
+			expect(store.initState).toBe('ready');
 			expect(store.configured).toBe(true);
 			expect(chatApi.listModels).toHaveBeenCalled();
+		});
+
+		test('open_panel stays neutral while settings load and coalesces concurrent opens', async () => {
+			let resolveSettings!: (settings: AppSettings) => void;
+			const settingsPromise = new Promise<AppSettings>((resolve) => {
+				resolveSettings = resolve;
+			});
+			vi.mocked(settingsApi.getSettings).mockReturnValue(
+				ResultAsync.fromSafePromise(settingsPromise)
+			);
+			vi.mocked(mcpApi.listTools).mockReturnValue(okAsync([]));
+			vi.mocked(chatApi.listSessions).mockReturnValue(okAsync([]));
+			vi.mocked(chatApi.listModels).mockReturnValue(okAsync([]));
+
+			const firstOpen = store.open_panel();
+			const secondOpen = store.open_panel();
+
+			expect(store.initState).toBe('loading');
+			expect(store.provider).toBe('openrouter');
+			expect(store.configured).toBe(false);
+			expect(settingsApi.getSettings).toHaveBeenCalledTimes(1);
+
+			resolveSettings(makeSettings({ openrouter_api_key: 'sk-test' }));
+			await Promise.all([firstOpen, secondOpen]);
+
+			expect(store.initState).toBe('ready');
+			expect(store.provider).toBe('openrouter');
+			expect(store.configured).toBe(true);
+		});
+
+		test('settings failure keeps provider unresolved and exposes the actual initialization error', async () => {
+			vi.mocked(settingsApi.getSettings).mockReturnValue(
+				errAsync({
+					type: 'http',
+					message: 'settings unavailable',
+					status: 503
+				} satisfies ApiError) as never
+			);
+
+			await store.open_panel();
+
+			expect(store.initState).toBe('error');
+			expect(store.provider).toBe('openrouter');
+			expect(store.configured).toBe(false);
+			expect(store.error).toBe('settings unavailable');
+		});
+
+		test('failed stale session resume clears its stored key', async () => {
+			storage.set('chat_session_id', 'stale-session');
+			vi.mocked(settingsApi.getSettings).mockReturnValue(okAsync(makeSettings()));
+			vi.mocked(mcpApi.listTools).mockReturnValue(okAsync([]));
+			vi.mocked(chatApi.listSessions).mockReturnValue(okAsync([]));
+			vi.mocked(chatApi.getHistory).mockReturnValue(
+				errAsync({ type: 'http', message: 'session not found', status: 404 }) as never
+			);
+			vi.mocked(chatApi.listModels).mockReturnValue(okAsync([]));
+
+			await store.open_panel();
+
+			expect(storage.has('chat_session_id')).toBe(false);
+			expect(store.initState).toBe('ready');
+		});
+
+		test('reopening refreshes saved provider settings with a neutral state and coalesces opens', async () => {
+			vi.mocked(settingsApi.getSettings).mockReturnValueOnce(okAsync(makeSettings()));
+			vi.mocked(mcpApi.listTools).mockReturnValue(okAsync([]));
+			vi.mocked(chatApi.listSessions).mockReturnValue(okAsync([]));
+			vi.mocked(chatApi.listModels).mockReturnValue(okAsync([]));
+
+			await store.open_panel();
+			store.setProvider('openrouter');
+			expect(store.configured).toBe(false);
+			store.close();
+
+			let resolveSettings!: (settings: AppSettings) => void;
+			const settingsPromise = new Promise<AppSettings>((resolve) => {
+				resolveSettings = resolve;
+			});
+			vi.mocked(settingsApi.getSettings).mockReturnValueOnce(
+				ResultAsync.fromSafePromise(settingsPromise)
+			);
+			vi.mocked(chatApi.listModels).mockReturnValueOnce(
+				okAsync([{ id: 'z-ai/glm-5.3-flash', name: 'GLM', context_length: 1 }])
+			);
+
+			const firstOpen = store.open_panel();
+			const secondOpen = store.open_panel();
+			expect(store.initState).toBe('loading');
+			expect(settingsApi.getSettings).toHaveBeenCalledTimes(2);
+
+			resolveSettings(
+				makeSettings({
+					openrouter_api_key: '••••••••',
+					openrouter_default_model: 'z-ai/glm-5.3-flash'
+				})
+			);
+			await Promise.all([firstOpen, secondOpen]);
+
+			await vi.waitFor(() => expect(store.configured).toBe(true));
+			expect(store.initState).toBe('ready');
+
+			expect(settingsApi.getSettings).toHaveBeenCalledTimes(2);
+			expect(store.provider).toBe('openrouter');
+			expect(store.model).toBe('z-ai/glm-5.3-flash');
+		});
+
+		test('resetForSignOut clears settings before another account opens chat', () => {
+			store.settings = makeSettings({ openrouter_api_key: '••••••••' });
+			store.provider = 'openrouter';
+			store.configured = true;
+			store.initState = 'ready';
+
+			store.resetForSignOut();
+
+			expect(store.settings).toBeNull();
+			expect(store.configured).toBe(false);
+			expect(store.initState).toBe('idle');
+			expect(store.apiKey).toBe('');
 		});
 
 		test('empty openrouter apply does not erase the stored key', async () => {

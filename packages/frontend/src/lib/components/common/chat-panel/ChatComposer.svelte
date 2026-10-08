@@ -124,54 +124,56 @@
 			color: 'fg.muted'
 		})}
 	>
-		<select
-			class={css({
-				borderWidth: '1',
-				backgroundColor: 'bg.panel',
-				color: 'fg.muted',
-				fontSize: '10px',
-				fontFamily: 'mono',
-				paddingX: '1',
-				paddingY: '0.5',
-				height: '20px',
-				flexShrink: '0'
-			})}
-			value={chatStore.provider}
-			onchange={(event) => {
-				const provider = (event.currentTarget as HTMLSelectElement).value as ChatProvider;
-				chatStore.setProvider(provider);
-				if (chatStore.models.length === 0) {
-					void chatStore.loadModels();
-				}
-			}}
-			title="Chat provider"
-		>
-			<option value="openrouter">OpenRouter</option>
-			<option value="ollama">Ollama</option>
-		</select>
+		{#if chatStore.initState !== 'loading'}
+			<select
+				class={css({
+					borderWidth: '1',
+					backgroundColor: 'bg.panel',
+					color: 'fg.muted',
+					fontSize: '10px',
+					fontFamily: 'mono',
+					paddingX: '1',
+					paddingY: '0.5',
+					height: '20px',
+					flexShrink: '0'
+				})}
+				value={chatStore.provider}
+				onchange={(event) => {
+					const provider = (event.currentTarget as HTMLSelectElement).value as ChatProvider;
+					chatStore.setProvider(provider);
+					if (chatStore.models.length === 0) {
+						void chatStore.loadModels();
+					}
+				}}
+				title="Chat provider"
+			>
+				<option value="openrouter">OpenRouter</option>
+				<option value="ollama">Ollama</option>
+			</select>
 
-		<button
-			class={css({
-				display: 'flex',
-				alignItems: 'center',
-				gap: '1',
-				border: 'none',
-				background: 'none',
-				padding: '0',
-				cursor: 'pointer',
-				color: 'fg.muted',
-				fontSize: '10px',
-				fontFamily: 'mono',
-				flexShrink: '0',
-				_hover: { color: 'fg.primary' }
-			})}
-			onclick={toggleModelPicker}
-			type="button"
-			title={chatStore.model}
-		>
-			{chatStore.modelDisplayName}
-			<ChevronDown size={8} />
-		</button>
+			<button
+				class={css({
+					display: 'flex',
+					alignItems: 'center',
+					gap: '1',
+					border: 'none',
+					background: 'none',
+					padding: '0',
+					cursor: 'pointer',
+					color: 'fg.muted',
+					fontSize: '10px',
+					fontFamily: 'mono',
+					flexShrink: '0',
+					_hover: { color: 'fg.primary' }
+				})}
+				onclick={toggleModelPicker}
+				type="button"
+				title={chatStore.model}
+			>
+				{chatStore.modelDisplayName}
+				<ChevronDown size={8} />
+			</button>
+		{/if}
 		{#if chatStore.sessionId}
 			<span
 				class={css({

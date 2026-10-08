@@ -1,6 +1,16 @@
 <script lang="ts">
 	import { resolve } from '$app/paths';
-	import { ArrowDown, CircleAlert, RotateCcw, X, Eye, Play, History, Trash2 } from '@lucide/svelte';
+	import {
+		ArrowDown,
+		CircleAlert,
+		RotateCcw,
+		X,
+		Eye,
+		Play,
+		History,
+		Trash2,
+		LoaderCircle
+	} from '@lucide/svelte';
 	import { onDestroy, onMount } from 'svelte';
 	import { SvelteSet } from 'svelte/reactivity';
 	import { css } from '$lib/styles/panda';
@@ -166,186 +176,207 @@
 >
 	<!-- Empty state -->
 	{#if chatStore.timeline.length === 0 && !chatStore.loading}
-		<div
-			class={css({
-				flex: '1',
-				display: 'flex',
-				flexDirection: 'column',
-				alignItems: 'center',
-				justifyContent: 'center',
-				gap: '3',
-				paddingY: '6',
-				color: 'fg.muted'
-			})}
-		>
-			<div class={css({ display: 'flex', alignItems: 'center', gap: '2' })}>
-				{#if chatStore.mode === 'plan'}
-					<Eye size={24} class={css({ opacity: '0.4' })} />
-				{:else}
-					<Play size={24} class={css({ opacity: '0.4' })} />
-				{/if}
+		{#if chatStore.initState === 'loading'}
+			<div
+				role="status"
+				aria-live="polite"
+				class={css({
+					flex: '1',
+					display: 'flex',
+					alignItems: 'center',
+					justifyContent: 'center',
+					gap: '2',
+					color: 'fg.muted',
+					fontSize: 'sm'
+				})}
+			>
+				<LoaderCircle size={14} class={css({ animation: 'spin 1s linear infinite' })} />
+				Loading chat…
 			</div>
-			<div class={css({ textAlign: 'center' })}>
-				<p class={css({ fontSize: 'sm', margin: '0', marginBottom: '1' })}>
-					{chatStore.mode === 'plan'
-						? 'Plan mode — read-only, proposes before acting'
-						: 'Execute mode — full access, acts directly'}
-				</p>
-				<p class={css({ fontSize: 'xs', margin: '0', color: 'fg.muted' })}>
-					{#if !chatStore.configured}
-						No AI provider is configured.
-						<a href={providerSetupHref} class={css({ color: 'accent.primary' })}
-							>Set one up in Profile</a
-						>
-					{:else if chatStore.sessionId}
-						Send a message to get started.
+		{:else}
+			<div
+				class={css({
+					flex: '1',
+					display: 'flex',
+					flexDirection: 'column',
+					alignItems: 'center',
+					justifyContent: 'center',
+					gap: '3',
+					paddingY: '6',
+					color: 'fg.muted'
+				})}
+			>
+				<div class={css({ display: 'flex', alignItems: 'center', gap: '2' })}>
+					{#if chatStore.mode === 'plan'}
+						<Eye size={24} class={css({ opacity: '0.4' })} />
 					{:else}
-						Start a session and ask anything.
+						<Play size={24} class={css({ opacity: '0.4' })} />
 					{/if}
-				</p>
-			</div>
-			{#if chatStore.configured}
-				<div
-					class={css({
-						display: 'flex',
-						flexDirection: 'column',
-						gap: '1.5',
-						width: '100%',
-						maxWidth: '280px'
-					})}
-				>
-					{#each EXAMPLE_PROMPTS as prompt (prompt)}
-						<button
-							class={css({
-								display: 'block',
-								width: '100%',
-								textAlign: 'left',
-								padding: '2',
-								paddingX: '3',
-								fontSize: 'xs',
-								borderWidth: '1',
-								borderRadius: 'md',
-								backgroundColor: 'transparent',
-								color: 'fg.secondary',
-								cursor: 'pointer',
-								_hover: { backgroundColor: 'bg.tertiary' }
-							})}
-							onclick={() => onSendPrompt(prompt)}
-							type="button"
-							disabled={chatStore.loading}
-						>
-							{prompt}
-						</button>
-					{/each}
 				</div>
-			{/if}
-			{#if chatStore.sessions.length > 0}
-				<div
-					class={css({
-						display: 'flex',
-						flexDirection: 'column',
-						gap: '1',
-						width: '100%',
-						maxWidth: '280px'
-					})}
-				>
+				<div class={css({ textAlign: 'center' })}>
+					<p class={css({ fontSize: 'sm', margin: '0', marginBottom: '1' })}>
+						{chatStore.mode === 'plan'
+							? 'Plan mode — read-only, proposes before acting'
+							: 'Execute mode — full access, acts directly'}
+					</p>
+					<p class={css({ fontSize: 'xs', margin: '0', color: 'fg.muted' })}>
+						{#if chatStore.initState === 'error'}
+							Chat setup could not be completed.
+						{:else if !chatStore.configured}
+							No AI provider is configured.
+							<a href={providerSetupHref} class={css({ color: 'accent.primary' })}
+								>Set one up in Profile</a
+							>
+						{:else if chatStore.sessionId}
+							Send a message to get started.
+						{:else}
+							Start a session and ask anything.
+						{/if}
+					</p>
+				</div>
+				{#if chatStore.configured}
 					<div
 						class={css({
 							display: 'flex',
-							alignItems: 'center',
-							gap: '1',
-							fontSize: '10px',
-							color: 'fg.muted',
-							fontWeight: 'medium',
-							textTransform: 'uppercase',
-							letterSpacing: 'wide'
+							flexDirection: 'column',
+							gap: '1.5',
+							width: '100%',
+							maxWidth: '280px'
 						})}
 					>
-						<History size={10} />
-						Recent sessions
-					</div>
-					{#each chatStore.sessions.slice(0, 5) as session (session.id)}
-						<div
-							class={[
-								'group',
-								css({
-									display: 'flex',
-									alignItems: 'center',
-									gap: '1',
-									borderRadius: 'sm',
-									overflow: 'hidden',
-									_hover: { backgroundColor: 'bg.hover' }
-								})
-							]}
-						>
+						{#each EXAMPLE_PROMPTS as prompt (prompt)}
 							<button
 								class={css({
-									display: 'flex',
-									flexDirection: 'column',
-									gap: '0',
-									flex: '1',
+									display: 'block',
+									width: '100%',
 									textAlign: 'left',
-									padding: '1.5',
-									paddingX: '2',
-									border: 'none',
-									background: 'none',
+									padding: '2',
+									paddingX: '3',
+									fontSize: 'xs',
+									borderWidth: '1',
+									borderRadius: 'md',
+									backgroundColor: 'transparent',
 									color: 'fg.secondary',
 									cursor: 'pointer',
-									minWidth: '0',
-									overflow: 'hidden'
+									_hover: { backgroundColor: 'bg.tertiary' }
 								})}
-								onclick={() => void chatStore.resumeSession(session.id)}
+								onclick={() => onSendPrompt(prompt)}
 								type="button"
 								disabled={chatStore.loading}
 							>
-								<span
-									class={css({
-										fontSize: 'xs',
-										overflow: 'hidden',
-										textOverflow: 'ellipsis',
-										whiteSpace: 'nowrap',
-										color: session.preview ? 'fg.primary' : 'fg.muted'
-									})}
-								>
-									{session.preview || 'Empty session'}
-								</span>
-								<span
-									class={css({
-										fontSize: '10px',
-										color: 'fg.muted',
-										fontFamily: 'mono'
-									})}
-								>
-									{session.model} · {timeAgo(session.created_at)}
-								</span>
+								{prompt}
 							</button>
-							<button
-								class={css({
-									padding: '1',
-									border: 'none',
-									background: 'none',
-									color: 'fg.muted',
-									cursor: 'pointer',
-									flexShrink: '0',
-									borderRadius: 'sm',
-									opacity: '0',
-									_groupHover: { opacity: '1' },
-									_hover: { color: 'fg.error', backgroundColor: 'bg.errorSubtle' }
-								})}
-								onclick={(e) => {
-									e.stopPropagation();
-									void chatStore.deleteSession(session.id);
-								}}
-								title="Delete session"
-								type="button"
-							>
-								<Trash2 size={11} />
-							</button>
+						{/each}
+					</div>
+				{/if}
+				{#if chatStore.sessions.length > 0}
+					<div
+						class={css({
+							display: 'flex',
+							flexDirection: 'column',
+							gap: '1',
+							width: '100%',
+							maxWidth: '280px'
+						})}
+					>
+						<div
+							class={css({
+								display: 'flex',
+								alignItems: 'center',
+								gap: '1',
+								fontSize: '10px',
+								color: 'fg.muted',
+								fontWeight: 'medium',
+								textTransform: 'uppercase',
+								letterSpacing: 'wide'
+							})}
+						>
+							<History size={10} />
+							Recent sessions
 						</div>
-					{/each}
-				</div>
-			{/if}
-		</div>
+						{#each chatStore.sessions.slice(0, 5) as session (session.id)}
+							<div
+								class={[
+									'group',
+									css({
+										display: 'flex',
+										alignItems: 'center',
+										gap: '1',
+										borderRadius: 'sm',
+										overflow: 'hidden',
+										_hover: { backgroundColor: 'bg.hover' }
+									})
+								]}
+							>
+								<button
+									class={css({
+										display: 'flex',
+										flexDirection: 'column',
+										gap: '0',
+										flex: '1',
+										textAlign: 'left',
+										padding: '1.5',
+										paddingX: '2',
+										border: 'none',
+										background: 'none',
+										color: 'fg.secondary',
+										cursor: 'pointer',
+										minWidth: '0',
+										overflow: 'hidden'
+									})}
+									onclick={() => void chatStore.resumeSession(session.id)}
+									type="button"
+									disabled={chatStore.loading}
+								>
+									<span
+										class={css({
+											fontSize: 'xs',
+											overflow: 'hidden',
+											textOverflow: 'ellipsis',
+											whiteSpace: 'nowrap',
+											color: session.preview ? 'fg.primary' : 'fg.muted'
+										})}
+									>
+										{session.preview || 'Empty session'}
+									</span>
+									<span
+										class={css({
+											fontSize: '10px',
+											color: 'fg.muted',
+											fontFamily: 'mono'
+										})}
+									>
+										{session.model} · {timeAgo(session.created_at)}
+									</span>
+								</button>
+								<button
+									class={css({
+										padding: '1',
+										border: 'none',
+										background: 'none',
+										color: 'fg.muted',
+										cursor: 'pointer',
+										flexShrink: '0',
+										borderRadius: 'sm',
+										opacity: '0',
+										_groupHover: { opacity: '1' },
+										_hover: { color: 'fg.error', backgroundColor: 'bg.errorSubtle' }
+									})}
+									onclick={(e) => {
+										e.stopPropagation();
+										void chatStore.deleteSession(session.id);
+									}}
+									title="Delete session"
+									type="button"
+								>
+									<Trash2 size={11} />
+								</button>
+							</div>
+						{/each}
+					</div>
+				{/if}
+			</div>
+		{/if}
 	{/if}
 
 	<!-- Timeline controls -->
@@ -514,7 +545,7 @@
 {/if}
 
 <!-- Error banner -->
-{#if chatStore.error}
+{#if chatStore.error && chatStore.initState !== 'loading'}
 	<div
 		class={css({
 			display: 'flex',

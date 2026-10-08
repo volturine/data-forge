@@ -206,6 +206,7 @@
 
 	async function handleSignOut() {
 		await authStore.logout();
+		chatStore.resetForSignOut();
 		void goto(resolve('/login'));
 	}
 
