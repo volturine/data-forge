@@ -27,9 +27,9 @@ from runtime.docker_compute_worker import (
 )
 from runtime.docker_hosts import DockerHostRegistry, DockerHostSpec
 
-_LOCAL_HOST = DockerHostSpec(name="local", docker_host="unix:///var/run/docker.sock", engine_network="net-test")
-_HOST_CONNECTED_LOCAL = DockerHostSpec(name="local", docker_host="unix:///var/run/docker.sock", connect_host="127.0.0.1", engine_network="net-test")
-_REMOTE_HOST = DockerHostSpec(name="node-b", docker_host="tcp://10.0.0.5:2375", connect_host="10.0.0.5", engine_network="net-test")
+_LOCAL_HOST = DockerHostSpec(name="local", docker_host="unix:///var/run/docker.sock", compute_worker_network="net-test")
+_HOST_CONNECTED_LOCAL = DockerHostSpec(name="local", docker_host="unix:///var/run/docker.sock", connect_host="127.0.0.1", compute_worker_network="net-test")
+_REMOTE_HOST = DockerHostSpec(name="node-b", docker_host="tcp://10.0.0.5:2375", connect_host="10.0.0.5", compute_worker_network="net-test")
 
 
 class _ProbeClient:
@@ -115,20 +115,20 @@ def test_unpinned_engine_image_warns_in_prod_but_is_allowed(monkeypatch, caplog)
     from runtime.docker_compute_worker import _warn_unpinned_compute_worker_image
 
     monkeypatch.setattr(settings, "prod_mode_enabled", True)
-    monkeypatch.setattr(settings, "engine_image", "registry.example/dataforge-engine:latest")
+    monkeypatch.setattr(settings, "compute_worker_image", "registry.example/dataforge-engine:latest")
 
     with caplog.at_level(logging.WARNING):
         _warn_unpinned_compute_worker_image()
 
     assert "not digest-pinned" in caplog.text
 
-    monkeypatch.setattr(settings, "engine_image", f"registry.example/dataforge-engine@sha256:{'a' * 64}")
+    monkeypatch.setattr(settings, "compute_worker_image", f"registry.example/dataforge-engine@sha256:{'a' * 64}")
     _warn_unpinned_compute_worker_image()
     assert caplog.text.count("not digest-pinned") == 1
 
 
 def test_container_name_is_dns_safe_and_bounded(monkeypatch) -> None:
-    monkeypatch.setattr(settings, "engine_connect_host", "")
+    monkeypatch.setattr(settings, "compute_worker_connect_host", "")
     identity = compute_pb2.ComputeWorkerIdentity(
         scope=enums_pb2.COMPUTE_WORKER_SCOPE_ANALYSIS_INTERACTIVE,
         reuse_policy=enums_pb2.COMPUTE_WORKER_REUSE_POLICY_SHARED,
@@ -147,41 +147,41 @@ def test_container_name_is_dns_safe_and_bounded(monkeypatch) -> None:
 
 def test_container_rpc_target_uses_unique_container_dns_name(monkeypatch) -> None:
     class Container:
-        name = "/dataforge-engine-analysis-abc123"
+        name = "/dataforge-compute-worker-analysis-abc123"
         status = "running"
 
         def reload(self) -> None:
             return None
 
-    monkeypatch.setattr(settings, "engine_rpc_port", 50053)
+    monkeypatch.setattr(settings, "compute_worker_rpc_port", 50053)
 
-    assert _container_rpc_target(Container(), _LOCAL_HOST) == "dataforge-engine-analysis-abc123:50053"
+    assert _container_rpc_target(Container(), _LOCAL_HOST) == "dataforge-compute-worker-analysis-abc123:50053"
 
 
 def test_container_rpc_target_uses_dns_without_polling_docker(monkeypatch) -> None:
     class Container:
-        name = "/dataforge-engine-analysis-starting"
+        name = "/dataforge-compute-worker-analysis-starting"
         status = "created"
 
         def reload(self) -> None:
             raise AssertionError("Docker status is observed only if gRPC readiness fails")
 
-    monkeypatch.setattr(settings, "engine_rpc_port", 50053)
+    monkeypatch.setattr(settings, "compute_worker_rpc_port", 50053)
     container = Container()
 
-    assert _container_rpc_target(container, _LOCAL_HOST) == "dataforge-engine-analysis-starting:50053"
+    assert _container_rpc_target(container, _LOCAL_HOST) == "dataforge-compute-worker-analysis-starting:50053"
     assert container.status == "created"
 
 
 def test_container_rpc_target_dials_the_host_connect_address_for_published_ports(monkeypatch) -> None:
     class Container:
-        name = "/dataforge-engine-analysis-remote"
+        name = "/dataforge-compute-worker-analysis-remote"
         attrs = {"NetworkSettings": {"Ports": {"50053/tcp": [{"HostIp": "0.0.0.0", "HostPort": "40123"}]}}}
 
         def reload(self) -> None:
             return None
 
-    monkeypatch.setattr(settings, "engine_rpc_port", 50053)
+    monkeypatch.setattr(settings, "compute_worker_rpc_port", 50053)
 
     assert _container_rpc_target(Container(), _REMOTE_HOST) == "10.0.0.5:40123"
 
@@ -201,7 +201,7 @@ def test_await_listening_waits_for_channel_then_checks_health_once(monkeypatch) 
     engine = DockerComputeWorker(_identity())
     engine._channel = object()  # type: ignore[assignment]
     engine._stub = Stub()  # type: ignore[assignment]
-    monkeypatch.setattr(settings, "engine_start_timeout_seconds", 30)
+    monkeypatch.setattr(settings, "compute_worker_start_timeout_seconds", 30)
     monkeypatch.setattr(grpc, "channel_ready_future", lambda channel: ReadyFuture())
 
     engine._await_listening()
@@ -239,7 +239,7 @@ def test_await_listening_retries_transient_health_deadlines_within_start_deadlin
     engine = DockerComputeWorker(_identity())
     engine._channel = object()  # type: ignore[assignment]
     engine._stub = Stub()  # type: ignore[assignment]
-    monkeypatch.setattr(settings, "engine_start_timeout_seconds", 30)
+    monkeypatch.setattr(settings, "compute_worker_start_timeout_seconds", 30)
     monkeypatch.setattr(grpc, "channel_ready_future", lambda channel: ReadyFuture())
     monkeypatch.setattr("runtime.docker_compute_worker.time.sleep", retry_delays.append)
 
@@ -533,7 +533,7 @@ def test_stale_coordinator_shutdown_detaches_without_mutating_container(monkeypa
     engine._channel = Handle()  # type: ignore[assignment]
     engine._client = Handle()
     engine._artifact_transfers["job"] = (Path("/tmp/artifact"), "s3://bucket/artifact")
-    monkeypatch.setattr(settings, "engine_shutdown_grace_seconds", 0)
+    monkeypatch.setattr(settings, "compute_worker_shutdown_grace_seconds", 0)
     monkeypatch.setattr("runtime.docker_compute_worker.delete_object", lambda _url: actions.append("delete-artifact"))
 
     engine.shutdown()
@@ -607,7 +607,7 @@ def test_coordinator_loss_mid_shutdown_prevents_stop_remove_and_artifact_delete(
     engine._channel = Handle()  # type: ignore[assignment]
     engine._client = Handle()
     engine._artifact_transfers["job"] = (Path("/tmp/artifact"), "s3://bucket/artifact")
-    monkeypatch.setattr(settings, "engine_shutdown_grace_seconds", 0)
+    monkeypatch.setattr(settings, "compute_worker_shutdown_grace_seconds", 0)
     monkeypatch.setattr("runtime.docker_compute_worker.delete_object", lambda _url: actions.append("delete-artifact"))
 
     engine.shutdown()
@@ -627,7 +627,7 @@ def test_intentional_shutdown_is_not_reported_as_container_crash(monkeypatch) ->
     result = engine.get_result(job_id="job-1", timeout=0)
 
     assert result is not None
-    assert result.error == "Engine shutdown requested"
+    assert result.error == "Compute worker shutdown requested"
     assert result.error_kind == "engine_shutdown"
 
 
@@ -641,7 +641,7 @@ def test_initialize_fails_fast_on_identity_collision(monkeypatch) -> None:
             return grpc.StatusCode.FAILED_PRECONDITION
 
         def details(self):
-            return "Engine already initialized for another-engine"
+            return "Compute worker already initialized for another-compute-worker"
 
     class Stub:
         def Initialize(self, request, timeout):  # noqa: N802 - gRPC stub name
@@ -651,9 +651,9 @@ def test_initialize_fails_fast_on_identity_collision(monkeypatch) -> None:
             raise AlreadyInitialized()
 
     engine._stub = Stub()  # type: ignore[assignment]
-    monkeypatch.setattr(settings, "engine_start_timeout_seconds", 120)
+    monkeypatch.setattr(settings, "compute_worker_start_timeout_seconds", 120)
 
-    with pytest.raises(RuntimeError, match="Engine identity collision"):
+    with pytest.raises(RuntimeError, match="Compute worker identity collision"):
         engine._initialize(
             resources={"max_threads": 1, "max_memory_mb": 256, "streaming_chunk_size": 0},
             credentials=ObjectStoreCredentials(access_key="access", secret_key="secret"),
@@ -672,7 +672,7 @@ def test_initialize_does_not_retry_transient_rpc_failures(monkeypatch) -> None:
             return grpc.StatusCode.UNAVAILABLE
 
         def details(self):
-            return "engine temporarily unavailable"
+            return "compute worker temporarily unavailable"
 
     class Stub:
         def Initialize(self, request, timeout):  # noqa: N802 - generated gRPC method
@@ -682,9 +682,9 @@ def test_initialize_does_not_retry_transient_rpc_failures(monkeypatch) -> None:
             raise Unavailable()
 
     engine._stub = Stub()  # type: ignore[assignment]
-    monkeypatch.setattr(settings, "engine_start_timeout_seconds", 120)
+    monkeypatch.setattr(settings, "compute_worker_start_timeout_seconds", 120)
 
-    with pytest.raises(RuntimeError, match="Engine initialization failed"):
+    with pytest.raises(RuntimeError, match="Compute worker initialization failed"):
         engine._initialize(
             resources={"max_threads": 1, "max_memory_mb": 256, "streaming_chunk_size": 0},
             credentials=ObjectStoreCredentials(access_key="access", secret_key="secret"),
@@ -718,7 +718,7 @@ def test_oom_exit_is_reported_with_container_details() -> None:
         "oom_killed": True,
         "termination_reason": "oom_killed",
     }
-    assert result.error == "Engine container terminated (reason=oom_killed, exit_code=137, oom_killed=True)"
+    assert result.error == "Compute worker container terminated (reason=oom_killed, exit_code=137, oom_killed=True)"
 
 
 def test_repeated_grpc_health_failures_do_not_evict_a_running_container(monkeypatch) -> None:
@@ -739,7 +739,7 @@ def test_repeated_grpc_health_failures_do_not_evict_a_running_container(monkeypa
     engine._alive = True
     engine.bind_capacity_notifier(lambda: notifications.append(True))
     engine._heartbeat_stop.clear()
-    monkeypatch.setattr(settings, "engine_heartbeat_interval_seconds", 0)
+    monkeypatch.setattr(settings, "compute_worker_heartbeat_interval_seconds", 0)
     monkeypatch.setattr("runtime.docker_compute_worker._LIVENESS_CACHE_SECONDS", 0.0)
 
     class Stub:
@@ -831,7 +831,7 @@ def test_runtime_readiness_probes_every_host_and_requires_one_ready(monkeypatch)
     calls: list[str] = []
     monkeypatch.setattr(
         settings,
-        "engine_docker_hosts",
+        "compute_worker_docker_hosts",
         '[{"name": "local", "docker_host": "unix:///var/run/docker.sock"},'
         ' {"name": "node-b", "docker_host": "tcp://10.0.0.5:2375", "connect_host": "10.0.0.5"}]',
     )
@@ -854,7 +854,7 @@ def test_runtime_readiness_probes_every_host_and_requires_one_ready(monkeypatch)
 
     validate_compute_worker_runtime_readiness()
 
-    assert calls == ["image-reference", "local", "node-b", f"monitor:{settings.engine_docker_host_health_interval_seconds}"]
+    assert calls == ["image-reference", "local", "node-b", f"monitor:{settings.compute_worker_docker_host_health_interval_seconds}"]
     statuses = {status.name: status.healthy for status in registry.snapshot()}
     assert statuses == {"local": True, "node-b": False}
 
@@ -876,7 +876,7 @@ def test_runtime_readiness_fails_when_no_host_answers(monkeypatch) -> None:
 def test_runtime_readiness_rejects_host_caps_below_compute_workers(monkeypatch) -> None:
     monkeypatch.setattr(
         settings,
-        "engine_docker_hosts",
+        "compute_worker_docker_hosts",
         '[{"name": "a", "docker_host": "tcp://10.0.0.5:2375", "connect_host": "10.0.0.5", "max_workers": 2},'
         ' {"name": "b", "docker_host": "tcp://10.0.0.6:2375", "connect_host": "10.0.0.6", "max_workers": 3}]',
     )
@@ -916,7 +916,7 @@ def test_resolve_launch_context_caches_daemon_and_image_lookups_per_host(monkeyp
 
         def get(self, name: str):
             self.calls += 1
-            assert name == "engine:test"
+            assert name == "compute-worker:test"
             return Image()
 
     class Networks:
@@ -937,7 +937,7 @@ def test_resolve_launch_context_caches_daemon_and_image_lookups_per_host(monkeyp
             self.info_calls += 1
             return {"NCPU": 6}
 
-    registry = DockerHostRegistry([_LOCAL_HOST, _REMOTE_HOST], engine_image="engine:test")
+    registry = DockerHostRegistry([_LOCAL_HOST, _REMOTE_HOST], compute_worker_image="compute-worker:test")
 
     client = Client()
     first = registry.launch_context(_LOCAL_HOST, client)
@@ -1081,10 +1081,10 @@ def test_engine_start_waits_for_rpc_listener_before_initializing(monkeypatch, ca
     assert created["labels"]["io.dataforge.docker-host"] == "local"
     assert engine.docker_host == "local"
     assert docker_host_registry().snapshot()[0].placements == 1
-    startup_log = next(record.message for record in caplog.records if "Slow engine startup" in record.message)
+    startup_log = next(record.message for record in caplog.records if "Slow compute-worker startup" in record.message)
     assert "request_id=cold-preview-request" in startup_log
     assert "namespace=tenant-a" in startup_log
-    assert "engine_scope=analysis_interactive" in startup_log
+    assert "compute_worker_scope=analysis_interactive" in startup_log
     assert f"resource_id={engine.identity.resource_id}" in startup_log
     client.close()
 
@@ -1114,7 +1114,7 @@ def test_warm_worker_uses_the_standard_compute_worker_runtime(monkeypatch) -> No
             return None
 
     client = Client()
-    monkeypatch.setattr(settings, "engine_connect_host", "")
+    monkeypatch.setattr(settings, "compute_worker_connect_host", "")
     _ready_registry(monkeypatch)
     engine = DockerComputeWorker()
     monkeypatch.setattr("runtime.docker_compute_worker._resolve_launch_context", lambda _host, _client: (1, "image-id"))
@@ -1132,8 +1132,8 @@ def test_warm_worker_uses_the_standard_compute_worker_runtime(monkeypatch) -> No
 
     environment = captured["environment"]
     assert isinstance(environment, dict)
-    assert environment["ENGINE_INIT_TIMEOUT_SECONDS"] == "0"
-    assert "ENGINE_PRELOAD_COMPUTE" not in environment
+    assert environment["COMPUTE_WORKER_INIT_TIMEOUT_SECONDS"] == "0"
+    assert "COMPUTE_WORKER_PRELOAD_COMPUTE" not in environment
     assert captured["cpu_shares"] == 128
     assert docker_host_registry().snapshot()[0].placements == 1
     # Detaching leaves the container (and its slot) on the host.

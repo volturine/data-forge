@@ -4,9 +4,17 @@ import json
 import os
 from pathlib import Path
 
+from runtime.environment import read_env
+
 
 def _load_bootstrap_if_present() -> None:
-    path = Path(os.environ.get("ENGINE_BOOTSTRAP_PATH", "/run/dataforge-secrets/engine.json"))
+    path = Path(
+        read_env(
+            "COMPUTE_WORKER_BOOTSTRAP_PATH",
+            "/run/dataforge-secrets/compute-worker.json",
+            legacy_names=("ENGINE_BOOTSTRAP_PATH",),
+        )
+    )
     if not path.exists():
         return
     try:

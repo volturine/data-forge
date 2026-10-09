@@ -41,7 +41,7 @@ HOST_PROBE_TIMEOUT_SECONDS = 5
 
 
 class DockerHostConfigError(ValueError):
-    """``ENGINE_DOCKER_HOSTS`` is malformed or inconsistent."""
+    """``COMPUTE_WORKER_DOCKER_HOSTS`` is malformed or inconsistent."""
 
 
 class NoEligibleDockerHost(RuntimeError):
@@ -52,11 +52,11 @@ class NoEligibleDockerHost(RuntimeError):
 class DockerHostSpec:
     name: str
     docker_host: str
-    # Address the worker dials for engine RPC ports published on this host.
-    # Empty means Docker DNS on ``engine_network``, which only works for a
+    # Address the worker manager dials for compute-worker RPC ports published on this host.
+    # Empty means Docker DNS on ``compute_worker_network``, which only works for a
     # daemon the worker container itself is attached to.
     connect_host: str = ""
-    engine_network: str = ""
+    compute_worker_network: str = ""
     # Object store endpoint handed to engines on this host. Empty falls back
     # to the worker's own endpoint.
     object_store_endpoint: str = ""
@@ -115,7 +115,7 @@ def _read_str(entry: dict[str, Any], key: str, *, default: str = "") -> str:
     if value is None:
         return default
     if not isinstance(value, str):
-        raise DockerHostConfigError(f"ENGINE_DOCKER_HOSTS entry field {key!r} must be a string")
+        raise DockerHostConfigError(f"COMPUTE_WORKER_DOCKER_HOSTS entry field {key!r} must be a string")
     return value.strip()
 
 
@@ -124,15 +124,14 @@ def parse_docker_hosts(
     *,
     default_docker_host: str,
     default_connect_host: str,
-    default_engine_network: str,
+    default_compute_worker_network: str,
     default_object_store_endpoint: str,
 ) -> tuple[DockerHostSpec, ...]:
-    """Parse ``ENGINE_DOCKER_HOSTS``; an empty value yields the single legacy host.
+    """Parse ``COMPUTE_WORKER_DOCKER_HOSTS``; empty input yields the local host.
 
-    The single-host variables (``ENGINE_DOCKER_HOST``, ``ENGINE_CONNECT_HOST``,
-    ``ENGINE_DOCKER_NETWORK``, ``ENGINE_OBJECT_STORE_ENDPOINT``) remain the
-    defaults for every entry that omits the field, so an existing deployment
-    keeps working without the list.
+    The single-host variables remain the defaults for every entry that omits a
+    field. The old ``engine_network`` JSON key is accepted for one release and
+    logs a deprecation warning.
     """
     text = raw.strip()
     if not text:
@@ -141,48 +140,59 @@ def parse_docker_hosts(
                 name=DEFAULT_HOST_NAME,
                 docker_host=default_docker_host,
                 connect_host=default_connect_host,
-                engine_network=default_engine_network,
+                compute_worker_network=default_compute_worker_network,
                 object_store_endpoint=default_object_store_endpoint,
             ),
         )
     try:
         payload = json.loads(text)
     except json.JSONDecodeError as exc:
-        raise DockerHostConfigError(f"ENGINE_DOCKER_HOSTS must be a JSON list: {exc}") from exc
+        raise DockerHostConfigError(f"COMPUTE_WORKER_DOCKER_HOSTS must be a JSON list: {exc}") from exc
     if not isinstance(payload, list) or not payload:
-        raise DockerHostConfigError("ENGINE_DOCKER_HOSTS must be a non-empty JSON list of host objects")
+        raise DockerHostConfigError("COMPUTE_WORKER_DOCKER_HOSTS must be a non-empty JSON list of host objects")
     specs: list[DockerHostSpec] = []
     seen: set[str] = set()
     for index, entry in enumerate(payload):
         if not isinstance(entry, dict):
-            raise DockerHostConfigError(f"ENGINE_DOCKER_HOSTS[{index}] must be an object")
+            raise DockerHostConfigError(f"COMPUTE_WORKER_DOCKER_HOSTS[{index}] must be an object")
         name = _read_str(entry, "name", default=DEFAULT_HOST_NAME if len(payload) == 1 else "")
         if not _HOST_NAME_RE.fullmatch(name):
-            raise DockerHostConfigError(f"ENGINE_DOCKER_HOSTS[{index}] needs a name matching {_HOST_NAME_RE.pattern}")
+            raise DockerHostConfigError(f"COMPUTE_WORKER_DOCKER_HOSTS[{index}] needs a name matching {_HOST_NAME_RE.pattern}")
         if name in seen:
-            raise DockerHostConfigError(f"ENGINE_DOCKER_HOSTS has duplicate host name {name!r}")
+            raise DockerHostConfigError(f"COMPUTE_WORKER_DOCKER_HOSTS has duplicate host name {name!r}")
         seen.add(name)
         docker_host = _read_str(entry, "docker_host") or default_docker_host
         if not docker_host.startswith(_SUPPORTED_SCHEMES):
-            raise DockerHostConfigError(f"ENGINE_DOCKER_HOSTS[{name}] docker_host must start with one of {', '.join(_SUPPORTED_SCHEMES)}")
+            raise DockerHostConfigError(f"COMPUTE_WORKER_DOCKER_HOSTS[{name}] docker_host must start with one of {', '.join(_SUPPORTED_SCHEMES)}")
         max_workers_raw = entry.get("max_workers", 0)
         if isinstance(max_workers_raw, bool) or not isinstance(max_workers_raw, int) or max_workers_raw < 0:
-            raise DockerHostConfigError(f"ENGINE_DOCKER_HOSTS[{name}] max_workers must be a non-negative integer")
+            raise DockerHostConfigError(f"COMPUTE_WORKER_DOCKER_HOSTS[{name}] max_workers must be a non-negative integer")
+        if "compute_worker_network" in entry:
+            compute_worker_network = _read_str(entry, "compute_worker_network") or default_compute_worker_network
+        elif "engine_network" in entry:
+            logger.warning(
+                "Deprecated compute-worker host field engine_network is in use; use compute_worker_network instead. "
+                "The compatibility alias will be removed after this release."
+            )
+            compute_worker_network = _read_str(entry, "engine_network") or default_compute_worker_network
+        else:
+            compute_worker_network = default_compute_worker_network
         spec = DockerHostSpec(
             name=name,
             docker_host=docker_host,
             connect_host=_read_str(entry, "connect_host", default=default_connect_host),
-            engine_network=_read_str(entry, "engine_network") or default_engine_network,
+            compute_worker_network=compute_worker_network,
             object_store_endpoint=_read_str(entry, "object_store_endpoint") or default_object_store_endpoint,
             max_workers=max_workers_raw,
             tls_cert_path=_read_str(entry, "tls_cert_path"),
         )
         if not spec.is_local and not spec.connect_host:
             raise DockerHostConfigError(
-                f"ENGINE_DOCKER_HOSTS[{name}] is a remote daemon and needs connect_host: engines there publish their RPC port and the worker dials that address"
+                f"COMPUTE_WORKER_DOCKER_HOSTS[{name}] is remote and needs connect_host; "
+                "compute workers publish an RPC port there and the manager dials that address"
             )
         if spec.tls_cert_path and not spec.docker_host.startswith(("tcp://", "https://")):
-            raise DockerHostConfigError(f"ENGINE_DOCKER_HOSTS[{name}] tls_cert_path only applies to tcp:// daemons")
+            raise DockerHostConfigError(f"COMPUTE_WORKER_DOCKER_HOSTS[{name}] tls_cert_path only applies to tcp:// daemons")
         specs.append(spec)
     return tuple(specs)
 
@@ -213,7 +223,7 @@ class DockerHostRegistry:
         self,
         hosts: Iterable[DockerHostSpec],
         *,
-        engine_image: str,
+        compute_worker_image: str,
         failure_cooldown_seconds: float = HOST_FAILURE_COOLDOWN_SECONDS,
         clock: Callable[[], float] = time.monotonic,
     ) -> None:
@@ -221,7 +231,7 @@ class DockerHostRegistry:
         if not specs:
             raise DockerHostConfigError("At least one Docker host is required")
         self._states: dict[str, _HostState] = {spec.name: _HostState(spec=spec, order=index) for index, spec in enumerate(specs)}
-        self._engine_image = engine_image
+        self._compute_worker_image = compute_worker_image
         self._failure_cooldown_seconds = failure_cooldown_seconds
         self._clock = clock
         self._lock = threading.Lock()
@@ -240,8 +250,8 @@ class DockerHostRegistry:
     def launch_context(self, spec: DockerHostSpec, client: Any) -> tuple[int | None, str]:
         """Return ``(daemon_cpu_count, image_id)`` for a host, cached per host.
 
-        Image and network are immutable for a worker process, so one lookup
-        per host serves every launch there. A changed ``engine_image`` setting
+        Image and network are immutable for a worker-manager process, so one lookup
+        per host serves every launch there. A changed ``compute_worker_image`` setting
         (tests) invalidates the cached image id.
         """
         state = self._states[spec.name]
@@ -249,17 +259,17 @@ class DockerHostRegistry:
         # or hung remote daemon must not stall placement on the other hosts.
         with self._lock:
             cpu_count = state.cpu_count
-            image_id = state.image_id if state.image_ref == self._engine_image else None
+            image_id = state.image_id if state.image_ref == self._compute_worker_image else None
         if cpu_count is None:
             ncpu = client.info().get("NCPU")
             cpu_count = ncpu if isinstance(ncpu, int) and ncpu > 0 else 0
         if not image_id:
-            image = client.images.get(self._engine_image)
+            image = client.images.get(self._compute_worker_image)
             image_id = str(image.id)
-        client.networks.get(spec.engine_network)
+        client.networks.get(spec.compute_worker_network)
         with self._lock:
             state.cpu_count = cpu_count
-            state.image_ref = self._engine_image
+            state.image_ref = self._compute_worker_image
             state.image_id = image_id
         return (cpu_count or None), image_id
 

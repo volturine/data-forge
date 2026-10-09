@@ -21,6 +21,7 @@ from google.protobuf.timestamp_pb2 import Timestamp
 from dataforge_protocol import compute_worker_runtime_pb2, compute_worker_runtime_pb2_grpc
 from runtime.config import settings
 from runtime.domain.compute.result import ComputeWorkerResult
+from runtime.environment import read_env, read_int
 from runtime.json_values import dict_to_struct, encode_json_bytes
 from runtime.object_store import reset_object_store_client
 
@@ -30,7 +31,8 @@ if TYPE_CHECKING:
     from runtime.compute_worker import PolarsComputeWorker
 
 COMPUTE_WORKER_PROTOCOL_VERSION = 2
-_TOKEN_METADATA_KEY = "x-engine-token"
+_COMPUTE_WORKER_TOKEN_METADATA_KEY = "x-compute-worker-token"
+_LEGACY_ENGINE_TOKEN_METADATA_KEY = "x-engine-token"
 _MAX_RETAINED_COMPLETED_JOBS = 8
 _MAX_TOTAL_JOBS = 100
 _MAX_PROGRESS_EVENTS = 256
@@ -471,9 +473,16 @@ class PolarsComputeWorkerServicer(compute_worker_runtime_pb2_grpc.PolarsComputeW
         if not self._token:
             return True
         metadata = dict(context.invocation_metadata())
-        if metadata.get(_TOKEN_METADATA_KEY) == self._token:
+        if metadata.get(_COMPUTE_WORKER_TOKEN_METADATA_KEY) == self._token:
             return True
-        context.abort(grpc.StatusCode.UNAUTHENTICATED, "Invalid engine token")
+        if metadata.get(_LEGACY_ENGINE_TOKEN_METADATA_KEY) == self._token:
+            logger.warning(
+                "Deprecated gRPC metadata key %s is in use; use %s instead. The compatibility alias will be removed after this release.",
+                _LEGACY_ENGINE_TOKEN_METADATA_KEY,
+                _COMPUTE_WORKER_TOKEN_METADATA_KEY,
+            )
+            return True
+        context.abort(grpc.StatusCode.UNAUTHENTICATED, "Invalid compute-worker token")
         return False
 
     def Initialize(
@@ -488,12 +497,12 @@ class PolarsComputeWorkerServicer(compute_worker_runtime_pb2_grpc.PolarsComputeW
             if self._initialized and (self._compute_worker_identity != request.engine_identity or self._token != request.token):
                 context.abort(
                     grpc.StatusCode.FAILED_PRECONDITION,
-                    f"Engine already initialized for {self._compute_worker_identity}",
+                    f"Compute worker already initialized for {self._compute_worker_identity}",
                 )
             self._compute_worker_identity = request.engine_identity
             self._token = request.token
-            os.environ["ENGINE_IDENTITY"] = request.engine_identity
-            os.environ["ENGINE_RPC_TOKEN"] = request.token
+            os.environ["COMPUTE_WORKER_IDENTITY"] = request.engine_identity
+            os.environ["COMPUTE_WORKER_RPC_TOKEN"] = request.token
             if request.object_store_endpoint:
                 os.environ["OBJECT_STORE_ENDPOINT"] = request.object_store_endpoint
                 settings.object_store_endpoint = request.object_store_endpoint
@@ -721,13 +730,13 @@ def main() -> None:
     # mistaken for a dead one while its first job imports the compute stack.
     _load_compute_engine()
     run_compute_worker_server(
-        host=os.environ.get("ENGINE_RPC_HOST", "0.0.0.0"),
-        port=int(os.environ.get("ENGINE_RPC_PORT", "50053")),
-        compute_worker_identity=os.environ.get("ENGINE_IDENTITY", "unknown"),
+        host=read_env("COMPUTE_WORKER_RPC_HOST", "0.0.0.0", legacy_names=("ENGINE_RPC_HOST",)),
+        port=read_int("COMPUTE_WORKER_RPC_PORT", 50053, min_value=1, max_value=65535, legacy_names=("ENGINE_RPC_PORT",)),
+        compute_worker_identity=read_env("COMPUTE_WORKER_IDENTITY", "unknown", legacy_names=("ENGINE_IDENTITY",)),
         application_version=os.environ.get("APP_VERSION", "unknown"),
-        token=os.environ.get("ENGINE_RPC_TOKEN", ""),
-        heartbeat_timeout_seconds=int(os.environ.get("ENGINE_HEARTBEAT_TIMEOUT_SECONDS", "15")),
-        init_timeout_seconds=int(os.environ.get("ENGINE_INIT_TIMEOUT_SECONDS", "0")),
+        token=read_env("COMPUTE_WORKER_RPC_TOKEN", legacy_names=("ENGINE_RPC_TOKEN",)),
+        heartbeat_timeout_seconds=read_int("COMPUTE_WORKER_HEARTBEAT_TIMEOUT_SECONDS", 15, min_value=1, legacy_names=("ENGINE_HEARTBEAT_TIMEOUT_SECONDS",)),
+        init_timeout_seconds=read_int("COMPUTE_WORKER_INIT_TIMEOUT_SECONDS", 0, min_value=0, legacy_names=("ENGINE_INIT_TIMEOUT_SECONDS",)),
     )
 
 

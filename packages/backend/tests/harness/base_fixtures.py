@@ -20,7 +20,7 @@ from tests.harness.postgres_harness import (
     ExternalPostgres,
     PostgresContainer,
     RustfsContainer,
-    cleanup_stale_test_engine_networks,
+    cleanup_stale_test_compute_worker_networks,
     cleanup_stale_test_postgres,
     cleanup_stale_test_rustfs,
     docker_available,
@@ -58,11 +58,11 @@ def pytest_sessionstart(session: pytest.Session) -> None:
         cleanup_stale_test_rustfs()
 
 
-def cleanup_stale_test_engine_networks_for_controller(session: pytest.Session) -> None:
+def cleanup_stale_test_compute_worker_networks_for_controller(session: pytest.Session) -> None:
     if getattr(session.config, 'workerinput', None) is not None:
         return
     if docker_available():
-        cleanup_stale_test_engine_networks()
+        cleanup_stale_test_compute_worker_networks()
 
 
 def _settings():

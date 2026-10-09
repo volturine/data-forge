@@ -76,6 +76,7 @@
 ## Monitoring
 
 - ✅ **Builds** — full history of build and preview runs with status, timings, and error details
+- ✅ **Compute workers** — inspect active compute workers and their status while the worker service manages their containers
 - ✅ **Schedules** — view and manage all active schedules in one place
 - ✅ **Health Checks** — track datasource health check results over time
 - ✅ Filter and search across builds, schedules, and health checks
@@ -130,7 +131,7 @@
 - ✅ All data stored locally — no cloud, no subscriptions, nothing leaves your machine
 - ✅ Apache Iceberg format for all managed outputs with snapshot and time-travel support
 - ✅ Powered by Polars for fast, memory-efficient computation
-- ✅ Isolated compute subprocess per analysis for safe parallel execution
+- ✅ Isolated compute-worker container per analysis for safe parallel execution
 - ✅ S3-compatible object storage — per-namespace buckets for uploads, Iceberg tables, exports, and runtime artifacts
 - ✅ PostgreSQL backend — supported metadata storage runtime
 
@@ -151,7 +152,7 @@
 
 ## Deployment & Operations
 
-- ✅ Docker deployment — fixed-role production runtime with published `api`, `scheduler`, and `worker` images
+- ✅ Docker deployment — fixed-role production runtime with published API, runtime coordinator, scheduler, worker-manager, and compute-worker images
 - ✅ Environment variable configuration — full reference of all configurable options
 - ⬜ Serve under a custom subdomain rather than `localhost:8000`
 - ⬜ All-in-one release script for streamlined builds and deploys

@@ -54,12 +54,14 @@ def test_datasource_schema_executes_in_separate_engine_pid_and_survives_engine_c
                 kind="datasource_schema",
                 payload_json=json.dumps(payload).encode(),
             ),
-            metadata=(("x-engine-token", "engine-test-token"),),
+            metadata=(("x-compute-worker-token", "engine-test-token"),),
             timeout=10,
         )
         events = list(
             stub.WatchJob(
-                compute_worker_runtime_pb2.ComputeWorkerWatchJobRequest(job_id="schema-1"), metadata=(("x-engine-token", "engine-test-token"),), timeout=30
+                compute_worker_runtime_pb2.ComputeWorkerWatchJobRequest(job_id="schema-1"),
+                metadata=(("x-compute-worker-token", "engine-test-token"),),
+                timeout=30,
             )
         )
         result = json.loads(events[-1].result.data_json)
@@ -69,7 +71,7 @@ def test_datasource_schema_executes_in_separate_engine_pid_and_survives_engine_c
         process.kill()
         process.join(timeout=10)
         with pytest.raises(grpc.RpcError):
-            stub.Health(compute_worker_runtime_pb2.ComputeWorkerHealthRequest(), metadata=(("x-engine-token", "engine-test-token"),), timeout=1)
+            stub.Health(compute_worker_runtime_pb2.ComputeWorkerHealthRequest(), metadata=(("x-compute-worker-token", "engine-test-token"),), timeout=1)
         assert pl.DataFrame({"manager": [1]}).height == 1
     finally:
         channel.close()

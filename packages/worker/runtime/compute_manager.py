@@ -160,7 +160,7 @@ def _log_engine_acquisition(
         scope = str(identity.scope)
     log_acquisition = logger.warning if acquisition_ms >= _SLOW_ENGINE_ACQUISITION_SECONDS * 1000 else logger.info
     log_acquisition(
-        "Engine acquisition request_id=%s namespace=%s engine_scope=%s resource_id=%s source=%s "
+        "Compute worker acquisition request_id=%s namespace=%s compute_worker_scope=%s resource_id=%s source=%s "
         "acquisition_ms=%.1f warm_health_ms=%.1f warm_candidate_shutdown_wait_ms=%.1f "
         "warm_bind_ms=%.1f "
         "cold_start_ms=%.1f warm_candidate_rejected=%s "
@@ -284,8 +284,8 @@ class ProcessManager:
             )
         )
         self._on_snapshot = on_snapshot
-        self._idle_ttl_seconds = settings.engine_idle_ttl_seconds
-        self._idle_reap_interval_seconds = settings.engine_idle_reap_interval_seconds
+        self._idle_ttl_seconds = settings.compute_worker_idle_ttl_seconds
+        self._idle_reap_interval_seconds = settings.compute_worker_idle_reap_interval_seconds
         logger.info(
             "Compute workers active_capacity=%s warm_workers=%s",
             settings.compute_workers,
@@ -1816,7 +1816,7 @@ class ProcessManager:
                         # after the startup grace period, which closes the
                         # snapshot/create race without leaking old containers.
                         remove_running=True,
-                        running_grace_seconds=max(settings.engine_start_timeout_seconds, 30),
+                        running_grace_seconds=max(settings.compute_worker_start_timeout_seconds, 30),
                         keep_container_ids=self._managed_container_ids(),
                     )
                 except Exception:

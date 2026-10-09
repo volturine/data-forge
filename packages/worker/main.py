@@ -224,7 +224,7 @@ async def _run_runtime_coordinator(
     runtime_listener_task: asyncio.Task[None] | None = None
     data_plane_server: ThreadedDataPlaneServer | None = None
     try:
-        warm_worker_timeout = max(float(settings.engine_start_timeout_seconds) * 4, 120.0)
+        warm_worker_timeout = max(float(settings.compute_worker_start_timeout_seconds) * 4, 120.0)
         warm_workers_ready = await run_control_in_thread(
             manager.wait_for_warm_workers_ready,
             timeout_seconds=warm_worker_timeout,
@@ -382,7 +382,7 @@ async def _run_runtime_coordinator(
             run_build,
             client=client,
             capacity=request_worker_count,
-            heartbeat_seconds=float(settings.engine_heartbeat_interval_seconds),
+            heartbeat_seconds=float(settings.compute_worker_heartbeat_interval_seconds),
             poll_interval_seconds=recovery_poll_seconds,
             on_reconnected=manager.resynchronize_snapshots,
             namespace_directory=build_namespace_directory,
