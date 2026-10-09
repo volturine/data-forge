@@ -23,6 +23,16 @@ if [ -n "$total_cpus" ] && ! awk -v value="$total_cpus" \
     exit 2
 fi
 
+case "${STRICT_TEST_TEARDOWN:-}" in
+    1) strict_teardown=1 ;;
+    0) strict_teardown=0 ;;
+    '') if [ -n "${CI:-}" ]; then strict_teardown=0; else strict_teardown=1; fi ;;
+    *)
+        echo "STRICT_TEST_TEARDOWN must be 0 or 1 when set; got '${STRICT_TEST_TEARDOWN}'." >&2
+        exit 2
+        ;;
+esac
+
 for command in docker bash just; do
     if ! command -v "$command" >/dev/null 2>&1; then
         echo "Required host command not found: ${command}" >&2
@@ -146,19 +156,33 @@ compose_down() {
     fi
     compose_down_attempted=1
 
+    # Removing the DinD enclave's multi-GB docker-data volume can take well
+    # over a minute on shared GitHub-hosted runners, so the bound is generous.
     local down_status=0
     if command -v timeout >/dev/null 2>&1; then
-        timeout --signal=TERM --kill-after=5s 20s \
-            "${compose[@]}" down --timeout 5 --volumes --remove-orphans \
+        timeout --signal=TERM --kill-after=5s 90s \
+            "${compose[@]}" down --timeout 10 --volumes --remove-orphans \
             > "$artifacts_dir/compose-down.log" 2>&1 || down_status=$?
     else
-        "${compose[@]}" down --timeout 5 --volumes --remove-orphans \
+        "${compose[@]}" down --timeout 10 --volumes --remove-orphans \
             > "$artifacts_dir/compose-down.log" 2>&1 || down_status=$?
     fi
-    if [ "$down_status" -ne 0 ]; then
-        echo "Test Compose cleanup failed (exit ${down_status}); see ${artifacts_dir}/compose-down.log." >&2
+    if [ "$down_status" -eq 0 ]; then
+        return
+    fi
+    local message="Test Compose cleanup failed (exit ${down_status}); see ${artifacts_dir}/compose-down.log."
+    # Leftovers accumulate on developer machines, so local runs fail on a
+    # teardown failure by default. CI runners are ephemeral or cleaned by a
+    # runner-level post-step, so there a passing run stays green and only warns.
+    if [ "$strict_teardown" -eq 1 ]; then
+        echo "$message" >&2
         if [ "$status" -eq 0 ]; then
             status=$down_status
+        fi
+    else
+        echo "Warning: ${message} The test result is unaffected." >&2
+        if [ -n "${GITHUB_ACTIONS:-}" ]; then
+            echo "::warning title=Test Compose cleanup failed::${message}"
         fi
     fi
 }
