@@ -187,9 +187,11 @@ The repository defaults are tuned for concurrent clients:
 - The capacity-first optimization plan and measured scale gates are in
   [Capacity-First Runtime Optimization](docs/prd/active/elastic-runtime-scale-out.md).
 - API containers are stateless and can run as replicas behind an ingress;
-  the single worker manager can place engine containers on several Docker
-  hosts. See [Deployment](docs/DEPLOYMENT.md#scale-out) and
-  [Compute hosts](docs/COMPUTE_HOSTS.md).
+  the active worker manager can place engine containers on several Docker
+  hosts, and the whole stack can run on two or three machines with the
+  coordinator and manager failing over through PostgreSQL leases. See
+  [Deployment](docs/DEPLOYMENT.md#scale-out), [Compute hosts](docs/COMPUTE_HOSTS.md)
+  and [High availability](docs/HIGH_AVAILABILITY.md).
 
 ### Development (local runtime)
 

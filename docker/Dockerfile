@@ -129,7 +129,7 @@ WORKDIR /app/packages/backend
 ENV PATH="/app/packages/backend/.venv/bin:${PATH}"
 ENV PYTHONPATH="/app/packages/backend"
 HEALTHCHECK --interval=30s --timeout=5s --start-period=30s --retries=5 \
-    CMD python3 -c "import grpc,os; from dataforge_protocol import common_pb2,runtime_coordinator_pb2_grpc; c=grpc.insecure_channel('127.0.0.1:50051'); r=runtime_coordinator_pb2_grpc.RuntimeCoordinatorServiceStub(c).GetCoordinatorGeneration(common_pb2.EmptyRequest(),timeout=3,metadata=(('x-internal-token',os.environ['INTERNAL_API_TOKEN']),)); c.close(); exit(0 if r.generation>0 else 1)"
+    CMD python3 -m backend_core.coordinator_health
 EXPOSE 50051
 CMD ["python3", "runtime_coordinator.py"]
 

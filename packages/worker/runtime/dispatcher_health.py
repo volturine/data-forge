@@ -19,11 +19,22 @@ def _socket_path(pid: int) -> Path:
 class DispatcherHealth:
     """Process-owned registration and dispatch progress, independent of heartbeats."""
 
-    def __init__(self, worker_id: str, *, lanes: tuple[str, ...], max_age_seconds: float, clock: Callable[[], float] = time.monotonic) -> None:
+    def __init__(
+        self,
+        worker_id: str,
+        *,
+        lanes: tuple[str, ...],
+        max_age_seconds: float,
+        clock: Callable[[], float] = time.monotonic,
+        standby: bool = False,
+    ) -> None:
         self.worker_id = worker_id
         self.pid = os.getpid()
         self._registered = False
         self._running = True
+        # A standby worker holds no registration and dispatches nothing; it is
+        # healthy as long as its lease wait loop is alive and answering here.
+        self._standby = standby
         self._progress: dict[str, float | None] = dict.fromkeys(lanes)
         self._max_age_seconds = max_age_seconds
         self._clock = clock
@@ -49,12 +60,17 @@ class DispatcherHealth:
     def snapshot(self) -> dict[str, object]:
         now = self._clock()
         ages = {lane: now - stamp if stamp is not None else None for lane, stamp in self._progress.items()}
+        if self._standby:
+            healthy = self._running
+        else:
+            healthy = self._registered and bool(ages) and all(age is not None and 0 <= age <= self._max_age_seconds for age in ages.values())
         return {
             "pid": self.pid,
             "worker_id": self.worker_id,
             "registered": self._registered,
+            "standby": self._standby,
             "progress_age_seconds": ages,
-            "healthy": self._registered and bool(ages) and all(age is not None and 0 <= age <= self._max_age_seconds for age in ages.values()),
+            "healthy": healthy,
         }
 
     @contextlib.asynccontextmanager
@@ -96,7 +112,9 @@ def probe(pid: int = 1) -> bool:
                     return False
                 chunks.append(chunk)
             response = json.loads(b"".join(chunks))
-        return isinstance(response, dict) and response.get("pid") == pid and response.get("registered") is True and response.get("healthy") is True
+        if not isinstance(response, dict) or response.get("pid") != pid or response.get("healthy") is not True:
+            return False
+        return response.get("registered") is True or response.get("standby") is True
     except OSError, ValueError:
         return False
 

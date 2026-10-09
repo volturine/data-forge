@@ -18,6 +18,7 @@ from sqlalchemy.exc import OperationalError as SQLAlchemyOperationalError
 
 from backend_core import runtime_ipc
 from backend_core.config import settings
+from backend_core.coordinator_health import CoordinatorHealth
 from backend_core.database import (
     active_runtime_coordinator_generation,
     configure_runtime_critical_database_budget,
@@ -41,6 +42,11 @@ _COORDINATOR_LOCK_KEY = int.from_bytes(hashlib.sha256(b'dataforge:runtime-coordi
 _LEASE_CHECK_SECONDS = 1.0
 _LEASE_CHECK_FRESHNESS_SECONDS = 0.25
 _LEASE_RETRY_SECONDS = 1.0
+# The advisory lock lives on this session. A coordinator whose machine vanishes
+# never closes the connection, so PostgreSQL must notice the dead peer itself:
+# probe after 5s idle, every 2s, three misses, instead of the OS default of
+# two hours. Only then can a standby on another machine take over.
+_LEASE_SESSION_OPTIONS = '-c statement_timeout=3000 -c lock_timeout=1000 -c tcp_keepalives_idle=5 -c tcp_keepalives_interval=2 -c tcp_keepalives_count=3'
 _ACTOR_SHUTDOWN_GRACE_SECONDS = 15.0
 _CHAT_DATABASE_RETRY_MIN_SECONDS = 0.25
 _CHAT_DATABASE_RETRY_MAX_SECONDS = 5.0
@@ -96,7 +102,7 @@ class RuntimeCoordinatorLease:
                     keepalives_idle=2,
                     keepalives_interval=1,
                     keepalives_count=3,
-                    options='-c statement_timeout=3000 -c lock_timeout=1000',
+                    options=_LEASE_SESSION_OPTIONS,
                 )
             try:
                 result = self._connection.execute(
@@ -469,7 +475,7 @@ async def _release_coordinator_lease(lease: RuntimeCoordinatorLease) -> None:
     await asyncio.to_thread(lease.release)
 
 
-async def _run_owned_epoch(process_stop_event: asyncio.Event, lease: RuntimeCoordinatorLease) -> None:
+async def _run_owned_epoch(process_stop_event: asyncio.Event, lease: RuntimeCoordinatorLease, *, health: CoordinatorHealth | None = None) -> None:
     owner_stop_event = asyncio.Event()
     process_stop_task = asyncio.create_task(process_stop_event.wait(), name='runtime-process-stop')
     owner_stop_task = asyncio.create_task(owner_stop_event.wait(), name='runtime-owner-stop')
@@ -493,6 +499,8 @@ async def _run_owned_epoch(process_stop_event: asyncio.Event, lease: RuntimeCoor
         if process_stop_event.is_set() or owner_stop_event.is_set():
             raise RuntimeError('Runtime coordinator lease was lost during gRPC startup')
         listener = await runtime_ipc.start_api_server(listener=RuntimeListenerKind.JOB)
+        if health is not None:
+            health.active(coordinator_generation)
         chat_consumer = await asyncio.to_thread(ChatTurnConsumer, app, coordinator_generation)
         telegram_runtime = TelegramIntegrationRuntime(coordinator_generation)
         handler = partial(_handle_coordinator_notification, chat_wake=chat_consumer.wake, telegram_wake=telegram_runtime.wake)
@@ -532,6 +540,8 @@ async def _run_owned_epoch(process_stop_event: asyncio.Event, lease: RuntimeCoor
         except RuntimeError:
             process_stop_event.set()
             raise
+        if health is not None:
+            health.standby()
         logger.info('Runtime coordinator stopped generation=%s', coordinator_generation)
         if interrupted_shutdown:
             raise asyncio.CancelledError
@@ -547,29 +557,42 @@ async def main() -> None:
     process_stop_event = asyncio.Event()
     _install_stop_handlers(process_stop_event)
     retry_seconds = _LEASE_RETRY_SECONDS
+    health = CoordinatorHealth()
     try:
-        while not process_stop_event.is_set():
-            if not await _wait_for_lease(process_stop_event, lease):
-                return
-            try:
-                await _run_owned_epoch(process_stop_event, lease)
-            except asyncio.CancelledError:
-                raise
-            except Exception:
-                logger.exception('Runtime coordinator owner epoch failed; returning to standby')
-                _fail_stop_if_epoch_active()
-            else:
-                retry_seconds = _LEASE_RETRY_SECONDS
-            if process_stop_event.is_set():
-                return
-            try:
-                await asyncio.wait_for(process_stop_event.wait(), timeout=retry_seconds)
-            except TimeoutError:
-                retry_seconds = min(retry_seconds * 2, 30.0)
-            else:
-                return
+        async with health.serve():
+            await _run_coordinator_roles(process_stop_event, lease, health, retry_seconds)
     finally:
         await _release_coordinator_lease(lease)
+
+
+async def _run_coordinator_roles(
+    process_stop_event: asyncio.Event,
+    lease: RuntimeCoordinatorLease,
+    health: CoordinatorHealth,
+    retry_seconds: float,
+) -> None:
+    """Alternate between standby and owner until the process is asked to stop."""
+    while not process_stop_event.is_set():
+        health.standby()
+        if not await _wait_for_lease(process_stop_event, lease):
+            return
+        try:
+            await _run_owned_epoch(process_stop_event, lease, health=health)
+        except asyncio.CancelledError:
+            raise
+        except Exception:
+            logger.exception('Runtime coordinator owner epoch failed; returning to standby')
+            _fail_stop_if_epoch_active()
+        else:
+            retry_seconds = _LEASE_RETRY_SECONDS
+        if process_stop_event.is_set():
+            return
+        try:
+            await asyncio.wait_for(process_stop_event.wait(), timeout=retry_seconds)
+        except TimeoutError:
+            retry_seconds = min(retry_seconds * 2, 30.0)
+        else:
+            return
 
 
 if __name__ == '__main__':

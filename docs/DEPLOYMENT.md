@@ -180,12 +180,19 @@ The ingress is one proxy hop; the override replaces `DF_TRUSTED_PROXY_HOPS`
 with `DF_API_REPLICA_TRUSTED_PROXY_HOPS` (default `1`) for the API replicas,
 so set it to the ingress plus every proxy in front of it, for example `2` with
 a TLS terminator ahead of the ingress. Replicas share the `data` volume only for
-scratch files. The runtime coordinator, scheduler and worker manager remain
-single fenced instances; do not add replicas of those services.
+scratch files. The runtime coordinator and the worker manager are single active
+instances chosen by PostgreSQL leases; extra copies of them are standbys, not
+replicas.
 
-Compute capacity scales across machines instead: the one worker manager can
-place engine containers on several Docker daemons. See
-[Compute hosts](COMPUTE_HOSTS.md) for how to add a host.
+Compute capacity scales across machines: the active worker manager can place
+engine containers on several Docker daemons. See [Compute hosts](COMPUTE_HOSTS.md)
+for how to add a host.
+
+To survive the loss of a whole machine, run the same stack on two or three
+machines with `docker/compose.multi-host.yaml`: API replicas on every machine,
+coordinator and manager active on one and standby on the others, schedulers
+everywhere, engines on every daemon, and PostgreSQL and the object store shared
+outside the stacks. See [High availability](HIGH_AVAILABILITY.md).
 
 ## From source
 
@@ -296,7 +303,11 @@ The API Compose health check uses `/health/ready` to verify API dependencies.
 Worker and scheduler Docker probes query PID1's private Unix socket through
 `python3 -m runtime.dispatcher_health` and `python3 -m scheduler_grpc.health`,
 respectively. They require that process's actual registration and fresh progress
-on every configured dispatch lane. Worker lanes cover compute execution and
+on every configured dispatch lane; a worker waiting in standby for the manager
+lease reports healthy without a registration. The runtime coordinator probe,
+`python3 -m backend_core.coordinator_health`, accepts a standby waiting for the
+coordinator lease and, for the active owner, still requires its gRPC endpoint to
+answer with the active generation. Worker lanes cover compute execution and
 shutdown, builds, datasource deletion, and outbox cleanup. A database registry
 row or independent heartbeat cannot mask a stalled lane. API readiness does not establish
 coordinator dispatch progress. Also monitor PostgreSQL and object-store capacity,

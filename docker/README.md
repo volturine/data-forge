@@ -9,7 +9,10 @@ Postgres + RustFS + API + Scheduler + Worker
 The API container serves the backend API and built frontend. Scheduler and worker are separate Python role containers built from the same source tree.
 
 See [Deployment](../docs/DEPLOYMENT.md) for production prerequisites, TLS,
-health checks, upgrades, backup, restore, and secret rotation.
+health checks, upgrades, backup, restore, and secret rotation;
+`compose.replicas.yaml` adds API replicas behind an ingress and
+`compose.multi-host.yaml` runs the stack on several machines
+([High availability](../docs/HIGH_AVAILABILITY.md)).
 
 ## Containerized tests
 

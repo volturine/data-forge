@@ -786,3 +786,54 @@ async def test_coordinator_resets_standby_backoff_after_a_successful_epoch(monke
 
     assert lease_attempts == 2
     assert delays == [0.001, 0.001]
+
+
+def test_runtime_coordinator_lease_session_asks_postgres_to_notice_a_vanished_owner(monkeypatch) -> None:
+    kwargs: dict[str, object] = {}
+    connection = _Connection(acquired=True)
+
+    def connect(_conninfo: str, **options):
+        kwargs.update(options)
+        return connection
+
+    monkeypatch.setattr(runtime_coordinator, '_database_conninfo', lambda: 'postgresql://test')
+    lease = runtime_coordinator.RuntimeCoordinatorLease(connection_factory=connect)
+    assert lease.acquire() is True
+    lease.release()
+
+    options = str(kwargs['options'])
+    assert options == runtime_coordinator._LEASE_SESSION_OPTIONS
+    # A coordinator whose machine dies never closes this session. Server-side
+    # keepalives are what drop it, and the advisory lock with it, within
+    # seconds so a standby elsewhere can take over.
+    assert 'tcp_keepalives_idle=5' in options
+    assert 'tcp_keepalives_interval=2' in options
+    assert 'tcp_keepalives_count=3' in options
+    assert 'statement_timeout=3000' in options
+
+
+@pytest.mark.asyncio
+async def test_coordinator_roles_report_standby_then_active_then_standby(monkeypatch) -> None:
+    states: list[str] = []
+    stop = asyncio.Event()
+
+    class Health:
+        def standby(self) -> None:
+            states.append('standby')
+
+        def active(self, generation: int) -> None:
+            states.append(f'active:{generation}')
+
+    async def wait_for_lease(_stop: asyncio.Event, _lease) -> bool:
+        states.append('lease')
+        return True
+
+    async def owned_epoch(_stop: asyncio.Event, _lease, *, health) -> None:
+        health.active(3)
+        stop.set()
+
+    monkeypatch.setattr(runtime_coordinator, '_wait_for_lease', wait_for_lease)
+    monkeypatch.setattr(runtime_coordinator, '_run_owned_epoch', owned_epoch)
+
+    await runtime_coordinator._run_coordinator_roles(stop, cast(Any, object()), cast(Any, Health()), 0.001)
+    assert states == ['standby', 'lease', 'active:3']

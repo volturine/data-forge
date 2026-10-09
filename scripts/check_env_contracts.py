@@ -18,6 +18,7 @@ ENV_FILES: dict[Path, tuple[Path, ...]] = {
     ROOT / 'docker/env/prod.env': (
         ROOT / 'docker/compose.yaml',
         ROOT / 'docker/compose.replicas.yaml',
+        ROOT / 'docker/compose.multi-host.yaml',
     ),
     ROOT / 'docker/env/e2e.env': (),
 }

@@ -1,0 +1,61 @@
+# Override for running one identical stack on each of several machines, so
+# that no single machine can take the application down. Start it on every
+# machine with the same env file, except DF_NODE_ADDRESS, which names that
+# machine's private address:
+#
+#   docker compose --env-file docker/env/prod.env -p dataforge-prod \
+#     -f docker/compose.yaml -f docker/compose.replicas.yaml \
+#     -f docker/compose.multi-host.yaml up -d
+#
+# What runs where:
+#   - PostgreSQL and the object store are shared and run outside these stacks
+#     (DF_DATABASE_URL, DF_OBJECT_STORE_ENDPOINT); the bundled ones are off.
+#   - Every machine runs API replicas behind its own ingress, one runtime
+#     coordinator and one worker manager. Coordinator and manager are active on
+#     exactly one machine at a time and standby elsewhere, chosen by PostgreSQL
+#     session leases: when the active machine dies, PostgreSQL drops its lease
+#     within seconds and a standby takes over. Standbys report healthy and the
+#     standby worker keeps serving the data plane for its machine's API replicas.
+#   - Every machine runs a scheduler; due schedules are claimed per namespace,
+#     so several schedulers never double-run a schedule.
+#   - Engines are placed on every daemon listed in DF_ENGINE_DOCKER_HOSTS by
+#     whichever manager is active, so list each machine's daemon there.
+# See docs/HIGH_AVAILABILITY.md for the full recipe and the failure matrix.
+services:
+  postgres:
+    profiles: ["bundled-infra"]
+
+  rustfs:
+    profiles: ["bundled-infra"]
+
+  api:
+    depends_on: !override
+      runtime:
+        condition: service_healthy
+      worker:
+        condition: service_healthy
+
+  runtime:
+    depends_on: !reset {}
+    ports:
+      # Workers and schedulers on every machine dial all coordinator addresses
+      # (DF_RUNTIME_COORDINATOR_TARGETS); only the active coordinator listens.
+      - "${DF_NODE_ADDRESS}:50051:50051"
+
+  worker:
+    depends_on: !override
+      runtime:
+        condition: service_healthy
+    environment:
+      INTERNAL_GRPC_TARGET: ${DF_RUNTIME_COORDINATOR_TARGETS}
+    volumes:
+      # TLS client certificates for the tcp:// daemons in DF_ENGINE_DOCKER_HOSTS
+      # (tls_cert_path: /certs/<host>).
+      - ${DF_COMPUTE_HOST_CERTS_DIR:-./certs}:/certs:ro
+
+  scheduler:
+    depends_on: !override
+      runtime:
+        condition: service_healthy
+    environment:
+      INTERNAL_GRPC_TARGET: ${DF_RUNTIME_COORDINATOR_TARGETS}

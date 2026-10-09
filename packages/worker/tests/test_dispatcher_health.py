@@ -99,3 +99,22 @@ def test_each_dispatcher_lane_must_make_progress(hung_lane: str) -> None:
     assert health.snapshot()["healthy"] is False
     health.progress(hung_lane)
     assert health.snapshot()["healthy"] is True
+
+
+@pytest.mark.asyncio
+async def test_standby_probe_is_healthy_without_registration(socket_directory) -> None:
+    standby = DispatcherHealth("worker-manager:standby", lanes=(), max_age_seconds=0.0, standby=True)
+    async with standby.serve():
+        snapshot = standby.snapshot()
+        assert snapshot["standby"] is True
+        assert snapshot["registered"] is False
+        assert await asyncio.to_thread(health_module.probe, os.getpid())
+        assert not await asyncio.to_thread(health_module.probe, os.getpid() + 1)
+        standby.stopped()
+        assert not await asyncio.to_thread(health_module.probe, os.getpid())
+
+
+def test_active_manager_health_is_not_satisfied_by_the_standby_flag() -> None:
+    health = DispatcherHealth("worker:active", lanes=("dispatch",), max_age_seconds=15)
+    assert health.snapshot()["standby"] is False
+    assert health.snapshot()["healthy"] is False

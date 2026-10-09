@@ -4,7 +4,10 @@ The worker manager places compute (engine) containers on one or more Docker
 daemons. By default it uses the single daemon named by `DF_ENGINE_DOCKER_HOST`
 (the socket mounted into the worker container). `DF_ENGINE_DOCKER_HOSTS` turns
 that into a list, so engines can run on two or three machines while the
-manager, API, PostgreSQL and RustFS stay where they are.
+manager, API, PostgreSQL and RustFS stay where they are. To also survive the
+loss of a machine, run the whole stack on each one as described in
+[High availability](HIGH_AVAILABILITY.md); the host list below is the same in
+both setups.
 
 ## How placement works
 
