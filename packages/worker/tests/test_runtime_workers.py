@@ -1413,14 +1413,12 @@ async def test_runtime_coordinator_cleans_up_when_registration_fails(monkeypatch
         lambda **_kwargs: SimpleNamespace(close=lambda: cleanup.append("notifier")),
     )
 
-    class FakeDataPlaneServer:
-        async def stop(self, *, grace: float | None = None) -> None:
-            cleanup.append("data-plane")
-
+    # The data plane is owned by the process (main), not by a generation: a
+    # standby serves it too, so a generation must neither start nor stop it.
     monkeypatch.setattr(
         runtime_process,
         "start_data_plane_grpc_server_in_thread",
-        lambda: FakeDataPlaneServer(),
+        lambda: pytest.fail("a worker generation must not own the data-plane server"),
     )
 
     async def start_listener():
@@ -1456,7 +1454,7 @@ async def test_runtime_coordinator_cleans_up_when_registration_fails(monkeypatch
     with pytest.raises(ConnectionError, match="coordinator unavailable"):
         await runtime_process.run_runtime_coordinator(stop_event=asyncio.Event())
 
-    assert cleanup == ["listener", "data-plane", "manager", "notifier"]
+    assert cleanup == ["listener", "manager", "notifier"]
 
 
 def test_runtime_clients_share_one_channel_per_target(monkeypatch) -> None:

@@ -118,11 +118,9 @@ services:
     mem_limit: ${DF_RUNTIME_MEM_LIMIT:-8g}
     cpus: ${DF_RUNTIME_CPUS:-0}
     healthcheck:
-      test:
-        [
-          "CMD-SHELL",
-          "python3 -c \"import grpc,os; from dataforge_protocol import common_pb2,runtime_coordinator_pb2_grpc; c=grpc.insecure_channel('127.0.0.1:50051'); r=runtime_coordinator_pb2_grpc.RuntimeCoordinatorServiceStub(c).GetCoordinatorGeneration(common_pb2.EmptyRequest(),timeout=3,metadata=(('x-internal-token',os.environ['INTERNAL_API_TOKEN']),)); c.close(); exit(0 if r.generation>0 else 1)\"",
-        ]
+      # Healthy as the active coordinator (gRPC answers with its generation) or
+      # as a standby waiting for the lease; see backend_core/coordinator_health.py.
+      test: ["CMD", "python3", "-m", "backend_core.coordinator_health"]
       interval: 5s
       timeout: 5s
       retries: 30

@@ -533,7 +533,7 @@ async def test_owner_epoch_failure_fail_stops_before_main_can_return_to_standby(
     async def acquire_lease(_stop_event, _lease) -> bool:
         return True
 
-    async def failed_epoch(_stop_event, _lease) -> None:
+    async def failed_epoch(_stop_event, _lease, *, health=None) -> None:
         raise RuntimeError('endpoint shutdown failed; lease retained')
 
     monkeypatch.setattr(runtime_coordinator.settings, 'distributed_runtime_enabled', True)
@@ -763,7 +763,7 @@ async def test_coordinator_resets_standby_backoff_after_a_successful_epoch(monke
 
     epoch_count = 0
 
-    async def run_epoch(_stop_event, _lease) -> None:
+    async def run_epoch(_stop_event, _lease, *, health=None) -> None:
         nonlocal epoch_count
         epoch_count += 1
         if epoch_count == 1:
@@ -786,3 +786,58 @@ async def test_coordinator_resets_standby_backoff_after_a_successful_epoch(monke
 
     assert lease_attempts == 2
     assert delays == [0.001, 0.001]
+
+
+def test_runtime_coordinator_lease_session_asks_postgres_to_notice_a_vanished_owner(monkeypatch) -> None:
+    kwargs: dict[str, object] = {}
+    connection = _Connection(acquired=True)
+
+    def connect(_conninfo: str, **options):
+        kwargs.update(options)
+        return connection
+
+    monkeypatch.setattr(runtime_coordinator, '_database_conninfo', lambda: 'postgresql://test')
+    lease = runtime_coordinator.RuntimeCoordinatorLease(connection_factory=connect)
+    assert lease.acquire() is True
+    lease.release()
+
+    options = str(kwargs['options'])
+    assert options == runtime_coordinator._LEASE_SESSION_OPTIONS
+    # A coordinator whose machine dies never closes this session. Server-side
+    # keepalives are what drop it, and the advisory lock with it, within
+    # seconds so a standby elsewhere can take over.
+    assert 'tcp_keepalives_idle=5' in options
+    assert 'tcp_keepalives_interval=2' in options
+    assert 'tcp_keepalives_count=3' in options
+    # Keepalives only run on an idle socket; a ping in flight when the machine
+    # died is bounded by the user timeout on both ends instead.
+    assert 'tcp_user_timeout=10000' in options
+    assert kwargs['tcp_user_timeout'] == 10000
+    assert 'statement_timeout=3000' in options
+
+
+@pytest.mark.asyncio
+async def test_coordinator_roles_report_standby_then_active_then_standby(monkeypatch) -> None:
+    states: list[str] = []
+    stop = asyncio.Event()
+
+    class Health:
+        def standby(self) -> None:
+            states.append('standby')
+
+        def active(self, generation: int) -> None:
+            states.append(f'active:{generation}')
+
+    async def wait_for_lease(_stop: asyncio.Event, _lease) -> bool:
+        states.append('lease')
+        return True
+
+    async def owned_epoch(_stop: asyncio.Event, _lease, *, health) -> None:
+        health.active(3)
+        stop.set()
+
+    monkeypatch.setattr(runtime_coordinator, '_wait_for_lease', wait_for_lease)
+    monkeypatch.setattr(runtime_coordinator, '_run_owned_epoch', owned_epoch)
+
+    await runtime_coordinator._run_coordinator_roles(stop, cast(Any, object()), cast(Any, Health()), 0.001)
+    assert states == ['standby', 'lease', 'active:3']

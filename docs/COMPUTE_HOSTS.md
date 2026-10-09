@@ -5,7 +5,9 @@ workers on one or more Docker daemons. By default it uses the single daemon
 named by `DF_COMPUTE_WORKER_DOCKER_HOST` (the socket mounted into the worker
 service). `DF_COMPUTE_WORKER_DOCKER_HOSTS` turns that into a list, so compute
 workers can run on several machines while the manager, API, PostgreSQL, and
-RustFS stay where they are.
+RustFS stay where they are. To also survive the loss of a machine, run the
+whole stack on each one as described in [High availability](HIGH_AVAILABILITY.md);
+the host list below is the same in both setups.
 
 ## How placement works
 

@@ -40,3 +40,6 @@ node_modules/
 *__pycache__/
 .reqtrace/
 pi-session-*.html
+
+# TLS client certificates for remote compute hosts (docker/compose.multi-host.yaml)
+docker/certs/
