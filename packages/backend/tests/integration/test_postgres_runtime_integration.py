@@ -100,7 +100,7 @@ def _active_preview_request_with_lease(container: PostgresContainer) -> tuple[st
 
 SAMPLE_CSV = 'id,name,age,city\n1,Alice,30,London\n2,Bob,25,Paris\n3,Charlie,35,Berlin\n'
 INTERNAL_API_TOKEN = 'dataforge-runtime-test-internal-token'
-ENGINE_TEST_IMAGE = 'data-forge-polars-engine:integration'
+COMPUTE_WORKER_TEST_IMAGE = 'data-forge-compute-worker:integration'
 
 
 def _http_base_url(port: int) -> str:
@@ -189,15 +189,15 @@ def compute_worker_runtime_env(rustfs_container: RustfsContainer) -> Generator[d
     """Use the engine image built by the canonical test recipe before pytest starts."""
     require_docker()
     run_command(
-        ['docker', 'image', 'inspect', ENGINE_TEST_IMAGE],
+        ['docker', 'image', 'inspect', COMPUTE_WORKER_TEST_IMAGE],
         cwd=CORE_ROOT,
         env=docker_env(),
     )
     docker_host = os.environ.get('DOCKER_HOST')
     if not docker_host:
         raise RuntimeError('DOCKER_HOST must identify the Docker service daemon')
-    network_label = 'data-forge.test-engine-network=1'
-    network_name = f'dataforge-integration-engine-{uuid.uuid4().hex[:10]}'
+    network_label = 'data-forge.test-compute-worker-network=1'
+    network_name = f'dataforge-integration-compute-worker-{uuid.uuid4().hex[:10]}'
     run_command(
         ['docker', 'network', 'create', '--label', network_label, network_name],
         env=docker_env(),
@@ -206,11 +206,11 @@ def compute_worker_runtime_env(rustfs_container: RustfsContainer) -> Generator[d
     try:
         run_command(['docker', 'network', 'connect', network_name, rustfs_container.name], env=docker_env(), timeout=120)
         yield {
-            'ENGINE_IMAGE': ENGINE_TEST_IMAGE,
-            'ENGINE_DOCKER_HOST': docker_host,
-            'ENGINE_DOCKER_NETWORK': network_name,
-            'ENGINE_OBJECT_STORE_ENDPOINT': f'http://{rustfs_container.name}:9000',
-            'ENGINE_CONNECT_HOST': docker_service_host(),
+            'COMPUTE_WORKER_IMAGE': COMPUTE_WORKER_TEST_IMAGE,
+            'COMPUTE_WORKER_DOCKER_HOST': docker_host,
+            'COMPUTE_WORKER_DOCKER_NETWORK': network_name,
+            'COMPUTE_WORKER_OBJECT_STORE_ENDPOINT': f'http://{rustfs_container.name}:9000',
+            'COMPUTE_WORKER_CONNECT_HOST': docker_service_host(),
         }
     finally:
         run_command(['docker', 'network', 'disconnect', '--force', network_name, rustfs_container.name], env=docker_env(), check=False, timeout=120)
@@ -254,9 +254,9 @@ def _runtime_failure_context(container: PostgresContainer, **processes: ManagedP
     engine_logs = ''
     if requests:
         request_id = str(requests[0][0])
-        engine_name = f'dataforge-engine-default-{request_id[:15]}'
+        compute_worker_name = f'dataforge-compute-worker-default-{request_id[:15]}'
         containers = run_command(
-            ['docker', 'ps', '-a', '--filter', f'name={engine_name}', '--format', '{{.ID}}'],
+            ['docker', 'ps', '-a', '--filter', f'name={compute_worker_name}', '--format', '{{.ID}}'],
             env=docker_env(),
             check=False,
         ).stdout.splitlines()

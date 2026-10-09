@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import json
+import logging
 import subprocess
 import sys
 import threading
@@ -81,7 +82,7 @@ def engine_stub(monkeypatch):
 
 
 def test_compute_worker_server_submits_and_streams_progress_and_result(engine_stub) -> None:
-    metadata = (("x-engine-token", "token"),)
+    metadata = (("x-compute-worker-token", "token"),)
     health = engine_stub.Health(compute_worker_runtime_pb2.ComputeWorkerHealthRequest(), metadata=metadata)
     assert health.ready
     assert health.engine_identity == "analysis-1"
@@ -106,8 +107,16 @@ def test_compute_worker_server_submits_and_streams_progress_and_result(engine_st
 
 def test_compute_worker_server_rejects_invalid_token(engine_stub) -> None:
     with pytest.raises(grpc.RpcError) as exc_info:
-        engine_stub.Health(compute_worker_runtime_pb2.ComputeWorkerHealthRequest(), metadata=(("x-engine-token", "invalid"),))
+        engine_stub.Health(compute_worker_runtime_pb2.ComputeWorkerHealthRequest(), metadata=(("x-compute-worker-token", "invalid"),))
     assert exc_info.value.code() == grpc.StatusCode.UNAUTHENTICATED
+
+
+def test_legacy_engine_token_metadata_is_accepted_with_a_warning(engine_stub, caplog) -> None:
+    with caplog.at_level(logging.WARNING):
+        health = engine_stub.Health(compute_worker_runtime_pb2.ComputeWorkerHealthRequest(), metadata=(("x-engine-token", "token"),))
+
+    assert health.ready
+    assert "Deprecated gRPC metadata key x-engine-token" in caplog.text
 
 
 def test_export_stages_artifact_in_object_store(monkeypatch, tmp_path) -> None:
@@ -335,7 +344,7 @@ def test_engine_rpc_control_calls_are_not_starved_by_watch_streams(monkeypatch) 
     server.start()
     channel = grpc.insecure_channel(f"127.0.0.1:{port}")
     stub = compute_worker_runtime_pb2_grpc.PolarsComputeWorkerServiceStub(channel)
-    metadata = (("x-engine-token", "token"),)
+    metadata = (("x-compute-worker-token", "token"),)
     watch_pool = ThreadPoolExecutor(max_workers=1)
     watch_futures = []
 
@@ -430,7 +439,7 @@ def test_compute_worker_server_warm_mode_and_initialize(monkeypatch) -> None:
         # 4. Authenticated health
         auth_health = stub.Health(
             compute_worker_runtime_pb2.ComputeWorkerHealthRequest(),
-            metadata=(("x-engine-token", "warm-token-123"),),
+            metadata=(("x-compute-worker-token", "warm-token-123"),),
         )
         assert auth_health.ready
         assert auth_health.engine_identity == "analysis-warm-1"
@@ -448,7 +457,7 @@ def test_compute_worker_server_warm_mode_and_initialize(monkeypatch) -> None:
                 kind="preview",
                 payload_json=b"{}",
             ),
-            metadata=(("x-engine-token", "warm-token-123"),),
+            metadata=(("x-compute-worker-token", "warm-token-123"),),
         )
         assert submitted.job_id == "job-initialized"
     finally:
@@ -518,7 +527,7 @@ def test_initialized_engine_ignores_init_deadline(monkeypatch) -> None:
         time.sleep(2)
         health = stub.Health(
             compute_worker_runtime_pb2.ComputeWorkerHealthRequest(),
-            metadata=(("x-engine-token", "token"),),
+            metadata=(("x-compute-worker-token", "token"),),
         )
         assert health.ready
     finally:

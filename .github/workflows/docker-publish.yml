@@ -43,7 +43,10 @@ jobs:
             image: data-forge-runtime
           - target: worker
             image: data-forge-worker
-          - target: engine
+          - target: compute-worker
+            image: data-forge-compute-worker
+          # Keep the old image name available for one release.
+          - target: compute-worker
             image: data-forge-polars-engine
     steps:
       - uses: actions/checkout@v7
@@ -99,7 +102,10 @@ jobs:
             image: data-forge-runtime
           - target: worker
             image: data-forge-worker
-          - target: engine
+          - target: compute-worker
+            image: data-forge-compute-worker
+          # Keep the old image name available for one release.
+          - target: compute-worker
             image: data-forge-polars-engine
     steps:
       - uses: actions/checkout@v7
@@ -166,7 +172,7 @@ jobs:
           SCHEDULER_IMAGE="${REGISTRY}/${OWNER_LC}/data-forge-scheduler"
           RUNTIME_IMAGE="${REGISTRY}/${OWNER_LC}/data-forge-runtime"
           WORKER_IMAGE="${REGISTRY}/${OWNER_LC}/data-forge-worker"
-          ENGINE_IMAGE="${REGISTRY}/${OWNER_LC}/data-forge-polars-engine"
+          COMPUTE_WORKER_IMAGE="${REGISTRY}/${OWNER_LC}/data-forge-compute-worker"
           COMPOSE_URL="https://github.com/${REPO}/blob/${TAG}/docker/compose.yaml"
           PROD_ENV_URL="https://github.com/${REPO}/blob/${TAG}/docker/env/prod.env"
           DEPLOY_URL="https://github.com/${REPO}/blob/${TAG}/docs/DEPLOYMENT.md"
@@ -183,9 +189,10 @@ jobs:
             echo "| Scheduler | \`${SCHEDULER_IMAGE}:${VERSION}\` |"
             echo "| Runtime coordinator | \`${RUNTIME_IMAGE}:${VERSION}\` |"
             echo "| Worker manager | \`${WORKER_IMAGE}:${VERSION}\` |"
-            echo "| Polars engine | \`${ENGINE_IMAGE}:${VERSION}\` |"
+            echo "| Compute worker | \`${COMPUTE_WORKER_IMAGE}:${VERSION}\` |"
             echo
             echo "Also tagged as \`${TAG}\`, \`latest\`, and major/minor aliases."
+            echo "The old \`data-forge-polars-engine\` image name is also published as a compatibility alias for this release."
             echo
             echo "### Pull"
             echo
@@ -194,7 +201,7 @@ jobs:
             echo "docker pull ${SCHEDULER_IMAGE}:${VERSION}"
             echo "docker pull ${RUNTIME_IMAGE}:${VERSION}"
             echo "docker pull ${WORKER_IMAGE}:${VERSION}"
-            echo "docker pull ${ENGINE_IMAGE}:${VERSION}"
+            echo "docker pull ${COMPUTE_WORKER_IMAGE}:${VERSION}"
             echo '```'
             echo
             echo "## Deploy with Docker Compose"
@@ -206,14 +213,14 @@ jobs:
             echo "- Full guide: [\`docs/DEPLOYMENT.md\`](${DEPLOY_URL})"
             echo
             echo "1. Copy \`docker/env/prod.env\` and replace every \`replace-with-...\` value."
-            echo "2. Pin the API, scheduler, runtime coordinator, worker, and engine images to this release:"
+            echo "2. Pin the API, scheduler, runtime coordinator, worker manager, and compute-worker images to this release:"
             echo
             echo '```env'
             echo "DF_API_IMAGE=${API_IMAGE}:${VERSION}"
             echo "DF_SCHEDULER_IMAGE=${SCHEDULER_IMAGE}:${VERSION}"
             echo "DF_RUNTIME_IMAGE=${RUNTIME_IMAGE}:${VERSION}"
             echo "DF_WORKER_IMAGE=${WORKER_IMAGE}:${VERSION}"
-            echo "DF_ENGINE_IMAGE=${ENGINE_IMAGE}:${VERSION}"
+            echo "DF_COMPUTE_WORKER_IMAGE=${COMPUTE_WORKER_IMAGE}:${VERSION}"
             echo '```'
             echo
             echo "3. Start the stack:"
@@ -229,7 +236,7 @@ jobs:
             echo "  up -d"
             echo '```'
             echo
-            echo "Keep API, runtime coordinator, scheduler, worker, and engine on the same release tag."
+            echo "Keep API, runtime coordinator, scheduler, worker manager, and compute-worker images on the same release tag."
             echo
           } > "$NOTES_FILE"
 

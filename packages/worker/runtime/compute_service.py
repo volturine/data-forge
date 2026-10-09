@@ -1901,7 +1901,7 @@ def preview_step(
             except ValueError:
                 engine_scope = str(resolved_compute_worker_identity.scope)
             logger.warning(
-                "Slow preview request_id=%s namespace=%s engine_scope=%s resource_id=%s command_hash=%s duration_ms=%.1f %s",
+                "Slow preview request_id=%s namespace=%s compute_worker_scope=%s resource_id=%s command_hash=%s duration_ms=%.1f %s",
                 request_id or "unknown",
                 request_namespace,
                 engine_scope,

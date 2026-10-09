@@ -33,6 +33,7 @@ by local dev/prod stacks, not container-internal test services.
 `packages/{backend,worker,scheduler,frontend,protocol}` — no shared Python package.
 
 - Import boundaries: `scripts/check_package_boundaries.py` (e.g. worker ↛ `backend_core`/`modules`).
+- The `worker` service is the Docker-owning manager; a compute worker is one isolated container it starts for an analysis or datasource. Keep those roles distinct in code, docs, and user-facing names.
 - Protocol: edit protos → run `just generate-protocol` locally. Generated output (`packages/*/dataforge_protocol/`, `packages/*/buf/`, `frontend/src/lib/protocol`) is git-ignored and must not be committed or hand-edited.
 - Env: `docker/env/` — see `docs/ENV_VARIABLES.md`.
 

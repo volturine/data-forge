@@ -103,6 +103,7 @@ def test_prod_env_uses_published_images_and_placeholder_secrets() -> None:
     assert 'DF_SCHEDULER_IMAGE=ghcr.io/volturine/data-forge-scheduler:' in text
     assert 'DF_RUNTIME_IMAGE=ghcr.io/volturine/data-forge-runtime:' in text
     assert 'DF_WORKER_IMAGE=ghcr.io/volturine/data-forge-worker:' in text
+    assert 'DF_COMPUTE_WORKER_IMAGE=ghcr.io/volturine/data-forge-compute-worker' in text
     assert 'replace-with-strong-password' in text
     assert 'replace-with-long-random-secret' in text
     assert 'replace-with-long-random-internal-runtime-token' in text
@@ -118,8 +119,8 @@ def test_prod_and_dev_stacks_do_not_collide() -> None:
     assert '-p dataforge-dev' in justfile
 
     # Distinct per-stack engine networks driven by the env files.
-    assert 'DF_ENGINE_DOCKER_NETWORK=dataforge-prod-engine-runtime' in prod
-    assert 'DF_ENGINE_DOCKER_NETWORK=dataforge-dev-engine-runtime' in dev
+    assert 'DF_COMPUTE_WORKER_DOCKER_NETWORK=dataforge-prod-compute-worker-runtime' in prod
+    assert 'DF_COMPUTE_WORKER_DOCKER_NETWORK=dataforge-dev-compute-worker-runtime' in dev
     # And distinct from anything tests create (tests use ephemeral suffixes).
     assert 'dataforge-e2e' not in prod + dev
 
@@ -130,7 +131,7 @@ def test_prod_and_dev_stacks_do_not_collide() -> None:
 
 def test_dockerfile_has_fixed_role_targets() -> None:
     text = DOCKERFILE.read_text()
-    for target in ('AS api', 'AS scheduler', 'AS runtime', 'AS worker'):
+    for target in ('AS api', 'AS scheduler', 'AS runtime', 'AS worker', 'AS compute-worker'):
         assert target in text
     assert 'HEALTHCHECK' in text
     assert 'org.opencontainers.image' in text
@@ -145,10 +146,12 @@ def test_just_docker_prod_overrides_only_image_tags() -> None:
     assert 'DF_SCHEDULER_IMAGE=' in text
     assert 'DF_RUNTIME_IMAGE=' in text
     assert 'DF_WORKER_IMAGE=' in text
+    assert 'DF_COMPUTE_WORKER_IMAGE=' in text
     assert 'data-forge-api:' in text
     assert 'data-forge-scheduler:' in text
     assert 'data-forge-runtime:' in text
     assert 'data-forge-worker:' in text
+    assert 'data-forge-compute-worker:' in text
 
 
 def test_publish_workflow_is_multi_arch_and_tag_triggered() -> None:
@@ -158,6 +161,8 @@ def test_publish_workflow_is_multi_arch_and_tag_triggered() -> None:
     assert 'data-forge-api' in text
     assert 'data-forge-scheduler' in text
     assert 'data-forge-runtime' in text
+    assert 'data-forge-compute-worker' in text
+    assert 'data-forge-polars-engine' in text  # one-release compatibility image alias
     assert 'ghcr.io' in text
 
 

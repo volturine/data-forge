@@ -84,8 +84,11 @@ jobs:
             target: runtime
           - image_name: data-forge-worker
             target: worker
+          - image_name: data-forge-compute-worker
+            target: compute-worker
+          # Keep the old image name available for one release.
           - image_name: data-forge-polars-engine
-            target: engine
+            target: compute-worker
     steps:
       - uses: actions/checkout@v7
 

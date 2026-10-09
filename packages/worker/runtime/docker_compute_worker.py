@@ -40,12 +40,13 @@ from runtime.object_store import delete_object, download_file, object_store_url,
 
 logger = logging.getLogger(__name__)
 
-_COMPUTE_WORKER_TOKEN_METADATA_KEY = "x-engine-token"
-_COMPUTE_WORKER_APPLICATION_VERSION = "engine"
+_COMPUTE_WORKER_TOKEN_METADATA_KEY = "x-compute-worker-token"
+_LEGACY_ENGINE_TOKEN_METADATA_KEY = "x-engine-token"
+_COMPUTE_WORKER_APPLICATION_VERSION = "compute-worker"
 _COORDINATOR_GENERATION_LABEL = "io.dataforge.coordinator-generation"
 _MIB = 1024 * 1024
 _SLOW_COMPUTE_WORKER_START_SECONDS = 5.0
-# Relative scheduling weight only (not a cap): one engine gets 1/16 the weight
+# Relative scheduling weight only (not a cap): one compute worker gets 1/16 the weight
 # of an API, runtime, database, or worker-manager service under CPU contention.
 _COMPUTE_WORKER_CPU_SHARES = 128
 _IMAGE_DIGEST_RE = re.compile(r"^.+@sha256:[0-9a-f]{64}$")
@@ -57,7 +58,7 @@ _COMPUTE_WORKER_CHANNEL_OPTIONS = (
 )
 _DOCKER_HOST_LABEL = "io.dataforge.docker-host"
 
-# Docker inspections are the most frequent engine I/O in the runtime (capacity
+# Docker inspections are the most frequent compute worker I/O in the runtime (capacity
 # decisions, status snapshots, idle reaping). One second of staleness is
 # invisible to those decisions and keeps the daemon off the hot path.
 _LIVENESS_CACHE_SECONDS = 1.0
@@ -77,7 +78,7 @@ class ComputeWorkerStartTimeout(RuntimeError):
 
     ``container_status`` is the Docker status observed when readiness failed.
     A container that is still ``running`` (or could not be inspected) points at
-    the host or its network; a container that exited points at the engine
+    the host or its network; a container that exited points at the compute worker
     itself, which no other host would fix.
     """
 
@@ -105,13 +106,13 @@ def docker_host_registry() -> DockerHostRegistry:
     with _registry_lock:
         if _registry is None:
             hosts = parse_docker_hosts(
-                settings.engine_docker_hosts,
-                default_docker_host=settings.engine_docker_host,
-                default_connect_host=settings.engine_connect_host,
-                default_engine_network=settings.engine_docker_network,
-                default_object_store_endpoint=settings.engine_object_store_endpoint,
+                settings.compute_worker_docker_hosts,
+                default_docker_host=settings.compute_worker_docker_host,
+                default_connect_host=settings.compute_worker_connect_host,
+                default_compute_worker_network=settings.compute_worker_docker_network,
+                default_object_store_endpoint=settings.compute_worker_object_store_endpoint,
             )
-            _registry = DockerHostRegistry(hosts, engine_image=settings.engine_image)
+            _registry = DockerHostRegistry(hosts, compute_worker_image=settings.compute_worker_image)
         return _registry
 
 
@@ -126,18 +127,18 @@ def reset_docker_host_registry() -> None:
 
 
 def _warn_unpinned_compute_worker_image() -> None:
-    """Report an unpinned engine image once, at worker startup.
+    """Report an unpinned compute worker image once, at worker startup.
 
-    Digest pinning keeps every engine launch on a byte-identical image, but tag
-    references (custom engine builds with extra libraries) remain supported: the
-    resolved image id is recorded per engine either way. This is configuration,
+    Digest pinning keeps every compute worker launch on a byte-identical image, but tag
+    references (custom compute worker builds with extra libraries) remain supported: the
+    resolved image id is recorded per compute worker either way. This is configuration,
     so it is checked when the runtime is validated, not on every launch — at
-    engine-spawn rates the warning buries every other line in the log.
+    compute worker-spawn rates the warning buries every other line in the log.
     """
-    if settings.prod_mode_enabled and _IMAGE_DIGEST_RE.fullmatch(settings.engine_image) is None:
+    if settings.prod_mode_enabled and _IMAGE_DIGEST_RE.fullmatch(settings.compute_worker_image) is None:
         logger.warning(
-            "ENGINE_IMAGE %s is not digest-pinned; engines may drift across launches. Prefer a repository@sha256:<digest> reference.",
-            settings.engine_image,
+            "COMPUTE_WORKER_IMAGE %s is not digest-pinned; compute workers may drift across launches. Prefer a repository@sha256:<digest> reference.",
+            settings.compute_worker_image,
         )
 
 
@@ -147,7 +148,7 @@ def _resolve_launch_context(spec: DockerHostSpec, client: Any) -> tuple[int | No
 
 
 def validate_compute_worker_runtime_readiness() -> None:
-    """Fail before worker registration if no Docker host can launch engines.
+    """Fail before worker registration if no Docker host can launch compute workers.
 
     Every configured host is probed; unreachable hosts are reported and kept
     out of placement until the health monitor sees them answer again. At
@@ -168,7 +169,7 @@ def validate_compute_worker_runtime_readiness() -> None:
         # cap would make admitted launches fail at placement instead of
         # waiting, so the configuration is refused rather than papered over.
         raise RuntimeError(
-            f"COMPUTE_WORKERS={settings.compute_workers} exceeds the summed max_workers={capacity} of ENGINE_DOCKER_HOSTS; "
+            f"COMPUTE_WORKERS={settings.compute_workers} exceeds the summed max_workers={capacity} of COMPUTE_WORKER_DOCKER_HOSTS; "
             "raise the host caps (or leave one host uncapped) or lower COMPUTE_WORKERS"
         )
     logger.info(
@@ -178,7 +179,7 @@ def validate_compute_worker_runtime_readiness() -> None:
             for status in registry.snapshot()
         ),
     )
-    registry.start_health_monitor(settings.engine_docker_host_health_interval_seconds)
+    registry.start_health_monitor(settings.compute_worker_docker_host_health_interval_seconds)
 
 
 def reconcile_deployment_containers(
@@ -231,7 +232,7 @@ def reconcile_deployment_containers(
 def _remove_reconciled_container(client: Any, host: DockerHostSpec, container_id: str) -> bool:
     """Force-remove a swept container and free its placement slot once it is gone.
 
-    A container a live engine detached from (fenced coordinator, failed
+    A container a live compute worker detached from (fenced coordinator, failed
     removal) still holds its slot on the host; the sweep is what finally
     removes it, so the sweep returns the slot. ``NotFound`` means someone else
     already removed it, which frees the slot just the same.
@@ -276,7 +277,7 @@ def _reconcile_host_containers(
                 removed += 1
             except Exception:
                 logger.warning(
-                    "Failed to remove stale-generation engine container %s (generation=%s current=%s)",
+                    "Failed to remove stale-generation compute worker container %s (generation=%s current=%s)",
                     container_id[:12],
                     container_generation or "missing",
                     coordinator_generation,
@@ -301,7 +302,7 @@ def _reconcile_host_containers(
             removed += 1
         except Exception:
             logger.warning(
-                "Failed to remove reconciled engine container %s (state=%s)",
+                "Failed to remove reconciled compute worker container %s (state=%s)",
                 container_id[:12],
                 state,
                 exc_info=True,
@@ -315,7 +316,7 @@ def _identity_scope(identity: compute_pb2.ComputeWorkerIdentity) -> str:
 
 def _safe_name(value: str) -> str:
     normalized = "".join(char.lower() if char.isalnum() else "-" for char in value).strip("-")
-    return normalized or "engine"
+    return normalized or "compute-worker"
 
 
 def _container_name(*, identity: compute_pb2.ComputeWorkerIdentity, namespace: str) -> str:
@@ -324,7 +325,7 @@ def _container_name(*, identity: compute_pb2.ComputeWorkerIdentity, namespace: s
     # Docker DNS resolves container names as DNS labels, capped at 63 chars.
     # The full-identity hash suffix keeps names unique when the namespace or
     # resource id parts are truncated.
-    prefix = "dataforge-engine-"
+    prefix = "dataforge-compute-worker-"
     ns_part = _safe_name(namespace)[:15]
     resource_part = _safe_name(identity.resource_id)[:15]
     return f"{prefix}{ns_part}-{resource_part}-{suffix}"[:63]
@@ -371,28 +372,28 @@ def _compute_worker_object_store_endpoint(host: DockerHostSpec) -> str:
 
 
 def _container_rpc_target(container: Any, host: DockerHostSpec) -> str:
-    """Return the engine RPC address on its host; gRPC readiness handles startup."""
+    """Return the compute-worker RPC address on its host; gRPC readiness handles startup."""
     if host.uses_published_ports:
         container.reload()
-        bindings = container.attrs["NetworkSettings"]["Ports"].get(f"{settings.engine_rpc_port}/tcp") or []
+        bindings = container.attrs["NetworkSettings"]["Ports"].get(f"{settings.compute_worker_rpc_port}/tcp") or []
         if not bindings:
-            raise RuntimeError("Docker did not publish an engine RPC port")
+            raise RuntimeError("Docker did not publish a compute-worker RPC port")
         return f"{host.connect_host}:{bindings[0]['HostPort']}"
     # Container names are unique per launch and Docker DNS resolves them. Do
     # not poll Docker's API here: channel readiness below already waits for the
     # listener, while repeated reloads multiply daemon traffic during bursts.
     name = str(getattr(container, "name", "")).lstrip("/")
     if not name:
-        raise RuntimeError("Docker did not return a name for the engine container")
-    return f"{name}:{settings.engine_rpc_port}"
+        raise RuntimeError("Docker did not return a name for the compute-worker container")
+    return f"{name}:{settings.compute_worker_rpc_port}"
 
 
 def _container_security_kwargs(*, host: DockerHostSpec, resources: dict[str, int]) -> dict[str, object]:
     """Shared create arguments for identity and warm compute containers."""
     kwargs: dict[str, object] = {
-        "image": settings.engine_image,
-        "command": ["python3", "engine_main.py"],
-        "network": host.engine_network,
+        "image": settings.compute_worker_image,
+        "command": ["python3", "compute_worker_main.py"],
+        "network": host.compute_worker_network,
         "cpu_shares": _COMPUTE_WORKER_CPU_SHARES,
         "mem_limit": resources["max_memory_mb"] * _MIB if resources["max_memory_mb"] else None,
         "pids_limit": 256,
@@ -407,7 +408,7 @@ def _container_security_kwargs(*, host: DockerHostSpec, resources: dict[str, int
     if nano_cpus is not None:
         kwargs["nano_cpus"] = nano_cpus
     if host.uses_published_ports:
-        kwargs["ports"] = {f"{settings.engine_rpc_port}/tcp": None}
+        kwargs["ports"] = {f"{settings.compute_worker_rpc_port}/tcp": None}
         if host.is_local:
             kwargs["extra_hosts"] = {"host.docker.internal": "host-gateway"}
     return kwargs
@@ -466,7 +467,7 @@ class DockerComputeWorker(ComputeWorker):
         self._capacity_notifier: Callable[[], None] | None = None
 
     def bind_capacity_notifier(self, notifier: Callable[[], None]) -> None:
-        """ProcessManager wakes capacity waiters when this engine becomes idle."""
+        """ProcessManager wakes capacity waiters when this compute worker becomes idle."""
         self._capacity_notifier = notifier
 
     def _assert_coordinator_current(self) -> None:
@@ -478,7 +479,7 @@ class DockerComputeWorker(ComputeWorker):
             self._assert_coordinator_current()
         except Exception:
             logger.warning(
-                "Coordinator ownership lost; skipping engine mutation operation=%s generation=%s container_id=%s",
+                "Coordinator ownership lost; skipping compute worker mutation operation=%s generation=%s container_id=%s",
                 operation,
                 self._coordinator_generation,
                 self._container_id,
@@ -528,7 +529,7 @@ class DockerComputeWorker(ComputeWorker):
         except docker.errors.NotFound:  # type: ignore[attr-defined]  # docker-py has no Python 3.14 stubs.
             return True
         except Exception:
-            logger.warning("Failed to remove engine container container_id=%s", self._container_id, exc_info=True)
+            logger.warning("Failed to remove compute worker container container_id=%s", self._container_id, exc_info=True)
             return False
         return True
 
@@ -600,7 +601,7 @@ class DockerComputeWorker(ComputeWorker):
             self.termination_reason = "container_stopped"
         if self.termination_reason == "shutdown":
             logger.info(
-                "Engine container stopped resource_id=%s container_id=%s reason=%s exit_code=%s oom_killed=%s",
+                "Compute worker container stopped resource_id=%s container_id=%s reason=%s exit_code=%s oom_killed=%s",
                 self.identity.resource_id,
                 self._container_id,
                 self.termination_reason,
@@ -609,7 +610,7 @@ class DockerComputeWorker(ComputeWorker):
             )
         else:
             logger.error(
-                "Engine container terminated resource_id=%s container_id=%s reason=%s exit_code=%s oom_killed=%s status=%s",
+                "Compute worker container terminated resource_id=%s container_id=%s reason=%s exit_code=%s oom_killed=%s status=%s",
                 self.identity.resource_id,
                 self._container_id,
                 self.termination_reason,
@@ -646,12 +647,12 @@ class DockerComputeWorker(ComputeWorker):
                 "io.dataforge.protocol-version": str(COMPUTE_WORKER_PROTOCOL_VERSION),
             }
             environment = {
-                "ENGINE_RPC_HOST": "0.0.0.0",
-                "ENGINE_RPC_PORT": str(settings.engine_rpc_port),
-                "ENGINE_HEARTBEAT_TIMEOUT_SECONDS": str(settings.engine_heartbeat_interval_seconds * 6),
+                "COMPUTE_WORKER_RPC_HOST": "0.0.0.0",
+                "COMPUTE_WORKER_RPC_PORT": str(settings.compute_worker_rpc_port),
+                "COMPUTE_WORKER_HEARTBEAT_TIMEOUT_SECONDS": str(settings.compute_worker_heartbeat_interval_seconds * 6),
                 # Orphan guard: if the worker dies between container start and
-                # initialization, the engine stops itself instead of leaking.
-                "ENGINE_INIT_TIMEOUT_SECONDS": str(max(120, settings.engine_start_timeout_seconds * 2)),
+                # initialization, the compute worker stops itself instead of leaking.
+                "COMPUTE_WORKER_INIT_TIMEOUT_SECONDS": str(max(120, settings.compute_worker_start_timeout_seconds * 2)),
                 "APP_VERSION": _COMPUTE_WORKER_APPLICATION_VERSION,
             }
             startup_phases = self._launch_with_failover(
@@ -665,7 +666,7 @@ class DockerComputeWorker(ComputeWorker):
             self._heartbeat_stop.clear()
             self._heartbeat_thread = threading.Thread(
                 target=self._heartbeat_loop,
-                name=f"engine-heartbeat-{self.identity.resource_id}",
+                name=f"compute-worker-heartbeat-{self.identity.resource_id}",
                 daemon=True,
             )
             self._heartbeat_thread.start()
@@ -673,7 +674,7 @@ class DockerComputeWorker(ComputeWorker):
             if startup_duration_ms >= _SLOW_COMPUTE_WORKER_START_SECONDS * 1000:
                 phase_timings = " ".join(f"{name}={duration:.1f}" for name, duration in startup_phases.items())
                 logger.warning(
-                    "Slow engine startup request_id=%s namespace=%s engine_scope=%s resource_id=%s docker_host=%s duration_ms=%.1f %s",
+                    "Slow compute-worker startup request_id=%s namespace=%s compute_worker_scope=%s resource_id=%s docker_host=%s duration_ms=%.1f %s",
                     get_compute_request_id() or "-",
                     self._namespace,
                     _identity_scope(self.identity),
@@ -699,11 +700,11 @@ class DockerComputeWorker(ComputeWorker):
                 "io.dataforge.protocol-version": str(COMPUTE_WORKER_PROTOCOL_VERSION),
             }
             environment = {
-                "ENGINE_RPC_HOST": "0.0.0.0",
-                "ENGINE_RPC_PORT": str(settings.engine_rpc_port),
-                "ENGINE_HEARTBEAT_TIMEOUT_SECONDS": str(settings.engine_heartbeat_interval_seconds * 6),
+                "COMPUTE_WORKER_RPC_HOST": "0.0.0.0",
+                "COMPUTE_WORKER_RPC_PORT": str(settings.compute_worker_rpc_port),
+                "COMPUTE_WORKER_HEARTBEAT_TIMEOUT_SECONDS": str(settings.compute_worker_heartbeat_interval_seconds * 6),
                 # Warm workers stay uninitialized until assigned; no deadline.
-                "ENGINE_INIT_TIMEOUT_SECONDS": "0",
+                "COMPUTE_WORKER_INIT_TIMEOUT_SECONDS": "0",
                 "APP_VERSION": _COMPUTE_WORKER_APPLICATION_VERSION,
             }
             self._launch_with_failover(
@@ -727,7 +728,7 @@ class DockerComputeWorker(ComputeWorker):
         A host failure (Docker API error, unreachable daemon, listener that
         never became ready) excludes that host for a cooldown and the launch
         is retried on the next eligible host. Request-level errors, such as a
-        rejected coordinator generation or an engine identity collision,
+        rejected coordinator generation or an compute worker identity collision,
         propagate unchanged.
         """
         registry = docker_host_registry()
@@ -738,7 +739,7 @@ class DockerComputeWorker(ComputeWorker):
                 host = registry.select(exclude=attempted)
             except NoEligibleDockerHost as exc:
                 if last_failure is not None:
-                    raise RuntimeError(f"Engine launch failed on every eligible Docker host; last host {last_failure}") from last_failure.cause
+                    raise RuntimeError(f"Compute worker launch failed on every eligible Docker host; last host {last_failure}") from last_failure.cause
                 raise RuntimeError(str(exc)) from exc
             attempted.add(host.name)
             try:
@@ -747,7 +748,7 @@ class DockerComputeWorker(ComputeWorker):
                 last_failure = failure
                 registry.report_failure(host.name, failure.cause)
                 logger.warning(
-                    "Engine launch failed on Docker host %s; trying another host resource_id=%s error=%s",
+                    "Compute worker launch failed on Docker host %s; trying another host resource_id=%s error=%s",
                     host.name,
                     self.identity.resource_id or "warm-worker",
                     failure.cause,
@@ -779,7 +780,7 @@ class DockerComputeWorker(ComputeWorker):
             raise
         startup_phases["docker_context_ms"] = (time.perf_counter() - phase_started) * 1000
         self.effective_resources = cast(dict[str, object], resources)
-        self.image_digest = settings.engine_image.split("@", 1)[1] if "@" in settings.engine_image else image_id
+        self.image_digest = settings.compute_worker_image.split("@", 1)[1] if "@" in settings.compute_worker_image else image_id
         create_kwargs = _container_security_kwargs(host=host, resources=resources)
         create_kwargs["name"] = name
         create_kwargs["environment"] = environment
@@ -835,7 +836,7 @@ class DockerComputeWorker(ComputeWorker):
             self._cleanup_failed_start(container, client)
             # A container that is still running but unreachable points at the
             # host; one that exited would fail the same way anywhere, so that
-            # is the engine's failure and must not exclude the host.
+            # is the compute worker's failure and must not exclude the host.
             if exc.is_host_failure:
                 raise _HostLaunchFailure(host, exc) from exc
             raise
@@ -847,11 +848,14 @@ class DockerComputeWorker(ComputeWorker):
     def _require_host(self) -> DockerHostSpec:
         host = self._host
         if host is None:
-            raise RuntimeError("Engine container has no Docker host; it has not been started")
+            raise RuntimeError("Compute worker container has no Docker host; it has not been started")
         return host
 
     def _metadata(self) -> tuple[tuple[str, str], ...]:
-        return ((_COMPUTE_WORKER_TOKEN_METADATA_KEY, self._token),)
+        return (
+            (_COMPUTE_WORKER_TOKEN_METADATA_KEY, self._token),
+            (_LEGACY_ENGINE_TOKEN_METADATA_KEY, self._token),
+        )
 
     def _initialize(self, *, resources: dict[str, int], credentials: ObjectStoreCredentials) -> None:
         assert self._stub is not None
@@ -870,23 +874,25 @@ class DockerComputeWorker(ComputeWorker):
         try:
             resp = self._stub.Initialize(req, timeout=2.0)
         except grpc.RpcError as exc:
-            if exc.code() == grpc.StatusCode.FAILED_PRECONDITION and str(exc.details()).startswith("Engine already initialized"):
+            if exc.code() == grpc.StatusCode.FAILED_PRECONDITION and str(exc.details()).startswith(
+                ("Compute worker already initialized", "Engine already initialized")
+            ):
                 raise RuntimeError(
-                    f"Engine identity collision for {self.identity.resource_id} at {self._rpc_target} (container {self._container_id}): {exc.details()}"
+                    f"Compute worker identity collision for {self.identity.resource_id} at {self._rpc_target} (container {self._container_id}): {exc.details()}"
                 ) from exc
-            raise RuntimeError(f"Engine initialization failed for {self.identity.resource_id}: {exc}") from exc
+            raise RuntimeError(f"Compute worker initialization failed for {self.identity.resource_id}: {exc}") from exc
         if not resp.ready or resp.engine_identity != self.identity.resource_id:
-            raise RuntimeError("Engine initialization did not return the expected ready identity")
+            raise RuntimeError("Compute worker initialization did not return the expected ready identity")
 
     def _await_listening(self) -> None:
         assert self._channel is not None
         assert self._stub is not None
-        deadline = time.monotonic() + settings.engine_start_timeout_seconds
+        deadline = time.monotonic() + settings.compute_worker_start_timeout_seconds
         try:
             grpc.channel_ready_future(self._channel).result(timeout=max(0.0, deadline - time.monotonic()))
         except grpc.FutureTimeoutError as exc:
             status = self._container_status_after_start_failure()
-            raise ComputeWorkerStartTimeout(f"Timed out waiting for engine listener; container status={status}", container_status=status) from exc
+            raise ComputeWorkerStartTimeout(f"Timed out waiting for compute worker listener; container status={status}", container_status=status) from exc
 
         retry_delay = 0.1
         last_error: grpc.RpcError | None = None
@@ -895,7 +901,7 @@ class DockerComputeWorker(ComputeWorker):
             if remaining <= 0:
                 status = self._container_status_after_start_failure()
                 raise ComputeWorkerStartTimeout(
-                    f"Timed out waiting for engine health check; container status={status}: {last_error}",
+                    f"Timed out waiting for compute worker health check; container status={status}: {last_error}",
                     container_status=status,
                 ) from last_error
             try:
@@ -907,7 +913,7 @@ class DockerComputeWorker(ComputeWorker):
             except grpc.RpcError as exc:
                 if exc.code() not in {grpc.StatusCode.UNAVAILABLE, grpc.StatusCode.DEADLINE_EXCEEDED}:
                     status = self._container_status_after_start_failure()
-                    raise RuntimeError(f"Engine listener failed its health check (container status={status}): {exc}") from exc
+                    raise RuntimeError(f"Compute worker listener failed its health check (container status={status}): {exc}") from exc
                 last_error = exc
                 remaining = deadline - time.monotonic()
                 if remaining <= 0:
@@ -934,7 +940,7 @@ class DockerComputeWorker(ComputeWorker):
         self._assert_coordinator_current()
         with self._lock:
             if not self._alive or self._stub is None:
-                raise RuntimeError("Cannot bind identity to an unstarted engine")
+                raise RuntimeError("Cannot bind identity to an unstarted compute worker")
             self.identity = identity
             self.analysis_id = identity.resource_id
             self._namespace = namespace or get_namespace()
@@ -950,14 +956,14 @@ class DockerComputeWorker(ComputeWorker):
             self._heartbeat_stop.clear()
             self._heartbeat_thread = threading.Thread(
                 target=self._heartbeat_loop,
-                name=f"engine-heartbeat-{self.identity.resource_id}",
+                name=f"compute worker-heartbeat-{self.identity.resource_id}",
                 daemon=True,
             )
             self._heartbeat_thread.start()
 
     def _heartbeat_loop(self) -> None:
         consecutive_failures = 0
-        while not self._heartbeat_stop.wait(settings.engine_heartbeat_interval_seconds):
+        while not self._heartbeat_stop.wait(settings.compute_worker_heartbeat_interval_seconds):
             try:
                 stub = self._stub
                 if stub is None:
@@ -967,13 +973,13 @@ class DockerComputeWorker(ComputeWorker):
             except Exception as exc:
                 consecutive_failures += 1
                 logger.warning(
-                    "Engine heartbeat failed for %s (%s consecutive): %s",
+                    "Compute worker heartbeat failed for %s (%s consecutive): %s",
                     self.identity.resource_id,
                     consecutive_failures,
                     exc,
                 )
                 # A missed gRPC health RPC is not proof that the container
-                # exited: the engine can be busy initializing its compute
+                # exited: the compute worker can be busy initializing its compute
                 # runtime or briefly starved while many identities start.
                 # Docker liveness is authoritative for manager eviction.
                 if not self.is_process_alive():
@@ -984,7 +990,7 @@ class DockerComputeWorker(ComputeWorker):
                     return
                 if consecutive_failures >= 3:
                     logger.warning(
-                        "Engine gRPC health is unavailable but its container is still running; "
+                        "Compute worker gRPC health is unavailable but its container is still running; "
                         "continuing heartbeats resource_id=%s container_id=%s failures=%s",
                         self.identity.resource_id,
                         self._container_id,
@@ -1044,7 +1050,7 @@ class DockerComputeWorker(ComputeWorker):
     def _submit(self, kind: str, payload: dict[str, object], *, job_id: str | None = None) -> str:
         with self._lock:
             self._assert_coordinator_current()
-            # Check, restart and job registration stay atomic: an engine that is
+            # Check, restart and job registration stay atomic: an compute worker that is
             # shut down (idle reaping, a crash) between the check and the
             # registration has to be restarted, not reported as broken.
             if not self.is_process_alive():
@@ -1055,9 +1061,9 @@ class DockerComputeWorker(ComputeWorker):
             job_id = job_id or get_compute_request_id() or str(uuid.uuid4())
             self._active_job_ids.add(job_id)
             self._publish_current_job_id(job_id)
-        # The submit RPC runs unlocked: it waits for the engine to accept the
+        # The submit RPC runs unlocked: it waits for the compute worker to accept the
         # job, and holding the lifecycle lock across it blocks shutdown, status
-        # and every other caller of this engine for the full submit timeout.
+        # and every other caller of this compute worker for the full submit timeout.
         try:
             self._assert_coordinator_current()
             stub.SubmitJob(
@@ -1067,7 +1073,7 @@ class DockerComputeWorker(ComputeWorker):
                     kind=kind,
                     payload_json=encode_json_bytes(payload),
                 ),
-                timeout=settings.engine_start_timeout_seconds,
+                timeout=settings.compute_worker_start_timeout_seconds,
                 metadata=metadata,
             )
         except Exception:
@@ -1075,7 +1081,7 @@ class DockerComputeWorker(ComputeWorker):
                 self._active_job_ids.discard(job_id)
                 self._publish_current_job_id(next(iter(self._active_job_ids), None))
             raise
-        threading.Thread(target=self._watch_job, args=(job_id,), name=f"engine-watch-{job_id}", daemon=True).start()
+        threading.Thread(target=self._watch_job, args=(job_id,), name=f"compute worker-watch-{job_id}", daemon=True).start()
         return job_id
 
     def preview(
@@ -1109,7 +1115,7 @@ class DockerComputeWorker(ComputeWorker):
             export = get_export_format(export_format)
             upload_url = presigned_put_url(
                 artifact_url,
-                expires_seconds=max(settings.engine_start_timeout_seconds * 10, 3600),
+                expires_seconds=max(settings.compute_worker_start_timeout_seconds * 10, 3600),
                 endpoint_url=_compute_worker_object_store_endpoint(self._require_host()),
                 content_type=export.content_type,
             )
@@ -1156,11 +1162,11 @@ class DockerComputeWorker(ComputeWorker):
         try:
             response = cancel(
                 compute_worker_runtime_pb2.ComputeWorkerCancelJobRequest(job_id=expected),
-                timeout=settings.engine_shutdown_grace_seconds,
+                timeout=settings.compute_worker_shutdown_grace_seconds,
                 metadata=metadata,
             )
         except grpc.RpcError as exc:
-            logger.warning("Failed to cancel engine job %s: %s", expected, exc)
+            logger.warning("Failed to cancel compute worker job %s: %s", expected, exc)
             return False
         return bool(response.accepted)
 
@@ -1178,7 +1184,7 @@ class DockerComputeWorker(ComputeWorker):
                 result = ComputeWorkerResult(
                     job_id=job_id,
                     data=None,
-                    error=f"Failed to retrieve staged engine artifact: {exc}",
+                    error=f"Failed to retrieve staged compute worker artifact: {exc}",
                     error_kind="engine_artifact_transfer_failed",
                     error_details={},
                 )
@@ -1209,7 +1215,7 @@ class DockerComputeWorker(ComputeWorker):
                         if which == "progress_json":
                             payload = json.loads(event.progress_json)
                             if not isinstance(payload, dict):
-                                raise RuntimeError("Engine progress payload must be an object")
+                                raise RuntimeError("Compute worker progress payload must be an object")
                             with self._lock:
                                 self._pending_progress.setdefault(job_id, deque(maxlen=1000)).append(ComputeWorkerProgressEvent(job_id=job_id, event=payload))
                                 while len(self._pending_progress) > 100:
@@ -1245,10 +1251,10 @@ class DockerComputeWorker(ComputeWorker):
                 # transport closes cleanly first, resume from the last durable
                 # sequence instead of abandoning the active job forever.
                 if self._shutdown_requested:
-                    raise RuntimeError("Engine shutdown requested")
-                logger.info("Engine job watch ended before result for %s; resuming after sequence %s", job_id, sequence)
+                    raise RuntimeError("Compute worker shutdown requested")
+                logger.info("Compute worker job watch ended before result for %s; resuming after sequence %s", job_id, sequence)
                 if self._heartbeat_stop.wait(0.05):
-                    raise RuntimeError("Engine shutdown requested")
+                    raise RuntimeError("Compute worker shutdown requested")
         except Exception as exc:
             with self._lock:
                 intentional_shutdown = self._shutdown_requested
@@ -1256,7 +1262,7 @@ class DockerComputeWorker(ComputeWorker):
                 self._pending_results[job_id] = ComputeWorkerResult(
                     job_id=job_id,
                     data=None,
-                    error="Engine shutdown requested" if intentional_shutdown else str(exc),
+                    error="Compute worker shutdown requested" if intentional_shutdown else str(exc),
                     error_kind="engine_shutdown" if intentional_shutdown else "engine_rpc_lost",
                     error_details={},
                 )
@@ -1264,9 +1270,9 @@ class DockerComputeWorker(ComputeWorker):
                 next_job = next(iter(self._active_job_ids), None)
             self._publish_current_job_id(next_job)
             if intentional_shutdown:
-                logger.info("Engine job %s stopped during engine shutdown", job_id)
+                logger.info("Compute worker job %s stopped during compute worker shutdown", job_id)
             else:
-                logger.warning("Engine job watcher failed for %s: %s", job_id, exc)
+                logger.warning("Compute worker job watcher failed for %s: %s", job_id, exc)
             if transfer is not None:
                 with contextlib.suppress(Exception):
                     delete_object(transfer[1])
@@ -1286,9 +1292,9 @@ class DockerComputeWorker(ComputeWorker):
                     job_id=expected,
                     data=None,
                     error=(
-                        "Engine shutdown requested"
+                        "Compute worker shutdown requested"
                         if intentional_shutdown
-                        else f"Engine container terminated (reason={reason}, exit_code={self.exit_code}, oom_killed={self.oom_killed})"
+                        else f"Compute worker container terminated (reason={reason}, exit_code={self.exit_code}, oom_killed={self.oom_killed})"
                     ),
                     error_kind=error_kind,
                     error_details={
@@ -1333,15 +1339,17 @@ class DockerComputeWorker(ComputeWorker):
                     with contextlib.suppress(Exception):
                         delete_object(artifact_url)
                 return
-            if not self._coordinator_can_mutate("engine-shutdown-rpc"):
+            if not self._coordinator_can_mutate("compute worker-shutdown-rpc"):
                 self._detach_local_handles()
                 return
             if stub is not None:
                 with contextlib.suppress(Exception):
                     stub.Shutdown(
-                        compute_worker_runtime_pb2.ComputeWorkerShutdownRequest(), timeout=settings.engine_shutdown_grace_seconds, metadata=self._metadata()
+                        compute_worker_runtime_pb2.ComputeWorkerShutdownRequest(),
+                        timeout=settings.compute_worker_shutdown_grace_seconds,
+                        metadata=self._metadata(),
                     )
-            deadline = time.monotonic() + settings.engine_shutdown_grace_seconds
+            deadline = time.monotonic() + settings.compute_worker_shutdown_grace_seconds
             while time.monotonic() < deadline:
                 with contextlib.suppress(Exception):
                     container.reload()
@@ -1351,13 +1359,13 @@ class DockerComputeWorker(ComputeWorker):
             with contextlib.suppress(Exception):
                 container.reload()
                 if container.status == "running":
-                    if not self._coordinator_can_mutate("engine-container-stop"):
+                    if not self._coordinator_can_mutate("compute worker-container-stop"):
                         self._detach_local_handles()
                         return
-                    container.stop(timeout=settings.engine_shutdown_grace_seconds)
+                    container.stop(timeout=settings.compute_worker_shutdown_grace_seconds)
                     container.reload()
                 self._capture_termination(container)
-            if not self._coordinator_can_mutate("engine-container-remove"):
+            if not self._coordinator_can_mutate("compute worker-container-remove"):
                 self._detach_local_handles()
                 return
             if not self._remove_container(container):

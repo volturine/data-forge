@@ -183,7 +183,7 @@ def cleanup_stale_test_rustfs(*, label: str = 'data-forge.test-rustfs=1') -> Non
     _cleanup_stale_owned_resources('container', label)
 
 
-def cleanup_stale_test_engine_networks(*, label: str = 'data-forge.test-engine-network=1') -> None:
+def cleanup_stale_test_compute_worker_networks(*, label: str = 'data-forge.test-compute-worker-network=1') -> None:
     """Remove orphaned integration/e2e engine networks that exhaust Docker's IP pool."""
     listed = run_command(
         ['docker', 'network', 'ls', '-q', '--filter', f'label={label}'],

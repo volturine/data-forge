@@ -85,8 +85,8 @@ class _FakeEngine:
 
 
 def test_process_manager_reaps_idle_shared_engines(monkeypatch) -> None:
-    monkeypatch.setattr(settings, "engine_idle_ttl_seconds", 1)
-    monkeypatch.setattr(settings, "engine_idle_reap_interval_seconds", 1)
+    monkeypatch.setattr(settings, "compute_worker_idle_ttl_seconds", 1)
+    monkeypatch.setattr(settings, "compute_worker_idle_reap_interval_seconds", 1)
 
     def fake_engine_factory(identity: compute_pb2.ComputeWorkerIdentity, resource_config: dict | None = None):
         return cast(Any, _FakeEngine(identity.resource_id, resource_config))
@@ -227,7 +227,7 @@ async def test_existing_engine_request_admission_is_released_exactly_once(monkey
 
 
 def test_docker_reconciliation_is_not_run_on_every_idle_reap(monkeypatch) -> None:
-    monkeypatch.setattr(settings, "engine_idle_ttl_seconds", 0)
+    monkeypatch.setattr(settings, "compute_worker_idle_ttl_seconds", 0)
     manager = ProcessManager(engine_factory=lambda identity, resource_config: cast(Any, _FakeEngine(identity.resource_id, resource_config)))
     calls = 0
     elapsed = 0.0
@@ -283,8 +283,8 @@ def test_process_manager_cancels_exact_shared_engine_job_without_stopping_worker
 
 def test_process_manager_does_not_reap_engine_with_request_reservation(monkeypatch) -> None:
     """An admitted request protects a reused engine until its runner releases it."""
-    monkeypatch.setattr(settings, "engine_idle_ttl_seconds", 0)
-    monkeypatch.setattr(settings, "engine_idle_reap_interval_seconds", 3600)
+    monkeypatch.setattr(settings, "compute_worker_idle_ttl_seconds", 0)
+    monkeypatch.setattr(settings, "compute_worker_idle_reap_interval_seconds", 3600)
     manager = ProcessManager(engine_factory=lambda identity, resource_config: cast(Any, _FakeEngine(identity.resource_id, resource_config)))
     identity = _analysis_identity("analysis-reaper-request-reservation")
     try:
@@ -623,7 +623,7 @@ def test_lease_loss_does_not_shutdown_compute_worker_with_active_job() -> None:
 
 
 def test_lease_loss_does_not_shutdown_idle_engine_before_reaper(monkeypatch) -> None:
-    monkeypatch.setattr(settings, "engine_idle_ttl_seconds", 60)
+    monkeypatch.setattr(settings, "compute_worker_idle_ttl_seconds", 60)
     manager = ProcessManager(engine_factory=lambda identity, resource_config: cast(Any, _FakeEngine(identity.resource_id, resource_config)))
     identity = _analysis_identity("analysis-idle-lease-loss")
     try:
@@ -1409,12 +1409,12 @@ def test_process_manager_warm_workers_replenishes_and_claims(monkeypatch, caplog
         assert claimed_engine in created_warm
         assert claimed_engine.bound_identities == [id1]
         assert not claimed_engine.is_warm_worker
-        warm_acquisition_record = next(record for record in caplog.records if "Engine acquisition" in record.message)
+        warm_acquisition_record = next(record for record in caplog.records if "Compute worker acquisition" in record.message)
         warm_acquisition_log = warm_acquisition_record.message
         assert warm_acquisition_record.levelno == logging.INFO
         assert "request_id=warm-preview-request" in warm_acquisition_log
         assert "namespace=default" in warm_acquisition_log
-        assert "engine_scope=analysis_interactive" in warm_acquisition_log
+        assert "compute_worker_scope=analysis_interactive" in warm_acquisition_log
         assert "source=warm" in warm_acquisition_log
         assert "warm_health_ms=" in warm_acquisition_log
         assert "warm_bind_ms=" in warm_acquisition_log
@@ -1461,7 +1461,7 @@ def test_engine_acquisition_warns_only_after_five_seconds(caplog) -> None:
         warm_health_ms=2.0,
         warm_bind_ms=3.0,
     )
-    fast_record = next(record for record in caplog.records if "Engine acquisition" in record.message)
+    fast_record = next(record for record in caplog.records if "Compute worker acquisition" in record.message)
     assert fast_record.levelno == logging.INFO
     assert "source=warm" in fast_record.message
     assert not [record for record in caplog.records if record.levelno == logging.WARNING]
@@ -1474,7 +1474,7 @@ def test_engine_acquisition_warns_only_after_five_seconds(caplog) -> None:
         acquisition_ms=5000.1,
         cold_start_ms=4900.0,
     )
-    slow_record = next(record for record in caplog.records if "Engine acquisition" in record.message)
+    slow_record = next(record for record in caplog.records if "Compute worker acquisition" in record.message)
     assert slow_record.levelno == logging.WARNING
     assert "source=cold" in slow_record.message
 
@@ -1491,12 +1491,12 @@ def test_process_manager_logs_cold_engine_acquisition(monkeypatch, caplog) -> No
     )
     try:
         manager.spawn_compute_worker(identity)
-        cold_acquisition_record = next(record for record in caplog.records if "Engine acquisition" in record.message)
+        cold_acquisition_record = next(record for record in caplog.records if "Compute worker acquisition" in record.message)
         cold_acquisition_log = cold_acquisition_record.message
         assert cold_acquisition_record.levelno == logging.INFO
         assert "request_id=cold-preview-request" in cold_acquisition_log
         assert "namespace=default" in cold_acquisition_log
-        assert "engine_scope=analysis_interactive" in cold_acquisition_log
+        assert "compute_worker_scope=analysis_interactive" in cold_acquisition_log
         assert f"resource_id={identity.resource_id}" in cold_acquisition_log
         assert "source=cold" in cold_acquisition_log
         assert "cold_start_ms=" in cold_acquisition_log

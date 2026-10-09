@@ -84,7 +84,7 @@ def test_preview_step_persists_compute_worker_run_by_default(sample_datasource, 
     preview_log = next(record.message for record in caplog.records if "Slow preview" in record.message)
     assert "request_id=preview-request-1" in preview_log
     assert "namespace=default" in preview_log
-    assert "engine_scope=analysis_interactive" in preview_log
+    assert "compute_worker_scope=analysis_interactive" in preview_log
     assert f"resource_id={analysis_id}" in preview_log
     assert "command_hash=safe-command-hash" in preview_log
 

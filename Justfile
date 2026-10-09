@@ -31,18 +31,18 @@ dev:
     set -euo pipefail
     just generate-protocol
     set -a; source docker/env/dev.env; set +a
-    just engine-image "$DF_ENGINE_IMAGE"
-    # The coordinator and worker run as separate package processes; only the
-    # worker owns Docker access and the engine lifecycle.
-    export ENGINE_DOCKER_HOST="$DF_ENGINE_DOCKER_HOST"
-    export ENGINE_IMAGE="$DF_ENGINE_IMAGE"
-    export ENGINE_DOCKER_NETWORK="$DF_ENGINE_DOCKER_NETWORK"
-    export ENGINE_RPC_PORT="$DF_ENGINE_RPC_PORT"
-    export ENGINE_START_TIMEOUT_SECONDS="$DF_ENGINE_START_TIMEOUT_SECONDS"
-    export ENGINE_SHUTDOWN_GRACE_SECONDS="$DF_ENGINE_SHUTDOWN_GRACE_SECONDS"
-    export ENGINE_HEARTBEAT_INTERVAL_SECONDS="$DF_ENGINE_HEARTBEAT_INTERVAL_SECONDS"
-    export ENGINE_CONNECT_HOST=127.0.0.1
-    docker network inspect "$ENGINE_DOCKER_NETWORK" >/dev/null 2>&1 || docker network create "$ENGINE_DOCKER_NETWORK" >/dev/null
+    just compute-worker-image "$DF_COMPUTE_WORKER_IMAGE"
+    # The coordinator and worker manager run as separate package processes;
+    # only the worker service owns Docker access and compute-worker lifecycle.
+    export COMPUTE_WORKER_DOCKER_HOST="$DF_COMPUTE_WORKER_DOCKER_HOST"
+    export COMPUTE_WORKER_IMAGE="$DF_COMPUTE_WORKER_IMAGE"
+    export COMPUTE_WORKER_DOCKER_NETWORK="$DF_COMPUTE_WORKER_DOCKER_NETWORK"
+    export COMPUTE_WORKER_RPC_PORT="$DF_COMPUTE_WORKER_RPC_PORT"
+    export COMPUTE_WORKER_START_TIMEOUT_SECONDS="$DF_COMPUTE_WORKER_START_TIMEOUT_SECONDS"
+    export COMPUTE_WORKER_SHUTDOWN_GRACE_SECONDS="$DF_COMPUTE_WORKER_SHUTDOWN_GRACE_SECONDS"
+    export COMPUTE_WORKER_HEARTBEAT_INTERVAL_SECONDS="$DF_COMPUTE_WORKER_HEARTBEAT_INTERVAL_SECONDS"
+    export COMPUTE_WORKER_CONNECT_HOST=127.0.0.1
+    docker network inspect "$COMPUTE_WORKER_DOCKER_NETWORK" >/dev/null 2>&1 || docker network create "$COMPUTE_WORKER_DOCKER_NETWORK" >/dev/null
     env -u VIRTUAL_ENV uv run --project packages/backend python scripts/ensure_dev_postgres.py
     env -u VIRTUAL_ENV uv run --project packages/backend python scripts/ensure_dev_rustfs.py
     (cd packages/backend && env -u VIRTUAL_ENV uv run --env-file ../../docker/env/dev.env main.py) & \
@@ -51,13 +51,13 @@ dev:
     (cd packages/scheduler && env -u VIRTUAL_ENV uv run --env-file ../../docker/env/dev.env main.py) & \
     (cd packages/frontend && bun run dev) & wait
 
-# Ensure the polars engine image exists locally; build it if missing.
-engine-image tag:
+# Ensure the compute-worker image exists locally; build it if missing.
+compute-worker-image tag:
     #!/usr/bin/env bash
     set -euo pipefail
     if ! docker image inspect "{{tag}}" >/dev/null 2>&1; then
-        echo "Engine image {{tag}} not found; building..."
-        docker build -f docker/Dockerfile --target engine -t "{{tag}}" .
+        echo "Compute-worker image {{tag}} not found; building..."
+        docker build -f docker/Dockerfile --target compute-worker -t "{{tag}}" .
     fi
 
 # Build the frontend and run the fixed production roles from source.
@@ -71,14 +71,14 @@ prod:
     set -a
     source docker/env/prod.env
     set +a
-    export ENGINE_DOCKER_HOST="$DF_ENGINE_DOCKER_HOST"
-    export ENGINE_DOCKER_NETWORK="$DF_ENGINE_DOCKER_NETWORK"
-    export ENGINE_IMAGE="$DF_ENGINE_IMAGE"
-    export ENGINE_RPC_PORT="$DF_ENGINE_RPC_PORT"
-    export ENGINE_START_TIMEOUT_SECONDS="$DF_ENGINE_START_TIMEOUT_SECONDS"
-    export ENGINE_SHUTDOWN_GRACE_SECONDS="$DF_ENGINE_SHUTDOWN_GRACE_SECONDS"
-    export ENGINE_HEARTBEAT_INTERVAL_SECONDS="$DF_ENGINE_HEARTBEAT_INTERVAL_SECONDS"
-    export ENGINE_CONNECT_HOST=127.0.0.1
+    export COMPUTE_WORKER_DOCKER_HOST="$DF_COMPUTE_WORKER_DOCKER_HOST"
+    export COMPUTE_WORKER_DOCKER_NETWORK="$DF_COMPUTE_WORKER_DOCKER_NETWORK"
+    export COMPUTE_WORKER_IMAGE="$DF_COMPUTE_WORKER_IMAGE"
+    export COMPUTE_WORKER_RPC_PORT="$DF_COMPUTE_WORKER_RPC_PORT"
+    export COMPUTE_WORKER_START_TIMEOUT_SECONDS="$DF_COMPUTE_WORKER_START_TIMEOUT_SECONDS"
+    export COMPUTE_WORKER_SHUTDOWN_GRACE_SECONDS="$DF_COMPUTE_WORKER_SHUTDOWN_GRACE_SECONDS"
+    export COMPUTE_WORKER_HEARTBEAT_INTERVAL_SECONDS="$DF_COMPUTE_WORKER_HEARTBEAT_INTERVAL_SECONDS"
+    export COMPUTE_WORKER_CONNECT_HOST=127.0.0.1
     pids=()
     shutdown() {
         trap - EXIT INT TERM
@@ -329,7 +329,7 @@ test-backend-integration-raw: _prepare-test-services
     if [ "${DATAFORGE_SKIP_PROTOCOL_GENERATE:-}" != "1" ]; then
         just generate-protocol
     fi
-    docker build -f docker/Dockerfile --target engine -t data-forge-polars-engine:integration .
+    docker build -f docker/Dockerfile --target compute-worker -t data-forge-compute-worker:integration .
     cd packages/backend
     # This test holds a compute request row lock, so run it outside the xdist load
     # to keep unrelated integration work from expiring its lease before publication.
@@ -490,12 +490,12 @@ docker-prod:
     docker build -f docker/Dockerfile --target scheduler -t "data-forge-scheduler:${TAG}" .
     docker build -f docker/Dockerfile --target runtime -t "data-forge-runtime:${TAG}" .
     docker build -f docker/Dockerfile --target worker -t "data-forge-worker:${TAG}" .
-    docker build -f docker/Dockerfile --target engine -t "data-forge-polars-engine:${TAG}" .
+    docker build -f docker/Dockerfile --target compute-worker -t "data-forge-compute-worker:${TAG}" .
     DF_API_IMAGE="data-forge-api:${TAG}" \
     DF_SCHEDULER_IMAGE="data-forge-scheduler:${TAG}" \
     DF_RUNTIME_IMAGE="data-forge-runtime:${TAG}" \
     DF_WORKER_IMAGE="data-forge-worker:${TAG}" \
-    DF_ENGINE_IMAGE="data-forge-polars-engine:${TAG}" \
+    DF_COMPUTE_WORKER_IMAGE="data-forge-compute-worker:${TAG}" \
     DF_API_PORT="${DF_SMOKE_API_PORT:-8300}" \
       docker compose --env-file docker/env/prod.env \
         -p dataforge-prod \
