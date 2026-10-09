@@ -533,7 +533,7 @@ async def test_owner_epoch_failure_fail_stops_before_main_can_return_to_standby(
     async def acquire_lease(_stop_event, _lease) -> bool:
         return True
 
-    async def failed_epoch(_stop_event, _lease) -> None:
+    async def failed_epoch(_stop_event, _lease, *, health=None) -> None:
         raise RuntimeError('endpoint shutdown failed; lease retained')
 
     monkeypatch.setattr(runtime_coordinator.settings, 'distributed_runtime_enabled', True)
@@ -763,7 +763,7 @@ async def test_coordinator_resets_standby_backoff_after_a_successful_epoch(monke
 
     epoch_count = 0
 
-    async def run_epoch(_stop_event, _lease) -> None:
+    async def run_epoch(_stop_event, _lease, *, health=None) -> None:
         nonlocal epoch_count
         epoch_count += 1
         if epoch_count == 1:
