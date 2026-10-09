@@ -180,6 +180,7 @@ check:
     if rg -n 'remote: buf\.build/(protocolbuffers|grpc)' packages/protocol Justfile; then echo 'Protocol generation must use the local packages/protocol toolchain, not Buf remote plugins.'; exit 1; fi
     just check-protocol-generated
     scripts/check_no_generated_protocol.sh
+    scripts/test_test_container_teardown.sh
     cd packages/backend && env -u VIRTUAL_ENV uv run python ../../scripts/check_package_boundaries.py
     cd packages/backend && env -u VIRTUAL_ENV uv run python ../../scripts/check_env_contracts.py
     cd packages/backend && env -u VIRTUAL_ENV uv run python ../../scripts/check_dependency_hygiene.py
