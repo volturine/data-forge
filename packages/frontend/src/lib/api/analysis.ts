@@ -88,7 +88,7 @@ export function updateAnalysis(
 	id: string,
 	data: AnalysisUpdate,
 	version: string
-): ResultAsync<{ analysis: Analysis; version: string }, ApiError> {
+): ResultAsync<AnalysisDetail, ApiError> {
 	const headers: Record<string, string> = {};
 	headers['If-Match'] = version;
 	return apiRequestWithHeaders<Analysis>(`/v1/analysis/${id}`, {
@@ -97,8 +97,9 @@ export function updateAnalysis(
 		headers
 	}).andThen(({ data: analysis, headers: responseHeaders }) => {
 		const nextVersion = responseHeaders.get('X-Analysis-Version');
-		if (!nextVersion) return errAsync(missingAnalysisRevision());
-		return okAsync({ analysis, version: nextVersion });
+		const etag = responseHeaders.get('ETag');
+		if (!nextVersion || !etag) return errAsync(missingAnalysisRevision());
+		return okAsync({ analysis, etag, version: nextVersion });
 	});
 }
 
