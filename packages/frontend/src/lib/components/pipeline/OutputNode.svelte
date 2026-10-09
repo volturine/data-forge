@@ -507,10 +507,7 @@
 				buildStarting = false;
 				return;
 			}
-			queryClient.setQueryData(
-				analysisQueryKey(saveResult.value.analysis.id),
-				saveResult.value
-			);
+			queryClient.setQueryData(analysisQueryKey(saveResult.value.analysis.id), saveResult.value);
 		}
 
 		const pipeline = buildAnalysisPipelinePayload(
