@@ -45,8 +45,15 @@ _LEASE_RETRY_SECONDS = 1.0
 # The advisory lock lives on this session. A coordinator whose machine vanishes
 # never closes the connection, so PostgreSQL must notice the dead peer itself:
 # probe after 5s idle, every 2s, three misses, instead of the OS default of
-# two hours. Only then can a standby on another machine take over.
-_LEASE_SESSION_OPTIONS = '-c statement_timeout=3000 -c lock_timeout=1000 -c tcp_keepalives_idle=5 -c tcp_keepalives_interval=2 -c tcp_keepalives_count=3'
+# two hours. Keepalives only run on an idle connection, so tcp_user_timeout
+# also bounds a ping that was in flight when the machine died (otherwise TCP
+# retransmits for minutes). Only then can a standby on another machine take over.
+_LEASE_TCP_USER_TIMEOUT_MS = 10_000
+_LEASE_SESSION_OPTIONS = (
+    '-c statement_timeout=3000 -c lock_timeout=1000'
+    ' -c tcp_keepalives_idle=5 -c tcp_keepalives_interval=2 -c tcp_keepalives_count=3'
+    f' -c tcp_user_timeout={_LEASE_TCP_USER_TIMEOUT_MS}'
+)
 _ACTOR_SHUTDOWN_GRACE_SECONDS = 15.0
 _CHAT_DATABASE_RETRY_MIN_SECONDS = 0.25
 _CHAT_DATABASE_RETRY_MAX_SECONDS = 5.0
@@ -102,6 +109,7 @@ class RuntimeCoordinatorLease:
                     keepalives_idle=2,
                     keepalives_interval=1,
                     keepalives_count=3,
+                    tcp_user_timeout=_LEASE_TCP_USER_TIMEOUT_MS,
                     options=_LEASE_SESSION_OPTIONS,
                 )
             try:

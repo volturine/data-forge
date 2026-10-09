@@ -103,18 +103,66 @@ def test_each_dispatcher_lane_must_make_progress(hung_lane: str) -> None:
 
 @pytest.mark.asyncio
 async def test_standby_probe_is_healthy_without_registration(socket_directory) -> None:
-    standby = DispatcherHealth("worker-manager:standby", lanes=(), max_age_seconds=0.0, standby=True)
-    async with standby.serve():
-        snapshot = standby.snapshot()
-        assert snapshot["standby"] is True
+    health = DispatcherHealth("worker-manager", lanes=("dispatch",), max_age_seconds=15)
+    async with health.serve():
+        assert health.state == "starting"
+        assert not await asyncio.to_thread(health_module.probe, os.getpid())
+        health.standby()
+        snapshot = health.snapshot()
+        assert snapshot["state"] == "standby"
         assert snapshot["registered"] is False
         assert await asyncio.to_thread(health_module.probe, os.getpid())
         assert not await asyncio.to_thread(health_module.probe, os.getpid() + 1)
-        standby.stopped()
+        health.stopped()
         assert not await asyncio.to_thread(health_module.probe, os.getpid())
 
 
-def test_active_manager_health_is_not_satisfied_by_the_standby_flag() -> None:
+@pytest.mark.asyncio
+async def test_takeover_probe_is_healthy_for_a_bounded_time_until_registration(socket_directory) -> None:
+    now = 100.0
+    health = DispatcherHealth("worker-manager", lanes=("dispatch",), max_age_seconds=15, clock=lambda: now)
+    health.standby()
+    async with health.serve():
+        health.taking_over(60.0)
+        assert health.snapshot()["state"] == "taking_over"
+        assert await asyncio.to_thread(health_module.probe, os.getpid())
+        now += 59
+        health.taking_over(60.0)  # a retried takeover does not extend its grace
+        assert await asyncio.to_thread(health_module.probe, os.getpid())
+        now += 2
+        assert not await asyncio.to_thread(health_module.probe, os.getpid())
+        health.registered()
+        health.progress("dispatch")
+        assert health.snapshot()["state"] == "active"
+        assert await asyncio.to_thread(health_module.probe, os.getpid())
+        # A coordinator failover is a takeover as well: the generation ends,
+        # registration is dropped and the next one gets a fresh grace period.
+        health.registration_changed(False)
+        assert not await asyncio.to_thread(health_module.probe, os.getpid())
+        health.taking_over(60.0)
+        assert await asyncio.to_thread(health_module.probe, os.getpid())
+
+
+def test_a_cold_start_stays_unhealthy_until_registered() -> None:
     health = DispatcherHealth("worker:active", lanes=("dispatch",), max_age_seconds=15)
-    assert health.snapshot()["standby"] is False
+    assert health.snapshot()["state"] == "starting"
+    assert health.snapshot()["healthy"] is False
+    health.registered()
+    health.progress("dispatch")
+    assert health.snapshot()["healthy"] is True
+
+
+def test_a_stopped_endpoint_never_returns_to_standby_or_takeover() -> None:
+    health = DispatcherHealth("worker-manager", lanes=(), max_age_seconds=15)
+    health.stopped()
+    health.standby()
+    assert health.snapshot() | {"progress_age_seconds": {}} == {
+        "pid": os.getpid(),
+        "worker_id": "worker-manager",
+        "state": "stopped",
+        "registered": False,
+        "progress_age_seconds": {},
+        "healthy": False,
+    }
+    health.taking_over(60.0)
     assert health.snapshot()["healthy"] is False

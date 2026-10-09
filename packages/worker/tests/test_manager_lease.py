@@ -57,6 +57,10 @@ def test_lease_session_asks_postgres_to_notice_a_vanished_owner(conninfo) -> Non
     assert "tcp_keepalives_idle=5" in options
     assert "tcp_keepalives_interval=2" in options
     assert "tcp_keepalives_count=3" in options
+    # Keepalives only run on an idle socket; a ping in flight when the machine
+    # died is bounded by the user timeout on both ends instead.
+    assert "tcp_user_timeout=10000" in options
+    assert kwargs["tcp_user_timeout"] == 10000
     assert kwargs["autocommit"] is True
     assert connection.statements[0] == ("SELECT pg_try_advisory_lock(%s)", (MANAGER_LOCK_KEY,))
 

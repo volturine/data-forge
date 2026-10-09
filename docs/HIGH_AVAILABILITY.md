@@ -13,7 +13,7 @@ unit per machine:
 | Service                 | Per machine                                                       | Failover                                                                                                                                                                                                  |
 | ----------------------- | ----------------------------------------------------------------- | --------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
 | API replicas + ingress  | `DF_API_REPLICAS` stateless API containers behind a local nginx  | Any replica on any machine can serve any request; sessions, locks, jobs and notifications live in PostgreSQL. Point your DNS or load balancer at every machine (see below).                                   |
-| Runtime coordinator     | one container, active on one machine, standby on the others       | A PostgreSQL session lease. If the active machine dies, PostgreSQL drops the session within about 11 seconds and a standby takes over with a new fenced generation.                                           |
+| Runtime coordinator     | one container, active on one machine, standby on the others       | A PostgreSQL session lease. If the active machine dies, PostgreSQL drops the session within about 15 seconds and a standby takes over with a new fenced generation.                                           |
 | Worker manager          | one container, active on one machine, standby on the others       | Same lease mechanism. The new manager sweeps every Docker host, removes engine containers of the previous owner, rebuilds its placement accounting and restarts the warm reserve. Standbys serve the data plane. |
 | Scheduler               | one container, all active                                         | Due schedules are claimed per namespace with claim tokens, so several schedulers never double-run one.                                                                                                       |
 | Engines                 | placed on every daemon in `DF_ENGINE_DOCKER_HOSTS`                | Work on engines of a dead machine fails or is retried by the existing lease expiry recovery; the host is excluded from placement until its daemon answers again.                                             |
@@ -21,17 +21,26 @@ unit per machine:
 
 Active and standby are decided by two PostgreSQL session-level advisory locks,
 one for the coordinator and one for the manager. The lease connections set
-`tcp_keepalives_idle=5`, `tcp_keepalives_interval=2` and
-`tcp_keepalives_count=3` on their own session, so the server notices a machine
-that vanished without closing the connection and releases the lock on its own;
-no server configuration is needed. Every Docker mutation of the active
-manager first proves its lease is still held, and every coordinator
-transaction is fenced by its generation, so a machine that was only paused or
-partitioned cannot act after a takeover. The two leases are independent: the
-coordinator may be active on machine A while the manager is active on B.
+`tcp_keepalives_idle=5`, `tcp_keepalives_interval=2`, `tcp_keepalives_count=3`
+and `tcp_user_timeout=10000` on their own session (and the same on the client
+side), so the server notices a machine that vanished without closing the
+connection and releases the lock on its own, whether the socket was idle
+(keepalives) or a lease ping was in flight (user timeout); no server
+configuration is needed. Every Docker mutation of the active manager first
+proves its lease is still held, and every coordinator transaction is fenced by
+its generation, so a machine that was only paused or partitioned cannot start a
+new Docker mutation or commit a coordinator transaction once its lease check
+fails; a Docker call that had already passed the check may still finish, and
+the new manager's start-up sweep removes anything it left behind. The two
+leases are independent: the coordinator may be active on machine A while the
+manager is active on B.
 
 A standby coordinator and a standby worker report healthy to Docker, so the
-API replicas and the scheduler of their machine start normally.
+API replicas and the scheduler of their machine start normally. A worker that
+takes over keeps reporting healthy while it sweeps the hosts, waits for the
+coordinator and rebuilds the warm reserve, for up to ten minutes; only a cold
+start stays unhealthy until it has registered, so a single machine's API still
+waits for compute on first boot.
 
 ## Recipe
 
@@ -65,8 +74,10 @@ not encrypted by the application; the network must be private.
 4. **List every coordinator address** in `DF_RUNTIME_COORDINATOR_TARGETS` as one
    gRPC `ipv4:` target, for example `ipv4:10.0.0.1:50051,10.0.0.2:50051`, and
    open port 50051 between the machines. Workers and schedulers try the
-   addresses in order and skip the ones that refuse, which is what a standby
-   does, so they always reach the active coordinator.
+   addresses in order and skip the ones that fail, so they always reach the
+   active coordinator: a standby does not listen, and whether its published
+   port refuses the connection or, through Docker's userland proxy, accepts
+   and closes it, gRPC moves to the next address within milliseconds.
 5. **Set `DF_NODE_ADDRESS`** on each machine to its own private address. It is
    the only value that differs between the two env files.
 6. **Start the stack on every machine:**

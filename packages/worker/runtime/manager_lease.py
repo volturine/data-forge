@@ -32,7 +32,15 @@ MANAGER_LOCK_KEY = int.from_bytes(hashlib.sha256(b"dataforge:worker-manager").di
 # A lost owner must release the lock quickly even when its machine vanished
 # without closing the TCP connection: ask the server to probe the session
 # (idle 5s, then every 2s, three misses) and set the same on the client side.
-LEASE_SESSION_OPTIONS = "-c statement_timeout=3000 -c lock_timeout=1000 -c tcp_keepalives_idle=5 -c tcp_keepalives_interval=2 -c tcp_keepalives_count=3"
+# Keepalives only run on an idle connection; a ping that was in flight when
+# the machine died would otherwise wait for TCP retransmission (minutes), so
+# tcp_user_timeout bounds unacknowledged data to 10s on both ends too.
+LEASE_TCP_USER_TIMEOUT_MS = 10_000
+LEASE_SESSION_OPTIONS = (
+    "-c statement_timeout=3000 -c lock_timeout=1000"
+    " -c tcp_keepalives_idle=5 -c tcp_keepalives_interval=2 -c tcp_keepalives_count=3"
+    f" -c tcp_user_timeout={LEASE_TCP_USER_TIMEOUT_MS}"
+)
 _CHECK_FRESHNESS_SECONDS = 0.25
 
 
@@ -76,6 +84,7 @@ class WorkerManagerLease:
                     keepalives_idle=2,
                     keepalives_interval=1,
                     keepalives_count=3,
+                    tcp_user_timeout=LEASE_TCP_USER_TIMEOUT_MS,
                     application_name="dataforge-worker-manager-lease",
                     options=LEASE_SESSION_OPTIONS,
                 )

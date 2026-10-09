@@ -61,6 +61,11 @@ _SHUTDOWN_CONTROL_CONCURRENCY = 4
 _COORDINATOR_GENERATION_POLL_SECONDS = 5.0
 _MANAGER_LEASE_CHECK_SECONDS = 1.0
 _MANAGER_LEASE_RETRY_SECONDS = 1.0
+# A manager that takes over sweeps every Docker host (a dead one times out),
+# waits for a coordinator generation and rebuilds the warm reserve before it
+# registers. It stays healthy for this long meanwhile; beyond it the takeover
+# is stuck and the container should look unhealthy.
+_TAKEOVER_HEALTH_GRACE_SECONDS = 600.0
 _DISPATCH_LANES = ("compute-active", "compute-shutdown", "build", "datasource-delete", "outbox-cleanup")
 
 
@@ -129,17 +134,15 @@ async def run_runtime_coordinator(
     coordinator_generation: int | None = None,
     coordinator_guard: Callable[[], None] | None = None,
     client: WorkerRuntimeClient | None = None,
+    health: DispatcherHealth | None = None,
 ) -> None:
     owns_client = client is None
     runtime_client = client if client is not None else await async_client_from_env()
     worker_id = coordinator_id()
-    health = DispatcherHealth(
-        worker_id,
-        lanes=_DISPATCH_LANES,
-        max_age_seconds=max(90.0, float(settings.runtime_reconciliation_poll_interval_seconds) + 60.0),
-    )
     try:
-        async with health.serve():
+        if health is not None:
+            # The manager process serves one health endpoint across standby,
+            # takeover and every coordinator generation.
             await _run_runtime_coordinator(
                 stop_event=stop_event,
                 coordinator_generation=coordinator_generation,
@@ -148,9 +151,28 @@ async def run_runtime_coordinator(
                 health=health,
                 client=runtime_client,
             )
+            return
+        owned_health = manager_health(worker_id)
+        async with owned_health.serve():
+            await _run_runtime_coordinator(
+                stop_event=stop_event,
+                coordinator_generation=coordinator_generation,
+                coordinator_guard=coordinator_guard,
+                worker_id=worker_id,
+                health=owned_health,
+                client=runtime_client,
+            )
     finally:
         if owns_client:
             await runtime_client.aclose()
+
+
+def manager_health(worker_id: str) -> DispatcherHealth:
+    return DispatcherHealth(
+        worker_id,
+        lanes=_DISPATCH_LANES,
+        max_age_seconds=max(90.0, float(settings.runtime_reconciliation_poll_interval_seconds) + 60.0),
+    )
 
 
 async def _run_runtime_coordinator(
@@ -402,7 +424,7 @@ async def _run_runtime_coordinator(
     try:
         await local_stop.wait()
     finally:
-        health.stopped()
+        health.registration_changed(False)
         local_stop.set()
         heartbeat_stop.set()
         await run_control_in_thread(heartbeat_thread.join)
@@ -480,6 +502,7 @@ async def _run_worker_generation(
     generation: int,
     *,
     manager_guard: Callable[[], None] | None = None,
+    health: DispatcherHealth | None = None,
 ) -> None:
     def coordinator_guard() -> None:
         # Every Docker mutation and lifecycle RPC first proves this process
@@ -496,6 +519,7 @@ async def _run_worker_generation(
             coordinator_generation=generation,
             coordinator_guard=coordinator_guard,
             client=client,
+            health=health,
         ),
         name=f"worker-runtime-generation-{generation}",
     )
@@ -531,7 +555,7 @@ async def _run_worker_generation(
         raise runtime_result
 
 
-async def _wait_for_manager_lease(stop_event: asyncio.Event, lease: WorkerManagerLease) -> bool:
+async def _wait_for_manager_lease(stop_event: asyncio.Event, lease: WorkerManagerLease, health: DispatcherHealth) -> bool:
     """Keep a standby alive until it holds the manager lease."""
     next_log = 0.0
     while not stop_event.is_set():
@@ -543,6 +567,8 @@ async def _wait_for_manager_lease(stop_event: asyncio.Event, lease: WorkerManage
                     await asyncio.to_thread(lease.release)
                     return False
                 return True
+            # Another machine owns Docker: this process is a healthy standby.
+            health.standby()
             now = asyncio.get_running_loop().time()
             if now >= next_log:
                 logger.info("Worker manager standby waiting for the active manager to release its lease")
@@ -580,7 +606,12 @@ async def _watch_manager_lease(process_stop_event: asyncio.Event, lease_lost: as
             return
 
 
-async def _run_as_manager(process_stop_event: asyncio.Event, client: WorkerRuntimeClient, lease: WorkerManagerLease) -> bool:
+async def _run_as_manager(
+    process_stop_event: asyncio.Event,
+    client: WorkerRuntimeClient,
+    lease: WorkerManagerLease,
+    health: DispatcherHealth,
+) -> bool:
     """Own Docker and the compute budget until the lease is lost or the process stops.
 
     Returns ``True`` when the role ended because the lease was lost.
@@ -602,12 +633,17 @@ async def _run_as_manager(process_stop_event: asyncio.Event, client: WorkerRunti
     reset_docker_host_registry()
     try:
         while not role_stop.is_set():
+            if health.state != "starting":
+                # A cold start stays unhealthy until it registers. A standby
+                # that won the lease, or a manager between coordinator
+                # generations, keeps answering healthy while it rebuilds.
+                health.taking_over(_TAKEOVER_HEALTH_GRACE_SECONDS)
             generation = await _wait_for_coordinator_generation(role_stop, client)
             if generation is None:
                 break
             os.environ["RUNTIME_COORDINATOR_GENERATION"] = str(generation)
             try:
-                await _run_worker_generation(role_stop, client, generation, manager_guard=lease.check)
+                await _run_worker_generation(role_stop, client, generation, manager_guard=lease.check, health=health)
             except asyncio.CancelledError:
                 raise
             except Exception:
@@ -633,21 +669,24 @@ async def main() -> None:
     # manager state, so a standby serves it too: every machine's API replicas
     # keep a local data-plane target whichever worker holds the lease.
     data_plane_server = start_data_plane_grpc_server_in_thread()
+    # One health endpoint for the whole process: Docker keeps probing it
+    # through standby, takeover and every coordinator generation.
+    health = manager_health(coordinator_id())
     try:
-        while not stop_event.is_set():
-            standby_health = DispatcherHealth("worker-manager:standby", lanes=(), max_age_seconds=0.0, standby=True)
-            async with standby_health.serve():
-                if not await _wait_for_manager_lease(stop_event, lease):
+        async with health.serve():
+            while not stop_event.is_set():
+                if not await _wait_for_manager_lease(stop_event, lease, health):
                     return
-            logger.info("Worker manager lease acquired pid=%s; this process owns Docker and the compute budget", os.getpid())
-            try:
-                lease_lost = await _run_as_manager(stop_event, client, lease)
-            finally:
-                await asyncio.to_thread(lease.release)
-            if lease_lost and not stop_event.is_set():
-                logger.warning("Worker manager returning to standby after losing its lease")
-                with contextlib.suppress(TimeoutError):
-                    await asyncio.wait_for(stop_event.wait(), timeout=_MANAGER_LEASE_RETRY_SECONDS)
+                logger.info("Worker manager lease acquired pid=%s; this process owns Docker and the compute budget", os.getpid())
+                try:
+                    lease_lost = await _run_as_manager(stop_event, client, lease, health)
+                finally:
+                    await asyncio.to_thread(lease.release)
+                if lease_lost and not stop_event.is_set():
+                    logger.warning("Worker manager returning to standby after losing its lease")
+                    health.standby()
+                    with contextlib.suppress(TimeoutError):
+                        await asyncio.wait_for(stop_event.wait(), timeout=_MANAGER_LEASE_RETRY_SECONDS)
     finally:
         with contextlib.suppress(Exception):
             await data_plane_server.stop(grace=1.0)
