@@ -161,7 +161,7 @@ def test_datasource_delete_waits_for_admitted_request_before_engine_exists(monke
     try:
         manager.reserve_engine_request(identity, namespace="default")
 
-        assert not manager.shutdown_engine_if_idle(identity, namespace="default")
+        assert not manager.shutdown_compute_worker_if_idle(identity, namespace="default")
         assert not _stop_idle_datasource_engine(
             identity.resource_id,
             namespace="default",
@@ -169,7 +169,7 @@ def test_datasource_delete_waits_for_admitted_request_before_engine_exists(monke
         )
 
         manager.release_engine_request(identity, namespace="default")
-        assert manager.shutdown_engine_if_idle(identity, namespace="default")
+        assert manager.shutdown_compute_worker_if_idle(identity, namespace="default")
     finally:
         manager.shutdown_all()
 
@@ -317,7 +317,7 @@ def test_process_manager_shutdown_stops_real_engine_subprocess() -> None:
     try:
         assert engine.is_process_alive()
 
-        manager.shutdown_engine(identity)
+        manager.shutdown_compute_worker(identity)
 
         assert manager.get_engine(identity) is None
         assert not engine.is_process_alive()
@@ -373,7 +373,7 @@ def test_process_manager_keeps_shutdown_container_owned_until_cleanup_finishes()
     identity = _analysis_identity("analysis-shutdown-ownership")
     try:
         manager.spawn_compute_worker(identity)
-        shutdown = threading.Thread(target=manager.shutdown_engine, args=(identity,))
+        shutdown = threading.Thread(target=manager.shutdown_compute_worker, args=(identity,))
         shutdown.start()
         assert shutdown_started.wait(timeout=2)
         assert manager._managed_container_ids() == {"container-being-shutdown"}
@@ -413,7 +413,7 @@ def test_process_manager_serializes_same_identity_spawn_after_shutdown() -> None
     try:
         original = manager.spawn_compute_worker(identity).engine
         with ThreadPoolExecutor(max_workers=2) as executor:
-            shutdown = executor.submit(manager.shutdown_engine, identity)
+            shutdown = executor.submit(manager.shutdown_compute_worker, identity)
             assert shutdown_started.wait(timeout=2)
 
             replacement = executor.submit(manager.spawn_compute_worker, identity)
@@ -479,7 +479,7 @@ def test_stopping_engine_keeps_its_compute_capacity_until_shutdown_finishes(monk
 
     try:
         with ThreadPoolExecutor(max_workers=1) as executor:
-            shutdown = executor.submit(manager.shutdown_engine, first_identity)
+            shutdown = executor.submit(manager.shutdown_compute_worker, first_identity)
             assert shutdown_entered.wait(timeout=2)
             with manager._capacity_changed:
                 assert manager._capacity_used_locked() == 1
@@ -576,12 +576,12 @@ def test_lease_loss_keeps_shared_engine_for_reuse() -> None:
         manager.reserve_engine_request(identity)
         manager.reserve_engine_request(identity)
 
-        assert manager.shutdown_engine_after_request_lease_loss(identity) is False
+        assert manager.shutdown_compute_worker_after_request_lease_loss(identity) is False
         assert manager.get_engine(identity) is engine
         assert engine.is_process_alive()
 
         manager.release_engine_request(identity)
-        assert manager.shutdown_engine_after_request_lease_loss(identity) is False
+        assert manager.shutdown_compute_worker_after_request_lease_loss(identity) is False
         assert manager.get_engine(identity) is engine
         assert engine.is_process_alive()
     finally:
@@ -600,14 +600,14 @@ def test_lease_loss_releases_exclusive_engine_after_last_request() -> None:
         engine = manager.spawn_compute_worker(identity).engine
         manager.reserve_engine_request(identity)
 
-        assert manager.shutdown_engine_after_request_lease_loss(identity) is True
+        assert manager.shutdown_compute_worker_after_request_lease_loss(identity) is True
         assert manager.get_engine(identity) is None
         assert not engine.is_process_alive()
     finally:
         manager.shutdown_all()
 
 
-def test_lease_loss_does_not_shutdown_engine_with_active_job() -> None:
+def test_lease_loss_does_not_shutdown_compute_worker_with_active_job() -> None:
     manager = ProcessManager(engine_factory=lambda identity, resource_config: cast(Any, _FakeEngine(identity.resource_id, resource_config)))
     identity = _analysis_identity("analysis-active-job-lease-loss")
     try:
@@ -615,7 +615,7 @@ def test_lease_loss_does_not_shutdown_engine_with_active_job() -> None:
         manager.reserve_engine_request(identity)
         engine.current_job_id = "job-1"
 
-        assert manager.shutdown_engine_after_request_lease_loss(identity) is False
+        assert manager.shutdown_compute_worker_after_request_lease_loss(identity) is False
         assert manager.get_engine(identity) is not None
         assert engine.is_process_alive()
     finally:
@@ -629,7 +629,7 @@ def test_lease_loss_does_not_shutdown_idle_engine_before_reaper(monkeypatch) -> 
     try:
         engine = manager.spawn_compute_worker(identity).engine
 
-        assert manager.shutdown_engine_after_request_lease_loss(identity) is False
+        assert manager.shutdown_compute_worker_after_request_lease_loss(identity) is False
         assert manager.get_engine(identity) is engine
         assert engine.is_process_alive()
     finally:
@@ -736,7 +736,7 @@ async def test_process_manager_capacity_admission_is_fifo(monkeypatch) -> None:
             await asyncio.to_thread(manager.spawn_compute_worker, identity)
             started.append(identity.resource_id)
             await asyncio.sleep(0)
-            await asyncio.to_thread(manager.shutdown_engine, identity)
+            await asyncio.to_thread(manager.shutdown_compute_worker, identity)
         finally:
             manager.release_spawn_admission(identity, owned=owns_admission)
 
@@ -784,7 +784,7 @@ async def test_process_manager_capacity_admission_prioritizes_interactive_work(m
         try:
             await asyncio.to_thread(manager.spawn_compute_worker, identity)
             started.append(identity.resource_id)
-            await asyncio.to_thread(manager.shutdown_engine, identity)
+            await asyncio.to_thread(manager.shutdown_compute_worker, identity)
         finally:
             manager.release_spawn_admission(identity, owned=owns_admission)
 
@@ -840,7 +840,7 @@ async def test_process_manager_admission_round_robins_builds_under_interactive_l
         try:
             await asyncio.to_thread(manager.spawn_compute_worker, identity)
             order.append(identity.resource_id)
-            await asyncio.to_thread(manager.shutdown_engine, identity)
+            await asyncio.to_thread(manager.shutdown_compute_worker, identity)
         finally:
             manager.release_spawn_admission(identity, owned=owns_admission)
 
@@ -865,7 +865,7 @@ async def test_process_manager_admission_round_robins_builds_under_interactive_l
             if loop.time() >= deadline:
                 pytest.fail(f"Timed out waiting for spawn waiters in task-arrival order: expected={expected_waiters!r}, actual={registered_waiters!r}")
             await asyncio.sleep(0.01)
-        await asyncio.to_thread(manager.shutdown_engine, running)
+        await asyncio.to_thread(manager.shutdown_compute_worker, running)
         await asyncio.wait_for(asyncio.gather(lifecycle_task, first_task, second_task), timeout=2)
 
         assert admission_order == ["analysis-fair-one", "build-fair", "analysis-fair-two"]
@@ -944,7 +944,7 @@ async def test_queued_reuse_admission_owns_its_request_reservation(monkeypatch, 
 
 
 @pytest.mark.asyncio
-async def test_process_manager_serializes_commands_per_exact_engine_identity(monkeypatch) -> None:
+async def test_process_manager_serializes_commands_per_exact_compute_worker_identity(monkeypatch) -> None:
     monkeypatch.setattr(settings, "compute_workers", 2)
     manager = ProcessManager(engine_factory=lambda identity, resource_config: cast(Any, _FakeEngine(identity.resource_id, resource_config)))
     first_identity = _analysis_identity("analysis-single-job")
@@ -1486,7 +1486,7 @@ def test_process_manager_logs_cold_engine_acquisition(monkeypatch, caplog) -> No
     caplog.set_level(logging.INFO, logger="runtime.compute_manager")
     identity = _analysis_identity("analysis-cold-acquisition-log")
     manager = ProcessManager(
-        engine_factory=lambda engine_identity, config: cast(Any, _FakeEngine(engine_identity.resource_id, config)),
+        engine_factory=lambda compute_worker_identity, config: cast(Any, _FakeEngine(compute_worker_identity.resource_id, config)),
         warm_worker_target=0,
     )
     try:
@@ -1929,7 +1929,7 @@ def test_process_manager_can_disable_warm_workers(monkeypatch) -> None:
         manager.shutdown_all()
 
 
-def test_capacity_decisions_never_probe_the_engine_runtime(monkeypatch) -> None:
+def test_capacity_decisions_never_probe_the_compute_worker_runtime(monkeypatch) -> None:
     """Capacity scans run under the engines lock, so they must not do engine I/O.
 
     A container inspection or engine RPC can hang for as long as a container
@@ -2063,7 +2063,7 @@ def test_failed_engine_restart_releases_warm_worker_claim(monkeypatch) -> None:
         manager.shutdown_all()
 
 
-def test_engine_status_reads_tracked_liveness_without_probing() -> None:
+def test_compute_worker_status_reads_tracked_liveness_without_probing() -> None:
     class CountingEngine(_FakeEngine):
         def __init__(self, resource_id: str, resource_config: dict | None = None) -> None:
             super().__init__(resource_id, resource_config)
@@ -2084,7 +2084,7 @@ def test_engine_status_reads_tracked_liveness_without_probing() -> None:
         manager.spawn_compute_worker(identity)
         probes_after_spawn = engine.probes
 
-        status = manager.get_engine_status(identity)
+        status = manager.get_compute_worker_status(identity)
 
         assert status.status == "healthy"
         assert engine.probes == probes_after_spawn

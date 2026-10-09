@@ -1,18 +1,21 @@
 import {
-	listEngineRuns,
+	listComputeWorkerRuns,
 	type ComputeWorkerRun,
-	type ListEngineRunsParams
-} from '$lib/api/engine-runs';
+	type ListComputeWorkerRunsParams
+} from '$lib/api/compute-worker-runs';
 import { PaginatedStore } from './paginated-store.svelte';
 
-export class EngineRunsStore extends PaginatedStore<ListEngineRunsParams, ComputeWorkerRun[]> {
+export class ComputeWorkerRunsStore extends PaginatedStore<
+	ListComputeWorkerRunsParams,
+	ComputeWorkerRun[]
+> {
 	runs = $state.raw<ComputeWorkerRun[]>([]);
 
 	replaceRun(next: ComputeWorkerRun): void {
 		this.runs = this.runs.map((run) => (run.id === next.id ? next : run));
 	}
 
-	protected sameParams(a?: ListEngineRunsParams, b?: ListEngineRunsParams): boolean {
+	protected sameParams(a?: ListComputeWorkerRunsParams, b?: ListComputeWorkerRunsParams): boolean {
 		if (a === b) return true;
 		if (!a || !b) return a === b;
 		return (
@@ -25,8 +28,8 @@ export class EngineRunsStore extends PaginatedStore<ListEngineRunsParams, Comput
 		);
 	}
 
-	protected fetchPage(params?: ListEngineRunsParams) {
-		return listEngineRuns(params);
+	protected fetchPage(params?: ListComputeWorkerRunsParams) {
+		return listComputeWorkerRuns(params);
 	}
 
 	protected applyPage(runs: ComputeWorkerRun[]): void {

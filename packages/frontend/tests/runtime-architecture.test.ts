@@ -407,7 +407,7 @@ test.describe('runtime architecture', () => {
 		const executionRuns = await page
 			.context()
 			.request.get(
-				`/api/v1/engine-runs?analysis_id=${encodeURIComponent(firstAnalysisId)}&kind=preview`
+				`/api/v1/compute-worker-runs?analysis_id=${encodeURIComponent(firstAnalysisId)}&kind=preview`
 			);
 		expect(executionRuns.ok()).toBeTruthy();
 		const runs = (await executionRuns.json()) as Array<{ id: string }>;

@@ -10,9 +10,9 @@ from modules.auth import router as auth_router
 from modules.auth.dependencies import get_current_user
 from modules.chat import router as chat_router
 from modules.compute.routes import router as compute_router
+from modules.compute_worker_runs.routes import router as compute_worker_runs_router
 from modules.config import router as config_router
 from modules.datasource.routes import router as datasource_router
-from modules.engine_runs.routes import router as engine_runs_router
 from modules.healthcheck import router as healthcheck_router
 from modules.locks import router as locks_router
 from modules.logs import router as logs_router
@@ -133,7 +133,7 @@ _V1_ROUTER_DEFINITIONS: tuple[tuple[APIRouter, bool], ...] = (
     (compute_router, False),
     (config_router, False),
     (datasource_router, True),
-    (engine_runs_router, True),
+    (compute_worker_runs_router, True),
     (healthcheck_router, False),
     (logs_router, True),
     (locks_router, False),

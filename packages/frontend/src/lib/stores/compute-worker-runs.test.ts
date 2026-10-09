@@ -1,11 +1,11 @@
 import { afterEach, beforeEach, describe, expect, test, vi } from 'vitest';
-import { EngineRunsStore } from './engine-runs.svelte';
-import type { ComputeWorkerRun } from '$lib/api/engine-runs';
+import { ComputeWorkerRunsStore } from './compute-worker-runs.svelte';
+import type { ComputeWorkerRun } from '$lib/api/compute-worker-runs';
 
-const mockListEngineRuns = vi.fn();
+const mockListComputeWorkerRuns = vi.fn();
 
-vi.mock('$lib/api/engine-runs', () => ({
-	listEngineRuns: (...args: unknown[]) => mockListEngineRuns(...args)
+vi.mock('$lib/api/compute-worker-runs', () => ({
+	listComputeWorkerRuns: (...args: unknown[]) => mockListComputeWorkerRuns(...args)
 }));
 
 function makeRun(overrides: Partial<ComputeWorkerRun> = {}): ComputeWorkerRun {
@@ -61,10 +61,10 @@ function mockPending() {
 	return { pending, result };
 }
 
-describe('EngineRunsStore', () => {
+describe('ComputeWorkerRunsStore', () => {
 	beforeEach(() => {
-		mockListEngineRuns.mockReset();
-		mockListEngineRuns.mockReturnValue(mockOk([]));
+		mockListComputeWorkerRuns.mockReset();
+		mockListComputeWorkerRuns.mockReturnValue(mockOk([]));
 	});
 
 	afterEach(() => {
@@ -72,7 +72,7 @@ describe('EngineRunsStore', () => {
 	});
 
 	test('initial state', () => {
-		const store = new EngineRunsStore();
+		const store = new ComputeWorkerRunsStore();
 		expect(store.runs).toEqual([]);
 		expect(store.status).toBe('disconnected');
 		expect(store.error).toBeNull();
@@ -80,21 +80,21 @@ describe('EngineRunsStore', () => {
 
 	test('load succeeds and forwards params without abort signal churn', () => {
 		const runs = [makeRun()];
-		mockListEngineRuns.mockReturnValue(mockOk(runs));
+		mockListComputeWorkerRuns.mockReturnValue(mockOk(runs));
 
-		const store = new EngineRunsStore();
+		const store = new ComputeWorkerRunsStore();
 		store.load({ datasource_id: 'ds-1', limit: 25 });
 
 		expect(store.status).toBe('connected');
 		expect(store.runs).toEqual(runs);
 		expect(store.error).toBeNull();
-		expect(mockListEngineRuns).toHaveBeenCalledWith({ datasource_id: 'ds-1', limit: 25 });
+		expect(mockListComputeWorkerRuns).toHaveBeenCalledWith({ datasource_id: 'ds-1', limit: 25 });
 	});
 
 	test('load failure sets error state', () => {
-		mockListEngineRuns.mockReturnValue(mockErr('Network error'));
+		mockListComputeWorkerRuns.mockReturnValue(mockErr('Network error'));
 
-		const store = new EngineRunsStore();
+		const store = new ComputeWorkerRunsStore();
 		store.load({ datasource_id: 'ds-1' });
 
 		expect(store.status).toBe('error');
@@ -103,26 +103,28 @@ describe('EngineRunsStore', () => {
 
 	test('refresh coalesces while a request is in flight', async () => {
 		const first = mockPending();
-		mockListEngineRuns.mockReturnValueOnce(first.result).mockReturnValueOnce(mockOk([makeRun()]));
+		mockListComputeWorkerRuns
+			.mockReturnValueOnce(first.result)
+			.mockReturnValueOnce(mockOk([makeRun()]));
 
-		const store = new EngineRunsStore();
+		const store = new ComputeWorkerRunsStore();
 		store.load({ datasource_id: 'ds-1' });
 		store.refresh();
 
-		expect(mockListEngineRuns).toHaveBeenCalledTimes(1);
+		expect(mockListComputeWorkerRuns).toHaveBeenCalledTimes(1);
 		first.pending.resolve?.([makeRun({ id: 'run-1' })]);
 		await Promise.resolve();
 
-		expect(mockListEngineRuns).toHaveBeenCalledTimes(2);
+		expect(mockListComputeWorkerRuns).toHaveBeenCalledTimes(2);
 		expect(store.status).toBe('connected');
 	});
 
 	test('stale response from older params is ignored', async () => {
 		const first = mockPending();
 		const second = mockPending();
-		mockListEngineRuns.mockReturnValueOnce(first.result).mockReturnValueOnce(second.result);
+		mockListComputeWorkerRuns.mockReturnValueOnce(first.result).mockReturnValueOnce(second.result);
 
-		const store = new EngineRunsStore();
+		const store = new ComputeWorkerRunsStore();
 		store.load({ datasource_id: 'ds-1' });
 		store.load({ datasource_id: 'ds-2' });
 
@@ -137,9 +139,9 @@ describe('EngineRunsStore', () => {
 
 	test('close ignores late results instead of surfacing them as failures', async () => {
 		const request = mockPending();
-		mockListEngineRuns.mockReturnValueOnce(request.result);
+		mockListComputeWorkerRuns.mockReturnValueOnce(request.result);
 
-		const store = new EngineRunsStore();
+		const store = new ComputeWorkerRunsStore();
 		store.load({ datasource_id: 'ds-1' });
 		store.close();
 		request.pending.resolve?.([makeRun()]);
@@ -151,8 +153,8 @@ describe('EngineRunsStore', () => {
 	});
 
 	test('reset clears state', () => {
-		mockListEngineRuns.mockReturnValue(mockOk([makeRun()]));
-		const store = new EngineRunsStore();
+		mockListComputeWorkerRuns.mockReturnValue(mockOk([makeRun()]));
+		const store = new ComputeWorkerRunsStore();
 		store.load({ datasource_id: 'ds-1' });
 		expect(store.runs).toHaveLength(1);
 

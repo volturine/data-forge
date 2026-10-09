@@ -1089,7 +1089,7 @@ def test_engine_start_waits_for_rpc_listener_before_initializing(monkeypatch, ca
     client.close()
 
 
-def test_warm_worker_uses_the_standard_engine_runtime(monkeypatch) -> None:
+def test_warm_worker_uses_the_standard_compute_worker_runtime(monkeypatch) -> None:
     captured: dict[str, object] = {}
 
     class Container:

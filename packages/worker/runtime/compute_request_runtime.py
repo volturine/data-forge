@@ -71,7 +71,7 @@ _COMPUTE_REQUEST_RECOVERY_SECONDS = max(
 )
 # Spread lease RPCs while keeping disconnected engine work bounded to ten seconds.
 _COMPUTE_REQUEST_LEASE_RENEWAL_MAX_SECONDS = 10.0
-_ENGINE_CAPACITY_RACE_TIMEOUT_SECONDS = 2.0
+_COMPUTE_WORKER_CAPACITY_RACE_TIMEOUT_SECONDS = 2.0
 # Claims are short database transactions. Allow a small batch to refill the
 # shared execution budget without turning every parked execution slot into a
 # concurrent database poller.
@@ -88,8 +88,8 @@ _DATASOURCE_REQUEST_KINDS = {
     enums_pb2.COMPUTE_REQUEST_KIND_COMPARE_ICEBERG_SNAPSHOTS,
     enums_pb2.COMPUTE_REQUEST_KIND_DATASOURCE_PREFLIGHT,
 }
-ENGINE_SHUTDOWN_REQUEST_KINDS = frozenset({enums_pb2.COMPUTE_REQUEST_KIND_SHUTDOWN_ENGINE})
-ENGINE_LIFECYCLE_REQUEST_KINDS = frozenset(
+COMPUTE_WORKER_SHUTDOWN_REQUEST_KINDS = frozenset({enums_pb2.COMPUTE_REQUEST_KIND_SHUTDOWN_ENGINE})
+COMPUTE_WORKER_LIFECYCLE_REQUEST_KINDS = frozenset(
     {
         enums_pb2.COMPUTE_REQUEST_KIND_SPAWN_ENGINE,
         enums_pb2.COMPUTE_REQUEST_KIND_CONFIGURE_ENGINE,
@@ -97,8 +97,8 @@ ENGINE_LIFECYCLE_REQUEST_KINDS = frozenset(
 )
 ALL_REQUEST_KINDS = (
     frozenset(_DATASOURCE_REQUEST_KINDS)
-    | ENGINE_SHUTDOWN_REQUEST_KINDS
-    | ENGINE_LIFECYCLE_REQUEST_KINDS
+    | COMPUTE_WORKER_SHUTDOWN_REQUEST_KINDS
+    | COMPUTE_WORKER_LIFECYCLE_REQUEST_KINDS
     | frozenset(
         {
             enums_pb2.COMPUTE_REQUEST_KIND_PREVIEW,
@@ -109,7 +109,7 @@ ALL_REQUEST_KINDS = (
         }
     )
 )
-ACTIVE_REQUEST_KINDS = ALL_REQUEST_KINDS - ENGINE_SHUTDOWN_REQUEST_KINDS
+ACTIVE_REQUEST_KINDS = ALL_REQUEST_KINDS - COMPUTE_WORKER_SHUTDOWN_REQUEST_KINDS
 
 
 def worker_runtime_client() -> WorkerRuntimeClient:
@@ -161,7 +161,7 @@ def _engine_admission_priority(
 ) -> int:
     if identity is not None and identity.scope == enums_pb2.COMPUTE_WORKER_SCOPE_DATASOURCE_PREVIEW:
         return COMPUTE_WORKER_ADMISSION_PRIORITY_DATASOURCE
-    if kind in ENGINE_LIFECYCLE_REQUEST_KINDS:
+    if kind in COMPUTE_WORKER_LIFECYCLE_REQUEST_KINDS:
         return COMPUTE_WORKER_ADMISSION_PRIORITY_LIFECYCLE
     return COMPUTE_WORKER_ADMISSION_PRIORITY_INTERACTIVE
 
@@ -169,14 +169,14 @@ def _engine_admission_priority(
 async def _wait_after_engine_capacity_race(manager: ProcessManager) -> None:
     """Back off after execution loses a slot reserved by admission.
 
-    ``spawn_engine`` is intentionally non-blocking. A lifecycle/prewarm
+    ``spawn_compute_worker`` is intentionally non-blocking. A lifecycle/prewarm
     operation can take the last slot after admission returns, so the request
     must rejoin the capacity wait path. The old immediate ``continue`` made
     this a hot loop that repeatedly consumed the execution/control budget.
     The bounded wait also covers the cross-process advisory-slot case, where
     a different manager cannot directly wake this process's local condition.
     """
-    await manager.wait_for_capacity(timeout_seconds=_ENGINE_CAPACITY_RACE_TIMEOUT_SECONDS)
+    await manager.wait_for_capacity(timeout_seconds=_COMPUTE_WORKER_CAPACITY_RACE_TIMEOUT_SECONDS)
 
 
 @dataclass(frozen=True)
@@ -435,7 +435,7 @@ async def _run_once(
     claimed = await claim_once()
     if claimed is None:
         return False
-    identity = _engine_identity_for_claimed(claimed)
+    identity = _compute_worker_identity_for_claimed(claimed)
     logger.debug(
         "Compute request claimed request_id=%s lease_generation=%s coordinator_generation=%s kind=%s namespace=%s resource_id=%s command_hash=%s",
         claimed.id,
@@ -471,7 +471,7 @@ async def _execute_request(
     exists for reuse. Exact duplicate commands share one durable request and
     completed response in Postgres before they reach this gate.
     """
-    identity = _engine_identity_for_claimed(claimed)
+    identity = _compute_worker_identity_for_claimed(claimed)
     renewal_stop = asyncio.Event()
     lease_confirmed = asyncio.Event()
     renewal = asyncio.create_task(_renew_compute_lease(claimed, stop_event=renewal_stop, lease_confirmed=lease_confirmed))
@@ -670,7 +670,7 @@ async def _execute_request(
                                 )
                             with contextlib.suppress(Exception):
                                 await run_control_in_thread(
-                                    manager.shutdown_engine_after_request_lease_loss,
+                                    manager.shutdown_compute_worker_after_request_lease_loss,
                                     identity,
                                     namespace=claimed.namespace,
                                 )
@@ -868,7 +868,7 @@ def _datasource_engine_job(
     from runtime.compute_utils import await_compute_worker_result
     from runtime.exceptions import PipelineExecutionError
 
-    identity = _engine_identity_for_claimed(claimed)
+    identity = _compute_worker_identity_for_claimed(claimed)
     if identity is None:
         raise ValueError("Datasource work requires an exact RID engine identity")
     with manager.acquire_engine(identity) as engine:
@@ -1002,7 +1002,7 @@ def _publish_staged_datasource(
             {"source_config": source, "table_path": target_path, "manifest_url": manifest_url},
         )
         schema_info = schema_info_proto(manifest)
-        client.update_engine_run(namespace=claimed.namespace, run_id=run_id, fields={"current_step": "Importing staged batches", "progress": 0.7})
+        client.update_compute_worker_run(namespace=claimed.namespace, run_id=run_id, fields={"current_step": "Importing staged batches", "progress": 0.7})
         table, published_table_path = datasource_execution.import_staged_parquet_files(
             manifest, staged_prefix=target_path, table_path=table_path, database_url=settings.database_url
         )
@@ -1160,7 +1160,7 @@ def _execute_request_sync(
         artifact_path: str | None = None,
         artifact_name: str | None = None,
         artifact_content_type: str | None = None,
-        engine_run_finalization: ComputeWorkerRunFinalization | None = None,
+        compute_worker_run_finalization: ComputeWorkerRunFinalization | None = None,
     ) -> None:
         if terminal_publication_started is not None:
             terminal_publication_started.set()
@@ -1171,7 +1171,7 @@ def _execute_request_sync(
             artifact_path=artifact_path,
             artifact_name=artifact_name,
             artifact_content_type=artifact_content_type,
-            engine_run_finalization=engine_run_finalization,
+            compute_worker_run_finalization=compute_worker_run_finalization,
         )
 
     metadata_snapshot_token = None
@@ -1218,7 +1218,7 @@ def _execute_request_sync(
                 row_limit=preview_request.row_limit,
                 page=preview_request.page,
                 analysis_id=preview_request.analysis_id if preview_request.HasField("analysis_id") else None,
-                engine_identity=preview_request.engine_identity if preview_request.HasField("engine_identity") else None,
+                compute_worker_identity=preview_request.engine_identity if preview_request.HasField("engine_identity") else None,
                 resource_config=_resource_config_from_preview_command(preview_request),
                 tab_id=preview_request.tab_id if preview_request.HasField("tab_id") else None,
                 request_json=request_json,
@@ -1238,7 +1238,7 @@ def _execute_request_sync(
             publication_started = time.monotonic()
             publish_complete(
                 response=preview_response_envelope,
-                engine_run_finalization=preview_outcome.engine_run_finalization,
+                compute_worker_run_finalization=preview_outcome.compute_worker_run_finalization,
             )
             logger.info(
                 "Compute preview response published request_id=%s worker_id=%s publish_ms=%.1f",
@@ -1328,8 +1328,8 @@ def _execute_request_sync(
                 identity,
                 resource_config=resource_config,
             )
-            response = compute_schemas.ComputeWorkerStatusSchema.model_validate(manager.get_engine_status(identity))
-            publish_complete(response=_engine_status_result(response))
+            response = compute_schemas.ComputeWorkerStatusSchema.model_validate(manager.get_compute_worker_status(identity))
+            publish_complete(response=_compute_worker_status_result(response))
         elif claimed.kind == enums_pb2.COMPUTE_REQUEST_KIND_CONFIGURE_ENGINE:
             command = _lifecycle_command_from_claimed(claimed, "configure_engine")
             identity = command.engine_identity
@@ -1337,15 +1337,15 @@ def _execute_request_sync(
             if resource_config is None:
                 raise ValueError("resource_config is required")
             manager.restart_engine_with_config(identity, resource_config)
-            response = compute_schemas.ComputeWorkerStatusSchema.model_validate(manager.get_engine_status(identity))
-            publish_complete(response=_engine_status_result(response))
+            response = compute_schemas.ComputeWorkerStatusSchema.model_validate(manager.get_compute_worker_status(identity))
+            publish_complete(response=_compute_worker_status_result(response))
         elif claimed.kind == enums_pb2.COMPUTE_REQUEST_KIND_SHUTDOWN_ENGINE:
             command = _lifecycle_command_from_claimed(claimed, "shutdown_engine")
             identity = command.engine_identity
             # Shutdown is idempotent: capacity eviction, idle reaping, or a prior
             # crash may already have removed the container. Missing engines are a
             # successful terminal state, matching reconciliation rules.
-            manager.shutdown_engine(identity)
+            manager.shutdown_compute_worker(identity)
             publish_complete(response=compute_pb2.ComputeResponse(ack=compute_pb2.ComputeAckResult(success=True)))
         else:
             raise ValueError(f"Unsupported compute request kind: {_compute_request_kind_name(claimed.kind)}")
@@ -1358,10 +1358,10 @@ def _execute_request_sync(
         raise
     except Exception as exc:
         error_to_report = exc
-        engine_run_finalization: ComputeWorkerRunFinalization | None = None
+        compute_worker_run_finalization: ComputeWorkerRunFinalization | None = None
         if isinstance(exc, service.PreviewExecutionError):
             error_to_report = exc.error
-            engine_run_finalization = exc.engine_run_finalization
+            compute_worker_run_finalization = exc.compute_worker_run_finalization
         error = _error_result(error_to_report)
         status_code = error.status_code if error.HasField("status_code") else None
         try:
@@ -1372,7 +1372,7 @@ def _execute_request_sync(
                 claimed,
                 error_message=_error_message(error_to_report),
                 error=error,
-                engine_run_finalization=engine_run_finalization,
+                compute_worker_run_finalization=compute_worker_run_finalization,
             )
         except BackendWorkerRpcError as publish_exc:
             if publish_exc.status_code == 412:
@@ -1394,7 +1394,7 @@ def _execute_request_sync(
         client.close()
 
 
-def _stateless_engine_identity_for_command(
+def _stateless_compute_worker_identity_for_command(
     command: message.Message,
     *,
     target_step_id: str,
@@ -1404,10 +1404,10 @@ def _stateless_engine_identity_for_command(
     if pipeline is None:
         raise ValueError("stateless compute command is missing analysis_pipeline")
     analysis_pipeline = analysis_pipeline_to_execution_payload(pipeline)
-    return service.default_stateless_engine_identity(analysis_pipeline, target_step_id, tab_id)
+    return service.default_stateless_compute_worker_identity(analysis_pipeline, target_step_id, tab_id)
 
 
-def _engine_identity_for_claimed(claimed: ClaimedComputeRequest) -> compute_pb2.ComputeWorkerIdentity | None:
+def _compute_worker_identity_for_claimed(claimed: ClaimedComputeRequest) -> compute_pb2.ComputeWorkerIdentity | None:
     """Identity that will need a capacity slot, or None if no Polars engine is required."""
     kind = claimed.kind
     if kind in _DATASOURCE_REQUEST_KINDS:
@@ -1441,7 +1441,7 @@ def _engine_identity_for_claimed(claimed: ClaimedComputeRequest) -> compute_pb2.
         if preview.HasField("engine_identity"):
             return preview.engine_identity
         if preview.HasField("analysis_id") and preview.analysis_id:
-            return _stateless_engine_identity_for_command(
+            return _stateless_compute_worker_identity_for_command(
                 preview,
                 target_step_id=preview.target_step_id,
                 tab_id=preview.tab_id if preview.HasField("tab_id") else None,
@@ -1450,7 +1450,7 @@ def _engine_identity_for_claimed(claimed: ClaimedComputeRequest) -> compute_pb2.
     if kind == enums_pb2.COMPUTE_REQUEST_KIND_SCHEMA:
         schema = cast(compute_pb2.StepSchemaCommand, _compute_command_from_claimed(claimed, "schema"))
         if schema.HasField("analysis_id") and schema.analysis_id:
-            return _stateless_engine_identity_for_command(
+            return _stateless_compute_worker_identity_for_command(
                 schema,
                 target_step_id=schema.target_step_id,
                 tab_id=schema.tab_id if schema.HasField("tab_id") else None,
@@ -1459,7 +1459,7 @@ def _engine_identity_for_claimed(claimed: ClaimedComputeRequest) -> compute_pb2.
     if kind == enums_pb2.COMPUTE_REQUEST_KIND_ROW_COUNT:
         row_count = cast(compute_pb2.StepRowCountCommand, _compute_command_from_claimed(claimed, "row_count"))
         if row_count.HasField("analysis_id") and row_count.analysis_id:
-            return _stateless_engine_identity_for_command(
+            return _stateless_compute_worker_identity_for_command(
                 row_count,
                 target_step_id=row_count.target_step_id,
                 tab_id=row_count.tab_id if row_count.HasField("tab_id") else None,
@@ -1468,7 +1468,7 @@ def _engine_identity_for_claimed(claimed: ClaimedComputeRequest) -> compute_pb2.
     if kind == enums_pb2.COMPUTE_REQUEST_KIND_DOWNLOAD:
         download = cast(compute_pb2.DownloadCommand, _compute_command_from_claimed(claimed, "download"))
         if download.HasField("analysis_id") and download.analysis_id:
-            return _stateless_engine_identity_for_command(
+            return _stateless_compute_worker_identity_for_command(
                 download,
                 target_step_id=download.target_step_id,
                 tab_id=download.tab_id if download.HasField("tab_id") else None,
@@ -1477,7 +1477,7 @@ def _engine_identity_for_claimed(claimed: ClaimedComputeRequest) -> compute_pb2.
     if kind == enums_pb2.COMPUTE_REQUEST_KIND_EXPORT:
         export = cast(compute_pb2.ExportCommand, _compute_command_from_claimed(claimed, "export"))
         if export.HasField("analysis_id") and export.analysis_id:
-            return _stateless_engine_identity_for_command(
+            return _stateless_compute_worker_identity_for_command(
                 export,
                 target_step_id=export.target_step_id,
                 tab_id=export.tab_id if export.HasField("tab_id") else None,
@@ -1597,7 +1597,7 @@ def _resource_config_proto(value: compute_schemas.ComputeWorkerResourceConfig | 
     return result
 
 
-def _engine_status_result(value: compute_schemas.ComputeWorkerStatusSchema) -> compute_pb2.ComputeResponse:
+def _compute_worker_status_result(value: compute_schemas.ComputeWorkerStatusSchema) -> compute_pb2.ComputeResponse:
     result = compute_pb2.ComputeWorkerStatusResult(
         analysis_id=value.analysis_id,
         resource_id=value.resource_id,
@@ -1609,7 +1609,7 @@ def _engine_status_result(value: compute_schemas.ComputeWorkerStatusSchema) -> c
         "datasource_id": value.datasource_id,
         "build_id": value.build_id,
         "current_build_id": value.current_build_id,
-        "current_engine_run_id": value.current_engine_run_id,
+        "current_engine_run_id": value.current_compute_worker_run_id,
         "container_id": value.container_id,
         "image_digest": value.image_digest,
         "termination_reason": value.termination_reason,
@@ -1680,7 +1680,7 @@ def _complete_request_once(
     artifact_path: str | None = None,
     artifact_name: str | None = None,
     artifact_content_type: str | None = None,
-    engine_run_finalization: ComputeWorkerRunFinalization | None = None,
+    compute_worker_run_finalization: ComputeWorkerRunFinalization | None = None,
 ) -> None:
     client.complete_compute_request(
         namespace=claimed.namespace,
@@ -1693,7 +1693,7 @@ def _complete_request_once(
         artifact_path=artifact_path,
         artifact_name=artifact_name,
         artifact_content_type=artifact_content_type,
-        engine_run_finalization=engine_run_finalization,
+        compute_worker_run_finalization=compute_worker_run_finalization,
         timeout_seconds=_TERMINAL_RPC_TIMEOUT_SECONDS,
     )
 
@@ -1710,7 +1710,7 @@ def _complete_request(
     artifact_path: str | None = None,
     artifact_name: str | None = None,
     artifact_content_type: str | None = None,
-    engine_run_finalization: ComputeWorkerRunFinalization | None = None,
+    compute_worker_run_finalization: ComputeWorkerRunFinalization | None = None,
 ) -> None:
     for attempt, delay in enumerate((*_TERMINAL_PUBLISH_BACKOFF_SECONDS, None), start=1):
         try:
@@ -1721,7 +1721,7 @@ def _complete_request(
                 artifact_path=artifact_path,
                 artifact_name=artifact_name,
                 artifact_content_type=artifact_content_type,
-                engine_run_finalization=engine_run_finalization,
+                compute_worker_run_finalization=compute_worker_run_finalization,
             )
             return
         except BackendWorkerRpcError as exc:
@@ -1742,7 +1742,7 @@ def _fail_request_with_retry(
     *,
     error_message: str,
     error: compute_pb2.ComputeErrorResult,
-    engine_run_finalization: ComputeWorkerRunFinalization | None = None,
+    compute_worker_run_finalization: ComputeWorkerRunFinalization | None = None,
 ) -> None:
     for attempt, delay in enumerate((*_TERMINAL_PUBLISH_BACKOFF_SECONDS, None), start=1):
         try:
@@ -1755,7 +1755,7 @@ def _fail_request_with_retry(
                 lease_generation=claimed.lease_generation,
                 error_message=error_message,
                 error=error,
-                engine_run_finalization=engine_run_finalization,
+                compute_worker_run_finalization=compute_worker_run_finalization,
                 timeout_seconds=_TERMINAL_RPC_TIMEOUT_SECONDS,
             )
             return

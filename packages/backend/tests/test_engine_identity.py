@@ -1,15 +1,15 @@
 import pytest
 from pydantic import ValidationError
 
-from backend_core.domain.compute.schemas import StepPreviewRequest, default_preview_engine_identity
+from backend_core.domain.compute.schemas import StepPreviewRequest, default_preview_compute_worker_identity
 from dataforge_protocol import compute_pb2, enums_pb2
 from modules.compute import executor_client
 
 
-def _preview_payload(engine_identity: dict[str, object]) -> dict[str, object]:
+def _preview_payload(compute_worker_identity: dict[str, object]) -> dict[str, object]:
     return {
         'analysis_id': 'analysis-1',
-        'engine_identity': engine_identity,
+        'compute_worker_identity': compute_worker_identity,
         'target_step_id': 'step-1',
         'analysis_pipeline': {
             'analysis_id': 'analysis-1',
@@ -81,7 +81,7 @@ def test_build_identity_uses_generated_proto_directly() -> None:
     assert identity.resource_id == 'build-1'
 
 
-def test_engine_identity_is_carried_directly_in_lifecycle_command() -> None:
+def test_compute_worker_identity_is_carried_directly_in_lifecycle_command() -> None:
     identity = compute_pb2.ComputeWorkerIdentity(
         scope=enums_pb2.COMPUTE_WORKER_SCOPE_DATASOURCE_PREVIEW,
         reuse_policy=enums_pb2.COMPUTE_WORKER_REUSE_POLICY_SHARED,
@@ -96,7 +96,7 @@ def test_engine_identity_is_carried_directly_in_lifecycle_command() -> None:
     assert command.spawn_engine.resource_config.max_threads == 4
 
 
-def test_step_preview_request_uses_generated_engine_identity() -> None:
+def test_step_preview_request_uses_generated_compute_worker_identity() -> None:
     request = StepPreviewRequest.model_validate(
         _preview_payload(
             {
@@ -108,11 +108,11 @@ def test_step_preview_request_uses_generated_engine_identity() -> None:
         )
     )
 
-    assert isinstance(request.engine_identity, compute_pb2.ComputeWorkerIdentity)
-    assert request.engine_identity.scope == enums_pb2.COMPUTE_WORKER_SCOPE_ANALYSIS_INTERACTIVE
-    assert request.engine_identity.reuse_policy == enums_pb2.COMPUTE_WORKER_REUSE_POLICY_SHARED
-    assert request.engine_identity.analysis_id == 'analysis-1'
-    assert request.model_dump(mode='json')['engine_identity'] == {
+    assert isinstance(request.compute_worker_identity, compute_pb2.ComputeWorkerIdentity)
+    assert request.compute_worker_identity.scope == enums_pb2.COMPUTE_WORKER_SCOPE_ANALYSIS_INTERACTIVE
+    assert request.compute_worker_identity.reuse_policy == enums_pb2.COMPUTE_WORKER_REUSE_POLICY_SHARED
+    assert request.compute_worker_identity.analysis_id == 'analysis-1'
+    assert request.model_dump(mode='json')['compute_worker_identity'] == {
         'scope': 'analysis_interactive',
         'reuse_policy': 'shared',
         'resource_id': 'analysis-1',
@@ -122,10 +122,10 @@ def test_step_preview_request_uses_generated_engine_identity() -> None:
 
 def test_default_preview_identity_uses_the_analysis_rid() -> None:
     payload = _preview_payload({})
-    payload.pop('engine_identity')
+    payload.pop('compute_worker_identity')
     request = StepPreviewRequest.model_validate(payload)
 
-    identity = default_preview_engine_identity(request)
+    identity = default_preview_compute_worker_identity(request)
 
     assert identity.scope == enums_pb2.COMPUTE_WORKER_SCOPE_ANALYSIS_INTERACTIVE
     assert identity.reuse_policy == enums_pb2.COMPUTE_WORKER_REUSE_POLICY_SHARED
@@ -135,12 +135,12 @@ def test_default_preview_identity_uses_the_analysis_rid() -> None:
 
 def test_datasource_preview_identity_uses_the_exact_datasource_rid() -> None:
     payload = _preview_payload({})
-    payload.pop('engine_identity')
+    payload.pop('compute_worker_identity')
     payload.pop('analysis_id')
     payload['datasource_id'] = 'datasource-1'
     request = StepPreviewRequest.model_validate(payload)
 
-    identity = default_preview_engine_identity(request)
+    identity = default_preview_compute_worker_identity(request)
 
     assert identity.scope == enums_pb2.COMPUTE_WORKER_SCOPE_DATASOURCE_PREVIEW
     assert identity.reuse_policy == enums_pb2.COMPUTE_WORKER_REUSE_POLICY_SHARED
@@ -148,7 +148,7 @@ def test_datasource_preview_identity_uses_the_exact_datasource_rid() -> None:
     assert identity.resource_id == 'datasource-1'
 
 
-def test_preview_request_rejects_an_engine_identity_for_a_different_resource() -> None:
+def test_preview_request_rejects_an_compute_worker_identity_for_a_different_resource() -> None:
     payload = _preview_payload(
         {
             'scope': 'analysis_interactive',
@@ -158,13 +158,13 @@ def test_preview_request_rejects_an_engine_identity_for_a_different_resource() -
         }
     )
 
-    with pytest.raises(ValidationError, match='engine_identity must match'):
+    with pytest.raises(ValidationError, match='compute_worker_identity must match'):
         StepPreviewRequest.model_validate(payload)
 
 
 def test_preview_request_rejects_analysis_id_mismatch() -> None:
     payload = _preview_payload({})
-    payload.pop('engine_identity')
+    payload.pop('compute_worker_identity')
     pipeline = payload['analysis_pipeline']
     assert isinstance(pipeline, dict)
     pipeline['analysis_id'] = 'other-analysis'
@@ -173,7 +173,7 @@ def test_preview_request_rejects_analysis_id_mismatch() -> None:
         StepPreviewRequest.model_validate(payload)
 
 
-def test_step_preview_request_rejects_invalid_engine_identity_payload() -> None:
+def test_step_preview_request_rejects_invalid_compute_worker_identity_payload() -> None:
     with pytest.raises(ValidationError, match='engine identity datasource_id is required'):
         StepPreviewRequest.model_validate(
             _preview_payload(

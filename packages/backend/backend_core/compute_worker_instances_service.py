@@ -9,7 +9,7 @@ from sqlmodel import Session, select
 
 from backend_core import runtime_ipc, runtime_workers_service
 from backend_core.domain.compute.base import ComputeWorkerStatusInfo
-from backend_core.domain.engine_instances.models import EngineInstanceStatus
+from backend_core.domain.compute_worker_instances.models import ComputeWorkerInstanceStatus
 from backend_core.domain.runtime.events import RuntimePayloadKind
 from backend_core.domain.runtime_workers.models import RuntimeWorkerKind
 from backend_core.json_utils import copy_json_object
@@ -67,7 +67,7 @@ def _lock_engine_snapshot(session: Session, *, worker_id: str, namespace: str) -
     session.execute(text('SELECT pg_advisory_xact_lock(:key)'), {'key': key})
 
 
-def _engine_status_projection(*, status: ComputeWorkerStatusInfo, last_activity_at: datetime | None, stamp: datetime) -> dict[str, object]:
+def _compute_worker_status_projection(*, status: ComputeWorkerStatusInfo, last_activity_at: datetime | None, stamp: datetime) -> dict[str, object]:
     return {
         'container_id': status.container_id,
         'image_digest': status.image_digest,
@@ -78,9 +78,9 @@ def _engine_status_projection(*, status: ComputeWorkerStatusInfo, last_activity_
         'owner_id': status.owner_id,
         'docker_host': status.docker_host,
         'status': (
-            EngineInstanceStatus.require(status.lifecycle_status)
+            ComputeWorkerInstanceStatus.require(status.lifecycle_status)
             if status.lifecycle_status
-            else EngineInstanceStatus.from_engine_status(status.status, status.current_job_id)
+            else ComputeWorkerInstanceStatus.from_compute_worker_status(status.status, status.current_job_id)
         ),
         'compute_worker_scope': _required_identity_value(status.scope, 'scope'),
         'compute_worker_reuse_policy': _required_identity_value(status.reuse_policy, 'reuse_policy'),
@@ -88,15 +88,15 @@ def _engine_status_projection(*, status: ComputeWorkerStatusInfo, last_activity_
         'build_id': status.build_id,
         'current_job_id': status.current_job_id,
         'current_build_id': status.current_build_id,
-        'current_compute_worker_run_id': status.current_engine_run_id,
+        'current_compute_worker_run_id': status.current_compute_worker_run_id,
         'resource_config_json': copy_json_object(status.resource_config),
         'effective_resources_json': copy_json_object(status.effective_resources),
         'last_activity_at': _read_dt(status.last_activity) or last_activity_at or stamp,
     }
 
 
-def _apply_engine_status(row: ComputeWorkerInstance, *, status: ComputeWorkerStatusInfo, stamp: datetime) -> None:
-    projection = _engine_status_projection(status=status, last_activity_at=row.last_activity_at, stamp=stamp)
+def _apply_compute_worker_status(row: ComputeWorkerInstance, *, status: ComputeWorkerStatusInfo, stamp: datetime) -> None:
+    projection = _compute_worker_status_projection(status=status, last_activity_at=row.last_activity_at, stamp=stamp)
     changed = {field: value for field, value in projection.items() if getattr(row, field, None) != value}
     if not changed:
         return
@@ -106,7 +106,7 @@ def _apply_engine_status(row: ComputeWorkerInstance, *, status: ComputeWorkerSta
     row.updated_at = stamp
 
 
-def _upsert_engine_status(
+def _upsert_compute_worker_status(
     session: Session,
     *,
     worker_id: str,
@@ -139,12 +139,12 @@ def _upsert_engine_status(
             supervisor_id=status.supervisor_id,
             owner_id=status.owner_id,
             docker_host=status.docker_host,
-            status=EngineInstanceStatus.require(status.lifecycle_status)
+            status=ComputeWorkerInstanceStatus.require(status.lifecycle_status)
             if status.lifecycle_status
-            else EngineInstanceStatus.from_engine_status(status.status, status.current_job_id),
+            else ComputeWorkerInstanceStatus.from_compute_worker_status(status.status, status.current_job_id),
             current_job_id=status.current_job_id,
             current_build_id=status.current_build_id,
-            current_compute_worker_run_id=status.current_engine_run_id,
+            current_compute_worker_run_id=status.current_compute_worker_run_id,
             resource_config_json=copy_json_object(status.resource_config),
             effective_resources_json=copy_json_object(status.effective_resources),
             last_activity_at=_read_dt(status.last_activity) or stamp,
@@ -152,7 +152,7 @@ def _upsert_engine_status(
             updated_at=stamp,
         )
     else:
-        _apply_engine_status(row, status=status, stamp=stamp)
+        _apply_compute_worker_status(row, status=status, stamp=stamp)
     session.add(row)
     if not commit:
         return row
@@ -163,18 +163,18 @@ def _upsert_engine_status(
         row = session.get(ComputeWorkerInstance, instance_id)
         if row is None:
             raise
-        _apply_engine_status(row, status=status, stamp=stamp)
+        _apply_compute_worker_status(row, status=status, stamp=stamp)
         session.add(row)
         session.commit()
     session.refresh(row)
     return row
 
 
-def upsert_engine_status(
+def upsert_compute_worker_status(
     session: Session, *, worker_id: str, namespace: str, status: ComputeWorkerStatusInfo, now: datetime | None = None
 ) -> ComputeWorkerInstance:
     """Persist one engine projection for callers that own a single update."""
-    return _upsert_engine_status(session, worker_id=worker_id, namespace=namespace, status=status, now=now, commit=True)
+    return _upsert_compute_worker_status(session, worker_id=worker_id, namespace=namespace, status=status, now=now, commit=True)
 
 
 def persist_compute_worker_snapshot(
@@ -268,11 +268,11 @@ def _persist_engine_snapshot_locked(
                 last_seen_at=stamp,
                 updated_at=stamp,
             )
-            _apply_engine_status(row, status=status, stamp=stamp)
+            _apply_compute_worker_status(row, status=status, stamp=stamp)
             session.add(row)
             continue
 
-        projection = _engine_status_projection(status=status, last_activity_at=row['last_activity_at'], stamp=stamp)
+        projection = _compute_worker_status_projection(status=status, last_activity_at=row['last_activity_at'], stamp=stamp)
         changed = {field: value for field, value in projection.items() if row[field] != value}
         if changed:
             updates.append({'id': instance_id, **changed, 'last_seen_at': stamp, 'updated_at': stamp})
@@ -283,17 +283,17 @@ def _persist_engine_snapshot_locked(
     phase_started = _start_snapshot_phase(phase_timings)
     prior_worker_ids = runtime_workers_service.reclaimable_worker_ids(session, kind=RuntimeWorkerKind.COORDINATOR) - {worker_id}
     worker_ids_to_stop = prior_worker_ids | {worker_id}
-    stop_engines = (
+    stop_compute_workers = (
         update(ComputeWorkerInstance)
         .where(col(ComputeWorkerInstance.worker_id).in_(worker_ids_to_stop))
         .where(col(ComputeWorkerInstance.namespace) == namespace)
-        .where(col(ComputeWorkerInstance.status) != EngineInstanceStatus.STOPPED.value)
+        .where(col(ComputeWorkerInstance.status) != ComputeWorkerInstanceStatus.STOPPED.value)
     )
     if active_by_id:
-        stop_engines = stop_engines.where(col(ComputeWorkerInstance.id).not_in(active_by_id))
+        stop_compute_workers = stop_compute_workers.where(col(ComputeWorkerInstance.id).not_in(active_by_id))
     session.execute(
-        stop_engines.values(
-            status=EngineInstanceStatus.STOPPED.value,
+        stop_compute_workers.values(
+            status=ComputeWorkerInstanceStatus.STOPPED.value,
             current_job_id=None,
             current_build_id=None,
             current_compute_worker_run_id=None,
@@ -315,7 +315,7 @@ def _persist_engine_snapshot_locked(
     _finish_snapshot_phase(phase_timings, 'snapshot_commit_ms', phase_started)
 
 
-def mark_namespace_engines_stopped(
+def mark_namespace_compute_workers_stopped(
     session: Session,
     *,
     worker_id: str,
@@ -331,9 +331,9 @@ def mark_namespace_engines_stopped(
     for row in rows:
         if _row_identity_key(row) in active_engine_identities:
             continue
-        if row.status == EngineInstanceStatus.STOPPED:
+        if row.status == ComputeWorkerInstanceStatus.STOPPED:
             continue
-        row.status = EngineInstanceStatus.STOPPED
+        row.status = ComputeWorkerInstanceStatus.STOPPED
         row.current_job_id = None
         row.current_build_id = None
         row.current_compute_worker_run_id = None
@@ -346,8 +346,8 @@ def mark_namespace_engines_stopped(
     return updated
 
 
-def list_engine_instances(session: Session, *, namespace: str) -> list[ComputeWorkerInstance]:
-    active = [status for status in EngineInstanceStatus.members() if status.is_active]
+def list_compute_worker_instances(session: Session, *, namespace: str) -> list[ComputeWorkerInstance]:
+    active = [status for status in ComputeWorkerInstanceStatus.members() if status.is_active]
     stmt = (
         select(ComputeWorkerInstance)
         .where(sa(ComputeWorkerInstance.namespace == namespace))
@@ -363,7 +363,7 @@ def list_engine_instances(session: Session, *, namespace: str) -> list[ComputeWo
 
 
 def list_engine_projection(session: Session, *, namespace: str) -> list[ComputeWorkerInstance]:
-    rows = list_engine_instances(session, namespace=namespace)
+    rows = list_compute_worker_instances(session, namespace=namespace)
     latest: dict[str, ComputeWorkerInstance] = {}
     for row in rows:
         key = _row_identity_key(row)
@@ -396,7 +396,7 @@ def latest_namespace_update(session: Session, *, namespace: str) -> datetime | N
     return value if isinstance(value, datetime) else None
 
 
-def serialize_engine_instance(row: ComputeWorkerInstance, *, defaults: dict[str, object]) -> dict[str, object]:
+def serialize_compute_worker_instance(row: ComputeWorkerInstance, *, defaults: dict[str, object]) -> dict[str, object]:
     return {
         'analysis_id': row.analysis_id or None,
         'resource_id': _row_resource_id(row),
@@ -420,7 +420,7 @@ def serialize_engine_instance(row: ComputeWorkerInstance, *, defaults: dict[str,
         'datasource_id': row.datasource_id,
         'build_id': row.build_id,
         'current_build_id': row.current_build_id or row.build_id,
-        'current_engine_run_id': row.current_compute_worker_run_id,
+        'current_compute_worker_run_id': row.current_compute_worker_run_id,
     }
 
 

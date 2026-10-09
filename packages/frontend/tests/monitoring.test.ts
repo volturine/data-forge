@@ -4,7 +4,7 @@ import {
 	deleteScheduleById,
 	deleteHealthCheckById,
 	deleteAnalysisViaUI,
-	freeWarmEngines
+	freeWarmComputeWorkers
 } from './utils/ui-cleanup.js';
 import {
 	buildTimeoutMs,
@@ -220,7 +220,7 @@ async function waitForBuildRowEventually(
 
 /**
  * E2E tests for the monitoring page – mirrors test_healthchecks.py /
- * test_scheduler.py / test_engine_runs.py.
+ * test_scheduler.py / test_compute_worker_runs.py.
  */
 test.describe('Monitoring – page structure', () => {
 	test.beforeEach(async ({ page }) => {
@@ -819,7 +819,7 @@ test.describe('Monitoring – Builds tab', () => {
 				await expect(detail.getByRole('tab', { name: 'Steps' })).toBeVisible();
 			}
 
-			// Duration trend chart is the human-visible surface for engine-run stats
+			// Duration trend chart is the human-visible surface for compute-worker-run stats
 			// (avg/p50/p95 and/or empty/insufficient-data states).
 			const trendChart = page.locator('[data-testid="duration-trend-chart"]');
 			await expect(trendChart).toBeVisible({ timeout: 10_000 });
@@ -939,7 +939,7 @@ test.describe('Monitoring – Builds tab', () => {
 				await expect(row).toContainText('Build');
 				await expect(row).not.toContainText('Preview');
 				// Free the exclusive build engine once the run is terminal.
-				await freeWarmEngines(page, { buildIds: [buildId] });
+				await freeWarmComputeWorkers(page, { buildIds: [buildId] });
 			}
 
 			await page.goto(`/datasources?id=${dsId}`);

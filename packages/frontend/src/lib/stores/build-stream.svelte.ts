@@ -36,7 +36,7 @@ const BUILD_REFRESH_MS = 5_000;
 export class BuildStreamStore {
 	status = $state<BuildStatus>('disconnected');
 	buildId = $state<string | null>(null);
-	engineRunId = $state<string | null>(null);
+	computeWorkerRunId = $state<string | null>(null);
 	analysisId = $state<string | null>(null);
 	progress = $state(0);
 	elapsed = $state(0);
@@ -144,7 +144,7 @@ export class BuildStreamStore {
 		this.status = 'disconnected';
 		this.buildId = null;
 		this.targetBuildId = null;
-		this.engineRunId = null;
+		this.computeWorkerRunId = null;
 		this.analysisId = null;
 		this.progress = 0;
 		this.elapsed = 0;
@@ -313,7 +313,7 @@ export class BuildStreamStore {
 
 		this.buildId = build.build_id;
 		this.lastSequence = Math.max(this.lastSequence, lastSequence);
-		this.engineRunId = build.current_engine_run_id ?? null;
+		this.computeWorkerRunId = build.current_compute_worker_run_id ?? null;
 		this.analysisId = build.analysis_id;
 		this.progress = build.progress;
 		this.elapsed = build.elapsed_ms;
@@ -368,7 +368,7 @@ export class BuildStreamStore {
 
 		this.buildId = event.build_id;
 		this.lastSequence = event.sequence ?? this.lastSequence;
-		if (event.engine_run_id) this.engineRunId = event.engine_run_id;
+		if (event.compute_worker_run_id) this.computeWorkerRunId = event.compute_worker_run_id;
 		this.analysisId = event.analysis_id;
 
 		switch (event.type) {

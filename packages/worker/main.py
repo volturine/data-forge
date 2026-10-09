@@ -14,7 +14,7 @@ from functools import partial
 from runtime.compute_manager import ProcessManager
 from runtime.compute_request_runtime import (
     ACTIVE_REQUEST_KINDS,
-    ENGINE_SHUTDOWN_REQUEST_KINDS,
+    COMPUTE_WORKER_SHUTDOWN_REQUEST_KINDS,
     compute_request_claim_worker_count,
     compute_request_loop,
     compute_request_worker_count,
@@ -295,7 +295,7 @@ async def _run_runtime_coordinator(
     request_lanes = [
         (ACTIVE_REQUEST_KINDS, request_worker_count, active_claim_semaphore, compute_work_semaphore),
         (
-            ENGINE_SHUTDOWN_REQUEST_KINDS,
+            COMPUTE_WORKER_SHUTDOWN_REQUEST_KINDS,
             min(request_worker_count, _SHUTDOWN_CONTROL_CONCURRENCY),
             shutdown_claim_semaphore,
             None,

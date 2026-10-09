@@ -10,7 +10,7 @@ from tests.http_client import TestClient
 
 
 def test_expected_engine_shutdown_cancellation_is_logged_without_traceback(caplog):
-    cancellation = PipelineExecutionCancelledError('Compute request cancelled because its engine was shut down')
+    cancellation = PipelineExecutionCancelledError('Compute request cancelled because its compute worker was shut down')
 
     with caplog.at_level(logging.INFO, logger='backend_core.error_handlers'):
         _log_app_error(cancellation, status=500)

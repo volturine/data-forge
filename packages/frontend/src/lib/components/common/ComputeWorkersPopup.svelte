@@ -1,17 +1,17 @@
 <script lang="ts">
 	import { X, Power, LoaderCircle } from '@lucide/svelte';
 	import { SvelteSet } from 'svelte/reactivity';
-	import { enginesStore } from '$lib/stores/engines.svelte';
+	import { computeWorkersStore } from '$lib/stores/compute-workers.svelte';
 	import type { ComputeWorkerStatusResponse } from '$lib/types/compute';
 	import {
-		engineActivityLabel,
-		engineHasActiveJob,
-		engineIdentityKey,
-		engineShutdownConfirmText,
-		engineShutdownHeading,
-		engineShutdownMessage,
-		engineStatusColor as statusColor
-	} from '$lib/nxt/engine';
+		computeWorkerActivityLabel,
+		computeWorkerHasActiveJob,
+		computeWorkerIdentityKey,
+		computeWorkerShutdownConfirmText,
+		computeWorkerShutdownHeading,
+		computeWorkerShutdownMessage,
+		computeWorkerStatusColor as statusColor
+	} from '$lib/nxt/compute-worker';
 	import PanelHeader from '$lib/components/ui/PanelHeader.svelte';
 	import ConfirmDialog from '$lib/components/common/ConfirmDialog.svelte';
 	import { css, iconButton } from '$lib/styles/panda';
@@ -30,28 +30,28 @@
 	const activeAnchor = $derived(open ? anchor : null);
 
 	let confirmOpen = $state(false);
-	let pendingEngine = $state<ComputeWorkerStatusResponse | null>(null);
+	let pendingComputeWorker = $state<ComputeWorkerStatusResponse | null>(null);
 
-	function requestShutdown(engine: ComputeWorkerStatusResponse) {
-		pendingEngine = engine;
+	function requestShutdown(computeWorker: ComputeWorkerStatusResponse) {
+		pendingComputeWorker = computeWorker;
 		confirmOpen = true;
 	}
 
 	function cancelConfirm() {
 		confirmOpen = false;
-		pendingEngine = null;
+		pendingComputeWorker = null;
 	}
 
 	async function confirmShutdown() {
-		const engine = pendingEngine;
+		const computeWorker = pendingComputeWorker;
 		confirmOpen = false;
-		pendingEngine = null;
-		if (!engine) return;
+		pendingComputeWorker = null;
+		if (!computeWorker) return;
 
-		const key = engineIdentityKey(engine);
+		const key = computeWorkerIdentityKey(computeWorker);
 		shuttingDown.add(key);
 		try {
-			await enginesStore.shutdownEngine(engine);
+			await computeWorkersStore.shutdownComputeWorker(computeWorker);
 		} finally {
 			shuttingDown.delete(key);
 		}
@@ -64,7 +64,7 @@
 	const overlayConfig = $derived<OverlayConfig>({
 		onEscape: handleClose,
 		onOutsideClick: (target: Node) => {
-			// Keep engines popup open while the confirm dialog is up.
+			// Keep the compute workers popup open while the confirm dialog is up.
 			if (confirmOpen) return;
 			if (popupRef?.contains(target)) return;
 			if (activeAnchor?.contains(target)) return;
@@ -73,22 +73,24 @@
 	});
 
 	const confirmHeading = $derived(
-		pendingEngine ? engineShutdownHeading(pendingEngine) : 'Shut down engine?'
+		pendingComputeWorker
+			? computeWorkerShutdownHeading(pendingComputeWorker)
+			: 'Shut down compute worker?'
 	);
 	const confirmMessage = $derived(
-		pendingEngine
-			? engineShutdownMessage(pendingEngine)
-			: 'This will stop and remove the engine container.'
+		pendingComputeWorker
+			? computeWorkerShutdownMessage(pendingComputeWorker)
+			: 'This will stop and remove the compute worker container.'
 	);
 	const confirmText = $derived(
-		pendingEngine ? engineShutdownConfirmText(pendingEngine) : 'Shut down'
+		pendingComputeWorker ? computeWorkerShutdownConfirmText(pendingComputeWorker) : 'Shut down'
 	);
 </script>
 
 {#if open}
 	<div
 		bind:this={popupRef}
-		data-engines-popup="true"
+		data-compute-workers-popup="true"
 		class={css({
 			position: 'absolute',
 			left: '0',
@@ -107,21 +109,24 @@
 		})}
 		role="dialog"
 		aria-modal="false"
-		aria-label="Engines"
+		aria-label="Compute workers"
 		tabindex="-1"
 		use:overlayStack.action={overlayConfig}
 	>
 		<PanelHeader>
 			{#snippet title()}
-				<h2 id="engines-title" class={css({ margin: '0', fontSize: 'sm', fontWeight: 'semibold' })}>
-					Engines
+				<h2
+					id="compute-workers-title"
+					class={css({ margin: '0', fontSize: 'sm', fontWeight: 'semibold' })}
+				>
+					Compute workers
 				</h2>
 			{/snippet}
 			{#snippet actions()}
 				<button
 					class={iconButton({ variant: 'ghost' })}
 					onclick={handleClose}
-					aria-label="Close engines"
+					aria-label="Close compute workers"
 					type="button"
 				>
 					<X size={16} />
@@ -129,7 +134,7 @@
 			{/snippet}
 		</PanelHeader>
 
-		{#if enginesStore.loading && enginesStore.engines.length === 0}
+		{#if computeWorkersStore.loading && computeWorkersStore.computeWorkers.length === 0}
 			<div
 				class={css({
 					display: 'flex',
@@ -142,9 +147,9 @@
 				})}
 			>
 				<LoaderCircle size={14} class={css({ animation: 'spin 1s linear infinite' })} />
-				Loading engines...
+				Loading compute workers...
 			</div>
-		{:else if enginesStore.engines.length === 0}
+		{:else if computeWorkersStore.computeWorkers.length === 0}
 			<div
 				class={css({
 					display: 'flex',
@@ -155,15 +160,15 @@
 					color: 'fg.muted'
 				})}
 			>
-				No engines running
+				No compute workers running
 			</div>
 		{:else}
 			<div class={css({ display: 'flex', flexDirection: 'column' })}>
-				{#each enginesStore.engines as engine (engineIdentityKey(engine))}
-					{@const busy = engineHasActiveJob(engine)}
+				{#each computeWorkersStore.computeWorkers as computeWorker (computeWorkerIdentityKey(computeWorker))}
+					{@const busy = computeWorkerHasActiveJob(computeWorker)}
 					<div
-						data-engine-row={engineIdentityKey(engine)}
-						data-engine-busy={busy ? 'true' : 'false'}
+						data-compute-worker-row={computeWorkerIdentityKey(computeWorker)}
+						data-compute-worker-busy={busy ? 'true' : 'false'}
 						class={css({
 							display: 'flex',
 							alignItems: 'center',
@@ -181,9 +186,9 @@
 									height: 'dot',
 									width: 'dot',
 									flexShrink: '0',
-									backgroundColor: statusColor(engine.status)
+									backgroundColor: statusColor(computeWorker.status)
 								})}
-								title={engineActivityLabel(engine)}
+								title={computeWorkerActivityLabel(computeWorker)}
 							></span>
 							<span
 								class={css({
@@ -192,22 +197,22 @@
 									textOverflow: 'ellipsis',
 									whiteSpace: 'nowrap'
 								})}
-								title={engine.resource_id}
+								title={computeWorker.resource_id}
 							>
-								{engine.resource_id}
+								{computeWorker.resource_id}
 							</span>
 							<span
 								class={css({
 									color: busy ? 'fg.warning' : 'fg.tertiary',
 									flexShrink: '0'
 								})}
-								data-engine-activity={busy ? 'busy' : 'idle'}
+								data-compute-worker-activity={busy ? 'busy' : 'idle'}
 							>
-								{engineActivityLabel(engine)}
+								{computeWorkerActivityLabel(computeWorker)}
 							</span>
 						</div>
 						<button
-							data-engine-shutdown={engineIdentityKey(engine)}
+							data-compute-worker-shutdown={computeWorkerIdentityKey(computeWorker)}
 							class={css({
 								display: 'flex',
 								cursor: 'pointer',
@@ -221,12 +226,14 @@
 								_hover: { color: 'error' },
 								_disabled: { cursor: 'not-allowed', opacity: 0.5 }
 							})}
-							onclick={() => requestShutdown(engine)}
-							disabled={shuttingDown.has(engineIdentityKey(engine))}
+							onclick={() => requestShutdown(computeWorker)}
+							disabled={shuttingDown.has(computeWorkerIdentityKey(computeWorker))}
 							type="button"
-							title={busy ? 'Cancel job and shut down engine' : 'Shut down idle engine'}
+							title={busy
+								? 'Cancel job and shut down compute worker'
+								: 'Shut down idle compute worker'}
 						>
-							{#if shuttingDown.has(engineIdentityKey(engine))}
+							{#if shuttingDown.has(computeWorkerIdentityKey(computeWorker))}
 								<LoaderCircle size={14} class={css({ animation: 'spin 1s linear infinite' })} />
 							{:else}
 								<Power size={14} />
@@ -237,7 +244,7 @@
 			</div>
 		{/if}
 
-		{#if enginesStore.error}
+		{#if computeWorkersStore.error}
 			<div
 				class={css({
 					display: 'flex',
@@ -250,7 +257,7 @@
 					color: 'fg.error'
 				})}
 			>
-				{enginesStore.error}
+				{computeWorkersStore.error}
 			</div>
 		{/if}
 	</div>

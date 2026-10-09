@@ -1159,6 +1159,7 @@ class TestSettingsRuntimeReads:
 
         assert first is second
         assert database.settings_engine is first
+        assert first is not None
         assert first.url.drivername.startswith('postgresql')
         first.dispose()
 

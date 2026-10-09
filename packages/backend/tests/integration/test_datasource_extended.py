@@ -653,7 +653,7 @@ class TestIsHidden:
 
 
 class TestDatasourceUpdateRunLogging:
-    def test_update_raw_iceberg_does_not_create_build_engine_run(self, client, test_db_session, sample_csv_object_url: str):
+    def test_update_raw_iceberg_does_not_create_build_compute_worker_run(self, client, test_db_session, sample_csv_object_url: str):
         ds = DataSource(
             id=str(uuid.uuid4()),
             name='Raw Iceberg',

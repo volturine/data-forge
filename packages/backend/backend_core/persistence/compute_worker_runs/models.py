@@ -3,17 +3,17 @@ import datetime as dt
 from sqlalchemy import JSON, Column, DateTime, Float, Integer, String
 from sqlmodel import Field, SQLModel
 
-from backend_core.domain.engine_runs.schemas import EngineRunKind, EngineRunStatus
+from backend_core.domain.compute_worker_runs.schemas import ComputeWorkerRunKind, ComputeWorkerRunStatus
 
 
 class ComputeWorkerRun(SQLModel, table=True):  # type: ignore[call-arg, assignment]
     __tablename__ = 'compute_worker_runs'  # type: ignore[assignment]
 
-    def kind_kind(self) -> EngineRunKind:
-        return EngineRunKind.require(self.kind)
+    def kind_kind(self) -> ComputeWorkerRunKind:
+        return ComputeWorkerRunKind.require(self.kind)
 
-    def status_kind(self) -> EngineRunStatus:
-        return EngineRunStatus.require(self.status)
+    def status_kind(self) -> ComputeWorkerRunStatus:
+        return ComputeWorkerRunStatus.require(self.status)
 
     id: str = Field(sa_column=Column(String, primary_key=True))
     namespace: str = Field(default='default', sa_column=Column(String, nullable=False, index=True))

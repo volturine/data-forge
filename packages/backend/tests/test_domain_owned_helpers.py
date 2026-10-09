@@ -1,13 +1,14 @@
 from datetime import UTC, datetime
 
+from backend_core.compute_worker_instances_service import serialize_compute_worker_instance
 from backend_core.domain.analysis.step_types import STEP_TYPES
 from backend_core.domain.build_jobs.models import BuildJobStatus
 from backend_core.domain.build_runs.models import BuildRunStatus
 from backend_core.domain.compute import schemas as compute_schemas
+from backend_core.domain.compute_worker_instances.models import ComputeWorkerInstanceStatus
+from backend_core.domain.compute_worker_runs.schemas import ComputeWorkerRunExecutionCategory, ComputeWorkerRunStatus
 from backend_core.domain.datasource.models import DataSourceCreatedBy, DataSourceTargetKind
 from backend_core.domain.datasource.source_types import DataSourceFileType, DataSourceLoadType, DataSourceType, IcebergReader
-from backend_core.domain.engine_instances.models import EngineInstanceStatus
-from backend_core.domain.engine_runs.schemas import EngineRunExecutionCategory, EngineRunStatus
 from backend_core.domain.healthcheck_models import HealthCheckType
 from backend_core.domain.runtime.events import RuntimePayloadKind
 from backend_core.domain.step_config_enums import (
@@ -21,7 +22,6 @@ from backend_core.domain.step_config_enums import (
     RecipientSource,
     SortBy,
 )
-from backend_core.engine_instances_service import serialize_engine_instance
 from backend_core.persistence.build_jobs.models import BuildJob
 from backend_core.persistence.build_runs.models import BuildRun
 from backend_core.persistence.compute_worker_instances.models import ComputeWorkerInstance
@@ -222,29 +222,29 @@ def test_build_job_owns_activity_and_orphan_rules() -> None:
     assert job.age_seconds(now=now) == 0.0
 
 
-def test_engine_run_status_owns_terminal_rules() -> None:
-    assert EngineRunStatus.RUNNING.is_terminal is False
-    assert EngineRunStatus.SUCCESS.is_terminal is True
-    assert EngineRunStatus.SUCCESS.blocks_transition_to(EngineRunStatus.FAILED) is True
-    assert EngineRunStatus.SUCCESS.blocks_transition_to(EngineRunStatus.SUCCESS) is False
+def test_compute_worker_run_status_owns_terminal_rules() -> None:
+    assert ComputeWorkerRunStatus.RUNNING.is_terminal is False
+    assert ComputeWorkerRunStatus.SUCCESS.is_terminal is True
+    assert ComputeWorkerRunStatus.SUCCESS.blocks_transition_to(ComputeWorkerRunStatus.FAILED) is True
+    assert ComputeWorkerRunStatus.SUCCESS.blocks_transition_to(ComputeWorkerRunStatus.SUCCESS) is False
 
 
-def test_engine_run_execution_category_owns_plan_and_step_defaults() -> None:
-    assert EngineRunExecutionCategory.PLAN.is_query_plan is True
-    assert EngineRunExecutionCategory.STEP.is_query_plan is False
-    assert EngineRunExecutionCategory.READ.default_step_type == 'read'
-    assert EngineRunExecutionCategory.WRITE.default_step_type == 'write'
-    assert EngineRunExecutionCategory.STEP.default_step_type == 'unknown'
+def test_compute_worker_run_execution_category_owns_plan_and_step_defaults() -> None:
+    assert ComputeWorkerRunExecutionCategory.PLAN.is_query_plan is True
+    assert ComputeWorkerRunExecutionCategory.STEP.is_query_plan is False
+    assert ComputeWorkerRunExecutionCategory.READ.default_step_type == 'read'
+    assert ComputeWorkerRunExecutionCategory.WRITE.default_step_type == 'write'
+    assert ComputeWorkerRunExecutionCategory.STEP.default_step_type == 'unknown'
 
 
-def test_engine_instance_status_owns_projection_flags() -> None:
-    assert EngineInstanceStatus.RUNNING.is_active is True
-    assert EngineInstanceStatus.STOPPED.is_active is False
-    assert EngineInstanceStatus.STARTING.overview_status == 'healthy'
-    assert EngineInstanceStatus.FAILED.overview_status == 'terminated'
+def test_compute_worker_instance_status_owns_projection_flags() -> None:
+    assert ComputeWorkerInstanceStatus.RUNNING.is_active is True
+    assert ComputeWorkerInstanceStatus.STOPPED.is_active is False
+    assert ComputeWorkerInstanceStatus.STARTING.overview_status == 'healthy'
+    assert ComputeWorkerInstanceStatus.FAILED.overview_status == 'terminated'
 
 
-def test_engine_instance_serialization_parses_persisted_status_token() -> None:
+def test_compute_worker_instance_serialization_parses_persisted_status_token() -> None:
     row = ComputeWorkerInstance(
         id='worker-1:default:analysis:analysis-1',
         worker_id='worker-1',
@@ -252,17 +252,17 @@ def test_engine_instance_serialization_parses_persisted_status_token() -> None:
         analysis_id='analysis-1',
         compute_worker_scope='analysis',
         compute_worker_reuse_policy='reuse',
-        status=EngineInstanceStatus.RUNNING.value,
+        status=ComputeWorkerInstanceStatus.RUNNING.value,
         last_seen_at=datetime.now(UTC),
         updated_at=datetime.now(UTC),
     )
 
-    assert row.status_kind() == EngineInstanceStatus.RUNNING
-    assert serialize_engine_instance(row, defaults={})['status'] == 'healthy'
-    assert serialize_engine_instance(row, defaults={})['analysis_id'] == 'analysis-1'
+    assert row.status_kind() == ComputeWorkerInstanceStatus.RUNNING
+    assert serialize_compute_worker_instance(row, defaults={})['status'] == 'healthy'
+    assert serialize_compute_worker_instance(row, defaults={})['analysis_id'] == 'analysis-1'
 
 
-def test_datasource_engine_instance_serialization_omits_analysis_identity() -> None:
+def test_datasource_compute_worker_instance_serialization_omits_analysis_identity() -> None:
     row = ComputeWorkerInstance(
         id='worker-1:default:datasource_preview:datasource-1',
         worker_id='worker-1',
@@ -271,12 +271,12 @@ def test_datasource_engine_instance_serialization_omits_analysis_identity() -> N
         compute_worker_scope='datasource_preview',
         compute_worker_reuse_policy='shared',
         datasource_id='datasource-1',
-        status=EngineInstanceStatus.RUNNING.value,
+        status=ComputeWorkerInstanceStatus.RUNNING.value,
         last_seen_at=datetime.now(UTC),
         updated_at=datetime.now(UTC),
     )
 
-    status = serialize_engine_instance(row, defaults={})
+    status = serialize_compute_worker_instance(row, defaults={})
 
     assert status['analysis_id'] is None
     assert status['resource_id'] == 'datasource-1'

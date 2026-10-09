@@ -16,8 +16,8 @@
 	import {
 		buildLifecycleStatusLabel,
 		buildLifecycleStatusTone,
-		engineRunDisplayKind,
-		engineRunKindLabel
+		computeWorkerRunDisplayKind,
+		computeWorkerRunKindLabel
 	} from '$lib/types/build-stream';
 	import type { PaginatedStatus } from '$lib/stores/paginated-store.svelte';
 	import Callout from '$lib/components/ui/Callout.svelte';
@@ -179,7 +179,7 @@
 				<span>Created</span>
 			</div>
 			{#each filteredRuns as run, index (run.id)}
-				{@const displayKind = engineRunDisplayKind(run.kind)}
+				{@const displayKind = computeWorkerRunDisplayKind(run.kind)}
 				<div
 					class={css(
 						{
@@ -203,7 +203,7 @@
 						{:else}
 							<Download size={14} class={css({ flexShrink: '0', color: 'fg.success' })} />
 						{/if}
-						<span>{engineRunKindLabel(run.kind)}</span>
+						<span>{computeWorkerRunKindLabel(run.kind)}</span>
 						{#if run.builtTag}
 							<span
 								class={chip({ tone: 'accent' })}

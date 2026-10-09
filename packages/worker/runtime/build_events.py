@@ -20,7 +20,7 @@ class BuildEventContext:
     tab_name: str | None
     current_output_id: str | None
     current_output_name: str | None
-    engine_run_id: str | None
+    compute_worker_run_id: str | None
 
     @classmethod
     def from_build(
@@ -35,7 +35,7 @@ class BuildEventContext:
         tab_name: str | None = None,
         current_output_id: str | None = None,
         current_output_name: str | None = None,
-        engine_run_id: str | None = None,
+        compute_worker_run_id: str | None = None,
     ) -> BuildEventContext:
         return cls(
             build_id=build.build_id,
@@ -47,7 +47,7 @@ class BuildEventContext:
             tab_name=tab_name,
             current_output_id=current_output_id if current_output_id is not None else build.current_output_id,
             current_output_name=current_output_name if current_output_name is not None else build.current_output_name,
-            engine_run_id=engine_run_id if engine_run_id is not None else build.current_engine_run_id,
+            compute_worker_run_id=compute_worker_run_id if compute_worker_run_id is not None else build.current_compute_worker_run_id,
         )
 
     def payload(self) -> dict[str, object]:
@@ -61,7 +61,7 @@ class BuildEventContext:
             "tab_name": self.tab_name,
             "current_output_id": self.current_output_id,
             "current_output_name": self.current_output_name,
-            "engine_run_id": self.engine_run_id,
+            "compute_worker_run_id": self.compute_worker_run_id,
         }
 
 
@@ -121,7 +121,7 @@ async def emit_progress(
     tab_name: str | None,
     current_output_id: str | None = None,
     current_output_name: str | None = None,
-    engine_run_id: str | None = None,
+    compute_worker_run_id: str | None = None,
 ) -> None:
     await emit_build_event(
         emitter,
@@ -140,7 +140,7 @@ async def emit_progress(
                 "tab_name": tab_name,
                 "current_output_id": current_output_id,
                 "current_output_name": current_output_name,
-                "engine_run_id": engine_run_id,
+                "compute_worker_run_id": compute_worker_run_id,
             },
         ),
     )

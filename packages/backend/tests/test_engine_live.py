@@ -9,15 +9,21 @@ from backend_core.compute_worker_live import ComputeWorkerRegistry
 from backend_core.domain.compute import schemas
 
 
+def test_compute_worker_snapshot_uses_compute_worker_json_field() -> None:
+    payload = schemas.ComputeWorkersSnapshotMessage(compute_workers=[], total=0).model_dump(mode='json')
+
+    assert payload == {'type': 'snapshot', 'compute_workers': [], 'total': 0}
+
+
 @pytest.mark.asyncio
 async def test_engine_snapshot_load_is_single_flight_and_versioned() -> None:
     registry = ComputeWorkerRegistry()
-    snapshot = schemas.EngineListSnapshotMessage(engines=[], total=0)
+    snapshot = schemas.ComputeWorkersSnapshotMessage(compute_workers=[], total=0)
     started = asyncio.Event()
     release = asyncio.Event()
     calls = 0
 
-    async def load() -> schemas.EngineListSnapshotMessage:
+    async def load() -> schemas.ComputeWorkersSnapshotMessage:
         nonlocal calls
         calls += 1
         started.set()
@@ -41,17 +47,17 @@ async def test_engine_snapshot_load_is_single_flight_and_versioned() -> None:
 @pytest.mark.asyncio
 async def test_serialized_engine_snapshot_is_shared_per_version(monkeypatch: pytest.MonkeyPatch) -> None:
     registry = ComputeWorkerRegistry()
-    snapshot = schemas.EngineListSnapshotMessage(engines=[], total=0)
+    snapshot = schemas.ComputeWorkersSnapshotMessage(compute_workers=[], total=0)
     loads = 0
     serializations = 0
 
-    async def load() -> schemas.EngineListSnapshotMessage:
+    async def load() -> schemas.ComputeWorkersSnapshotMessage:
         nonlocal loads
         loads += 1
         await asyncio.sleep(0)
         return snapshot
 
-    async def serialize(payload: schemas.EngineListSnapshotMessage) -> str:
+    async def serialize(payload: schemas.ComputeWorkersSnapshotMessage) -> str:
         nonlocal serializations
         serializations += 1
         await asyncio.sleep(0)
@@ -75,13 +81,13 @@ async def test_stale_engine_snapshot_load_does_not_replace_new_version(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
     registry = ComputeWorkerRegistry()
-    stale_snapshot = schemas.EngineListSnapshotMessage(engines=[], total=0)
-    current_snapshot = schemas.EngineListSnapshotMessage(engines=[], total=1)
+    stale_snapshot = schemas.ComputeWorkersSnapshotMessage(compute_workers=[], total=0)
+    current_snapshot = schemas.ComputeWorkersSnapshotMessage(compute_workers=[], total=1)
     stale_started = asyncio.Event()
     release_stale = asyncio.Event()
     loads = 0
 
-    async def load() -> schemas.EngineListSnapshotMessage:
+    async def load() -> schemas.ComputeWorkersSnapshotMessage:
         nonlocal loads
         loads += 1
         if loads == 1:
@@ -90,7 +96,7 @@ async def test_stale_engine_snapshot_load_does_not_replace_new_version(
             return stale_snapshot
         return current_snapshot
 
-    async def serialize(payload: schemas.EngineListSnapshotMessage) -> str:
+    async def serialize(payload: schemas.ComputeWorkersSnapshotMessage) -> str:
         return f'engine-snapshot:{payload.total}'
 
     monkeypatch.setattr(engine_live, 'serialize_json', serialize)

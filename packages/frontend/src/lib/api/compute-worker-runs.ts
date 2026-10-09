@@ -36,7 +36,7 @@ export interface ComputeWorkerRun {
 	execution_entries: ComputeWorkerRunExecutionEntry[];
 }
 
-export interface ListEngineRunsParams {
+export interface ListComputeWorkerRunsParams {
 	analysis_id?: string;
 	datasource_id?: string;
 	kind?: string;
@@ -45,7 +45,7 @@ export interface ListEngineRunsParams {
 	offset?: number;
 }
 
-function buildQueryString(params?: ListEngineRunsParams): string {
+function buildQueryString(params?: ListComputeWorkerRunsParams): string {
 	if (!params) return '';
 	const query = new URLSearchParams();
 	if (params.analysis_id) query.set('analysis_id', params.analysis_id);
@@ -65,11 +65,11 @@ function namespaceKey(): string {
 	return requireNamespace();
 }
 
-export function listEngineRuns(
-	params?: ListEngineRunsParams,
+export function listComputeWorkerRuns(
+	params?: ListComputeWorkerRunsParams,
 	signal?: AbortSignal
 ): ResultAsync<ComputeWorkerRun[], ApiError> {
-	const endpoint = `/v1/engine-runs${buildQueryString(params)}`;
+	const endpoint = `/v1/compute-worker-runs${buildQueryString(params)}`;
 	if (signal) return apiRequest<ComputeWorkerRun[]>(endpoint, { signal });
 	return shareInFlight(inFlight, `${namespaceKey()}:${endpoint}`, () =>
 		apiRequest<ComputeWorkerRun[]>(endpoint)
@@ -119,5 +119,5 @@ export function getDurationStats(
 	if (params?.kind) query.set('kind', params.kind);
 	if (params?.limit !== undefined) query.set('limit', String(params.limit));
 	const qs = query.toString();
-	return apiRequest<DurationStatsResponse>(`/v1/engine-runs/stats${qs ? `?${qs}` : ''}`);
+	return apiRequest<DurationStatsResponse>(`/v1/compute-worker-runs/stats${qs ? `?${qs}` : ''}`);
 }

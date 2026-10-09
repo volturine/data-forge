@@ -161,7 +161,7 @@ describe('SnapshotPicker', () => {
 			await fireEvent.click(screen.getByRole('button'));
 			const latestButtons = screen.getAllByText('Latest');
 			const resetButton = latestButtons.find(
-				(el) => el.tagName === 'BUTTON' && el.closest('.engine-header') === null
+				(el) => el.tagName === 'BUTTON' && el.closest('.compute-worker-header') === null
 			);
 			expect(resetButton).toBeDefined();
 		});
@@ -179,7 +179,7 @@ describe('SnapshotPicker', () => {
 			await fireEvent.click(screen.getByRole('button'));
 			const latestButtons = screen.getAllByText('Latest');
 			const resetButtons = latestButtons.filter(
-				(el) => el.tagName === 'BUTTON' && el.closest('.engine-header') === null
+				(el) => el.tagName === 'BUTTON' && el.closest('.compute-worker-header') === null
 			);
 			expect(resetButtons.length).toBe(0);
 		});
@@ -206,7 +206,7 @@ describe('SnapshotPicker', () => {
 			await fireEvent.click(screen.getByRole('button'));
 			const latestButtons = screen.getAllByText('Latest');
 			const resetButton = latestButtons.find(
-				(el) => el.tagName === 'BUTTON' && el.closest('.engine-header') === null
+				(el) => el.tagName === 'BUTTON' && el.closest('.compute-worker-header') === null
 			);
 			expect(resetButton).toBeDefined();
 			await fireEvent.click(resetButton!);

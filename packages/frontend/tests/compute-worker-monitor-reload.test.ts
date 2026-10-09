@@ -2,23 +2,23 @@ import { test, expect } from './fixtures.js';
 import { createAnalysis, createCsvDatasource } from './utils/api.js';
 import { gotoAnalysisEditor } from './utils/analysis.js';
 import {
-	closeEnginesPopup,
+	closeComputeWorkersPopup,
 	deleteAnalysisViaUI,
 	deleteDatasourceViaUI,
-	openEnginesPopup
+	openComputeWorkersPopup
 } from './utils/ui-cleanup.js';
 import { waitForInlinePreviewReady, waitForLayoutReady } from './utils/readiness.js';
 import { switchNamespace } from './utils/namespace.js';
 import { uid } from './utils/uid.js';
 
-test('the engine monitor keeps its snapshot after an analysis page reload', async ({
+test('the compute worker monitor keeps its snapshot after an analysis page reload', async ({
 	page,
 	request
 }) => {
 	const suffix = uid();
-	const namespace = `e2e-engine-reload-${suffix}`;
-	const datasourceName = `E2E Engine Reload Source ${suffix}`;
-	const analysisName = `E2E Engine Reload ${suffix}`;
+	const namespace = `e2e-compute-worker-reload-${suffix}`;
+	const datasourceName = `E2E Compute Worker Reload Source ${suffix}`;
+	const analysisName = `E2E Compute Worker Reload ${suffix}`;
 	let datasourceId: string | null = null;
 	let analysisId: string | null = null;
 
@@ -36,20 +36,20 @@ test('the engine monitor keeps its snapshot after an analysis page reload', asyn
 		await gotoAnalysisEditor(page, analysisId);
 		await waitForInlinePreviewReady(page);
 
-		const popupBefore = await openEnginesPopup(page);
-		const rowsBefore = await popupBefore.locator('[data-engine-row]').evaluateAll((rows) =>
+		const popupBefore = await openComputeWorkersPopup(page);
+		const rowsBefore = await popupBefore.locator('[data-compute-worker-row]').evaluateAll((rows) =>
 			rows
-				.map((row) => row.getAttribute('data-engine-row'))
+				.map((row) => row.getAttribute('data-compute-worker-row'))
 				.filter(Boolean)
 				.sort()
 		);
-		const badgeBefore = page.getByTestId('engine-monitor-count');
+		const badgeBefore = page.getByTestId('compute-worker-monitor-count');
 		const countBefore = Number(await badgeBefore.textContent());
 
 		expect(countBefore).toBeGreaterThan(0);
 		expect(countBefore).toBe(rowsBefore.length);
 		expect(rowsBefore).toContain(`analysis_interactive:${analysisId}`);
-		await closeEnginesPopup(page);
+		await closeComputeWorkersPopup(page);
 
 		await page.getByRole('link', { name: 'Analyses', exact: true }).click();
 		await expect(page).toHaveURL('/');
@@ -60,20 +60,20 @@ test('the engine monitor keeps its snapshot after an analysis page reload', asyn
 		await waitForLayoutReady(page);
 		await expect(page.getByRole('heading', { name: 'Analyses', exact: true })).toBeVisible();
 
-		const badgeAfter = page.getByTestId('engine-monitor-count');
+		const badgeAfter = page.getByTestId('compute-worker-monitor-count');
 		await expect(badgeAfter).toHaveText(String(countBefore));
 
-		const popupAfter = await openEnginesPopup(page);
-		const rowsAfter = await popupAfter.locator('[data-engine-row]').evaluateAll((rows) =>
+		const popupAfter = await openComputeWorkersPopup(page);
+		const rowsAfter = await popupAfter.locator('[data-compute-worker-row]').evaluateAll((rows) =>
 			rows
-				.map((row) => row.getAttribute('data-engine-row'))
+				.map((row) => row.getAttribute('data-compute-worker-row'))
 				.filter(Boolean)
 				.sort()
 		);
 
 		expect(rowsAfter).toEqual(rowsBefore);
 	} finally {
-		await closeEnginesPopup(page).catch(() => undefined);
+		await closeComputeWorkersPopup(page).catch(() => undefined);
 		if (analysisId) {
 			await deleteAnalysisViaUI(page, analysisName, { id: analysisId, namespace });
 		}

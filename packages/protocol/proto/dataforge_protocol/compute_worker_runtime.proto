@@ -21,6 +21,7 @@ service PolarsComputeWorkerService {
 
 message ComputeWorkerInitializeRequest {
   int32 protocol_version = 1 [(buf.validate.field).int32.gte = 1];
+  // Keep the field name for protobuf JSON compatibility.
   string engine_identity = 2 [(buf.validate.field).string.min_len = 1];
   string token = 3 [(buf.validate.field).string.min_len = 1];
   string object_store_endpoint = 4;
@@ -33,6 +34,7 @@ message ComputeWorkerInitializeRequest {
 }
 
 message ComputeWorkerInitializeResponse {
+  // Keep the field name for protobuf JSON compatibility.
   string engine_identity = 1 [(buf.validate.field).string.min_len = 1];
   bool ready = 2;
 }
@@ -40,6 +42,7 @@ message ComputeWorkerInitializeResponse {
 message ComputeWorkerHealthRequest {}
 
 message ComputeWorkerHealthResponse {
+  // Keep the field name for protobuf JSON compatibility.
   string engine_identity = 1 [(buf.validate.field).string.min_len = 1];
   int32 protocol_version = 2 [(buf.validate.field).int32.gte = 1];
   string application_version = 3 [(buf.validate.field).string.min_len = 1];

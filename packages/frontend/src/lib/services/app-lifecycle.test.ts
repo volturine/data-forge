@@ -9,7 +9,7 @@ function services(): NamespaceServices {
 		chat: { reset: vi.fn(), destroy: vi.fn() },
 		computeActivity: resettable(),
 		datasource: resettable(),
-		engines: resettable(),
+		computeWorkers: resettable(),
 		favorites: resettable(),
 		schema: resettable()
 	};
@@ -40,6 +40,6 @@ describe('AppLifecycle', () => {
 		lifecycle.destroy();
 
 		expect(scoped.chat.destroy).toHaveBeenCalledOnce();
-		expect(scoped.engines.reset).toHaveBeenCalledOnce();
+		expect(scoped.computeWorkers.reset).toHaveBeenCalledOnce();
 	});
 });

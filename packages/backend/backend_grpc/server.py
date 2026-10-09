@@ -29,10 +29,10 @@ from backend_core import (
     build_jobs_service as build_job_service,
     build_runs_service as build_run_service,
     compute_requests_service,
+    compute_worker_instances_service as compute_worker_instance_service,
+    compute_worker_run_commands,
+    compute_worker_runs_service as compute_worker_run_service,
     datasource_delete_service,
-    engine_instances_service as engine_instance_service,
-    engine_run_commands,
-    engine_runs_service as engine_run_service,
     runtime_outbox_service,
     runtime_work_service,
     runtime_workers_service as runtime_worker_service,
@@ -93,14 +93,14 @@ _TOKEN_METADATA_KEY = 'x-internal-token'
 _RUNTIME_GENERATION_METADATA_KEY = 'x-runtime-coordinator-generation'
 _WORKER_RUNTIME_SERVICE_PREFIX = f'/{worker_runtime_pb2.DESCRIPTOR.services_by_name["WorkerRuntimeService"].full_name}/'
 _BUILD_JOB_PROTOCOL_VERSION = 2
-_SLOW_ENGINE_SNAPSHOT_PHASE_SECONDS = 1.0
+_SLOW_COMPUTE_WORKER_SNAPSHOT_PHASE_SECONDS = 1.0
 _RPC_PHASE_MONOTONIC = time.monotonic
 _PHASE_TIMED_RPC_METHODS = frozenset({'CreateComputeWorkerRun', 'GetDatasourceMetadata'})
 _RPC_PHASE_LOG_ORDER = (
     'payload_conversion_ms',
     'db_unit_ms',
-    'engine_run_payload_service_ms',
-    'engine_run_persistence_service_ms',
+    'compute_worker_run_payload_service_ms',
+    'compute_worker_run_persistence_service_ms',
     'datasource_row_lookup_ms',
     'datasource_payload_conversion_ms',
     'column_descriptions_service_ms',
@@ -631,7 +631,7 @@ def _threaded_rpc(executor: Executor):
                     worker_finished = timing.get('worker_finished', finished)
                     request_id = getattr(request, 'request_id', None) or getattr(request, 'idempotency_key', None) or getattr(request, 'job_id', None) or '-'
                     namespace = getattr(request, 'target_namespace', None) or getattr(request, 'namespace', None) or '-'
-                    identity = getattr(request, 'engine_identity', None)
+                    identity = getattr(request, 'compute_worker_identity', None) or getattr(request, 'engine_identity', None)
                     resource_id = getattr(identity, 'resource_id', None) or getattr(request, 'datasource_id', None) or '-'
                     pool_snapshot: dict[str, object] = {}
                     with contextlib.suppress(Exception):
@@ -812,9 +812,11 @@ def _build_event_payload(message: compute_pb2.BuildEvent) -> dict[str, object]:
         payload['sequence'] = context.sequence
     if context.HasField('current_kind'):
         payload['current_kind'] = proto_value_to_enum_name(enums_pb2.ComputeWorkerRunKind, 'COMPUTE_WORKER_RUN_KIND', context.current_kind)
-    for field in ('current_datasource_id', 'tab_id', 'tab_name', 'current_output_id', 'current_output_name', 'engine_run_id'):
+    for field in ('current_datasource_id', 'tab_id', 'tab_name', 'current_output_id', 'current_output_name'):
         if context.HasField(field):
             payload[field] = getattr(context, field)
+    if context.HasField('engine_run_id'):
+        payload['compute_worker_run_id'] = context.engine_run_id
 
     match message.WhichOneof('event'):
         case 'plan':
@@ -917,7 +919,7 @@ def _build_resource_config_payload(message: compute_pb2.BuildResourceConfigSumma
     return payload
 
 
-def _engine_run_execution_entry_payload(entry: compute_pb2.ComputeWorkerRunExecutionEntry) -> dict[str, object]:
+def _compute_worker_run_execution_entry_payload(entry: compute_pb2.ComputeWorkerRunExecutionEntry) -> dict[str, object]:
     payload: dict[str, object] = {
         'key': entry.key,
         'label': entry.label,
@@ -956,7 +958,7 @@ def _engine_defaults_payload(message: compute_pb2.ComputeWorkerDefaults) -> dict
     }
 
 
-def _engine_status_info_payload(message: compute_pb2.ComputeWorkerStatusResult) -> ComputeWorkerStatusInfo:
+def _compute_worker_status_info_payload(message: compute_pb2.ComputeWorkerStatusResult) -> ComputeWorkerStatusInfo:
     return ComputeWorkerStatusInfo(
         analysis_id=message.analysis_id,
         resource_id=message.resource_id,
@@ -984,11 +986,11 @@ def _engine_status_info_payload(message: compute_pb2.ComputeWorkerStatusResult) 
         datasource_id=message.datasource_id if message.HasField('datasource_id') else None,
         build_id=message.build_id if message.HasField('build_id') else None,
         current_build_id=message.current_build_id if message.HasField('current_build_id') else None,
-        current_engine_run_id=message.current_engine_run_id if message.HasField('current_engine_run_id') else None,
+        current_compute_worker_run_id=message.current_engine_run_id if message.HasField('current_engine_run_id') else None,
     )
 
 
-def _engine_run_update_kwargs(update: worker_runtime_pb2.WorkerComputeWorkerRunUpdateFields, *, merge_result: bool) -> dict[str, Any]:
+def _compute_worker_run_update_kwargs(update: worker_runtime_pb2.WorkerComputeWorkerRunUpdateFields, *, merge_result: bool) -> dict[str, Any]:
     kwargs: dict[str, Any] = {'merge_result_json': merge_result}
     if update.HasField('analysis_id'):
         kwargs['analysis_id'] = update.analysis_id
@@ -1013,7 +1015,7 @@ def _engine_run_update_kwargs(update: worker_runtime_pb2.WorkerComputeWorkerRunU
     if update.HasField('query_plan'):
         kwargs['query_plan'] = update.query_plan
     if update.HasField('execution_entries'):
-        kwargs['execution_entries'] = [_engine_run_execution_entry_payload(entry) for entry in update.execution_entries.entries]
+        kwargs['execution_entries'] = [_compute_worker_run_execution_entry_payload(entry) for entry in update.execution_entries.entries]
     if update.HasField('progress'):
         kwargs['progress'] = update.progress
     if update.clear_current_step:
@@ -1025,16 +1027,16 @@ def _engine_run_update_kwargs(update: worker_runtime_pb2.WorkerComputeWorkerRunU
     return kwargs
 
 
-def _compute_request_engine_run_finalization(
+def _compute_request_compute_worker_run_finalization(
     finalization: worker_runtime_pb2.WorkerComputeWorkerRunFinalization | None,
-) -> compute_requests_service.EngineRunFinalization | None:
+) -> compute_requests_service.ComputeWorkerRunFinalization | None:
     if finalization is None:
         return None
     if not finalization.HasField('update'):
-        raise _ThreadedRpcAbort(grpc.StatusCode.INVALID_ARGUMENT, 'Engine-run finalization update is required')
-    fields = _engine_run_update_kwargs(finalization.update, merge_result=finalization.merge_result)
+        raise _ThreadedRpcAbort(grpc.StatusCode.INVALID_ARGUMENT, 'Compute worker run finalization update is required')
+    fields = _compute_worker_run_update_kwargs(finalization.update, merge_result=finalization.merge_result)
     merge_result_json = bool(fields.pop('merge_result_json'))
-    return compute_requests_service.EngineRunFinalization(
+    return compute_requests_service.ComputeWorkerRunFinalization(
         run_id=finalization.run_id,
         fields=fields,
         merge_result_json=merge_result_json,
@@ -1259,7 +1261,7 @@ class WorkerRuntimeServicer(worker_runtime_pb2_grpc.WorkerRuntimeServiceServicer
                 artifact_path=_optional_str(request, 'artifact_path'),
                 artifact_name=_optional_str(request, 'artifact_name'),
                 artifact_content_type=_optional_str(request, 'artifact_content_type'),
-                engine_run_finalization=_compute_request_engine_run_finalization(
+                compute_worker_run_finalization=_compute_request_compute_worker_run_finalization(
                     request.engine_run_finalization if request.HasField('engine_run_finalization') else None
                 ),
             )
@@ -1281,7 +1283,7 @@ class WorkerRuntimeServicer(worker_runtime_pb2_grpc.WorkerRuntimeServiceServicer
                 worker_id=request.worker_id,
                 claim_token=request.claim_token,
                 lease_generation=request.lease_generation,
-                engine_run_finalization=_compute_request_engine_run_finalization(
+                compute_worker_run_finalization=_compute_request_compute_worker_run_finalization(
                     request.engine_run_finalization if request.HasField('engine_run_finalization') else None
                 ),
             )
@@ -1869,7 +1871,7 @@ class WorkerRuntimeServicer(worker_runtime_pb2_grpc.WorkerRuntimeServiceServicer
                     duration_ms=_optional_int(request, 'duration_ms'),
                     step_timings=dict(request.timing_by_key) if request.timing_by_key else None,
                     query_plan=_optional_str(request, 'query_plan'),
-                    execution_entries=[_engine_run_execution_entry_payload(entry) for entry in request.execution_entry] or None,
+                    execution_entries=[_compute_worker_run_execution_entry_payload(entry) for entry in request.execution_entry] or None,
                     progress=request.progress,
                     current_step=_optional_str(request, 'current_step'),
                     triggered_by=_optional_str(request, 'triggered_by'),
@@ -1877,14 +1879,14 @@ class WorkerRuntimeServicer(worker_runtime_pb2_grpc.WorkerRuntimeServiceServicer
                 ),
             )
             payload = _record_rpc_phase(
-                'engine_run_payload_service_ms',
-                lambda: engine_run_service.create_engine_run_payload(**payload_fields),
+                'compute_worker_run_payload_service_ms',
+                lambda: compute_worker_run_service.create_compute_worker_run_payload(**payload_fields),
             )
 
             def _persist(session: Session) -> Any:
                 return _record_rpc_phase(
-                    'engine_run_persistence_service_ms',
-                    lambda: engine_run_commands.create_engine_run(session, payload),
+                    'compute_worker_run_persistence_service_ms',
+                    lambda: compute_worker_run_commands.create_compute_worker_run(session, payload),
                 )
 
             run = _record_rpc_phase('db_unit_ms', lambda: run_db(_persist))
@@ -1894,10 +1896,10 @@ class WorkerRuntimeServicer(worker_runtime_pb2_grpc.WorkerRuntimeServiceServicer
 
     @_run_async_handler_in_thread
     def UpdateComputeWorkerRun(self, request: worker_runtime_pb2.WorkerUpdateComputeWorkerRunRequest, metadata: RpcMetadata) -> worker_runtime_pb2.IdResponse:
-        kwargs = _engine_run_update_kwargs(request.update, merge_result=request.merge_result)
+        kwargs = _compute_worker_run_update_kwargs(request.update, merge_result=request.merge_result)
         token = set_namespace_context(request.namespace)
         try:
-            run = run_db(lambda session: engine_run_commands.update_engine_run(session, request.run_id, **kwargs))
+            run = run_db(lambda session: compute_worker_run_commands.update_compute_worker_run(session, request.run_id, **kwargs))
             return _id(run.id)
         finally:
             reset_namespace(token)
@@ -1908,7 +1910,7 @@ class WorkerRuntimeServicer(worker_runtime_pb2_grpc.WorkerRuntimeServiceServicer
     ) -> worker_runtime_pb2.WorkerComputeWorkerRunStateResponse:
         token = set_namespace_context(request.namespace)
         try:
-            run = run_db(engine_run_service.get_engine_run, request.run_id)
+            run = run_db(compute_worker_run_service.get_compute_worker_run, request.run_id)
             if run is None:
                 return worker_runtime_pb2.WorkerComputeWorkerRunStateResponse(found=False)
             result_json = dict(run.result_json) if isinstance(run.result_json, dict) else {}
@@ -2177,14 +2179,14 @@ class WorkerRuntimeServicer(worker_runtime_pb2_grpc.WorkerRuntimeServiceServicer
         self, request: worker_runtime_pb2.WorkerPersistComputeWorkerSnapshotRequest, metadata: RpcMetadata
     ) -> worker_runtime_pb2.CountResponse:
         conversion_started = time.perf_counter()
-        statuses = [_engine_status_info_payload(status) for status in request.engine_status]
+        statuses = [_compute_worker_status_info_payload(status) for status in request.engine_status]
         phase_timings: dict[str, float] = {
             'protobuf_to_status_conversion_ms': (time.perf_counter() - conversion_started) * 1000,
         }
 
         def _write(session: Any) -> None:
             persistence_started = time.perf_counter()
-            engine_instance_service.persist_compute_worker_snapshot(
+            compute_worker_instance_service.persist_compute_worker_snapshot(
                 session,
                 worker_id=request.worker_id,
                 namespace=request.namespace,
@@ -2194,7 +2196,7 @@ class WorkerRuntimeServicer(worker_runtime_pb2_grpc.WorkerRuntimeServiceServicer
             phase_timings['settings_db_persistence_ms'] = (time.perf_counter() - persistence_started) * 1000
 
         run_settings_db(_write)
-        if any(value > _SLOW_ENGINE_SNAPSHOT_PHASE_SECONDS * 1000 for value in phase_timings.values()):
+        if any(value > _SLOW_COMPUTE_WORKER_SNAPSHOT_PHASE_SECONDS * 1000 for value in phase_timings.values()):
             logger.warning(
                 'Slow PersistComputeWorkerSnapshot phases worker_id=%s namespace=%s status_count=%d '
                 'protobuf_to_status_conversion_ms=%.1f settings_db_persistence_ms=%.1f '

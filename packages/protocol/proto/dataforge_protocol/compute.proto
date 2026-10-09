@@ -47,6 +47,7 @@ message ComputeWorkerResourceConfig {
   optional int32 streaming_chunk_size = 3 [(buf.validate.field).int32.gte = 0];
 }
 
+// Keep the engine_identity field name for protobuf JSON compatibility; its value is a compute worker identity.
 message StepPreviewCommand {
   optional string analysis_id = 1 [(buf.validate.field).string.min_len = 1];
   optional ComputeWorkerIdentity engine_identity = 2;
@@ -111,6 +112,7 @@ message ExportCommand {
   optional string result_id = 9 [(buf.validate.field).string.min_len = 1];
 }
 
+// Keep the engine_identity field name for protobuf JSON compatibility.
 message ComputeWorkerLifecycleCommand {
   ComputeWorkerIdentity engine_identity = 1 [(buf.validate.field).required = true];
   optional ComputeWorkerResourceConfig resource_config = 2;
@@ -128,6 +130,7 @@ message ComputeCommand {
     StepRowCountCommand row_count = 3;
     DownloadCommand download = 4;
     ExportCommand export = 5;
+    // These field names remain stable for queued and serialized protobuf commands.
     ComputeWorkerLifecycleCommand spawn_engine = 6;
     ComputeWorkerLifecycleCommand configure_engine = 7;
     ComputeWorkerLifecycleCommand shutdown_engine = 8;
@@ -204,6 +207,7 @@ message ComputeWorkerStatusResult {
   optional string datasource_id = 12 [(buf.validate.field).string.min_len = 1];
   optional string build_id = 13 [(buf.validate.field).string.min_len = 1];
   optional string current_build_id = 14 [(buf.validate.field).string.min_len = 1];
+  // Keep the protobuf field name; the REST and UI name is compute_worker_run_id.
   optional string current_engine_run_id = 15 [(buf.validate.field).string.min_len = 1];
   optional string container_id = 16 [(buf.validate.field).string.min_len = 1];
   optional string image_digest = 17 [(buf.validate.field).string.min_len = 1];
@@ -247,6 +251,7 @@ message ComputeResponse {
     StepRowCountResult row_count = 3;
     ExportResult export = 4;
     DatasourceResult datasource = 6;
+    // Keep the oneof field name for protobuf JSON compatibility.
     ComputeWorkerStatusResult engine_status = 7;
     ComputeAckResult ack = 8;
     ComputeErrorResult error = 9;
@@ -299,6 +304,7 @@ message BuildEventContext {
   optional string tab_name = 8;
   optional string current_output_id = 9;
   optional string current_output_name = 10;
+  // Keep the event wire field; the HTTP stream serializes it as computeWorkerRunId.
   optional string engine_run_id = 11;
 }
 
@@ -543,6 +549,7 @@ message BuildRunSummary {
   optional string current_tab_name = 18;
   optional string current_output_id = 19;
   optional string current_output_name = 20;
+  // Keep the protobuf field name; the REST and UI name is current_compute_worker_run_id.
   optional string current_engine_run_id = 21;
   int32 total_tabs = 22 [(buf.validate.field).int32.gte = 0];
   optional google.protobuf.Timestamp cancelled_at = 23;

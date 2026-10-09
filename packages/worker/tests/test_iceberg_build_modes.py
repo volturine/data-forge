@@ -174,8 +174,8 @@ class TestBuildModeWiring:
 
     def _make_internal_client_mock(self, output_ds_id: str) -> MagicMock:
         client = MagicMock()
-        client.create_engine_run.return_value = "run-1"
-        client.engine_run_state.return_value = {"result_json": {}}
+        client.create_compute_worker_run.return_value = "run-1"
+        client.compute_worker_run_state.return_value = {"result_json": {}}
         client.list_healthchecks.return_value = []
         client.analysis_name.return_value = "Test Analysis"
         client.telegram_targets.return_value = []

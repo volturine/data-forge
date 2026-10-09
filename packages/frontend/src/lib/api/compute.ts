@@ -104,14 +104,14 @@ export function previewStepData(
 	);
 }
 
-// Engine lifecycle functions
+// Compute worker lifecycle functions
 
-export function spawnAnalysisEngine(
+export function spawnAnalysisComputeWorker(
 	analysisId: string,
 	resourceConfig?: ComputeWorkerResourceConfig
 ): ResultAsync<ComputeWorkerStatusResponse, ApiError> {
 	const body = resourceConfig ? JSON.stringify({ resource_config: resourceConfig }) : undefined;
-	const endpoint = `/v1/compute/engine/spawn/analysis/${analysisId}`;
+	const endpoint = `/v1/compute/compute-worker/spawn/analysis/${analysisId}`;
 	return shareInFlight(spawnInFlight, requestKey(endpoint, body), () =>
 		computeActivityStore.track(
 			apiRequest<ComputeWorkerStatusResponse>(endpoint, {
@@ -122,8 +122,8 @@ export function spawnAnalysisEngine(
 	);
 }
 
-export function shutdownAnalysisEngine(analysisId: string): ResultAsync<void, ApiError> {
-	const endpoint = `/v1/compute/engine/analysis/${analysisId}`;
+export function shutdownAnalysisComputeWorker(analysisId: string): ResultAsync<void, ApiError> {
+	const endpoint = `/v1/compute/compute-worker/analysis/${analysisId}`;
 	return shareInFlight(shutdownInFlight, requestKey(endpoint), () =>
 		computeActivityStore.track(
 			apiRequest<void>(endpoint, {
@@ -133,7 +133,7 @@ export function shutdownAnalysisEngine(analysisId: string): ResultAsync<void, Ap
 	);
 }
 
-export function shutdownEngineByIdentity(
+export function shutdownComputeWorkerByIdentity(
 	scope: ComputeWorkerScope,
 	resourceId: string
 ): ResultAsync<void, ApiError> {
@@ -143,7 +143,7 @@ export function shutdownEngineByIdentity(
 			: scope === 'build'
 				? 'build'
 				: 'analysis';
-	const endpoint = `/v1/compute/engine/${segment}/${resourceId}`;
+	const endpoint = `/v1/compute/compute-worker/${segment}/${resourceId}`;
 	return shareInFlight(shutdownInFlight, requestKey(endpoint), () =>
 		computeActivityStore.track(
 			apiRequest<void>(endpoint, {
@@ -153,7 +153,7 @@ export function shutdownEngineByIdentity(
 	);
 }
 
-export function getEngineDefaults(
+export function getComputeWorkerDefaults(
 	options?: ComputeRequestOptions
 ): ResultAsync<ComputeWorkerDefaults, ApiError> {
 	return apiRequest<ComputeWorkerDefaults>(
@@ -276,7 +276,7 @@ export function throwIfAborted(signal: AbortSignal): void {
 
 export interface CancelBuildResponse {
 	build_id: string;
-	engine_run_id: string | null;
+	compute_worker_run_id: string | null;
 	status: 'cancelled';
 	duration_ms: number | null;
 	cancelled_at: string;
@@ -288,33 +288,36 @@ export interface BuildRequest {
 	tab_id: string;
 }
 
-export type EnginesSnapshotMessage = {
+export type ComputeWorkersSnapshotMessage = {
 	type: 'snapshot';
-	engines: ComputeWorkerStatusResponse[];
+	compute_workers: ComputeWorkerStatusResponse[];
 	total: number;
 };
-export type EnginesErrorMessage = { type: 'error'; error: string; status_code?: number };
-export type EnginesStreamMessage = EnginesSnapshotMessage | EnginesErrorMessage;
+export type ComputeWorkersErrorMessage = { type: 'error'; error: string; status_code?: number };
+export type ComputeWorkersStreamMessage =
+	ComputeWorkersSnapshotMessage | ComputeWorkersErrorMessage;
 
-export interface EnginesStreamCallbacks {
-	onSnapshot: (engines: ComputeWorkerStatusResponse[]) => void;
+export interface ComputeWorkersStreamCallbacks {
+	onSnapshot: (computeWorkers: ComputeWorkerStatusResponse[]) => void;
 	onError: (error: string) => void;
 	onClose: () => void;
 }
 
-function parseEnginesStreamMessage(data: string): EnginesStreamMessage | null {
+function parseComputeWorkersStreamMessage(data: string): ComputeWorkersStreamMessage | null {
 	try {
-		return JSON.parse(data) as EnginesStreamMessage;
+		return JSON.parse(data) as ComputeWorkersStreamMessage;
 	} catch {
 		return null;
 	}
 }
 
-export function connectEnginesStream(callbacks: EnginesStreamCallbacks): StreamHandle {
-	return createStream<ComputeWorkerStatusResponse[]>('/v1/compute/ws/engines', {
-		parse: parseEnginesStreamMessage,
+export function connectComputeWorkersStream(
+	callbacks: ComputeWorkersStreamCallbacks
+): StreamHandle {
+	return createStream<ComputeWorkerStatusResponse[]>('/v1/compute/ws/compute-workers', {
+		parse: parseComputeWorkersStreamMessage,
 		isSnapshot: (msg) => msg.type === 'snapshot',
-		extractSnapshot: (msg) => (msg as EnginesSnapshotMessage).engines,
+		extractSnapshot: (msg) => (msg as ComputeWorkersSnapshotMessage).compute_workers,
 		callbacks
 	});
 }

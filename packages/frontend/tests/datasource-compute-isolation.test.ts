@@ -8,17 +8,17 @@ const workbook = Buffer.from(
 );
 const namespace = process.env.DEFAULT_NAMESPACE ?? 'default';
 
-type EngineStatus = {
+type ComputeWorkerStatus = {
 	resource_id: string;
 	container_id: string;
 	scope: string;
 	reuse_policy: string;
 };
 
-async function engineStatus(page: Page, id: string): Promise<EngineStatus> {
+async function engineStatus(page: Page, id: string): Promise<ComputeWorkerStatus> {
 	const response = await page
 		.context()
-		.request.post(`/api/v1/compute/engine/spawn/datasource-preview/${id}`, {
+		.request.post(`/api/v1/compute/compute-worker/spawn/datasource-preview/${id}`, {
 			headers: { 'X-Namespace': namespace }
 		});
 	expect(response.ok(), await response.text()).toBeTruthy();

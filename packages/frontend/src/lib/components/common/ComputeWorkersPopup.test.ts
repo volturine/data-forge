@@ -4,18 +4,18 @@ import { tick } from 'svelte';
 import { flushSync } from 'svelte';
 import type { ComputeWorkerStatusResponse } from '$lib/types/compute';
 
-const mockConnectEnginesStream = vi.fn();
-const mockShutdownEngine = vi.fn();
+const mockConnectComputeWorkersStream = vi.fn();
+const mockShutdownComputeWorker = vi.fn();
 
 vi.mock('$lib/api/compute', () => ({
-	connectEnginesStream: (...args: unknown[]) => mockConnectEnginesStream(...args),
-	shutdownEngineByIdentity: (...args: unknown[]) => mockShutdownEngine(...args)
+	connectComputeWorkersStream: (...args: unknown[]) => mockConnectComputeWorkersStream(...args),
+	shutdownComputeWorkerByIdentity: (...args: unknown[]) => mockShutdownComputeWorker(...args)
 }));
 
-const { enginesStore } = await import('$lib/stores/engines.svelte');
-const { default: EnginesPopup } = await import('./EnginesPopup.svelte');
+const { computeWorkersStore } = await import('$lib/stores/compute-workers.svelte');
+const { default: ComputeWorkersPopup } = await import('./ComputeWorkersPopup.svelte');
 
-function makeEngine(
+function makeComputeWorker(
 	overrides: Partial<ComputeWorkerStatusResponse> = {}
 ): ComputeWorkerStatusResponse {
 	return {
@@ -41,23 +41,23 @@ function makeEngine(
 		datasource_id: null,
 		build_id: null,
 		current_build_id: null,
-		current_engine_run_id: null,
+		current_compute_worker_run_id: null,
 		...overrides
 	};
 }
 
 function mockStreamConnection() {
 	const callbacks: {
-		onSnapshot: (engines: ComputeWorkerStatusResponse[]) => void;
+		onSnapshot: (computeWorkers: ComputeWorkerStatusResponse[]) => void;
 		onError: (error: string) => void;
 		onClose: () => void;
 	}[] = [];
 	const close = vi.fn();
 
-	mockConnectEnginesStream.mockImplementation((nextCallbacks) => {
+	mockConnectComputeWorkersStream.mockImplementation((nextCallbacks) => {
 		callbacks.push(
 			nextCallbacks as {
-				onSnapshot: (engines: ComputeWorkerStatusResponse[]) => void;
+				onSnapshot: (computeWorkers: ComputeWorkerStatusResponse[]) => void;
 				onError: (error: string) => void;
 				onClose: () => void;
 			}
@@ -67,8 +67,8 @@ function mockStreamConnection() {
 
 	return {
 		close,
-		emitSnapshot(engines: ComputeWorkerStatusResponse[]) {
-			callbacks.at(-1)?.onSnapshot(engines);
+		emitSnapshot(computeWorkers: ComputeWorkerStatusResponse[]) {
+			callbacks.at(-1)?.onSnapshot(computeWorkers);
 		},
 		emitError(message: string) {
 			callbacks.at(-1)?.onError(message);
@@ -79,30 +79,30 @@ function mockStreamConnection() {
 	};
 }
 
-describe('EnginesPopup', () => {
+describe('ComputeWorkersPopup', () => {
 	beforeEach(() => {
 		vi.clearAllMocks();
-		enginesStore.reset();
+		computeWorkersStore.reset();
 	});
 
 	afterEach(() => {
-		enginesStore.reset();
+		computeWorkersStore.reset();
 	});
 
 	test('opening the popup reflects store state without creating its own stream', async () => {
-		render(EnginesPopup, { props: { open: true } });
+		render(ComputeWorkersPopup, { props: { open: true } });
 		flushSync();
-		expect(mockConnectEnginesStream).not.toHaveBeenCalled();
-		enginesStore.engines = [makeEngine()];
-		enginesStore.status = 'connected';
+		expect(mockConnectComputeWorkersStream).not.toHaveBeenCalled();
+		computeWorkersStore.computeWorkers = [makeComputeWorker()];
+		computeWorkersStore.status = 'connected';
 		await tick();
-		expect(enginesStore.engines).toHaveLength(1);
-		expect(enginesStore.status).toBe('connected');
+		expect(computeWorkersStore.computeWorkers).toHaveLength(1);
+		expect(computeWorkersStore.status).toBe('connected');
 	});
 
 	test('closing the popup stops the stream', async () => {
 		const stream = mockStreamConnection();
-		const view = render(EnginesPopup, { props: { open: true } });
+		const view = render(ComputeWorkersPopup, { props: { open: true } });
 		flushSync();
 
 		await view.rerender({ open: false });
@@ -111,17 +111,17 @@ describe('EnginesPopup', () => {
 		expect(stream.close).not.toHaveBeenCalled();
 		stream.emitSnapshot([]);
 		stream.emitClose();
-		expect(enginesStore.status).toBe('disconnected');
-		expect(enginesStore.engines).toEqual([]);
+		expect(computeWorkersStore.status).toBe('disconnected');
+		expect(computeWorkersStore.computeWorkers).toEqual([]);
 	});
 
 	test('shows Idle for warm engines and Job running when current_job_id is set', async () => {
-		const { getByText } = render(EnginesPopup, { props: { open: true } });
-		enginesStore.engines = [
-			makeEngine({ resource_id: 'idle-1', current_job_id: null }),
-			makeEngine({ resource_id: 'busy-1', current_job_id: 'job-9' })
+		const { getByText } = render(ComputeWorkersPopup, { props: { open: true } });
+		computeWorkersStore.computeWorkers = [
+			makeComputeWorker({ resource_id: 'idle-1', current_job_id: null }),
+			makeComputeWorker({ resource_id: 'busy-1', current_job_id: 'job-9' })
 		];
-		enginesStore.status = 'connected';
+		computeWorkersStore.status = 'connected';
 		await tick();
 		flushSync();
 		expect(getByText('Idle')).toBeTruthy();

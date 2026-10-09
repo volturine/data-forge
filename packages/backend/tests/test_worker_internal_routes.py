@@ -14,7 +14,7 @@ from google.protobuf import json_format, struct_pb2, timestamp_pb2
 from sqlmodel import Session, select
 
 import backend_grpc.server as backend_grpc_server
-from backend_core import build_jobs_service, build_runs_service, compute_requests_service, engine_instances_service, engine_runs_service
+from backend_core import build_jobs_service, build_runs_service, compute_requests_service, compute_worker_instances_service, compute_worker_runs_service
 from backend_core.claiming import CLAIM_DELIVERY_LEASE_SECONDS
 from backend_core.config import settings
 from backend_core.database import RuntimeCoordinatorFenced, database_pool_snapshot, run_settings_db
@@ -22,9 +22,9 @@ from backend_core.domain.build_jobs.models import BuildJobStatus
 from backend_core.domain.build_runs.models import BuildRunStatus
 from backend_core.domain.compute import schemas as compute_schemas
 from backend_core.domain.compute_requests.models import command_from_payload, response_envelope
+from backend_core.domain.compute_worker_instances.models import ComputeWorkerInstanceStatus
+from backend_core.domain.compute_worker_runs.schemas import ComputeWorkerRunKind, ComputeWorkerRunStatus
 from backend_core.domain.datasource.source_types import DataSourceType
-from backend_core.domain.engine_instances.models import EngineInstanceStatus
-from backend_core.domain.engine_runs.schemas import EngineRunKind, EngineRunStatus
 from backend_core.namespace import get_namespace
 from backend_core.namespace_credentials_service import NamespaceCredentialError
 from backend_core.persistence.datasource.models import DataSource
@@ -1222,7 +1222,7 @@ async def test_internal_worker_grpc_claims_completes_and_fails_compute_requests(
         namespace='default',
         kind=enums_pb2.COMPUTE_REQUEST_KIND_SHUTDOWN_ENGINE,
         request_json={
-            'engine_identity': {
+            'compute_worker_identity': {
                 'scope': 'analysis_interactive',
                 'reuse_policy': 'shared',
                 'resource_id': 'analysis-1',
@@ -1242,11 +1242,11 @@ async def test_internal_worker_grpc_claims_completes_and_fails_compute_requests(
     assert response.request.namespace == 'default'
     assert response.request.kind == enums_pb2.COMPUTE_REQUEST_KIND_SHUTDOWN_ENGINE
     assert response.request.command.command.WhichOneof('command') == 'shutdown_engine'
-    engine_identity = response.request.command.command.shutdown_engine.engine_identity
-    assert engine_identity.scope == enums_pb2.COMPUTE_WORKER_SCOPE_ANALYSIS_INTERACTIVE
-    assert engine_identity.reuse_policy == enums_pb2.COMPUTE_WORKER_REUSE_POLICY_SHARED
-    assert engine_identity.analysis_id == 'analysis-1'
-    assert engine_identity.resource_id == 'analysis-1'
+    compute_worker_identity = response.request.command.command.shutdown_engine.engine_identity
+    assert compute_worker_identity.scope == enums_pb2.COMPUTE_WORKER_SCOPE_ANALYSIS_INTERACTIVE
+    assert compute_worker_identity.reuse_policy == enums_pb2.COMPUTE_WORKER_REUSE_POLICY_SHARED
+    assert compute_worker_identity.analysis_id == 'analysis-1'
+    assert compute_worker_identity.resource_id == 'analysis-1'
     test_db_session.refresh(request)
     assert request.status == enums_pb2.COMPUTE_REQUEST_STATUS_RUNNING
     assert request.lease_owner == worker_id
@@ -1329,7 +1329,7 @@ async def test_internal_worker_grpc_claims_completes_and_fails_compute_requests(
 
 
 @pytest.mark.asyncio
-async def test_preview_completion_finalizes_engine_run_in_the_same_rpc(test_db_session: Session, monkeypatch: pytest.MonkeyPatch) -> None:
+async def test_preview_completion_finalizes_compute_worker_run_in_the_same_rpc(test_db_session: Session, monkeypatch: pytest.MonkeyPatch) -> None:
     context = _context(monkeypatch)
     worker_id = f'preview-worker:{uuid.uuid4()}'
     request = _create_request(
@@ -1338,13 +1338,13 @@ async def test_preview_completion_finalizes_engine_run_in_the_same_rpc(test_db_s
         kind=enums_pb2.COMPUTE_REQUEST_KIND_PREVIEW,
         request_json={**_schema_payload(), 'row_limit': 100, 'page': 1},
     )
-    engine_run = engine_runs_service.create_engine_run(
+    compute_worker_run = compute_worker_runs_service.create_compute_worker_run(
         test_db_session,
-        engine_runs_service.create_engine_run_payload(
+        compute_worker_runs_service.create_compute_worker_run_payload(
             analysis_id='analysis-2',
             datasource_id='datasource-1',
-            kind=EngineRunKind.PREVIEW,
-            status=EngineRunStatus.RUNNING,
+            kind=ComputeWorkerRunKind.PREVIEW,
+            status=ComputeWorkerRunStatus.RUNNING,
             request_json={},
             result_json={},
         ),
@@ -1376,7 +1376,7 @@ async def test_preview_completion_finalizes_engine_run_in_the_same_rpc(test_db_s
                 payload={'step_id': 'source', 'columns': [], 'column_types': {}, 'data': [], 'total_rows': 0, 'page': 1, 'page_size': 100},
             ),
             engine_run_finalization=worker_runtime_pb2.WorkerComputeWorkerRunFinalization(
-                run_id=engine_run.id,
+                run_id=compute_worker_run.id,
                 update=update,
             ),
         ),
@@ -1385,11 +1385,11 @@ async def test_preview_completion_finalizes_engine_run_in_the_same_rpc(test_db_s
 
     test_db_session.expire_all()
     stored_request = test_db_session.get(type(request), request.id)
-    stored_run = engine_runs_service.get_engine_run(test_db_session, engine_run.id)
+    stored_run = compute_worker_runs_service.get_compute_worker_run(test_db_session, compute_worker_run.id)
     assert stored_request is not None
     assert stored_request.status == enums_pb2.COMPUTE_REQUEST_STATUS_COMPLETED
     assert stored_run is not None
-    assert stored_run.status == EngineRunStatus.SUCCESS
+    assert stored_run.status == ComputeWorkerRunStatus.SUCCESS
     assert stored_run.completed_at is not None
     assert stored_run.result_json == {'results': [{'status': 'success'}]}
 
@@ -1403,7 +1403,7 @@ async def test_compute_request_claim_does_not_reclaim_the_calling_worker(test_db
         namespace='default',
         kind=enums_pb2.COMPUTE_REQUEST_KIND_SHUTDOWN_ENGINE,
         request_json={
-            'engine_identity': {
+            'compute_worker_identity': {
                 'scope': 'analysis_interactive',
                 'reuse_policy': 'shared',
                 'resource_id': 'self-reclaim-regression',
@@ -1691,8 +1691,8 @@ async def test_internal_worker_grpc_uses_typed_schema_info_for_datasource_metada
             (
                 'payload_conversion_ms',
                 'db_unit_ms',
-                'engine_run_payload_service_ms',
-                'engine_run_persistence_service_ms',
+                'compute_worker_run_payload_service_ms',
+                'compute_worker_run_persistence_service_ms',
                 'response_transformation_ms',
                 'grpc_response_serialization_ms',
             ),
@@ -1711,7 +1711,7 @@ async def test_internal_worker_grpc_uses_typed_schema_info_for_datasource_metada
     ],
 )
 @pytest.mark.asyncio
-async def test_slow_metadata_and_engine_run_rpcs_log_ordered_phase_timings(
+async def test_slow_metadata_and_compute_worker_run_rpcs_log_ordered_phase_timings(
     method_name: str,
     expected_phases: tuple[str, ...],
     monkeypatch: pytest.MonkeyPatch,
@@ -1752,10 +1752,10 @@ async def test_slow_metadata_and_engine_run_rpcs_log_ordered_phase_timings(
     servicer = WorkerRuntimeServicer()
     request: Any
     if method_name == 'CreateComputeWorkerRun':
-        monkeypatch.setattr(backend_grpc_server.engine_run_service, 'create_engine_run_payload', lambda **fields: fields)
+        monkeypatch.setattr(backend_grpc_server.compute_worker_run_service, 'create_compute_worker_run_payload', lambda **fields: fields)
         monkeypatch.setattr(
-            backend_grpc_server.engine_run_commands,
-            'create_engine_run',
+            backend_grpc_server.compute_worker_run_commands,
+            'create_compute_worker_run',
             lambda _session, _payload: SimpleNamespace(id='phase-test-run'),
         )
         monkeypatch.setattr(backend_grpc_server, 'run_db', lambda function, *args, **kwargs: function(object(), *args, **kwargs))
@@ -2101,7 +2101,7 @@ async def test_internal_worker_grpc_returns_datasource_telegram_targets(test_db_
 
 
 @pytest.mark.asyncio
-async def test_internal_worker_grpc_creates_engine_run_with_typed_execution_entries(test_db_session: Session, monkeypatch: pytest.MonkeyPatch) -> None:
+async def test_internal_worker_grpc_creates_compute_worker_run_with_typed_execution_entries(test_db_session: Session, monkeypatch: pytest.MonkeyPatch) -> None:
     context = _context(monkeypatch)
     request = worker_runtime_pb2.WorkerCreateComputeWorkerRunRequest(
         namespace='default',
@@ -2132,7 +2132,7 @@ async def test_internal_worker_grpc_creates_engine_run_with_typed_execution_entr
 
     assert retry.id == response.id == request.idempotency_key
 
-    run = engine_runs_service.get_engine_run(test_db_session, response.id)
+    run = compute_worker_runs_service.get_compute_worker_run(test_db_session, response.id)
     assert run is not None
     assert run.step_timings == {'filter': 12.5}
     assert run.execution_entries[0].category == 'step'
@@ -2140,7 +2140,7 @@ async def test_internal_worker_grpc_creates_engine_run_with_typed_execution_entr
 
 
 @pytest.mark.asyncio
-async def test_internal_worker_grpc_updates_engine_run_with_typed_fields(test_db_session: Session, monkeypatch: pytest.MonkeyPatch) -> None:
+async def test_internal_worker_grpc_updates_compute_worker_run_with_typed_fields(test_db_session: Session, monkeypatch: pytest.MonkeyPatch) -> None:
     context = _context(monkeypatch)
     servicer = WorkerRuntimeServicer()
     created = await servicer.CreateComputeWorkerRun(
@@ -2188,7 +2188,7 @@ async def test_internal_worker_grpc_updates_engine_run_with_typed_fields(test_db
     )
 
     assert response.id == created.id
-    run = engine_runs_service.get_engine_run(test_db_session, created.id)
+    run = compute_worker_runs_service.get_compute_worker_run(test_db_session, created.id)
     assert run is not None
     assert run.status == 'success'
     assert run.result_json is not None
@@ -2202,7 +2202,7 @@ async def test_internal_worker_grpc_updates_engine_run_with_typed_fields(test_db
 @pytest.mark.asyncio
 async def test_internal_worker_grpc_persists_typed_engine_snapshot(monkeypatch: pytest.MonkeyPatch, caplog: pytest.LogCaptureFixture) -> None:
     context = _context(monkeypatch)
-    monkeypatch.setattr(backend_grpc_server, '_SLOW_ENGINE_SNAPSHOT_PHASE_SECONDS', 0)
+    monkeypatch.setattr(backend_grpc_server, '_SLOW_COMPUTE_WORKER_SNAPSHOT_PHASE_SECONDS', 0)
     queued_notifications: list[tuple[Any, dict[str, object], bool]] = []
 
     def queue_notification(session: Any, payload: dict[str, object]) -> None:
@@ -2211,8 +2211,8 @@ async def test_internal_worker_grpc_persists_typed_engine_snapshot(monkeypatch: 
     def reject_direct_notification(_namespace: str) -> None:
         pytest.fail('engine snapshot must not use the direct notification connection')
 
-    monkeypatch.setattr(engine_instances_service.runtime_ipc, 'notify_runtime_payload_on_commit', queue_notification)
-    monkeypatch.setattr(engine_instances_service.runtime_ipc, 'notify_api_engine', reject_direct_notification)
+    monkeypatch.setattr(compute_worker_instances_service.runtime_ipc, 'notify_runtime_payload_on_commit', queue_notification)
+    monkeypatch.setattr(compute_worker_instances_service.runtime_ipc, 'notify_api_engine', reject_direct_notification)
 
     response = await WorkerRuntimeServicer().PersistComputeWorkerSnapshot(
         worker_runtime_pb2.WorkerPersistComputeWorkerSnapshotRequest(
@@ -2264,7 +2264,7 @@ async def test_internal_worker_grpc_persists_typed_engine_snapshot(monkeypatch: 
 
     instances = [
         instance
-        for instance in run_settings_db(engine_instances_service.list_engine_instances, namespace='default')
+        for instance in run_settings_db(compute_worker_instances_service.list_compute_worker_instances, namespace='default')
         if instance.worker_id == 'worker-typed-snapshot'
     ]
     assert len(instances) == 1
@@ -2272,7 +2272,7 @@ async def test_internal_worker_grpc_persists_typed_engine_snapshot(monkeypatch: 
     assert instances[0].effective_resources_json == {'max_threads': 2, 'max_memory_mb': 1024}
     assert instances[0].container_id == 'container-1234'
     assert instances[0].image_digest == 'sha256:abc'
-    assert instances[0].status == EngineInstanceStatus.RUNNING
+    assert instances[0].status == ComputeWorkerInstanceStatus.RUNNING
 
 
 @pytest.mark.asyncio
@@ -2435,7 +2435,7 @@ async def test_internal_worker_grpc_starts_build_run_and_returns_payload(test_db
         starter_json={'triggered_by': 'test'},
         resource_config_json={'max_threads': 4, 'max_memory_mb': 1024, 'streaming_chunk_size': 500},
         status=BuildRunStatus.QUEUED,
-        current_kind=EngineRunKind.BUILD.value,
+        current_kind=ComputeWorkerRunKind.BUILD.value,
         created_at=datetime.now(UTC),
     )
     build_jobs_service.create_job(test_db_session, build_id=build_id, namespace='default')
@@ -2470,7 +2470,7 @@ async def test_internal_worker_grpc_starts_build_run_and_returns_payload(test_db
     assert run is not None
     assert run.status == BuildRunStatus.RUNNING
     assert run.execution_generation == job.lease_generation
-    assert run.current_kind == EngineRunKind.BUILD.value
+    assert run.current_kind == ComputeWorkerRunKind.BUILD.value
 
 
 @pytest.mark.asyncio

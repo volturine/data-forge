@@ -3,20 +3,20 @@ from datetime import UTC, datetime, timedelta
 
 import pytest
 
-from backend_core import build_runs_service, engine_runs_service as engine_run_service
+from backend_core import build_runs_service, compute_worker_runs_service as compute_worker_run_service
 from backend_core.domain.build_runs.models import BuildRunStatus
-from backend_core.domain.engine_runs.schemas import EngineRunKind, EngineRunStatus
+from backend_core.domain.compute_worker_runs.schemas import ComputeWorkerRunKind, ComputeWorkerRunStatus
 from backend_core.namespace import reset_namespace, set_namespace_context
 from backend_core.persistence.compute_worker_runs.models import ComputeWorkerRun
 
 
 def _create_payload(
-    kind: EngineRunKind | str,
-    status: EngineRunStatus | str,
+    kind: ComputeWorkerRunKind | str,
+    status: ComputeWorkerRunStatus | str,
     analysis_id: str | None = None,
     datasource_id: str | None = None,
 ):
-    return engine_run_service.create_engine_run_payload(
+    return compute_worker_run_service.create_compute_worker_run_payload(
         analysis_id=analysis_id,
         datasource_id=datasource_id or str(uuid.uuid4()),
         kind=kind,
@@ -27,59 +27,59 @@ def _create_payload(
     )
 
 
-def test_create_engine_run_persists(test_db_session):
+def test_create_compute_worker_run_persists(test_db_session):
     payload = _create_payload(
-        EngineRunKind.PREVIEW,
-        EngineRunStatus.SUCCESS,
+        ComputeWorkerRunKind.PREVIEW,
+        ComputeWorkerRunStatus.SUCCESS,
         analysis_id='analysis-1',
         datasource_id='ds-1',
     )
 
-    result = engine_run_service.create_engine_run(test_db_session, payload)
+    result = compute_worker_run_service.create_compute_worker_run(test_db_session, payload)
     run = test_db_session.get(ComputeWorkerRun, result.id)
 
     assert run is not None
-    assert run.kind == EngineRunKind.PREVIEW
-    assert run.status == EngineRunStatus.SUCCESS
+    assert run.kind == ComputeWorkerRunKind.PREVIEW
+    assert run.status == ComputeWorkerRunStatus.SUCCESS
     assert run.analysis_id == 'analysis-1'
 
 
-def test_create_engine_run_is_idempotent_for_the_same_request(test_db_session):
-    payload = engine_run_service.create_engine_run_payload(
+def test_create_compute_worker_run_is_idempotent_for_the_same_request(test_db_session):
+    payload = compute_worker_run_service.create_compute_worker_run_payload(
         analysis_id='analysis-idempotent',
         datasource_id='ds-idempotent',
-        kind=EngineRunKind.PREVIEW,
-        status=EngineRunStatus.RUNNING,
+        kind=ComputeWorkerRunKind.PREVIEW,
+        status=ComputeWorkerRunStatus.RUNNING,
         request_json={'target_step_id': 'source'},
         result_json={'row_count': 0},
         created_at=datetime.now(UTC),
         idempotency_key='preview-request-idempotent',
     )
 
-    first = engine_run_service.create_engine_run(test_db_session, payload)
-    retry = engine_run_service.create_engine_run(test_db_session, payload)
+    first = compute_worker_run_service.create_compute_worker_run(test_db_session, payload)
+    retry = compute_worker_run_service.create_compute_worker_run(test_db_session, payload)
 
     assert first.id == retry.id == payload.id
     assert test_db_session.get(ComputeWorkerRun, payload.id) is not None
 
-    conflicting = engine_run_service.create_engine_run_payload(
+    conflicting = compute_worker_run_service.create_compute_worker_run_payload(
         analysis_id='analysis-idempotent',
         datasource_id='ds-idempotent',
-        kind=EngineRunKind.PREVIEW,
-        status=EngineRunStatus.RUNNING,
+        kind=ComputeWorkerRunKind.PREVIEW,
+        status=ComputeWorkerRunStatus.RUNNING,
         request_json={'target_step_id': 'different'},
         idempotency_key='preview-request-idempotent',
     )
     with pytest.raises(ValueError, match='reused for a different request'):
-        engine_run_service.create_engine_run(test_db_session, conflicting)
+        compute_worker_run_service.create_compute_worker_run(test_db_session, conflicting)
 
 
-def test_create_engine_run_persists_execution_entries(test_db_session):
-    payload = engine_run_service.create_engine_run_payload(
+def test_create_compute_worker_run_persists_execution_entries(test_db_session):
+    payload = compute_worker_run_service.create_compute_worker_run_payload(
         analysis_id='analysis-1',
         datasource_id='ds-1',
-        kind=EngineRunKind.PREVIEW,
-        status=EngineRunStatus.SUCCESS,
+        kind=ComputeWorkerRunKind.PREVIEW,
+        status=ComputeWorkerRunStatus.SUCCESS,
         request_json={'kind': 'preview'},
         result_json={'row_count': 1},
         execution_entries=[
@@ -98,7 +98,7 @@ def test_create_engine_run_persists_execution_entries(test_db_session):
         created_at=datetime.now(UTC),
     )
 
-    result = engine_run_service.create_engine_run(test_db_session, payload)
+    result = compute_worker_run_service.create_compute_worker_run(test_db_session, payload)
     run = test_db_session.get(ComputeWorkerRun, result.id)
 
     assert run is not None
@@ -107,135 +107,135 @@ def test_create_engine_run_persists_execution_entries(test_db_session):
     assert result.execution_entries[0].key == 'initial_read'
 
 
-def test_list_engine_runs_filters(test_db_session):
+def test_list_compute_worker_runs_filters(test_db_session):
     payload_a = _create_payload(
-        EngineRunKind.PREVIEW,
-        EngineRunStatus.SUCCESS,
+        ComputeWorkerRunKind.PREVIEW,
+        ComputeWorkerRunStatus.SUCCESS,
         analysis_id='analysis-a',
         datasource_id='ds-a',
     )
     payload_b = _create_payload(
-        EngineRunKind.DOWNLOAD,
-        EngineRunStatus.FAILED,
+        ComputeWorkerRunKind.DOWNLOAD,
+        ComputeWorkerRunStatus.FAILED,
         analysis_id='analysis-b',
         datasource_id='ds-b',
     )
     payload_c = _create_payload(
-        EngineRunKind.DOWNLOAD,
-        EngineRunStatus.CANCELLED,
+        ComputeWorkerRunKind.DOWNLOAD,
+        ComputeWorkerRunStatus.CANCELLED,
         analysis_id='analysis-c',
         datasource_id='ds-c',
     )
-    engine_run_service.create_engine_run(test_db_session, payload_a)
-    engine_run_service.create_engine_run(test_db_session, payload_b)
-    engine_run_service.create_engine_run(test_db_session, payload_c)
+    compute_worker_run_service.create_compute_worker_run(test_db_session, payload_a)
+    compute_worker_run_service.create_compute_worker_run(test_db_session, payload_b)
+    compute_worker_run_service.create_compute_worker_run(test_db_session, payload_c)
 
-    result = engine_run_service.list_engine_runs(test_db_session, analysis_id='analysis-a')
+    result = compute_worker_run_service.list_compute_worker_runs(test_db_session, analysis_id='analysis-a')
     assert len(result) == 1
     assert result[0].analysis_id == 'analysis-a'
 
-    result = engine_run_service.list_engine_runs(test_db_session, status=EngineRunStatus.FAILED)
+    result = compute_worker_run_service.list_compute_worker_runs(test_db_session, status=ComputeWorkerRunStatus.FAILED)
     assert len(result) == 1
-    assert result[0].status == EngineRunStatus.FAILED
+    assert result[0].status == ComputeWorkerRunStatus.FAILED
 
-    result = engine_run_service.list_engine_runs(test_db_session, status=EngineRunStatus.CANCELLED)
+    result = compute_worker_run_service.list_compute_worker_runs(test_db_session, status=ComputeWorkerRunStatus.CANCELLED)
     assert len(result) == 1
-    assert result[0].status == EngineRunStatus.CANCELLED
+    assert result[0].status == ComputeWorkerRunStatus.CANCELLED
 
 
-def test_list_engine_runs_pagination(test_db_session):
+def test_list_compute_worker_runs_pagination(test_db_session):
     for idx in range(3):
         payload = _create_payload(
-            EngineRunKind.PREVIEW,
-            EngineRunStatus.SUCCESS,
+            ComputeWorkerRunKind.PREVIEW,
+            ComputeWorkerRunStatus.SUCCESS,
             analysis_id=f'analysis-{idx}',
             datasource_id=f'ds-{idx}',
         )
-        engine_run_service.create_engine_run(test_db_session, payload)
+        compute_worker_run_service.create_compute_worker_run(test_db_session, payload)
 
-    first = engine_run_service.list_engine_runs(test_db_session, limit=2, offset=0)
-    second = engine_run_service.list_engine_runs(test_db_session, limit=2, offset=2)
+    first = compute_worker_run_service.list_compute_worker_runs(test_db_session, limit=2, offset=0)
+    second = compute_worker_run_service.list_compute_worker_runs(test_db_session, limit=2, offset=2)
 
     assert len(first) == 2
     assert len(second) == 1
 
 
-def test_list_engine_runs_excludes_build_kind(test_db_session):
-    engine_run_service.create_engine_run(
+def test_list_compute_worker_runs_excludes_build_kind(test_db_session):
+    compute_worker_run_service.create_compute_worker_run(
         test_db_session,
         _create_payload(
-            EngineRunKind.BUILD,
-            EngineRunStatus.SUCCESS,
+            ComputeWorkerRunKind.BUILD,
+            ComputeWorkerRunStatus.SUCCESS,
             analysis_id='analysis-build',
             datasource_id='ds-build',
         ),
     )
-    engine_run_service.create_engine_run(
+    compute_worker_run_service.create_compute_worker_run(
         test_db_session,
         _create_payload(
-            EngineRunKind.PREVIEW,
-            EngineRunStatus.SUCCESS,
+            ComputeWorkerRunKind.PREVIEW,
+            ComputeWorkerRunStatus.SUCCESS,
             analysis_id='analysis-preview',
             datasource_id='ds-preview',
         ),
     )
-    engine_run_service.create_engine_run(
+    compute_worker_run_service.create_compute_worker_run(
         test_db_session,
         _create_payload(
-            EngineRunKind.INGEST,
-            EngineRunStatus.SUCCESS,
+            ComputeWorkerRunKind.INGEST,
+            ComputeWorkerRunStatus.SUCCESS,
             analysis_id=None,
             datasource_id='ds-ingest',
         ),
     )
 
-    rows = engine_run_service.list_engine_runs(test_db_session)
+    rows = compute_worker_run_service.list_compute_worker_runs(test_db_session)
 
     assert len(rows) == 2
-    assert {row.kind for row in rows} == {EngineRunKind.PREVIEW, EngineRunKind.INGEST}
-    assert engine_run_service.list_engine_runs(test_db_session, kind=EngineRunKind.BUILD) == []
+    assert {row.kind for row in rows} == {ComputeWorkerRunKind.PREVIEW, ComputeWorkerRunKind.INGEST}
+    assert compute_worker_run_service.list_compute_worker_runs(test_db_session, kind=ComputeWorkerRunKind.BUILD) == []
 
 
-def test_update_engine_run_reuses_existing_row(test_db_session):
-    created = engine_run_service.create_engine_run(
+def test_update_compute_worker_run_reuses_existing_row(test_db_session):
+    created = compute_worker_run_service.create_compute_worker_run(
         test_db_session,
-        engine_run_service.create_engine_run_payload(
+        compute_worker_run_service.create_compute_worker_run_payload(
             analysis_id='analysis-1',
             datasource_id='ds-1',
-            kind=EngineRunKind.PREVIEW,
-            status=EngineRunStatus.RUNNING,
+            kind=ComputeWorkerRunKind.PREVIEW,
+            status=ComputeWorkerRunStatus.RUNNING,
             request_json={'kind': 'preview'},
             result_json={'current_output_name': 'output_salary_predictions'},
             created_at=datetime.now(UTC),
         ),
     )
 
-    updated = engine_run_service.update_engine_run(
+    updated = compute_worker_run_service.update_compute_worker_run(
         test_db_session,
         created.id,
-        status=EngineRunStatus.SUCCESS,
+        status=ComputeWorkerRunStatus.SUCCESS,
         progress=1.0,
         duration_ms=321,
         completed_at=datetime.now(UTC),
         result_json={'datasource_name': 'output_salary_predictions'},
     )
 
-    rows = engine_run_service.list_engine_runs(test_db_session, datasource_id='ds-1')
+    rows = compute_worker_run_service.list_compute_worker_runs(test_db_session, datasource_id='ds-1')
     assert len(rows) == 1
     assert updated.id == created.id
-    assert updated.status == EngineRunStatus.SUCCESS
+    assert updated.status == ComputeWorkerRunStatus.SUCCESS
     assert updated.result_json is not None
     assert updated.result_json['datasource_name'] == 'output_salary_predictions'
 
 
-def test_update_engine_run_replaces_result_json_when_merge_disabled(test_db_session):
-    created = engine_run_service.create_engine_run(
+def test_update_compute_worker_run_replaces_result_json_when_merge_disabled(test_db_session):
+    created = compute_worker_run_service.create_compute_worker_run(
         test_db_session,
-        engine_run_service.create_engine_run_payload(
+        compute_worker_run_service.create_compute_worker_run_payload(
             analysis_id='analysis-live-merge',
             datasource_id='output-ds-1',
-            kind=EngineRunKind.PREVIEW,
-            status=EngineRunStatus.RUNNING,
+            kind=ComputeWorkerRunKind.PREVIEW,
+            status=ComputeWorkerRunStatus.RUNNING,
             request_json={'kind': 'preview'},
             result_json={
                 'current_output_name': 'stale-output',
@@ -245,10 +245,10 @@ def test_update_engine_run_replaces_result_json_when_merge_disabled(test_db_sess
         ),
     )
 
-    updated = engine_run_service.update_engine_run(
+    updated = compute_worker_run_service.update_compute_worker_run(
         test_db_session,
         created.id,
-        status=EngineRunStatus.SUCCESS,
+        status=ComputeWorkerRunStatus.SUCCESS,
         progress=1.0,
         duration_ms=321,
         completed_at=datetime.now(UTC),
@@ -262,124 +262,124 @@ def test_update_engine_run_replaces_result_json_when_merge_disabled(test_db_sess
     assert 'logs' not in updated.result_json
 
 
-def test_update_engine_run_keeps_terminal_run_immutable(test_db_session):
-    created = engine_run_service.create_engine_run(
+def test_update_compute_worker_run_keeps_terminal_run_immutable(test_db_session):
+    created = compute_worker_run_service.create_compute_worker_run(
         test_db_session,
-        engine_run_service.create_engine_run_payload(
+        compute_worker_run_service.create_compute_worker_run_payload(
             analysis_id='analysis-terminal',
             datasource_id='ds-terminal',
-            kind=EngineRunKind.PREVIEW,
-            status=EngineRunStatus.SUCCESS,
+            kind=ComputeWorkerRunKind.PREVIEW,
+            status=ComputeWorkerRunStatus.SUCCESS,
             request_json={'kind': 'preview'},
             result_json={'row_count': 1},
             created_at=datetime.now(UTC),
         ),
     )
 
-    updated = engine_run_service.update_engine_run(
+    updated = compute_worker_run_service.update_compute_worker_run(
         test_db_session,
         created.id,
-        status=EngineRunStatus.FAILED,
+        status=ComputeWorkerRunStatus.FAILED,
         error_message='should be ignored',
         result_json={'row_count': 999},
         progress=0.25,
     )
 
-    assert updated.status == EngineRunStatus.SUCCESS
+    assert updated.status == ComputeWorkerRunStatus.SUCCESS
     stored = test_db_session.get(ComputeWorkerRun, created.id)
     assert stored is not None
-    assert stored.status == EngineRunStatus.SUCCESS
+    assert stored.status == ComputeWorkerRunStatus.SUCCESS
     assert stored.error_message is None
 
 
-def test_update_engine_run_reports_rejected_terminal_conflict(test_db_session):
-    created = engine_run_service.create_engine_run(
+def test_update_compute_worker_run_reports_rejected_terminal_conflict(test_db_session):
+    created = compute_worker_run_service.create_compute_worker_run(
         test_db_session,
-        engine_run_service.create_engine_run_payload(
+        compute_worker_run_service.create_compute_worker_run_payload(
             analysis_id='analysis-terminal-conflict',
             datasource_id='ds-terminal',
-            kind=EngineRunKind.PREVIEW,
-            status=EngineRunStatus.SUCCESS,
+            kind=ComputeWorkerRunKind.PREVIEW,
+            status=ComputeWorkerRunStatus.SUCCESS,
             request_json={'kind': 'preview'},
             result_json={'row_count': 1},
             created_at=datetime.now(UTC),
         ),
     )
 
-    rejected = engine_run_service.update_engine_run(
+    rejected = compute_worker_run_service.update_compute_worker_run(
         test_db_session,
         created.id,
-        status=EngineRunStatus.FAILED,
+        status=ComputeWorkerRunStatus.FAILED,
         error_message='should be ignored',
     )
 
     assert rejected.applied is False
-    assert rejected.status == EngineRunStatus.SUCCESS
+    assert rejected.status == ComputeWorkerRunStatus.SUCCESS
     stored = test_db_session.get(ComputeWorkerRun, created.id)
     assert stored is not None
     assert stored.result_json == {'row_count': 1}
     assert stored.progress == 0.0
 
-    idempotent = engine_run_service.update_engine_run(
+    idempotent = compute_worker_run_service.update_compute_worker_run(
         test_db_session,
         created.id,
-        status=EngineRunStatus.SUCCESS,
+        status=ComputeWorkerRunStatus.SUCCESS,
         error_message='still ignored',
     )
     assert idempotent.applied is True
-    assert idempotent.status == EngineRunStatus.SUCCESS
+    assert idempotent.status == ComputeWorkerRunStatus.SUCCESS
 
 
-def test_update_engine_run_applies_changes_to_running_run(test_db_session):
-    created = engine_run_service.create_engine_run(
+def test_update_compute_worker_run_applies_changes_to_running_run(test_db_session):
+    created = compute_worker_run_service.create_compute_worker_run(
         test_db_session,
-        engine_run_service.create_engine_run_payload(
+        compute_worker_run_service.create_compute_worker_run_payload(
             analysis_id='analysis-running-applied',
             datasource_id='ds-1',
-            kind=EngineRunKind.PREVIEW,
-            status=EngineRunStatus.RUNNING,
+            kind=ComputeWorkerRunKind.PREVIEW,
+            status=ComputeWorkerRunStatus.RUNNING,
             request_json={'kind': 'preview'},
             result_json=None,
             created_at=datetime.now(UTC),
         ),
     )
 
-    updated = engine_run_service.update_engine_run(
+    updated = compute_worker_run_service.update_compute_worker_run(
         test_db_session,
         created.id,
-        status=EngineRunStatus.SUCCESS,
+        status=ComputeWorkerRunStatus.SUCCESS,
         execution_entries=[],
         result_json={'row_count': 5},
     )
 
     assert updated.applied is True
-    assert updated.status == EngineRunStatus.SUCCESS
+    assert updated.status == ComputeWorkerRunStatus.SUCCESS
     stored = test_db_session.get(ComputeWorkerRun, created.id)
     assert stored is not None
     assert stored.result_json == {'row_count': 5, 'execution_entries': []}
 
 
-def test_list_engine_runs_http_returns_filtered_runs(client, test_db_session) -> None:
+def test_list_compute_worker_runs_http_returns_filtered_runs(client, test_db_session) -> None:
     analysis_id = str(uuid.uuid4())
-    engine_run_service.create_engine_run(
+    compute_worker_run_service.create_compute_worker_run(
         test_db_session,
-        engine_run_service.create_engine_run_payload(
+        compute_worker_run_service.create_compute_worker_run_payload(
             analysis_id=analysis_id,
             datasource_id='ds-list',
-            kind=EngineRunKind.PREVIEW,
-            status=EngineRunStatus.SUCCESS,
+            kind=ComputeWorkerRunKind.PREVIEW,
+            status=ComputeWorkerRunStatus.SUCCESS,
             request_json={'kind': 'preview'},
             result_json={'row_count': 2},
             created_at=datetime.now(UTC),
         ),
     )
-    engine_run_service.create_engine_run(
+    compute_worker_run_service.create_compute_worker_run(
         test_db_session,
-        engine_run_service.create_engine_run_payload(
+        compute_worker_run_service.create_compute_worker_run_payload(
             analysis_id=str(uuid.uuid4()),
             datasource_id='ds-other',
-            kind=EngineRunKind.DOWNLOAD,
-            status=EngineRunStatus.FAILED,
+            kind=ComputeWorkerRunKind.DOWNLOAD,
+            status=ComputeWorkerRunStatus.FAILED,
             request_json={'kind': 'download'},
             result_json={'row_count': 5},
             created_at=datetime.now(UTC),
@@ -387,7 +387,7 @@ def test_list_engine_runs_http_returns_filtered_runs(client, test_db_session) ->
     )
 
     response = client.get(
-        '/api/v1/engine-runs',
+        '/api/v1/compute-worker-runs',
         params={'analysis_id': analysis_id, 'status': 'success'},
     )
 
@@ -398,14 +398,14 @@ def test_list_engine_runs_http_returns_filtered_runs(client, test_db_session) ->
     assert payload[0]['status'] == 'success'
 
 
-def test_get_engine_run_http_returns_full_run(client, test_db_session) -> None:
-    created = engine_run_service.create_engine_run(
+def test_get_compute_worker_run_http_returns_full_run(client, test_db_session) -> None:
+    created = compute_worker_run_service.create_compute_worker_run(
         test_db_session,
-        engine_run_service.create_engine_run_payload(
+        compute_worker_run_service.create_compute_worker_run_payload(
             analysis_id='analysis-detail',
             datasource_id='ds-detail',
-            kind=EngineRunKind.ROW_COUNT,
-            status=EngineRunStatus.SUCCESS,
+            kind=ComputeWorkerRunKind.ROW_COUNT,
+            status=ComputeWorkerRunStatus.SUCCESS,
             request_json={'kind': 'row_count'},
             result_json={'row_count': 9, 'schema': {'value': 'Int64'}},
             created_at=datetime.now(UTC),
@@ -413,7 +413,7 @@ def test_get_engine_run_http_returns_full_run(client, test_db_session) -> None:
         ),
     )
 
-    response = client.get(f'/api/v1/engine-runs/{created.id}')
+    response = client.get(f'/api/v1/compute-worker-runs/{created.id}')
 
     assert response.status_code == 200
     payload = response.json()
@@ -422,19 +422,19 @@ def test_get_engine_run_http_returns_full_run(client, test_db_session) -> None:
     assert payload['result_json']['row_count'] == 9
 
 
-def test_get_engine_run_http_returns_404_for_missing_run(client) -> None:
-    response = client.get(f'/api/v1/engine-runs/{uuid.uuid4()}')
+def test_get_compute_worker_run_http_returns_404_for_missing_run(client) -> None:
+    response = client.get(f'/api/v1/compute-worker-runs/{uuid.uuid4()}')
 
     assert response.status_code == 404
-    assert response.json() == {'detail': 'Engine run not found'}
+    assert response.json() == {'detail': 'Compute worker run not found'}
 
 
-def test_engine_runs_http_respects_namespace(client, test_db_session) -> None:
-    payload = engine_run_service.create_engine_run_payload(
+def test_compute_worker_runs_http_respects_namespace(client, test_db_session) -> None:
+    payload = compute_worker_run_service.create_compute_worker_run_payload(
         analysis_id='analysis-default',
         datasource_id='ds-default',
-        kind=EngineRunKind.PREVIEW,
-        status=EngineRunStatus.SUCCESS,
+        kind=ComputeWorkerRunKind.PREVIEW,
+        status=ComputeWorkerRunStatus.SUCCESS,
         request_json={'kind': 'preview'},
         result_json={'row_count': 1},
         created_at=datetime.now(UTC),
@@ -442,12 +442,12 @@ def test_engine_runs_http_respects_namespace(client, test_db_session) -> None:
 
     default = set_namespace_context('default')
     try:
-        engine_run_service.create_engine_run(test_db_session, payload)
+        compute_worker_run_service.create_compute_worker_run(test_db_session, payload)
     finally:
         reset_namespace(default)
 
-    default_response = client.get('/api/v1/engine-runs')
-    beta_response = client.get('/api/v1/engine-runs', headers={'X-Namespace': 'beta'})
+    default_response = client.get('/api/v1/compute-worker-runs')
+    beta_response = client.get('/api/v1/compute-worker-runs', headers={'X-Namespace': 'beta'})
 
     assert default_response.status_code == 200
     assert len(default_response.json()) == 1
@@ -473,7 +473,7 @@ def _completed_build_run(
         request_json={'analysis_id': analysis_id},
         starter_json={'triggered_by': 'test'},
         status=BuildRunStatus.COMPLETED,
-        current_kind=EngineRunKind.BUILD,
+        current_kind=ComputeWorkerRunKind.BUILD,
         current_datasource_id=datasource_id,
         created_at=started_at,
         started_at=started_at,
@@ -500,10 +500,10 @@ def test_duration_stats_for_builds_uses_build_runs(test_db_session) -> None:
         )
         assert run.duration_ms == duration
 
-    stats = engine_run_service.duration_stats(
+    stats = compute_worker_run_service.duration_stats(
         test_db_session,
         analysis_id=analysis_id,
-        kind=EngineRunKind.BUILD,
+        kind=ComputeWorkerRunKind.BUILD,
         limit=20,
     )
 
@@ -529,7 +529,7 @@ def test_duration_stats_http_endpoint(client, test_db_session) -> None:
     )
 
     response = client.get(
-        '/api/v1/engine-runs/stats',
+        '/api/v1/compute-worker-runs/stats',
         params={'analysis_id': analysis_id, 'kind': 'build', 'limit': 20},
     )
 
@@ -557,10 +557,10 @@ def test_duration_stats_trend_reports_increasing_when_recent_runs_take_longer(
             datasource_id=f'ds-inc-{index}',
         )
 
-    stats = engine_run_service.duration_stats(
+    stats = compute_worker_run_service.duration_stats(
         test_db_session,
         analysis_id=analysis_id,
-        kind=EngineRunKind.BUILD,
+        kind=ComputeWorkerRunKind.BUILD,
         limit=20,
     )
     assert stats.trend.direction == 'increasing'
@@ -584,10 +584,10 @@ def test_duration_stats_trend_reports_decreasing_when_recent_runs_are_shorter(
             datasource_id=f'ds-dec-{index}',
         )
 
-    stats = engine_run_service.duration_stats(
+    stats = compute_worker_run_service.duration_stats(
         test_db_session,
         analysis_id=analysis_id,
-        kind=EngineRunKind.BUILD,
+        kind=ComputeWorkerRunKind.BUILD,
         limit=20,
     )
     assert stats.trend.direction == 'decreasing'
@@ -595,17 +595,17 @@ def test_duration_stats_trend_reports_decreasing_when_recent_runs_are_shorter(
     assert 'decreasing' in stats.trend.summary.lower()
 
 
-def test_duration_stats_for_preview_kind_uses_engine_runs(test_db_session) -> None:
+def test_duration_stats_for_preview_kind_uses_compute_worker_runs(test_db_session) -> None:
     analysis_id = 'analysis-preview-stats'
     now = datetime.now(UTC)
     for duration in (500, 1500):
-        engine_run_service.create_engine_run(
+        compute_worker_run_service.create_compute_worker_run(
             test_db_session,
-            engine_run_service.create_engine_run_payload(
+            compute_worker_run_service.create_compute_worker_run_payload(
                 analysis_id=analysis_id,
                 datasource_id='ds-preview-stats',
-                kind=EngineRunKind.PREVIEW,
-                status=EngineRunStatus.SUCCESS,
+                kind=ComputeWorkerRunKind.PREVIEW,
+                status=ComputeWorkerRunStatus.SUCCESS,
                 request_json={'kind': 'preview'},
                 result_json={'row_count': 1},
                 created_at=now,
@@ -613,10 +613,10 @@ def test_duration_stats_for_preview_kind_uses_engine_runs(test_db_session) -> No
             ),
         )
 
-    stats = engine_run_service.duration_stats(
+    stats = compute_worker_run_service.duration_stats(
         test_db_session,
         analysis_id=analysis_id,
-        kind=EngineRunKind.PREVIEW,
+        kind=ComputeWorkerRunKind.PREVIEW,
         limit=20,
     )
 

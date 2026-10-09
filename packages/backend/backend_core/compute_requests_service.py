@@ -9,7 +9,7 @@ from sqlalchemy import and_, case, func, or_, select, text, update
 from sqlalchemy.orm import load_only
 from sqlmodel import Session
 
-from backend_core import engine_runs_service, runtime_ipc, runtime_work_service
+from backend_core import compute_worker_runs_service, runtime_ipc, runtime_work_service
 from backend_core.claiming import CLAIM_DELIVERY_LEASE_SECONDS, claim_by_lease_owner, database_lease_clock, with_for_update_skip_locked
 from backend_core.config import settings
 from backend_core.domain.compute_requests.models import (
@@ -21,7 +21,7 @@ from backend_core.domain.compute_requests.models import (
     response_payload as proto_response_payload,
     status_from_proto,
 )
-from backend_core.domain.engine_runs.schemas import EngineRunKind, EngineRunStatus
+from backend_core.domain.compute_worker_runs.schemas import ComputeWorkerRunKind, ComputeWorkerRunStatus
 from backend_core.lease_observability import record_lease_transition
 from backend_core.persistence.compute_requests.models import ComputeRequest, ComputeRequestDatasource, ComputeRequestFlight
 from backend_core.persistence.datasource.models import DataSource
@@ -133,17 +133,17 @@ class TerminalComputeRequest:
 
 
 @dataclass(frozen=True, slots=True)
-class EngineRunFinalization:
+class ComputeWorkerRunFinalization:
     run_id: str
     fields: dict[str, object]
     merge_result_json: bool = False
 
 
-class _EngineRunFinalizationFields(TypedDict, total=False):
+class _ComputeWorkerRunFinalizationFields(TypedDict, total=False):
     analysis_id: str | None
     datasource_id: str
-    kind: EngineRunKind | str
-    status: EngineRunStatus | str
+    kind: ComputeWorkerRunKind | str
+    status: ComputeWorkerRunStatus | str
     request_json: dict[str, Any]
     result_json: dict[str, Any] | None
     error_message: str | None
@@ -409,7 +409,7 @@ def _stage_request(
         command=command,
         request_id=request_id,
     )
-    identity = _engine_identity_for_command(command, request_id=request_id)
+    identity = _compute_worker_identity_for_command(command, request_id=request_id)
     request = ComputeRequest(
         id=request_id,
         namespace=namespace,
@@ -591,7 +591,7 @@ def list_terminal_requests(session: Session, request_ids: Collection[str]) -> li
     ]
 
 
-def _datasource_engine_identity(resource_id: str) -> compute_pb2.ComputeWorkerIdentity:
+def _datasource_compute_worker_identity(resource_id: str) -> compute_pb2.ComputeWorkerIdentity:
     return compute_pb2.ComputeWorkerIdentity(
         scope=enums_pb2.COMPUTE_WORKER_SCOPE_DATASOURCE_PREVIEW,
         reuse_policy=enums_pb2.COMPUTE_WORKER_REUSE_POLICY_SHARED,
@@ -600,7 +600,7 @@ def _datasource_engine_identity(resource_id: str) -> compute_pb2.ComputeWorkerId
     )
 
 
-def _engine_identity_for_command(command: compute_pb2.ComputeCommand, *, request_id: str) -> compute_pb2.ComputeWorkerIdentity | None:
+def _compute_worker_identity_for_command(command: compute_pb2.ComputeCommand, *, request_id: str) -> compute_pb2.ComputeWorkerIdentity | None:
     command_name = command.WhichOneof('command')
     if command_name in {'spawn_engine', 'configure_engine', 'shutdown_engine'}:
         return getattr(command, command_name).engine_identity
@@ -631,14 +631,14 @@ def _engine_identity_for_command(command: compute_pb2.ComputeCommand, *, request
         datasource = command.datasource
         datasource_command = datasource.WhichOneof('command')
         if datasource_command in {'create_file', 'create_database', 'create_iceberg'}:
-            return _datasource_engine_identity(request_id)
+            return _datasource_compute_worker_identity(request_id)
         if datasource_command == 'preflight':
-            return _datasource_engine_identity(datasource.preflight.preflight_id)
+            return _datasource_compute_worker_identity(datasource.preflight.preflight_id)
         if datasource_command is not None:
             operation = getattr(datasource, datasource_command)
             datasource_id = getattr(operation, 'datasource_id', '')
             if datasource_id:
-                return _datasource_engine_identity(datasource_id)
+                return _datasource_compute_worker_identity(datasource_id)
     return None
 
 
@@ -704,7 +704,7 @@ def _cancel_request(
 
     if request.status == enums_pb2.COMPUTE_REQUEST_STATUS_RUNNING and allow_running_engine_request:
         envelope = command_envelope_for_request(request)
-        if _engine_identity_for_command(envelope.command, request_id=request.id) is None:
+        if _compute_worker_identity_for_command(envelope.command, request_id=request.id) is None:
             # Datasource ingestion/publication is not tied to a killable engine.
             # Let it finish its publication claim instead of creating orphaned
             # source objects when a browser closes the upload request.
@@ -872,7 +872,7 @@ def claim_next_request(
 ) -> ComputeRequest | None:
     table = ComputeRequest.metadata.tables[ComputeRequest.__tablename__]
     reclaimable = set(reclaimable_owner_ids or ())
-    has_engine_identity = and_(
+    has_compute_worker_identity = and_(
         table.c.compute_worker_scope.is_not(None),
         table.c.compute_worker_reuse_policy.is_not(None),
         table.c.compute_worker_resource_id.is_not(None),
@@ -897,13 +897,13 @@ def claim_next_request(
             .where(running.c.id != table.c.id)
             .exists()
         )
-        base = select(ComputeRequest).where(or_(queued_clause, reclaimable_clause)).where(or_(~has_engine_identity, ~has_running_sibling))
+        base = select(ComputeRequest).where(or_(queued_clause, reclaimable_clause)).where(or_(~has_compute_worker_identity, ~has_running_sibling))
         if allowed_kinds is not None:
             base = base.where(table.c.kind.in_(allowed_kinds))
         if blocked_engine_identities:
             base = base.where(
                 or_(
-                    ~has_engine_identity,
+                    ~has_compute_worker_identity,
                     ~or_(
                         *(
                             and_(
@@ -1262,24 +1262,24 @@ def _active_request_claim(
     return session.execute(statement).scalars().first()
 
 
-def _stage_engine_run_finalization(
+def _stage_compute_worker_run_finalization(
     session: Session,
     request: ComputeRequest,
-    finalization: EngineRunFinalization | None,
+    finalization: ComputeWorkerRunFinalization | None,
     *,
-    expected_status: EngineRunStatus,
+    expected_status: ComputeWorkerRunStatus,
 ) -> None:
     if finalization is None:
         return
     if request.kind != enums_pb2.COMPUTE_REQUEST_KIND_PREVIEW:
-        raise ValueError('Only preview requests can finalize a preview engine run')
+        raise ValueError('Only preview requests can finalize a preview compute worker run')
     status = finalization.fields.get('status')
-    if not isinstance(status, str) or EngineRunStatus.require(status) != expected_status:
-        raise ValueError(f'Preview engine run must finish with status {expected_status.value}')
+    if not isinstance(status, str) or ComputeWorkerRunStatus.require(status) != expected_status:
+        raise ValueError(f'Preview compute worker run must finish with status {expected_status.value}')
     if 'completed_at' not in finalization.fields:
-        raise ValueError('Preview engine run finalization requires completed_at')
-    fields = cast(_EngineRunFinalizationFields, finalization.fields)
-    result = engine_runs_service.stage_update_engine_run(
+        raise ValueError('Preview compute worker run finalization requires completed_at')
+    fields = cast(_ComputeWorkerRunFinalizationFields, finalization.fields)
+    result = compute_worker_runs_service.stage_update_compute_worker_run(
         session,
         finalization.run_id,
         merge_result_json=finalization.merge_result_json,
@@ -1287,7 +1287,7 @@ def _stage_engine_run_finalization(
         **fields,
     )
     if result is not True:
-        raise ValueError(f'Preview engine run {finalization.run_id} rejected its terminal status transition')
+        raise ValueError(f'Preview compute worker run {finalization.run_id} rejected its terminal status transition')
 
 
 def _matching_terminal_request(
@@ -1315,7 +1315,7 @@ def _matching_terminal_request(
     ):
         return None
     # This is a read-only acknowledgement. The original transaction already
-    # finalized engine-run state and emitted the response notification.
+    # finalized compute-worker-run state and emitted the response notification.
     return request
 
 
@@ -1330,7 +1330,7 @@ def mark_request_completed(
     artifact_path: str | None = None,
     artifact_name: str | None = None,
     artifact_content_type: str | None = None,
-    engine_run_finalization: EngineRunFinalization | None = None,
+    compute_worker_run_finalization: ComputeWorkerRunFinalization | None = None,
 ) -> ComputeRequest | None:
     # Serialize the potentially large preview payload before opening a DB
     # transaction or locking the durable request row.
@@ -1356,16 +1356,16 @@ def mark_request_completed(
             artifact_content_type=artifact_content_type,
         )
     _validate_response_envelope(request, response_envelope, enums_pb2.COMPUTE_REQUEST_STATUS_COMPLETED)
-    _stage_engine_run_finalization(
+    _stage_compute_worker_run_finalization(
         session,
         request,
-        engine_run_finalization,
-        expected_status=EngineRunStatus.SUCCESS,
+        compute_worker_run_finalization,
+        expected_status=ComputeWorkerRunStatus.SUCCESS,
     )
-    # Engine-run finalization and payload serialization can be expensive. Keep
+    # Compute worker run finalization and payload serialization can be expensive. Keep
     # the request row unlocked during that work, then revalidate under lock at
     # the write boundary. If the claim changed, rollback also discards the
-    # staged engine-run finalization.
+    # staged compute-worker-run finalization.
     request = lock_active_request_claim(
         session,
         request_id,
@@ -1419,7 +1419,7 @@ def mark_request_failed(
     worker_id: str,
     claim_token: str,
     lease_generation: int,
-    engine_run_finalization: EngineRunFinalization | None = None,
+    compute_worker_run_finalization: ComputeWorkerRunFinalization | None = None,
 ) -> ComputeRequest | None:
     serialized_response = response_envelope.SerializeToString()
     request = get_active_request_claim(
@@ -1439,13 +1439,13 @@ def mark_request_failed(
             error_message=error_message,
         )
     _validate_response_envelope(request, response_envelope, enums_pb2.COMPUTE_REQUEST_STATUS_FAILED)
-    _stage_engine_run_finalization(
+    _stage_compute_worker_run_finalization(
         session,
         request,
-        engine_run_finalization,
-        expected_status=EngineRunStatus.FAILED,
+        compute_worker_run_finalization,
+        expected_status=ComputeWorkerRunStatus.FAILED,
     )
-    # Do not hold the request row lock through engine-run finalization. The
+    # Do not hold the request row lock through compute-worker-run finalization. The
     # final lock below revalidates the exact claim before publishing failure.
     request = lock_active_request_claim(
         session,

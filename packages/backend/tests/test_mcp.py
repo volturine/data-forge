@@ -47,6 +47,35 @@ class TestMCPToolDefinition:
 
 
 class TestMCPToolListing:
+    def test_compute_worker_lifecycle_tools_use_compute_worker_paths_and_names(self, client: TestClient) -> None:
+        response = client.get('/api/v1/mcp/tools')
+        tools = response.json()
+        by_id = {tool['id']: tool for tool in tools}
+
+        expected_suffixes = {
+            'spawn_analysis_compute_worker': '/compute/compute-worker/spawn/analysis/{analysis_id}',
+            'spawn_datasource_preview_compute_worker': '/compute/compute-worker/spawn/datasource-preview/{datasource_id}',
+            'configure_analysis_compute_worker': '/compute/compute-worker/configure/analysis/{analysis_id}',
+            'configure_datasource_preview_compute_worker': '/compute/compute-worker/configure/datasource-preview/{datasource_id}',
+            'shutdown_analysis_compute_worker': '/compute/compute-worker/analysis/{analysis_id}',
+            'shutdown_datasource_preview_compute_worker': '/compute/compute-worker/datasource-preview/{datasource_id}',
+            'shutdown_build_compute_worker': '/compute/compute-worker/build/{build_id}',
+        }
+        for tool_id, path_suffix in expected_suffixes.items():
+            assert tool_id in by_id
+            assert by_id[tool_id]['path'].endswith(path_suffix)
+
+        assert not any(tool_id.endswith('_engine') for tool_id in by_id)
+
+    def test_compute_worker_run_tools_use_compute_worker_run_paths(self, client: TestClient) -> None:
+        response = client.get('/api/v1/mcp/tools')
+
+        paths = [tool['path'] for tool in response.json()]
+
+        assert any(path.endswith('/compute-worker-runs') for path in paths)
+        assert any(path.endswith('/compute-worker-runs/stats') for path in paths)
+        assert not any('/engine-runs' in path for path in paths)
+
     def test_routes_require_auth(self, client: TestClient, monkeypatch: pytest.MonkeyPatch) -> None:
         from main import app
         from modules.auth.dependencies import get_current_user

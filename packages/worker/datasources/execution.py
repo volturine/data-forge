@@ -28,8 +28,8 @@ from datasources.schemas import (
     SnapshotPreview,
 )
 from runtime.compute_manager import ProcessManager
+from runtime.domain.compute_worker_runs.schemas import ComputeWorkerRunKind, ComputeWorkerRunStatus, SchemaDiffStatus
 from runtime.domain.datasource.source_types import DataSourceType
-from runtime.domain.engine_runs.schemas import ComputeWorkerRunKind, ComputeWorkerRunStatus, SchemaDiffStatus
 from runtime.exceptions import DataSourceConnectionError, DataSourceValidationError
 from runtime.iceberg_catalog import ensure_catalog_namespace, load_runtime_catalog
 from runtime.namespace import get_namespace
@@ -379,7 +379,7 @@ def _create_ingest_run(
     }
     if request_json is not None:
         payload.update(dict(request_json))
-    return client.create_engine_run(
+    return client.create_compute_worker_run(
         namespace=namespace,
         analysis_id=None,
         datasource_id=datasource_id,
@@ -419,7 +419,7 @@ def _complete_ingest_run(
         result_json["branch"] = branch
     if metadata_path is not None:
         result_json["metadata_path"] = metadata_path
-    client.update_engine_run(
+    client.update_compute_worker_run(
         namespace=namespace,
         run_id=run_id,
         fields={
@@ -435,7 +435,7 @@ def _complete_ingest_run(
 
 def _fail_ingest_run(client: WorkerRuntimeClient, *, namespace: str, run_id: str, started: float, exc: Exception) -> None:
     with contextlib.suppress(Exception):
-        client.update_engine_run(
+        client.update_compute_worker_run(
             namespace=namespace,
             run_id=run_id,
             fields={

@@ -1,17 +1,17 @@
 import { afterEach, beforeEach, describe, expect, test, vi } from 'vitest';
 import type { ComputeWorkerStatusResponse } from '$lib/types/compute';
 
-const mockConnectEnginesStream = vi.fn();
-const mockShutdownEngine = vi.fn();
+const mockConnectComputeWorkersStream = vi.fn();
+const mockShutdownComputeWorker = vi.fn();
 
 vi.mock('$lib/api/compute', () => ({
-	connectEnginesStream: (...args: unknown[]) => mockConnectEnginesStream(...args),
-	shutdownEngineByIdentity: (...args: unknown[]) => mockShutdownEngine(...args)
+	connectComputeWorkersStream: (...args: unknown[]) => mockConnectComputeWorkersStream(...args),
+	shutdownComputeWorkerByIdentity: (...args: unknown[]) => mockShutdownComputeWorker(...args)
 }));
 
-const { EnginesStore } = await import('./engines.svelte');
+const { ComputeWorkersStore } = await import('./compute-workers.svelte');
 
-function makeEngine(
+function makeComputeWorker(
 	overrides: Partial<ComputeWorkerStatusResponse> = {}
 ): ComputeWorkerStatusResponse {
 	return {
@@ -37,23 +37,23 @@ function makeEngine(
 		datasource_id: null,
 		build_id: null,
 		current_build_id: null,
-		current_engine_run_id: null,
+		current_compute_worker_run_id: null,
 		...overrides
 	};
 }
 
 function mockStreamConnection() {
 	const callbacks: {
-		onSnapshot: (engines: ComputeWorkerStatusResponse[]) => void;
+		onSnapshot: (computeWorkers: ComputeWorkerStatusResponse[]) => void;
 		onError: (error: string) => void;
 		onClose: () => void;
 	}[] = [];
 	const close = vi.fn();
 
-	mockConnectEnginesStream.mockImplementation((nextCallbacks) => {
+	mockConnectComputeWorkersStream.mockImplementation((nextCallbacks) => {
 		callbacks.push(
 			nextCallbacks as {
-				onSnapshot: (engines: ComputeWorkerStatusResponse[]) => void;
+				onSnapshot: (computeWorkers: ComputeWorkerStatusResponse[]) => void;
 				onError: (error: string) => void;
 				onClose: () => void;
 			}
@@ -63,8 +63,8 @@ function mockStreamConnection() {
 
 	return {
 		close,
-		emitSnapshot(engines: ComputeWorkerStatusResponse[]) {
-			callbacks.at(-1)?.onSnapshot(engines);
+		emitSnapshot(computeWorkers: ComputeWorkerStatusResponse[]) {
+			callbacks.at(-1)?.onSnapshot(computeWorkers);
 		},
 		emitError(message: string) {
 			callbacks.at(-1)?.onError(message);
@@ -76,7 +76,7 @@ function mockStreamConnection() {
 }
 
 function mockShutdownSuccess() {
-	mockShutdownEngine.mockReturnValue({
+	mockShutdownComputeWorker.mockReturnValue({
 		match: (onOk: () => void) => {
 			onOk();
 			return Promise.resolve();
@@ -85,7 +85,7 @@ function mockShutdownSuccess() {
 }
 
 function mockShutdownError(message: string, status?: number) {
-	mockShutdownEngine.mockReturnValue({
+	mockShutdownComputeWorker.mockReturnValue({
 		match: (_onOk: unknown, onErr: (e: { message: string; status?: number }) => void) => {
 			onErr({ message, status });
 			return Promise.resolve();
@@ -93,13 +93,13 @@ function mockShutdownError(message: string, status?: number) {
 	});
 }
 
-describe('EnginesStore', () => {
-	let store: InstanceType<typeof EnginesStore>;
+describe('ComputeWorkersStore', () => {
+	let store: InstanceType<typeof ComputeWorkersStore>;
 
 	beforeEach(() => {
 		vi.useFakeTimers();
 		vi.clearAllMocks();
-		store = new EnginesStore();
+		store = new ComputeWorkersStore();
 	});
 
 	afterEach(() => {
@@ -108,7 +108,7 @@ describe('EnginesStore', () => {
 	});
 
 	test('starts in a disconnected empty state', () => {
-		expect(store.engines).toEqual([]);
+		expect(store.computeWorkers).toEqual([]);
 		expect(store.loading).toBe(false);
 		expect(store.error).toBeNull();
 		expect(store.status).toBe('disconnected');
@@ -122,7 +122,7 @@ describe('EnginesStore', () => {
 		store.startStream();
 		store.startStream();
 
-		expect(mockConnectEnginesStream).toHaveBeenCalledTimes(1);
+		expect(mockConnectComputeWorkersStream).toHaveBeenCalledTimes(1);
 		expect(store.isStreaming).toBe(true);
 		expect(store.loading).toBe(true);
 		expect(store.status).toBe('connecting');
@@ -130,19 +130,19 @@ describe('EnginesStore', () => {
 
 	test('loadSnapshotOnce applies the initial snapshot and closes its socket', () => {
 		const stream = mockStreamConnection();
-		const engines = [makeEngine({ analysis_id: 'a-1', resource_id: 'a-1' })];
+		const computeWorkers = [makeComputeWorker({ analysis_id: 'a-1', resource_id: 'a-1' })];
 
 		store.loadSnapshotOnce();
 		store.loadSnapshotOnce();
-		stream.emitSnapshot(engines);
+		stream.emitSnapshot(computeWorkers);
 		store.loadSnapshotOnce();
 
-		expect(store.engines).toEqual(engines);
+		expect(store.computeWorkers).toEqual(computeWorkers);
 		expect(store.count).toBe(1);
 		expect(store.isStreaming).toBe(false);
 		expect(store.status).toBe('connected');
 		expect(stream.close).toHaveBeenCalledOnce();
-		expect(mockConnectEnginesStream).toHaveBeenCalledOnce();
+		expect(mockConnectComputeWorkersStream).toHaveBeenCalledOnce();
 	});
 
 	test('starting the live stream cancels a pending snapshot', () => {
@@ -151,15 +151,15 @@ describe('EnginesStore', () => {
 
 		const liveStream = mockStreamConnection();
 		store.startStream();
-		const staleEngine = makeEngine({ analysis_id: 'stale', resource_id: 'stale' });
+		const staleEngine = makeComputeWorker({ analysis_id: 'stale', resource_id: 'stale' });
 		snapshotStream.emitSnapshot([staleEngine]);
 
 		expect(snapshotStream.close).toHaveBeenCalled();
-		expect(store.engines).toEqual([]);
+		expect(store.computeWorkers).toEqual([]);
 
-		const engine = makeEngine({ analysis_id: 'a-1', resource_id: 'a-1' });
+		const engine = makeComputeWorker({ analysis_id: 'a-1', resource_id: 'a-1' });
 		liveStream.emitSnapshot([engine]);
-		expect(store.engines).toEqual([engine]);
+		expect(store.computeWorkers).toEqual([engine]);
 		expect(store.isStreaming).toBe(true);
 	});
 
@@ -168,45 +168,45 @@ describe('EnginesStore', () => {
 		store.loadSnapshotOnce();
 		firstStream.emitSnapshot([]);
 		store.refreshSnapshot();
-		expect(mockConnectEnginesStream).toHaveBeenCalledOnce();
+		expect(mockConnectComputeWorkersStream).toHaveBeenCalledOnce();
 
 		vi.advanceTimersByTime(15_000);
 
 		const refreshStream = mockStreamConnection();
 		store.refreshSnapshot();
-		const engines = [makeEngine({ analysis_id: 'a-2', resource_id: 'a-2' })];
-		refreshStream.emitSnapshot(engines);
+		const computeWorkers = [makeComputeWorker({ analysis_id: 'a-2', resource_id: 'a-2' })];
+		refreshStream.emitSnapshot(computeWorkers);
 
-		expect(mockConnectEnginesStream).toHaveBeenCalledTimes(2);
-		expect(store.engines).toEqual(engines);
+		expect(mockConnectComputeWorkersStream).toHaveBeenCalledTimes(2);
+		expect(store.computeWorkers).toEqual(computeWorkers);
 		expect(store.isStreaming).toBe(false);
 		expect(refreshStream.close).toHaveBeenCalledOnce();
 	});
 
 	test('refreshSnapshot leaves engines untouched while the live stream is active', () => {
 		const stream = mockStreamConnection();
-		const engines = [makeEngine({ analysis_id: 'a-1', resource_id: 'a-1' })];
+		const computeWorkers = [makeComputeWorker({ analysis_id: 'a-1', resource_id: 'a-1' })];
 
 		store.startStream();
-		stream.emitSnapshot(engines);
+		stream.emitSnapshot(computeWorkers);
 		store.refreshSnapshot();
 
-		expect(mockConnectEnginesStream).toHaveBeenCalledOnce();
-		expect(store.engines).toEqual(engines);
+		expect(mockConnectComputeWorkersStream).toHaveBeenCalledOnce();
+		expect(store.computeWorkers).toEqual(computeWorkers);
 		expect(store.isStreaming).toBe(true);
 	});
 
 	test('snapshot updates engines and connection state', () => {
 		const stream = mockStreamConnection();
-		const engines = [
-			makeEngine({ analysis_id: 'a-1', resource_id: 'a-1' }),
-			makeEngine({ analysis_id: 'a-2', resource_id: 'a-2' })
+		const computeWorkers = [
+			makeComputeWorker({ analysis_id: 'a-1', resource_id: 'a-1' }),
+			makeComputeWorker({ analysis_id: 'a-2', resource_id: 'a-2' })
 		];
 
 		store.startStream();
-		stream.emitSnapshot(engines);
+		stream.emitSnapshot(computeWorkers);
 
-		expect(store.engines).toEqual(engines);
+		expect(store.computeWorkers).toEqual(computeWorkers);
 		expect(store.count).toBe(2);
 		expect(store.loading).toBe(false);
 		expect(store.error).toBeNull();
@@ -215,13 +215,13 @@ describe('EnginesStore', () => {
 
 	test('errors set error state without clearing existing engines', () => {
 		const stream = mockStreamConnection();
-		const engines = [makeEngine({ analysis_id: 'a-1' })];
+		const computeWorkers = [makeComputeWorker({ analysis_id: 'a-1' })];
 
 		store.startStream();
-		stream.emitSnapshot(engines);
+		stream.emitSnapshot(computeWorkers);
 		stream.emitError('socket failed');
 
-		expect(store.engines).toEqual(engines);
+		expect(store.computeWorkers).toEqual(computeWorkers);
 		expect(store.error).toBe('socket failed');
 		expect(store.status).toBe('error');
 	});
@@ -237,7 +237,7 @@ describe('EnginesStore', () => {
 		expect(store.error).toBe('Not authenticated');
 		expect(store.status).toBe('disconnected');
 		expect(store.isStreaming).toBe(false);
-		expect(mockConnectEnginesStream).toHaveBeenCalledTimes(1);
+		expect(mockConnectComputeWorkersStream).toHaveBeenCalledTimes(1);
 	});
 
 	test('unexpected close schedules reconnect', () => {
@@ -247,55 +247,58 @@ describe('EnginesStore', () => {
 		first.emitClose();
 
 		expect(store.status).toBe('connecting');
-		expect(mockConnectEnginesStream).toHaveBeenCalledTimes(1);
+		expect(mockConnectComputeWorkersStream).toHaveBeenCalledTimes(1);
 
 		vi.advanceTimersByTime(1_000);
-		expect(mockConnectEnginesStream).toHaveBeenCalledTimes(2);
+		expect(mockConnectComputeWorkersStream).toHaveBeenCalledTimes(2);
 		expect(store.status).toBe('connecting');
 	});
 
 	test('stopStream holds the socket until engines drain', () => {
 		const stream = mockStreamConnection();
-		const engines = [makeEngine({ analysis_id: 'a-1' })];
+		const computeWorkers = [makeComputeWorker({ analysis_id: 'a-1' })];
 
 		store.startStream();
-		stream.emitSnapshot(engines);
+		stream.emitSnapshot(computeWorkers);
 		store.stopStream();
 		vi.advanceTimersByTime(1_000);
 
 		expect(stream.close).not.toHaveBeenCalled();
-		expect(mockConnectEnginesStream).toHaveBeenCalledTimes(1);
-		expect(store.engines).toEqual(engines);
+		expect(mockConnectComputeWorkersStream).toHaveBeenCalledTimes(1);
+		expect(store.computeWorkers).toEqual(computeWorkers);
 		expect(store.status).toBe('connected');
 		expect(store.isStreaming).toBe(true);
 
 		stream.emitSnapshot([]);
 		expect(stream.close).toHaveBeenCalledTimes(1);
 		stream.emitClose();
-		expect(store.engines).toEqual([]);
+		expect(store.computeWorkers).toEqual([]);
 		expect(store.error).toBeNull();
 		expect(store.status).toBe('disconnected');
 		expect(store.isStreaming).toBe(false);
 	});
 
-	test('shutdownEngine removes the engine from the local snapshot', async () => {
+	test('shutdownComputeWorker removes the engine from the local snapshot', async () => {
 		const stream = mockStreamConnection();
-		const engines = [makeEngine({ analysis_id: 'a-1' }), makeEngine({ analysis_id: 'a-2' })];
+		const computeWorkers = [
+			makeComputeWorker({ analysis_id: 'a-1' }),
+			makeComputeWorker({ analysis_id: 'a-2' })
+		];
 		mockShutdownSuccess();
 
 		store.startStream();
-		stream.emitSnapshot(engines);
-		await store.shutdownEngine(engines[0]!);
+		stream.emitSnapshot(computeWorkers);
+		await store.shutdownComputeWorker(computeWorkers[0]!);
 
-		expect(store.engines).toHaveLength(1);
-		expect(store.engines[0]?.analysis_id).toBe('a-2');
+		expect(store.computeWorkers).toHaveLength(1);
+		expect(store.computeWorkers[0]?.analysis_id).toBe('a-2');
 	});
 
-	test('shutdownEngine keeps the row until the API confirms shutdown', async () => {
+	test('shutdownComputeWorker keeps the row until the API confirms shutdown', async () => {
 		const stream = mockStreamConnection();
-		const engines = [makeEngine({ analysis_id: 'a-1', resource_id: 'a-1' })];
+		const computeWorkers = [makeComputeWorker({ analysis_id: 'a-1', resource_id: 'a-1' })];
 		let resolveShutdown!: () => void;
-		mockShutdownEngine.mockReturnValue({
+		mockShutdownComputeWorker.mockReturnValue({
 			match: (onOk: () => void) =>
 				new Promise<void>((resolve) => {
 					resolveShutdown = () => {
@@ -306,102 +309,104 @@ describe('EnginesStore', () => {
 		});
 
 		store.startStream();
-		stream.emitSnapshot(engines);
-		const shutdown = store.shutdownEngine(engines[0]!);
+		stream.emitSnapshot(computeWorkers);
+		const shutdown = store.shutdownComputeWorker(computeWorkers[0]!);
 
-		expect(store.engines).toEqual(engines);
+		expect(store.computeWorkers).toEqual(computeWorkers);
 		resolveShutdown();
 		await shutdown;
 
-		expect(store.engines).toEqual([]);
+		expect(store.computeWorkers).toEqual([]);
 	});
 
-	test('shutdownEngine keeps a pending engine hidden across snapshots', async () => {
+	test('shutdownComputeWorker keeps a pending engine hidden across snapshots', async () => {
 		const stream = mockStreamConnection();
-		const engines = [
-			makeEngine({ analysis_id: 'a-1', resource_id: 'a-1' }),
-			makeEngine({ analysis_id: 'a-2', resource_id: 'a-2' })
+		const computeWorkers = [
+			makeComputeWorker({ analysis_id: 'a-1', resource_id: 'a-1' }),
+			makeComputeWorker({ analysis_id: 'a-2', resource_id: 'a-2' })
 		];
 		mockShutdownSuccess();
 
 		store.startStream();
-		stream.emitSnapshot(engines);
-		await store.shutdownEngine(engines[0]!);
-		stream.emitSnapshot(engines);
+		stream.emitSnapshot(computeWorkers);
+		await store.shutdownComputeWorker(computeWorkers[0]!);
+		stream.emitSnapshot(computeWorkers);
 
-		expect(store.engines).toHaveLength(1);
-		expect(store.engines[0]?.analysis_id).toBe('a-2');
+		expect(store.computeWorkers).toHaveLength(1);
+		expect(store.computeWorkers[0]?.analysis_id).toBe('a-2');
 
-		stream.emitSnapshot([makeEngine({ analysis_id: 'a-2', resource_id: 'a-2' })]);
-		stream.emitSnapshot(engines);
+		stream.emitSnapshot([makeComputeWorker({ analysis_id: 'a-2', resource_id: 'a-2' })]);
+		stream.emitSnapshot(computeWorkers);
 
-		expect(store.engines).toHaveLength(2);
+		expect(store.computeWorkers).toHaveLength(2);
 	});
 
-	test('shutdownEngine surfaces API failures', async () => {
+	test('shutdownComputeWorker surfaces API failures', async () => {
 		const stream = mockStreamConnection();
-		const engines = [makeEngine({ analysis_id: 'a-1', resource_id: 'a-1' })];
+		const computeWorkers = [makeComputeWorker({ analysis_id: 'a-1', resource_id: 'a-1' })];
 		mockShutdownError('Permission denied');
 
 		store.startStream();
-		stream.emitSnapshot(engines);
+		stream.emitSnapshot(computeWorkers);
 
-		await expect(store.shutdownEngine(engines[0]!)).rejects.toThrow('Permission denied');
-		expect(store.engines).toEqual(engines);
+		await expect(store.shutdownComputeWorker(computeWorkers[0]!)).rejects.toThrow(
+			'Permission denied'
+		);
+		expect(store.computeWorkers).toEqual(computeWorkers);
 		expect(store.error).toBe('Permission denied');
-		stream.emitSnapshot(engines);
-		expect(store.engines).toEqual(engines);
+		stream.emitSnapshot(computeWorkers);
+		expect(store.computeWorkers).toEqual(computeWorkers);
 		expect(store.error).toBeNull();
 	});
 
-	test('shutdownEngine ignores not-found races', async () => {
+	test('shutdownComputeWorker ignores not-found races', async () => {
 		const stream = mockStreamConnection();
-		const engines = [makeEngine({ analysis_id: 'a-1', resource_id: 'a-1' })];
-		mockShutdownError('Engine not found', 404);
+		const computeWorkers = [makeComputeWorker({ analysis_id: 'a-1', resource_id: 'a-1' })];
+		mockShutdownError('Compute worker not found', 404);
 
 		store.startStream();
-		stream.emitSnapshot(engines);
+		stream.emitSnapshot(computeWorkers);
 
-		await expect(store.shutdownEngine(engines[0]!)).resolves.toBeUndefined();
-		expect(store.engines).toEqual([]);
+		await expect(store.shutdownComputeWorker(computeWorkers[0]!)).resolves.toBeUndefined();
+		expect(store.computeWorkers).toEqual([]);
 		expect(store.error).toBeNull();
 	});
 
 	test('multiple subscribers keep the stream alive until all unsubscribe and engines drain', () => {
 		const stream = mockStreamConnection();
-		const engines = [makeEngine({ analysis_id: 'a-1' })];
+		const computeWorkers = [makeComputeWorker({ analysis_id: 'a-1' })];
 
 		store.startStream();
 		store.startStream();
-		stream.emitSnapshot(engines);
-		expect(mockConnectEnginesStream).toHaveBeenCalledTimes(1);
+		stream.emitSnapshot(computeWorkers);
+		expect(mockConnectComputeWorkersStream).toHaveBeenCalledTimes(1);
 
 		store.stopStream();
 		expect(stream.close).not.toHaveBeenCalled();
-		expect(store.engines).toEqual(engines);
+		expect(store.computeWorkers).toEqual(computeWorkers);
 		expect(store.status).toBe('connected');
 		expect(store.isStreaming).toBe(true);
 
 		store.stopStream();
 		expect(stream.close).not.toHaveBeenCalled();
-		expect(store.engines).toEqual(engines);
+		expect(store.computeWorkers).toEqual(computeWorkers);
 		expect(store.status).toBe('connected');
 		expect(store.isStreaming).toBe(true);
 
 		stream.emitSnapshot([]);
 		expect(stream.close).toHaveBeenCalledTimes(1);
 		stream.emitClose();
-		expect(store.engines).toEqual([]);
+		expect(store.computeWorkers).toEqual([]);
 		expect(store.status).toBe('disconnected');
 		expect(store.isStreaming).toBe(false);
 	});
 
 	test('subscriber count does not go below zero while hold-until-empty is active', () => {
 		const stream = mockStreamConnection();
-		const engines = [makeEngine({ analysis_id: 'a-1' })];
+		const computeWorkers = [makeComputeWorker({ analysis_id: 'a-1' })];
 
 		store.startStream();
-		stream.emitSnapshot(engines);
+		stream.emitSnapshot(computeWorkers);
 		store.stopStream();
 		store.stopStream();
 
@@ -414,7 +419,7 @@ describe('EnginesStore', () => {
 		expect(store.status).toBe('disconnected');
 
 		store.startStream();
-		expect(mockConnectEnginesStream).toHaveBeenCalledTimes(2);
+		expect(mockConnectComputeWorkersStream).toHaveBeenCalledTimes(2);
 		expect(store.isStreaming).toBe(true);
 	});
 });

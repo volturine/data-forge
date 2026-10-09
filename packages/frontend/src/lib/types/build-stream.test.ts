@@ -1,32 +1,32 @@
 import { describe, expect, it } from 'vitest';
 
-import type { ComputeWorkerRunExecutionEntry } from '$lib/api/engine-runs';
+import type { ComputeWorkerRunExecutionEntry } from '$lib/api/compute-worker-runs';
 import {
 	buildStatusLabel,
 	buildStatusTone,
-	buildStepStateFromEngineRunStatus,
+	buildStepStateFromComputeWorkerRunStatus,
 	buildStepTypeFromExecutionEntry,
-	countEngineRunSteps,
-	engineRunDisplayKind,
-	engineRunKindLabel,
-	engineRunStatusFilterValue,
-	engineRunStatusToBuildLifecycleStatus
+	countComputeWorkerRunSteps,
+	computeWorkerRunDisplayKind,
+	computeWorkerRunKindLabel,
+	computeWorkerRunStatusFilterValue,
+	computeWorkerRunStatusToBuildLifecycleStatus
 } from './build-stream';
 
 describe('build-stream ownership helpers', () => {
-	it('owns build and engine-run status projections', () => {
+	it('owns build and compute-worker-run status projections', () => {
 		expect(buildStatusLabel('running', 'Apply filter')).toBe('Apply filter');
 		expect(buildStatusTone('cancelled')).toBe('warning');
-		expect(engineRunStatusToBuildLifecycleStatus('success')).toBe('completed');
-		expect(engineRunStatusFilterValue('completed')).toBe('success');
+		expect(computeWorkerRunStatusToBuildLifecycleStatus('success')).toBe('completed');
+		expect(computeWorkerRunStatusFilterValue('completed')).toBe('success');
 	});
 
-	it('owns engine-run kind labels', () => {
-		expect(engineRunDisplayKind('raw')).toBe('build');
-		expect(engineRunDisplayKind('ingest')).toBe('build');
-		expect(engineRunKindLabel('row_count')).toBe('Row Count');
-		expect(engineRunKindLabel('download')).toBe('Download');
-		expect(engineRunKindLabel('ingest')).toBe('Build');
+	it('owns compute-worker-run kind labels', () => {
+		expect(computeWorkerRunDisplayKind('raw')).toBe('build');
+		expect(computeWorkerRunDisplayKind('ingest')).toBe('build');
+		expect(computeWorkerRunKindLabel('row_count')).toBe('Row Count');
+		expect(computeWorkerRunKindLabel('download')).toBe('Download');
+		expect(computeWorkerRunKindLabel('ingest')).toBe('Build');
 	});
 
 	it('owns execution-entry step typing and counting', () => {
@@ -66,10 +66,12 @@ describe('build-stream ownership helpers', () => {
 			}
 		];
 
-		expect(countEngineRunSteps(entries)).toBe(2);
+		expect(countComputeWorkerRunSteps(entries)).toBe(2);
 		expect(buildStepTypeFromExecutionEntry(entries[1])).toBe('read');
 		expect(buildStepTypeFromExecutionEntry(entries[2])).toBe('filter');
-		expect(buildStepStateFromEngineRunStatus('failed', { isLastStep: true })).toBe('failed');
-		expect(buildStepStateFromEngineRunStatus('success', { isLastStep: true })).toBe('completed');
+		expect(buildStepStateFromComputeWorkerRunStatus('failed', { isLastStep: true })).toBe('failed');
+		expect(buildStepStateFromComputeWorkerRunStatus('success', { isLastStep: true })).toBe(
+			'completed'
+		);
 	});
 });

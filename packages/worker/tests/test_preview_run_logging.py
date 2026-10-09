@@ -33,7 +33,7 @@ def _pipeline(sample_datasource, analysis_id: str) -> dict[str, object]:
 
 def _internal_client_mock() -> MagicMock:
     client = MagicMock()
-    client.create_engine_run.return_value = "run-1"
+    client.create_compute_worker_run.return_value = "run-1"
     return client
 
 
@@ -45,7 +45,7 @@ def _preview_request(analysis_id: str, pipeline: dict[str, object]) -> dict[str,
     }
 
 
-def test_preview_step_persists_engine_run_by_default(sample_datasource, monkeypatch, caplog) -> None:
+def test_preview_step_persists_compute_worker_run_by_default(sample_datasource, monkeypatch, caplog) -> None:
     monkeypatch.setattr(compute_service.settings, "persist_preview_runs", True)
     monkeypatch.setattr(compute_service, "_SLOW_PREVIEW_LOG_SECONDS", 0.0)
     caplog.set_level("WARNING", logger="runtime.compute_service")
@@ -71,16 +71,16 @@ def test_preview_step_persists_engine_run_by_default(sample_datasource, monkeypa
         manager.shutdown_all()
 
     assert result.response.total_rows == 5
-    internal_client.create_engine_run.assert_called_once()
-    create_kwargs = internal_client.create_engine_run.call_args.kwargs
+    internal_client.create_compute_worker_run.assert_called_once()
+    create_kwargs = internal_client.create_compute_worker_run.call_args.kwargs
     assert create_kwargs["datasource_id"] == sample_datasource.id
     assert create_kwargs["kind"] == "preview"
     assert create_kwargs["status"] == "running"
-    internal_client.engine_run_state.assert_not_called()
-    internal_client.update_engine_run.assert_not_called()
-    assert result.engine_run_finalization is not None
-    assert result.engine_run_finalization.run_id == "run-1"
-    assert result.engine_run_finalization.fields["status"] == "success"
+    internal_client.compute_worker_run_state.assert_not_called()
+    internal_client.update_compute_worker_run.assert_not_called()
+    assert result.compute_worker_run_finalization is not None
+    assert result.compute_worker_run_finalization.run_id == "run-1"
+    assert result.compute_worker_run_finalization.fields["status"] == "success"
     preview_log = next(record.message for record in caplog.records if "Slow preview" in record.message)
     assert "request_id=preview-request-1" in preview_log
     assert "namespace=default" in preview_log
@@ -89,7 +89,7 @@ def test_preview_step_persists_engine_run_by_default(sample_datasource, monkeypa
     assert "command_hash=safe-command-hash" in preview_log
 
 
-def test_preview_step_skips_engine_run_persistence_when_disabled(sample_datasource, monkeypatch) -> None:
+def test_preview_step_skips_compute_worker_run_persistence_when_disabled(sample_datasource, monkeypatch) -> None:
     monkeypatch.setattr(compute_service.settings, "persist_preview_runs", False)
     analysis_id = f"preview-no-log-{uuid.uuid4()}"
     pipeline = _pipeline(sample_datasource, analysis_id)
@@ -111,9 +111,9 @@ def test_preview_step_skips_engine_run_persistence_when_disabled(sample_datasour
         manager.shutdown_all()
 
     assert result.response.total_rows == 5
-    internal_client.create_engine_run.assert_not_called()
-    internal_client.engine_run_state.assert_not_called()
-    internal_client.update_engine_run.assert_not_called()
+    internal_client.create_compute_worker_run.assert_not_called()
+    internal_client.compute_worker_run_state.assert_not_called()
+    internal_client.update_compute_worker_run.assert_not_called()
 
 
 def test_preview_step_finalizes_run_when_engine_fails(sample_datasource, monkeypatch) -> None:
@@ -139,13 +139,13 @@ def test_preview_step_finalizes_run_when_engine_fails(sample_datasource, monkeyp
             request_json=_preview_request(analysis_id, pipeline),
         )
 
-    internal_client.create_engine_run.assert_called_once()
-    internal_client.engine_run_state.assert_not_called()
-    internal_client.update_engine_run.assert_not_called()
+    internal_client.create_compute_worker_run.assert_called_once()
+    internal_client.compute_worker_run_state.assert_not_called()
+    internal_client.update_compute_worker_run.assert_not_called()
     assert str(raised.value.error) == "engine failed"
-    assert raised.value.engine_run_finalization.run_id == "run-1"
-    assert raised.value.engine_run_finalization.fields["status"] == "failed"
-    assert raised.value.engine_run_finalization.fields["error_message"] == "engine failed"
+    assert raised.value.compute_worker_run_finalization.run_id == "run-1"
+    assert raised.value.compute_worker_run_finalization.fields["status"] == "failed"
+    assert raised.value.compute_worker_run_finalization.fields["error_message"] == "engine failed"
 
 
 def test_hydrate_udfs_loads_code_for_protocol_enum_number(monkeypatch) -> None:
@@ -201,7 +201,7 @@ def test_row_count_records_run_when_engine_acquire_fails(sample_datasource) -> N
     analysis_id = f"row-count-failure-{uuid.uuid4()}"
     pipeline = _pipeline(sample_datasource, analysis_id)
     internal_client = _internal_client_mock()
-    internal_client.engine_run_state.return_value = None
+    internal_client.compute_worker_run_state.return_value = None
     manager = ProcessManager(engine_factory=lambda identity, config: PolarsComputeWorker(identity.resource_id, config))
 
     with (
@@ -219,9 +219,9 @@ def test_row_count_records_run_when_engine_acquire_fails(sample_datasource) -> N
             request_json={"analysis_id": analysis_id, "analysis_pipeline": pipeline, "target_step_id": "source"},
         )
 
-    create_kwargs = internal_client.create_engine_run.call_args.kwargs
+    create_kwargs = internal_client.create_compute_worker_run.call_args.kwargs
     assert create_kwargs["kind"] == "row_count"
     assert create_kwargs["status"] == "running"
-    fields = internal_client.update_engine_run.call_args.kwargs["fields"]
+    fields = internal_client.update_compute_worker_run.call_args.kwargs["fields"]
     assert fields["status"] == "failed"
     assert fields["error_message"] == "Timed out waiting for engine listener"

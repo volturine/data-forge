@@ -172,12 +172,12 @@ describe('compute api activity tracking', () => {
 		expect(value).toBe(result);
 	});
 
-	test('spawnAnalysisEngine coalesces identical in-flight requests', () => {
+	test('spawnAnalysisComputeWorker coalesces identical in-flight requests', () => {
 		const result = makePendingResult('spawn');
 		mockApiRequest.mockReturnValue(result);
 
-		const first = compute.spawnAnalysisEngine('analysis-1');
-		const second = compute.spawnAnalysisEngine('analysis-1');
+		const first = compute.spawnAnalysisComputeWorker('analysis-1');
+		const second = compute.spawnAnalysisComputeWorker('analysis-1');
 
 		expect(first).toBe(result);
 		expect(second).toBe(result);

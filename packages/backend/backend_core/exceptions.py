@@ -47,17 +47,17 @@ def step_not_found(step_id: str) -> AppError:
     )
 
 
-def engine_not_found(resource_id: str) -> AppError:
+def compute_worker_not_found(resource_id: str) -> AppError:
     return not_found_error(
-        f'Engine for resource {resource_id} not found',
+        f'Compute worker for resource {resource_id} not found',
         error_code='ENGINE_NOT_FOUND',
         details={'resource_id': resource_id},
     )
 
 
-def engine_run_not_found(run_id: str) -> AppError:
+def compute_worker_run_not_found(run_id: str) -> AppError:
     return not_found_error(
-        f'Engine run {run_id} not found',
+        f'Compute worker run {run_id} not found',
         error_code='ENGINE_RUN_NOT_FOUND',
         details={'run_id': run_id},
     )
@@ -173,7 +173,7 @@ class ComputeError(AppError):
     pass
 
 
-class EngineStartError(ComputeError):
+class ComputeWorkerStartError(ComputeError):
     def __init__(self, message: str, details: dict | None = None):
         super().__init__(message=message, error_code='ENGINE_START_ERROR', details=details)
 
@@ -181,10 +181,10 @@ class EngineStartError(ComputeError):
 class ComputeWorkerBusyError(ComputeError):
     def __init__(self, analysis_id: str | None = None):
         details = {'analysis_id': analysis_id} if analysis_id is not None else None
-        super().__init__(message='Engine has an active job', error_code='ENGINE_BUSY', details=details)
+        super().__init__(message='Compute worker has an active job', error_code='ENGINE_BUSY', details=details)
 
 
-class EngineRunComparisonError(ComputeError):
+class ComputeWorkerRunComparisonError(ComputeError):
     def __init__(self, message: str, *, run_a_id: str | None = None, run_b_id: str | None = None, datasource_id: str | None = None):
         details: dict[str, str] = {}
         if run_a_id is not None:

@@ -13,7 +13,7 @@ export interface NamespaceServices {
 	chat: ResettableService & DestroyableService;
 	computeActivity: ResettableService;
 	datasource: ResettableService;
-	engines: ResettableService;
+	computeWorkers: ResettableService;
 	favorites: ResettableService;
 	schema: ResettableService;
 }
@@ -27,7 +27,7 @@ export class AppLifecycle {
 	async releaseNamespace(): Promise<void> {
 		await this.queryClient.cancelQueries();
 		this.services.computeActivity.reset();
-		this.services.engines.reset();
+		this.services.computeWorkers.reset();
 		this.services.chat.reset();
 		this.services.analysis.reset();
 		this.services.datasource.reset();
@@ -41,6 +41,6 @@ export class AppLifecycle {
 
 	destroy(): void {
 		this.services.chat.destroy();
-		this.services.engines.reset();
+		this.services.computeWorkers.reset();
 	}
 }

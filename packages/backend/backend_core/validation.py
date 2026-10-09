@@ -37,10 +37,10 @@ ScheduleId = Annotated[
         min_length=1,
     ),
 ]
-EngineRunId = Annotated[
+ComputeWorkerRunId = Annotated[
     str,
     Path(
-        description='Engine run ID',
+        description='Compute worker run ID',
         examples=['b3b1a08a-6a30-4f06-8c8a-9c1f1c8a4c2a'],
         min_length=1,
     ),
@@ -80,7 +80,7 @@ def parse_datasource_id(value: str) -> str:
 
 
 parse_schedule_id = _parse_uuid
-parse_engine_run_id = _parse_uuid
+parse_compute_worker_run_id = _parse_uuid
 parse_healthcheck_id = _parse_uuid
 parse_udf_id = _parse_uuid
 parse_preflight_id = _parse_uuid

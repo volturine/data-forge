@@ -246,13 +246,13 @@ async function waitForBuildRowEventually(
 	return waitForBuildRowById(page, panel, runId, statuses, 5_000);
 }
 
-test.describe('Navigation – engines live monitor', () => {
-	test('engines popup lists running engines on demand', async ({
+test.describe('Navigation – compute worker monitor', () => {
+	test('compute workers popup lists active compute workers on demand', async ({
 		page,
 		request,
 		sharedCancellationDatasource
 	}) => {
-		const analysisName = `E2E Engines ${uid()}`;
+		const analysisName = `E2E Compute Workers ${uid()}`;
 		const analysisId = await createLongRunningAnalysis(
 			request,
 			analysisName,
@@ -276,16 +276,18 @@ test.describe('Navigation – engines live monitor', () => {
 
 			await gotoMonitoringBuilds(page, analysisId);
 
-			const engineButton = page.getByRole('button', { name: 'Engine Monitor' });
-			await expect(engineButton).toBeVisible({ timeout: 5_000 });
-			const enginePopup = page.locator('[data-engines-popup="true"]');
-			await engineButton.click();
-			await expect(enginePopup).toBeVisible({ timeout: 5_000 });
-			await expect(page.getByTestId('engine-monitor-count')).toBeVisible({ timeout: 10_000 });
+			const computeWorkersButton = page.getByRole('button', { name: 'Compute workers' });
+			await expect(computeWorkersButton).toBeVisible({ timeout: 5_000 });
+			const computeWorkersPopup = page.locator('[data-compute-workers-popup="true"]');
+			await computeWorkersButton.click();
+			await expect(computeWorkersPopup).toBeVisible({ timeout: 5_000 });
+			await expect(page.getByTestId('compute-worker-monitor-count')).toBeVisible({
+				timeout: 10_000
+			});
 			await expect(
-				enginePopup
+				computeWorkersPopup
 					.locator(
-						`[data-engine-row="analysis_interactive:${analysisId}"], [data-engine-row="build:${runId}"]`
+						`[data-compute-worker-row="analysis_interactive:${analysisId}"], [data-compute-worker-row="build:${runId}"]`
 					)
 					.first()
 			).toBeVisible({
@@ -294,7 +296,7 @@ test.describe('Navigation – engines live monitor', () => {
 
 			const panel = page.locator('#panel-builds');
 			// Build may finish before cancel under load (especially with multi-thread
-			// Polars). Engines popup already verified; only cancel while still active.
+			// Polars). The Compute workers popup already verified; only cancel while still active.
 			const historyRow = await waitForBuildRowEventually(page, panel, runId, [
 				'queued',
 				'running',
