@@ -22,8 +22,8 @@ from backend_core.domain.build_jobs.live import hub as build_job_hub
 from backend_core.domain.build_jobs.models import BuildJobStatus
 from backend_core.domain.build_runs.models import BuildRunStatus
 from backend_core.domain.compute import schemas as compute_schemas
+from backend_core.domain.compute_worker_runs.schemas import ComputeWorkerRunKind
 from backend_core.domain.datasource.models import DataSourceTargetKind
-from backend_core.domain.engine_runs.schemas import EngineRunKind
 from backend_core.domain.scheduler.schemas import ScheduleCreate, ScheduleResponse, ScheduleUpdate
 from backend_core.exceptions import (
     ScheduleValidationError,
@@ -355,7 +355,7 @@ def _enqueue_schedule_analysis_build(
         request_json=_build_request_json(request),
         starter_json=compute_schemas.BuildStarter.for_schedule(schedule.id).model_dump(mode='json'),
         status=BuildRunStatus.QUEUED,
-        current_kind=EngineRunKind.BUILD.value,
+        current_kind=ComputeWorkerRunKind.BUILD.value,
         current_datasource_id=schedule.datasource_id,
         current_tab_id=tab_id,
         current_tab_name=tab_name,
@@ -1054,7 +1054,7 @@ def enqueue_schedule_run(
         run = _enqueue_schedule_ingest_build(
             session,
             schedule=schedule,
-            target_kind=EngineRunKind.BUILD.value,
+            target_kind=ComputeWorkerRunKind.BUILD.value,
             namespace=namespace,
             now=stamp,
         )

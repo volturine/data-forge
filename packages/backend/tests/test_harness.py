@@ -263,12 +263,12 @@ def test_test_service_addresses_require_container_environment(monkeypatch: pytes
 def test_integration_network_cleanup_runs_only_in_xdist_controller(monkeypatch: pytest.MonkeyPatch) -> None:
     monkeypatch.setattr(base_fixtures, 'docker_available', lambda: True)
     cleanups: list[str] = []
-    monkeypatch.setattr(base_fixtures, 'cleanup_stale_test_engine_networks', lambda: cleanups.append('networks'))
+    monkeypatch.setattr(base_fixtures, 'cleanup_stale_test_compute_worker_networks', lambda: cleanups.append('networks'))
 
     worker_session = cast(pytest.Session, SimpleNamespace(config=SimpleNamespace(workerinput={})))
-    base_fixtures.cleanup_stale_test_engine_networks_for_controller(worker_session)
+    base_fixtures.cleanup_stale_test_compute_worker_networks_for_controller(worker_session)
     assert cleanups == []
 
     controller_session = cast(pytest.Session, SimpleNamespace(config=SimpleNamespace()))
-    base_fixtures.cleanup_stale_test_engine_networks_for_controller(controller_session)
+    base_fixtures.cleanup_stale_test_compute_worker_networks_for_controller(controller_session)
     assert cleanups == ['networks']

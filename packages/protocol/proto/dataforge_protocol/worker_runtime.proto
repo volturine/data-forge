@@ -176,6 +176,7 @@ message WorkerCompleteComputeRequestRequest {
   string worker_id = 8 [(buf.validate.field).string.min_len = 1];
   string claim_token = 9 [(buf.validate.field).string.min_len = 1];
   int64 lease_generation = 10 [(buf.validate.field).int64.gte = 1];
+  // Keep this field name for protobuf JSON compatibility.
   optional WorkerComputeWorkerRunFinalization engine_run_finalization = 11;
 }
 
@@ -190,6 +191,7 @@ message WorkerFailComputeRequestRequest {
   string worker_id = 6 [(buf.validate.field).string.min_len = 1];
   string claim_token = 7 [(buf.validate.field).string.min_len = 1];
   int64 lease_generation = 8 [(buf.validate.field).int64.gte = 1];
+  // Keep this field name for protobuf JSON compatibility.
   optional WorkerComputeWorkerRunFinalization engine_run_finalization = 9;
 }
 
@@ -656,6 +658,7 @@ message WorkerPersistComputeWorkerSnapshotRequest {
 
   string worker_id = 1 [(buf.validate.field).string.min_len = 1];
   string namespace = 2 [(buf.validate.field).string.pattern = "^[a-zA-Z0-9_-]+$"];
+  // Keep this field name for protobuf JSON compatibility.
   repeated ComputeWorkerStatusResult engine_status = 4;
 }
 

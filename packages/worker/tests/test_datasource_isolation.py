@@ -23,7 +23,7 @@ from runtime.worker_runtime_client import DatasourceMetadata
 
 
 def _run_engine(port: int) -> None:
-    run_compute_worker_server(host="127.0.0.1", port=port, engine_identity="source-1", token="engine-test-token", heartbeat_timeout_seconds=60)
+    run_compute_worker_server(host="127.0.0.1", port=port, compute_worker_identity="source-1", token="engine-test-token", heartbeat_timeout_seconds=60)
 
 
 def test_datasource_schema_executes_in_separate_engine_pid_and_survives_engine_crash(tmp_path, monkeypatch) -> None:
@@ -54,12 +54,14 @@ def test_datasource_schema_executes_in_separate_engine_pid_and_survives_engine_c
                 kind="datasource_schema",
                 payload_json=json.dumps(payload).encode(),
             ),
-            metadata=(("x-engine-token", "engine-test-token"),),
+            metadata=(("x-compute-worker-token", "engine-test-token"),),
             timeout=10,
         )
         events = list(
             stub.WatchJob(
-                compute_worker_runtime_pb2.ComputeWorkerWatchJobRequest(job_id="schema-1"), metadata=(("x-engine-token", "engine-test-token"),), timeout=30
+                compute_worker_runtime_pb2.ComputeWorkerWatchJobRequest(job_id="schema-1"),
+                metadata=(("x-compute-worker-token", "engine-test-token"),),
+                timeout=30,
             )
         )
         result = json.loads(events[-1].result.data_json)
@@ -69,7 +71,7 @@ def test_datasource_schema_executes_in_separate_engine_pid_and_survives_engine_c
         process.kill()
         process.join(timeout=10)
         with pytest.raises(grpc.RpcError):
-            stub.Health(compute_worker_runtime_pb2.ComputeWorkerHealthRequest(), metadata=(("x-engine-token", "engine-test-token"),), timeout=1)
+            stub.Health(compute_worker_runtime_pb2.ComputeWorkerHealthRequest(), metadata=(("x-compute-worker-token", "engine-test-token"),), timeout=1)
         assert pl.DataFrame({"manager": [1]}).height == 1
     finally:
         channel.close()
@@ -309,7 +311,7 @@ def test_scheduled_ingest_uses_the_same_manifest_commit_path_as_manual_ingest(mo
             calls.append(("publish", kwargs))
             return execution.DataSourceRecord(id="source", name="Source", source_type="iceberg", config=kwargs["config"])
 
-        def update_engine_run(self, **_kwargs):
+        def update_compute_worker_run(self, **_kwargs):
             return None
 
     table = type("Table", (), {"current_snapshot": lambda _self: None, "metadata_location": None})()

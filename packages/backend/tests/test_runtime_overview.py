@@ -5,7 +5,7 @@ from datetime import UTC, datetime
 
 from backend_core import (
     build_jobs_service as build_job_service,
-    engine_instances_service as engine_instance_service,
+    compute_worker_instances_service as compute_worker_instance_service,
     runtime_workers_service as runtime_worker_service,
 )
 from backend_core.database import run_db, run_settings_db
@@ -45,7 +45,7 @@ def test_runtime_overview_reports_runtime_state(client, monkeypatch) -> None:
         active_jobs=1,
     )
     run_settings_db(
-        engine_instance_service.upsert_engine_status,
+        compute_worker_instance_service.upsert_compute_worker_status,
         worker_id='build-worker-1',
         namespace='default',
         status=ComputeWorkerStatusInfo(
@@ -71,7 +71,7 @@ def test_runtime_overview_reports_runtime_state(client, monkeypatch) -> None:
         ),
     )
     run_settings_db(
-        engine_instance_service.upsert_engine_status,
+        compute_worker_instance_service.upsert_compute_worker_status,
         worker_id='build-worker-1',
         namespace='default',
         status=ComputeWorkerStatusInfo(
@@ -95,7 +95,7 @@ def test_runtime_overview_reports_runtime_state(client, monkeypatch) -> None:
             reuse_policy='exclusive',
             build_id='build-live',
             current_build_id='build-live',
-            current_engine_run_id='run-live',
+            current_compute_worker_run_id='run-live',
         ),
     )
 
@@ -128,15 +128,16 @@ def test_runtime_overview_reports_runtime_state(client, monkeypatch) -> None:
     assert any(item['id'] == 'build-manager-1' and item['kind'] == 'build_manager' for item in body['workers'])
     assert any(item['id'] == 'build-worker-1' for item in body['workers'])
     assert any(
-        item['resource_id'] == 'preview-ds' and item['scope'] == 'datasource_preview' and item['datasource_id'] == 'preview-ds' for item in body['engines']
+        item['resource_id'] == 'preview-ds' and item['scope'] == 'datasource_preview' and item['datasource_id'] == 'preview-ds'
+        for item in body['compute_workers']
     )
     assert any(
         item['resource_id'] == 'build-live'
         and item['scope'] == 'build'
         and item['build_id'] == 'build-live'
         and item['current_build_id'] == 'build-live'
-        and item['current_engine_run_id'] == 'run-live'
-        for item in body['engines']
+        and item['current_compute_worker_run_id'] == 'run-live'
+        for item in body['compute_workers']
     )
     assert body['queue']['totals']['queued'] == 1
     assert body['queue']['totals']['running'] == 1
@@ -176,7 +177,7 @@ def test_runtime_overview_executes_its_database_unit_on_the_bounded_api_executor
         mode='durable_single_node',
         api=schemas.ApiProcessSummary(worker_id='api:test', pid=1, hostname='test', version='test'),
         workers=[],
-        engines=[],
+        compute_workers=[],
         queue=schemas.QueueSummary(
             namespaces=[],
             totals=schemas.QueueTotalsSummary(

@@ -93,7 +93,7 @@ async def recover_runtime_notifications(
 ) -> None:
     """Recover all API projections after a lost listener connection.
 
-    The process edge supplies durable build/engine/lock refreshes. These are
+    The process edge supplies durable build/compute-worker/lock refreshes. These are
     mandatory because their websocket consumers have no periodic recovery.
     """
     from modules.chat.store import chat_stream_recovery

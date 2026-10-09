@@ -445,16 +445,16 @@ export async function createHealthCheck(
 	});
 }
 
-export async function spawnEngine(_request: E2ERequest, _analysisId: string): Promise<void> {
-	// Engines are started through visible user actions and compute requests.
+export async function spawnComputeWorker(_request: E2ERequest, _analysisId: string): Promise<void> {
+	// Compute workers are started through visible user actions and compute requests.
 }
 
-export async function waitForNoEngineJob(
+export async function waitForNoComputeWorkerJob(
 	_request: E2ERequest,
 	_analysisId: string,
 	_timeoutMs = 5_000
 ): Promise<void> {
-	// Observe engine lifecycle via the Engines popup / visible build status.
+	// Observe compute worker lifecycle via the Compute workers popup / visible build status.
 }
 
 export function registerAnalysis(id: string, name: string): void {

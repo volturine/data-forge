@@ -2,7 +2,7 @@
 
 The current production architecture uses PostgreSQL and S3-compatible object
 storage with four application roles—API, runtime coordinator, scheduler, and
-worker. Docker
+the worker manager service. Docker
 Compose is the recommended deployment method. Running the same roles from source
 is supported when the infrastructure is managed separately.
 
@@ -21,8 +21,10 @@ Production requires:
   encryption secrets;
 - a reverse proxy with TLS for any host exposed outside a trusted network.
 
-Keep the API, runtime coordinator, scheduler, worker, and engine images on the
-same release. They share protocol contracts and must be upgraded together.
+Keep the API, runtime coordinator, scheduler, worker-manager, and compute-worker
+images on the same release. They share protocol contracts and must be upgraded
+together. The worker service owns Docker; compute workers are the isolated
+containers it starts for analyses and datasources.
 
 ## Docker Compose (recommended)
 
@@ -33,7 +35,7 @@ PostgreSQL ─┐
 RustFS ─────┼── API (HTTP) ◄── Runtime coordinator (internal gRPC)
             │       │                         ▲
             │       └── worker data-plane     ├── Scheduler
-            │                                 └── Worker (engine owner)
+            │                                 └── Worker manager (Docker owner)
             │         └── worker data-plane gRPC
 Browser ────┘
 ```
@@ -42,10 +44,10 @@ The API processes serve the built frontend and HTTP API on port 8000, including
 WebSocket/SSE delivery and durable enqueue-and-wait request paths. They retain
 disposable process-local caches, projections, and waiters; these are not
 authoritative durable runtime state. They do not own compute dispatch, Telegram
-polling, or engine lifecycle. One active fenced runtime
+polling, or compute-worker lifecycle. One active fenced runtime
 coordinator owns internal gRPC/dispatch, durable chat processing, Telegram
 polling, and independent durable email/Telegram delivery lanes. One worker
-manager owns Docker and isolated compute containers; each assigned worker is
+manager owns Docker and isolated compute-worker containers; each assigned compute worker is
 bound to one exact analysis or datasource RID. Identical full commands share
 durable results, while distinct commands for one RID are serialized. Increasing
 `WORKERS` scales API processes inside that container only. The Compose API
@@ -55,10 +57,10 @@ for the 1×1 baseline and evidence-gated scale path.
 
 External notification delivery claims durable outbox metadata before making
 email or Telegram network calls; those calls run outside the database
-transaction. Compute parsing and Polars-heavy work remain in isolated engine
-containers managed by the worker service.
+transaction. Compute parsing and Polars-heavy work run in isolated compute
+workers managed by the worker service.
 
-Engine cancellation targets the exact job ID, remembers requests made before
+Compute-worker cancellation targets the exact job ID, remembers requests made before
 the job starts, and waits for the actual execution thread to settle before
 releasing its admission. SMTP tests admit one thread; a deadline while sending
 can return before that thread settles, so the provider may already have accepted
@@ -79,6 +81,8 @@ CI publishes every role image to GHCR on three channels:
 
 Dev-channel images feed PR-preview deployments; release images are pinned in
 production. Keep all five `DF_*_IMAGE` values on the same channel and commit.
+The old `data-forge-polars-engine` image name is published as a compatibility
+alias for one release; new manifests use `data-forge-compute-worker`.
 
 ### Naming, ports, and collision rules
 
@@ -88,8 +92,8 @@ and centrally managed deployment stacks can coexist on one host:
 - Compose projects: repo smoke uses `-p dataforge-prod`, containerized dev uses
   `-p dataforge-dev`; centrally deployed stacks use their own names
   (`dataforge-app`, `dataforge-app-dev`) with separate volumes.
-- Engine networks follow the compose project (`dataforge-prod-engine-runtime`,
-  `dataforge-dev-engine-runtime`) and never overlap test networks — tests and
+- Compute-worker networks follow the compose project (`dataforge-prod-compute-worker-runtime`,
+  `dataforge-dev-compute-worker-runtime`) and never overlap test networks — tests and
   e2e always create per-run networks with UUID/run-id suffixes on random free
   ports.
 - Host ports: dev 8000/3000 (`just dev` and `docker-dev` are mutually
@@ -103,13 +107,13 @@ compose files mirror this directory's topology and follow the same registry.
 ### Configure and start
 
 1. Review `docker/env/prod.env` and replace every `replace-with-...` value.
-2. Set the five image variables to tags published from the same release. `DF_ENGINE_IMAGE` must be available to the local Docker daemon before the worker starts. Pin it to a `repository@sha256:<digest>` reference when engines must stay byte-identical across launches; a tag is accepted (and logged as unpinned) so custom engine images with extra libraries can be used.
+2. Set the five image variables to tags published from the same release. `DF_COMPUTE_WORKER_IMAGE` must be available to the local Docker daemon before the worker manager starts. Pin it to a `repository@sha256:<digest>` reference when compute workers must stay byte-identical across launches; tags remain accepted for custom compute-worker images with extra libraries.
 3. Set `DF_AUTH_FRONTEND_URL` and `DF_CORS_ORIGINS` to the public HTTPS origin.
    GitHub OAuth derives its callback from the incoming request host, so register
    `https://<your-host>/api/v1/auth/github/callback` in the GitHub OAuth app.
    Set `DF_TRUSTED_PROXY_HOPS` to the number of proxies that provide the
    forwarded public scheme.
-4. Set `DF_DOCKER_SOCKET_PATH` and `DF_DOCKER_GID` for the deployment host. The worker is the only service with Docker access; this permission is equivalent to administrative host access. To run engines on more than one machine, list the daemons in `DF_ENGINE_DOCKER_HOSTS` as described in [Compute hosts](COMPUTE_HOSTS.md).
+4. Set `DF_DOCKER_SOCKET_PATH` and `DF_DOCKER_GID` for the deployment host. The worker manager is the only service with Docker access; this permission is equivalent to administrative host access. To run compute workers on more than one machine, list the daemons in `DF_COMPUTE_WORKER_DOCKER_HOSTS` as described in [Compute hosts](COMPUTE_HOSTS.md).
 5. Start the stack:
 
 ```bash
@@ -122,6 +126,12 @@ docker compose --env-file docker/env/prod.env \
   -f docker/compose.yaml \
   up -d
 ```
+
+The old `DF_ENGINE_*` and `ENGINE_*` environment names are accepted for one
+release. The worker manager logs a deprecation warning when it reads one; new
+names take precedence. Remove old keys from deployment files during this
+release. `data-forge-polars-engine` is also published as a compatibility image
+alias for this release only.
 
 Inspect status and logs:
 
@@ -144,19 +154,49 @@ RustFS, and application-data volumes.
 
 ### Update
 
-Back up all three durable stores first. Then change all application image tags in
-`docker/env/prod.env` to one release and run:
+Keep ingress traffic drained until migrations and health checks are complete.
+Back up all three durable stores, stop the API, runtime coordinator, scheduler,
+and worker manager, then set the five image tags and new compute-worker
+variables in `docker/env/prod.env`. Pull the release images without starting the
+services:
 
 ```bash
 docker compose --env-file docker/env/prod.env \
   -p dataforge-prod -f docker/compose.yaml pull
+```
+
+Run the new API image once to apply its migrations to the public schema and all
+registered tenant schemas before starting the application roles:
+
+```bash
+docker compose --env-file docker/env/prod.env \
+  -p dataforge-prod -f docker/compose.yaml \
+  run --rm --no-deps api python3 -c \
+  'import asyncio; from backend_core.database import init_db; asyncio.run(init_db())'
+```
+
+The revision order is part of the rollout: apply #244's table/column revisions
+first (public `0025`, tenant `0026`), then #246's constraints (public `0027`,
+tenant `0028`), all before restoring traffic. The current public head also
+includes #247's Docker-host revision `0029`. After the migration job succeeds,
+start the coordinated release:
+
+```bash
 docker compose --env-file docker/env/prod.env \
   -p dataforge-prod -f docker/compose.yaml up -d
 ```
 
-Watch the logs and wait for `/health/ready` before returning traffic to the
-deployment. Roll back by restoring the coordinated backups and the previous set
-of image tags; application images and persisted data should not be rolled back
+Watch the API and worker-manager logs, confirm `/health/ready`, and restore
+traffic only after the new release is healthy.
+
+For a rollback of the #246 constraint layer, downgrade public `0027` to `0025`
+and tenant `0028` to `0026`. The current public `0029` revision follows `0027`,
+so first unwind it to `0027`; reaching `0025` also removes the Docker-host
+column introduced by #247. Keep traffic drained and use application images
+compatible with that schema. For a full rollback of #244, continue to public
+`0020` and tenant `0024` before deploying the previous images. Restore the
+coordinated backups if the database and object-store data must return to their
+pre-upgrade state; do not roll back application images and persisted data
 independently.
 
 ### Scale out
@@ -185,14 +225,14 @@ instances chosen by PostgreSQL leases; extra copies of them are standbys, not
 replicas.
 
 Compute capacity scales across machines: the active worker manager can place
-engine containers on several Docker daemons. See [Compute hosts](COMPUTE_HOSTS.md)
-for how to add a host.
+compute workers on several Docker daemons. See
+[Compute hosts](COMPUTE_HOSTS.md) for how to add a host.
 
 To survive the loss of a whole machine, run the same stack on two or three
 machines with `docker/compose.multi-host.yaml`: API replicas on every machine,
 coordinator and manager active on one and standby on the others, schedulers
-everywhere, engines on every daemon, and PostgreSQL and the object store shared
-outside the stacks. See [High availability](HIGH_AVAILABILITY.md).
+everywhere, compute workers on every daemon, and PostgreSQL and the object
+store shared outside the stacks. See [High availability](HIGH_AVAILABILITY.md).
 
 ## From source
 
@@ -211,7 +251,7 @@ Edit `docker/env/prod.env`:
 - set `DATABASE_URL` to PostgreSQL;
 - set the four `OBJECT_STORE_*` values (endpoint, region, access key, secret).
   Each product namespace is an S3 bucket (name == bucket). The backend
-  provisions namespace-scoped reader/builder engine identities and serves them
+  provisions namespace-scoped reader/builder compute-worker identities and serves them
   to workers over the authenticated internal gRPC API — no per-namespace
   object-store configuration is required;
 - replace `INTERNAL_API_TOKEN` and `SETTINGS_ENCRYPTION_KEY`;

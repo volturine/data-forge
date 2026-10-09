@@ -18,7 +18,7 @@
 #     standby worker keeps serving the data plane for its machine's API replicas.
 #   - Every machine runs a scheduler; due schedules are claimed per namespace,
 #     so several schedulers never double-run a schedule.
-#   - Engines are placed on every daemon listed in DF_ENGINE_DOCKER_HOSTS by
+#   - Compute workers are placed on every daemon listed in DF_COMPUTE_WORKER_DOCKER_HOSTS by
 #     whichever manager is active, so list each machine's daemon there.
 # See docs/HIGH_AVAILABILITY.md for the full recipe and the failure matrix.
 services:
@@ -49,7 +49,7 @@ services:
     environment:
       INTERNAL_GRPC_TARGET: ${DF_RUNTIME_COORDINATOR_TARGETS}
     volumes:
-      # TLS client certificates for the tcp:// daemons in DF_ENGINE_DOCKER_HOSTS
+      # TLS client certificates for the tcp:// daemons in DF_COMPUTE_WORKER_DOCKER_HOSTS
       # (tls_cert_path: /certs/<host>).
       - ${DF_COMPUTE_HOST_CERTS_DIR:-./certs}:/certs:ro
 

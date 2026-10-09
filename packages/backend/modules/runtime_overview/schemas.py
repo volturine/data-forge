@@ -5,8 +5,8 @@ from typing import Literal
 
 from pydantic import BaseModel
 
-from backend_core.domain.compute.schemas import EngineReusePolicy, EngineScope
-from backend_core.domain.engine_instances.models import EngineInstanceStatus
+from backend_core.domain.compute.schemas import ComputeWorkerReusePolicy, ComputeWorkerScope
+from backend_core.domain.compute_worker_instances.models import ComputeWorkerInstanceStatus
 from backend_core.domain.runtime_workers.models import RuntimeWorkerKind
 
 RuntimeMode = Literal['durable_single_node', 'distributed']
@@ -32,7 +32,7 @@ class RuntimeWorkerSummary(BaseModel):
     stopped_at: datetime | None
 
 
-class EngineInstanceSummary(BaseModel):
+class ComputeWorkerInstanceSummary(BaseModel):
     id: str
     worker_id: str
     namespace: str
@@ -46,14 +46,14 @@ class EngineInstanceSummary(BaseModel):
     supervisor_id: str | None
     owner_id: str | None
     docker_host: str | None = None
-    status: EngineInstanceStatus
+    status: ComputeWorkerInstanceStatus
     current_job_id: str | None
     current_build_id: str | None
-    current_engine_run_id: str | None
+    current_compute_worker_run_id: str | None
     last_activity_at: datetime | None
     last_seen_at: datetime
-    scope: EngineScope | None = None
-    reuse_policy: EngineReusePolicy | None = None
+    scope: ComputeWorkerScope | None = None
+    reuse_policy: ComputeWorkerReusePolicy | None = None
     datasource_id: str | None = None
     build_id: str | None = None
 
@@ -84,5 +84,5 @@ class RuntimeOverviewResponse(BaseModel):
     mode: RuntimeMode
     api: ApiProcessSummary
     workers: list[RuntimeWorkerSummary]
-    engines: list[EngineInstanceSummary]
+    compute_workers: list[ComputeWorkerInstanceSummary]
     queue: QueueSummary

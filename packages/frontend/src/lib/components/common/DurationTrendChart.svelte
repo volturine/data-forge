@@ -1,5 +1,5 @@
 <script lang="ts">
-	import type { DurationStatsResponse } from '$lib/api/engine-runs';
+	import type { DurationStatsResponse } from '$lib/api/compute-worker-runs';
 	import { formatDuration } from '$lib/utils/format-duration';
 	import {
 		isSuccessfulBuildStatus,

@@ -54,7 +54,7 @@ if [ -z "${E2E_GLOBAL_RUN_STAMP:-}" ]; then
     export E2E_GLOBAL_RUN_STAMP
 fi
 
-# Every run owns a separate compose project, network, volume set, and engine
+# Every run owns a separate compose project, network, volume set, and compute-worker
 # label. This lets concurrent E2E runs coexist and prevents test cleanup from
 # deleting another run's live database or artifacts.
 E2E_DOCKER_NETWORK="dataforge-e2e-${E2E_STACK_ID}-net"
@@ -62,7 +62,7 @@ E2E_DEPLOYMENT_ID="dataforge-e2e-${E2E_STACK_ID}"
 export E2E_DOCKER_NETWORK E2E_DEPLOYMENT_ID
 COMPOSE=(docker compose -p "dataforge-e2e-${E2E_STACK_ID}" -f "${ROOT_DIR}/docker/compose.e2e.yaml")
 
-ENGINE_IMAGE="data-forge-polars-engine:e2e"
+COMPUTE_WORKER_IMAGE="data-forge-compute-worker:e2e"
 WORKER_IMAGE="data-forge-worker:e2e"
 ARCHITECTURE_TEST_FILES=(
     tests/runtime-architecture.test.ts
@@ -170,7 +170,7 @@ build_images() {
         # BuildKit layer cache keeps rebuilds cheap when a target is unchanged.
         build_image "$target" "data-forge-${target}:e2e"
     done
-    build_image engine "${ENGINE_IMAGE}"
+    build_image compute-worker "${COMPUTE_WORKER_IMAGE}"
     # This enclave is discarded after the run. Reclaim its intermediate layers
     # before pulling the large Playwright image into the same daemon.
     echo "Pruning temporary BuildKit cache before pulling the Playwright image"
@@ -201,9 +201,9 @@ stack_up() {
 }
 
 stack_down() {
-    # Stop services first so the coordinator cannot spawn engines during teardown,
-    # then sweep the spawned engines (label filter) both before and after: an
-    # engine claimed in the race window would otherwise leak past `down -v`.
+    # Stop services first so the coordinator cannot spawn compute workers during teardown,
+    # then sweep spawned compute workers (label filter) both before and after: a
+    # worker claimed in the race window would otherwise leak past `down -v`.
     docker ps -aq --filter "label=io.dataforge.deployment=${E2E_DEPLOYMENT_ID}" | xargs -r docker rm -f >/dev/null 2>&1 || true
     docker ps -aq --filter "name=dataforge-e2e-${E2E_STACK_ID}-playwright-shard" | xargs -r docker rm -f >/dev/null 2>&1 || true
     docker ps -aq --filter "name=dataforge-e2e-${E2E_STACK_ID}-playwright-load-probe" | xargs -r docker rm -f >/dev/null 2>&1 || true
@@ -227,11 +227,11 @@ dump_service_logs() {
     for service in api runtime worker scheduler rustfs openai-fixture; do
         "${COMPOSE[@]}" logs --no-color "$service" >"$phase_dir/${service}.log" 2>&1 || true
     done
-    # Engine container stderr/stdout: job tracebacks (datasource load errors,
-    # engine-side crashes) only surface here, never in the coordinator log.
+    # Compute-worker container stderr/stdout: job tracebacks (datasource load errors,
+    # worker crashes) only surface here, never in the coordinator log.
     docker ps -a --filter "label=io.dataforge.deployment=${E2E_DEPLOYMENT_ID}" --format '{{.Names}}' \
-        | while read -r engine_name; do
-            docker logs --timestamps "$engine_name" >"${phase_dir}/engine-${engine_name}.log" 2>&1 || true
+        | while read -r compute_worker_name; do
+            docker logs --timestamps "$compute_worker_name" >"${phase_dir}/compute-worker-${compute_worker_name}.log" 2>&1 || true
         done
     if [ "$print_tails" -eq 1 ]; then
         echo "::group::service log tails"
@@ -399,7 +399,7 @@ wait_for_runtime_drain() {
         sleep 1
     done
     # A cancelled build can be terminal in Postgres while its executor is still
-    # unwinding the engine RPC. Let that cooperative path finish before signals.
+    # unwinding the compute-worker RPC. Let that cooperative path finish before signals.
     sleep 2
 }
 

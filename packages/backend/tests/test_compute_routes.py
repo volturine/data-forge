@@ -10,10 +10,10 @@ from fastapi import WebSocket
 from sqlalchemy import select
 
 from backend_core import (
+    compute_worker_runs_service as compute_worker_run_service,
     database,
     datasource_delete_service,
     dependencies,
-    engine_runs_service as engine_run_service,
     websocket as websocket_core,
 )
 from backend_core.api_execution_budget import (
@@ -23,9 +23,9 @@ from backend_core.api_execution_budget import (
 )
 from backend_core.dependencies import get_manager, get_runtime_availability_probe
 from backend_core.domain.compute import schemas as compute_schemas
+from backend_core.domain.compute_worker_runs.schemas import ComputeWorkerRunKind, ComputeWorkerRunStatus
 from backend_core.domain.datasource.models import DataSourceCreatedBy
 from backend_core.domain.datasource.source_types import DataSourceType
-from backend_core.domain.engine_runs.schemas import EngineRunKind, EngineRunStatus
 from backend_core.domain.runtime_workers.models import RuntimeWorkerKind
 from backend_core.exceptions import AppError
 from backend_core.namespace import get_namespace, reset_namespace, set_namespace_context
@@ -80,7 +80,7 @@ async def test_engine_websocket_reports_auth_overload_without_reusing_thread_poo
 
     sent: list[dict[str, Any]] = []
     websocket = _make_test_websocket(sent, receive)
-    await compute_routes.engine_list_stream(websocket)
+    await compute_routes.compute_workers_stream(websocket)
 
     assert len(submissions) == 1
     assert [message['type'] for message in sent] == ['websocket.accept', 'websocket.send', 'websocket.close']
@@ -199,10 +199,10 @@ async def test_engine_shutdown_creates_uses_and_closes_session_in_its_db_thread(
     monkeypatch.setattr(database, 'Session', OwnedSession)
     monkeypatch.setattr(database, '_get_tenant_engine', lambda: object())
     monkeypatch.setattr(compute_routes, '_override_manager', lambda _request: None)
-    monkeypatch.setattr(executor_client, 'request_engine_shutdown', request_shutdown)
+    monkeypatch.setattr(executor_client, 'request_compute_worker_shutdown', request_shutdown)
     namespace_token = set_namespace_context('shutdown-test')
     try:
-        await compute_routes._shutdown_engine_identity(
+        await compute_routes._shutdown_compute_worker_identity(
             compute_pb2.ComputeWorkerIdentity(resource_id='analysis-1'),
             cast(Any, object()),
             _AvailableRuntimeProbe(),
@@ -299,7 +299,7 @@ class _StubManager:
     def get_engine(self, identity):
         return _StubEngine() if self._identity_key(identity).endswith(':build-1') else None
 
-    def get_engine_status(self, identity) -> dict[str, object]:
+    def get_compute_worker_status(self, identity) -> dict[str, object]:
         status: dict[str, object] = {
             'resource_id': identity.resource_id,
             'status': 'healthy',
@@ -318,7 +318,7 @@ class _StubManager:
     def restart_engine_with_config(self, identity, resource_config: dict) -> None:
         self.restart_calls.append((self._identity_key(identity), resource_config))
 
-    def shutdown_engine(self, identity) -> None:
+    def shutdown_compute_worker(self, identity) -> None:
         self.shutdown_calls.append(self._identity_key(identity))
 
 
@@ -331,7 +331,7 @@ async def test_override_engine_lifecycle_runs_outside_event_loop(monkeypatch) ->
         def spawn_compute_worker(self, *_args, **_kwargs) -> None:
             operation_threads.append(threading.get_ident())
 
-        def get_engine_status(self, _identity):
+        def get_compute_worker_status(self, _identity):
             operation_threads.append(threading.get_ident())
             return 'status'
 
@@ -342,7 +342,7 @@ async def test_override_engine_lifecycle_runs_outside_event_loop(monkeypatch) ->
             operation_threads.append(threading.get_ident())
             return _StubEngine()
 
-        def shutdown_engine(self, _identity) -> None:
+        def shutdown_compute_worker(self, _identity) -> None:
             operation_threads.append(threading.get_ident())
 
     manager = Manager()
@@ -354,7 +354,7 @@ async def test_override_engine_lifecycle_runs_outside_event_loop(monkeypatch) ->
         resource_id='analysis-1',
     )
 
-    status = await compute_routes._spawn_engine_identity(
+    status = await compute_routes._spawn_compute_worker_identity(
         identity,
         cast(Any, None),
         None,
@@ -362,13 +362,13 @@ async def test_override_engine_lifecycle_runs_outside_event_loop(monkeypatch) ->
     )
     assert status == 'status'
 
-    await compute_routes._configure_engine_identity(
+    await compute_routes._configure_compute_worker_identity(
         identity,
-        compute_schemas.EngineResourceConfig(max_threads=4),
+        compute_schemas.ComputeWorkerResourceConfig(max_threads=4),
         cast(Any, None),
         cast(Any, None),
     )
-    await compute_routes._shutdown_engine_identity(identity, cast(Any, None), cast(Any, None))
+    await compute_routes._shutdown_compute_worker_identity(identity, cast(Any, None), cast(Any, None))
 
     assert operation_threads
     assert all(thread_id != loop_thread for thread_id in operation_threads)
@@ -435,11 +435,11 @@ def test_persisted_runtime_availability_probe_uses_an_isolated_session_per_check
     ]
 
 
-def test_spawn_engine_accepts_datasource_preview_identity(client) -> None:
+def test_spawn_compute_worker_accepts_datasource_preview_identity(client) -> None:
     manager = _StubManager()
     app.dependency_overrides[get_manager] = lambda: manager
     try:
-        response = client.post('/api/v1/compute/engine/spawn/datasource-preview/datasource-1')
+        response = client.post('/api/v1/compute/compute-worker/spawn/datasource-preview/datasource-1')
     finally:
         app.dependency_overrides.pop(get_manager, None)
 
@@ -451,11 +451,11 @@ def test_spawn_engine_accepts_datasource_preview_identity(client) -> None:
     assert manager.spawn_calls == [('1:datasource-1', None)]
 
 
-def test_spawn_engine_retains_analysis_identity(client) -> None:
+def test_spawn_compute_worker_retains_analysis_identity(client) -> None:
     manager = _StubManager()
     app.dependency_overrides[get_manager] = lambda: manager
     try:
-        response = client.post('/api/v1/compute/engine/spawn/analysis/analysis-1')
+        response = client.post('/api/v1/compute/compute-worker/spawn/analysis/analysis-1')
     finally:
         app.dependency_overrides.pop(get_manager, None)
 
@@ -465,12 +465,18 @@ def test_spawn_engine_retains_analysis_identity(client) -> None:
     assert response.json()['scope'] == 'analysis_interactive'
 
 
-def test_configure_engine_accepts_datasource_preview_identity(client) -> None:
+def test_legacy_engine_lifecycle_route_is_removed(client) -> None:
+    response = client.post('/api/v1/compute/engine/spawn/analysis/analysis-1')
+
+    assert response.status_code in {404, 405}
+
+
+def test_configure_compute_worker_accepts_datasource_preview_identity(client) -> None:
     manager = _StubManager()
     app.dependency_overrides[get_manager] = lambda: manager
     try:
         response = client.post(
-            '/api/v1/compute/engine/configure/datasource-preview/datasource-1',
+            '/api/v1/compute/compute-worker/configure/datasource-preview/datasource-1',
             json={'max_threads': 4},
         )
     finally:
@@ -481,11 +487,11 @@ def test_configure_engine_accepts_datasource_preview_identity(client) -> None:
     assert manager.restart_calls == [('1:datasource-1', {'max_threads': 4, 'max_memory_mb': None, 'streaming_chunk_size': None})]
 
 
-def test_shutdown_engine_accepts_build_identity(client) -> None:
+def test_shutdown_compute_worker_accepts_build_identity(client) -> None:
     manager = _StubManager()
     app.dependency_overrides[get_manager] = lambda: manager
     try:
-        response = client.delete('/api/v1/compute/engine/build/build-1')
+        response = client.delete('/api/v1/compute/compute-worker/build/build-1')
     finally:
         app.dependency_overrides.pop(get_manager, None)
 
@@ -493,7 +499,7 @@ def test_shutdown_engine_accepts_build_identity(client) -> None:
     assert manager.shutdown_calls == ['3:build-1']
 
 
-def test_shutdown_engine_cancels_active_job_then_shuts_down(client) -> None:
+def test_shutdown_compute_worker_cancels_active_job_then_shuts_down(client) -> None:
     """Busy engines cancel the job first; shutdown must not return 409."""
 
     class _BusyEngine:
@@ -510,7 +516,7 @@ def test_shutdown_engine_cancels_active_job_then_shuts_down(client) -> None:
     manager = _BusyManager()
     app.dependency_overrides[get_manager] = lambda: manager
     try:
-        response = client.delete('/api/v1/compute/engine/build/build-1')
+        response = client.delete('/api/v1/compute/compute-worker/build/build-1')
     finally:
         app.dependency_overrides.pop(get_manager, None)
 
@@ -518,11 +524,11 @@ def test_shutdown_engine_cancels_active_job_then_shuts_down(client) -> None:
     assert manager.shutdown_calls == ['3:build-1']
 
 
-def test_shutdown_engine_returns_not_found_for_unknown_identity(client) -> None:
+def test_shutdown_compute_worker_returns_not_found_for_unknown_identity(client) -> None:
     manager = _StubManager()
     app.dependency_overrides[get_manager] = lambda: manager
     try:
-        response = client.delete('/api/v1/compute/engine/build/missing')
+        response = client.delete('/api/v1/compute/compute-worker/build/missing')
     finally:
         app.dependency_overrides.pop(get_manager, None)
 
@@ -530,23 +536,23 @@ def test_shutdown_engine_returns_not_found_for_unknown_identity(client) -> None:
     assert manager.shutdown_calls == []
 
 
-def test_shutdown_engine_queues_worker_shutdown_without_waiting(client, monkeypatch) -> None:
+def test_shutdown_compute_worker_queues_worker_shutdown_without_waiting(client, monkeypatch) -> None:
     shutdown_calls: list[compute_pb2.ComputeWorkerIdentity] = []
 
     def request_shutdown(session, *, identity, runtime_probe) -> None:
         del session, runtime_probe
         shutdown_calls.append(identity)
 
-    monkeypatch.setattr(executor_client, 'request_engine_shutdown', request_shutdown)
+    monkeypatch.setattr(executor_client, 'request_compute_worker_shutdown', request_shutdown)
 
-    response = client.delete('/api/v1/compute/engine/build/build-1')
+    response = client.delete('/api/v1/compute/compute-worker/build/build-1')
 
     assert response.status_code == 204
     assert len(shutdown_calls) == 1
     assert shutdown_calls[0].build_id == 'build-1'
 
 
-def test_get_engine_defaults_resolves_auto_values(client, monkeypatch) -> None:
+def test_get_compute_worker_defaults_resolves_auto_values(client, monkeypatch) -> None:
     monkeypatch.setattr(compute_routes.settings, 'polars_cores_available', 0)
     monkeypatch.setattr(compute_routes.settings, 'polars_max_memory_mb', 0)
     monkeypatch.setattr(compute_routes.settings, 'polars_streaming_chunk_size', 4096)
@@ -658,14 +664,14 @@ def test_start_build_recreates_deleted_output_placeholder(client, test_db_sessio
     assert notification_threads[0] != api_loop_threads[0]
 
 
-def test_list_builds_includes_preview_engine_runs(client, test_db_session) -> None:
-    created = engine_run_service.create_engine_run(
+def test_list_builds_includes_preview_compute_worker_runs(client, test_db_session) -> None:
+    created = compute_worker_run_service.create_compute_worker_run(
         test_db_session,
-        engine_run_service.create_engine_run_payload(
+        compute_worker_run_service.create_compute_worker_run_payload(
             analysis_id=None,
             datasource_id='datasource-1',
-            kind=EngineRunKind.PREVIEW,
-            status=EngineRunStatus.SUCCESS,
+            kind=ComputeWorkerRunKind.PREVIEW,
+            status=ComputeWorkerRunStatus.SUCCESS,
             request_json={'target_step_id': 'source'},
             result_json={'row_count': 2, 'current_tab_name': 'Preview'},
             progress=1.0,
@@ -685,14 +691,14 @@ def test_list_builds_includes_preview_engine_runs(client, test_db_session) -> No
     assert body['builds'][0]['status'] == 'completed'
 
 
-def test_get_build_returns_preview_engine_run_detail(client, test_db_session) -> None:
-    created = engine_run_service.create_engine_run(
+def test_get_build_returns_preview_compute_worker_run_detail(client, test_db_session) -> None:
+    created = compute_worker_run_service.create_compute_worker_run(
         test_db_session,
-        engine_run_service.create_engine_run_payload(
+        compute_worker_run_service.create_compute_worker_run_payload(
             analysis_id=None,
             datasource_id='datasource-1',
-            kind=EngineRunKind.PREVIEW,
-            status=EngineRunStatus.SUCCESS,
+            kind=ComputeWorkerRunKind.PREVIEW,
+            status=ComputeWorkerRunStatus.SUCCESS,
             request_json={'target_step_id': 'source'},
             result_json={'row_count': 2},
             duration_ms=123,
@@ -710,16 +716,16 @@ def test_get_build_returns_preview_engine_run_detail(client, test_db_session) ->
     assert body['result_json'] == {'row_count': 2}
 
 
-def test_list_builds_excludes_engine_runs_from_other_namespaces(client, test_db_session) -> None:
+def test_list_builds_excludes_compute_worker_runs_from_other_namespaces(client, test_db_session) -> None:
     token = set_namespace_context('other')
     try:
-        engine_run_service.create_engine_run(
+        compute_worker_run_service.create_compute_worker_run(
             test_db_session,
-            engine_run_service.create_engine_run_payload(
+            compute_worker_run_service.create_compute_worker_run_payload(
                 analysis_id=None,
                 datasource_id='datasource-1',
-                kind=EngineRunKind.PREVIEW,
-                status=EngineRunStatus.SUCCESS,
+                kind=ComputeWorkerRunKind.PREVIEW,
+                status=ComputeWorkerRunStatus.SUCCESS,
                 request_json={'target_step_id': 'source'},
             ),
         )

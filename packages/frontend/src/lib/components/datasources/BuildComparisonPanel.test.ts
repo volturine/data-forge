@@ -100,7 +100,7 @@ function makeRun(overrides: Partial<BuildRunSummary> = {}): BuildRunSummary {
 		current_tab_name: null,
 		current_output_id: 'ds-1',
 		current_output_name: 'Output',
-		current_engine_run_id: null,
+		current_compute_worker_run_id: null,
 		total_tabs: 1,
 		cancelled_at: null,
 		cancelled_by: null,

@@ -13,7 +13,7 @@ from datetime import datetime
 from fastapi import WebSocket
 
 from runtime.domain.compute import schemas
-from runtime.domain.engine_runs.schemas import ComputeWorkerRunKind
+from runtime.domain.compute_worker_runs.schemas import ComputeWorkerRunKind
 from runtime.time import utc_now as _utcnow
 
 logger = logging.getLogger(__name__)
@@ -140,7 +140,7 @@ class RuntimeBuild:
     current_tab_name: str | None = None
     current_output_id: str | None = None
     current_output_name: str | None = None
-    current_engine_run_id: str | None = None
+    current_compute_worker_run_id: str | None = None
     duration_ms: int | None = None
     error: str | None = None
     cancelled_at: datetime | None = None
@@ -238,7 +238,7 @@ class RuntimeBuild:
         self.current_tab_name = _safe_str(payload.get("tab_name")) or self.current_tab_name
         self.current_output_id = _safe_str(payload.get("current_output_id")) or self.current_output_id
         self.current_output_name = _safe_str(payload.get("current_output_name")) or self.current_output_name
-        self.current_engine_run_id = _safe_str(payload.get("engine_run_id")) or self.current_engine_run_id
+        self.current_compute_worker_run_id = _safe_str(payload.get("compute_worker_run_id")) or self.current_compute_worker_run_id
 
         if event_type == schemas.BuildEventType.PLAN:
             self.add_query_plan(
@@ -352,7 +352,7 @@ class RuntimeBuild:
             current_tab_name=self.current_tab_name,
             current_output_id=self.current_output_id,
             current_output_name=self.current_output_name,
-            current_engine_run_id=self.current_engine_run_id,
+            current_compute_worker_run_id=self.current_compute_worker_run_id,
             total_tabs=self.total_tabs,
             cancelled_at=self.cancelled_at,
             cancelled_by=self.cancelled_by,

@@ -14,7 +14,7 @@ from functools import partial
 from runtime.compute_manager import ProcessManager
 from runtime.compute_request_runtime import (
     ACTIVE_REQUEST_KINDS,
-    ENGINE_SHUTDOWN_REQUEST_KINDS,
+    COMPUTE_WORKER_SHUTDOWN_REQUEST_KINDS,
     compute_request_claim_worker_count,
     compute_request_loop,
     compute_request_worker_count,
@@ -252,7 +252,7 @@ async def _run_runtime_coordinator(
     runtime_listener = None
     runtime_listener_task: asyncio.Task[None] | None = None
     try:
-        warm_worker_timeout = max(float(settings.engine_start_timeout_seconds) * 4, 120.0)
+        warm_worker_timeout = max(float(settings.compute_worker_start_timeout_seconds) * 4, 120.0)
         warm_workers_ready = await run_control_in_thread(
             manager.wait_for_warm_workers_ready,
             timeout_seconds=warm_worker_timeout,
@@ -318,7 +318,7 @@ async def _run_runtime_coordinator(
     request_lanes = [
         (ACTIVE_REQUEST_KINDS, request_worker_count, active_claim_semaphore, compute_work_semaphore),
         (
-            ENGINE_SHUTDOWN_REQUEST_KINDS,
+            COMPUTE_WORKER_SHUTDOWN_REQUEST_KINDS,
             min(request_worker_count, _SHUTDOWN_CONTROL_CONCURRENCY),
             shutdown_claim_semaphore,
             None,
@@ -405,7 +405,7 @@ async def _run_runtime_coordinator(
             run_build,
             client=client,
             capacity=request_worker_count,
-            heartbeat_seconds=float(settings.engine_heartbeat_interval_seconds),
+            heartbeat_seconds=float(settings.compute_worker_heartbeat_interval_seconds),
             poll_interval_seconds=recovery_poll_seconds,
             on_reconnected=manager.resynchronize_snapshots,
             namespace_directory=build_namespace_directory,

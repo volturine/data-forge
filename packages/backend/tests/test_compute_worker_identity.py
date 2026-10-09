@@ -1,0 +1,186 @@
+import pytest
+from pydantic import ValidationError
+
+from backend_core.domain.compute.schemas import StepPreviewRequest, default_preview_compute_worker_identity
+from dataforge_protocol import compute_pb2, enums_pb2
+from modules.compute import executor_client
+
+
+def _preview_payload(compute_worker_identity: dict[str, object]) -> dict[str, object]:
+    return {
+        'analysis_id': 'analysis-1',
+        'compute_worker_identity': compute_worker_identity,
+        'target_step_id': 'step-1',
+        'analysis_pipeline': {
+            'analysis_id': 'analysis-1',
+            'tabs': [
+                {
+                    'id': 'tab-1',
+                    'datasource': {
+                        'id': 'datasource-1',
+                        'analysis_tab_id': 'tab-1',
+                        'source_type': 'csv',
+                        'config': {'branch': 'main'},
+                    },
+                    'output': {'result_id': 'result-1', 'filename': 'result.csv', 'format': 'csv'},
+                    'steps': [{'id': 'step-1', 'type': 'select', 'config': {'columns': []}}],
+                }
+            ],
+        },
+    }
+
+
+def test_analysis_interactive_identity_uses_generated_proto_directly() -> None:
+    identity = compute_pb2.ComputeWorkerIdentity(
+        scope=enums_pb2.COMPUTE_WORKER_SCOPE_ANALYSIS_INTERACTIVE,
+        reuse_policy=enums_pb2.COMPUTE_WORKER_REUSE_POLICY_SHARED,
+        analysis_id='analysis-1',
+        resource_id='analysis-1',
+    )
+
+    assert isinstance(identity, compute_pb2.ComputeWorkerIdentity)
+    assert identity.scope == enums_pb2.COMPUTE_WORKER_SCOPE_ANALYSIS_INTERACTIVE
+    assert identity.reuse_policy == enums_pb2.COMPUTE_WORKER_REUSE_POLICY_SHARED
+    assert identity.analysis_id == 'analysis-1'
+    assert identity.resource_id == 'analysis-1'
+    assert not identity.HasField('datasource_id')
+    assert not identity.HasField('build_id')
+
+
+def test_datasource_preview_identity_uses_generated_proto_directly() -> None:
+    identity = compute_pb2.ComputeWorkerIdentity(
+        scope=enums_pb2.COMPUTE_WORKER_SCOPE_DATASOURCE_PREVIEW,
+        reuse_policy=enums_pb2.COMPUTE_WORKER_REUSE_POLICY_SHARED,
+        datasource_id='ds-1',
+        resource_id='ds-1',
+    )
+
+    assert isinstance(identity, compute_pb2.ComputeWorkerIdentity)
+    assert identity.scope == enums_pb2.COMPUTE_WORKER_SCOPE_DATASOURCE_PREVIEW
+    assert identity.reuse_policy == enums_pb2.COMPUTE_WORKER_REUSE_POLICY_SHARED
+    assert not identity.HasField('analysis_id')
+    assert identity.datasource_id == 'ds-1'
+    assert identity.resource_id == 'ds-1'
+    assert not identity.HasField('build_id')
+
+
+def test_build_identity_uses_generated_proto_directly() -> None:
+    identity = compute_pb2.ComputeWorkerIdentity(
+        scope=enums_pb2.COMPUTE_WORKER_SCOPE_BUILD,
+        reuse_policy=enums_pb2.COMPUTE_WORKER_REUSE_POLICY_EXCLUSIVE,
+        build_id='build-1',
+        resource_id='build-1',
+    )
+
+    assert isinstance(identity, compute_pb2.ComputeWorkerIdentity)
+    assert identity.scope == enums_pb2.COMPUTE_WORKER_SCOPE_BUILD
+    assert identity.reuse_policy == enums_pb2.COMPUTE_WORKER_REUSE_POLICY_EXCLUSIVE
+    assert not identity.HasField('analysis_id')
+    assert not identity.HasField('datasource_id')
+    assert identity.build_id == 'build-1'
+    assert identity.resource_id == 'build-1'
+
+
+def test_compute_worker_identity_is_carried_directly_in_lifecycle_command() -> None:
+    identity = compute_pb2.ComputeWorkerIdentity(
+        scope=enums_pb2.COMPUTE_WORKER_SCOPE_DATASOURCE_PREVIEW,
+        reuse_policy=enums_pb2.COMPUTE_WORKER_REUSE_POLICY_SHARED,
+        datasource_id='ds-1',
+        resource_id='ds-1',
+    )
+
+    command = executor_client._lifecycle_command('spawn_engine', identity, {'max_threads': 4})
+
+    assert command.WhichOneof('command') == 'spawn_engine'
+    assert command.spawn_engine.engine_identity == identity
+    assert command.spawn_engine.resource_config.max_threads == 4
+
+
+def test_step_preview_request_uses_generated_compute_worker_identity() -> None:
+    request = StepPreviewRequest.model_validate(
+        _preview_payload(
+            {
+                'scope': 'analysis_interactive',
+                'reuse_policy': 'shared',
+                'resource_id': 'analysis-1',
+                'analysis_id': 'analysis-1',
+            }
+        )
+    )
+
+    assert isinstance(request.compute_worker_identity, compute_pb2.ComputeWorkerIdentity)
+    assert request.compute_worker_identity.scope == enums_pb2.COMPUTE_WORKER_SCOPE_ANALYSIS_INTERACTIVE
+    assert request.compute_worker_identity.reuse_policy == enums_pb2.COMPUTE_WORKER_REUSE_POLICY_SHARED
+    assert request.compute_worker_identity.analysis_id == 'analysis-1'
+    assert request.model_dump(mode='json')['compute_worker_identity'] == {
+        'scope': 'analysis_interactive',
+        'reuse_policy': 'shared',
+        'resource_id': 'analysis-1',
+        'analysis_id': 'analysis-1',
+    }
+
+
+def test_default_preview_identity_uses_the_analysis_rid() -> None:
+    payload = _preview_payload({})
+    payload.pop('compute_worker_identity')
+    request = StepPreviewRequest.model_validate(payload)
+
+    identity = default_preview_compute_worker_identity(request)
+
+    assert identity.scope == enums_pb2.COMPUTE_WORKER_SCOPE_ANALYSIS_INTERACTIVE
+    assert identity.reuse_policy == enums_pb2.COMPUTE_WORKER_REUSE_POLICY_SHARED
+    assert identity.analysis_id == 'analysis-1'
+    assert identity.resource_id == 'analysis-1'
+
+
+def test_datasource_preview_identity_uses_the_exact_datasource_rid() -> None:
+    payload = _preview_payload({})
+    payload.pop('compute_worker_identity')
+    payload.pop('analysis_id')
+    payload['datasource_id'] = 'datasource-1'
+    request = StepPreviewRequest.model_validate(payload)
+
+    identity = default_preview_compute_worker_identity(request)
+
+    assert identity.scope == enums_pb2.COMPUTE_WORKER_SCOPE_DATASOURCE_PREVIEW
+    assert identity.reuse_policy == enums_pb2.COMPUTE_WORKER_REUSE_POLICY_SHARED
+    assert identity.datasource_id == 'datasource-1'
+    assert identity.resource_id == 'datasource-1'
+
+
+def test_preview_request_rejects_an_compute_worker_identity_for_a_different_resource() -> None:
+    payload = _preview_payload(
+        {
+            'scope': 'analysis_interactive',
+            'reuse_policy': 'shared',
+            'resource_id': 'other-analysis',
+            'analysis_id': 'other-analysis',
+        }
+    )
+
+    with pytest.raises(ValidationError, match='compute_worker_identity must match'):
+        StepPreviewRequest.model_validate(payload)
+
+
+def test_preview_request_rejects_analysis_id_mismatch() -> None:
+    payload = _preview_payload({})
+    payload.pop('compute_worker_identity')
+    pipeline = payload['analysis_pipeline']
+    assert isinstance(pipeline, dict)
+    pipeline['analysis_id'] = 'other-analysis'
+
+    with pytest.raises(ValidationError, match='analysis_id must match'):
+        StepPreviewRequest.model_validate(payload)
+
+
+def test_step_preview_request_rejects_invalid_compute_worker_identity_payload() -> None:
+    with pytest.raises(ValidationError, match='engine identity datasource_id is required'):
+        StepPreviewRequest.model_validate(
+            _preview_payload(
+                {
+                    'scope': 'datasource_preview',
+                    'reuse_policy': 'shared',
+                    'resource_id': 'datasource-1',
+                }
+            )
+        )

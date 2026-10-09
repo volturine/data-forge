@@ -41,8 +41,8 @@ from runtime.config import settings
 from runtime.domain.analysis.step_types import get_step_timing_key
 from runtime.domain.compute import schemas as compute_schemas
 from runtime.domain.compute.schemas import BuildStatus, BuildTabStatus, ComputeRunStatus
+from runtime.domain.compute_worker_runs.schemas import ComputeWorkerRunExecutionCategory, ComputeWorkerRunKind, ComputeWorkerRunStatus
 from runtime.domain.datasource.source_types import DataSourceType
-from runtime.domain.engine_runs.schemas import ComputeWorkerRunExecutionCategory, ComputeWorkerRunKind, ComputeWorkerRunStatus
 from runtime.exceptions import (
     AppError,
     ComputeWorkerShutdownError,
@@ -176,7 +176,7 @@ class _UnsetType:
 _UNSET: Final = _UnsetType()
 
 
-class _EngineRunFailureUpdateKwargs(TypedDict, total=False):
+class _ComputeWorkerRunFailureUpdateKwargs(TypedDict, total=False):
     datasource_id: str
     status: ComputeRunStatus
     result_json: dict[str, object]
@@ -199,21 +199,21 @@ def _datasource_name(session: object | None, datasource_id: str | None) -> str |
 
 
 @dataclass(frozen=True)
-class _EngineRunRef:
+class _ComputeWorkerRunRef:
     id: str
 
 
 @dataclass(frozen=True, slots=True)
 class PreviewOutcome:
     response: compute_schemas.StepPreviewResponse
-    engine_run_finalization: ComputeWorkerRunFinalization | None = None
+    compute_worker_run_finalization: ComputeWorkerRunFinalization | None = None
 
 
 class PreviewExecutionError(RuntimeError):
-    def __init__(self, error: Exception, engine_run_finalization: ComputeWorkerRunFinalization) -> None:
+    def __init__(self, error: Exception, compute_worker_run_finalization: ComputeWorkerRunFinalization) -> None:
         super().__init__(str(error))
         self.error = error
-        self.engine_run_finalization = engine_run_finalization
+        self.compute_worker_run_finalization = compute_worker_run_finalization
 
 
 BuildContext = Mapping[str, object]
@@ -225,7 +225,7 @@ class ExportDatasourceResult:
     datasource_name: str
     result_meta: dict
     source_datasource_id: str
-    engine_run_id: str | None = None
+    compute_worker_run_id: str | None = None
     source_datasource_name: str | None = None
     read_duration_ms: float | None = None
     write_duration_ms: float | None = None
@@ -603,7 +603,7 @@ def _schema_cache_payload_from_arrow(arrow_schema: pa.Schema, data: Mapping[str,
     return payload
 
 
-def _build_engine_run_execution_entries(
+def _build_compute_worker_run_execution_entries(
     result_data: dict | None,
     *,
     duration_ms: int,
@@ -737,7 +737,7 @@ def _json_field(value: object) -> object:
     return value.isoformat() if isinstance(value, datetime) else value
 
 
-def _create_engine_run(
+def _create_compute_worker_run(
     session: object | None,
     *,
     analysis_id: str | None,
@@ -750,9 +750,9 @@ def _create_engine_run(
     progress: float = 0.0,
     triggered_by: str | None = None,
     idempotency_key: str | None = None,
-) -> _EngineRunRef:
+) -> _ComputeWorkerRunRef:
     del session
-    run_id = client_from_env().create_engine_run(
+    run_id = client_from_env().create_compute_worker_run(
         namespace=get_namespace(),
         analysis_id=analysis_id,
         datasource_id=datasource_id,
@@ -765,10 +765,10 @@ def _create_engine_run(
         triggered_by=triggered_by,
         idempotency_key=idempotency_key,
     )
-    return _EngineRunRef(id=run_id)
+    return _ComputeWorkerRunRef(id=run_id)
 
 
-def _update_engine_run(
+def _update_compute_worker_run(
     session: object | None,
     run_id: str,
     *,
@@ -776,7 +776,7 @@ def _update_engine_run(
     **fields: object,
 ) -> None:
     del session
-    client_from_env().update_engine_run(
+    client_from_env().update_compute_worker_run(
         namespace=get_namespace(),
         run_id=run_id,
         fields={key: _json_field(value) for key, value in fields.items()},
@@ -937,17 +937,17 @@ def _log_entry(
     }
 
 
-def _load_engine_run_result_json(session: object | None, run_id: str) -> dict[str, object]:
+def _load_compute_worker_run_result_json(session: object | None, run_id: str) -> dict[str, object]:
     del session
-    state = client_from_env().engine_run_state(namespace=get_namespace(), run_id=run_id)
+    state = client_from_env().compute_worker_run_state(namespace=get_namespace(), run_id=run_id)
     if state is None:
         return {}
     return copy_json_dict(state.get("result_json"))
 
 
-def _raise_if_engine_run_cancelled(session: object | None, run_id: str) -> None:
+def _raise_if_compute_worker_run_cancelled(session: object | None, run_id: str) -> None:
     del session
-    state = client_from_env().engine_run_state(namespace=get_namespace(), run_id=run_id)
+    state = client_from_env().compute_worker_run_state(namespace=get_namespace(), run_id=run_id)
     if state is None or state.get("status") != ComputeWorkerRunStatus.CANCELLED.value:
         return
     cancelled_at = state.get("cancelled_at")
@@ -959,10 +959,10 @@ def _raise_if_engine_run_cancelled(session: object | None, run_id: str) -> None:
     )
 
 
-def _cancel_started_engine_run_if_build_cancelled(build: RuntimeBuild, *, run_id: str) -> None:
+def _cancel_started_compute_worker_run_if_build_cancelled(build: RuntimeBuild, *, run_id: str) -> None:
     if build.status != compute_schemas.BuildLifecycleStatus.CANCELLED:
         return
-    client_from_env().update_engine_run(
+    client_from_env().update_compute_worker_run(
         namespace=get_namespace(),
         run_id=run_id,
         fields={
@@ -998,7 +998,7 @@ def _raise_if_build_cancelled(session: object | None, build_id: str) -> None:
     raise BuildCancelledError(build_id, cancelled_at=cancelled_at, cancelled_by=cancelled_by)
 
 
-def _build_failed_engine_run_finalization(
+def _build_failed_compute_worker_run_finalization(
     *,
     run_id: str,
     existing_result: dict[str, object] | None,
@@ -1022,7 +1022,7 @@ def _build_failed_engine_run_finalization(
     datasource_id: str | _UnsetType = _UNSET,
     current_step: str | None | _UnsetType = _UNSET,
 ) -> ComputeWorkerRunFinalization:
-    result_json = _build_canonical_engine_run_result(
+    result_json = _build_canonical_compute_worker_run_result(
         existing_result=existing_result,
         summary_meta=summary_meta,
         execution_entries=execution_entries,
@@ -1037,7 +1037,7 @@ def _build_failed_engine_run_finalization(
         results=[result_entry] if result_entry is not None else None,
         append_logs=[log_entry] if log_entry is not None else None,
     )
-    kwargs: _EngineRunFailureUpdateKwargs = {
+    kwargs: _ComputeWorkerRunFailureUpdateKwargs = {
         "status": ComputeRunStatus.FAILED,
         "result_json": result_json,
         "error_message": str(error),
@@ -1060,7 +1060,7 @@ def _build_failed_engine_run_finalization(
     )
 
 
-def _finalize_failed_engine_run(
+def _finalize_failed_compute_worker_run(
     session: object | None,
     *,
     run_id: str,
@@ -1085,7 +1085,7 @@ def _finalize_failed_engine_run(
     datasource_id: str | _UnsetType = _UNSET,
     current_step: str | None | _UnsetType = _UNSET,
 ) -> None:
-    finalization = _build_failed_engine_run_finalization(
+    finalization = _build_failed_compute_worker_run_finalization(
         run_id=run_id,
         existing_result=existing_result,
         execution_entries=execution_entries,
@@ -1108,7 +1108,7 @@ def _finalize_failed_engine_run(
         datasource_id=datasource_id,
         current_step=current_step,
     )
-    _update_engine_run(
+    _update_compute_worker_run(
         session,
         finalization.run_id,
         merge_result_json=finalization.merge_result_json,
@@ -1116,7 +1116,7 @@ def _finalize_failed_engine_run(
     )
 
 
-def _build_canonical_engine_run_result(
+def _build_canonical_compute_worker_run_result(
     *,
     existing_result: dict[str, object] | None,
     summary_meta: dict[str, object] | None,
@@ -1545,7 +1545,7 @@ def _select_pipeline_tab(pipeline: dict, tab_id: str | None, target_step_id: str
     return selected
 
 
-def default_stateless_engine_identity(
+def default_stateless_compute_worker_identity(
     analysis_pipeline: dict,
     target_step_id: str,
     tab_id: str | None = None,
@@ -1626,17 +1626,17 @@ def _acquire_engine(manager: ProcessManager, identity: compute_pb2.ComputeWorker
     return manager.acquire_engine(identity, resource_config=resource_config)
 
 
-def _resolve_export_engine_identity(
+def _resolve_export_compute_worker_identity(
     *,
-    engine_identity: compute_pb2.ComputeWorkerIdentity | None,
+    compute_worker_identity: compute_pb2.ComputeWorkerIdentity | None,
     analysis_id: str | None,
     build_id: str | None,
     analysis_pipeline: dict,
     target_step_id: str,
     tab_id: str | None,
 ) -> compute_pb2.ComputeWorkerIdentity:
-    if engine_identity is not None:
-        return engine_identity
+    if compute_worker_identity is not None:
+        return compute_worker_identity
     if build_id is not None:
         return compute_pb2.ComputeWorkerIdentity(
             scope=enums_pb2.COMPUTE_WORKER_SCOPE_BUILD,
@@ -1645,7 +1645,7 @@ def _resolve_export_engine_identity(
             resource_id=build_id,
         )
     if analysis_id:
-        return default_stateless_engine_identity(analysis_pipeline, target_step_id, tab_id)
+        return default_stateless_compute_worker_identity(analysis_pipeline, target_step_id, tab_id)
     raise ValueError("Export requires analysis_id or engine identity")
 
 
@@ -1657,7 +1657,7 @@ def preview_step(
     row_limit: int = 1000,
     page: int = 1,
     analysis_id: str | None = None,
-    engine_identity: compute_pb2.ComputeWorkerIdentity | None = None,
+    compute_worker_identity: compute_pb2.ComputeWorkerIdentity | None = None,
     resource_config: dict | None = None,
     tab_id: str | None = None,
     request_json: dict | None = None,
@@ -1708,7 +1708,7 @@ def preview_step(
         preview_steps = steps[: step_index + 1]
         preview_steps = _hydrate_udfs(session, preview_steps)
 
-    resolved_engine_identity = engine_identity or default_stateless_engine_identity(
+    resolved_compute_worker_identity = compute_worker_identity or default_stateless_compute_worker_identity(
         analysis_pipeline,
         requested_target_step_id,
         tab_id,
@@ -1725,7 +1725,7 @@ def preview_step(
             total_tabs=1,
             resource_config=resource_config if isinstance(resource_config, dict) else None,
         )
-        run_response = _create_engine_run(
+        run_response = _create_compute_worker_run(
             session,
             analysis_id=run_analysis_id,
             datasource_id=datasource_id,
@@ -1750,7 +1750,7 @@ def preview_step(
     def execute_preview() -> dict[str, object]:
         nonlocal engine, preview_resource_summary
         phase_started = time.perf_counter()
-        with _acquire_engine(manager, resolved_engine_identity, resource_config=resource_config) as acquired_engine:
+        with _acquire_engine(manager, resolved_compute_worker_identity, resource_config=resource_config) as acquired_engine:
             execution_phases["engine_acquire_ms"] = (time.perf_counter() - phase_started) * 1000
             engine = acquired_engine
             preview_resource_summary = _resource_summary(acquired_engine)
@@ -1776,7 +1776,7 @@ def preview_step(
     step_timings: dict = {}
     current_step_id: str | None = None
     query_plan: str | None = None
-    engine_run_finalization: ComputeWorkerRunFinalization | None = None
+    compute_worker_run_finalization: ComputeWorkerRunFinalization | None = None
     execution_phases["prepare_ms"] = (time.perf_counter() - started_perf) * 1000
     cache_started = time.perf_counter()
     try:
@@ -1807,10 +1807,10 @@ def preview_step(
 
         completed_at = datetime.now(UTC)
         duration_ms = int((time.perf_counter() - started_perf) * 1000)
-        execution_entries = _build_engine_run_execution_entries(result_data, duration_ms=duration_ms)
+        execution_entries = _build_compute_worker_run_execution_entries(result_data, duration_ms=duration_ms)
         if run_response is not None:
             assert initial_run_result is not None
-            result_json = _build_canonical_engine_run_result(
+            result_json = _build_canonical_compute_worker_run_result(
                 existing_result=initial_run_result,
                 summary_meta=result_meta,
                 execution_entries=execution_entries,
@@ -1840,7 +1840,7 @@ def preview_step(
             }
             if isinstance(query_plan, str):
                 finalization_fields["query_plan"] = query_plan
-            engine_run_finalization = ComputeWorkerRunFinalization(
+            compute_worker_run_finalization = ComputeWorkerRunFinalization(
                 run_id=run_response.id,
                 fields=finalization_fields,
                 merge_result_json=False,
@@ -1857,18 +1857,18 @@ def preview_step(
                 page_size=len(data.get("data", [])),
                 metadata=data.get("metadata"),
             ),
-            engine_run_finalization=engine_run_finalization,
+            compute_worker_run_finalization=compute_worker_run_finalization,
         )
     except Exception as exc:
         completed_at = datetime.now(UTC)
         duration_ms = int((time.perf_counter() - started_perf) * 1000)
-        execution_entries = _build_engine_run_execution_entries(
+        execution_entries = _build_compute_worker_run_execution_entries(
             result_data if isinstance(result_data, dict) else None,
             duration_ms=duration_ms,
         )
         if run_response is not None:
             assert initial_run_result is not None
-            finalization = _build_failed_engine_run_finalization(
+            finalization = _build_failed_compute_worker_run_finalization(
                 run_id=run_response.id,
                 existing_result=initial_run_result,
                 execution_entries=execution_entries,
@@ -1897,15 +1897,15 @@ def preview_step(
         if total_duration_ms >= _SLOW_PREVIEW_LOG_SECONDS * 1000:
             phase_timings = " ".join(f"{name}={value:.1f}" for name, value in execution_phases.items())
             try:
-                engine_scope = enums_pb2.ComputeWorkerScope.Name(resolved_engine_identity.scope).removeprefix("COMPUTE_WORKER_SCOPE_").lower()
+                engine_scope = enums_pb2.ComputeWorkerScope.Name(resolved_compute_worker_identity.scope).removeprefix("COMPUTE_WORKER_SCOPE_").lower()
             except ValueError:
-                engine_scope = str(resolved_engine_identity.scope)
+                engine_scope = str(resolved_compute_worker_identity.scope)
             logger.warning(
-                "Slow preview request_id=%s namespace=%s engine_scope=%s resource_id=%s command_hash=%s duration_ms=%.1f %s",
+                "Slow preview request_id=%s namespace=%s compute_worker_scope=%s resource_id=%s command_hash=%s duration_ms=%.1f %s",
                 request_id or "unknown",
                 request_namespace,
                 engine_scope,
-                resolved_engine_identity.resource_id,
+                resolved_compute_worker_identity.resource_id,
                 command_hash or "-",
                 total_duration_ms,
                 phase_timings,
@@ -1954,7 +1954,7 @@ def get_step_schema(
 
     with _acquire_engine(
         manager,
-        default_stateless_engine_identity(analysis_pipeline, requested_target_step_id, tab_id),
+        default_stateless_compute_worker_identity(analysis_pipeline, requested_target_step_id, tab_id),
     ) as engine:
         additional_datasources = _get_additional_datasources(session, schema_steps, analysis_pipeline)
 
@@ -2045,7 +2045,7 @@ def get_step_row_count(
         count_steps = steps[: step_index + 1]
         count_steps = _hydrate_udfs(session, count_steps)
 
-    run_response = _create_engine_run(
+    run_response = _create_compute_worker_run(
         session,
         analysis_id=analysis_id_value,
         datasource_id=datasource_id,
@@ -2070,7 +2070,7 @@ def get_step_row_count(
     try:
         with _acquire_engine(
             manager,
-            default_stateless_engine_identity(analysis_pipeline, requested_target_step_id, tab_id),
+            default_stateless_compute_worker_identity(analysis_pipeline, requested_target_step_id, tab_id),
         ) as engine:
             additional_datasources = _get_additional_datasources(session, count_steps, analysis_pipeline)
 
@@ -2094,9 +2094,9 @@ def get_step_row_count(
 
         completed_at = datetime.now(UTC)
         duration_ms = int((time.perf_counter() - started_perf) * 1000)
-        execution_entries = _build_engine_run_execution_entries(result_data, duration_ms=duration_ms)
-        result_json = _build_canonical_engine_run_result(
-            existing_result=_load_engine_run_result_json(session, run_response.id),
+        execution_entries = _build_compute_worker_run_execution_entries(result_data, duration_ms=duration_ms)
+        result_json = _build_canonical_compute_worker_run_result(
+            existing_result=_load_compute_worker_run_result_json(session, run_response.id),
             summary_meta={"row_count": row_count},
             execution_entries=execution_entries,
             current_tab_id=tab_id,
@@ -2118,7 +2118,7 @@ def get_step_row_count(
                 )
             ],
         )
-        _update_engine_run(
+        _update_compute_worker_run(
             session,
             run_response.id,
             merge_result_json=False,
@@ -2136,18 +2136,18 @@ def get_step_row_count(
         return StepRowCountResponse(step_id=target_step_id, row_count=row_count)
     except Exception as exc:
         try:
-            _raise_if_engine_run_cancelled(session, run_response.id)
+            _raise_if_compute_worker_run_cancelled(session, run_response.id)
         except BuildCancelledError as cancel_exc:
             raise cancel_exc from exc
 
         reported = _reported_row_count_error(exc)
         completed_at = datetime.now(UTC)
         duration_ms = int((time.perf_counter() - started_perf) * 1000)
-        execution_entries = _build_engine_run_execution_entries(result_data if isinstance(result_data, dict) else None, duration_ms=duration_ms)
-        _finalize_failed_engine_run(
+        execution_entries = _build_compute_worker_run_execution_entries(result_data if isinstance(result_data, dict) else None, duration_ms=duration_ms)
+        _finalize_failed_compute_worker_run(
             session,
             run_id=run_response.id,
-            existing_result=_load_engine_run_result_json(session, run_response.id),
+            existing_result=_load_compute_worker_run_result_json(session, run_response.id),
             execution_entries=execution_entries,
             error=reported,
             completed_at=completed_at,
@@ -2188,7 +2188,7 @@ def export_data(
     build_stage_event: Callable[[dict[str, object]], None] | None = None,
     resources: list[dict[str, object]] | None = None,
     resources_fn: Callable[[], list[dict[str, object]]] | None = None,
-    engine_identity: compute_pb2.ComputeWorkerIdentity | None = None,
+    compute_worker_identity: compute_pb2.ComputeWorkerIdentity | None = None,
     build_id: str | None = None,
     publication_claim: ClaimedBuildJob | None = None,
     worker_id: str | None = None,
@@ -2236,8 +2236,8 @@ def export_data(
         export_steps = steps[: step_index + 1]
     export_steps = _hydrate_udfs(session, export_steps)
 
-    resolved_engine_identity = _resolve_export_engine_identity(
-        engine_identity=engine_identity,
+    resolved_compute_worker_identity = _resolve_export_compute_worker_identity(
+        compute_worker_identity=compute_worker_identity,
         analysis_id=analysis_id_value,
         build_id=build_id,
         analysis_pipeline=analysis_pipeline,
@@ -2257,7 +2257,7 @@ def export_data(
     run_response = None
 
     try:
-        with _acquire_engine(manager, resolved_engine_identity) as engine:
+        with _acquire_engine(manager, resolved_compute_worker_identity) as engine:
             job_id = engine.export(
                 datasource_config=datasource_config,
                 steps=export_steps,
@@ -2273,7 +2273,7 @@ def export_data(
                     "tab_id": tab_id,
                 }
                 if run_response is not None:
-                    job_payload["engine_run_id"] = run_response.id
+                    job_payload["compute_worker_run_id"] = run_response.id
                 job_started(job_payload)
 
             result_data = await_compute_worker_result(engine, job_id=job_id)
@@ -2286,7 +2286,7 @@ def export_data(
             failure_prefix="Export",
         )
         if run_response is not None:
-            _raise_if_engine_run_cancelled(session, run_response.id)
+            _raise_if_compute_worker_run_cancelled(session, run_response.id)
         if build_id is not None:
             _raise_if_build_cancelled(session, build_id)
 
@@ -2579,7 +2579,7 @@ def export_data(
             datasource_name=datasource_name,
             result_meta=result_meta,
             source_datasource_id=datasource_id,
-            engine_run_id=run_response.id if run_response is not None else None,
+            compute_worker_run_id=run_response.id if run_response is not None else None,
             source_datasource_name=source_datasource_name,
             read_duration_ms=float(read_duration_ms) if isinstance(read_duration_ms, (int, float)) else None,
             write_duration_ms=write_duration_ms,
@@ -2589,7 +2589,7 @@ def export_data(
     except Exception as exc:
         try:
             if run_response is not None:
-                _raise_if_engine_run_cancelled(session, run_response.id)
+                _raise_if_compute_worker_run_cancelled(session, run_response.id)
             if build_id is not None:
                 _raise_if_build_cancelled(session, build_id)
         except BuildCancelledError as cancel_exc:
@@ -2618,11 +2618,11 @@ def export_data(
                 result_json=failed_summary,
             )
         elif run_response is not None:
-            execution_entries = _build_engine_run_execution_entries(result_data, duration_ms=duration_ms)
-            _finalize_failed_engine_run(
+            execution_entries = _build_compute_worker_run_execution_entries(result_data, duration_ms=duration_ms)
+            _finalize_failed_compute_worker_run(
                 session,
                 run_id=run_response.id,
-                existing_result=_load_engine_run_result_json(session, run_response.id),
+                existing_result=_load_compute_worker_run_result_json(session, run_response.id),
                 execution_entries=execution_entries,
                 error=exc,
                 completed_at=completed_at,
@@ -2718,7 +2718,7 @@ def download_step(
         download_steps = steps[: step_index + 1]
         download_steps = _hydrate_udfs(session, download_steps)
 
-    resolved_engine_identity = default_stateless_engine_identity(
+    resolved_compute_worker_identity = default_stateless_compute_worker_identity(
         analysis_pipeline,
         requested_target_step_id,
         tab_id,
@@ -2751,8 +2751,8 @@ def download_step(
     query_plan: str | None = None
     result_data: dict | None = None
     try:
-        with _acquire_engine(manager, resolved_engine_identity) as engine:
-            run_response = _create_engine_run(
+        with _acquire_engine(manager, resolved_compute_worker_identity) as engine:
+            run_response = _create_compute_worker_run(
                 session,
                 analysis_id=analysis_id_value,
                 datasource_id=datasource_id,
@@ -2807,13 +2807,13 @@ def download_step(
 
         completed_at = datetime.now(UTC)
         duration_ms = int((time.perf_counter() - started_perf) * 1000)
-        execution_entries = _build_engine_run_execution_entries(
+        execution_entries = _build_compute_worker_run_execution_entries(
             result_data,
             duration_ms=duration_ms,
             write_duration_ms=write_duration_ms,
         )
-        result_json = _build_canonical_engine_run_result(
-            existing_result=_load_engine_run_result_json(session, run_response.id),
+        result_json = _build_canonical_compute_worker_run_result(
+            existing_result=_load_compute_worker_run_result_json(session, run_response.id),
             summary_meta={"filename": f"{filename}{ext}", "format": export_format},
             execution_entries=execution_entries,
             current_tab_id=tab_id,
@@ -2836,7 +2836,7 @@ def download_step(
                 )
             ],
         )
-        _update_engine_run(
+        _update_compute_worker_run(
             session,
             run_response.id,
             merge_result_json=False,
@@ -2856,11 +2856,11 @@ def download_step(
             raise
         completed_at = datetime.now(UTC)
         duration_ms = int((time.perf_counter() - started_perf) * 1000)
-        execution_entries = _build_engine_run_execution_entries(result_data, duration_ms=duration_ms)
-        _finalize_failed_engine_run(
+        execution_entries = _build_compute_worker_run_execution_entries(result_data, duration_ms=duration_ms)
+        _finalize_failed_compute_worker_run(
             session,
             run_id=run_response.id,
-            existing_result=_load_engine_run_result_json(session, run_response.id),
+            existing_result=_load_compute_worker_run_result_json(session, run_response.id),
             execution_entries=execution_entries,
             error=exc,
             completed_at=completed_at,
@@ -2942,7 +2942,7 @@ async def _stream_engine_events(
     analysis_id: str,
     engine,
     job_id: str,
-    engine_run_id: str | None = None,
+    compute_worker_run_id: str | None = None,
     build_step_base: int,
     engine_step_offset: int,
     total_steps: int,
@@ -3000,7 +3000,7 @@ async def _stream_engine_events(
                         "tab_name": tab_name,
                         "current_output_id": current_output_id,
                         "current_output_name": current_output_name,
-                        "engine_run_id": engine_run_id,
+                        "compute_worker_run_id": compute_worker_run_id,
                     },
                 ),
             )
@@ -3020,7 +3020,7 @@ async def _stream_engine_events(
                 tab_name=tab_name,
                 current_output_id=current_output_id,
                 current_output_name=current_output_name,
-                engine_run_id=engine_run_id,
+                compute_worker_run_id=compute_worker_run_id,
             )
 
         step_index = payload.get("step_index")
@@ -3031,7 +3031,7 @@ async def _stream_engine_events(
         payload["tab_name"] = tab_name
         payload["current_output_id"] = current_output_id
         payload["current_output_name"] = current_output_name
-        payload["engine_run_id"] = payload.get("engine_run_id") or engine_run_id
+        payload["compute_worker_run_id"] = payload.get("compute_worker_run_id") or compute_worker_run_id
 
         if emitted_type not in {"compute_start", "compute_complete"}:
             await _emit_build_event(emitter, event=_build_event(build, analysis_id, payload))
@@ -3055,7 +3055,7 @@ async def _stream_engine_events(
                 tab_name=tab_name,
                 current_output_id=current_output_id,
                 current_output_name=current_output_name,
-                engine_run_id=engine_run_id,
+                compute_worker_run_id=compute_worker_run_id,
             )
         if emitted_type == "compute_start":
             elapsed_ms = int((time.perf_counter() - started_perf) * 1000)
@@ -3073,7 +3073,7 @@ async def _stream_engine_events(
                 tab_name=tab_name,
                 current_output_id=current_output_id,
                 current_output_name=current_output_name,
-                engine_run_id=engine_run_id,
+                compute_worker_run_id=compute_worker_run_id,
             )
         if emitted_type == "step_failed":
             elapsed_ms = int((time.perf_counter() - started_perf) * 1000)
@@ -3093,7 +3093,7 @@ async def _stream_engine_events(
                 tab_name=tab_name,
                 current_output_id=current_output_id,
                 current_output_name=current_output_name,
-                engine_run_id=engine_run_id,
+                compute_worker_run_id=compute_worker_run_id,
             )
             return
 
@@ -3105,7 +3105,7 @@ def _schedule_stream_tasks(
     analysis_id: str,
     engine,
     job_id: str,
-    engine_run_id: str | None = None,
+    compute_worker_run_id: str | None = None,
     build_step_base: int,
     engine_step_offset: int,
     total_steps: int,
@@ -3123,7 +3123,7 @@ def _schedule_stream_tasks(
             analysis_id=analysis_id,
             engine=engine,
             job_id=job_id,
-            engine_run_id=engine_run_id,
+            compute_worker_run_id=compute_worker_run_id,
             build_step_base=build_step_base,
             engine_step_offset=engine_step_offset,
             total_steps=total_steps,
@@ -3157,7 +3157,7 @@ def _start_stream_tasks(
     analysis_id: str,
     engine,
     job_id: str,
-    engine_run_id: str | None = None,
+    compute_worker_run_id: str | None = None,
     build_step_base: int,
     engine_step_offset: int,
     total_steps: int,
@@ -3189,7 +3189,7 @@ def _start_stream_tasks(
                     analysis_id=analysis_id,
                     engine=engine,
                     job_id=job_id,
-                    engine_run_id=engine_run_id,
+                    compute_worker_run_id=compute_worker_run_id,
                     build_step_base=build_step_base,
                     engine_step_offset=engine_step_offset,
                     total_steps=total_steps,
@@ -3274,7 +3274,7 @@ async def run_analysis_build_stream(
         tab_name=None,
         current_output_id=None,
         current_output_name=None,
-        engine_run_id=build.current_engine_run_id,
+        compute_worker_run_id=build.current_compute_worker_run_id,
     )
 
     build_identity = compute_pb2.ComputeWorkerIdentity(
@@ -3427,7 +3427,7 @@ async def run_analysis_build_stream(
                         "tab_name": tab_name,
                         "current_output_id": current_output_id,
                         "current_output_name": current_output_name,
-                        "engine_run_id": build.current_engine_run_id,
+                        "compute_worker_run_id": build.current_compute_worker_run_id,
                     },
                 ),
             )
@@ -3446,15 +3446,15 @@ async def run_analysis_build_stream(
                 nonlocal progress_task, resource_task
                 job_id = info["job_id"]
                 engine = info.get("engine")
-                run_id = info.get("engine_run_id")
+                run_id = info.get("compute_worker_run_id")
                 if not isinstance(job_id, str) or not job_id:
                     raise ValueError("Build engine job ID is required")
                 current_cancellation.job_started(job_id)
                 if engine is None:
                     return
                 if isinstance(run_id, str):
-                    build.current_engine_run_id = run_id
-                    manager.set_engine_runtime_context(
+                    build.current_compute_worker_run_id = run_id
+                    manager.set_compute_worker_runtime_context(
                         compute_pb2.ComputeWorkerIdentity(
                             scope=enums_pb2.COMPUTE_WORKER_SCOPE_BUILD,
                             reuse_policy=enums_pb2.COMPUTE_WORKER_REUSE_POLICY_EXCLUSIVE,
@@ -3462,9 +3462,9 @@ async def run_analysis_build_stream(
                             resource_id=build.build_id,
                         ),
                         current_build_id=build.build_id,
-                        current_engine_run_id=run_id,
+                        current_compute_worker_run_id=run_id,
                     )
-                    _cancel_started_engine_run_if_build_cancelled(build, run_id=run_id)
+                    _cancel_started_compute_worker_run_if_build_cancelled(build, run_id=run_id)
                     if build.status == compute_schemas.BuildLifecycleStatus.CANCELLED:
                         current_cancellation.cancel()
                         current_cancellation.raise_if_cancelled()
@@ -3484,7 +3484,7 @@ async def run_analysis_build_stream(
                         "current_output_name": current_output_name_value,
                     }
                     if isinstance(run_id, str):
-                        payload["engine_run_id"] = run_id
+                        payload["compute_worker_run_id"] = run_id
                     await _emit_build_event(emitter, event=_build_event(build, analysis_id_value, payload))
 
                 future = asyncio.run_coroutine_threadsafe(emit_run_started(), loop)
@@ -3495,7 +3495,7 @@ async def run_analysis_build_stream(
                     analysis_id=analysis_id_value,
                     engine=engine,
                     job_id=job_id,
-                    engine_run_id=run_id if isinstance(run_id, str) else build.current_engine_run_id,
+                    compute_worker_run_id=run_id if isinstance(run_id, str) else build.current_compute_worker_run_id,
                     build_step_base=current_build_step_base,
                     engine_step_offset=1,
                     total_steps=total_steps,
@@ -3556,7 +3556,7 @@ async def run_analysis_build_stream(
                                         "tab_name": current_tab_name,
                                         "current_output_id": current_output_id_value,
                                         "current_output_name": current_output_name_value,
-                                        "engine_run_id": build.current_engine_run_id,
+                                        "compute_worker_run_id": build.current_compute_worker_run_id,
                                     },
                                 ),
                             )
@@ -3575,7 +3575,7 @@ async def run_analysis_build_stream(
                                 tab_name=current_tab_name,
                                 current_output_id=current_output_id_value,
                                 current_output_name=current_output_name_value,
-                                engine_run_id=build.current_engine_run_id,
+                                compute_worker_run_id=build.current_compute_worker_run_id,
                             )
                         current_write_stage.started = True
                         current_write_stage.started_at = time.perf_counter()
@@ -3596,7 +3596,7 @@ async def run_analysis_build_stream(
                                     "tab_name": current_tab_name,
                                     "current_output_id": current_output_id_value,
                                     "current_output_name": current_output_name_value,
-                                    "engine_run_id": build.current_engine_run_id,
+                                    "compute_worker_run_id": build.current_compute_worker_run_id,
                                 },
                             ),
                         )
@@ -3629,7 +3629,7 @@ async def run_analysis_build_stream(
                                     "tab_name": current_tab_name,
                                     "current_output_id": current_output_id_value,
                                     "current_output_name": current_output_name_value,
-                                    "engine_run_id": build.current_engine_run_id,
+                                    "compute_worker_run_id": build.current_compute_worker_run_id,
                                 },
                             ),
                         )
@@ -3648,7 +3648,7 @@ async def run_analysis_build_stream(
                             tab_name=current_tab_name,
                             current_output_id=current_output_id_value,
                             current_output_name=current_output_name_value,
-                            engine_run_id=build.current_engine_run_id,
+                            compute_worker_run_id=build.current_compute_worker_run_id,
                         )
 
                 future = asyncio.run_coroutine_threadsafe(emit_stage_updates(), loop)
@@ -3692,12 +3692,12 @@ async def run_analysis_build_stream(
                     job_started=handle_job_started,
                     build_stage_event=handle_stage_event,
                     resources_fn=lambda: [item.model_dump(mode="json") for item in build.resources],
-                    engine_identity=build_identity,
+                    compute_worker_identity=build_identity,
                     build_id=build.build_id,
                     publication_claim=publication_claim,
                     worker_id=worker_id,
                 )
-                build.current_engine_run_id = result.engine_run_id
+                build.current_compute_worker_run_id = result.compute_worker_run_id
                 return result
 
             export_result = await run_compute_in_thread(
@@ -3774,7 +3774,7 @@ async def run_analysis_build_stream(
                             "tab_name": tab_name,
                             "current_output_id": current_output_id,
                             "current_output_name": current_output_name,
-                            "engine_run_id": build.current_engine_run_id,
+                            "compute_worker_run_id": build.current_compute_worker_run_id,
                         },
                     ),
                 )
@@ -3797,7 +3797,7 @@ async def run_analysis_build_stream(
                             "tab_name": tab_name,
                             "current_output_id": current_output_id,
                             "current_output_name": current_output_name,
-                            "engine_run_id": build.current_engine_run_id,
+                            "compute_worker_run_id": build.current_compute_worker_run_id,
                         },
                     ),
                 )
@@ -3836,7 +3836,7 @@ async def run_analysis_build_stream(
         analysis_id_value,
         current_output_id=build.current_output_id,
         current_output_name=build.current_output_name,
-        engine_run_id=build.current_engine_run_id,
+        compute_worker_run_id=build.current_compute_worker_run_id,
     )
     event_results = [compute_schemas.BuildTabResult.model_validate(item) for item in results]
     if was_cancelled:
@@ -3852,7 +3852,7 @@ async def run_analysis_build_stream(
                 tab_name=base.tab_name,
                 current_output_id=base.current_output_id,
                 current_output_name=base.current_output_name,
-                engine_run_id=base.engine_run_id,
+                compute_worker_run_id=base.compute_worker_run_id,
                 progress=build.progress,
                 elapsed_ms=elapsed_ms,
                 total_steps=total_steps,
@@ -3876,7 +3876,7 @@ async def run_analysis_build_stream(
                 tab_name=base.tab_name,
                 current_output_id=base.current_output_id,
                 current_output_name=base.current_output_name,
-                engine_run_id=base.engine_run_id,
+                compute_worker_run_id=base.compute_worker_run_id,
                 progress=build.progress,
                 elapsed_ms=elapsed_ms,
                 total_steps=total_steps,
@@ -3899,7 +3899,7 @@ async def run_analysis_build_stream(
                 tab_name=base.tab_name,
                 current_output_id=base.current_output_id,
                 current_output_name=base.current_output_name,
-                engine_run_id=base.engine_run_id,
+                compute_worker_run_id=base.compute_worker_run_id,
                 elapsed_ms=elapsed_ms,
                 total_steps=total_steps,
                 tabs_built=tabs_built,
@@ -3909,7 +3909,7 @@ async def run_analysis_build_stream(
         )
     with contextlib.suppress(Exception):
         await run_control_in_thread(
-            manager.shutdown_engine,
+            manager.shutdown_compute_worker,
             compute_pb2.ComputeWorkerIdentity(
                 scope=enums_pb2.COMPUTE_WORKER_SCOPE_BUILD,
                 reuse_policy=enums_pb2.COMPUTE_WORKER_REUSE_POLICY_EXCLUSIVE,

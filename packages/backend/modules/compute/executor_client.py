@@ -35,7 +35,7 @@ from modules.datasource import schemas as datasource_schemas
 from modules.datasource.schema_protocol import schema_info_proto
 
 ComputeWorkerIdentity = compute_pb2.ComputeWorkerIdentity
-_ENGINE_SHUTDOWN_CANCELLATION = 'Compute request cancelled because its engine was shut down'
+_COMPUTE_WORKER_SHUTDOWN_CANCELLATION = 'Compute request cancelled because its compute worker was shut down'
 _HTTP_DISCONNECT_POLL_SECONDS = 0.5
 logger = logging.getLogger(__name__)
 
@@ -503,7 +503,7 @@ async def _submit_and_wait(
         if isinstance(error_code, str) and error_code:
             raise AppError(message, error_code=error_code, details=details if isinstance(details, dict) else None)
         raise HTTPException(status_code=status_code, detail=message)
-    if message == _ENGINE_SHUTDOWN_CANCELLATION:
+    if message == _COMPUTE_WORKER_SHUTDOWN_CANCELLATION:
         raise PipelineExecutionCancelledError(message)
     raise PipelineExecutionError(message)
 
@@ -539,7 +539,7 @@ def _cancel_active_requests_for_engine_in_new_session(identity: ComputeWorkerIde
         compute_requests_service.cancel_active_requests_for_engine,
         namespace=get_namespace(),
         identity=identity,
-        reason=_ENGINE_SHUTDOWN_CANCELLATION,
+        reason=_COMPUTE_WORKER_SHUTDOWN_CANCELLATION,
     )
 
 
@@ -567,7 +567,7 @@ async def preview_step(
     runtime_probe: RuntimeAvailabilityProbe,
     http_request: Request | None = None,
 ) -> compute_schemas.StepPreviewResponse:
-    normalized = request.model_copy(update={'engine_identity': compute_schemas.default_preview_engine_identity(request)})
+    normalized = request.model_copy(update={'compute_worker_identity': compute_schemas.default_preview_compute_worker_identity(request)})
     command = await _request_command(enums_pb2.COMPUTE_REQUEST_KIND_PREVIEW, normalized)
     completed = await _submit_and_wait(
         kind=enums_pb2.COMPUTE_REQUEST_KIND_PREVIEW,
@@ -893,30 +893,30 @@ async def spawn_compute_worker(
     identity: ComputeWorkerIdentity,
     runtime_probe: RuntimeAvailabilityProbe,
     resource_config: dict[str, object] | None,
-) -> compute_schemas.EngineStatusSchema:
+) -> compute_schemas.ComputeWorkerStatusSchema:
     completed = await _submit_and_wait(
         kind=enums_pb2.COMPUTE_REQUEST_KIND_SPAWN_ENGINE,
         command=_lifecycle_command('spawn_engine', identity, resource_config or {}),
         runtime_probe=runtime_probe,
     )
-    return await _validated_response(compute_schemas.EngineStatusSchema, completed)
+    return await _validated_response(compute_schemas.ComputeWorkerStatusSchema, completed)
 
 
-async def configure_engine(
+async def configure_compute_worker(
     *,
     identity: ComputeWorkerIdentity,
     runtime_probe: RuntimeAvailabilityProbe,
     resource_config: dict[str, object],
-) -> compute_schemas.EngineStatusSchema:
+) -> compute_schemas.ComputeWorkerStatusSchema:
     completed = await _submit_and_wait(
         kind=enums_pb2.COMPUTE_REQUEST_KIND_CONFIGURE_ENGINE,
         command=_lifecycle_command('configure_engine', identity, resource_config),
         runtime_probe=runtime_probe,
     )
-    return await _validated_response(compute_schemas.EngineStatusSchema, completed)
+    return await _validated_response(compute_schemas.ComputeWorkerStatusSchema, completed)
 
 
-async def shutdown_engine(
+async def shutdown_compute_worker(
     *,
     identity: ComputeWorkerIdentity,
     runtime_probe: RuntimeAvailabilityProbe,
@@ -932,7 +932,7 @@ async def shutdown_engine(
     )
 
 
-def request_engine_shutdown(
+def request_compute_worker_shutdown(
     session: Session,
     *,
     identity: ComputeWorkerIdentity,
@@ -943,7 +943,7 @@ def request_engine_shutdown(
         session,
         namespace=get_namespace(),
         identity=identity,
-        reason=_ENGINE_SHUTDOWN_CANCELLATION,
+        reason=_COMPUTE_WORKER_SHUTDOWN_CANCELLATION,
     )
     _submit(
         session,

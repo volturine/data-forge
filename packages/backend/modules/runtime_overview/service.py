@@ -68,7 +68,7 @@ def list_worker_summaries(session: Session) -> list[schemas.RuntimeWorkerSummary
     ]
 
 
-def list_engine_summaries(session: Session) -> list[schemas.EngineInstanceSummary]:
+def list_compute_worker_summaries(session: Session) -> list[schemas.ComputeWorkerInstanceSummary]:
     stmt = select(ComputeWorkerInstance).order_by(
         ComputeWorkerInstance.namespace,
         ComputeWorkerInstance.analysis_id,
@@ -76,10 +76,10 @@ def list_engine_summaries(session: Session) -> list[schemas.EngineInstanceSummar
         ComputeWorkerInstance.id,
     )
     rows = list(session.execute(stmt).scalars().all())
-    items: list[schemas.EngineInstanceSummary] = []
+    items: list[schemas.ComputeWorkerInstanceSummary] = []
     for row in rows:
         items.append(
-            schemas.EngineInstanceSummary(
+            schemas.ComputeWorkerInstanceSummary(
                 id=row.id,
                 worker_id=row.worker_id,
                 namespace=row.namespace,
@@ -96,11 +96,11 @@ def list_engine_summaries(session: Session) -> list[schemas.EngineInstanceSummar
                 status=row.status,
                 current_job_id=row.current_job_id,
                 current_build_id=row.current_build_id,
-                current_engine_run_id=row.current_compute_worker_run_id,
+                current_compute_worker_run_id=row.current_compute_worker_run_id,
                 last_activity_at=row.last_activity_at,
                 last_seen_at=row.last_seen_at,
-                scope=schemas.EngineScope.require(row.compute_worker_scope),
-                reuse_policy=schemas.EngineReusePolicy.require(row.compute_worker_reuse_policy),
+                scope=schemas.ComputeWorkerScope.require(row.compute_worker_scope),
+                reuse_policy=schemas.ComputeWorkerReusePolicy.require(row.compute_worker_reuse_policy),
                 datasource_id=row.datasource_id,
                 build_id=row.build_id,
             )

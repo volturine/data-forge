@@ -16,7 +16,7 @@ from backend_core.build_datasource_dependencies import external_datasource_ids
 from backend_core.domain.analysis.models import AnalysisStatus
 from backend_core.domain.build_runs.models import BuildRunStatus
 from backend_core.domain.compute import schemas as compute_schemas
-from backend_core.domain.engine_runs.schemas import EngineRunKind
+from backend_core.domain.compute_worker_runs.schemas import ComputeWorkerRunKind
 from backend_core.domain.scheduler.schemas import ScheduleCreate, ScheduleUpdate
 from backend_core.exceptions import AppError
 from backend_core.persistence.analysis.models import Analysis, AnalysisDataSource
@@ -1221,7 +1221,7 @@ class TestEnqueueScheduleRun:
 
         assert run is not None
         assert run.schedule_id == schedule.id
-        assert run.current_kind == EngineRunKind.BUILD.value
+        assert run.current_kind == ComputeWorkerRunKind.BUILD.value
         assert run.status == BuildRunStatus.QUEUED
         assert build_run_service.has_active_build_for_datasource(test_db_session, namespace='default', datasource_id=raw.id)
 

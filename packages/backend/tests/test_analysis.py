@@ -1384,7 +1384,7 @@ class TestAnalysisUpdate:
 
 
 class TestAnalysisDelete:
-    def test_request_engine_shutdown_skips_synchronous_dispatch(self, monkeypatch) -> None:
+    def test_request_compute_worker_shutdown_skips_synchronous_dispatch(self, monkeypatch) -> None:
         submitted: list[dict[str, object]] = []
 
         def submit(*args, **kwargs) -> None:
@@ -1393,7 +1393,7 @@ class TestAnalysisDelete:
         monkeypatch.setattr(executor_client, '_submit', submit)
         monkeypatch.setattr(executor_client.compute_requests_service, 'cancel_active_requests_for_engine', lambda *args, **kwargs: 0)
 
-        executor_client.request_engine_shutdown(
+        executor_client.request_compute_worker_shutdown(
             cast(Session, object()),
             identity=compute_pb2.ComputeWorkerIdentity(analysis_id='analysis-1', resource_id='analysis-1'),
             runtime_probe=cast(Any, object()),
@@ -1408,7 +1408,7 @@ class TestAnalysisDelete:
         def request_shutdown(session, *, identity, runtime_probe) -> None:
             shutdown_calls.append(identity)
 
-        monkeypatch.setattr(executor_client, 'request_engine_shutdown', request_shutdown)
+        monkeypatch.setattr(executor_client, 'request_compute_worker_shutdown', request_shutdown)
 
         response = client.delete(f'/api/v1/analysis/{sample_analysis.id}')
 

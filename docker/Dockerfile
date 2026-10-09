@@ -29,34 +29,34 @@ RUN apt-get update && \
     apt-get install -y --no-install-recommends build-essential && \
     rm -rf /var/lib/apt/lists/*
 
-FROM python-builder AS engine-builder
+FROM python-builder AS compute-worker-builder
 COPY packages/worker/ /app/packages/worker/
 COPY --from=protocol-builder /app/packages/worker/buf /app/packages/worker/buf
 COPY --from=protocol-builder /app/packages/worker/dataforge_protocol /app/packages/worker/dataforge_protocol
 WORKDIR /app/packages/worker
 RUN uv sync --frozen --no-dev
-# Engine containers are read-only, so cache dependency bytecode in the image
-# instead of recompiling Python sources on every cold engine start.
+# Compute-worker containers are read-only, so cache dependency bytecode in the image
+# instead of recompiling Python sources on every cold start.
 RUN .venv/bin/python -m compileall -q /app/packages/worker
 
-FROM python:${PYTHON_VERSION}-slim-trixie AS engine
+FROM python:${PYTHON_VERSION}-slim-trixie AS compute-worker
 ARG VCS_REF=unknown
 ARG BUILD_DATE=unknown
 ARG APP_VERSION=unknown
-LABEL org.opencontainers.image.title="Data-Forge Polars Engine"
-LABEL org.opencontainers.image.description="Isolated Polars compute engine"
+LABEL org.opencontainers.image.title="Data-Forge Compute Worker"
+LABEL org.opencontainers.image.description="Isolated Polars compute worker"
 LABEL org.opencontainers.image.version="${APP_VERSION}"
 LABEL org.opencontainers.image.revision="${VCS_REF}"
 LABEL org.opencontainers.image.created="${BUILD_DATE}"
 RUN addgroup --gid 1000 appgroup && \
     adduser --uid 1000 --gid 1000 --disabled-password --gecos "" appuser
-COPY --from=engine-builder --chown=appuser:appgroup /app/packages/worker /app/packages/worker
+COPY --from=compute-worker-builder --chown=appuser:appgroup /app/packages/worker /app/packages/worker
 WORKDIR /app/packages/worker
 USER appuser
 ENV PATH="/app/packages/worker/.venv/bin:${PATH}"
 ENV PYTHONPATH="/app/packages/worker"
 HEALTHCHECK NONE
-CMD ["python3", "engine_main.py"]
+CMD ["python3", "compute_worker_main.py"]
 
 FROM oven/bun:${BUN_VERSION}-alpine AS frontend-builder
 WORKDIR /app/packages/frontend
@@ -134,7 +134,7 @@ EXPOSE 50051
 CMD ["python3", "runtime_coordinator.py"]
 
 FROM app-runtime AS worker
-COPY --from=engine-builder --chown=appuser:appgroup /app/packages/worker /app/packages/worker
+COPY --from=compute-worker-builder --chown=appuser:appgroup /app/packages/worker /app/packages/worker
 USER appuser
 WORKDIR /app/packages/worker
 ENV PATH="/app/packages/worker/.venv/bin:${PATH}"

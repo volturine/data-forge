@@ -107,7 +107,7 @@ def _resource_id_for_scope(payload: dict[str, object], key: str) -> str:
     return resource_id
 
 
-def _engine_identity_from_payload(payload: dict[str, object]) -> compute_pb2.ComputeWorkerIdentity:
+def _compute_worker_identity_from_payload(payload: dict[str, object]) -> compute_pb2.ComputeWorkerIdentity:
     scope = payload.get('scope')
     reuse_policy = payload.get('reuse_policy')
     if scope == 'analysis_interactive':
@@ -155,7 +155,9 @@ def _resource_config_from_payload(payload: object) -> compute_pb2.ComputeWorkerR
 
 
 def _lifecycle_command(payload: dict[str, object]) -> compute_pb2.ComputeWorkerLifecycleCommand:
-    command = compute_pb2.ComputeWorkerLifecycleCommand(engine_identity=_engine_identity_from_payload(_required_payload_dict(payload, 'engine_identity')))
+    command = compute_pb2.ComputeWorkerLifecycleCommand(
+        engine_identity=_compute_worker_identity_from_payload(_required_payload_dict(payload, 'compute_worker_identity'))
+    )
     resource_config = _resource_config_from_payload(payload.get('resource_config'))
     if resource_config is not None:
         command.resource_config.CopyFrom(resource_config)
@@ -376,8 +378,8 @@ def _step_preview_command(payload: dict[str, object]) -> compute_pb2.StepPreview
     )
     _set_optional_string(command, 'analysis_id', _optional_str(payload, 'analysis_id'))
     _set_optional_string(command, 'tab_id', _optional_str(payload, 'tab_id'))
-    if isinstance(payload.get('engine_identity'), dict):
-        command.engine_identity.CopyFrom(_engine_identity_from_payload(_required_payload_dict(payload, 'engine_identity')))
+    if isinstance(payload.get('compute_worker_identity'), dict):
+        command.engine_identity.CopyFrom(_compute_worker_identity_from_payload(_required_payload_dict(payload, 'compute_worker_identity')))
     resource_config = _resource_config_from_payload(payload.get('resource_config'))
     if resource_config is not None:
         command.resource_config.CopyFrom(resource_config)
@@ -606,7 +608,10 @@ def _response_from_payload(kind: enums_pb2.ComputeRequestKind, payload: dict[str
         enums_pb2.COMPUTE_REQUEST_KIND_SPAWN_ENGINE,
         enums_pb2.COMPUTE_REQUEST_KIND_CONFIGURE_ENGINE,
     }:
-        response.engine_status.CopyFrom(_parse_proto_message(compute_pb2.ComputeWorkerStatusResult, payload))
+        status_payload = dict(payload)
+        if 'current_compute_worker_run_id' in status_payload:
+            status_payload['current_engine_run_id'] = status_payload.pop('current_compute_worker_run_id')
+        response.engine_status.CopyFrom(_parse_proto_message(compute_pb2.ComputeWorkerStatusResult, status_payload))
     elif kind in {
         enums_pb2.COMPUTE_REQUEST_KIND_DOWNLOAD,
         enums_pb2.COMPUTE_REQUEST_KIND_SHUTDOWN_ENGINE,
@@ -665,6 +670,8 @@ def response_payload(envelope: compute_pb2.ComputeResponseEnvelope) -> dict[str,
         payload.setdefault('row_count', 0)
         _restore_int64(payload, 'row_count')
     if selected == 'engine_status':
+        if 'current_engine_run_id' in payload:
+            payload['current_compute_worker_run_id'] = payload.pop('current_engine_run_id')
         engine_result = cast(compute_pb2.ComputeWorkerStatusResult, value)
         if engine_result.HasField('lifecycle_status'):
             payload['lifecycle_status'] = _enum_token_from_number(enums_pb2.ComputeWorkerInstanceStatus.DESCRIPTOR, engine_result.lifecycle_status)

@@ -61,7 +61,7 @@ class TestCompareEndpoint:
         test_db_session.refresh(run_b)
 
         resp = client.get(
-            '/api/v1/engine-runs/compare',
+            '/api/v1/compute-worker-runs/compare',
             params={'run_a': run_a.id, 'run_b': run_b.id},
         )
         assert resp.status_code == 200
@@ -76,7 +76,7 @@ class TestCompareEndpoint:
 
     def test_compare_endpoint_not_found(self, client) -> None:
         resp = client.get(
-            '/api/v1/engine-runs/compare',
+            '/api/v1/compute-worker-runs/compare',
             params={'run_a': 'fake-a', 'run_b': 'fake-b'},
         )
         assert resp.status_code == 400
@@ -85,7 +85,7 @@ class TestCompareEndpoint:
         run_a = _create_run(test_db_session, result_json={'row_count': 10})
         run_b = _create_run(test_db_session, result_json={'row_count': 20})
         resp = client.get(
-            '/api/v1/engine-runs/compare',
+            '/api/v1/compute-worker-runs/compare',
             params={
                 'run_a': run_a.id,
                 'run_b': run_b.id,

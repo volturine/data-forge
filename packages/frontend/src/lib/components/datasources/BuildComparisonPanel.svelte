@@ -40,11 +40,11 @@
 		return typeof config.branch === 'string' ? config.branch : null;
 	});
 
-	const engineRunsStore = new BuildsStore();
+	const computeWorkerRunsStore = new BuildsStore();
 	onMount(() => {
 		if (logicalBuildMode) return;
-		engineRunsStore.load({ datasource_id: datasource.id, limit: 50 });
-		return () => engineRunsStore.close();
+		computeWorkerRunsStore.load({ datasource_id: datasource.id, limit: 50 });
+		return () => computeWorkerRunsStore.close();
 	});
 
 	const snapshotsQuery = createQuery(() => ({
@@ -61,7 +61,7 @@
 	}));
 
 	const runs = $derived(
-		engineRunsStore.builds.filter(
+		computeWorkerRunsStore.builds.filter(
 			(run) => run.current_kind === 'build' && run.status === 'completed'
 		)
 	);
@@ -320,15 +320,15 @@
 					>
 						Select builds
 					</div>
-					{#if logicalBuildMode ? snapshotsQuery.isLoading : engineRunsStore.status === 'connecting'}
+					{#if logicalBuildMode ? snapshotsQuery.isLoading : computeWorkerRunsStore.status === 'connecting'}
 						<div class={css({ fontSize: 'sm', color: 'fg.tertiary' })}>Loading builds...</div>
-					{:else if logicalBuildMode ? snapshotsQuery.isError : engineRunsStore.status === 'error'}
+					{:else if logicalBuildMode ? snapshotsQuery.isError : computeWorkerRunsStore.status === 'error'}
 						<div class={css({ fontSize: 'sm', color: 'fg.error' })}>
 							{logicalBuildMode
 								? snapshotsQuery.error instanceof Error
 									? snapshotsQuery.error.message
 									: 'Failed to load builds'
-								: (engineRunsStore.error ?? 'Failed to load runs')}
+								: (computeWorkerRunsStore.error ?? 'Failed to load runs')}
 						</div>
 					{:else if logicalBuildMode ? snapshots.length === 0 : runs.length === 0}
 						<p class={css({ fontSize: 'sm', color: 'fg.tertiary' })}>

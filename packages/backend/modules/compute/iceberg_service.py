@@ -6,7 +6,7 @@ from sqlmodel import Session
 from backend_core.data_plane_client import client_from_settings
 from backend_core.domain.build_runs.models import BuildRunStatus
 from backend_core.domain.compute import schemas
-from backend_core.domain.engine_runs.schemas import EngineRunKind, EngineRunStatus
+from backend_core.domain.compute_worker_runs.schemas import ComputeWorkerRunKind, ComputeWorkerRunStatus
 from backend_core.exceptions import DataSourceSnapshotError, datasource_not_found
 from backend_core.namespace import get_namespace
 from backend_core.persistence.build_runs.models import BuildRun
@@ -35,7 +35,7 @@ def _matches_branch(payload: dict[str, object] | None, branch: str | None) -> bo
     return isinstance(run_branch, str) and run_branch == branch
 
 
-def _engine_run_end_ms(run: ComputeWorkerRun) -> int:
+def _compute_worker_run_end_ms(run: ComputeWorkerRun) -> int:
     completed_at = run.completed_at or run.created_at
     marker = completed_at if completed_at.tzinfo is not None else completed_at.replace(tzinfo=UTC)
     return int(marker.timestamp() * 1000)
@@ -79,8 +79,8 @@ def _ingest_run_snapshot_ids(
     stmt = (
         select(ComputeWorkerRun)
         .where(sa(ComputeWorkerRun.datasource_id == datasource_id))
-        .where(sa(ComputeWorkerRun.kind == EngineRunKind.INGEST.value))
-        .where(sa(ComputeWorkerRun.status == EngineRunStatus.SUCCESS.value))
+        .where(sa(ComputeWorkerRun.kind == ComputeWorkerRunKind.INGEST.value))
+        .where(sa(ComputeWorkerRun.status == ComputeWorkerRunStatus.SUCCESS.value))
     )
     runs = session.execute(stmt).scalars().all()
     direct_snapshot_ids: set[str] = set()
@@ -105,9 +105,9 @@ def _ingest_run_snapshot_ids(
     )
     snapshot_index = 0
     latest_candidate: schemas.IcebergSnapshotInfo | None = None
-    ordered_runs = sorted(unresolved_runs, key=lambda run: (_engine_run_end_ms(run), run.id))
+    ordered_runs = sorted(unresolved_runs, key=lambda run: (_compute_worker_run_end_ms(run), run.id))
     for run in ordered_runs:
-        run_end_ms = _engine_run_end_ms(run)
+        run_end_ms = _compute_worker_run_end_ms(run)
         while snapshot_index < len(ordered_snapshots):
             snapshot = ordered_snapshots[snapshot_index][1]
             if snapshot.timestamp_ms > run_end_ms:

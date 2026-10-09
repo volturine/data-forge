@@ -33,7 +33,7 @@ from runtime.compute_service import ExportDatasourceResult
 from runtime.compute_worker import PolarsComputeWorker
 from runtime.domain.compute import schemas as compute_schemas
 from runtime.domain.compute.base import ComputeWorkerStatusInfo
-from runtime.domain.engine_runs.schemas import ComputeWorkerRunResponseSchema
+from runtime.domain.compute_worker_runs.schemas import ComputeWorkerRunResponseSchema
 from runtime.executors import (
     CLEANUP_EXECUTOR,
     COMPUTE_EXECUTOR,
@@ -590,8 +590,8 @@ async def test_compute_request_claims_share_a_bounded_control_plane(monkeypatch)
     assert peak == claim_capacity
 
 
-def test_engine_run_execution_entry_proto_uses_typed_fields() -> None:
-    entry = worker_runtime_client._engine_run_execution_entry_proto(
+def test_compute_worker_run_execution_entry_proto_uses_typed_fields() -> None:
+    entry = worker_runtime_client._compute_worker_run_execution_entry_proto(
         {
             "key": "filter",
             "label": "Filter",
@@ -610,7 +610,7 @@ def test_engine_run_execution_entry_proto_uses_typed_fields() -> None:
     assert entry.share_pct == 100.0
 
 
-def test_engine_run_execution_entries_normalize_invalid_timing_metrics() -> None:
+def test_compute_worker_run_execution_entries_normalize_invalid_timing_metrics() -> None:
     entries = compute_service._build_execution_entries(
         step_timings={"filter": -5.0, "join": float("nan")},
         read_duration_ms=-10.0,
@@ -647,8 +647,8 @@ def test_download_operation_params_accept_generated_enum_numbers() -> None:
     assert params.format == enums_pb2.EXPORT_FORMAT_JSON
 
 
-def test_engine_run_update_proto_uses_typed_patch_fields() -> None:
-    update = worker_runtime_client._engine_run_update_proto(
+def test_compute_worker_run_update_proto_uses_typed_patch_fields() -> None:
+    update = worker_runtime_client._compute_worker_run_update_proto(
         {
             "status": "success",
             "result_json": {"row_count": 2},
@@ -679,8 +679,8 @@ def test_engine_run_update_proto_uses_typed_patch_fields() -> None:
     assert update.clear_current_step is True
 
 
-def test_engine_run_finalization_uses_the_existing_typed_update() -> None:
-    finalization = worker_runtime_client._engine_run_finalization_proto(
+def test_compute_worker_run_finalization_uses_the_existing_typed_update() -> None:
+    finalization = worker_runtime_client._compute_worker_run_finalization_proto(
         worker_runtime_client.ComputeWorkerRunFinalization(
             run_id="run-1",
             fields={
@@ -698,8 +698,8 @@ def test_engine_run_finalization_uses_the_existing_typed_update() -> None:
     assert finalization.update.HasField("completed_at")
 
 
-def test_engine_status_result_proto_uses_typed_snapshot_fields() -> None:
-    status = worker_runtime_client._engine_status_result_proto(
+def test_compute_worker_status_result_proto_uses_typed_snapshot_fields() -> None:
+    status = worker_runtime_client._compute_worker_status_result_proto(
         ComputeWorkerStatusInfo(
             analysis_id="analysis-1",
             resource_id="datasource-1",
@@ -722,7 +722,7 @@ def test_engine_status_result_proto_uses_typed_snapshot_fields() -> None:
             datasource_id="datasource-1",
             build_id=None,
             current_build_id=None,
-            current_engine_run_id=None,
+            current_compute_worker_run_id=None,
         )
     )
 
@@ -733,7 +733,7 @@ def test_engine_status_result_proto_uses_typed_snapshot_fields() -> None:
     assert status.scope == enums_pb2.COMPUTE_WORKER_SCOPE_DATASOURCE_PREVIEW
 
 
-def _engine_identity_payload(identity) -> dict[str, str]:
+def _compute_worker_identity_payload(identity) -> dict[str, str]:
     payload: dict[str, str] = {
         "scope": "datasource_preview" if identity.HasField("datasource_id") else "build" if identity.HasField("build_id") else "analysis_interactive",
         "reuse_policy": "exclusive" if identity.HasField("build_id") else "shared",
@@ -1385,7 +1385,7 @@ async def test_compute_request_lease_loss_cancels_shared_job_without_stopping_wo
             assert namespace == "tenant-a"
             assert owned is False
 
-        def shutdown_engine(self, identity, *, namespace: str | None = None) -> None:
+        def shutdown_compute_worker(self, identity, *, namespace: str | None = None) -> None:
             shutdown_calls.append((identity.resource_id, namespace))
 
         def cancel_engine_job(self, _identity, *, namespace, job_id):
@@ -1394,7 +1394,7 @@ async def test_compute_request_lease_loss_cancels_shared_job_without_stopping_wo
             assert job_id == "req-lease-loss"
             cancelled.set()
 
-        def shutdown_engine_after_request_lease_loss(self, identity, *, namespace):
+        def shutdown_compute_worker_after_request_lease_loss(self, identity, *, namespace):
             assert identity.reuse_policy == enums_pb2.COMPUTE_WORKER_REUSE_POLICY_SHARED
             assert namespace == "tenant-a"
 
@@ -1420,7 +1420,7 @@ async def test_compute_request_lease_loss_cancels_shared_job_without_stopping_wo
         lease_ttl_seconds=300,
         command_envelope=_preview_command_envelope(request_id="req-lease-loss"),
     )
-    identity = compute_request_runtime._engine_identity_for_claimed(claimed)
+    identity = compute_request_runtime._compute_worker_identity_for_claimed(claimed)
     assert identity is not None
     assert identity.reuse_policy == enums_pb2.COMPUTE_WORKER_REUSE_POLICY_SHARED
 
@@ -1539,10 +1539,10 @@ async def test_lease_loss_releases_admission_completed_in_same_turn(monkeypatch)
             assert namespace == "tenant-a"
             assert job_id == "req-admission-handoff"
 
-        def shutdown_engine_after_request_lease_loss(self, _identity, *, namespace):
+        def shutdown_compute_worker_after_request_lease_loss(self, _identity, *, namespace):
             assert namespace == "tenant-a"
 
-        def shutdown_engine(self, _identity, *, namespace):
+        def shutdown_compute_worker(self, _identity, *, namespace):
             assert namespace == "tenant-a"
 
     async def lose_lease(_claimed, *, stop_event, lease_confirmed):
@@ -1628,10 +1628,10 @@ async def test_lease_loss_releases_engine_lane_acquired_in_same_turn(monkeypatch
             assert namespace == "tenant-a"
             assert job_id == "req-engine-lane-handoff"
 
-        def shutdown_engine_after_request_lease_loss(self, _identity, *, namespace):
+        def shutdown_compute_worker_after_request_lease_loss(self, _identity, *, namespace):
             assert namespace == "tenant-a"
 
-        def shutdown_engine(self, _identity, *, namespace):
+        def shutdown_compute_worker(self, _identity, *, namespace):
             assert namespace == "tenant-a"
 
     async def lose_lease(_claimed, *, stop_event, lease_confirmed):
@@ -1832,7 +1832,7 @@ async def test_lease_loss_releases_work_permit_acquired_in_same_turn(monkeypatch
             assert namespace == "tenant-a"
             assert job_id == "req-work-permit-handoff"
 
-        def shutdown_engine_after_request_lease_loss(self, _identity, *, namespace):
+        def shutdown_compute_worker_after_request_lease_loss(self, _identity, *, namespace):
             assert namespace == "tenant-a"
 
     async def lose_lease(_claimed, *, stop_event, lease_confirmed):
@@ -1933,7 +1933,7 @@ async def test_terminal_compute_publication_wins_late_lease_loss(monkeypatch) ->
         def release_engine_job_slot(self, _identity, *, namespace):
             assert namespace == "tenant-a"
 
-        def shutdown_engine(self, identity, *, namespace: str | None = None) -> None:
+        def shutdown_compute_worker(self, identity, *, namespace: str | None = None) -> None:
             del namespace
             shutdown_calls.append(identity.resource_id)
 
@@ -1941,7 +1941,7 @@ async def test_terminal_compute_publication_wins_late_lease_loss(monkeypatch) ->
             del namespace, job_id
             cancelled_jobs.append(identity.resource_id)
 
-        def shutdown_engine_after_request_lease_loss(self, identity, *, namespace):
+        def shutdown_compute_worker_after_request_lease_loss(self, identity, *, namespace):
             del namespace
             shutdown_calls.append(identity.resource_id)
 
@@ -2050,7 +2050,7 @@ def test_shutdown_compute_request_removes_active_engine_and_emits_empty_snapshot
         command_envelope=_command_envelope(
             kind=enums_pb2.COMPUTE_REQUEST_KIND_SHUTDOWN_ENGINE,
             request_id="req-1",
-            payload={"engine_identity": _engine_identity_payload(identity)},
+            payload={"compute_worker_identity": _compute_worker_identity_payload(identity)},
             shutdown_identity=identity,
         ),
     )
@@ -2095,7 +2095,7 @@ def test_shutdown_compute_request_is_idempotent_when_engine_already_absent(monke
         command_envelope=_command_envelope(
             kind=enums_pb2.COMPUTE_REQUEST_KIND_SHUTDOWN_ENGINE,
             request_id="req-missing-shutdown",
-            payload={"engine_identity": _engine_identity_payload(identity)},
+            payload={"compute_worker_identity": _compute_worker_identity_payload(identity)},
             shutdown_identity=identity,
         ),
     )
@@ -2240,7 +2240,7 @@ async def test_pending_datasource_delete_waits_for_busy_preview_engine() -> None
     finalized: list[tuple[str, str]] = []
     shutdown_calls: list[str] = []
     manager = SimpleNamespace(
-        shutdown_engine_if_idle=lambda identity, *, namespace=None: False,
+        shutdown_compute_worker_if_idle=lambda identity, *, namespace=None: False,
     )
 
     async def finalize_delete_async(*, namespace: str, datasource_id: str) -> bool:
@@ -2271,13 +2271,13 @@ async def test_pending_datasource_delete_finalizes_once_preview_engine_is_idle()
     event_loop = asyncio.get_running_loop()
     expected_identity = _datasource_preview_identity(datasource_id)
 
-    def shutdown_engine_if_idle(identity, *, namespace=None):
+    def shutdown_compute_worker_if_idle(identity, *, namespace=None):
         manager_threads.append(threading.get_ident())
         shutdown_calls.append(identity.resource_id)
         return True
 
     manager = SimpleNamespace(
-        shutdown_engine_if_idle=shutdown_engine_if_idle,
+        shutdown_compute_worker_if_idle=shutdown_compute_worker_if_idle,
     )
 
     async def pending_deletes_async(*_args, **_kwargs):
@@ -2308,7 +2308,7 @@ async def test_pending_datasource_delete_waits_when_backend_defers_finalization(
     datasource_id = "datasource-3"
     finalized: list[tuple[str, str]] = []
     manager = SimpleNamespace(
-        shutdown_engine_if_idle=lambda _identity, *, namespace=None: True,
+        shutdown_compute_worker_if_idle=lambda _identity, *, namespace=None: True,
     )
 
     async def finalize_delete_async(*, namespace: str, datasource_id: str) -> bool:
@@ -2370,14 +2370,14 @@ async def test_run_analysis_build_stream_shuts_down_build_engine_after_completio
     shutdown_calls: list[str] = []
     seen_engine_identities: list[str] = []
 
-    def fake_export_data(*, engine_identity, **_kwargs) -> ExportDatasourceResult:
-        seen_engine_identities.append(engine_identity.resource_id)
+    def fake_export_data(*, compute_worker_identity, **_kwargs) -> ExportDatasourceResult:
+        seen_engine_identities.append(compute_worker_identity.resource_id)
         return ExportDatasourceResult(
             datasource_id="out-1",
             datasource_name="output_table",
             result_meta={},
             source_datasource_id="source-1",
-            engine_run_id="run-1",
+            compute_worker_run_id="run-1",
         )
 
     monkeypatch.setattr(compute_service, "export_data", fake_export_data)
@@ -2385,7 +2385,7 @@ async def test_run_analysis_build_stream_shuts_down_build_engine_after_completio
     manager = cast(
         Any,
         SimpleNamespace(
-            shutdown_engine=lambda identity: shutdown_calls.append(identity.resource_id),
+            shutdown_compute_worker=lambda identity: shutdown_calls.append(identity.resource_id),
         ),
     )
 
@@ -2412,7 +2412,7 @@ async def test_run_analysis_build_stream_shuts_down_build_engine_after_completio
 # ---------------------------------------------------------------------------
 
 
-class TestEngineRunProgressDefault:
+class TestComputeWorkerRunProgressDefault:
     def test_progress_defaults_to_zero(self):
         """progress: float = 0.0 means NULL from DB should not crash."""
         data = {

@@ -86,7 +86,7 @@ class TestExceptions:
         assert exc.error_code == 'PIPELINE_EXECUTION_ERROR'
 
     def test_pipeline_execution_cancelled_error_is_pipeline_execution_error(self):
-        exc = PipelineExecutionCancelledError('Compute request cancelled because its engine was shut down')
+        exc = PipelineExecutionCancelledError('Compute request cancelled because its compute worker was shut down')
 
         assert isinstance(exc, PipelineExecutionError)
         assert exc.error_code == 'PIPELINE_EXECUTION_ERROR'

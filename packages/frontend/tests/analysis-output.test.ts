@@ -661,7 +661,7 @@ test.describe('Analyses – row count action', () => {
 		const aId = await createAnalysis(request, aName, sharedDatasourceId);
 		try {
 			await gotoAnalysisEditor(page, aId);
-			// Engines process jobs serially. Wait for the auto-preview to finish so
+			// Compute workers process jobs serially. Wait for the auto-preview to finish so
 			// the row-count request is not queued behind a still-running preview.
 			await waitForInlinePreviewReady(page);
 

@@ -86,7 +86,7 @@ just docker-dev-logs
 ```
 
 The dev stack uses the same host ports as `just dev` (API 8000, Vite 3000) and
-the same engine network name is unique to its `-p dataforge-dev` project, so the
+the same compute-worker network name is unique to its `-p dataforge-dev` project, so the
 two dev modes are mutually exclusive by design: run either one, not both.
 
 ## Production compose
@@ -98,11 +98,11 @@ docker compose --env-file docker/env/prod.env -p dataforge-prod -f docker/compos
 docker compose --env-file docker/env/prod.env -p dataforge-prod -f docker/compose.yaml up -d
 ```
 
-All four `DF_*_IMAGE` values must refer to the same Data-Forge release. The
-worker starts the engine image dynamically, so pull it explicitly before startup:
+All five `DF_*_IMAGE` values must refer to the same Data-Forge release. The
+worker manager starts compute workers dynamically, so pull their image before startup:
 
 ```bash
-docker pull "$(grep '^DF_ENGINE_IMAGE=' docker/env/prod.env | cut -d= -f2-)"
+docker pull "$(grep '^DF_COMPUTE_WORKER_IMAGE=' docker/env/prod.env | cut -d= -f2-)"
 ```
 
 Set `DF_DOCKER_SOCKET_PATH` and `DF_DOCKER_GID` for the host Docker socket. This
@@ -129,8 +129,8 @@ volumes is intentional and verified.
 
 ## Maintainer local production smoke test
 
-`just docker-prod` builds local `api` / `scheduler` / `worker` / `engine` images and starts
-the same production compose file and env file, overriding the four
+`just docker-prod` builds local `api` / `scheduler` / `worker manager` / `compute worker` images and starts
+the same production compose file and env file, overriding the five
 `DF_*_IMAGE` tags and binding the API to host port 8300 so the smoke stack
 never collides with the dev stacks or the central deployment stacks:
 
@@ -150,14 +150,14 @@ overrides) before a successful smoke start.
 Every fixed Docker resource has a unique name so prod, dev, tests, e2e, and the
 central deployments workspace can coexist on one host:
 
-| Consumer | Compose project | Engine network | Host ports |
+| Consumer | Compose project | Compute-worker network | Host ports |
 | --- | --- | --- | --- |
-| Source dev (`just dev`) / `docker-dev` | `dataforge-dev` (compose) | `dataforge-dev-engine-runtime` | 8000 API, 3000 Vite |
-| Production smoke (`docker-prod`) | `dataforge-prod` | `dataforge-prod-engine-runtime` | 8300 |
-| Central deployment prod | `dataforge-app` | `dataforge-app-engine-runtime` | 3300 |
-| Central deployment dev / PR preview | `dataforge-app-dev` | `dataforge-app-dev-engine-runtime` | 3400 |
-| Unit/integration tests | — | `dataforge-integration-engine-<uuid>` | random free ports |
-| E2E suite | — | `dataforge-e2e-engine-<run-id>` | random free ports |
+| Source dev (`just dev`) / `docker-dev` | `dataforge-dev` (compose) | `dataforge-dev-compute-worker-runtime` | 8000 API, 3000 Vite |
+| Production smoke (`docker-prod`) | `dataforge-prod` | `dataforge-prod-compute-worker-runtime` | 8300 |
+| Central deployment prod | `dataforge-app` | `dataforge-app-compute-worker-runtime` | 3300 |
+| Central deployment dev / PR preview | `dataforge-app-dev` | `dataforge-app-dev-compute-worker-runtime` | 3400 |
+| Unit/integration tests | — | `dataforge-integration-compute-worker-<uuid>` | random free ports |
+| E2E suite | — | `dataforge-e2e-compute-worker-<run-id>` | random free ports |
 
 When adding a new fixed resource, pick the next free name/port and update this
 table. See [Deployment](../docs/DEPLOYMENT.md) for the full standard.

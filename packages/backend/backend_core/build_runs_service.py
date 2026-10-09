@@ -12,7 +12,7 @@ from backend_core import runtime_ipc, runtime_outbox_service, runtime_work_servi
 from backend_core.domain.analysis.step_types import PipelineStepType
 from backend_core.domain.build_runs.models import BuildRunStatus
 from backend_core.domain.compute import schemas as compute_schemas
-from backend_core.domain.engine_runs.schemas import EngineRunExecutionCategory, EngineRunKind
+from backend_core.domain.compute_worker_runs.schemas import ComputeWorkerRunExecutionCategory, ComputeWorkerRunKind
 from backend_core.domain.runtime.events import RuntimePayloadKind
 from backend_core.json_utils import copy_json_dict
 from backend_core.namespace import get_namespace
@@ -63,8 +63,8 @@ def _build_event_context_proto(
         context.current_output_id = event.current_output_id
     if event.current_output_name is not None:
         context.current_output_name = event.current_output_name
-    if event.engine_run_id is not None:
-        context.engine_run_id = event.engine_run_id
+    if event.compute_worker_run_id is not None:
+        context.engine_run_id = event.compute_worker_run_id
     return context
 
 
@@ -92,10 +92,10 @@ def _build_step_kind_proto(step_type: str) -> compute_pb2.BuildStepKind:
         pass
 
     try:
-        category = EngineRunExecutionCategory.require(step_type)
+        category = ComputeWorkerRunExecutionCategory.require(step_type)
     except ValueError:
         raise ValueError(f'Unsupported build step type for protocol event: {step_type!r}') from None
-    if category in {EngineRunExecutionCategory.READ, EngineRunExecutionCategory.WRITE}:
+    if category in {ComputeWorkerRunExecutionCategory.READ, ComputeWorkerRunExecutionCategory.WRITE}:
         message.execution_category = cast(Any, category.number)
         return message
     raise ValueError(f'Unsupported build execution category for protocol step event: {step_type!r}')
@@ -209,7 +209,7 @@ def stage_build_run(
     resource_config_json: dict[str, Any] | None = None,
     result_json: dict[str, Any] | None = None,
     status: BuildRunStatus | str = BuildRunStatus.RUNNING,
-    current_engine_run_id: str | None = None,
+    current_compute_worker_run_id: str | None = None,
     current_kind: str | None = None,
     current_datasource_id: str | None = None,
     current_tab_id: str | None = None,
@@ -235,7 +235,7 @@ def stage_build_run(
         starter_json=copy_json_dict(starter_json),
         resource_config_json=copy_json_dict(resource_config_json) if isinstance(resource_config_json, dict) else None,
         result_json=copy_json_dict(result_json) if isinstance(result_json, dict) else None,
-        current_compute_worker_run_id=current_engine_run_id,
+        current_compute_worker_run_id=current_compute_worker_run_id,
         current_kind=current_kind,
         current_datasource_id=current_datasource_id,
         current_tab_id=current_tab_id,
@@ -275,8 +275,13 @@ def has_active_build_for_datasource(session: Session, *, namespace: str, datasou
     return session.execute(statement).first() is not None
 
 
-def get_build_run_by_engine_run(session: Session, engine_run_id: str) -> BuildRun | None:
-    stmt = select(BuildRun).where(sa(BuildRun.current_compute_worker_run_id == engine_run_id)).order_by(desc(sa(BuildRun.updated_at)), sa(BuildRun.id)).limit(1)
+def get_build_run_by_compute_worker_run(session: Session, compute_worker_run_id: str) -> BuildRun | None:
+    stmt = (
+        select(BuildRun)
+        .where(sa(BuildRun.current_compute_worker_run_id == compute_worker_run_id))
+        .order_by(desc(sa(BuildRun.updated_at)), sa(BuildRun.id))
+        .limit(1)
+    )
     return session.execute(stmt).scalars().first()
 
 
@@ -287,7 +292,7 @@ def list_build_runs(
     datasource_id: str | None = None,
     kind: str | None = None,
     status: BuildRunStatus | str | None = None,
-    current_engine_run_id: str | None = None,
+    current_compute_worker_run_id: str | None = None,
     search: str | None = None,
     limit: int = 100,
     offset: int = 0,
@@ -310,8 +315,8 @@ def list_build_runs(
         stmt = stmt.where(sa(BuildRun.current_kind == kind))
     if status is not None:
         stmt = stmt.where(sa(BuildRun.status == BuildRunStatus.require(status)))
-    if current_engine_run_id is not None:
-        stmt = stmt.where(sa(BuildRun.current_compute_worker_run_id == current_engine_run_id))
+    if current_compute_worker_run_id is not None:
+        stmt = stmt.where(sa(BuildRun.current_compute_worker_run_id == current_compute_worker_run_id))
     if search:
         q = f'%{search}%'
         stmt = stmt.where(
@@ -506,7 +511,7 @@ def stage_build_event(
         sequence=sequence,
         type=event.type,
         payload_json=payload_json,
-        compute_worker_run_id=event.engine_run_id,
+        compute_worker_run_id=event.compute_worker_run_id,
         emitted_at=event.emitted_at,
         created_at=created_at,
     )
@@ -557,7 +562,7 @@ def stage_build_event(
         sequence=sequence,
         type=event.type,
         payload_json=payload_json,
-        compute_worker_run_id=event.engine_run_id,
+        compute_worker_run_id=event.compute_worker_run_id,
         emitted_at=event.emitted_at,
         created_at=created_at,
     )
@@ -646,43 +651,16 @@ def latest_namespace_update(session: Session, *, namespace: str) -> datetime | N
     return updated if isinstance(updated, datetime) else None
 
 
-def _legacy_run_enum_name(value: object, *, current_prefix: str, legacy_prefix: str) -> object:
-    if isinstance(value, str) and value.startswith(current_prefix):
-        return legacy_prefix + value[len(current_prefix) :]
-    return value
-
-
-def _preserve_legacy_run_enum_names(payload: dict[str, object]) -> dict[str, object]:
-    # The public build-stream contract keeps its enum names until #224's API/WS layer.
-    context = payload.get('context')
-    if isinstance(context, dict) and 'currentKind' in context:
-        context['currentKind'] = _legacy_run_enum_name(
-            context['currentKind'],
-            current_prefix='COMPUTE_WORKER_RUN_KIND_',
-            legacy_prefix='ENGINE_RUN_KIND_',
-        )
-    for event_key in ('stepStarted', 'stepCompleted', 'stepFailed'):
-        event = payload.get(event_key)
-        if not isinstance(event, dict):
-            continue
-        step_kind = event.get('stepKind')
-        if isinstance(step_kind, dict) and 'executionCategory' in step_kind:
-            step_kind['executionCategory'] = _legacy_run_enum_name(
-                step_kind['executionCategory'],
-                current_prefix='COMPUTE_WORKER_RUN_EXECUTION_CATEGORY_',
-                legacy_prefix='ENGINE_RUN_EXECUTION_CATEGORY_',
-            )
-    return payload
-
-
 def serialize_event_row(row: BuildEvent) -> dict[str, object]:
     event = compute_schemas.BuildEventAdapter.validate_python(row.payload_json)
-    # MessageToDict emits enum identifiers; retain legacy names only at enum fields.
     payload = json_format.MessageToDict(
         _build_event_proto(event, namespace=row.namespace, sequence=row.sequence),
         always_print_fields_with_no_presence=True,
     )
-    return _preserve_legacy_run_enum_names(cast(dict[str, object], payload))
+    context = payload.get('context')
+    if isinstance(context, dict) and 'engineRunId' in context:
+        context['computeWorkerRunId'] = context.pop('engineRunId')
+    return payload
 
 
 def fold_build_detail(session: Session, build_run: BuildRun) -> compute_schemas.BuildRunDetail:
@@ -788,13 +766,13 @@ def fold_build_detail(session: Session, build_run: BuildRun) -> compute_schemas.
         current_step=build_run.current_step,
         current_step_index=build_run.current_step_index,
         total_steps=build_run.total_steps,
-        current_kind=EngineRunKind.parse(build_run.current_kind),
+        current_kind=ComputeWorkerRunKind.parse(build_run.current_kind),
         current_datasource_id=build_run.current_datasource_id,
         current_tab_id=build_run.current_tab_id,
         current_tab_name=build_run.current_tab_name,
         current_output_id=build_run.current_output_id,
         current_output_name=build_run.current_output_name,
-        current_engine_run_id=build_run.current_compute_worker_run_id,
+        current_compute_worker_run_id=build_run.current_compute_worker_run_id,
         total_tabs=build_run.total_tabs,
         cancelled_at=build_run.cancelled_at,
         cancelled_by=build_run.cancelled_by,
@@ -832,13 +810,13 @@ def build_summary(build_run: BuildRun) -> compute_schemas.BuildRunSummary:
         current_step=build_run.current_step,
         current_step_index=build_run.current_step_index,
         total_steps=build_run.total_steps,
-        current_kind=EngineRunKind.parse(build_run.current_kind),
+        current_kind=ComputeWorkerRunKind.parse(build_run.current_kind),
         current_datasource_id=build_run.current_datasource_id,
         current_tab_id=build_run.current_tab_id,
         current_tab_name=build_run.current_tab_name,
         current_output_id=build_run.current_output_id,
         current_output_name=build_run.current_output_name,
-        current_engine_run_id=build_run.current_compute_worker_run_id,
+        current_compute_worker_run_id=build_run.current_compute_worker_run_id,
         total_tabs=build_run.total_tabs,
         cancelled_at=build_run.cancelled_at,
         cancelled_by=build_run.cancelled_by,

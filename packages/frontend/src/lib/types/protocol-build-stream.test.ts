@@ -18,8 +18,8 @@ const BASE_CONTEXT = {
 	tabName: 'Tab 1',
 	currentOutputId: 'out-1',
 	currentOutputName: 'Output 1',
-	engineRunId: 'engine-1'
-} satisfies NonNullable<BuildEventJson['context']>;
+	computeWorkerRunId: 'compute-worker-run-1'
+} as unknown as NonNullable<BuildEventJson['context']>;
 
 describe('protocol build stream conversion', () => {
 	test('converts generated progress event JSON to UI build event shape', () => {
@@ -49,7 +49,7 @@ describe('protocol build stream conversion', () => {
 			tab_name: 'Tab 1',
 			current_output_id: 'out-1',
 			current_output_name: 'Output 1',
-			engine_run_id: 'engine-1',
+			compute_worker_run_id: 'compute-worker-run-1',
 			progress: 0.5,
 			elapsed_ms: 1200,
 			estimated_remaining_ms: 800,
@@ -59,7 +59,7 @@ describe('protocol build stream conversion', () => {
 		});
 	});
 
-	test('accepts legacy run enum JSON names while the API rename is deferred', () => {
+	test('rejects legacy run enum JSON names after the API rename', () => {
 		const legacyProtocolEvent = {
 			context: { ...BASE_CONTEXT, currentKind: 'ENGINE_RUN_KIND_BUILD' },
 			namespace: 'default',
@@ -74,12 +74,7 @@ describe('protocol build stream conversion', () => {
 			}
 		} as unknown as BuildEventJson;
 
-		expect(protocolBuildEventToBuildEvent(legacyProtocolEvent)).toMatchObject({
-			type: 'step_complete',
-			current_kind: 'build',
-			step_type: 'read',
-			duration_ms: 125
-		});
+		expect(protocolBuildEventToBuildEvent(legacyProtocolEvent)).toBeNull();
 	});
 
 	test('rejects legacy flat build event JSON', () => {

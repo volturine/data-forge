@@ -280,7 +280,7 @@ async def delete_analysis(
             raise HTTPException(status_code=404, detail=str(exc)) from exc
         # The deletion is committed above; runtime teardown must not delay its response.
         with contextlib.suppress(HTTPException):
-            executor_client.request_engine_shutdown(
+            executor_client.request_compute_worker_shutdown(
                 session,
                 identity=compute_pb2.ComputeWorkerIdentity(
                     scope=enums_pb2.COMPUTE_WORKER_SCOPE_ANALYSIS_INTERACTIVE,
@@ -353,7 +353,7 @@ async def preview_analysis(
     preview = await executor_client.preview_step(
         compute_schemas.StepPreviewRequest(
             analysis_id=analysis_id_value,
-            engine_identity=compute_pb2.ComputeWorkerIdentity(
+            compute_worker_identity=compute_pb2.ComputeWorkerIdentity(
                 scope=enums_pb2.COMPUTE_WORKER_SCOPE_ANALYSIS_INTERACTIVE,
                 reuse_policy=enums_pb2.COMPUTE_WORKER_REUSE_POLICY_SHARED,
                 analysis_id=analysis_id_value,

@@ -1,11 +1,11 @@
 from datetime import UTC, datetime
 
-from backend_core import build_runs_service, engine_runs_service
+from backend_core import build_runs_service, compute_worker_runs_service
 from backend_core.data_plane_client import IcebergSnapshotInfo, IcebergSnapshots
 from backend_core.domain.build_runs.models import BuildRunStatus
+from backend_core.domain.compute_worker_runs.schemas import ComputeWorkerRunKind, ComputeWorkerRunStatus
 from backend_core.domain.datasource.models import DataSourceCreatedBy
 from backend_core.domain.datasource.source_types import DataSourceType
-from backend_core.domain.engine_runs.schemas import EngineRunKind, EngineRunStatus
 from backend_core.persistence.datasource.models import DataSource
 from modules.compute import iceberg_service
 
@@ -116,13 +116,13 @@ def test_list_iceberg_snapshots_can_collapse_ingest_churn_to_logical_results(tes
         datetime(2026, 5, 22, 23, 18, 56, tzinfo=UTC),
     ]
     for completed_at in run_times:
-        engine_runs_service.create_engine_run(
+        compute_worker_runs_service.create_compute_worker_run(
             test_db_session,
-            engine_runs_service.create_engine_run_payload(
+            compute_worker_runs_service.create_compute_worker_run_payload(
                 analysis_id=None,
                 datasource_id='ds-raw-1',
-                kind=EngineRunKind.INGEST,
-                status=EngineRunStatus.SUCCESS,
+                kind=ComputeWorkerRunKind.INGEST,
+                status=ComputeWorkerRunStatus.SUCCESS,
                 request_json={'branch': 'master', 'mode': 'manual_ingest'},
                 created_at=completed_at,
                 completed_at=completed_at,

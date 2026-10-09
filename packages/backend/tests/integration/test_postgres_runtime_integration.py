@@ -100,7 +100,7 @@ def _active_preview_request_with_lease(container: PostgresContainer) -> tuple[st
 
 SAMPLE_CSV = 'id,name,age,city\n1,Alice,30,London\n2,Bob,25,Paris\n3,Charlie,35,Berlin\n'
 INTERNAL_API_TOKEN = 'dataforge-runtime-test-internal-token'
-ENGINE_TEST_IMAGE = 'data-forge-polars-engine:integration'
+COMPUTE_WORKER_TEST_IMAGE = 'data-forge-compute-worker:integration'
 
 
 def _http_base_url(port: int) -> str:
@@ -185,19 +185,19 @@ def test_runtime_service_addresses_use_runner_and_docker_services(monkeypatch: p
 
 
 @pytest.fixture(scope='module')
-def engine_runtime_env(rustfs_container: RustfsContainer) -> Generator[dict[str, str]]:
+def compute_worker_runtime_env(rustfs_container: RustfsContainer) -> Generator[dict[str, str]]:
     """Use the engine image built by the canonical test recipe before pytest starts."""
     require_docker()
     run_command(
-        ['docker', 'image', 'inspect', ENGINE_TEST_IMAGE],
+        ['docker', 'image', 'inspect', COMPUTE_WORKER_TEST_IMAGE],
         cwd=CORE_ROOT,
         env=docker_env(),
     )
     docker_host = os.environ.get('DOCKER_HOST')
     if not docker_host:
         raise RuntimeError('DOCKER_HOST must identify the Docker service daemon')
-    network_label = 'data-forge.test-engine-network=1'
-    network_name = f'dataforge-integration-engine-{uuid.uuid4().hex[:10]}'
+    network_label = 'data-forge.test-compute-worker-network=1'
+    network_name = f'dataforge-integration-compute-worker-{uuid.uuid4().hex[:10]}'
     run_command(
         ['docker', 'network', 'create', '--label', network_label, network_name],
         env=docker_env(),
@@ -206,11 +206,11 @@ def engine_runtime_env(rustfs_container: RustfsContainer) -> Generator[dict[str,
     try:
         run_command(['docker', 'network', 'connect', network_name, rustfs_container.name], env=docker_env(), timeout=120)
         yield {
-            'ENGINE_IMAGE': ENGINE_TEST_IMAGE,
-            'ENGINE_DOCKER_HOST': docker_host,
-            'ENGINE_DOCKER_NETWORK': network_name,
-            'ENGINE_OBJECT_STORE_ENDPOINT': f'http://{rustfs_container.name}:9000',
-            'ENGINE_CONNECT_HOST': docker_service_host(),
+            'COMPUTE_WORKER_IMAGE': COMPUTE_WORKER_TEST_IMAGE,
+            'COMPUTE_WORKER_DOCKER_HOST': docker_host,
+            'COMPUTE_WORKER_DOCKER_NETWORK': network_name,
+            'COMPUTE_WORKER_OBJECT_STORE_ENDPOINT': f'http://{rustfs_container.name}:9000',
+            'COMPUTE_WORKER_CONNECT_HOST': docker_service_host(),
         }
     finally:
         run_command(['docker', 'network', 'disconnect', '--force', network_name, rustfs_container.name], env=docker_env(), check=False, timeout=120)
@@ -254,9 +254,9 @@ def _runtime_failure_context(container: PostgresContainer, **processes: ManagedP
     engine_logs = ''
     if requests:
         request_id = str(requests[0][0])
-        engine_name = f'dataforge-engine-default-{request_id[:15]}'
+        compute_worker_name = f'dataforge-compute-worker-default-{request_id[:15]}'
         containers = run_command(
-            ['docker', 'ps', '-a', '--filter', f'name={engine_name}', '--format', '{{.ID}}'],
+            ['docker', 'ps', '-a', '--filter', f'name={compute_worker_name}', '--format', '{{.ID}}'],
             env=docker_env(),
             check=False,
         ).stdout.splitlines()
@@ -2063,7 +2063,7 @@ def test_refresh_missing_runtime_work_marker_does_not_block_producer(monkeypatch
 
 
 @pytest.mark.timeout(300)
-def test_postgres_compute_claims_are_serialized_per_engine_identity(monkeypatch, tmp_path: Path) -> None:
+def test_postgres_compute_claims_are_serialized_per_compute_worker_identity(monkeypatch, tmp_path: Path) -> None:
     require_docker()
 
     from backend_core import compute_requests_service, database
@@ -2966,7 +2966,7 @@ async def test_postgres_runtime_ipc_delivers_notifications(monkeypatch, tmp_path
 def test_postgres_runtime_roles_restart_after_forced_process_exit(
     tmp_path: Path,
     rustfs_container: RustfsContainer,
-    engine_runtime_env: dict[str, str],
+    compute_worker_runtime_env: dict[str, str],
 ) -> None:
     require_docker()
 
@@ -2984,7 +2984,7 @@ def test_postgres_runtime_roles_restart_after_forced_process_exit(
             rustfs=rustfs_container,
             data_plane_port=data_plane_port,
         )
-        base_env.update(engine_runtime_env)
+        base_env.update(compute_worker_runtime_env)
         base_env['SCHEDULER_CHECK_INTERVAL'] = '1'
         _init_runtime_db(base_env)
 
@@ -3001,7 +3001,7 @@ def test_postgres_runtime_roles_restart_after_forced_process_exit(
             grpc_port=grpc_port,
             data_plane_port=data_plane_port,
             rustfs=rustfs_container,
-            extra_env=engine_runtime_env,
+            extra_env=compute_worker_runtime_env,
         )
 
         api = ManagedProcess(
@@ -3084,7 +3084,7 @@ def test_postgres_runtime_roles_restart_after_forced_process_exit(
 def test_postgres_runtime_coordinator_takeover_during_compute_terminal_publication(
     tmp_path: Path,
     rustfs_container: RustfsContainer,
-    engine_runtime_env: dict[str, str],
+    compute_worker_runtime_env: dict[str, str],
 ) -> None:
     """A coordinator crash at the terminal row lock must recover without stale publication."""
     require_docker()
@@ -3103,7 +3103,7 @@ def test_postgres_runtime_coordinator_takeover_during_compute_terminal_publicati
             rustfs=rustfs_container,
             data_plane_port=data_plane_port,
         )
-        base_env.update(engine_runtime_env)
+        base_env.update(compute_worker_runtime_env)
         # The test holds the request row while waiting up to 90 seconds for
         # terminal publication; renewal updates the same row and is blocked by
         # the test transaction, so preserve a 10-second lease margin.
@@ -3134,7 +3134,7 @@ def test_postgres_runtime_coordinator_takeover_during_compute_terminal_publicati
             grpc_port=coordinator_grpc_port,
             data_plane_port=data_plane_port,
             rustfs=rustfs_container,
-            extra_env={**engine_runtime_env, 'RUNTIME_WORK_LEASE_TTL_SECONDS': '120'},
+            extra_env={**compute_worker_runtime_env, 'RUNTIME_WORK_LEASE_TTL_SECONDS': '120'},
         )
         blocker_connection: psycopg.Connection | None = None
         preview_thread: threading.Thread | None = None
@@ -3364,7 +3364,7 @@ def test_postgres_runtime_coordinator_takeover_during_compute_terminal_publicati
 async def test_postgres_runtime_survives_api_crash_during_shared_preview_and_replays_build(
     tmp_path: Path,
     rustfs_container: RustfsContainer,
-    engine_runtime_env: dict[str, str],
+    compute_worker_runtime_env: dict[str, str],
 ) -> None:
     require_docker()
 
@@ -3425,7 +3425,7 @@ async def test_postgres_runtime_survives_api_crash_during_shared_preview_and_rep
             grpc_port=coordinator_grpc_port,
             data_plane_port=data_plane_port,
             rustfs=rustfs_container,
-            extra_env=engine_runtime_env,
+            extra_env=compute_worker_runtime_env,
         )
         try:
             api_one.start()
@@ -3626,7 +3626,7 @@ async def test_postgres_runtime_survives_api_crash_during_shared_preview_and_rep
 def test_postgres_runtime_supports_cross_api_cancellation(
     tmp_path: Path,
     rustfs_container: RustfsContainer,
-    engine_runtime_env: dict[str, str],
+    compute_worker_runtime_env: dict[str, str],
 ) -> None:
     require_docker()
 
@@ -3687,7 +3687,7 @@ def test_postgres_runtime_supports_cross_api_cancellation(
             grpc_port=coordinator_grpc_port,
             data_plane_port=data_plane_port,
             rustfs=rustfs_container,
-            extra_env=engine_runtime_env,
+            extra_env=compute_worker_runtime_env,
         )
         try:
             api_one.start()
@@ -3741,7 +3741,7 @@ def test_postgres_runtime_supports_cross_api_cancellation(
                 assert cancelled.status_code == 200, cancelled.text
                 payload = dict(cancelled.json())
                 assert payload['build_id'] == build_id
-                assert payload['engine_run_id'] is None
+                assert payload['compute_worker_run_id'] is None
                 assert payload['status'] == 'cancelled'
 
                 detail = wait_for_condition(
@@ -3757,7 +3757,7 @@ def test_postgres_runtime_supports_cross_api_cancellation(
                 )
 
                 assert detail['build_id'] == build_id
-                assert detail['current_engine_run_id'] is None
+                assert detail['current_compute_worker_run_id'] is None
                 assert detail['status'] == 'cancelled'
                 assert detail['cancelled_by']
 

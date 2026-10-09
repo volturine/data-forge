@@ -10,7 +10,7 @@
 	import { datasourceStore } from '$lib/stores/datasource.svelte';
 	import { useNamespace } from '$lib/stores/namespace.svelte';
 	import { getDatasource } from '$lib/api/datasource';
-	import { getEngineDefaults } from '$lib/api/compute';
+	import { getComputeWorkerDefaults } from '$lib/api/compute';
 	import { schemaStore } from '$lib/stores/schema.svelte';
 	import { track } from '$lib/utils/audit-log';
 	import {
@@ -67,13 +67,13 @@
 	let isEditing = $state(false);
 	let draftName = $state('');
 
-	// Engine config - simple state bound to store
+	// Compute worker config - simple state bound to store
 	let engineExpanded = $state(false);
 
 	const engineDefaultsQuery = createQuery(() => ({
-		queryKey: ['engine-defaults'],
+		queryKey: ['compute-worker-defaults'],
 		queryFn: async () => {
-			const result = await getEngineDefaults();
+			const result = await getComputeWorkerDefaults();
 			if (result.isErr()) throw new Error(result.error.message);
 			return result.value;
 		},
@@ -645,7 +645,7 @@
 			{/if}
 		</div>
 
-		<!-- Engine Resources Section -->
+		<!-- Compute worker resources section -->
 		{#if analysisId}
 			<div
 				class={css({
@@ -657,7 +657,7 @@
 			>
 				<button
 					class={[
-						'engine-header',
+						'compute-worker-header',
 						css({
 							display: 'flex',
 							width: '100%',
@@ -686,7 +686,7 @@
 						})}
 					>
 						<Cpu size={12} />
-						<span>Engine</span>
+						<span>Compute worker</span>
 					</div>
 					<div class={css({ display: 'flex', alignItems: 'center', gap: '2' })}>
 						<span

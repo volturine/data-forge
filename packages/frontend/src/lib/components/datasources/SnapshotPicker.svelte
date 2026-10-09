@@ -344,7 +344,7 @@
 <div>
 	<button
 		class={[
-			'engine-header',
+			'compute-worker-header',
 			css({
 				display: 'flex',
 				width: '100%',

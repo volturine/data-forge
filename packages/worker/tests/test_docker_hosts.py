@@ -25,13 +25,13 @@ from runtime.docker_hosts import (
 _DEFAULTS = {
     "default_docker_host": "unix:///var/run/docker.sock",
     "default_connect_host": "",
-    "default_engine_network": "dataforge-engine-runtime",
+    "default_compute_worker_network": "dataforge-compute-worker-runtime",
     "default_object_store_endpoint": "",
 }
 
 
 def _spec(name: str, *, docker_host: str = "tcp://10.0.0.5:2375", connect_host: str = "10.0.0.5", max_workers: int = 0) -> DockerHostSpec:
-    return DockerHostSpec(name=name, docker_host=docker_host, connect_host=connect_host, engine_network="net", max_workers=max_workers)
+    return DockerHostSpec(name=name, docker_host=docker_host, connect_host=connect_host, compute_worker_network="net", max_workers=max_workers)
 
 
 class _Clock:
@@ -80,7 +80,7 @@ def test_empty_host_list_keeps_the_single_legacy_host() -> None:
         "",
         default_docker_host="unix:///var/run/docker.sock",
         default_connect_host="127.0.0.1",
-        default_engine_network="net",
+        default_compute_worker_network="net",
         default_object_store_endpoint="http://rustfs:9000",
     )
 
@@ -89,7 +89,7 @@ def test_empty_host_list_keeps_the_single_legacy_host() -> None:
             name="local",
             docker_host="unix:///var/run/docker.sock",
             connect_host="127.0.0.1",
-            engine_network="net",
+            compute_worker_network="net",
             object_store_endpoint="http://rustfs:9000",
         ),
     )
@@ -110,14 +110,24 @@ def test_host_list_fills_omitted_fields_from_single_host_defaults() -> None:
 
     local, node_b, node_c = parse_docker_hosts(raw, **_DEFAULTS)
 
-    assert local == DockerHostSpec(name="local", docker_host="unix:///var/run/docker.sock", engine_network="dataforge-engine-runtime")
+    assert local == DockerHostSpec(name="local", docker_host="unix:///var/run/docker.sock", compute_worker_network="dataforge-compute-worker-runtime")
     assert node_b.max_workers == 6
     assert node_b.object_store_endpoint == "http://10.0.0.1:9000"
     assert node_b.tls_cert_path == "/certs/node-b"
-    assert node_b.engine_network == "dataforge-engine-runtime"
+    assert node_b.compute_worker_network == "dataforge-compute-worker-runtime"
     assert not node_b.is_local
     assert node_b.enforces_cpu_quota
     assert node_c.uses_published_ports
+
+
+def test_legacy_host_network_field_is_accepted_with_a_warning(caplog) -> None:
+    raw = '[{"name":"local","docker_host":"unix:///var/run/docker.sock","engine_network":"legacy-net"}]'
+
+    with caplog.at_level("WARNING"):
+        (host,) = parse_docker_hosts(raw, **_DEFAULTS)
+
+    assert host.compute_worker_network == "legacy-net"
+    assert "Deprecated compute-worker host field engine_network" in caplog.text
 
 
 @pytest.mark.parametrize(
@@ -168,7 +178,7 @@ def test_open_docker_client_passes_host_specific_transport_options(monkeypatch, 
 
 
 def test_select_prefers_the_least_loaded_host_per_cpu(monkeypatch) -> None:
-    registry = DockerHostRegistry([_spec("small"), _spec("big")], engine_image="engine:test")
+    registry = DockerHostRegistry([_spec("small"), _spec("big")], compute_worker_image="compute-worker:test")
     _ready(registry, monkeypatch, cpus={"small": 2, "big": 8})
 
     # Empty hosts tie on load; configuration order breaks the tie.
@@ -185,7 +195,7 @@ def test_select_prefers_the_least_loaded_host_per_cpu(monkeypatch) -> None:
 
 
 def test_select_honours_per_host_max_workers_and_exclusions(monkeypatch) -> None:
-    registry = DockerHostRegistry([_spec("a", max_workers=1), _spec("b", max_workers=1)], engine_image="engine:test")
+    registry = DockerHostRegistry([_spec("a", max_workers=1), _spec("b", max_workers=1)], compute_worker_image="compute-worker:test")
     _ready(registry, monkeypatch)
     registry.record_placement("a", "c1")
 
@@ -204,7 +214,7 @@ def test_select_honours_per_host_max_workers_and_exclusions(monkeypatch) -> None
 
 def test_select_skips_unhealthy_hosts_until_the_cooldown_passes(monkeypatch) -> None:
     clock = _Clock()
-    registry = DockerHostRegistry([_spec("a"), _spec("b")], engine_image="engine:test", failure_cooldown_seconds=30, clock=clock)
+    registry = DockerHostRegistry([_spec("a"), _spec("b")], compute_worker_image="compute-worker:test", failure_cooldown_seconds=30, clock=clock)
     _ready(registry, monkeypatch)
 
     registry.report_failure("a", RuntimeError("boom"))
@@ -228,7 +238,7 @@ def test_select_skips_unhealthy_hosts_until_the_cooldown_passes(monkeypatch) -> 
 
 
 def test_launch_context_does_not_hold_the_registry_lock_during_daemon_calls(monkeypatch) -> None:
-    registry = DockerHostRegistry([_spec("a")], engine_image="engine:test")
+    registry = DockerHostRegistry([_spec("a")], compute_worker_image="compute-worker:test")
     seen: list[bool] = []
 
     class Client(_ProbeClient):
@@ -247,7 +257,7 @@ def test_launch_context_does_not_hold_the_registry_lock_during_daemon_calls(monk
 
 
 def test_hosts_never_probed_are_not_placement_candidates() -> None:
-    registry = DockerHostRegistry([_spec("a")], engine_image="engine:test")
+    registry = DockerHostRegistry([_spec("a")], compute_worker_image="compute-worker:test")
 
     with pytest.raises(NoEligibleDockerHost):
         registry.select()
@@ -259,7 +269,7 @@ def test_health_monitor_probes_every_host_periodically(monkeypatch) -> None:
 
     probed: list[str] = []
     first_round = threading.Event()
-    registry = DockerHostRegistry([_spec("a"), _spec("b")], engine_image="engine:test")
+    registry = DockerHostRegistry([_spec("a"), _spec("b")], compute_worker_image="compute-worker:test")
 
     def probe(spec: DockerHostSpec) -> bool:
         probed.append(spec.name)
@@ -297,7 +307,7 @@ _TWO_HOSTS = (
 
 
 def _prepare_launch(monkeypatch, *, clients: dict[str, object]) -> DockerHostRegistry:
-    monkeypatch.setattr(settings, "engine_docker_hosts", _TWO_HOSTS)
+    monkeypatch.setattr(settings, "compute_worker_docker_hosts", _TWO_HOSTS)
     monkeypatch.setattr("runtime.docker_hosts.open_docker_client", lambda _spec, **_kwargs: _ProbeClient())
     registry = docker_host_registry()
     assert all(registry.probe_all().values())
@@ -535,7 +545,7 @@ def test_reconciliation_frees_the_slot_of_a_detached_container(monkeypatch) -> N
 
 def test_reconciliation_sweeps_every_host_and_skips_unreachable_ones(monkeypatch) -> None:
     removed: list[str] = []
-    monkeypatch.setattr(settings, "engine_docker_hosts", _TWO_HOSTS)
+    monkeypatch.setattr(settings, "compute_worker_docker_hosts", _TWO_HOSTS)
     monkeypatch.setattr(settings, "deployment_id", "test-deployment")
 
     class Api:

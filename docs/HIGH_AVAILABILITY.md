@@ -14,9 +14,9 @@ unit per machine:
 | ----------------------- | ----------------------------------------------------------------- | --------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
 | API replicas + ingress  | `DF_API_REPLICAS` stateless API containers behind a local nginx  | Any replica on any machine can serve any request; sessions, locks, jobs and notifications live in PostgreSQL. Point your DNS or load balancer at every machine (see below).                                   |
 | Runtime coordinator     | one container, active on one machine, standby on the others       | A PostgreSQL session lease. If the active machine dies, PostgreSQL drops the session within about 15 seconds and a standby takes over with a new fenced generation.                                           |
-| Worker manager          | one container, active on one machine, standby on the others       | Same lease mechanism. The new manager sweeps every Docker host, removes engine containers of the previous owner, rebuilds its placement accounting and restarts the warm reserve. Standbys serve the data plane. |
+| Worker manager          | one container, active on one machine, standby on the others       | Same lease mechanism. The new manager sweeps every Docker host, removes compute workers of the previous owner, rebuilds its placement accounting and restarts the warm reserve. Standbys serve the data plane. |
 | Scheduler               | one container, all active                                         | Due schedules are claimed per namespace with claim tokens, so several schedulers never double-run one.                                                                                                       |
-| Engines                 | placed on every daemon in `DF_ENGINE_DOCKER_HOSTS`                | Work on engines of a dead machine fails or is retried by the existing lease expiry recovery; the host is excluded from placement until its daemon answers again.                                             |
+| Compute workers         | placed on every daemon in `DF_COMPUTE_WORKER_DOCKER_HOSTS`        | Work on compute workers of a dead machine fails or is retried by the existing lease expiry recovery; the host is excluded from placement until its daemon answers again.                                     |
 | PostgreSQL, object store| **outside** these stacks, shared                                  | Your responsibility: a managed PostgreSQL or a replicated cluster, and an S3-compatible store with its own redundancy. The bundled `postgres` and `rustfs` services are disabled by the override.            |
 
 Active and standby are decided by two PostgreSQL session-level advisory locks,
@@ -52,24 +52,25 @@ not encrypted by the application; the network must be private.
    machines (connect the stack directly to PostgreSQL, not through a
    transaction-pooling PgBouncer: the leases are session-level advisory locks)
    and an S3-compatible object store. Put them in `DF_DATABASE_URL`,
-   `DF_OBJECT_STORE_ENDPOINT` and `DF_ENGINE_OBJECT_STORE_ENDPOINT`.
+   `DF_OBJECT_STORE_ENDPOINT` and `COMPUTE_WORKER_OBJECT_STORE_ENDPOINT`.
 2. **Expose each Docker daemon with TLS** on its private address
    (`tcp://10.0.0.x:2376`, Docker's "Protect the Docker daemon socket"). Copy
    the client certificates for both daemons to both machines under
    `docker/certs/<host-name>/{ca,cert,key}.pem` (`DF_COMPUTE_HOST_CERTS_DIR`).
-   Pull `DF_ENGINE_IMAGE` on both machines.
-3. **Describe both hosts** in `DF_ENGINE_DOCKER_HOSTS`, identically on both
-   machines, so whichever manager is active places engines on both:
+   Pull `DF_COMPUTE_WORKER_IMAGE` on both machines.
+3. **Describe both hosts** in `DF_COMPUTE_WORKER_DOCKER_HOSTS`, identically on both
+   machines, so whichever manager is active places compute workers on both:
 
    ```bash
-   DF_ENGINE_DOCKER_HOSTS='[
+   DF_COMPUTE_WORKER_DOCKER_HOSTS='[
      {"name": "node-a", "docker_host": "tcp://10.0.0.1:2376", "connect_host": "10.0.0.1", "tls_cert_path": "/certs/node-a"},
      {"name": "node-b", "docker_host": "tcp://10.0.0.2:2376", "connect_host": "10.0.0.2", "tls_cert_path": "/certs/node-b"}
    ]'
    ```
 
-   The engine network named by `DF_ENGINE_DOCKER_NETWORK` is created by the
-   stack on each machine. Open the engines' published port range (Docker's
+   The compute-worker network named by `DF_COMPUTE_WORKER_DOCKER_NETWORK` is
+   created by the stack on each machine. Open the published port range of the
+   compute workers (Docker's
    `ip_local_port_range`, 32768-60999 by default) between the machines.
 4. **List every coordinator address** in `DF_RUNTIME_COORDINATOR_TARGETS` as one
    gRPC `ipv4:` target, for example `ipv4:10.0.0.1:50051,10.0.0.2:50051`, and
@@ -101,7 +102,7 @@ not encrypted by the application; the network must be private.
   `Worker manager lease acquired`; on the other,
   `Runtime coordinator standby waiting` and
   `Worker manager standby waiting for the active manager`.
-- The runtime overview lists engines with `docker_host` values from both
+- The runtime overview lists compute workers with `docker_host` values from both
   machines once there is enough work (or `COMPUTE_WARM_WORKERS` is at least 2).
 - Drill: power off, or `docker compose ... stop runtime worker` on, the active
   machine. Within about 15 seconds the other machine logs the takeover, the
@@ -110,7 +111,7 @@ not encrypted by the application; the network must be private.
 
 ## Limits
 
-- Recovery is a takeover, not a hand-off: work that was running on engines of
+- Recovery is a takeover, not a hand-off: work that was running on compute workers of
   the dead machine, or in the dying manager, is retried or fails through the
   existing lease expiry paths; nothing is lost durably.
 - Only one coordinator and one manager are active at a time. This gives

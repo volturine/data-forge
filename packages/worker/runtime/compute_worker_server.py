@@ -21,6 +21,7 @@ from google.protobuf.timestamp_pb2 import Timestamp
 from dataforge_protocol import compute_worker_runtime_pb2, compute_worker_runtime_pb2_grpc
 from runtime.config import settings
 from runtime.domain.compute.result import ComputeWorkerResult
+from runtime.environment import read_env, read_int
 from runtime.json_values import dict_to_struct, encode_json_bytes
 from runtime.object_store import reset_object_store_client
 
@@ -30,7 +31,8 @@ if TYPE_CHECKING:
     from runtime.compute_worker import PolarsComputeWorker
 
 COMPUTE_WORKER_PROTOCOL_VERSION = 2
-_TOKEN_METADATA_KEY = "x-engine-token"
+_COMPUTE_WORKER_TOKEN_METADATA_KEY = "x-compute-worker-token"
+_LEGACY_ENGINE_TOKEN_METADATA_KEY = "x-engine-token"
 _MAX_RETAINED_COMPLETED_JOBS = 8
 _MAX_TOTAL_JOBS = 100
 _MAX_PROGRESS_EVENTS = 256
@@ -420,21 +422,21 @@ class PolarsComputeWorkerServicer(compute_worker_runtime_pb2_grpc.PolarsComputeW
     def __init__(
         self,
         *,
-        engine_identity: str = "unknown",
+        compute_worker_identity: str = "unknown",
         application_version: str = "unknown",
         token: str = "",
         on_shutdown: Callable[[], None],
         heartbeat_timeout_seconds: int = 15,
         init_timeout_seconds: int = 0,
     ) -> None:
-        self._engine_identity = engine_identity
+        self._compute_worker_identity = compute_worker_identity
         self._application_version = application_version
         self._token = token
         self._on_shutdown = on_shutdown
         self._jobs = _EngineJobs()
         self._shutdown = threading.Event()
         self._lock = threading.Lock()
-        self._initialized = bool(token and engine_identity and engine_identity != "unknown")
+        self._initialized = bool(token and compute_worker_identity and compute_worker_identity != "unknown")
         self._last_heartbeat = time.monotonic()
         self._heartbeat_timeout_seconds = heartbeat_timeout_seconds
         # Deadline for the first Initialize prevents orphaned assigned workers.
@@ -461,7 +463,7 @@ class PolarsComputeWorkerServicer(compute_worker_runtime_pb2_grpc.PolarsComputeW
                     return
                 if time.monotonic() - self._last_heartbeat <= self._heartbeat_timeout_seconds:
                     continue
-            logger.error("Worker heartbeat expired; stopping orphaned engine %s", self._engine_identity)
+            logger.error("Worker heartbeat expired; stopping orphaned engine %s", self._compute_worker_identity)
             self._shutdown.set()
             self._jobs.shutdown()
             self._on_shutdown()
@@ -471,9 +473,16 @@ class PolarsComputeWorkerServicer(compute_worker_runtime_pb2_grpc.PolarsComputeW
         if not self._token:
             return True
         metadata = dict(context.invocation_metadata())
-        if metadata.get(_TOKEN_METADATA_KEY) == self._token:
+        if metadata.get(_COMPUTE_WORKER_TOKEN_METADATA_KEY) == self._token:
             return True
-        context.abort(grpc.StatusCode.UNAUTHENTICATED, "Invalid engine token")
+        if metadata.get(_LEGACY_ENGINE_TOKEN_METADATA_KEY) == self._token:
+            logger.warning(
+                "Deprecated gRPC metadata key %s is in use; use %s instead. The compatibility alias will be removed after this release.",
+                _LEGACY_ENGINE_TOKEN_METADATA_KEY,
+                _COMPUTE_WORKER_TOKEN_METADATA_KEY,
+            )
+            return True
+        context.abort(grpc.StatusCode.UNAUTHENTICATED, "Invalid compute-worker token")
         return False
 
     def Initialize(
@@ -485,15 +494,15 @@ class PolarsComputeWorkerServicer(compute_worker_runtime_pb2_grpc.PolarsComputeW
                 f"Engine protocol version mismatch: expected {COMPUTE_WORKER_PROTOCOL_VERSION}, got {request.protocol_version}",
             )
         with self._lock:
-            if self._initialized and (self._engine_identity != request.engine_identity or self._token != request.token):
+            if self._initialized and (self._compute_worker_identity != request.engine_identity or self._token != request.token):
                 context.abort(
                     grpc.StatusCode.FAILED_PRECONDITION,
-                    f"Engine already initialized for {self._engine_identity}",
+                    f"Compute worker already initialized for {self._compute_worker_identity}",
                 )
-            self._engine_identity = request.engine_identity
+            self._compute_worker_identity = request.engine_identity
             self._token = request.token
-            os.environ["ENGINE_IDENTITY"] = request.engine_identity
-            os.environ["ENGINE_RPC_TOKEN"] = request.token
+            os.environ["COMPUTE_WORKER_IDENTITY"] = request.engine_identity
+            os.environ["COMPUTE_WORKER_RPC_TOKEN"] = request.token
             if request.object_store_endpoint:
                 os.environ["OBJECT_STORE_ENDPOINT"] = request.object_store_endpoint
                 settings.object_store_endpoint = request.object_store_endpoint
@@ -518,7 +527,7 @@ class PolarsComputeWorkerServicer(compute_worker_runtime_pb2_grpc.PolarsComputeW
             self._initialized = True
             self._last_heartbeat = time.monotonic()
             return compute_worker_runtime_pb2.ComputeWorkerInitializeResponse(
-                engine_identity=self._engine_identity,
+                engine_identity=self._compute_worker_identity,
                 ready=True,
             )
 
@@ -537,7 +546,7 @@ class PolarsComputeWorkerServicer(compute_worker_runtime_pb2_grpc.PolarsComputeW
         with self._lock:
             self._last_heartbeat = time.monotonic()
             return compute_worker_runtime_pb2.ComputeWorkerHealthResponse(
-                engine_identity=self._engine_identity,
+                engine_identity=self._compute_worker_identity,
                 protocol_version=COMPUTE_WORKER_PROTOCOL_VERSION,
                 application_version=self._application_version,
                 ready=not self._shutdown.is_set(),
@@ -559,13 +568,13 @@ class PolarsComputeWorkerServicer(compute_worker_runtime_pb2_grpc.PolarsComputeW
         if not isinstance(payload, dict):
             context.abort(grpc.StatusCode.INVALID_ARGUMENT, "Job payload JSON must be an object")
         if request.kind.startswith("datasource_") or request.kind.startswith("excel_"):
-            if payload.get("resource_id") != self._engine_identity:
+            if payload.get("resource_id") != self._compute_worker_identity:
                 context.abort(grpc.StatusCode.PERMISSION_DENIED, "Datasource work must match the assigned RID")
             metadata = payload.get("datasource_metadata")
-            if isinstance(metadata, dict) and metadata.get("id") != self._engine_identity:
+            if isinstance(metadata, dict) and metadata.get("id") != self._compute_worker_identity:
                 context.abort(grpc.StatusCode.PERMISSION_DENIED, "Datasource snapshot must match the assigned RID")
             preflight = payload.get("preflight")
-            if isinstance(preflight, dict) and preflight.get("preflight_id") != self._engine_identity:
+            if isinstance(preflight, dict) and preflight.get("preflight_id") != self._compute_worker_identity:
                 context.abort(grpc.StatusCode.PERMISSION_DENIED, "Excel preflight must match the assigned RID")
         try:
             self._jobs.submit(job_id=request.job_id, kind=request.kind, payload=payload)
@@ -678,7 +687,7 @@ def run_compute_worker_server(
     *,
     host: str,
     port: int,
-    engine_identity: str = "unknown",
+    compute_worker_identity: str = "unknown",
     application_version: str = "unknown",
     token: str = "",
     heartbeat_timeout_seconds: int = 15,
@@ -697,7 +706,7 @@ def run_compute_worker_server(
 
     compute_worker_runtime_pb2_grpc.add_PolarsComputeWorkerServiceServicer_to_server(
         PolarsComputeWorkerServicer(
-            engine_identity=engine_identity,
+            compute_worker_identity=compute_worker_identity,
             application_version=application_version,
             token=token,
             on_shutdown=stop_server,
@@ -708,7 +717,7 @@ def run_compute_worker_server(
     )
     server.add_insecure_port(f"{host}:{port}")
     server.start()
-    logger.info("Polars engine server listening on %s:%s for %s", host, port, engine_identity)
+    logger.info("Polars engine server listening on %s:%s for %s", host, port, compute_worker_identity)
     try:
         server.wait_for_termination()
     finally:
@@ -721,13 +730,13 @@ def main() -> None:
     # mistaken for a dead one while its first job imports the compute stack.
     _load_compute_engine()
     run_compute_worker_server(
-        host=os.environ.get("ENGINE_RPC_HOST", "0.0.0.0"),
-        port=int(os.environ.get("ENGINE_RPC_PORT", "50053")),
-        engine_identity=os.environ.get("ENGINE_IDENTITY", "unknown"),
+        host=read_env("COMPUTE_WORKER_RPC_HOST", "0.0.0.0", legacy_names=("ENGINE_RPC_HOST",)),
+        port=read_int("COMPUTE_WORKER_RPC_PORT", 50053, min_value=1, max_value=65535, legacy_names=("ENGINE_RPC_PORT",)),
+        compute_worker_identity=read_env("COMPUTE_WORKER_IDENTITY", "unknown", legacy_names=("ENGINE_IDENTITY",)),
         application_version=os.environ.get("APP_VERSION", "unknown"),
-        token=os.environ.get("ENGINE_RPC_TOKEN", ""),
-        heartbeat_timeout_seconds=int(os.environ.get("ENGINE_HEARTBEAT_TIMEOUT_SECONDS", "15")),
-        init_timeout_seconds=int(os.environ.get("ENGINE_INIT_TIMEOUT_SECONDS", "0")),
+        token=read_env("COMPUTE_WORKER_RPC_TOKEN", legacy_names=("ENGINE_RPC_TOKEN",)),
+        heartbeat_timeout_seconds=read_int("COMPUTE_WORKER_HEARTBEAT_TIMEOUT_SECONDS", 15, min_value=1, legacy_names=("ENGINE_HEARTBEAT_TIMEOUT_SECONDS",)),
+        init_timeout_seconds=read_int("COMPUTE_WORKER_INIT_TIMEOUT_SECONDS", 0, min_value=0, legacy_names=("ENGINE_INIT_TIMEOUT_SECONDS",)),
     )
 
 

@@ -124,7 +124,7 @@ async def test_build_cancellation_hands_off_exact_job_before_joining_thread(monk
         assert await asyncio.to_thread(real_work_stop_requested.wait, 5)
         assert not task.done()
         assert lane._semaphore(loop)._value == 0
-        manager.shutdown_engine.assert_not_called()
+        manager.shutdown_compute_worker.assert_not_called()
         task.cancel()
         await asyncio.sleep(0)
         assert not task.done()
@@ -132,12 +132,12 @@ async def test_build_cancellation_hands_off_exact_job_before_joining_thread(monk
         with pytest.raises(asyncio.CancelledError):
             await task
         manager.cancel_engine_job.assert_called_once()
-        manager.shutdown_engine.assert_called_once()
-        shutdown_identity = manager.shutdown_engine.call_args.args[0]
+        manager.shutdown_compute_worker.assert_called_once()
+        shutdown_identity = manager.shutdown_compute_worker.call_args.args[0]
         assert shutdown_identity.resource_id == "build-rid"
         assert shutdown_identity.scope == enums_pb2.COMPUTE_WORKER_SCOPE_BUILD
         assert shutdown_identity.reuse_policy == enums_pb2.COMPUTE_WORKER_REUSE_POLICY_EXCLUSIVE
-        assert manager.shutdown_engine.call_args.kwargs == {"namespace": "tenant-a"}
+        assert manager.shutdown_compute_worker.call_args.kwargs == {"namespace": "tenant-a"}
         await asyncio.sleep(0)
         assert lane._semaphore(loop)._value == 1
         assert loop_errors == []

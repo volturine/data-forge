@@ -119,7 +119,7 @@ def test_worker_heartbeat_reregisters_and_resynchronizes_after_api_loss() -> Non
     assert client.registrations[0]["worker_id"] == "manager-1"
 
 
-def test_engine_run_creation_retries_only_when_idempotency_key_is_present() -> None:
+def test_compute_worker_run_creation_retries_only_when_idempotency_key_is_present() -> None:
     class Stub:
         def __init__(self) -> None:
             self.requests = []
@@ -154,14 +154,14 @@ def test_engine_run_creation_retries_only_when_idempotency_key_is_present() -> N
         "status": "running",
         "request_json": {"target_step_id": "source"},
     }
-    assert client.create_engine_run(**common, idempotency_key="request-1") == "run-id"
+    assert client.create_compute_worker_run(**common, idempotency_key="request-1") == "run-id"
     assert calls == [("reconnect", "CreateComputeWorkerRun")]
     request, timeout, _metadata = client._stub.requests[-1]
     assert request.idempotency_key == "request-1"
     assert timeout == 15.0
 
     calls.clear()
-    assert client.create_engine_run(**common) == "run-id"
+    assert client.create_compute_worker_run(**common) == "run-id"
     assert calls == ["call"]
     request, _timeout, _metadata = client._stub.requests[-1]
     assert not request.HasField("idempotency_key")
@@ -691,8 +691,8 @@ async def test_cancelled_build_only_stops_its_exclusive_engine(monkeypatch) -> N
             calls.append(("cancel_engine_job", (identity, namespace, job_id)))
             return True
 
-        def shutdown_engine(self, identity, *, namespace: str | None = None) -> None:
-            calls.append(("shutdown_engine", (identity, namespace)))
+        def shutdown_compute_worker(self, identity, *, namespace: str | None = None) -> None:
+            calls.append(("shutdown_compute_worker", (identity, namespace)))
 
         def shutdown_all(self) -> None:
             calls.append(("shutdown_all", None))
@@ -713,7 +713,7 @@ async def test_cancelled_build_only_stops_its_exclusive_engine(monkeypatch) -> N
     with pytest.raises(asyncio.CancelledError):
         await build_execution.run_queued_build_job(manager=cast(Any, Manager()), worker_id="worker-1", claim=claim)
 
-    assert [name for name, _ in calls] == ["shutdown_engine"]
+    assert [name for name, _ in calls] == ["shutdown_compute_worker"]
     identity, namespace = cast(tuple[compute_pb2.ComputeWorkerIdentity, str | None], calls[0][1])
     assert identity.scope == enums_pb2.COMPUTE_WORKER_SCOPE_BUILD
     assert identity.reuse_policy == enums_pb2.COMPUTE_WORKER_REUSE_POLICY_EXCLUSIVE
@@ -1377,7 +1377,7 @@ async def test_run_runtime_coordinator_shares_compute_budget_across_lanes(
     request_lane_kwargs = [payload for name, payload in calls if name == "compute_request_loop"]
     assert [payload["allowed_kinds"] for payload in request_lane_kwargs] == [
         runtime_process.ACTIVE_REQUEST_KINDS,
-        runtime_process.ENGINE_SHUTDOWN_REQUEST_KINDS,
+        runtime_process.COMPUTE_WORKER_SHUTDOWN_REQUEST_KINDS,
     ]
     assert [payload["poll_for_work"] for payload in request_lane_kwargs] == [True, True]
     assert [payload["max_concurrency"] for payload in request_lane_kwargs] == [4, 4]

@@ -3,7 +3,7 @@ import datetime as dt
 from sqlalchemy import JSON, Boolean, Column, DateTime, Integer, String
 from sqlmodel import Field, SQLModel
 
-from backend_core.domain.engine_instances.models import EngineInstanceStatus
+from backend_core.domain.compute_worker_instances.models import ComputeWorkerInstanceStatus
 
 
 class ComputeWorkerInstance(SQLModel, table=True):  # type: ignore[call-arg, assignment]
@@ -25,7 +25,7 @@ class ComputeWorkerInstance(SQLModel, table=True):  # type: ignore[call-arg, ass
     supervisor_id: str | None = Field(default=None, sa_column=Column(String, nullable=True))
     owner_id: str | None = Field(default=None, sa_column=Column(String, nullable=True))
     docker_host: str | None = Field(default=None, sa_column=Column(String, nullable=True))
-    status: EngineInstanceStatus = Field(sa_column=Column(String, nullable=False, index=True))
+    status: ComputeWorkerInstanceStatus = Field(sa_column=Column(String, nullable=False, index=True))
     current_job_id: str | None = Field(default=None, sa_column=Column(String, nullable=True))
     current_build_id: str | None = Field(default=None, sa_column=Column(String, nullable=True))
     current_compute_worker_run_id: str | None = Field(default=None, sa_column=Column(String, nullable=True))
@@ -35,5 +35,5 @@ class ComputeWorkerInstance(SQLModel, table=True):  # type: ignore[call-arg, ass
     last_seen_at: dt.datetime = Field(sa_column=Column(DateTime(timezone=True), nullable=False, index=True))
     updated_at: dt.datetime = Field(sa_column=Column(DateTime(timezone=True), nullable=False))
 
-    def status_kind(self) -> EngineInstanceStatus:
-        return EngineInstanceStatus.require(self.status)
+    def status_kind(self) -> ComputeWorkerInstanceStatus:
+        return ComputeWorkerInstanceStatus.require(self.status)
