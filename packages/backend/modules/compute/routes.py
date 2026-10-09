@@ -17,7 +17,7 @@ from sqlmodel import Session
 from backend_core import (
     build_event_service,
     build_runs_service as build_run_service,
-    engine_runs_service as engine_run_service,
+    compute_worker_runs_service as compute_worker_run_service,
     runtime_ipc,
 )
 from backend_core.api_execution_budget import run_api_blocking
@@ -33,9 +33,9 @@ from backend_core.dependencies import (
 )
 from backend_core.domain.build_runs.live import BuildNotification, hub as build_hub
 from backend_core.domain.compute import schemas
-from backend_core.domain.engine_runs.schemas import EngineRunKind
+from backend_core.domain.compute_worker_runs.schemas import ComputeWorkerRunKind
 from backend_core.error_handlers import handle_errors
-from backend_core.exceptions import engine_not_found
+from backend_core.exceptions import compute_worker_not_found
 from backend_core.namespace import get_namespace, reset_namespace, set_namespace_context
 from backend_core.persistence.analysis.models import Analysis
 from backend_core.time import utc_now as _utcnow
@@ -293,8 +293,8 @@ async def _wait_for_namespace_build_update(websocket: WebSocket, namespace: str,
     return last_seen
 
 
-def _get_durable_build_detail_by_engine_run(session: Session, engine_run_id: str) -> schemas.BuildRunDetail | None:
-    build_run = build_run_service.get_build_run_by_engine_run(session, engine_run_id)
+def _get_durable_build_detail_by_compute_worker_run(session: Session, compute_worker_run_id: str) -> schemas.BuildRunDetail | None:
+    build_run = build_run_service.get_build_run_by_compute_worker_run(session, compute_worker_run_id)
     if build_run is None or build_run.namespace != get_namespace():
         return None
     return build_run_service.fold_build_detail(session, build_run)
@@ -376,7 +376,7 @@ def _resolved_default_max_memory_mb() -> int:
     return _resolved_system_memory_mb()
 
 
-async def _send_engine_snapshot(websocket: WebSocket) -> str:
+async def _send_compute_worker_snapshot(websocket: WebSocket) -> str:
     namespace = get_namespace()
 
     defaults: dict[str, object] = {
@@ -393,7 +393,7 @@ async def _send_engine_snapshot(websocket: WebSocket) -> str:
     return str(version)
 
 
-async def _wait_for_engine_notification(websocket: WebSocket, namespace: str, last_seen: str | None) -> str | None:
+async def _wait_for_compute_worker_notification(websocket: WebSocket, namespace: str, last_seen: str | None) -> str | None:
     receive_task = asyncio.create_task(_wait_for_websocket_disconnect(websocket))
     notify_task = asyncio.create_task(compute_worker_registry.wait_for_namespace(namespace, last_seen))
     done, pending = await asyncio.wait({receive_task, notify_task}, return_when=asyncio.FIRST_COMPLETED)
@@ -424,7 +424,7 @@ async def preview_step(
     if analysis_id is None and request.datasource_id is None:
         analysis_id = request.analysis_pipeline.analysis_id
     normalized = request.model_copy(update={'analysis_id': analysis_id})
-    engine_identity = schemas.default_preview_engine_identity(normalized)
+    compute_worker_identity = schemas.default_preview_compute_worker_identity(normalized)
     manager = _override_manager(http_request)
     if manager is not None:
         executor = _override_compute_executor(http_request)
@@ -441,7 +441,7 @@ async def preview_step(
             row_limit=normalized.row_limit,
             page=normalized.page,
             analysis_id=analysis_id,
-            engine_identity=engine_identity,
+            compute_worker_identity=compute_worker_identity,
             resource_config=await executor_client.model_payload(normalized.resource_config) if normalized.resource_config else None,
             tab_id=normalized.tab_id,
             request_json=await executor_client.model_payload(normalized, mode='json'),
@@ -595,7 +595,7 @@ async def start_build(
     if not isinstance(selected_tab, dict):
         raise HTTPException(status_code=404, detail=f'Build request tab {request.tab_id} not found in analysis pipeline')
     active_tab = selected_tab
-    current_kind = EngineRunKind.BUILD.value
+    current_kind = ComputeWorkerRunKind.BUILD.value
     current_datasource_id: str | None = None
     current_tab_id: str | None = None
     current_tab_name: str | None = None
@@ -720,7 +720,7 @@ async def cancel_build(
     return schemas.CancelBuildResponse(
         id=detail.build_id,
         build_id=detail.build_id,
-        engine_run_id=detail.current_engine_run_id,
+        compute_worker_run_id=detail.current_compute_worker_run_id,
         status='cancelled',
         duration_ms=duration_ms,
         cancelled_at=cancelled_at,
@@ -761,17 +761,17 @@ async def list_builds(
         build_rows = [build_run_service.build_summary(run) for run in runs if run.namespace == namespace]
         engine_rows: list[schemas.BuildRunSummary] = []
         if status != schemas.BuildLifecycleStatus.QUEUED:
-            engine_runs = engine_run_service.list_engine_runs(
+            compute_worker_runs = compute_worker_run_service.list_compute_worker_runs(
                 session,
                 analysis_id=normalized_analysis_id,
                 datasource_id=normalized_datasource_id,
-                kind=representations.engine_run_kind_filter(kind),
-                status=representations.engine_run_status_filter(status),
+                kind=representations.compute_worker_run_kind_filter(kind),
+                status=representations.compute_worker_run_status_filter(status),
                 search=search,
                 limit=fetch_limit,
                 offset=0,
             )
-            engine_rows = [representations.engine_run_summary(run, namespace=namespace) for run in engine_runs]
+            engine_rows = [representations.compute_worker_run_summary(run, namespace=namespace) for run in compute_worker_runs]
         visible = sorted([*build_rows, *engine_rows], key=lambda run: run.started_at, reverse=True)
         return schemas.BuildRunListResponse(builds=visible[offset : offset + limit], total=len(visible))
 
@@ -790,9 +790,9 @@ async def get_build(
         detail = _get_durable_build_detail(session, build_id)
         if detail is not None:
             return detail
-        engine_run = engine_run_service.get_engine_run(session, build_id)
-        if engine_run is not None:
-            return representations.engine_run_detail(engine_run, namespace=namespace)
+        compute_worker_run = compute_worker_run_service.get_compute_worker_run(session, build_id)
+        if compute_worker_run is not None:
+            return representations.compute_worker_run_detail(compute_worker_run, namespace=namespace)
         raise HTTPException(status_code=404, detail='Build not found')
 
     return await run_api_blocking(run_db, _get)
@@ -801,10 +801,10 @@ async def get_build(
 # Engine lifecycle endpoints
 
 
-async def _spawn_engine_identity(
+async def _spawn_compute_worker_identity(
     identity,
     http_request: Request,
-    request: schemas.SpawnEngineRequest | None,
+    request: schemas.SpawnComputeWorkerRequest | None,
     runtime_probe: RuntimeAvailabilityProbe,
 ):
     resource_config = await executor_client.model_payload(request.resource_config) if request and request.resource_config else None
@@ -813,7 +813,7 @@ async def _spawn_engine_identity(
 
         def spawn_and_read_status():
             manager.spawn_compute_worker(identity, resource_config=resource_config)
-            return manager.get_engine_status(identity)
+            return manager.get_compute_worker_status(identity)
 
         return await run_api_blocking(spawn_and_read_status)
     return await executor_client.spawn_compute_worker(
@@ -823,9 +823,9 @@ async def _spawn_engine_identity(
     )
 
 
-async def _configure_engine_identity(
+async def _configure_compute_worker_identity(
     identity,
-    request: schemas.EngineResourceConfig,
+    request: schemas.ComputeWorkerResourceConfig,
     http_request: Request,
     runtime_probe: RuntimeAvailabilityProbe,
 ):
@@ -835,17 +835,17 @@ async def _configure_engine_identity(
 
         def configure_and_read_status():
             manager.restart_engine_with_config(identity, resource_config)
-            return manager.get_engine_status(identity)
+            return manager.get_compute_worker_status(identity)
 
         return await run_api_blocking(configure_and_read_status)
-    return await executor_client.configure_engine(
+    return await executor_client.configure_compute_worker(
         identity=identity,
         resource_config=resource_config,
         runtime_probe=runtime_probe,
     )
 
 
-async def _shutdown_engine_identity(
+async def _shutdown_compute_worker_identity(
     identity,
     http_request: Request,
     runtime_probe: RuntimeAvailabilityProbe,
@@ -862,7 +862,7 @@ async def _shutdown_engine_identity(
         def shutdown_override_engine() -> None:
             engine = manager.get_engine(identity)
             if not engine:
-                raise engine_not_found(identity.resource_id)
+                raise compute_worker_not_found(identity.resource_id)
             # Cancel the active job before tearing down so shutdown never blocks on
             # "busy". Container/process shutdown is the hard cancel for jobs.
             if engine.current_job_id and engine.is_process_alive():
@@ -873,28 +873,28 @@ async def _shutdown_engine_identity(
                     # Stub / lightweight engines: clear the job marker so shutdown
                     # is allowed. Production Docker engines cancel via container stop.
                     engine.current_job_id = None
-            manager.shutdown_engine(identity)
+            manager.shutdown_compute_worker(identity)
 
         await run_api_blocking(shutdown_override_engine)
         return
     await run_api_blocking(
         run_db,
-        executor_client.request_engine_shutdown,
+        executor_client.request_compute_worker_shutdown,
         identity=identity,
         runtime_probe=runtime_probe,
     )
 
 
-@router.post('/engine/spawn/analysis/{analysis_id}', response_model=schemas.EngineStatusSchema, mcp=True)
-@handle_errors(operation='spawn analysis engine')
-async def spawn_analysis_engine(
+@router.post('/compute-worker/spawn/analysis/{analysis_id}', response_model=schemas.ComputeWorkerStatusSchema, mcp=True)
+@handle_errors(operation='spawn analysis compute worker')
+async def spawn_analysis_compute_worker(
     analysis_id: AnalysisId,
     http_request: Request,
-    request: schemas.SpawnEngineRequest | None = None,
+    request: schemas.SpawnComputeWorkerRequest | None = None,
     _user: User = Depends(get_current_user),
     runtime_probe: RuntimeAvailabilityProbe = Depends(get_runtime_availability_probe),
 ):
-    return await _spawn_engine_identity(
+    return await _spawn_compute_worker_identity(
         compute_pb2.ComputeWorkerIdentity(
             scope=enums_pb2.COMPUTE_WORKER_SCOPE_ANALYSIS_INTERACTIVE,
             reuse_policy=enums_pb2.COMPUTE_WORKER_REUSE_POLICY_SHARED,
@@ -907,17 +907,17 @@ async def spawn_analysis_engine(
     )
 
 
-@router.post('/engine/spawn/datasource-preview/{datasource_id}', response_model=schemas.EngineStatusSchema, mcp=True)
-@handle_errors(operation='spawn datasource preview engine')
-async def spawn_datasource_preview_engine(
+@router.post('/compute-worker/spawn/datasource-preview/{datasource_id}', response_model=schemas.ComputeWorkerStatusSchema, mcp=True)
+@handle_errors(operation='spawn datasource preview compute worker')
+async def spawn_datasource_preview_compute_worker(
     datasource_id: DataSourceId,
     http_request: Request,
-    request: schemas.SpawnEngineRequest | None = None,
+    request: schemas.SpawnComputeWorkerRequest | None = None,
     _user: User = Depends(get_current_user),
     runtime_probe: RuntimeAvailabilityProbe = Depends(get_runtime_availability_probe),
 ):
     datasource_id_value = parse_datasource_id(datasource_id)
-    return await _spawn_engine_identity(
+    return await _spawn_compute_worker_identity(
         compute_pb2.ComputeWorkerIdentity(
             scope=enums_pb2.COMPUTE_WORKER_SCOPE_DATASOURCE_PREVIEW,
             reuse_policy=enums_pb2.COMPUTE_WORKER_REUSE_POLICY_SHARED,
@@ -930,16 +930,16 @@ async def spawn_datasource_preview_engine(
     )
 
 
-@router.post('/engine/configure/analysis/{analysis_id}', response_model=schemas.EngineStatusSchema, mcp=True)
-@handle_errors(operation='configure analysis engine')
-async def configure_analysis_engine(
+@router.post('/compute-worker/configure/analysis/{analysis_id}', response_model=schemas.ComputeWorkerStatusSchema, mcp=True)
+@handle_errors(operation='configure analysis compute worker')
+async def configure_analysis_compute_worker(
     analysis_id: AnalysisId,
-    request: schemas.EngineResourceConfig,
+    request: schemas.ComputeWorkerResourceConfig,
     http_request: Request,
     _user: User = Depends(get_current_user),
     runtime_probe: RuntimeAvailabilityProbe = Depends(get_runtime_availability_probe),
 ):
-    return await _configure_engine_identity(
+    return await _configure_compute_worker_identity(
         compute_pb2.ComputeWorkerIdentity(
             scope=enums_pb2.COMPUTE_WORKER_SCOPE_ANALYSIS_INTERACTIVE,
             reuse_policy=enums_pb2.COMPUTE_WORKER_REUSE_POLICY_SHARED,
@@ -952,17 +952,17 @@ async def configure_analysis_engine(
     )
 
 
-@router.post('/engine/configure/datasource-preview/{datasource_id}', response_model=schemas.EngineStatusSchema, mcp=True)
-@handle_errors(operation='configure datasource preview engine')
-async def configure_datasource_preview_engine(
+@router.post('/compute-worker/configure/datasource-preview/{datasource_id}', response_model=schemas.ComputeWorkerStatusSchema, mcp=True)
+@handle_errors(operation='configure datasource preview compute worker')
+async def configure_datasource_preview_compute_worker(
     datasource_id: DataSourceId,
-    request: schemas.EngineResourceConfig,
+    request: schemas.ComputeWorkerResourceConfig,
     http_request: Request,
     _user: User = Depends(get_current_user),
     runtime_probe: RuntimeAvailabilityProbe = Depends(get_runtime_availability_probe),
 ):
     datasource_id_value = parse_datasource_id(datasource_id)
-    return await _configure_engine_identity(
+    return await _configure_compute_worker_identity(
         compute_pb2.ComputeWorkerIdentity(
             scope=enums_pb2.COMPUTE_WORKER_SCOPE_DATASOURCE_PREVIEW,
             reuse_policy=enums_pb2.COMPUTE_WORKER_REUSE_POLICY_SHARED,
@@ -975,15 +975,15 @@ async def configure_datasource_preview_engine(
     )
 
 
-@router.delete('/engine/analysis/{analysis_id}', status_code=204, mcp=True, mcp_confirm_required=True)
-@handle_errors(operation='shutdown analysis engine')
-async def shutdown_analysis_engine(
+@router.delete('/compute-worker/analysis/{analysis_id}', status_code=204, mcp=True, mcp_confirm_required=True)
+@handle_errors(operation='shutdown analysis compute worker')
+async def shutdown_analysis_compute_worker(
     analysis_id: AnalysisId,
     http_request: Request,
     _user: User = Depends(get_current_user),
     runtime_probe: RuntimeAvailabilityProbe = Depends(get_runtime_availability_probe),
 ):
-    await _shutdown_engine_identity(
+    await _shutdown_compute_worker_identity(
         compute_pb2.ComputeWorkerIdentity(
             scope=enums_pb2.COMPUTE_WORKER_SCOPE_ANALYSIS_INTERACTIVE,
             reuse_policy=enums_pb2.COMPUTE_WORKER_REUSE_POLICY_SHARED,
@@ -995,16 +995,16 @@ async def shutdown_analysis_engine(
     )
 
 
-@router.delete('/engine/datasource-preview/{datasource_id}', status_code=204, mcp=True, mcp_confirm_required=True)
-@handle_errors(operation='shutdown datasource preview engine')
-async def shutdown_datasource_preview_engine(
+@router.delete('/compute-worker/datasource-preview/{datasource_id}', status_code=204, mcp=True, mcp_confirm_required=True)
+@handle_errors(operation='shutdown datasource preview compute worker')
+async def shutdown_datasource_preview_compute_worker(
     datasource_id: DataSourceId,
     http_request: Request,
     _user: User = Depends(get_current_user),
     runtime_probe: RuntimeAvailabilityProbe = Depends(get_runtime_availability_probe),
 ):
     datasource_id_value = parse_datasource_id(datasource_id)
-    await _shutdown_engine_identity(
+    await _shutdown_compute_worker_identity(
         compute_pb2.ComputeWorkerIdentity(
             scope=enums_pb2.COMPUTE_WORKER_SCOPE_DATASOURCE_PREVIEW,
             reuse_policy=enums_pb2.COMPUTE_WORKER_REUSE_POLICY_SHARED,
@@ -1016,15 +1016,15 @@ async def shutdown_datasource_preview_engine(
     )
 
 
-@router.delete('/engine/build/{build_id}', status_code=204, mcp=True, mcp_confirm_required=True)
-@handle_errors(operation='shutdown build engine')
-async def shutdown_build_engine(
+@router.delete('/compute-worker/build/{build_id}', status_code=204, mcp=True, mcp_confirm_required=True)
+@handle_errors(operation='shutdown build compute worker')
+async def shutdown_build_compute_worker(
     build_id: str,
     http_request: Request,
     _user: User = Depends(get_current_user),
     runtime_probe: RuntimeAvailabilityProbe = Depends(get_runtime_availability_probe),
 ):
-    await _shutdown_engine_identity(
+    await _shutdown_compute_worker_identity(
         compute_pb2.ComputeWorkerIdentity(
             scope=enums_pb2.COMPUTE_WORKER_SCOPE_BUILD,
             reuse_policy=enums_pb2.COMPUTE_WORKER_REUSE_POLICY_EXCLUSIVE,
@@ -1036,8 +1036,8 @@ async def shutdown_build_engine(
     )
 
 
-@router.websocket('/ws/engines')
-async def engine_list_stream(websocket: WebSocket) -> None:
+@router.websocket('/ws/compute-workers')
+async def compute_workers_stream(websocket: WebSocket) -> None:
     token = set_namespace_context(websocket.headers.get('X-Namespace') or websocket.query_params.get('namespace'))
     namespace = get_namespace()
     subscribed = False
@@ -1046,12 +1046,12 @@ async def engine_list_stream(websocket: WebSocket) -> None:
         await _require_websocket_user(websocket)
         await compute_worker_registry.subscribe(namespace)
         subscribed = True
-        last_seen = await _send_engine_snapshot(websocket)
+        last_seen = await _send_compute_worker_snapshot(websocket)
         while True:
-            updated = await _wait_for_engine_notification(websocket, namespace, last_seen)
+            updated = await _wait_for_compute_worker_notification(websocket, namespace, last_seen)
             if updated is None:
                 return
-            last_seen = await _send_engine_snapshot(websocket)
+            last_seen = await _send_compute_worker_snapshot(websocket)
             # One snapshot is authoritative for all intermediate lifecycle
             # notifications. A burst of starts/stops should not make every
             # browser socket issue one database read per version.
@@ -1062,21 +1062,21 @@ async def engine_list_stream(websocket: WebSocket) -> None:
     except HTTPException as exc:
         await safe_send_json_error(
             websocket,
-            schemas.EngineWebsocketErrorMessage(error=str(exc.detail), status_code=exc.status_code),
+            schemas.ComputeWorkersWebsocketErrorMessage(error=str(exc.detail), status_code=exc.status_code),
         )
     except RuntimeError as exc:
         if is_disconnect_runtime_error(exc):
             return
-        logger.error('Engine websocket error: %s', exc, exc_info=True)
+        logger.error('Compute worker websocket error: %s', exc, exc_info=True)
         await safe_send_json_error(
             websocket,
-            schemas.EngineWebsocketErrorMessage(error='An internal error occurred'),
+            schemas.ComputeWorkersWebsocketErrorMessage(error='An internal error occurred'),
         )
     except Exception as exc:
-        logger.error('Engine websocket error: %s', exc, exc_info=True)
+        logger.error('Compute worker websocket error: %s', exc, exc_info=True)
         await safe_send_json_error(
             websocket,
-            schemas.EngineWebsocketErrorMessage(error='An internal error occurred'),
+            schemas.ComputeWorkersWebsocketErrorMessage(error='An internal error occurred'),
         )
     finally:
         if subscribed:
@@ -1207,11 +1207,11 @@ async def build_stream(websocket: WebSocket, build_id: str) -> None:
         await safe_close_websocket(websocket)
 
 
-@router.get('/defaults', response_model=schemas.EngineDefaults, mcp=True)
-@handle_errors(operation='get engine defaults')
-async def get_engine_defaults():
+@router.get('/defaults', response_model=schemas.ComputeWorkerDefaults, mcp=True)
+@handle_errors(operation='get compute worker defaults')
+async def get_compute_worker_defaults():
     """Get resolved default engine resource settings for the UI."""
-    return schemas.EngineDefaults(
+    return schemas.ComputeWorkerDefaults(
         max_threads=_resolved_default_max_threads(),
         max_memory_mb=_resolved_default_max_memory_mb(),
         streaming_chunk_size=settings.polars_streaming_chunk_size,

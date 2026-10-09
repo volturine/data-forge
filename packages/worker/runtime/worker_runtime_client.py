@@ -927,7 +927,7 @@ class WorkerRuntimeClient:
         artifact_path: str | None = None,
         artifact_name: str | None = None,
         artifact_content_type: str | None = None,
-        engine_run_finalization: ComputeWorkerRunFinalization | None = None,
+        compute_worker_run_finalization: ComputeWorkerRunFinalization | None = None,
         timeout_seconds: float | None = None,
     ) -> None:
         request = worker_runtime_pb2.WorkerCompleteComputeRequestRequest(
@@ -949,8 +949,8 @@ class WorkerRuntimeClient:
             request.artifact_name = artifact_name
         if artifact_content_type is not None:
             request.artifact_content_type = artifact_content_type
-        if engine_run_finalization is not None:
-            request.engine_run_finalization.CopyFrom(_engine_run_finalization_proto(engine_run_finalization))
+        if compute_worker_run_finalization is not None:
+            request.engine_run_finalization.CopyFrom(_compute_worker_run_finalization_proto(compute_worker_run_finalization))
         timeout = self._control_timeout(timeout_seconds)
         self._call(lambda: self._stub.CompleteComputeRequest(request, timeout=timeout, metadata=self._metadata()))
 
@@ -965,7 +965,7 @@ class WorkerRuntimeClient:
         lease_generation: int,
         error_message: str,
         error: compute_pb2.ComputeErrorResult,
-        engine_run_finalization: ComputeWorkerRunFinalization | None = None,
+        compute_worker_run_finalization: ComputeWorkerRunFinalization | None = None,
         timeout_seconds: float | None = None,
     ) -> None:
         timeout = self._control_timeout(timeout_seconds)
@@ -984,8 +984,8 @@ class WorkerRuntimeClient:
                 error_message=error_message,
             ),
         )
-        if engine_run_finalization is not None:
-            request.engine_run_finalization.CopyFrom(_engine_run_finalization_proto(engine_run_finalization))
+        if compute_worker_run_finalization is not None:
+            request.engine_run_finalization.CopyFrom(_compute_worker_run_finalization_proto(compute_worker_run_finalization))
         self._call(
             lambda: self._stub.FailComputeRequest(
                 request,
@@ -1409,7 +1409,7 @@ class WorkerRuntimeClient:
         )
         return int(self._call(lambda: self._stub.RecordHealthCheckResults(request, timeout=self._timeout_seconds, metadata=self._metadata())).count)
 
-    def create_engine_run(
+    def create_compute_worker_run(
         self,
         *,
         namespace: str,
@@ -1437,7 +1437,7 @@ class WorkerRuntimeClient:
             kind=enum_to_proto_value("COMPUTE_WORKER_RUN_KIND", kind),
             status=enum_to_proto_value("COMPUTE_WORKER_RUN_STATUS", status),
             request=dict_to_struct(request_json),
-            execution_entry=[_engine_run_execution_entry_proto(entry) for entry in execution_entries or []],
+            execution_entry=[_compute_worker_run_execution_entry_proto(entry) for entry in execution_entries or []],
             progress=progress,
         )
         if analysis_id is not None:
@@ -1470,7 +1470,7 @@ class WorkerRuntimeClient:
             return self._call_with_reconnect(create, operation="CreateComputeWorkerRun").id
         return self._call(create).id
 
-    def update_engine_run(
+    def update_compute_worker_run(
         self,
         *,
         namespace: str,
@@ -1484,7 +1484,7 @@ class WorkerRuntimeClient:
                     namespace=namespace,
                     run_id=run_id,
                     merge_result=merge_result_json,
-                    update=_engine_run_update_proto(fields),
+                    update=_compute_worker_run_update_proto(fields),
                 ),
                 timeout=self._control_timeout(),
                 metadata=self._metadata(),
@@ -1492,7 +1492,7 @@ class WorkerRuntimeClient:
         )
         return response.id
 
-    def engine_run_state(self, *, namespace: str, run_id: str) -> dict[str, object] | None:
+    def compute_worker_run_state(self, *, namespace: str, run_id: str) -> dict[str, object] | None:
         response = self._call(
             lambda: self._stub.GetComputeWorkerRunState(
                 worker_runtime_pb2.WorkerComputeWorkerRunStateRequest(namespace=namespace, run_id=run_id),
@@ -1794,7 +1794,7 @@ class WorkerRuntimeClient:
                 worker_runtime_pb2.WorkerPersistComputeWorkerSnapshotRequest(
                     worker_id=worker_id,
                     namespace=namespace,
-                    engine_status=[_engine_status_result_proto(status) for status in statuses],
+                    engine_status=[_compute_worker_status_result_proto(status) for status in statuses],
                 ),
                 timeout=self._control_timeout(),
                 metadata=self._metadata(),
@@ -2237,7 +2237,7 @@ def _optional_mapping_str(payload: Mapping[str, object], key: str) -> str | None
     return value
 
 
-def _engine_run_entry_step_type(payload: Mapping[str, object]) -> enums_pb2.StepType | None:
+def _compute_worker_run_entry_step_type(payload: Mapping[str, object]) -> enums_pb2.StepType | None:
     value = payload.get("step_type")
     if value is None:
         metadata = payload.get("metadata")
@@ -2250,7 +2250,7 @@ def _engine_run_entry_step_type(payload: Mapping[str, object]) -> enums_pb2.Step
     return cast(enums_pb2.StepType, enum_to_proto_value("STEP_TYPE", value))
 
 
-def _engine_run_execution_entry_proto(payload: Mapping[str, object]) -> compute_pb2.ComputeWorkerRunExecutionEntry:
+def _compute_worker_run_execution_entry_proto(payload: Mapping[str, object]) -> compute_pb2.ComputeWorkerRunExecutionEntry:
     entry = compute_pb2.ComputeWorkerRunExecutionEntry(
         key=_required_mapping_str(payload, "key"),
         label=_required_mapping_str(payload, "label"),
@@ -2269,7 +2269,7 @@ def _engine_run_execution_entry_proto(payload: Mapping[str, object]) -> compute_
     unoptimized_plan = _optional_mapping_str(payload, "unoptimized_plan")
     if unoptimized_plan is not None:
         entry.unoptimized_plan = unoptimized_plan
-    step_type = _engine_run_entry_step_type(payload)
+    step_type = _compute_worker_run_entry_step_type(payload)
     if step_type is not None:
         entry.step_type = step_type
     return entry
@@ -2309,7 +2309,7 @@ def _engine_defaults_proto(payload: Mapping[str, object]) -> compute_pb2.Compute
     )
 
 
-def _engine_status_result_proto(status_info: ComputeWorkerStatusInfo) -> compute_pb2.ComputeWorkerStatusResult:
+def _compute_worker_status_result_proto(status_info: ComputeWorkerStatusInfo) -> compute_pb2.ComputeWorkerStatusResult:
     if not isinstance(status_info.analysis_id, str):
         raise RuntimeError(f"Engine status analysis_id must be a string: {status_info!r}")
     if not isinstance(status_info.resource_id, str) or not status_info.resource_id:
@@ -2327,7 +2327,6 @@ def _engine_status_result_proto(status_info: ComputeWorkerStatusInfo) -> compute
         "datasource_id",
         "build_id",
         "current_build_id",
-        "current_engine_run_id",
         "container_id",
         "image_digest",
         "termination_reason",
@@ -2340,6 +2339,8 @@ def _engine_status_result_proto(status_info: ComputeWorkerStatusInfo) -> compute
             if not isinstance(value, str):
                 raise RuntimeError(f"Engine status field {field} must be a string: {status_info!r}")
             setattr(status, field, value)
+    if status_info.current_compute_worker_run_id is not None:
+        status.current_engine_run_id = status_info.current_compute_worker_run_id
     exit_code = status_info.exit_code
     if exit_code is not None:
         if not isinstance(exit_code, int) or isinstance(exit_code, bool):
@@ -2377,7 +2378,7 @@ def _engine_status_result_proto(status_info: ComputeWorkerStatusInfo) -> compute
     return status
 
 
-def _engine_run_update_proto(fields: Mapping[str, object]) -> worker_runtime_pb2.WorkerComputeWorkerRunUpdateFields:
+def _compute_worker_run_update_proto(fields: Mapping[str, object]) -> worker_runtime_pb2.WorkerComputeWorkerRunUpdateFields:
     update = worker_runtime_pb2.WorkerComputeWorkerRunUpdateFields()
     if "analysis_id" in fields:
         update.analysis_id = _required_mapping_str(fields, "analysis_id")
@@ -2414,7 +2415,7 @@ def _engine_run_update_proto(fields: Mapping[str, object]) -> worker_runtime_pb2
         for entry in entries:
             if not isinstance(entry, Mapping):
                 raise RuntimeError(f"Execution entry must be an object: {entry!r}")
-            update.execution_entries.entries.append(_engine_run_execution_entry_proto(entry))
+            update.execution_entries.entries.append(_compute_worker_run_execution_entry_proto(entry))
     if "progress" in fields:
         progress = _optional_mapping_float(fields, "progress")
         if progress is None:
@@ -2433,11 +2434,11 @@ def _engine_run_update_proto(fields: Mapping[str, object]) -> worker_runtime_pb2
     return update
 
 
-def _engine_run_finalization_proto(finalization: ComputeWorkerRunFinalization) -> worker_runtime_pb2.WorkerComputeWorkerRunFinalization:
+def _compute_worker_run_finalization_proto(finalization: ComputeWorkerRunFinalization) -> worker_runtime_pb2.WorkerComputeWorkerRunFinalization:
     return worker_runtime_pb2.WorkerComputeWorkerRunFinalization(
         run_id=finalization.run_id,
         merge_result=finalization.merge_result_json,
-        update=_engine_run_update_proto(finalization.fields),
+        update=_compute_worker_run_update_proto(finalization.fields),
     )
 
 
@@ -2664,7 +2665,7 @@ def _build_event_proto(namespace: str, payload: Mapping[str, object]) -> compute
     current_kind = payload.get("current_kind")
     if current_kind is not None:
         context.current_kind = _enum_number_from_token(enums_pb2.ComputeWorkerRunKind.DESCRIPTOR, current_kind, field_name="current_kind")
-    for field in ("current_datasource_id", "tab_id", "tab_name", "current_output_id", "current_output_name", "engine_run_id"):
+    for field in ("current_datasource_id", "tab_id", "tab_name", "current_output_id", "current_output_name", "compute_worker_run_id"):
         value = _optional_event_str(payload, field)
         if value is not None:
             setattr(context, field, value)

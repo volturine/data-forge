@@ -13,7 +13,7 @@ from backend_core.domain.build_jobs.models import BuildJobStatus
 from backend_core.domain.build_runs.live import BuildNotification, BuildNotificationHub
 from backend_core.domain.build_runs.models import BuildRunStatus
 from backend_core.domain.compute import schemas as compute_schemas
-from backend_core.domain.engine_runs.schemas import EngineRunKind
+from backend_core.domain.compute_worker_runs.schemas import ComputeWorkerRunKind
 from backend_core.persistence.build_runs.models import BuildEvent, BuildRun
 from backend_core.persistence.runtime_events.models import RuntimeOutboxEvent
 from backend_core.sqlmodel_typing import sa
@@ -32,7 +32,7 @@ def _create_run(test_db_session):
         analysis_name='Analysis 1',
         request_json={'analysis_id': 'analysis-1'},
         starter_json=_starter(),
-        current_kind=EngineRunKind.PREVIEW,
+        current_kind=ComputeWorkerRunKind.PREVIEW,
         current_datasource_id='source-1',
         current_tab_id='tab-1',
         current_tab_name='Tab 1',
@@ -62,13 +62,13 @@ def test_append_build_event_sequences_and_updates_snapshot(test_db_session) -> N
         build_id=run.id,
         analysis_id=run.analysis_id,
         emitted_at=started_at,
-        current_kind=EngineRunKind.BUILD,
+        current_kind=ComputeWorkerRunKind.BUILD,
         current_datasource_id='source-1',
         tab_id='tab-1',
         tab_name='Tab 1',
         current_output_id='out-1',
         current_output_name='Output 1',
-        engine_run_id='engine-1',
+        compute_worker_run_id='engine-1',
         progress=0.5,
         elapsed_ms=1200,
         estimated_remaining_ms=800,
@@ -80,13 +80,13 @@ def test_append_build_event_sequences_and_updates_snapshot(test_db_session) -> N
         build_id=run.id,
         analysis_id=run.analysis_id,
         emitted_at=started_at + timedelta(seconds=1),
-        current_kind=EngineRunKind.BUILD,
+        current_kind=ComputeWorkerRunKind.BUILD,
         current_datasource_id='source-1',
         tab_id='tab-1',
         tab_name='Tab 1',
         current_output_id='out-1',
         current_output_name='Output 1',
-        engine_run_id='engine-1',
+        compute_worker_run_id='engine-1',
         level=compute_schemas.BuildLogLevel.INFO,
         message='hello',
     )
@@ -135,7 +135,7 @@ def test_append_nonterminal_build_event_notifies_after_lock_without_outbox(test_
                 build_id=run.id,
                 analysis_id=run.analysis_id,
                 emitted_at=datetime.now(UTC),
-                current_kind=EngineRunKind.BUILD,
+                current_kind=ComputeWorkerRunKind.BUILD,
                 level=compute_schemas.BuildLogLevel.INFO,
                 message='ordered notification',
             ),
@@ -187,7 +187,7 @@ def test_concurrent_build_event_producers_receive_one_total_order_and_consistent
             build_id=run.id,
             analysis_id=run.analysis_id,
             emitted_at=emitted_at + timedelta(milliseconds=index),
-            current_kind=EngineRunKind.BUILD,
+            current_kind=ComputeWorkerRunKind.BUILD,
             current_datasource_id='source-1',
             progress=(index + 1) / producer_count,
             elapsed_ms=index,
@@ -227,7 +227,7 @@ def test_build_event_projection_counter_and_event_row_roll_back_together(test_db
         build_id=run.id,
         analysis_id=run.analysis_id,
         emitted_at=datetime.now(UTC),
-        current_kind=EngineRunKind.BUILD,
+        current_kind=ComputeWorkerRunKind.BUILD,
         current_datasource_id='source-1',
         level=compute_schemas.BuildLogLevel.INFO,
         message='uncommitted',
@@ -264,7 +264,7 @@ def test_build_event_rejects_stale_execution_generation_without_writes(test_db_s
         build_id=run.id,
         analysis_id=run.analysis_id,
         emitted_at=datetime.now(UTC),
-        current_kind=EngineRunKind.BUILD,
+        current_kind=ComputeWorkerRunKind.BUILD,
         current_datasource_id='source-1',
         level=compute_schemas.BuildLogLevel.INFO,
         message='stale',
@@ -416,7 +416,7 @@ def test_list_build_events_after_and_latest_sequence(test_db_session) -> None:
             build_id=run.id,
             analysis_id=run.analysis_id,
             emitted_at=base,
-            current_kind=EngineRunKind.PREVIEW,
+            current_kind=ComputeWorkerRunKind.PREVIEW,
             current_datasource_id='source-1',
             level=compute_schemas.BuildLogLevel.INFO,
             message='one',
@@ -429,7 +429,7 @@ def test_list_build_events_after_and_latest_sequence(test_db_session) -> None:
             build_id=run.id,
             analysis_id=run.analysis_id,
             emitted_at=base + timedelta(seconds=1),
-            current_kind=EngineRunKind.PREVIEW,
+            current_kind=ComputeWorkerRunKind.PREVIEW,
             current_datasource_id='source-1',
             level=compute_schemas.BuildLogLevel.INFO,
             message='two',
@@ -469,7 +469,7 @@ def test_serialize_event_row_preserves_proto_default_scalars(test_db_session) ->
         build_id=run.id,
         analysis_id=run.analysis_id,
         emitted_at=datetime.now(UTC),
-        current_kind=EngineRunKind.BUILD,
+        current_kind=ComputeWorkerRunKind.BUILD,
         progress=0.0,
         elapsed_ms=0,
         total_steps=0,
@@ -495,7 +495,7 @@ def test_serialize_step_event_includes_protocol_pipeline_step_kind(test_db_sessi
             build_id=run.id,
             analysis_id=run.analysis_id,
             emitted_at=datetime.now(UTC),
-            current_kind=EngineRunKind.BUILD,
+            current_kind=ComputeWorkerRunKind.BUILD,
             build_step_index=1,
             step_index=0,
             step_id='step-1',
@@ -522,7 +522,7 @@ def test_serialize_step_event_includes_protocol_execution_category_kind(test_db_
             build_id=run.id,
             analysis_id=run.analysis_id,
             emitted_at=datetime.now(UTC),
-            current_kind=EngineRunKind.BUILD,
+            current_kind=ComputeWorkerRunKind.BUILD,
             build_step_index=0,
             step_index=0,
             step_id='tab-1:initial_read',
@@ -538,10 +538,10 @@ def test_serialize_step_event_includes_protocol_execution_category_kind(test_db_
     step_completed = serialized['stepCompleted']
     assert isinstance(step_completed, dict)
     assert 'stepType' not in step_completed
-    assert step_completed['stepKind'] == {'executionCategory': 'ENGINE_RUN_EXECUTION_CATEGORY_READ'}
+    assert step_completed['stepKind'] == {'executionCategory': 'COMPUTE_WORKER_RUN_EXECUTION_CATEGORY_READ'}
 
 
-def test_build_stream_keeps_legacy_run_enum_json_names(test_db_session) -> None:
+def test_build_stream_uses_compute_worker_run_enum_json_names(test_db_session) -> None:
     run = _create_run(test_db_session)
     row = build_run_service.append_build_event(
         test_db_session,
@@ -550,7 +550,8 @@ def test_build_stream_keeps_legacy_run_enum_json_names(test_db_session) -> None:
             build_id=run.id,
             analysis_id=run.analysis_id,
             emitted_at=datetime.now(UTC),
-            current_kind=EngineRunKind.BUILD,
+            current_kind=ComputeWorkerRunKind.BUILD,
+            compute_worker_run_id='compute-worker-run-1',
             build_step_index=1,
             step_index=0,
             step_id='step-1',
@@ -567,11 +568,12 @@ def test_build_stream_keeps_legacy_run_enum_json_names(test_db_session) -> None:
     step_completed = serialized['stepCompleted']
     assert isinstance(context, dict)
     assert isinstance(step_completed, dict)
-    assert context['currentKind'] == 'ENGINE_RUN_KIND_BUILD'
+    assert context['currentKind'] == 'COMPUTE_WORKER_RUN_KIND_BUILD'
+    assert context['computeWorkerRunId'] == 'compute-worker-run-1'
     assert step_completed['stepName'] == 'COMPUTE_WORKER_RUN_KIND_BUILD'
     step_kind = step_completed['stepKind']
     assert isinstance(step_kind, dict)
-    assert step_kind['executionCategory'] == 'ENGINE_RUN_EXECUTION_CATEGORY_READ'
+    assert step_kind['executionCategory'] == 'COMPUTE_WORKER_RUN_EXECUTION_CATEGORY_READ'
 
 
 def test_serialize_step_event_rejects_untyped_step_kind(test_db_session) -> None:
@@ -583,7 +585,7 @@ def test_serialize_step_event_rejects_untyped_step_kind(test_db_session) -> None
             build_id=run.id,
             analysis_id=run.analysis_id,
             emitted_at=datetime.now(UTC),
-            current_kind=EngineRunKind.BUILD,
+            current_kind=ComputeWorkerRunKind.BUILD,
             build_step_index=1,
             step_index=0,
             step_id='step-1',
@@ -608,7 +610,7 @@ def test_fold_build_detail_reconstructs_snapshot(test_db_session) -> None:
             build_id=run.id,
             analysis_id=run.analysis_id,
             emitted_at=emitted_at,
-            current_kind=EngineRunKind.PREVIEW,
+            current_kind=ComputeWorkerRunKind.PREVIEW,
             current_datasource_id='source-1',
             tab_id='tab-1',
             tab_name='Tab 1',
@@ -623,7 +625,7 @@ def test_fold_build_detail_reconstructs_snapshot(test_db_session) -> None:
             build_id=run.id,
             analysis_id=run.analysis_id,
             emitted_at=emitted_at + timedelta(seconds=1),
-            current_kind=EngineRunKind.PREVIEW,
+            current_kind=ComputeWorkerRunKind.PREVIEW,
             current_datasource_id='source-1',
             tab_id='tab-1',
             tab_name='Tab 1',
@@ -642,7 +644,7 @@ def test_fold_build_detail_reconstructs_snapshot(test_db_session) -> None:
             build_id=run.id,
             analysis_id=run.analysis_id,
             emitted_at=emitted_at + timedelta(seconds=2),
-            current_kind=EngineRunKind.PREVIEW,
+            current_kind=ComputeWorkerRunKind.PREVIEW,
             current_datasource_id='source-1',
             tab_id='tab-1',
             tab_name='Tab 1',
@@ -661,13 +663,13 @@ def test_fold_build_detail_reconstructs_snapshot(test_db_session) -> None:
             build_id=run.id,
             analysis_id=run.analysis_id,
             emitted_at=emitted_at + timedelta(seconds=3),
-            current_kind=EngineRunKind.PREVIEW,
+            current_kind=ComputeWorkerRunKind.PREVIEW,
             current_datasource_id='source-1',
             tab_id='tab-1',
             tab_name='Tab 1',
             current_output_id='out-1',
             current_output_name='Output 1',
-            engine_run_id='engine-1',
+            compute_worker_run_id='engine-1',
             elapsed_ms=1500,
             total_steps=1,
             tabs_built=1,
@@ -704,7 +706,7 @@ def test_step_failed_event_does_not_make_running_snapshot_terminal(test_db_sessi
             build_id=run.id,
             analysis_id=run.analysis_id,
             emitted_at=emitted_at,
-            current_kind=EngineRunKind.PREVIEW,
+            current_kind=ComputeWorkerRunKind.PREVIEW,
             current_datasource_id='source-1',
             tab_id='tab-1',
             tab_name='Tab 1',
@@ -734,7 +736,7 @@ def test_guarded_terminal_update_preserves_cancelled_terminal_state(test_db_sess
         build_id=run.id,
         analysis_id=run.analysis_id,
         emitted_at=datetime.now(UTC),
-        current_kind=EngineRunKind.PREVIEW,
+        current_kind=ComputeWorkerRunKind.PREVIEW,
         current_datasource_id='source-1',
         tab_id='tab-1',
         tab_name='Tab 1',
@@ -751,7 +753,7 @@ def test_guarded_terminal_update_preserves_cancelled_terminal_state(test_db_sess
         build_id=run.id,
         analysis_id=run.analysis_id,
         emitted_at=datetime.now(UTC) + timedelta(seconds=1),
-        current_kind=EngineRunKind.PREVIEW,
+        current_kind=ComputeWorkerRunKind.PREVIEW,
         current_datasource_id='source-1',
         tab_id='tab-1',
         tab_name='Tab 1',
@@ -848,7 +850,7 @@ def test_append_build_event_persists_matching_terminal_event_without_mutating_te
         build_id=run.id,
         analysis_id=run.analysis_id,
         emitted_at=cancelled_at,
-        current_kind=EngineRunKind.PREVIEW,
+        current_kind=ComputeWorkerRunKind.PREVIEW,
         current_datasource_id='source-1',
         tab_id='tab-1',
         tab_name='Tab 1',
@@ -868,7 +870,7 @@ def test_append_build_event_persists_matching_terminal_event_without_mutating_te
         build_id=run.id,
         analysis_id=run.analysis_id,
         emitted_at=cancelled_at + timedelta(seconds=1),
-        current_kind=EngineRunKind.PREVIEW,
+        current_kind=ComputeWorkerRunKind.PREVIEW,
         current_datasource_id='source-1',
         tab_id='tab-1',
         tab_name='Tab 1',
@@ -910,7 +912,7 @@ def test_append_build_event_rejects_conflicting_terminal_event_for_terminal_run(
         build_id=run.id,
         analysis_id=run.analysis_id,
         emitted_at=datetime.now(UTC),
-        current_kind=EngineRunKind.PREVIEW,
+        current_kind=ComputeWorkerRunKind.PREVIEW,
         current_datasource_id='source-1',
         tab_id='tab-1',
         tab_name='Tab 1',
@@ -927,7 +929,7 @@ def test_append_build_event_rejects_conflicting_terminal_event_for_terminal_run(
         build_id=run.id,
         analysis_id=run.analysis_id,
         emitted_at=datetime.now(UTC) + timedelta(seconds=1),
-        current_kind=EngineRunKind.PREVIEW,
+        current_kind=ComputeWorkerRunKind.PREVIEW,
         current_datasource_id='source-1',
         tab_id='tab-1',
         tab_name='Tab 1',
@@ -992,18 +994,18 @@ def test_mark_running_builds_orphaned_handles_naive_started_at(test_db_session) 
     assert orphaned.duration_ms >= 0
 
 
-def test_get_build_run_by_engine_run_returns_latest_match(test_db_session) -> None:
+def test_get_build_run_by_compute_worker_run_returns_latest_match(test_db_session) -> None:
     first = _create_run(test_db_session)
     second = _create_run(test_db_session)
     event = compute_schemas.BuildProgressEvent(
         build_id=second.id,
         analysis_id=second.analysis_id,
         emitted_at=datetime.now(UTC),
-        current_kind=EngineRunKind.PREVIEW,
+        current_kind=ComputeWorkerRunKind.PREVIEW,
         current_datasource_id='source-1',
         tab_id='tab-1',
         tab_name='Tab 1',
-        engine_run_id='engine-42',
+        compute_worker_run_id='engine-42',
         progress=0.1,
         elapsed_ms=100,
         total_steps=3,
@@ -1016,18 +1018,18 @@ def test_get_build_run_by_engine_run_returns_latest_match(test_db_session) -> No
             build_id=first.id,
             analysis_id=first.analysis_id,
             emitted_at=datetime.now(UTC) - timedelta(seconds=2),
-            current_kind=EngineRunKind.PREVIEW,
+            current_kind=ComputeWorkerRunKind.PREVIEW,
             current_datasource_id='source-1',
             tab_id='tab-1',
             tab_name='Tab 1',
-            engine_run_id='engine-42',
+            compute_worker_run_id='engine-42',
             progress=0.1,
             elapsed_ms=100,
             total_steps=3,
         ),
     )
 
-    found = build_run_service.get_build_run_by_engine_run(test_db_session, 'engine-42')
+    found = build_run_service.get_build_run_by_compute_worker_run(test_db_session, 'engine-42')
     events = test_db_session.exec(select(BuildEvent).where(sa(BuildEvent.build_id == second.id))).all()
 
     assert found is not None

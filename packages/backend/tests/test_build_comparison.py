@@ -6,8 +6,8 @@ from datetime import UTC, datetime
 import pytest
 from sqlmodel import Session
 
-from backend_core.engine_runs_service import _compute_schema_diff, _compute_timing_diff, _safe_int, compare_engine_runs
-from backend_core.exceptions import AppError, EngineRunComparisonError
+from backend_core.compute_worker_runs_service import _compute_schema_diff, _compute_timing_diff, _safe_int, compare_compute_worker_runs
+from backend_core.exceptions import AppError, ComputeWorkerRunComparisonError
 from backend_core.persistence.compute_worker_runs.models import ComputeWorkerRun
 
 
@@ -146,7 +146,7 @@ class TestTimingDiff:
         assert _compute_timing_diff({}, {}) == []
 
 
-class TestCompareEngineRuns:
+class TestCompareComputeWorkerRuns:
     def test_compare_two_runs(self, test_db_session: Session) -> None:
         datasource_id = str(uuid.uuid4())
         run_a = _create_run(
@@ -168,7 +168,7 @@ class TestCompareEngineRuns:
         test_db_session.commit()
         test_db_session.refresh(run_b)
 
-        result = compare_engine_runs(test_db_session, run_a.id, run_b.id)
+        result = compare_compute_worker_runs(test_db_session, run_a.id, run_b.id)
 
         assert result.run_a.id == run_a.id
         assert result.run_b.id == run_b.id
@@ -193,14 +193,14 @@ class TestCompareEngineRuns:
         run_a = _create_run(test_db_session, result_json={})
         missing_id = str(uuid.uuid4())
         with pytest.raises(AppError, match='not found') as exc_info:
-            compare_engine_runs(test_db_session, run_a.id, missing_id)
+            compare_compute_worker_runs(test_db_session, run_a.id, missing_id)
         assert exc_info.value.error_code == 'ENGINE_RUN_NOT_FOUND'
 
     def test_compare_requires_same_datasource(self, test_db_session: Session) -> None:
         run_a = _create_run(test_db_session, result_json={'row_count': 1})
         run_b = _create_run(test_db_session, result_json={'row_count': 2})
-        with pytest.raises(EngineRunComparisonError, match='same datasource'):
-            compare_engine_runs(test_db_session, run_a.id, run_b.id)
+        with pytest.raises(ComputeWorkerRunComparisonError, match='same datasource'):
+            compare_compute_worker_runs(test_db_session, run_a.id, run_b.id)
 
     def test_compare_identical_runs(self, test_db_session: Session) -> None:
         datasource_id = str(uuid.uuid4())
@@ -219,7 +219,7 @@ class TestCompareEngineRuns:
             duration_ms=100,
         )
 
-        result = compare_engine_runs(test_db_session, run_a.id, run_b.id)
+        result = compare_compute_worker_runs(test_db_session, run_a.id, run_b.id)
         assert result.row_count_delta == 0
         assert result.total_duration_delta_ms == 0
         assert result.schema_diff == []
@@ -231,7 +231,7 @@ class TestCompareEngineRuns:
         run_a = _create_run(test_db_session, result_json=None, datasource_id=datasource_id)
         run_b = _create_run(test_db_session, result_json=None, datasource_id=datasource_id)
 
-        result = compare_engine_runs(test_db_session, run_a.id, run_b.id)
+        result = compare_compute_worker_runs(test_db_session, run_a.id, run_b.id)
         assert result.row_count_a is None
         assert result.row_count_b is None
         assert result.row_count_delta is None
@@ -244,7 +244,7 @@ class TestCompareEngineRuns:
         run_a = _create_run(test_db_session, result_json={'row_count': '200'}, datasource_id=datasource_id)
         run_b = _create_run(test_db_session, result_json={'row_count': '300'}, datasource_id=datasource_id)
 
-        result = compare_engine_runs(test_db_session, run_a.id, run_b.id)
+        result = compare_compute_worker_runs(test_db_session, run_a.id, run_b.id)
         assert result.row_count_a == 200
         assert result.row_count_b == 300
         assert result.row_count_delta == 100

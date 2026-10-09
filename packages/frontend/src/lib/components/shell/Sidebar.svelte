@@ -20,9 +20,9 @@
 	} from '@lucide/svelte';
 	import { listFavoriteAnalyses } from '$lib/api/analysis';
 	import { css } from '$lib/styles/panda';
-	import { enginesStore } from '$lib/stores/engines.svelte';
+	import { computeWorkersStore } from '$lib/stores/compute-workers.svelte';
 	import { favoriteStore } from '$lib/stores/favorites.svelte';
-	import EnginesPopup from '$lib/components/common/EnginesPopup.svelte';
+	import ComputeWorkersPopup from '$lib/components/common/ComputeWorkersPopup.svelte';
 
 	interface Props {
 		collapsed: boolean;
@@ -57,8 +57,8 @@
 	}: Props = $props();
 
 	const currentPath = $derived(page.url.pathname);
-	let enginesOpen = $state(false);
-	let enginesTrigger = $state<HTMLButtonElement>();
+	let computeWorkersOpen = $state(false);
+	let computeWorkersTrigger = $state<HTMLButtonElement>();
 
 	const analysesQuery = createQuery(() => ({
 		queryKey: ['favorite-analyses', namespace],
@@ -155,22 +155,22 @@
 
 	const profileActive = $derived(currentPath.startsWith('/profile'));
 
-	function setEnginesOpen(next: boolean): void {
-		if (enginesOpen === next) return;
-		enginesOpen = next;
+	function setComputeWorkersOpen(next: boolean): void {
+		if (computeWorkersOpen === next) return;
+		computeWorkersOpen = next;
 		if (next) {
-			enginesStore.startStream();
+			computeWorkersStore.startStream();
 			return;
 		}
-		enginesStore.stopStream();
+		computeWorkersStore.stopStream();
 	}
 
-	function openEngines(): void {
-		setEnginesOpen(true);
+	function openComputeWorkers(): void {
+		setComputeWorkersOpen(true);
 	}
 
 	onDestroy(() => {
-		if (enginesOpen) enginesStore.stopStream();
+		if (computeWorkersOpen) computeWorkersStore.stopStream();
 	});
 </script>
 
@@ -446,15 +446,15 @@
 				class={[
 					sidebarBtnClass,
 					css({
-						color: enginesStore.count > 0 ? 'fg.secondary' : 'fg.tertiary'
+						color: computeWorkersStore.count > 0 ? 'fg.secondary' : 'fg.tertiary'
 					})
 				]}
-				title={collapsed ? 'Engines' : 'Engine Monitor'}
-				aria-label="Engine Monitor"
-				aria-expanded={enginesOpen}
+				title="Compute workers"
+				aria-label="Compute workers"
+				aria-expanded={computeWorkersOpen}
 				type="button"
-				onclick={openEngines}
-				bind:this={enginesTrigger}
+				onclick={openComputeWorkers}
+				bind:this={computeWorkersTrigger}
 			>
 				<span
 					class={css({
@@ -468,9 +468,9 @@
 					})}
 				>
 					<Cpu size={16} />
-					{#if enginesStore.count > 0}
+					{#if computeWorkersStore.count > 0}
 						<span
-							data-testid="engine-monitor-count"
+							data-testid="compute-worker-monitor-count"
 							class={css({
 								position: 'absolute',
 								top: '-2px',
@@ -486,16 +486,19 @@
 								color: 'fg.inverse'
 							})}
 						>
-							{enginesStore.count}
+							{computeWorkersStore.count}
 						</span>
 					{/if}
 				</span>
 				{#if !collapsed}
-					<span>Engines</span>
+					<span>Compute workers</span>
 				{/if}
 			</button>
 
-			<EnginesPopup bind:open={() => enginesOpen, setEnginesOpen} anchor={enginesTrigger} />
+			<ComputeWorkersPopup
+				bind:open={() => computeWorkersOpen, setComputeWorkersOpen}
+				anchor={computeWorkersTrigger}
+			/>
 		</div>
 
 		<button

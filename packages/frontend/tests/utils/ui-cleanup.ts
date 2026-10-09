@@ -20,9 +20,9 @@ import {
 	waitForLayoutReady
 } from './readiness.js';
 
-export type EngineUiScope = 'analysis_interactive' | 'datasource_preview' | 'build';
+export type ComputeWorkerUiScope = 'analysis_interactive' | 'datasource_preview' | 'build';
 
-function engineApiSegment(scope: EngineUiScope): string {
+function computeWorkerApiSegment(scope: ComputeWorkerUiScope): string {
 	return scope === 'datasource_preview'
 		? 'datasource-preview'
 		: scope === 'build'
@@ -30,26 +30,29 @@ function engineApiSegment(scope: EngineUiScope): string {
 			: 'analysis';
 }
 
-async function shutdownEngineForCleanup(
+async function shutdownComputeWorkerForCleanup(
 	page: Page,
-	scope: EngineUiScope,
+	scope: ComputeWorkerUiScope,
 	resourceId: string,
 	namespace = DEFAULT_NAMESPACE
 ): Promise<void> {
 	const endpoint =
-		'/api/v1/compute/engine/' + engineApiSegment(scope) + '/' + encodeURIComponent(resourceId);
+		'/api/v1/compute/compute-worker/' +
+		computeWorkerApiSegment(scope) +
+		'/' +
+		encodeURIComponent(resourceId);
 	const response = await page
 		.context()
 		.request.delete(endpoint, { headers: cleanupHeaders(namespace) });
 	if (!response.ok() && response.status() !== 404) {
 		throw new Error(
-			`Failed to shut down ${scope} engine ${resourceId}: ${(await responseFailure(response)).message}`
+			`Failed to shut down ${scope} compute worker ${resourceId}: ${(await responseFailure(response)).message}`
 		);
 	}
 }
 
 /**
- * Dismiss the Build Preview modal if open so shell controls (Engines) are
+ * Dismiss the Build Preview modal if open so shell controls (Compute workers) are
  * clickable. freeWarm must not fight a full-screen BaseModal backdrop.
  */
 export async function closeBuildPreviewIfOpen(page: Page): Promise<void> {
@@ -67,15 +70,15 @@ export async function closeBuildPreviewIfOpen(page: Page): Promise<void> {
 }
 
 /**
- * Open the sidebar Engines popup (human path for engine lifecycle).
- * Pure UI — no direct DELETE /compute/engine/* from the test helper.
+ * Open the sidebar Compute workers popup (human path for compute worker lifecycle).
+ * Pure UI — no direct DELETE /compute/compute-worker/* from the test helper.
  */
-export async function openEnginesPopup(page: Page): Promise<Locator> {
-	const popup = page.locator('[data-engines-popup="true"]');
+export async function openComputeWorkersPopup(page: Page): Promise<Locator> {
+	const popup = page.locator('[data-compute-workers-popup="true"]');
 	if (await popup.isVisible().catch(() => false)) {
 		return popup;
 	}
-	const trigger = page.getByRole('button', { name: 'Engine Monitor' });
+	const trigger = page.getByRole('button', { name: 'Compute workers' });
 	if (!(await trigger.isVisible().catch(() => false))) {
 		await waitForLayoutReady(page, 5_000).catch(() => undefined);
 	}
@@ -84,13 +87,13 @@ export async function openEnginesPopup(page: Page): Promise<Locator> {
 	await expect(popup).toBeVisible({ timeout: 5_000 });
 	// Settle stream: loading ends with either an empty state or a real row.
 	// A timeout here must fail cleanup; treating an unsettled stream as empty
-	// leaves the engine alive and contaminates the next test.
+	// leaves the compute worker alive and contaminates the next test.
 	await expect
 		.poll(
 			async () => {
 				if (
 					await popup
-						.getByText('No engines running')
+						.getByText('No compute workers running')
 						.isVisible()
 						.catch(() => false)
 				) {
@@ -98,7 +101,7 @@ export async function openEnginesPopup(page: Page): Promise<Locator> {
 				}
 				if (
 					await popup
-						.locator('[data-engine-row]')
+						.locator('[data-compute-worker-row]')
 						.first()
 						.isVisible()
 						.catch(() => false)
@@ -107,27 +110,27 @@ export async function openEnginesPopup(page: Page): Promise<Locator> {
 				}
 				return 'loading';
 			},
-			{ timeout: 10_000, message: 'Engine monitor did not publish a settled snapshot' }
+			{ timeout: 10_000, message: 'Compute worker monitor did not publish a settled snapshot' }
 		)
 		.not.toBe('loading');
 	return popup;
 }
 
-export async function closeEnginesPopup(page: Page): Promise<void> {
-	const popup = page.locator('[data-engines-popup="true"]');
+export async function closeComputeWorkersPopup(page: Page): Promise<void> {
+	const popup = page.locator('[data-compute-workers-popup="true"]');
 	if (!(await popup.isVisible().catch(() => false))) return;
-	await popup.getByLabel('Close engines').click({ timeout: 1_000 });
+	await popup.getByLabel('Close compute workers').click({ timeout: 1_000 });
 	await expect(popup).toBeHidden({ timeout: 2_000 });
 }
 
 /**
- * Shut down owned engines through exact API identities.
+ * Shut down owned compute workers through exact API identities.
  *
- * This is teardown, not an Engines-popup test. The live engine stream can
+ * This is teardown, not a Compute workers popup test. The live stream can
  * remove a row between lookup and click, so using the authenticated API keeps
  * cleanup independent from DOM churn and cannot select another resource.
  */
-export async function freeWarmEngines(
+export async function freeWarmComputeWorkers(
 	page: Page,
 	targets: {
 		analysisIds?: Iterable<string>;
@@ -137,7 +140,7 @@ export async function freeWarmEngines(
 ): Promise<void> {
 	if (page.isClosed()) return;
 
-	const resources: Array<{ scope: EngineUiScope; resourceId: string }> = [];
+	const resources: Array<{ scope: ComputeWorkerUiScope; resourceId: string }> = [];
 	for (const resourceId of targets.buildIds ?? []) {
 		resources.push({ scope: 'build', resourceId });
 	}
@@ -150,7 +153,7 @@ export async function freeWarmEngines(
 
 	for (const resource of resources) {
 		if (!resource.resourceId || page.isClosed()) return;
-		await shutdownEngineForCleanup(page, resource.scope, resource.resourceId);
+		await shutdownComputeWorkerForCleanup(page, resource.scope, resource.resourceId);
 	}
 }
 
@@ -162,10 +165,10 @@ function confirmDialog(page: Page, heading: string | RegExp): Locator {
 }
 
 async function closeFloatingPanels(page: Page): Promise<void> {
-	const enginesPopup = page.locator('[data-engines-popup="true"]');
-	if (await enginesPopup.isVisible().catch(() => false)) {
-		await enginesPopup.getByLabel('Close engines').click({ timeout: 1_000 });
-		await expect(enginesPopup).toBeHidden({ timeout: 2_000 });
+	const computeWorkersPopup = page.locator('[data-compute-workers-popup="true"]');
+	if (await computeWorkersPopup.isVisible().catch(() => false)) {
+		await computeWorkersPopup.getByLabel('Close compute workers').click({ timeout: 1_000 });
+		await expect(computeWorkersPopup).toBeHidden({ timeout: 2_000 });
 	}
 }
 
@@ -230,7 +233,7 @@ async function deleteDatasourceById(
 	// DELETE marks the row pending and the worker finalizes it after its
 	// preview engine drains. Stop the exact owned engine first so teardown
 	// cannot leave a running preview holding the datasource open.
-	await shutdownEngineForCleanup(page, 'datasource_preview', datasourceId, namespace);
+	await shutdownComputeWorkerForCleanup(page, 'datasource_preview', datasourceId, namespace);
 	const response = await page
 		.context()
 		.request.delete(`/api/v1/datasource/${encodeURIComponent(datasourceId)}`, {
@@ -420,7 +423,7 @@ async function deleteDatasourceViaUIOnPage(
 	if (!(await row.isVisible().catch(() => false))) return;
 	const visibleDatasourceId = options?.id ?? (await row.getAttribute('data-ds-id'));
 	if (visibleDatasourceId) {
-		await freeWarmEngines(page, { datasourceIds: [visibleDatasourceId] });
+		await freeWarmComputeWorkers(page, { datasourceIds: [visibleDatasourceId] });
 	}
 	const deleteResponse = visibleDatasourceId
 		? page.waitForResponse(

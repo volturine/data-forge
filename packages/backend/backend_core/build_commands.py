@@ -7,7 +7,7 @@ from backend_core import build_jobs_service, build_runs_service
 from backend_core.domain.build_jobs.models import BuildJobStatus
 from backend_core.domain.build_runs.models import BuildRunStatus
 from backend_core.domain.compute import schemas as compute_schemas
-from backend_core.domain.engine_runs.schemas import EngineRunKind
+from backend_core.domain.compute_worker_runs.schemas import ComputeWorkerRunKind
 from backend_core.persistence.build_jobs.models import BuildJob
 from backend_core.transactions import committed
 
@@ -72,13 +72,13 @@ def fail_build_job(session: Session, claim: BuildClaimCommand, *, error: str) ->
             build_id=run.id,
             analysis_id=run.analysis_id,
             emitted_at=datetime.now(UTC),
-            current_kind=EngineRunKind.parse(run.current_kind) if run.current_kind is not None else None,
+            current_kind=ComputeWorkerRunKind.parse(run.current_kind) if run.current_kind is not None else None,
             current_datasource_id=run.current_datasource_id,
             tab_id=run.current_tab_id,
             tab_name=run.current_tab_name,
             current_output_id=run.current_output_id,
             current_output_name=run.current_output_name,
-            engine_run_id=run.current_compute_worker_run_id,
+            compute_worker_run_id=run.current_compute_worker_run_id,
             progress=run.progress,
             elapsed_ms=run.elapsed_ms,
             total_steps=run.total_steps,

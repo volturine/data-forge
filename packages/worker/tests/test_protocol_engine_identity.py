@@ -7,7 +7,7 @@ from dataforge_protocol import analysis_pb2, compute_pb2, enums_pb2
 from runtime import compute_request_runtime, compute_service
 
 
-def test_step_preview_request_uses_generated_engine_identity() -> None:
+def test_step_preview_request_uses_generated_compute_worker_identity() -> None:
     identity = compute_pb2.ComputeWorkerIdentity(
         scope=enums_pb2.COMPUTE_WORKER_SCOPE_DATASOURCE_PREVIEW,
         reuse_policy=enums_pb2.COMPUTE_WORKER_REUSE_POLICY_SHARED,
@@ -23,7 +23,7 @@ def test_step_preview_request_uses_generated_engine_identity() -> None:
     assert request.engine_identity.resource_id == "datasource-1"
 
 
-def test_step_preview_request_rejects_invalid_engine_identity_payload() -> None:
+def test_step_preview_request_rejects_invalid_compute_worker_identity_payload() -> None:
     identity = compute_pb2.ComputeWorkerIdentity(
         scope=enums_pb2.COMPUTE_WORKER_SCOPE_DATASOURCE_PREVIEW,
         reuse_policy=enums_pb2.COMPUTE_WORKER_REUSE_POLICY_SHARED,
@@ -67,7 +67,7 @@ def _claimed_request(kind: int, command: compute_pb2.ComputeCommand) -> compute_
         (enums_pb2.COMPUTE_REQUEST_KIND_EXPORT, "export", compute_pb2.ExportCommand),
     ],
 )
-def test_analysis_requests_share_analysis_engine_identity(kind, field_name, command_type) -> None:
+def test_analysis_requests_share_analysis_compute_worker_identity(kind, field_name, command_type) -> None:
     pipeline = _pipeline("dataset-1", "analysis-1")
     request = command_type(
         analysis_id="analysis-1",
@@ -77,9 +77,9 @@ def test_analysis_requests_share_analysis_engine_identity(kind, field_name, comm
     command = compute_pb2.ComputeCommand()
     getattr(command, field_name).CopyFrom(request)
 
-    identity = compute_request_runtime._engine_identity_for_claimed(_claimed_request(kind, command))
+    identity = compute_request_runtime._compute_worker_identity_for_claimed(_claimed_request(kind, command))
 
-    assert identity == compute_service.default_stateless_engine_identity(
+    assert identity == compute_service.default_stateless_compute_worker_identity(
         {
             "analysis_id": "analysis-1",
             "tabs": [{"id": "tab-1", "datasource": {"id": "dataset-1"}, "steps": []}],
@@ -103,7 +103,7 @@ def test_distinct_transforms_share_only_the_exact_analysis_engine() -> None:
             analysis_pipeline=_pipeline("dataset-1", analysis_id),
         )
         command = compute_pb2.ComputeCommand(preview=request)
-        identities.append(compute_request_runtime._engine_identity_for_claimed(_claimed_request(enums_pb2.COMPUTE_REQUEST_KIND_PREVIEW, command)))
+        identities.append(compute_request_runtime._compute_worker_identity_for_claimed(_claimed_request(enums_pb2.COMPUTE_REQUEST_KIND_PREVIEW, command)))
 
     assert identities[0] == identities[1]
     assert identities[0].resource_id == "analysis-1"
@@ -135,6 +135,6 @@ def test_distinct_transforms_share_only_the_exact_analysis_engine() -> None:
     ],
     ids=["mismatched-resource-id", "invalid-reuse-policy", "multiple-scoped-ids"],
 )
-def test_engine_identity_rejects_scope_invariant_violations(identity: compute_pb2.ComputeWorkerIdentity) -> None:
+def test_compute_worker_identity_rejects_scope_invariant_violations(identity: compute_pb2.ComputeWorkerIdentity) -> None:
     with pytest.raises(ValidationError):
         Validator().validate(identity)

@@ -4,7 +4,7 @@ from datetime import datetime
 
 from sqlmodel import Session
 
-from backend_core import build_datasource_dependencies, build_jobs_service, build_runs_service, engine_runs_service, runtime_outbox_service
+from backend_core import build_datasource_dependencies, build_jobs_service, build_runs_service, compute_worker_runs_service, runtime_outbox_service
 from backend_core.domain.compute import schemas
 from backend_core.persistence.build_runs.models import BuildEvent
 from backend_core.transactions import committed
@@ -116,13 +116,13 @@ def cancel_build(
     )
     if event_row is None:
         raise BuildCancellationConflict('Build became terminal before cancellation')
-    if detail.current_engine_run_id is not None:
-        run = engine_runs_service.get_engine_run(session, detail.current_engine_run_id)
-        if run is not None and run.status == engine_runs_service.EngineRunStatus.RUNNING:
+    if detail.current_compute_worker_run_id is not None:
+        run = compute_worker_runs_service.get_compute_worker_run(session, detail.current_compute_worker_run_id)
+        if run is not None and run.status == compute_worker_runs_service.ComputeWorkerRunStatus.RUNNING:
             with contextlib.suppress(ValueError):
-                engine_runs_service.stage_cancel_engine_run(
+                compute_worker_runs_service.stage_cancel_compute_worker_run(
                     session,
-                    detail.current_engine_run_id,
+                    detail.current_compute_worker_run_id,
                     cancelled_by=event.cancelled_by,
                 )
     return event_row

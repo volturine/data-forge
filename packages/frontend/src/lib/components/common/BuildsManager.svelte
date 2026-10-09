@@ -9,8 +9,8 @@
 	import {
 		buildLifecycleStatusLabel,
 		canCancelBuildLifecycleStatus,
-		engineRunDisplayKind,
-		engineRunKindLabel
+		computeWorkerRunDisplayKind,
+		computeWorkerRunKindLabel
 	} from '$lib/types/build-stream';
 	import { BuildsStore } from '$lib/stores/builds.svelte';
 	import { page as pageState } from '$app/state';
@@ -39,7 +39,7 @@
 	import { ReconnectionManager } from '$lib/stores/reconnection-manager';
 	import type { StreamHandle } from '$lib/api/websocket';
 	import { useNamespace } from '$lib/stores/namespace.svelte';
-	import { getDurationStats } from '$lib/api/engine-runs';
+	import { getDurationStats } from '$lib/api/compute-worker-runs';
 	import { formatDateTimeDisplay, toEpochDisplay } from '$lib/utils/datetime';
 	import { elapsedSince, formatDuration } from '$lib/utils/format-duration';
 	import { endOfDayEpoch, startOfDayEpoch } from '$lib/utils/temporal';
@@ -380,7 +380,7 @@
 	}
 
 	function effectiveKind(run: BuildRunSummary): string {
-		return engineRunDisplayKind(run.current_kind ?? '');
+		return computeWorkerRunDisplayKind(run.current_kind ?? '');
 	}
 
 	function buildDatasourceId(run: BuildRunSummary): string {
@@ -1097,16 +1097,16 @@
 									>
 										{#if effectiveKind(run) === 'build'}
 											<Database size={14} class={css({ color: 'accent.primary' })} />
-											<span>{engineRunKindLabel(effectiveKind(run))}</span>
+											<span>{computeWorkerRunKindLabel(effectiveKind(run))}</span>
 										{:else if effectiveKind(run) === 'download'}
 											<Download size={14} class={css({ color: 'fg.success' })} />
-											<span>{engineRunKindLabel(effectiveKind(run))}</span>
+											<span>{computeWorkerRunKindLabel(effectiveKind(run))}</span>
 										{:else if effectiveKind(run) === 'row_count'}
 											<Hash size={14} class={css({ color: 'fg.muted' })} />
-											<span>{engineRunKindLabel(effectiveKind(run))}</span>
+											<span>{computeWorkerRunKindLabel(effectiveKind(run))}</span>
 										{:else}
 											<Database size={14} class={css({ color: 'fg.muted' })} />
-											<span>{engineRunKindLabel(effectiveKind(run))}</span>
+											<span>{computeWorkerRunKindLabel(effectiveKind(run))}</span>
 										{/if}
 										{#if run.starter.triggered_by === 'schedule'}
 											<span
@@ -1353,10 +1353,10 @@
 													<strong>Build ID:</strong>
 													{run.build_id}
 												</span>
-												{#if run.current_engine_run_id}
+												{#if run.current_compute_worker_run_id}
 													<span class={css({ color: 'fg.secondary' })}>
-														<strong>Engine Run ID:</strong>
-														{run.current_engine_run_id}
+														<strong>Compute worker run ID:</strong>
+														{run.current_compute_worker_run_id}
 													</span>
 												{/if}
 												{#if currentStatus(run) === 'cancelled'}
@@ -1381,7 +1381,7 @@
 												{#key run.build_id}
 													<BuildPreview
 														store={expandedStore}
-														title={engineRunKindLabel(effectiveKind(run))}
+														title={computeWorkerRunKindLabel(effectiveKind(run))}
 														requestJson={expandedPayload?.requestJson ?? null}
 														resultJson={expandedPayload?.resultJson ?? null}
 													/>

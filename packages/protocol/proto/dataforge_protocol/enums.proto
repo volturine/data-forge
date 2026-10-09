@@ -202,6 +202,7 @@ enum ComputeRequestKind {
   COMPUTE_REQUEST_KIND_DATASOURCE_SCHEMA = 10;
   COMPUTE_REQUEST_KIND_DATASOURCE_COLUMN_STATS = 11;
   COMPUTE_REQUEST_KIND_COMPARE_ICEBERG_SNAPSHOTS = 12;
+  // Keep these names stable for queued request tokens and protobuf JSON clients.
   COMPUTE_REQUEST_KIND_SPAWN_ENGINE = 13;
   COMPUTE_REQUEST_KIND_CONFIGURE_ENGINE = 14;
   COMPUTE_REQUEST_KIND_SHUTDOWN_ENGINE = 15;
@@ -332,6 +333,7 @@ enum HealthCheckType {
 enum RuntimePayloadKind {
   RUNTIME_PAYLOAD_KIND_UNSPECIFIED = 0;
   RUNTIME_PAYLOAD_KIND_BUILD = 1 [(dataforge_token) = "build"];
+  // Keep the persisted token and enum name for existing runtime payloads.
   RUNTIME_PAYLOAD_KIND_ENGINE = 2 [(dataforge_token) = "engine"];
   RUNTIME_PAYLOAD_KIND_JOB = 3 [(dataforge_token) = "job"];
   RUNTIME_PAYLOAD_KIND_COMPUTE_REQUEST = 4 [(dataforge_token) = "compute_request"];

@@ -9,7 +9,7 @@ from backend_core.domain.api_enums import ApiEnumValue, api_token
 from dataforge_protocol import enums_pb2
 
 
-class EngineRunKind(ApiEnumValue):
+class ComputeWorkerRunKind(ApiEnumValue):
     BUILD: ClassVar[Self]
     PREVIEW: ClassVar[Self]
     ROW_COUNT: ClassVar[Self]
@@ -17,18 +17,24 @@ class EngineRunKind(ApiEnumValue):
     INGEST: ClassVar[Self]
 
 
-EngineRunKind.BUILD = EngineRunKind(enums_pb2.COMPUTE_WORKER_RUN_KIND_BUILD, api_token('ComputeWorkerRunKind', enums_pb2.COMPUTE_WORKER_RUN_KIND_BUILD))
-EngineRunKind.PREVIEW = EngineRunKind(enums_pb2.COMPUTE_WORKER_RUN_KIND_PREVIEW, api_token('ComputeWorkerRunKind', enums_pb2.COMPUTE_WORKER_RUN_KIND_PREVIEW))
-EngineRunKind.ROW_COUNT = EngineRunKind(
+ComputeWorkerRunKind.BUILD = ComputeWorkerRunKind(
+    enums_pb2.COMPUTE_WORKER_RUN_KIND_BUILD, api_token('ComputeWorkerRunKind', enums_pb2.COMPUTE_WORKER_RUN_KIND_BUILD)
+)
+ComputeWorkerRunKind.PREVIEW = ComputeWorkerRunKind(
+    enums_pb2.COMPUTE_WORKER_RUN_KIND_PREVIEW, api_token('ComputeWorkerRunKind', enums_pb2.COMPUTE_WORKER_RUN_KIND_PREVIEW)
+)
+ComputeWorkerRunKind.ROW_COUNT = ComputeWorkerRunKind(
     enums_pb2.COMPUTE_WORKER_RUN_KIND_ROW_COUNT, api_token('ComputeWorkerRunKind', enums_pb2.COMPUTE_WORKER_RUN_KIND_ROW_COUNT)
 )
-EngineRunKind.DOWNLOAD = EngineRunKind(
+ComputeWorkerRunKind.DOWNLOAD = ComputeWorkerRunKind(
     enums_pb2.COMPUTE_WORKER_RUN_KIND_DOWNLOAD, api_token('ComputeWorkerRunKind', enums_pb2.COMPUTE_WORKER_RUN_KIND_DOWNLOAD)
 )
-EngineRunKind.INGEST = EngineRunKind(enums_pb2.COMPUTE_WORKER_RUN_KIND_INGEST, api_token('ComputeWorkerRunKind', enums_pb2.COMPUTE_WORKER_RUN_KIND_INGEST))
+ComputeWorkerRunKind.INGEST = ComputeWorkerRunKind(
+    enums_pb2.COMPUTE_WORKER_RUN_KIND_INGEST, api_token('ComputeWorkerRunKind', enums_pb2.COMPUTE_WORKER_RUN_KIND_INGEST)
+)
 
 
-class EngineRunStatus(ApiEnumValue):
+class ComputeWorkerRunStatus(ApiEnumValue):
     RUNNING: ClassVar[Self]
     SUCCESS: ClassVar[Self]
     FAILED: ClassVar[Self]
@@ -36,27 +42,27 @@ class EngineRunStatus(ApiEnumValue):
 
     @property
     def is_terminal(self) -> bool:
-        return self in {EngineRunStatus.SUCCESS, EngineRunStatus.FAILED, EngineRunStatus.CANCELLED}
+        return self in {ComputeWorkerRunStatus.SUCCESS, ComputeWorkerRunStatus.FAILED, ComputeWorkerRunStatus.CANCELLED}
 
-    def blocks_transition_to(self, next_status: EngineRunStatus) -> bool:
+    def blocks_transition_to(self, next_status: ComputeWorkerRunStatus) -> bool:
         return self.is_terminal and next_status != self
 
 
-EngineRunStatus.RUNNING = EngineRunStatus(
+ComputeWorkerRunStatus.RUNNING = ComputeWorkerRunStatus(
     enums_pb2.COMPUTE_WORKER_RUN_STATUS_RUNNING, api_token('ComputeWorkerRunStatus', enums_pb2.COMPUTE_WORKER_RUN_STATUS_RUNNING)
 )
-EngineRunStatus.SUCCESS = EngineRunStatus(
+ComputeWorkerRunStatus.SUCCESS = ComputeWorkerRunStatus(
     enums_pb2.COMPUTE_WORKER_RUN_STATUS_SUCCESS, api_token('ComputeWorkerRunStatus', enums_pb2.COMPUTE_WORKER_RUN_STATUS_SUCCESS)
 )
-EngineRunStatus.FAILED = EngineRunStatus(
+ComputeWorkerRunStatus.FAILED = ComputeWorkerRunStatus(
     enums_pb2.COMPUTE_WORKER_RUN_STATUS_FAILED, api_token('ComputeWorkerRunStatus', enums_pb2.COMPUTE_WORKER_RUN_STATUS_FAILED)
 )
-EngineRunStatus.CANCELLED = EngineRunStatus(
+ComputeWorkerRunStatus.CANCELLED = ComputeWorkerRunStatus(
     enums_pb2.COMPUTE_WORKER_RUN_STATUS_CANCELLED, api_token('ComputeWorkerRunStatus', enums_pb2.COMPUTE_WORKER_RUN_STATUS_CANCELLED)
 )
 
 
-class EngineRunExecutionCategory(ApiEnumValue):
+class ComputeWorkerRunExecutionCategory(ApiEnumValue):
     READ: ClassVar[Self]
     STEP: ClassVar[Self]
     PLAN: ClassVar[Self]
@@ -65,31 +71,31 @@ class EngineRunExecutionCategory(ApiEnumValue):
 
     @property
     def is_query_plan(self) -> bool:
-        return self == EngineRunExecutionCategory.PLAN
+        return self == ComputeWorkerRunExecutionCategory.PLAN
 
     @property
     def default_step_type(self) -> str:
         match self:
-            case EngineRunExecutionCategory.READ | EngineRunExecutionCategory.WRITE:
+            case ComputeWorkerRunExecutionCategory.READ | ComputeWorkerRunExecutionCategory.WRITE:
                 return self.value
             case _:
                 return 'unknown'
 
 
-EngineRunExecutionCategory.READ = EngineRunExecutionCategory(
+ComputeWorkerRunExecutionCategory.READ = ComputeWorkerRunExecutionCategory(
     enums_pb2.COMPUTE_WORKER_RUN_EXECUTION_CATEGORY_READ, api_token('ComputeWorkerRunExecutionCategory', enums_pb2.COMPUTE_WORKER_RUN_EXECUTION_CATEGORY_READ)
 )
-EngineRunExecutionCategory.STEP = EngineRunExecutionCategory(
+ComputeWorkerRunExecutionCategory.STEP = ComputeWorkerRunExecutionCategory(
     enums_pb2.COMPUTE_WORKER_RUN_EXECUTION_CATEGORY_STEP, api_token('ComputeWorkerRunExecutionCategory', enums_pb2.COMPUTE_WORKER_RUN_EXECUTION_CATEGORY_STEP)
 )
-EngineRunExecutionCategory.PLAN = EngineRunExecutionCategory(
+ComputeWorkerRunExecutionCategory.PLAN = ComputeWorkerRunExecutionCategory(
     enums_pb2.COMPUTE_WORKER_RUN_EXECUTION_CATEGORY_PLAN, api_token('ComputeWorkerRunExecutionCategory', enums_pb2.COMPUTE_WORKER_RUN_EXECUTION_CATEGORY_PLAN)
 )
-EngineRunExecutionCategory.COMPUTE = EngineRunExecutionCategory(
+ComputeWorkerRunExecutionCategory.COMPUTE = ComputeWorkerRunExecutionCategory(
     enums_pb2.COMPUTE_WORKER_RUN_EXECUTION_CATEGORY_COMPUTE,
     api_token('ComputeWorkerRunExecutionCategory', enums_pb2.COMPUTE_WORKER_RUN_EXECUTION_CATEGORY_COMPUTE),
 )
-EngineRunExecutionCategory.WRITE = EngineRunExecutionCategory(
+ComputeWorkerRunExecutionCategory.WRITE = ComputeWorkerRunExecutionCategory(
     enums_pb2.COMPUTE_WORKER_RUN_EXECUTION_CATEGORY_WRITE, api_token('ComputeWorkerRunExecutionCategory', enums_pb2.COMPUTE_WORKER_RUN_EXECUTION_CATEGORY_WRITE)
 )
 
@@ -107,7 +113,7 @@ SchemaDiffStatus.TYPE_CHANGED = SchemaDiffStatus(
 )
 
 
-class EngineRunResultSummary(BaseModel):
+class ComputeWorkerRunResultSummary(BaseModel):
     model_config = ConfigDict(extra='allow')
 
     row_count: int | str | None = None
@@ -116,10 +122,10 @@ class EngineRunResultSummary(BaseModel):
     metadata: dict[str, Any] | None = None
 
 
-class EngineRunExecutionEntry(BaseModel):
+class ComputeWorkerRunExecutionEntry(BaseModel):
     key: str
     label: str
-    category: EngineRunExecutionCategory
+    category: ComputeWorkerRunExecutionCategory
     order: int
     duration_ms: float | None = None
     share_pct: float | None = None
@@ -128,14 +134,14 @@ class EngineRunExecutionEntry(BaseModel):
     metadata: dict[str, Any] | None = None
 
 
-class EngineRunBaseSchema(BaseModel):
+class ComputeWorkerRunBaseSchema(BaseModel):
     model_config = ConfigDict(from_attributes=True)
 
     namespace: str
     analysis_id: str | None = None
     datasource_id: str
-    kind: EngineRunKind
-    status: EngineRunStatus
+    kind: ComputeWorkerRunKind
+    status: ComputeWorkerRunStatus
     request_json: dict[str, Any]
     result_json: dict[str, Any] | None = None
     error_message: str | None = None
@@ -147,10 +153,10 @@ class EngineRunBaseSchema(BaseModel):
     progress: float = 0.0
     current_step: str | None = None
     triggered_by: str | None = None
-    execution_entries: list[EngineRunExecutionEntry] = Field(default_factory=list)
+    execution_entries: list[ComputeWorkerRunExecutionEntry] = Field(default_factory=list)
 
 
-class EngineRunResponseSchema(EngineRunBaseSchema):
+class ComputeWorkerRunResponseSchema(ComputeWorkerRunBaseSchema):
     id: str
     applied: bool = True
 
@@ -174,8 +180,8 @@ class RunSummary(BaseModel):
     model_config = ConfigDict(from_attributes=True)
 
     id: str
-    kind: EngineRunKind
-    status: EngineRunStatus
+    kind: ComputeWorkerRunKind
+    status: ComputeWorkerRunStatus
     created_at: dt.datetime
     duration_ms: int | None
     row_count: int | None = None

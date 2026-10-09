@@ -226,9 +226,9 @@
 	{#if store.buildId}
 		<span data-testid="build-preview-id" class={css({ display: 'none' })}>{store.buildId}</span>
 	{/if}
-	{#if store.engineRunId}
-		<span data-testid="build-preview-engine-run-id" class={css({ display: 'none' })}
-			>{store.engineRunId}</span
+	{#if store.computeWorkerRunId}
+		<span data-testid="build-preview-compute-worker-run-id" class={css({ display: 'none' })}
+			>{store.computeWorkerRunId}</span
 		>
 	{/if}
 	<div

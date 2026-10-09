@@ -1,23 +1,23 @@
 import type { ComputeWorkerStatusResponse } from '$lib/types/compute';
 import {
-	connectEnginesStream,
-	shutdownAnalysisEngine as shutdownAnalysisEngineApi,
-	shutdownEngineByIdentity
+	connectComputeWorkersStream,
+	shutdownAnalysisComputeWorker as shutdownAnalysisComputeWorkerApi,
+	shutdownComputeWorkerByIdentity
 } from '$lib/api/compute';
 import { ReconnectionManager } from './reconnection-manager';
 import { SvelteSet } from 'svelte/reactivity';
-import { engineIdentityKey } from '$lib/representations/engine';
+import { computeWorkerIdentityKey } from '$lib/representations/compute-worker';
 
 const RECONNECT_DELAY_MS = 1_000;
 const SNAPSHOT_REFRESH_COOLDOWN_MS = 15_000;
 
-export type EnginesConnectionStatus = 'disconnected' | 'connecting' | 'connected' | 'error';
+export type ComputeWorkersConnectionStatus = 'disconnected' | 'connecting' | 'connected' | 'error';
 
-export class EnginesStore {
-	engines = $state.raw<ComputeWorkerStatusResponse[]>([]);
+export class ComputeWorkersStore {
+	computeWorkers = $state.raw<ComputeWorkerStatusResponse[]>([]);
 	loading = $state(false);
 	error = $state<string | null>(null);
-	status = $state<EnginesConnectionStatus>('disconnected');
+	status = $state<ComputeWorkersConnectionStatus>('disconnected');
 	private shuttingDown = new SvelteSet<string>();
 
 	private connection: { close: () => void } | null = null;
@@ -30,7 +30,7 @@ export class EnginesStore {
 	private subscribers = 0;
 	private holdUntilEmpty = false;
 
-	count = $derived(this.engines.length);
+	count = $derived(this.computeWorkers.length);
 
 	loadSnapshotOnce(): void {
 		if (this.shouldReconnect || this.snapshotConnection || this.snapshotRequested) return;
@@ -63,14 +63,14 @@ export class EnginesStore {
 			}
 		};
 
-		connection = connectEnginesStream({
-			onSnapshot: (engines) => {
+		connection = connectComputeWorkersStream({
+			onSnapshot: (computeWorkers) => {
 				if (this.snapshotGeneration !== generation) {
 					connection?.close();
 					return;
 				}
 				receivedSnapshot = true;
-				this.applySnapshot(engines);
+				this.applySnapshot(computeWorkers);
 				connection?.close();
 				clearConnection();
 			},
@@ -110,10 +110,10 @@ export class EnginesStore {
 		if (this.snapshotConnection) {
 			this.cancelSnapshot();
 			this.loading = false;
-			this.status = this.engines.length > 0 ? 'connected' : 'disconnected';
+			this.status = this.computeWorkers.length > 0 ? 'connected' : 'disconnected';
 			return;
 		}
-		if (this.engines.length > 0 || this.loading || this.connection) {
+		if (this.computeWorkers.length > 0 || this.loading || this.connection) {
 			this.holdUntilEmpty = true;
 			this.shouldReconnect = true;
 			return;
@@ -122,32 +122,36 @@ export class EnginesStore {
 		this.shouldReconnect = false;
 		this.clearReconnectTimer();
 		this.connection = null;
-		this.engines = [];
+		this.computeWorkers = [];
 		this.loading = false;
 		this.error = null;
 		this.status = 'disconnected';
 	}
 
 	/**
-	 * Shut down an engine via the API. Backend cancels any active job first,
+	 * Shut down a compute worker via the API. Backend cancels any active job first,
 	 * then stops the container. 404 means already gone (race with reaper).
 	 */
-	async shutdownEngine(engine: ComputeWorkerStatusResponse): Promise<void> {
-		const key = engineIdentityKey(engine);
+	async shutdownComputeWorker(computeWorker: ComputeWorkerStatusResponse): Promise<void> {
+		const key = computeWorkerIdentityKey(computeWorker);
 		this.shuttingDown.add(key);
-		await shutdownEngineByIdentity(
-			engine.scope ?? 'analysis_interactive',
-			engine.resource_id
+		await shutdownComputeWorkerByIdentity(
+			computeWorker.scope ?? 'analysis_interactive',
+			computeWorker.resource_id
 		).match(
 			() => {
-				this.engines = this.engines.filter((item) => engineIdentityKey(item) !== key);
+				this.computeWorkers = this.computeWorkers.filter(
+					(item) => computeWorkerIdentityKey(item) !== key
+				);
 				this.error = null;
 			},
 			(err) => {
 				this.shuttingDown.delete(key);
 				// Already reaped / never existed — treat as success for the UI.
 				if (err.status === 404) {
-					this.engines = this.engines.filter((item) => engineIdentityKey(item) !== key);
+					this.computeWorkers = this.computeWorkers.filter(
+						(item) => computeWorkerIdentityKey(item) !== key
+					);
 					this.error = null;
 					return;
 				}
@@ -157,8 +161,8 @@ export class EnginesStore {
 		);
 	}
 
-	async shutdownAnalysisEngine(analysisId: string): Promise<void> {
-		await shutdownAnalysisEngineApi(analysisId).match(
+	async shutdownAnalysisComputeWorker(analysisId: string): Promise<void> {
+		await shutdownAnalysisComputeWorkerApi(analysisId).match(
 			() => {
 				this.error = null;
 			},
@@ -183,7 +187,7 @@ export class EnginesStore {
 		this.clearReconnectTimer();
 		this.connection?.close();
 		this.connection = null;
-		this.engines = [];
+		this.computeWorkers = [];
 		this.shuttingDown.clear();
 		this.loading = false;
 		this.error = null;
@@ -200,12 +204,12 @@ export class EnginesStore {
 		this.clearReconnectTimer();
 		this.error = null;
 		this.status = 'connecting';
-		if (isInitial && this.engines.length === 0) {
+		if (isInitial && this.computeWorkers.length === 0) {
 			this.loading = true;
 		}
 
-		this.connection = connectEnginesStream({
-			onSnapshot: (engines) => this.applySnapshot(engines),
+		this.connection = connectComputeWorkersStream({
+			onSnapshot: (computeWorkers) => this.applySnapshot(computeWorkers),
 			onError: (message) => {
 				if (/not authenticated/i.test(message)) {
 					this.holdUntilEmpty = false;
@@ -229,18 +233,21 @@ export class EnginesStore {
 		});
 	}
 
-	private applySnapshot(engines: ComputeWorkerStatusResponse[]): void {
+	private applySnapshot(computeWorkers: ComputeWorkerStatusResponse[]): void {
 		this.snapshotRequested = true;
 		this.lastSnapshotAt = Date.now();
 		for (const key of this.shuttingDown) {
-			if (engines.some((engine) => engineIdentityKey(engine) === key)) continue;
+			if (computeWorkers.some((computeWorker) => computeWorkerIdentityKey(computeWorker) === key))
+				continue;
 			this.shuttingDown.delete(key);
 		}
-		this.engines = engines.filter((engine) => !this.shuttingDown.has(engineIdentityKey(engine)));
+		this.computeWorkers = computeWorkers.filter(
+			(computeWorker) => !this.shuttingDown.has(computeWorkerIdentityKey(computeWorker))
+		);
 		this.loading = false;
 		this.error = null;
 		this.status = 'connected';
-		if (this.holdUntilEmpty && this.subscribers === 0 && this.engines.length === 0) {
+		if (this.holdUntilEmpty && this.subscribers === 0 && this.computeWorkers.length === 0) {
 			this.holdUntilEmpty = false;
 			this.shouldReconnect = false;
 			this.clearReconnectTimer();
@@ -267,4 +274,4 @@ export class EnginesStore {
 	}
 }
 
-export const enginesStore = new EnginesStore();
+export const computeWorkersStore = new ComputeWorkersStore();

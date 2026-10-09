@@ -13,7 +13,7 @@
 	import ChatPanel from '$lib/components/common/ChatPanel.svelte';
 	import Sidebar from '$lib/components/shell/Sidebar.svelte';
 	import { chatStore } from '$lib/stores/chat.svelte';
-	import { enginesStore } from '$lib/stores/engines.svelte';
+	import { computeWorkersStore } from '$lib/stores/compute-workers.svelte';
 	import { computeActivityStore } from '$lib/stores/compute-activity.svelte';
 	import { analysisStore } from '$lib/stores/analysis.svelte';
 	import { datasourceStore } from '$lib/stores/datasource.svelte';
@@ -218,12 +218,12 @@
 		void chatStore.open_panel();
 	}
 
-	function refreshEnginesSnapshotWhenVisible(): void {
+	function refreshComputeWorkersSnapshotWhenVisible(): void {
 		if (document.visibilityState !== 'visible') return;
 		if (!appBootstrap.appReady || onAuthPage || !isNamespaceReady()) return;
 		if (configStore.authRequired && !authStore.authenticated) return;
 		if (!namespaceState.value) return;
-		enginesStore.refreshSnapshot();
+		computeWorkersStore.refreshSnapshot();
 	}
 
 	const queryClient = new QueryClient({
@@ -240,7 +240,7 @@
 		chat: chatStore,
 		computeActivity: computeActivityStore,
 		datasource: datasourceStore,
-		engines: enginesStore,
+		computeWorkers: computeWorkersStore,
 		favorites: favoriteStore,
 		schema: schemaStore
 	});
@@ -250,11 +250,11 @@
 		if (configStore.authRequired && !authStore.authenticated) return;
 		const namespace = namespaceState.value;
 		if (!namespace) return;
-		enginesStore.loadSnapshotOnce();
+		computeWorkersStore.loadSnapshotOnce();
 	});
 
 	onMount(() => {
-		document.addEventListener('visibilitychange', refreshEnginesSnapshotWhenVisible);
+		document.addEventListener('visibilitychange', refreshComputeWorkersSnapshotWhenVisible);
 		void appBootstrap.start().then(() => {
 			bindNamespaceServices();
 			redirectIfNeeded();
@@ -263,7 +263,7 @@
 		const cleanupAudit = installAuditListeners();
 		return () => {
 			cleanupAudit?.();
-			document.removeEventListener('visibilitychange', refreshEnginesSnapshotWhenVisible);
+			document.removeEventListener('visibilitychange', refreshComputeWorkersSnapshotWhenVisible);
 			appLifecycle.destroy();
 		};
 	});

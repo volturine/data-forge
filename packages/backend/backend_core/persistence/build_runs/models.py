@@ -26,8 +26,8 @@ class BuildRun(SQLModel, table=True):  # type: ignore[call-arg, assignment]
             self.current_output_id = event.current_output_id
         if event.current_output_name is not None:
             self.current_output_name = event.current_output_name
-        if event.engine_run_id is not None:
-            self.current_compute_worker_run_id = event.engine_run_id
+        if event.compute_worker_run_id is not None:
+            self.current_compute_worker_run_id = event.compute_worker_run_id
 
     def apply_runtime_event(self, event: compute_schemas.BuildEvent) -> None:
         if isinstance(event, compute_schemas.BuildProgressEvent):

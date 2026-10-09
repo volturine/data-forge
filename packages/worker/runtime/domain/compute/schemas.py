@@ -5,8 +5,8 @@ from pydantic import BaseModel, ConfigDict, Field, StringConstraints, TypeAdapte
 
 from dataforge_protocol import enums_pb2
 from runtime.domain.analysis.step_types import is_step_type
+from runtime.domain.compute_worker_runs.schemas import ComputeWorkerRunKind
 from runtime.domain.domain_enums import DomainEnumValue, domain_token
-from runtime.domain.engine_runs.schemas import ComputeWorkerRunKind
 
 
 class ComputeWorkerStatus(DomainEnumValue):
@@ -209,7 +209,7 @@ class ComputeWorkerStatusSchema(BaseModel):
     datasource_id: str | None = None
     build_id: str | None = None
     current_build_id: str | None = None
-    current_engine_run_id: str | None = None
+    current_compute_worker_run_id: str | None = None
 
 
 class StepPreviewResponse(BaseModel):
@@ -476,7 +476,7 @@ class BuildRunSummary(BaseModel):
     current_tab_name: str | None = None
     current_output_id: str | None = None
     current_output_name: str | None = None
-    current_engine_run_id: str | None = None
+    current_compute_worker_run_id: str | None = None
     total_tabs: int = 0
     cancelled_at: datetime | None = None
     cancelled_by: str | None = None
@@ -510,7 +510,7 @@ class BuildRunDetail(BuildRunSummary):
             tab_name=self.current_tab_name,
             current_output_id=self.current_output_id,
             current_output_name=self.current_output_name,
-            engine_run_id=self.current_engine_run_id,
+            compute_worker_run_id=self.current_compute_worker_run_id,
             progress=self.progress,
             elapsed_ms=duration_ms,
             total_steps=self.total_steps,
@@ -607,7 +607,7 @@ class BuildStreamEvent(BaseModel):
     tab_name: str | None = None
     current_output_id: str | None = None
     current_output_name: str | None = None
-    engine_run_id: str | None = None
+    compute_worker_run_id: str | None = None
 
 
 class BuildPlanEvent(BuildStreamEvent):

@@ -45,7 +45,7 @@ type BuildEventBase = Pick<
 	| 'current_output_id'
 	| 'current_output_name'
 	| 'emitted_at'
-	| 'engine_run_id'
+	| 'compute_worker_run_id'
 	| 'sequence'
 	| 'tab_id'
 	| 'tab_name'
@@ -105,24 +105,9 @@ function optionalInt64(value: unknown): number | null {
 	return null;
 }
 
-function currentRunEnumJsonName(
-	value: string,
-	legacyPrefix: string,
-	currentPrefix: string
-): string {
-	return value.startsWith(legacyPrefix)
-		? `${currentPrefix}${value.slice(legacyPrefix.length)}`
-		: value;
-}
-
-function engineRunKindToken(value: string | undefined): ComputeWorkerRunKind | null {
+function computeWorkerRunKindToken(value: string | undefined): ComputeWorkerRunKind | null {
 	if (value === undefined) return null;
-	const currentValue = currentRunEnumJsonName(
-		value,
-		'ENGINE_RUN_KIND_',
-		'COMPUTE_WORKER_RUN_KIND_'
-	);
-	return COMPUTE_WORKER_RUN_KIND_JSON_TOKENS[currentValue as ComputeWorkerRunKindJson] ?? null;
+	return COMPUTE_WORKER_RUN_KIND_JSON_TOKENS[value as ComputeWorkerRunKindJson] ?? null;
 }
 
 function buildTabStatusToken(value: BuildTabStatusJson | undefined): BuildTabStatus | null {
@@ -138,14 +123,9 @@ function stepTypeToken(kind: BuildStepKindJson | undefined): string | null {
 		return STEP_TYPE_JSON_TOKENS[kind.pipeline] ?? null;
 	}
 	if (kind?.executionCategory !== undefined) {
-		const currentValue = currentRunEnumJsonName(
-			kind.executionCategory,
-			'ENGINE_RUN_EXECUTION_CATEGORY_',
-			'COMPUTE_WORKER_RUN_EXECUTION_CATEGORY_'
-		);
 		return (
 			COMPUTE_WORKER_RUN_EXECUTION_CATEGORY_JSON_TOKENS[
-				currentValue as ComputeWorkerRunExecutionCategoryJson
+				kind.executionCategory as ComputeWorkerRunExecutionCategoryJson
 			] ?? null
 		);
 	}
@@ -163,13 +143,15 @@ function baseFromContext(context: BuildEventContextJson | undefined): BuildEvent
 		analysis_id: analysisId,
 		emitted_at: emittedAt,
 		sequence: context.sequence ?? null,
-		current_kind: engineRunKindToken(context.currentKind),
+		current_kind: computeWorkerRunKindToken(context.currentKind),
 		current_datasource_id: context.currentDatasourceId ?? null,
 		tab_id: context.tabId ?? null,
 		tab_name: context.tabName ?? null,
 		current_output_id: context.currentOutputId ?? null,
 		current_output_name: context.currentOutputName ?? null,
-		engine_run_id: context.engineRunId ?? null
+		compute_worker_run_id:
+			(context as BuildEventContextJson & { computeWorkerRunId?: string }).computeWorkerRunId ??
+			null
 	};
 }
 

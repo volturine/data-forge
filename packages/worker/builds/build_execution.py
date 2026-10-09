@@ -12,8 +12,8 @@ from operations.step_converter import analysis_pipeline_to_execution_payload
 from runtime import compute_service as service
 from runtime.compute_manager import COMPUTE_WORKER_ADMISSION_PRIORITY_LIFECYCLE, ComputeWorkerCapacityFull, ProcessManager
 from runtime.domain.compute import schemas
+from runtime.domain.compute_worker_runs.schemas import ComputeWorkerRunKind
 from runtime.domain.datasource.models import DataSourceTargetKind
-from runtime.domain.engine_runs.schemas import ComputeWorkerRunKind
 from runtime.executors import run_compute_in_thread, run_control_in_thread
 from runtime.namespace import reset_namespace, set_namespace_context
 from runtime.worker_runtime_client import BuildJobLeaseLost, ClaimedBuildJob, WorkerRuntimeClient, async_client_from_env, client_from_env
@@ -145,7 +145,7 @@ async def _run_build_task(
                     tab_name=build.current_tab_name,
                     current_output_id=build.current_output_id,
                     current_output_name=build.current_output_name,
-                    engine_run_id=build.current_engine_run_id,
+                    compute_worker_run_id=build.current_compute_worker_run_id,
                     progress=build.progress,
                     elapsed_ms=build.elapsed_ms,
                     total_steps=build.total_steps,
@@ -202,9 +202,9 @@ async def _run_queued_build_job(
     if build is None or pipeline is None or starter is None:
         return
     current_kind = build.current_kind or ""
-    engine_run_kind = ComputeWorkerRunKind.parse(build.current_kind)
+    compute_worker_run_kind = ComputeWorkerRunKind.parse(build.current_kind)
     is_schedule_ingest = (
-        engine_run_kind == ComputeWorkerRunKind.BUILD
+        compute_worker_run_kind == ComputeWorkerRunKind.BUILD
         and starter.is_schedule_trigger()
         and len(run.analysis_pipeline.tabs) == 1
         and run.analysis_pipeline.tabs[0].datasource.source_type == enums_pb2.DATA_SOURCE_TYPE_SCHEDULE
@@ -238,7 +238,7 @@ async def _run_queued_build_job(
                     tab_name=build.current_tab_name,
                     current_output_id=build.current_output_id,
                     current_output_name=build.current_output_name,
-                    engine_run_id=None,
+                    compute_worker_run_id=None,
                     build_step_index=0,
                     step_index=0,
                     step_id=step_id,
@@ -280,7 +280,7 @@ async def _run_queued_build_job(
                         tab_name=build.current_tab_name,
                         current_output_id=build.current_output_id,
                         current_output_name=build.current_output_name,
-                        engine_run_id=None,
+                        compute_worker_run_id=None,
                         build_step_index=0,
                         step_index=0,
                         step_id=step_id,
@@ -304,7 +304,7 @@ async def _run_queued_build_job(
                         tab_name=build.current_tab_name,
                         current_output_id=build.current_output_id,
                         current_output_name=build.current_output_name,
-                        engine_run_id=None,
+                        compute_worker_run_id=None,
                         progress=build.progress,
                         elapsed_ms=elapsed_ms,
                         total_steps=1,
@@ -331,7 +331,7 @@ async def _run_queued_build_job(
                     tab_name=build.current_tab_name,
                     current_output_id=build.current_output_id,
                     current_output_name=refreshed_name,
-                    engine_run_id=None,
+                    compute_worker_run_id=None,
                     build_step_index=0,
                     step_index=0,
                     step_id=step_id,
@@ -355,7 +355,7 @@ async def _run_queued_build_job(
                     tab_name=build.current_tab_name,
                     current_output_id=build.current_output_id,
                     current_output_name=refreshed_name,
-                    engine_run_id=None,
+                    compute_worker_run_id=None,
                     elapsed_ms=elapsed_ms,
                     total_steps=1,
                     tabs_built=1,
@@ -387,7 +387,7 @@ async def _run_queued_build_job(
                     tab_name=build.current_tab_name,
                     current_output_id=build.current_output_id,
                     current_output_name=build.current_output_name,
-                    engine_run_id=None,
+                    compute_worker_run_id=None,
                     progress=build.progress,
                     elapsed_ms=build.elapsed_ms,
                     total_steps=1,
@@ -444,7 +444,7 @@ async def _cancel_build_engine(manager: ProcessManager, claim: ClaimedBuildJob) 
         resource_id=claim.build_id,
     )
     with contextlib.suppress(Exception):
-        await run_control_in_thread(manager.shutdown_engine, identity, namespace=claim.namespace)
+        await run_control_in_thread(manager.shutdown_compute_worker, identity, namespace=claim.namespace)
 
 
 async def run_queued_build_job(

@@ -1,4 +1,7 @@
-import type { ComputeWorkerRun, ComputeWorkerRunExecutionEntry } from '$lib/api/engine-runs';
+import type {
+	ComputeWorkerRun,
+	ComputeWorkerRunExecutionEntry
+} from '$lib/api/compute-worker-runs';
 import type {
 	BuildRunDetail,
 	BuildLogEntry,
@@ -10,13 +13,13 @@ import type {
 	BuildTabResult
 } from '$lib/types/build-stream';
 import {
-	buildStepStateFromEngineRunStatus,
+	buildStepStateFromComputeWorkerRunStatus,
 	buildStepTypeFromExecutionEntry,
-	countEngineRunSteps,
-	engineRunStatusToBuildLifecycleStatus,
+	countComputeWorkerRunSteps,
+	computeWorkerRunStatusToBuildLifecycleStatus,
 	isPlanExecutionEntry,
 	readBuildTabStatus,
-	readEngineRunKind
+	readComputeWorkerRunKind
 } from '$lib/types/build-stream';
 
 function readArray<T>(value: unknown): T[] {
@@ -95,50 +98,52 @@ function readBuildResults(
 	});
 }
 
-export function engineRunStatus(
+export function computeWorkerRunStatus(
 	run: ComputeWorkerRun
 ): 'running' | 'completed' | 'failed' | 'cancelled' {
-	return engineRunStatusToBuildLifecycleStatus(run.status);
+	return computeWorkerRunStatusToBuildLifecycleStatus(run.status);
 }
 
-export function engineRunOutputName(run: ComputeWorkerRun): string | null {
+export function computeWorkerRunOutputName(run: ComputeWorkerRun): string | null {
 	const result = readObject(run.result_json);
 	return readString(result?.current_output_name);
 }
 
-export function engineRunDatasourceId(run: ComputeWorkerRun): string {
+export function computeWorkerRunDatasourceId(run: ComputeWorkerRun): string {
 	const result = readObject(run.result_json);
 	const sourceId = readString(result?.source_datasource_id);
 	if (sourceId !== null) return sourceId;
 	return run.datasource_id;
 }
 
-export function engineRunDatasourceName(run: ComputeWorkerRun): string | null {
+export function computeWorkerRunDatasourceName(run: ComputeWorkerRun): string | null {
 	const result = readObject(run.result_json);
 	return readString(result?.source_datasource_name);
 }
 
-export function engineRunEstimatedRemainingMs(run: ComputeWorkerRun): number | null {
+export function computeWorkerRunEstimatedRemainingMs(run: ComputeWorkerRun): number | null {
 	const result = readObject(run.result_json);
 	return readNumber(result?.estimated_remaining_ms);
 }
 
-export function engineRunCurrentStepIndex(run: ComputeWorkerRun): number | null {
+export function computeWorkerRunCurrentStepIndex(run: ComputeWorkerRun): number | null {
 	const result = readObject(run.result_json);
 	return readNumber(result?.current_step_index);
 }
 
-export function engineRunTotalSteps(run: ComputeWorkerRun): number {
+export function computeWorkerRunTotalSteps(run: ComputeWorkerRun): number {
 	const result = readObject(run.result_json);
-	return readNumber(result?.total_steps) ?? countEngineRunSteps(run.execution_entries);
+	return readNumber(result?.total_steps) ?? countComputeWorkerRunSteps(run.execution_entries);
 }
 
-export function engineRunTotalTabs(run: ComputeWorkerRun): number {
+export function computeWorkerRunTotalTabs(run: ComputeWorkerRun): number {
 	const result = readObject(run.result_json);
 	return readNumber(result?.total_tabs) ?? 0;
 }
 
-export function engineRunResourceConfig(run: ComputeWorkerRun): BuildResourceConfigSummary | null {
+export function computeWorkerRunResourceConfig(
+	run: ComputeWorkerRun
+): BuildResourceConfigSummary | null {
 	const result = readObject(run.result_json);
 	return readResourceConfig(result?.resource_config);
 }
@@ -160,7 +165,7 @@ function stepsFromExecutionEntries(
 		step_type: buildStepTypeFromExecutionEntry(entry),
 		tab_id: tabId,
 		tab_name: tabName,
-		state: buildStepStateFromEngineRunStatus(runStatus, {
+		state: buildStepStateFromComputeWorkerRunStatus(runStatus, {
 			isLastStep: index === steps.length - 1
 		}),
 		duration_ms: entry.duration_ms,
@@ -185,7 +190,7 @@ function queryPlansFromExecutionEntries(
 		}));
 }
 
-export function engineRunBuildDetail(run: ComputeWorkerRun): BuildRunDetail {
+export function computeWorkerRunBuildDetail(run: ComputeWorkerRun): BuildRunDetail {
 	const result = readObject(run.result_json);
 	const tabId = readString(result?.current_tab_id);
 	const tabName = readString(result?.current_tab_name);
@@ -223,7 +228,7 @@ export function engineRunBuildDetail(run: ComputeWorkerRun): BuildRunDetail {
 		analysis_id: run.analysis_id ?? '',
 		analysis_name: run.analysis_id ?? '',
 		namespace: '',
-		status: engineRunStatus(run),
+		status: computeWorkerRunStatus(run),
 		started_at: run.created_at,
 		starter: {
 			user_id: null,
@@ -231,21 +236,21 @@ export function engineRunBuildDetail(run: ComputeWorkerRun): BuildRunDetail {
 			email: null,
 			triggered_by: run.triggered_by
 		},
-		resource_config: engineRunResourceConfig(run),
+		resource_config: computeWorkerRunResourceConfig(run),
 		progress: run.progress,
 		elapsed_ms: run.duration_ms ?? 0,
-		estimated_remaining_ms: engineRunEstimatedRemainingMs(run),
+		estimated_remaining_ms: computeWorkerRunEstimatedRemainingMs(run),
 		current_step: run.current_step,
-		current_step_index: engineRunCurrentStepIndex(run),
-		total_steps: engineRunTotalSteps(run),
-		current_kind: readEngineRunKind(run.kind),
-		current_datasource_id: engineRunDatasourceId(run),
+		current_step_index: computeWorkerRunCurrentStepIndex(run),
+		total_steps: computeWorkerRunTotalSteps(run),
+		current_kind: readComputeWorkerRunKind(run.kind),
+		current_datasource_id: computeWorkerRunDatasourceId(run),
 		current_tab_id: readString(result?.current_tab_id),
 		current_tab_name: readString(result?.current_tab_name),
 		current_output_id: readString(result?.current_output_id),
-		current_output_name: engineRunOutputName(run),
-		current_engine_run_id: run.id,
-		total_tabs: engineRunTotalTabs(run),
+		current_output_name: computeWorkerRunOutputName(run),
+		current_compute_worker_run_id: run.id,
+		total_tabs: computeWorkerRunTotalTabs(run),
 		cancelled_at: readString(result?.cancelled_at),
 		cancelled_by: readString(result?.cancelled_by),
 		steps,

@@ -64,7 +64,7 @@ export interface ComputeWorkerStatusResponse {
 	datasource_id: OptionalStringField<ProtocolComputeWorkerStatusResultJson, 'datasourceId'>;
 	build_id: OptionalStringField<ProtocolComputeWorkerStatusResultJson, 'buildId'>;
 	current_build_id: OptionalStringField<ProtocolComputeWorkerStatusResultJson, 'currentBuildId'>;
-	current_engine_run_id: OptionalStringField<
+	current_compute_worker_run_id: OptionalStringField<
 		ProtocolComputeWorkerStatusResultJson,
 		'currentEngineRunId'
 	>;

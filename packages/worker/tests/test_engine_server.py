@@ -68,7 +68,7 @@ def engine_stub(monkeypatch):
     monkeypatch.setattr(compute_worker_server, "_execute_job", execute)
     server = grpc.server(ThreadPoolExecutor(max_workers=4))
     compute_worker_runtime_pb2_grpc.add_PolarsComputeWorkerServiceServicer_to_server(
-        PolarsComputeWorkerServicer(engine_identity="analysis-1", application_version="test", token="token", on_shutdown=lambda: None), server
+        PolarsComputeWorkerServicer(compute_worker_identity="analysis-1", application_version="test", token="token", on_shutdown=lambda: None), server
     )
     port = server.add_insecure_port("127.0.0.1:0")
     server.start()
@@ -141,7 +141,7 @@ def test_export_stages_artifact_in_object_store(monkeypatch, tmp_path) -> None:
         payload={
             "datasource_config": {},
             "steps": [],
-            "artifact_url": "s3://tenant-a/runtime-staging/engine/job-1/output.parquet",
+            "artifact_url": "s3://tenant-a/runtime-staging/compute-worker/job-1/output.parquet",
             "artifact_upload_url": "http://object-store/presigned-put",
             "export_format": "parquet",
         },
@@ -151,7 +151,7 @@ def test_export_stages_artifact_in_object_store(monkeypatch, tmp_path) -> None:
     assert staged["data"] == b"parquet"
     assert staged["url"] == "http://object-store/presigned-put"
     assert result.data is not None
-    assert result.data["output_path"] == "s3://tenant-a/runtime-staging/engine/job-1/output.parquet"
+    assert result.data["output_path"] == "s3://tenant-a/runtime-staging/compute-worker/job-1/output.parquet"
 
 
 def test_engine_job_retention_is_bounded(monkeypatch) -> None:
@@ -324,7 +324,7 @@ def test_engine_rpc_control_calls_are_not_starved_by_watch_streams(monkeypatch) 
     server = grpc.server(ThreadPoolExecutor(max_workers=compute_worker_server._COMPUTE_WORKER_RPC_WORKERS))
     compute_worker_runtime_pb2_grpc.add_PolarsComputeWorkerServiceServicer_to_server(
         PolarsComputeWorkerServicer(
-            engine_identity="shared-preview",
+            compute_worker_identity="shared-preview",
             application_version="test",
             token="token",
             on_shutdown=lambda: None,
@@ -381,7 +381,7 @@ def test_compute_worker_server_warm_mode_and_initialize(monkeypatch) -> None:
     monkeypatch.setattr(compute_worker_server, "_execute_job", execute)
     server = grpc.server(ThreadPoolExecutor(max_workers=4))
     servicer = PolarsComputeWorkerServicer(
-        engine_identity="",
+        compute_worker_identity="",
         application_version="test",
         token="",
         on_shutdown=lambda: None,
@@ -465,7 +465,7 @@ def test_uninitialized_engine_stops_after_init_deadline(monkeypatch) -> None:
     monkeypatch.setattr(compute_worker_server, "_execute_job", execute)
     server = grpc.server(ThreadPoolExecutor(max_workers=4))
     servicer = PolarsComputeWorkerServicer(
-        engine_identity="",
+        compute_worker_identity="",
         application_version="test",
         token="",
         on_shutdown=lambda: shutdowns.append("stopped"),
@@ -493,7 +493,7 @@ def test_initialized_engine_ignores_init_deadline(monkeypatch) -> None:
     monkeypatch.setattr(compute_worker_server, "_execute_job", execute)
     server = grpc.server(ThreadPoolExecutor(max_workers=4))
     servicer = PolarsComputeWorkerServicer(
-        engine_identity="",
+        compute_worker_identity="",
         application_version="test",
         token="",
         on_shutdown=lambda: None,

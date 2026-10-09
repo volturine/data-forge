@@ -16,7 +16,7 @@ vi.mock('./client', () => ({
 	apiRequest: (...args: unknown[]) => mockApiRequest(...args)
 }));
 
-const engineRuns = await import('./engine-runs');
+const computeWorkerRuns = await import('./compute-worker-runs');
 
 function makeResult(tag: string) {
 	return {
@@ -25,7 +25,7 @@ function makeResult(tag: string) {
 	};
 }
 
-describe('engine-runs api', () => {
+describe('compute-worker-runs api', () => {
 	beforeEach(() => {
 		vi.clearAllMocks();
 	});
@@ -34,12 +34,14 @@ describe('engine-runs api', () => {
 		const result = makeResult('runs');
 		mockApiRequest.mockReturnValue(result);
 
-		const first = engineRuns.listEngineRuns({ datasource_id: 'ds-1', limit: 50 });
-		const second = engineRuns.listEngineRuns({ datasource_id: 'ds-1', limit: 50 });
+		const first = computeWorkerRuns.listComputeWorkerRuns({ datasource_id: 'ds-1', limit: 50 });
+		const second = computeWorkerRuns.listComputeWorkerRuns({ datasource_id: 'ds-1', limit: 50 });
 
 		expect(first).toBe(result);
 		expect(second).toBe(result);
 		expect(mockApiRequest).toHaveBeenCalledTimes(1);
-		expect(mockApiRequest).toHaveBeenCalledWith('/v1/engine-runs?datasource_id=ds-1&limit=50');
+		expect(mockApiRequest).toHaveBeenCalledWith(
+			'/v1/compute-worker-runs?datasource_id=ds-1&limit=50'
+		);
 	});
 });

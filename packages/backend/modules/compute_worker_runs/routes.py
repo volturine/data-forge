@@ -1,39 +1,39 @@
 from fastapi import HTTPException
 
-from backend_core import engine_runs_service as service
+from backend_core import compute_worker_runs_service as service
 from backend_core.api_execution_budget import run_api_blocking
 from backend_core.database import run_db
-from backend_core.domain.engine_runs import schemas
-from backend_core.domain.engine_runs.schemas import EngineRunKind, EngineRunStatus
+from backend_core.domain.compute_worker_runs import schemas
+from backend_core.domain.compute_worker_runs.schemas import ComputeWorkerRunKind, ComputeWorkerRunStatus
 from backend_core.error_handlers import handle_errors
 from backend_core.validation import (
-    EngineRunId,
+    ComputeWorkerRunId,
     parse_analysis_id,
+    parse_compute_worker_run_id,
     parse_datasource_id,
-    parse_engine_run_id,
 )
 from modules.mcp.router import MCPRouter
 
-router = MCPRouter(prefix='/engine-runs', tags=['engine-runs'])
+router = MCPRouter(prefix='/compute-worker-runs', tags=['compute-worker-runs'])
 
 
 @router.get('/compare', response_model=schemas.BuildComparisonResponse, mcp=True)
-@handle_errors(operation='compare engine runs')
+@handle_errors(operation='compare compute worker runs')
 async def compare_runs(
     run_a: str,
     run_b: str,
     datasource_id: str | None = None,
 ):
-    """Compare two engine runs side-by-side: row counts, schema changes, and step timing deltas.
+    """Compare two compute worker runs side-by-side: row counts, schema changes, and step timing deltas.
 
-    Requires run_a and run_b (engine run IDs from GET /engine-runs).
+    Requires run_a and run_b (compute worker run IDs from GET /compute-worker-runs).
     Optionally filter by datasource_id.
     """
     return await run_api_blocking(
         run_db,
-        service.compare_engine_runs,
-        parse_engine_run_id(run_a),
-        parse_engine_run_id(run_b),
+        service.compare_compute_worker_runs,
+        parse_compute_worker_run_id(run_a),
+        parse_compute_worker_run_id(run_b),
         datasource_id=parse_datasource_id(datasource_id) if datasource_id else None,
     )
 
@@ -43,12 +43,12 @@ async def compare_runs(
 async def duration_stats(
     analysis_id: str | None = None,
     datasource_id: str | None = None,
-    kind: EngineRunKind | None = None,
+    kind: ComputeWorkerRunKind | None = None,
     limit: int = 20,
 ):
     """Duration aggregates for the last N terminal runs (avg, p50, p95, trend).
 
-    For kind=BUILD (default when omitted), uses build_runs. Other kinds use engine_runs.
+    For kind=BUILD (default when omitted), uses build_runs. Other kinds use compute_worker_runs.
     """
     return await run_api_blocking(
         run_db,
@@ -60,24 +60,24 @@ async def duration_stats(
     )
 
 
-@router.get('', response_model=list[schemas.EngineRunResponseSchema], mcp=True)
-@handle_errors(operation='list engine runs')
+@router.get('', response_model=list[schemas.ComputeWorkerRunResponseSchema], mcp=True)
+@handle_errors(operation='list compute worker runs')
 async def list_runs(
     analysis_id: str | None = None,
     datasource_id: str | None = None,
-    kind: EngineRunKind | None = None,
-    status: EngineRunStatus | None = None,
+    kind: ComputeWorkerRunKind | None = None,
+    status: ComputeWorkerRunStatus | None = None,
     limit: int = 100,
     offset: int = 0,
 ):
-    """List engine runs with optional filters.
+    """List compute worker runs with optional filters.
 
     Filters: analysis_id, datasource_id, kind (preview/row_count/download),
     status (success/failed/cancelled/running). Supports pagination via limit/offset.
     """
     return await run_api_blocking(
         run_db,
-        service.list_engine_runs,
+        service.list_compute_worker_runs,
         analysis_id=parse_analysis_id(analysis_id) if analysis_id else None,
         datasource_id=parse_datasource_id(datasource_id) if datasource_id else None,
         kind=kind,
@@ -87,11 +87,11 @@ async def list_runs(
     )
 
 
-@router.get('/{run_id}', response_model=schemas.EngineRunResponseSchema, mcp=True)
-@handle_errors(operation='get engine run')
-async def get_run(run_id: EngineRunId):
-    """Get a single engine run by ID with full request/result JSON and step timings."""
-    run = await run_api_blocking(run_db, service.get_engine_run, parse_engine_run_id(run_id))
+@router.get('/{run_id}', response_model=schemas.ComputeWorkerRunResponseSchema, mcp=True)
+@handle_errors(operation='get compute worker run')
+async def get_run(run_id: ComputeWorkerRunId):
+    """Get a single compute worker run by ID with full request/result JSON and step timings."""
+    run = await run_api_blocking(run_db, service.get_compute_worker_run, parse_compute_worker_run_id(run_id))
     if not run:
-        raise HTTPException(status_code=404, detail='Engine run not found')
+        raise HTTPException(status_code=404, detail='Compute worker run not found')
     return run

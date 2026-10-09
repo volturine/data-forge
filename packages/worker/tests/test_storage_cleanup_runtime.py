@@ -398,10 +398,10 @@ def test_failed_or_stale_import_leaves_only_claim_prefix_for_durable_cleanup(mon
         def register_datasource_stage(self, **kwargs: object) -> None:
             registrations.append(kwargs)
 
-        def create_engine_run(self, **_kwargs: object) -> str:
+        def create_compute_worker_run(self, **_kwargs: object) -> str:
             return "run-1"
 
-        def update_engine_run(self, **_kwargs: object) -> None:
+        def update_compute_worker_run(self, **_kwargs: object) -> None:
             return None
 
     command = compute_pb2.ComputeCommand()
@@ -461,10 +461,10 @@ def test_reingest_datasource_strips_stale_time_travel_keys(monkeypatch: pytest.M
         def register_datasource_stage(self, **kwargs: object) -> None:
             pass
 
-        def create_engine_run(self, **_kwargs: object) -> str:
+        def create_compute_worker_run(self, **_kwargs: object) -> str:
             return "run-ingest-1"
 
-        def update_engine_run(self, **_kwargs: object) -> None:
+        def update_compute_worker_run(self, **_kwargs: object) -> None:
             pass
 
         def publish_datasource_ingest(self, **kwargs: object) -> object:
@@ -480,7 +480,7 @@ def test_reingest_datasource_strips_stale_time_travel_keys(monkeypatch: pytest.M
 
             return Rec()
 
-        def complete_engine_run(self, **_kwargs: object) -> None:
+        def complete_compute_worker_run(self, **_kwargs: object) -> None:
             pass
 
     command = compute_pb2.ComputeCommand()

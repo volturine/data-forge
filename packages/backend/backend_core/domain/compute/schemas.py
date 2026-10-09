@@ -2,6 +2,7 @@ from datetime import UTC, datetime
 from typing import Annotated, ClassVar, Literal, Self
 
 from pydantic import (
+    AliasChoices,
     BaseModel,
     BeforeValidator,
     ConfigDict,
@@ -16,48 +17,52 @@ from pydantic import (
 
 from backend_core.domain.analysis.step_types import is_step_type
 from backend_core.domain.api_enums import ApiEnumValue, api_token
-from backend_core.domain.engine_runs.schemas import EngineRunKind
+from backend_core.domain.compute_worker_runs.schemas import ComputeWorkerRunKind
 from dataforge_protocol import compute_pb2, enums_pb2
 
 
-class EngineStatus(ApiEnumValue):
+class ComputeWorkerStatus(ApiEnumValue):
     HEALTHY: ClassVar[Self]
     TERMINATED: ClassVar[Self]
 
 
-EngineStatus.HEALTHY = EngineStatus(enums_pb2.COMPUTE_WORKER_STATUS_HEALTHY, api_token('ComputeWorkerStatus', enums_pb2.COMPUTE_WORKER_STATUS_HEALTHY))
-EngineStatus.TERMINATED = EngineStatus(enums_pb2.COMPUTE_WORKER_STATUS_TERMINATED, api_token('ComputeWorkerStatus', enums_pb2.COMPUTE_WORKER_STATUS_TERMINATED))
+ComputeWorkerStatus.HEALTHY = ComputeWorkerStatus(
+    enums_pb2.COMPUTE_WORKER_STATUS_HEALTHY, api_token('ComputeWorkerStatus', enums_pb2.COMPUTE_WORKER_STATUS_HEALTHY)
+)
+ComputeWorkerStatus.TERMINATED = ComputeWorkerStatus(
+    enums_pb2.COMPUTE_WORKER_STATUS_TERMINATED, api_token('ComputeWorkerStatus', enums_pb2.COMPUTE_WORKER_STATUS_TERMINATED)
+)
 
 
-class EngineScope(ApiEnumValue):
+class ComputeWorkerScope(ApiEnumValue):
     DATASOURCE_PREVIEW: ClassVar[Self]
     ANALYSIS_INTERACTIVE: ClassVar[Self]
     BUILD: ClassVar[Self]
 
 
-EngineScope.DATASOURCE_PREVIEW = EngineScope(
+ComputeWorkerScope.DATASOURCE_PREVIEW = ComputeWorkerScope(
     enums_pb2.COMPUTE_WORKER_SCOPE_DATASOURCE_PREVIEW, api_token('ComputeWorkerScope', enums_pb2.COMPUTE_WORKER_SCOPE_DATASOURCE_PREVIEW)
 )
-EngineScope.ANALYSIS_INTERACTIVE = EngineScope(
+ComputeWorkerScope.ANALYSIS_INTERACTIVE = ComputeWorkerScope(
     enums_pb2.COMPUTE_WORKER_SCOPE_ANALYSIS_INTERACTIVE, api_token('ComputeWorkerScope', enums_pb2.COMPUTE_WORKER_SCOPE_ANALYSIS_INTERACTIVE)
 )
-EngineScope.BUILD = EngineScope(enums_pb2.COMPUTE_WORKER_SCOPE_BUILD, api_token('ComputeWorkerScope', enums_pb2.COMPUTE_WORKER_SCOPE_BUILD))
+ComputeWorkerScope.BUILD = ComputeWorkerScope(enums_pb2.COMPUTE_WORKER_SCOPE_BUILD, api_token('ComputeWorkerScope', enums_pb2.COMPUTE_WORKER_SCOPE_BUILD))
 
 
-class EngineReusePolicy(ApiEnumValue):
+class ComputeWorkerReusePolicy(ApiEnumValue):
     SHARED: ClassVar[Self]
     EXCLUSIVE: ClassVar[Self]
 
 
-EngineReusePolicy.SHARED = EngineReusePolicy(
+ComputeWorkerReusePolicy.SHARED = ComputeWorkerReusePolicy(
     enums_pb2.COMPUTE_WORKER_REUSE_POLICY_SHARED, api_token('ComputeWorkerReusePolicy', enums_pb2.COMPUTE_WORKER_REUSE_POLICY_SHARED)
 )
-EngineReusePolicy.EXCLUSIVE = EngineReusePolicy(
+ComputeWorkerReusePolicy.EXCLUSIVE = ComputeWorkerReusePolicy(
     enums_pb2.COMPUTE_WORKER_REUSE_POLICY_EXCLUSIVE, api_token('ComputeWorkerReusePolicy', enums_pb2.COMPUTE_WORKER_REUSE_POLICY_EXCLUSIVE)
 )
 
 
-class EngineResourceConfig(BaseModel):
+class ComputeWorkerResourceConfig(BaseModel):
     """Optional resource overrides for compute engine.
 
     All fields are optional - None means use default from settings/env vars.
@@ -96,7 +101,7 @@ class EngineResourceConfig(BaseModel):
         return v
 
 
-class EngineDefaults(BaseModel):
+class ComputeWorkerDefaults(BaseModel):
     """Default engine resource settings from environment."""
 
     model_config = ConfigDict(from_attributes=True)
@@ -192,12 +197,12 @@ class AnalysisPipelinePayload(BaseModel):
         return value
 
 
-class EngineStatusSchema(BaseModel):
+class ComputeWorkerStatusSchema(BaseModel):
     model_config = ConfigDict(from_attributes=True)
 
     analysis_id: str | None = None
     resource_id: str
-    status: EngineStatus
+    status: ComputeWorkerStatus
     container_id: str | None = None
     image_digest: str | None = None
     lifecycle_status: str | None = None
@@ -208,26 +213,29 @@ class EngineStatusSchema(BaseModel):
     owner_id: str | None = None
     last_activity: str | None = None
     current_job_id: str | None = None
-    resource_config: EngineResourceConfig | None = None  # Overrides provided by user
-    effective_resources: EngineResourceConfig | None = None  # Actual values being used
-    defaults: EngineDefaults | None = None  # Default values from env vars
-    scope: EngineScope | None = None
-    reuse_policy: EngineReusePolicy | None = None
+    resource_config: ComputeWorkerResourceConfig | None = None  # Overrides provided by user
+    effective_resources: ComputeWorkerResourceConfig | None = None  # Actual values being used
+    defaults: ComputeWorkerDefaults | None = None  # Default values from env vars
+    scope: ComputeWorkerScope | None = None
+    reuse_policy: ComputeWorkerReusePolicy | None = None
     datasource_id: str | None = None
     build_id: str | None = None
     current_build_id: str | None = None
-    current_engine_run_id: str | None = None
+    current_compute_worker_run_id: str | None = Field(
+        default=None,
+        validation_alias=AliasChoices('current_compute_worker_run_id', 'current_engine_run_id'),
+    )
 
 
-class EngineListSnapshotMessage(BaseModel):
+class ComputeWorkersSnapshotMessage(BaseModel):
     model_config = ConfigDict(from_attributes=True)
 
     type: Literal['snapshot'] = 'snapshot'
-    engines: list[EngineStatusSchema]
+    compute_workers: list[ComputeWorkerStatusSchema]
     total: int
 
 
-class EngineWebsocketErrorMessage(BaseModel):
+class ComputeWorkersWebsocketErrorMessage(BaseModel):
     model_config = ConfigDict(from_attributes=True)
 
     type: Literal['error'] = 'error'
@@ -235,37 +243,37 @@ class EngineWebsocketErrorMessage(BaseModel):
     status_code: int = 500
 
 
-class SpawnEngineRequest(BaseModel):
-    """Request body for spawning an engine with optional resource config."""
+class SpawnComputeWorkerRequest(BaseModel):
+    """Request body for spawning a compute worker with optional resource config."""
 
     model_config = ConfigDict(from_attributes=True)
 
-    resource_config: EngineResourceConfig | None = None
+    resource_config: ComputeWorkerResourceConfig | None = None
 
 
-def _required_engine_identity_id(payload: dict[str, object], field_name: str) -> str:
+def _required_compute_worker_identity_id(payload: dict[str, object], field_name: str) -> str:
     value = payload.get(field_name)
     if not isinstance(value, str) or not value.strip():
         raise ValueError(f'engine identity {field_name} is required')
     return value.strip()
 
 
-def _engine_identity_resource_from_payload(payload: dict[str, object], field_name: str) -> str:
-    resource_id = _required_engine_identity_id(payload, 'resource_id')
-    scoped_id = _required_engine_identity_id(payload, field_name)
+def _compute_worker_identity_resource_from_payload(payload: dict[str, object], field_name: str) -> str:
+    resource_id = _required_compute_worker_identity_id(payload, 'resource_id')
+    scoped_id = _required_compute_worker_identity_id(payload, field_name)
     if resource_id != scoped_id:
         raise ValueError(f'engine identity resource_id must match {field_name}')
     return resource_id
 
 
-def _engine_identity_from_payload(value: object) -> compute_pb2.ComputeWorkerIdentity:
+def _compute_worker_identity_from_payload(value: object) -> compute_pb2.ComputeWorkerIdentity:
     if isinstance(value, compute_pb2.ComputeWorkerIdentity):
         return value
     if not isinstance(value, dict):
         raise ValueError('engine identity must be a protocol message or object payload')
     scope = value.get('scope')
     if scope == 'analysis_interactive':
-        resource_id = _engine_identity_resource_from_payload(value, 'analysis_id')
+        resource_id = _compute_worker_identity_resource_from_payload(value, 'analysis_id')
         return compute_pb2.ComputeWorkerIdentity(
             scope=enums_pb2.COMPUTE_WORKER_SCOPE_ANALYSIS_INTERACTIVE,
             reuse_policy=enums_pb2.COMPUTE_WORKER_REUSE_POLICY_SHARED,
@@ -273,7 +281,7 @@ def _engine_identity_from_payload(value: object) -> compute_pb2.ComputeWorkerIde
             resource_id=resource_id,
         )
     if scope == 'datasource_preview':
-        resource_id = _engine_identity_resource_from_payload(value, 'datasource_id')
+        resource_id = _compute_worker_identity_resource_from_payload(value, 'datasource_id')
         return compute_pb2.ComputeWorkerIdentity(
             scope=enums_pb2.COMPUTE_WORKER_SCOPE_DATASOURCE_PREVIEW,
             reuse_policy=enums_pb2.COMPUTE_WORKER_REUSE_POLICY_SHARED,
@@ -281,7 +289,7 @@ def _engine_identity_from_payload(value: object) -> compute_pb2.ComputeWorkerIde
             resource_id=resource_id,
         )
     if scope == 'build':
-        resource_id = _engine_identity_resource_from_payload(value, 'build_id')
+        resource_id = _compute_worker_identity_resource_from_payload(value, 'build_id')
         return compute_pb2.ComputeWorkerIdentity(
             scope=enums_pb2.COMPUTE_WORKER_SCOPE_BUILD,
             reuse_policy=enums_pb2.COMPUTE_WORKER_REUSE_POLICY_EXCLUSIVE,
@@ -291,7 +299,7 @@ def _engine_identity_from_payload(value: object) -> compute_pb2.ComputeWorkerIde
     raise ValueError('engine identity scope is invalid')
 
 
-def _engine_identity_to_payload(identity: compute_pb2.ComputeWorkerIdentity) -> dict[str, str]:
+def _compute_worker_identity_to_payload(identity: compute_pb2.ComputeWorkerIdentity) -> dict[str, str]:
     if identity.scope == enums_pb2.COMPUTE_WORKER_SCOPE_ANALYSIS_INTERACTIVE and identity.HasField('analysis_id'):
         return {
             'scope': 'analysis_interactive',
@@ -318,8 +326,8 @@ def _engine_identity_to_payload(identity: compute_pb2.ComputeWorkerIdentity) -> 
 
 EngineIdentityField = Annotated[
     compute_pb2.ComputeWorkerIdentity,
-    BeforeValidator(_engine_identity_from_payload),
-    PlainSerializer(_engine_identity_to_payload, return_type=dict[str, str], when_used='json'),
+    BeforeValidator(_compute_worker_identity_from_payload),
+    PlainSerializer(_compute_worker_identity_to_payload, return_type=dict[str, str], when_used='json'),
     WithJsonSchema(
         {
             'type': 'object',
@@ -342,21 +350,21 @@ class StepPreviewRequest(BaseModel):
 
     analysis_id: str | None = None
     datasource_id: str | None = None
-    engine_identity: EngineIdentityField | None = None
+    compute_worker_identity: EngineIdentityField | None = None
     target_step_id: str
     analysis_pipeline: AnalysisPipelinePayload
     tab_id: str | None = None
     row_limit: int = Field(default=1000, ge=1, le=5000)
     page: int = Field(default=1, ge=1)
-    resource_config: EngineResourceConfig | None = None
+    resource_config: ComputeWorkerResourceConfig | None = None
 
     @model_validator(mode='after')
-    def validate_engine_identity(self) -> Self:
-        default_preview_engine_identity(self)
+    def validate_compute_worker_identity(self) -> Self:
+        default_preview_compute_worker_identity(self)
         return self
 
 
-def default_preview_engine_identity(request: StepPreviewRequest) -> compute_pb2.ComputeWorkerIdentity:
+def default_preview_compute_worker_identity(request: StepPreviewRequest) -> compute_pb2.ComputeWorkerIdentity:
     """Derive the shared physical engine identity from the requested resource RID."""
     if request.analysis_id and request.datasource_id:
         raise ValueError('preview request must identify either an analysis or datasource, not both')
@@ -396,8 +404,8 @@ def default_preview_engine_identity(request: StepPreviewRequest) -> compute_pb2.
             resource_id=analysis_id,
         )
 
-    if request.engine_identity is not None and request.engine_identity != expected:
-        raise ValueError('engine_identity must match the preview resource identity')
+    if request.compute_worker_identity is not None and request.compute_worker_identity != expected:
+        raise ValueError('compute_worker_identity must match the preview resource identity')
     return expected
 
 
@@ -783,13 +791,13 @@ class BuildRunSummary(BaseModel):
     current_step: str | None = None
     current_step_index: int | None = None
     total_steps: int = 0
-    current_kind: EngineRunKind | None = None
+    current_kind: ComputeWorkerRunKind | None = None
     current_datasource_id: str | None = None
     current_tab_id: str | None = None
     current_tab_name: str | None = None
     current_output_id: str | None = None
     current_output_name: str | None = None
-    current_engine_run_id: str | None = None
+    current_compute_worker_run_id: str | None = None
     total_tabs: int = 0
     cancelled_at: datetime | None = None
     cancelled_by: str | None = None
@@ -823,7 +831,7 @@ class BuildRunDetail(BuildRunSummary):
             tab_name=self.current_tab_name,
             current_output_id=self.current_output_id,
             current_output_name=self.current_output_name,
-            engine_run_id=self.current_engine_run_id,
+            compute_worker_run_id=self.current_compute_worker_run_id,
             progress=self.progress,
             elapsed_ms=duration_ms,
             total_steps=self.total_steps,
@@ -919,13 +927,13 @@ class BuildStreamEvent(BaseModel):
     analysis_id: str
     emitted_at: datetime
     sequence: int | None = None
-    current_kind: EngineRunKind | None = None
+    current_kind: ComputeWorkerRunKind | None = None
     current_datasource_id: str | None = None
     tab_id: str | None = None
     tab_name: str | None = None
     current_output_id: str | None = None
     current_output_name: str | None = None
-    engine_run_id: str | None = None
+    compute_worker_run_id: str | None = None
 
 
 class BuildPlanEvent(BuildStreamEvent):
@@ -1047,7 +1055,7 @@ BuildEventAdapter: TypeAdapter[BuildEvent] = TypeAdapter(BuildEvent)
 class CancelBuildResponse(BaseModel):
     id: str
     build_id: str | None = None
-    engine_run_id: str | None = None
+    compute_worker_run_id: str | None = None
     status: Literal['cancelled'] = 'cancelled'
     duration_ms: int | None = None
     cancelled_at: datetime

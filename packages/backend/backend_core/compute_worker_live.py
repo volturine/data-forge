@@ -4,7 +4,7 @@ import asyncio
 from collections import Counter
 from collections.abc import Awaitable, Callable
 
-from backend_core import engine_instances_service as engine_instance_service
+from backend_core import compute_worker_instances_service as compute_worker_instance_service
 from backend_core.domain.compute import schemas
 from backend_core.websocket import serialize_json
 
@@ -15,8 +15,8 @@ class ComputeWorkerRegistry:
         self._lock = asyncio.Lock()
         self._version: dict[str, int] = {}
         self._subscribers: Counter[str] = Counter()
-        self._snapshot_cache: dict[str, tuple[int, schemas.EngineListSnapshotMessage]] = {}
-        self._snapshot_loads: dict[tuple[str, int], asyncio.Future[tuple[int, schemas.EngineListSnapshotMessage]]] = {}
+        self._snapshot_cache: dict[str, tuple[int, schemas.ComputeWorkersSnapshotMessage]] = {}
+        self._snapshot_loads: dict[tuple[str, int], asyncio.Future[tuple[int, schemas.ComputeWorkersSnapshotMessage]]] = {}
         self._serialized_snapshot_cache: dict[str, tuple[int, str]] = {}
         self._serialized_snapshot_loads: dict[tuple[str, int], asyncio.Future[tuple[int, str]]] = {}
 
@@ -100,15 +100,15 @@ class ComputeWorkerRegistry:
     async def load_snapshot(
         self,
         namespace: str,
-        loader: Callable[[], Awaitable[schemas.EngineListSnapshotMessage]],
-    ) -> schemas.EngineListSnapshotMessage:
+        loader: Callable[[], Awaitable[schemas.ComputeWorkersSnapshotMessage]],
+    ) -> schemas.ComputeWorkersSnapshotMessage:
         _, snapshot = await self._load_versioned_snapshot(namespace, loader)
         return snapshot
 
     async def load_serialized_snapshot(
         self,
         namespace: str,
-        loader: Callable[[], Awaitable[schemas.EngineListSnapshotMessage]],
+        loader: Callable[[], Awaitable[schemas.ComputeWorkersSnapshotMessage]],
     ) -> tuple[int, str]:
         """Share one encoded status snapshot across every socket at a version."""
         version, snapshot = await self._load_versioned_snapshot(namespace, loader)
@@ -130,8 +130,8 @@ class ComputeWorkerRegistry:
     async def _load_versioned_snapshot(
         self,
         namespace: str,
-        loader: Callable[[], Awaitable[schemas.EngineListSnapshotMessage]],
-    ) -> tuple[int, schemas.EngineListSnapshotMessage]:
+        loader: Callable[[], Awaitable[schemas.ComputeWorkersSnapshotMessage]],
+    ) -> tuple[int, schemas.ComputeWorkersSnapshotMessage]:
         """Load one durable snapshot for all sockets in this API process.
 
         Engine lifecycle notifications wake every browser socket. Without a
@@ -159,8 +159,8 @@ class ComputeWorkerRegistry:
         self,
         namespace: str,
         version: int,
-        load: asyncio.Future[tuple[int, schemas.EngineListSnapshotMessage]],
-        loader: Callable[[], Awaitable[schemas.EngineListSnapshotMessage]],
+        load: asyncio.Future[tuple[int, schemas.ComputeWorkersSnapshotMessage]],
+        loader: Callable[[], Awaitable[schemas.ComputeWorkersSnapshotMessage]],
     ) -> None:
         try:
             snapshot = await loader()
@@ -190,7 +190,7 @@ class ComputeWorkerRegistry:
         self,
         namespace: str,
         version: int,
-        snapshot: schemas.EngineListSnapshotMessage,
+        snapshot: schemas.ComputeWorkersSnapshotMessage,
         load: asyncio.Future[tuple[int, str]],
     ) -> None:
         try:
@@ -236,7 +236,10 @@ class ComputeWorkerRegistry:
 registry = ComputeWorkerRegistry()
 
 
-def load_compute_worker_snapshot(session, *, namespace: str, defaults: dict[str, object]) -> schemas.EngineListSnapshotMessage:
-    rows = engine_instance_service.list_engine_projection(session, namespace=namespace)
-    statuses = [schemas.EngineStatusSchema.model_validate(engine_instance_service.serialize_engine_instance(row, defaults=defaults)) for row in rows]
-    return schemas.EngineListSnapshotMessage(engines=statuses, total=len(statuses))
+def load_compute_worker_snapshot(session, *, namespace: str, defaults: dict[str, object]) -> schemas.ComputeWorkersSnapshotMessage:
+    rows = compute_worker_instance_service.list_engine_projection(session, namespace=namespace)
+    statuses = [
+        schemas.ComputeWorkerStatusSchema.model_validate(compute_worker_instance_service.serialize_compute_worker_instance(row, defaults=defaults))
+        for row in rows
+    ]
+    return schemas.ComputeWorkersSnapshotMessage(compute_workers=statuses, total=len(statuses))

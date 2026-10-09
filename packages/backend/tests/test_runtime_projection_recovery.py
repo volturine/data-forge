@@ -15,7 +15,7 @@ from sqlmodel import Session
 from backend_core import runtime_notifications
 from backend_core.compute_worker_live import ComputeWorkerRegistry
 from backend_core.domain.build_runs.live import BuildNotification, BuildNotificationHub
-from backend_core.domain.compute.schemas import EngineListSnapshotMessage
+from backend_core.domain.compute.schemas import ComputeWorkersSnapshotMessage
 from backend_core.namespace import get_namespace
 from backend_core.persistence.locks.models import ResourceLock
 from modules.compute import routes as compute_routes
@@ -105,8 +105,8 @@ async def test_engine_stream_registers_before_snapshot_and_refreshes_on_racing_r
         await registry.recover_active()
         return before
 
-    monkeypatch.setattr(compute_routes, '_send_engine_snapshot', snapshot)
-    await asyncio.wait_for(compute_routes.engine_list_stream(projection_socket), timeout=1)
+    monkeypatch.setattr(compute_routes, '_send_compute_worker_snapshot', snapshot)
+    await asyncio.wait_for(compute_routes.compute_workers_stream(projection_socket), timeout=1)
     assert snapshots == 2
     version = await registry.current_version('alpha')
     await registry.recover_active()
@@ -154,13 +154,13 @@ async def test_build_recovery_batches_only_active_exact_ids_and_retains_a_newer_
 @pytest.mark.asyncio
 async def test_engine_recovery_during_initial_snapshot_retains_before_read_version_and_one_load_per_namespace() -> None:
     registry = ComputeWorkerRegistry()
-    before = EngineListSnapshotMessage(engines=[], total=0)
-    after = EngineListSnapshotMessage(engines=[], total=1)
+    before = ComputeWorkersSnapshotMessage(compute_workers=[], total=0)
+    after = ComputeWorkersSnapshotMessage(compute_workers=[], total=1)
     started = asyncio.Event()
     release = asyncio.Event()
     calls = 0
 
-    async def load() -> EngineListSnapshotMessage:
+    async def load() -> ComputeWorkersSnapshotMessage:
         nonlocal calls
         calls += 1
         if calls == 1:
@@ -169,7 +169,7 @@ async def test_engine_recovery_during_initial_snapshot_retains_before_read_versi
             return before
         return after
 
-    async def idle_load() -> EngineListSnapshotMessage:
+    async def idle_load() -> ComputeWorkersSnapshotMessage:
         return before
 
     await registry.load_snapshot('inactive', idle_load)

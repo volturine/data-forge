@@ -3,7 +3,7 @@ import type { Locator, Page } from '@playwright/test';
 import { test, expect } from './fixtures.js';
 import { gotoAnalysisEditor } from './utils/analysis.js';
 import { createAnalysis } from './utils/api.js';
-import { deleteAnalysisViaUI, freeWarmEngines } from './utils/ui-cleanup.js';
+import { deleteAnalysisViaUI, freeWarmComputeWorkers } from './utils/ui-cleanup.js';
 import { readyTimeoutMs } from './utils/readiness.js';
 import { uid } from './utils/uid.js';
 import { screenshot } from './utils/visual.js';
@@ -23,7 +23,7 @@ async function cleanupBuildPreviewResources(
 	// Free exclusive build engine once if still warm, then gallery deletes
 	// (analysis/datasource delete each shut their engines once — no freeWarm stack).
 	if (buildId) {
-		await freeWarmEngines(page, { buildIds: [buildId] });
+		await freeWarmComputeWorkers(page, { buildIds: [buildId] });
 	}
 	await deleteAnalysisViaUI(page, analysisName, { id: analysisId });
 }

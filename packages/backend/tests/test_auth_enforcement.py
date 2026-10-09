@@ -194,7 +194,7 @@ class TestEngineWebsocketAuth:
     def test_ws_engines_rejects_unauthenticated(self, client: TestClient, monkeypatch: pytest.MonkeyPatch) -> None:
         _require_unauthenticated(monkeypatch)
 
-        with client.websocket_connect('/api/v1/compute/ws/engines') as websocket:
+        with client.websocket_connect('/api/v1/compute/ws/compute-workers') as websocket:
             message = websocket.receive_json()
 
         assert message['status_code'] == 401

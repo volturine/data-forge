@@ -29,6 +29,6 @@ def _build_runtime_overview(session: Session, worker_id: str | None) -> schemas.
         mode=service.runtime_mode(),
         api=service.api_process(worker_id),
         workers=service.list_worker_summaries(session),
-        engines=service.list_engine_summaries(session),
+        compute_workers=service.list_compute_worker_summaries(session),
         queue=service.queue_summary(session),
     )

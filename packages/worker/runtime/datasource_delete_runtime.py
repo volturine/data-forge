@@ -127,4 +127,4 @@ def _stop_idle_datasource_engine(
         datasource_id=datasource_id,
         resource_id=datasource_id,
     )
-    return manager.shutdown_engine_if_idle(identity, namespace=namespace)
+    return manager.shutdown_compute_worker_if_idle(identity, namespace=namespace)

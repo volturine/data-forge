@@ -1,5 +1,5 @@
 import type { ResultAsync } from 'neverthrow';
-import { enginesStore } from '$lib/stores/engines.svelte';
+import { computeWorkersStore } from '$lib/stores/compute-workers.svelte';
 
 export class ComputeActivityStore {
 	private leases = $state(0);
@@ -8,13 +8,13 @@ export class ComputeActivityStore {
 
 	retain(): () => void {
 		this.leases += 1;
-		if (this.leases === 1) enginesStore.startStream();
+		if (this.leases === 1) computeWorkersStore.startStream();
 		let released = false;
 		return () => {
 			if (released) return;
 			released = true;
 			this.leases = Math.max(0, this.leases - 1);
-			if (this.leases === 0) enginesStore.stopStream();
+			if (this.leases === 0) computeWorkersStore.stopStream();
 		};
 	}
 
@@ -34,7 +34,7 @@ export class ComputeActivityStore {
 	reset(): void {
 		const hadLease = this.leases > 0;
 		this.leases = 0;
-		if (hadLease) enginesStore.stopStream();
+		if (hadLease) computeWorkersStore.stopStream();
 	}
 }
 

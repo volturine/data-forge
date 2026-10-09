@@ -29,5 +29,5 @@ class ComputeWorkerStatusInfo:
     datasource_id: str | None = None
     build_id: str | None = None
     current_build_id: str | None = None
-    current_engine_run_id: str | None = None
+    current_compute_worker_run_id: str | None = None
     docker_host: str | None = None

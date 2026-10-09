@@ -72,7 +72,7 @@ def test_preview_analysis_uses_pipeline_payload(client, sample_datasource: DataS
         args, _kwargs = mock_preview.call_args
         request = args[0]
         assert request.analysis_pipeline.analysis_id == analysis_id
-        assert request.engine_identity.scope == enums_pb2.COMPUTE_WORKER_SCOPE_ANALYSIS_INTERACTIVE
-        assert request.engine_identity.analysis_id == analysis_id
-        assert request.engine_identity.resource_id == analysis_id
+        assert request.compute_worker_identity.scope == enums_pb2.COMPUTE_WORKER_SCOPE_ANALYSIS_INTERACTIVE
+        assert request.compute_worker_identity.analysis_id == analysis_id
+        assert request.compute_worker_identity.resource_id == analysis_id
         assert request.analysis_pipeline.tabs[0].datasource.config.model_extra['snapshot_id'] == '123'

@@ -1,4 +1,4 @@
-"""Persistence model for compute engine run history."""
+"""Persistence model for compute compute worker run history."""
 
 from backend_core.persistence.compute_worker_runs.models import ComputeWorkerRun
 

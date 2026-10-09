@@ -1,13 +1,13 @@
 import { describe, expect, it } from 'vitest';
 
-import type { ComputeWorkerRun } from '$lib/api/engine-runs';
+import type { ComputeWorkerRun } from '$lib/api/compute-worker-runs';
 import {
-	engineRunBuildDetail,
-	engineRunDatasourceId,
-	engineRunDatasourceName,
-	engineRunOutputName,
-	engineRunStatus
-} from '$lib/utils/engine-run-build-detail';
+	computeWorkerRunBuildDetail,
+	computeWorkerRunDatasourceId,
+	computeWorkerRunDatasourceName,
+	computeWorkerRunOutputName,
+	computeWorkerRunStatus
+} from '$lib/utils/compute-worker-run-build-detail';
 
 function makeRun(overrides: Partial<ComputeWorkerRun> = {}): ComputeWorkerRun {
 	return {
@@ -108,19 +108,19 @@ function makeRun(overrides: Partial<ComputeWorkerRun> = {}): ComputeWorkerRun {
 	};
 }
 
-describe('engineRunBuildDetail', () => {
+describe('computeWorkerRunBuildDetail', () => {
 	it('maps persisted running rows into build preview detail', () => {
 		const run = makeRun();
-		const detail = engineRunBuildDetail(run);
+		const detail = computeWorkerRunBuildDetail(run);
 
-		expect(engineRunStatus(run)).toBe('running');
-		expect(engineRunOutputName(run)).toBe('output_salary_predictions');
-		expect(engineRunDatasourceId(run)).toBe('input-ds-1');
-		expect(engineRunDatasourceName(run)).toBe('Source 1');
+		expect(computeWorkerRunStatus(run)).toBe('running');
+		expect(computeWorkerRunOutputName(run)).toBe('output_salary_predictions');
+		expect(computeWorkerRunDatasourceId(run)).toBe('input-ds-1');
+		expect(computeWorkerRunDatasourceName(run)).toBe('Source 1');
 		expect(detail.status).toBe('running');
 		expect(detail.current_output_name).toBe('output_salary_predictions');
 		expect(detail.steps).toHaveLength(3);
-		expect(detail.current_engine_run_id).toBe('run-1');
+		expect(detail.current_compute_worker_run_id).toBe('run-1');
 		expect(detail.steps).toHaveLength(3);
 		expect(detail.steps[0]?.step_name).toBe('Initial Read');
 		expect(detail.steps[0]?.duration_ms).toBe(12);
@@ -140,9 +140,9 @@ describe('engineRunBuildDetail', () => {
 
 	it('maps failed rows to failed detail state', () => {
 		const run = makeRun({ status: 'failed', error_message: 'boom' });
-		const detail = engineRunBuildDetail(run);
+		const detail = computeWorkerRunBuildDetail(run);
 
-		expect(engineRunStatus(run)).toBe('failed');
+		expect(computeWorkerRunStatus(run)).toBe('failed');
 		expect(detail.status).toBe('failed');
 		expect(detail.error).toBe('boom');
 	});
@@ -158,16 +158,16 @@ describe('engineRunBuildDetail', () => {
 				results: []
 			}
 		});
-		const detail = engineRunBuildDetail(run);
+		const detail = computeWorkerRunBuildDetail(run);
 
-		expect(engineRunStatus(run)).toBe('cancelled');
+		expect(computeWorkerRunStatus(run)).toBe('cancelled');
 		expect(detail.status).toBe('cancelled');
 		expect(detail.cancelled_at).toBe('2026-04-10T10:15:00Z');
 		expect(detail.cancelled_by).toBe('test@example.com');
 	});
 
 	it('leaves analysis fields blank for datasource-only runs', () => {
-		const detail = engineRunBuildDetail(makeRun({ analysis_id: null }));
+		const detail = computeWorkerRunBuildDetail(makeRun({ analysis_id: null }));
 
 		expect(detail.analysis_id).toBe('');
 		expect(detail.analysis_name).toBe('');
@@ -190,7 +190,7 @@ describe('engineRunBuildDetail', () => {
 				resources: []
 			}
 		});
-		const detail = engineRunBuildDetail(run);
+		const detail = computeWorkerRunBuildDetail(run);
 
 		expect(detail.status).toBe('completed');
 		expect(detail.resources).toEqual([]);
@@ -226,7 +226,7 @@ describe('engineRunBuildDetail', () => {
 				]
 			}
 		});
-		const detail = engineRunBuildDetail(run);
+		const detail = computeWorkerRunBuildDetail(run);
 
 		expect(detail.resources).toEqual([]);
 		expect(detail.latest_resources).toBeNull();
@@ -241,6 +241,6 @@ describe('engineRunBuildDetail', () => {
 			}
 		});
 
-		expect(engineRunOutputName(run)).toBeNull();
+		expect(computeWorkerRunOutputName(run)).toBeNull();
 	});
 });

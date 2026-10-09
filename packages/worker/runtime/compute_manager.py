@@ -107,15 +107,15 @@ class _EngineJobSlot:
     references: int = 0
 
 
-def _engine_identity_analysis_id(identity: ComputeWorkerIdentity) -> str | None:
+def _compute_worker_identity_analysis_id(identity: ComputeWorkerIdentity) -> str | None:
     return identity.analysis_id if identity.HasField("analysis_id") else None
 
 
-def _engine_identity_datasource_id(identity: ComputeWorkerIdentity) -> str | None:
+def _compute_worker_identity_datasource_id(identity: ComputeWorkerIdentity) -> str | None:
     return identity.datasource_id if identity.HasField("datasource_id") else None
 
 
-def _engine_identity_build_id(identity: ComputeWorkerIdentity) -> str | None:
+def _compute_worker_identity_build_id(identity: ComputeWorkerIdentity) -> str | None:
     return identity.build_id if identity.HasField("build_id") else None
 
 
@@ -193,7 +193,7 @@ class ComputeWorkerInfo:
         self.last_activity = datetime.now(UTC)
         self._last_snapshot_at = time.monotonic()
         self.current_build_id: str | None = None
-        self.current_engine_run_id: str | None = None
+        self.current_compute_worker_run_id: str | None = None
         self.active_reservations = 0
 
     def touch(self) -> None:
@@ -738,7 +738,7 @@ class ProcessManager:
             self._capacity_changed.notify_all()
         self.notify_capacity_changed()
 
-    def shutdown_engine_after_request_lease_loss(
+    def shutdown_compute_worker_after_request_lease_loss(
         self,
         identity: ComputeWorkerIdentity,
         *,
@@ -787,7 +787,7 @@ class ProcessManager:
                 active_job,
             )
         if shutdown:
-            self.shutdown_engine(identity, namespace=namespace)
+            self.shutdown_compute_worker(identity, namespace=namespace)
         return shutdown
 
     def can_admit_spawn(self) -> bool:
@@ -1055,7 +1055,7 @@ class ProcessManager:
                                 self._cold_starts += 1
                                 cold_start_held = True
                         info.current_build_id = None
-                        info.current_engine_run_id = None
+                        info.current_compute_worker_run_id = None
                         del self._engines[qualified_key]
                         self._engine_identities.pop(qualified_key, None)
                     break
@@ -1403,7 +1403,7 @@ class ProcessManager:
         identity_key = self._key(identity)
         logger.info("Restarting engine for %s with new config: %s", identity_key, resource_config)
         # Keep the old identity's capacity reserved until its replacement has
-        # been installed. spawn_engine owns that transfer atomically.
+        # been installed. spawn_compute_worker owns that transfer atomically.
         return self.spawn_compute_worker(identity, resource_config=resource_config)
 
     def get_engine(self, identity: ComputeWorkerIdentity, *, namespace: str | None = None) -> ComputeWorker | None:
@@ -1417,7 +1417,9 @@ class ProcessManager:
         with self._engines_lock:
             return self._engines.get(qualified_key)
 
-    def set_engine_runtime_context(self, identity: ComputeWorkerIdentity, *, current_build_id: str | None, current_engine_run_id: str | None) -> None:
+    def set_compute_worker_runtime_context(
+        self, identity: ComputeWorkerIdentity, *, current_build_id: str | None, current_compute_worker_run_id: str | None
+    ) -> None:
         qualified_key = self._key(identity)
         namespace = qualified_key.namespace
         changed = False
@@ -1427,8 +1429,8 @@ class ProcessManager:
                 if info.current_build_id != current_build_id:
                     info.current_build_id = current_build_id
                     changed = True
-                if info.current_engine_run_id != current_engine_run_id:
-                    info.current_engine_run_id = current_engine_run_id
+                if info.current_compute_worker_run_id != current_compute_worker_run_id:
+                    info.current_compute_worker_run_id = current_compute_worker_run_id
                     changed = True
         if changed:
             self._emit_snapshot_for_namespaces({namespace})
@@ -1440,7 +1442,7 @@ class ProcessManager:
             "streaming_chunk_size": settings.polars_streaming_chunk_size,
         }
 
-    def get_engine_status(self, identity: ComputeWorkerIdentity, *, defaults: dict | None = None) -> ComputeWorkerStatusInfo:
+    def get_compute_worker_status(self, identity: ComputeWorkerIdentity, *, defaults: dict | None = None) -> ComputeWorkerStatusInfo:
         if defaults is None:
             defaults = self._get_defaults()
 
@@ -1450,7 +1452,7 @@ class ProcessManager:
             persisted_identity = self._engine_identities.get(qualified_key, identity)
             if info is None:
                 return ComputeWorkerStatusInfo(
-                    analysis_id=_engine_identity_analysis_id(persisted_identity) or "",
+                    analysis_id=_compute_worker_identity_analysis_id(persisted_identity) or "",
                     resource_id=persisted_identity.resource_id,
                     status=ComputeWorkerStatus.TERMINATED,
                     container_id=None,
@@ -1468,10 +1470,10 @@ class ProcessManager:
                     defaults=defaults,
                     scope=_engine_scope_value(persisted_identity),
                     reuse_policy=_engine_reuse_policy_value(persisted_identity),
-                    datasource_id=_engine_identity_datasource_id(persisted_identity),
-                    build_id=_engine_identity_build_id(persisted_identity),
-                    current_build_id=_engine_identity_build_id(persisted_identity),
-                    current_engine_run_id=None,
+                    datasource_id=_compute_worker_identity_datasource_id(persisted_identity),
+                    build_id=_compute_worker_identity_build_id(persisted_identity),
+                    current_build_id=_compute_worker_identity_build_id(persisted_identity),
+                    current_compute_worker_run_id=None,
                 )
 
             # Status is a read of tracked state, not a probe: snapshots cover
@@ -1484,7 +1486,7 @@ class ProcessManager:
             effective_resources = engine.effective_resources or None
 
             return ComputeWorkerStatusInfo(
-                analysis_id=_engine_identity_analysis_id(persisted_identity) or "",
+                analysis_id=_compute_worker_identity_analysis_id(persisted_identity) or "",
                 resource_id=persisted_identity.resource_id,
                 status=ComputeWorkerStatus.HEALTHY if is_alive else ComputeWorkerStatus.TERMINATED,
                 container_id=getattr(engine, "container_id", None),
@@ -1494,7 +1496,7 @@ class ProcessManager:
                 exit_code=getattr(engine, "exit_code", None),
                 oom_killed=getattr(engine, "oom_killed", None),
                 supervisor_id=self._supervisor_id,
-                owner_id=_engine_identity_build_id(persisted_identity) or self._supervisor_id,
+                owner_id=_compute_worker_identity_build_id(persisted_identity) or self._supervisor_id,
                 last_activity=info.last_activity.isoformat(),
                 current_job_id=engine.current_job_id,
                 resource_config=resource_config,
@@ -1502,14 +1504,14 @@ class ProcessManager:
                 defaults=defaults,
                 scope=_engine_scope_value(persisted_identity),
                 reuse_policy=_engine_reuse_policy_value(persisted_identity),
-                datasource_id=_engine_identity_datasource_id(persisted_identity),
-                build_id=_engine_identity_build_id(persisted_identity),
-                current_build_id=info.current_build_id or _engine_identity_build_id(persisted_identity),
-                current_engine_run_id=info.current_engine_run_id,
+                datasource_id=_compute_worker_identity_datasource_id(persisted_identity),
+                build_id=_compute_worker_identity_build_id(persisted_identity),
+                current_build_id=info.current_build_id or _compute_worker_identity_build_id(persisted_identity),
+                current_compute_worker_run_id=info.current_compute_worker_run_id,
                 docker_host=getattr(engine, "docker_host", None),
             )
 
-    def shutdown_engine(self, identity: ComputeWorkerIdentity, *, namespace: str | None = None, emit_snapshot: bool = True) -> None:
+    def shutdown_compute_worker(self, identity: ComputeWorkerIdentity, *, namespace: str | None = None, emit_snapshot: bool = True) -> None:
         qualified_key = self._key(identity, namespace=namespace)
         resolved_namespace = qualified_key.namespace
         info: ComputeWorkerInfo | None = None
@@ -1558,7 +1560,7 @@ class ProcessManager:
             # new RPC client against the old container and report collisions.
             self._finish_engine_event(qualified_key, shutdown_event)
 
-    def shutdown_engine_if_idle(self, identity: ComputeWorkerIdentity, *, namespace: str | None = None) -> bool:
+    def shutdown_compute_worker_if_idle(self, identity: ComputeWorkerIdentity, *, namespace: str | None = None) -> bool:
         """Stop an engine only after atomically fencing new RID work.
 
         Datasource deletion uses this instead of checking ``current_job_id``
@@ -1684,8 +1686,8 @@ class ProcessManager:
         with self._engines_lock:
             return [key.resource_id for key in self._engines if key.namespace == namespace]
 
-    def list_all_engine_statuses(self) -> list[ComputeWorkerStatusInfo]:
-        return self._list_engine_statuses_for_namespace(get_namespace())
+    def list_all_compute_worker_statuses(self) -> list[ComputeWorkerStatusInfo]:
+        return self._list_compute_worker_statuses_for_namespace(get_namespace())
 
     def resynchronize_snapshots(self) -> None:
         """Republish every durable engine projection after API reconnect."""
@@ -1693,13 +1695,13 @@ class ProcessManager:
             namespaces = {key.namespace for key in self._engines}
         self._emit_snapshot_for_namespaces(namespaces)
 
-    def _list_engine_statuses_for_namespace(self, namespace: str) -> list[ComputeWorkerStatusInfo]:
+    def _list_compute_worker_statuses_for_namespace(self, namespace: str) -> list[ComputeWorkerStatusInfo]:
         defaults = self._get_defaults()
         with self._engines_lock:
             identities = [(self._engine_identities[key], info) for key, info in self._engines.items() if key.namespace == namespace]
             for _identity, info in identities:
                 info.mark_snapshot_published()
-        return [self.get_engine_status(identity, defaults=defaults) for identity, _info in identities]
+        return [self.get_compute_worker_status(identity, defaults=defaults) for identity, _info in identities]
 
     def _emit_snapshot_for_namespaces(self, namespaces: set[str]) -> None:
         if self._on_snapshot is None:
@@ -1707,7 +1709,7 @@ class ProcessManager:
         for namespace in sorted(namespaces):
             token = set_namespace_context(namespace)
             try:
-                self._on_snapshot(self._list_engine_statuses_for_namespace(namespace))
+                self._on_snapshot(self._list_compute_worker_statuses_for_namespace(namespace))
             finally:
                 reset_namespace(token)
 

@@ -38,10 +38,10 @@ def test_performance_baseline(sample_datasource):
         ],
     }
 
-    manager = ProcessManager(engine_factory=lambda engine_identity, config: PolarsComputeWorker(engine_identity.resource_id, config))
+    manager = ProcessManager(engine_factory=lambda compute_worker_identity, config: PolarsComputeWorker(compute_worker_identity.resource_id, config))
     internal_client = MagicMock()
-    internal_client.create_engine_run.return_value = "run-1"
-    internal_client.engine_run_state.return_value = {"result_json": {}}
+    internal_client.create_compute_worker_run.return_value = "run-1"
+    internal_client.compute_worker_run_state.return_value = {"result_json": {}}
     try:
         with patch("runtime.compute_service.client_from_env", return_value=internal_client):
             preview_result, preview_ms = _measure(
