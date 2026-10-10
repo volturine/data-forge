@@ -166,8 +166,8 @@ async def test_bounded_executor_keeps_started_cancelled_work_admitted_until_sett
 def test_api_admission_overflow_maps_to_retryable_http_503() -> None:
     from starlette.requests import Request
 
-    from backend_core.error_handlers import handle_errors
     from backend_core.application import api_work_admission_full_handler, app
+    from backend_core.error_handlers import handle_errors
 
     @handle_errors(operation='test bounded API work')
     async def route():
@@ -187,8 +187,8 @@ def test_api_admission_overflow_maps_to_retryable_http_503() -> None:
 
 
 def test_api_blocking_work_queue_is_independent_of_socket_limit(monkeypatch) -> None:
-    from backend_core.config import settings
     from backend_core.application import _api_blocking_pending_limit
+    from backend_core.config import settings
 
     for connection_limit in (1_000, 2_500, 0):
         monkeypatch.setattr(settings, 'worker_connections', connection_limit)

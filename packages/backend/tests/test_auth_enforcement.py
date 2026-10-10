@@ -8,11 +8,11 @@ import pytest
 from fastapi import APIRouter
 from fastapi.routing import iter_route_contexts
 
+from backend_core.application import app
 from backend_core.database import run_settings_db
 from backend_core.domain.analysis.models import AnalysisStatus
 from backend_core.persistence.analysis.models import Analysis
 from backend_core.persistence.analysis_versions.models import AnalysisVersion
-from backend_core.application import app
 from modules.auth.dependencies import get_current_user
 from tests.http_client import TestClient
 

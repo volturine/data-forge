@@ -2,9 +2,9 @@
 
 import pytest
 
+from backend_core.application import app
 from backend_core.exceptions import AppError, UdfValidationError
 from backend_core.persistence.udfs.models import Udf
-from backend_core.application import app
 from modules.auth.dependencies import get_optional_user
 from modules.udf.schemas import (
     UdfCreateSchema,

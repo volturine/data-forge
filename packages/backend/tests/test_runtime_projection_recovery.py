@@ -487,5 +487,7 @@ async def test_main_api_listener_recovery_wiring_has_mandatory_projection_callba
     monkeypatch.setattr(application, 'recover_runtime_notifications', recover)
     await application._recover_api_notifications()
     recover.assert_awaited_once_with(
-        refresh_builds=application.refresh_build_projections, refresh_engines=application.compute_worker_registry.recover_active, refresh_locks=application.refresh_lock_projections
+        refresh_builds=application.refresh_build_projections,
+        refresh_engines=application.compute_worker_registry.recover_active,
+        refresh_locks=application.refresh_lock_projections,
     )
