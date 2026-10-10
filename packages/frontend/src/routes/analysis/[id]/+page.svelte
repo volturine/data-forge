@@ -432,7 +432,8 @@
 			return;
 		}
 		await analysisStore.save().match(
-			() => {
+			(detail) => {
+				queryClient.setQueryData(analysisQueryKey(detail.analysis.id), detail);
 				selectedStepId = null;
 				isSaving = false;
 				void datasourcesQuery.refetch();

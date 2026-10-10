@@ -2,7 +2,7 @@ import type { Analysis, AnalysisTab, AnalysisUpdate, PipelineStep } from '$lib/t
 
 import type { SchemaInfo } from '$lib/types/datasource';
 import type { ComputeWorkerResourceConfig } from '$lib/types/compute';
-import { getAnalysisWithHeaders, updateAnalysis } from '$lib/api/analysis';
+import { getAnalysisWithHeaders, updateAnalysis, type AnalysisDetail } from '$lib/api/analysis';
 import {
 	buildOutputConfig,
 	ensureTabDefaults,
@@ -545,7 +545,7 @@ export class AnalysisStore {
 		return true;
 	}
 
-	save(): ResultAsync<void, ApiError> {
+	save(): ResultAsync<AnalysisDetail, ApiError> {
 		if (!this.current) {
 			this.loading = false;
 			return errAsync({
@@ -581,7 +581,7 @@ export class AnalysisStore {
 		}
 
 		return updateAnalysis(this.current.id, update, version)
-			.andThen(({ analysis: updated, version: nextVersion }) => {
+			.andThen(({ analysis: updated, etag, version: nextVersion }) => {
 				this.current = updated;
 				this.currentRevision = nextVersion;
 				this.lastSaved = { name: updated.name, description: updated.description ?? null };
@@ -593,7 +593,7 @@ export class AnalysisStore {
 					this.activeTabId = this.tabs[0]?.id ?? null;
 				}
 				this.loading = false;
-				return ok(undefined);
+				return ok({ analysis: updated, etag, version: nextVersion });
 			})
 			.mapErr((error) => {
 				this.error = error.message;

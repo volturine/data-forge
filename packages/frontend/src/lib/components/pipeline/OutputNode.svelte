@@ -12,6 +12,7 @@
 	import { cancelBuild } from '$lib/api/compute';
 	import { apiRequest } from '$lib/api/client';
 	import { getDatasource, listDatasources, updateDatasource } from '$lib/api/datasource';
+	import { analysisQueryKey } from '$lib/queries/analysis';
 	import { createQuery, useQueryClient } from '@tanstack/svelte-query';
 	import { analysisStore } from '$lib/stores/analysis.svelte';
 	import { configStore } from '$lib/stores/config.svelte';
@@ -506,6 +507,7 @@
 				buildStarting = false;
 				return;
 			}
+			queryClient.setQueryData(analysisQueryKey(saveResult.value.analysis.id), saveResult.value);
 		}
 
 		const pipeline = buildAnalysisPipelinePayload(
