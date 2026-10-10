@@ -8,11 +8,11 @@ import pytest
 from fastapi import APIRouter
 from fastapi.routing import iter_route_contexts
 
+from backend_core.application import app
 from backend_core.database import run_settings_db
 from backend_core.domain.analysis.models import AnalysisStatus
 from backend_core.persistence.analysis.models import Analysis
 from backend_core.persistence.analysis_versions.models import AnalysisVersion
-from main import app
 from modules.auth.dependencies import get_current_user
 from tests.http_client import TestClient
 
@@ -202,14 +202,14 @@ class TestEngineWebsocketAuth:
 
 class TestNamespaceMiddleware:
     def test_headerless_health_does_not_register_implicit_namespace_when_auth_is_disabled(self, client: TestClient, monkeypatch: pytest.MonkeyPatch) -> None:
-        import main
+        import backend_core.application as application
 
         monkeypatch.setattr('backend_core.auth_config.settings.auth_required', False)
 
         async def reject_namespace_database_work(*_args, **_kwargs):
             raise AssertionError('Headerless process health must not access the namespace database')
 
-        monkeypatch.setattr(main, '_run_namespace_middleware', reject_namespace_database_work)
+        monkeypatch.setattr(application, '_run_namespace_middleware', reject_namespace_database_work)
 
         response = client.get('/health')
 

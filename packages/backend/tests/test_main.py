@@ -9,7 +9,7 @@ from fastapi.middleware.cors import CORSMiddleware
 from fastapi.responses import FileResponse
 
 from backend_core.api_execution_budget import ApiDatabaseBudget
-from main import (
+from backend_core.application import (
     _api_observability_snapshot,
     _api_thread_budget,
     _configure_sync_thread_capacity,
@@ -70,15 +70,15 @@ class TestUvicornSettings:
 
     @pytest.mark.asyncio
     async def test_slow_request_diagnostics_return_cached_snapshot_without_waiting(self, monkeypatch) -> None:
-        import main
+        import backend_core.application as application
 
         executor = ThreadPoolExecutor(max_workers=1, thread_name_prefix='snapshot-test')
         refresh_started = threading.Event()
         allow_refresh = threading.Event()
-        monkeypatch.setattr(main, '_API_DIAGNOSTICS_EXECUTOR', executor)
-        monkeypatch.setattr(main, '_api_process_snapshot_refreshing', False)
+        monkeypatch.setattr(application, '_API_DIAGNOSTICS_EXECUTOR', executor)
+        monkeypatch.setattr(application, '_api_process_snapshot_refreshing', False)
         monkeypatch.setattr(
-            main,
+            application,
             '_api_process_snapshot_cache',
             (time.monotonic() - 10, {'snapshot': 'stale'}),
         )
@@ -87,11 +87,11 @@ class TestUvicornSettings:
             refresh_started.set()
             if not allow_refresh.wait(timeout=2):
                 raise TimeoutError('test snapshot refresh was not released')
-            with main._API_PROCESS_SNAPSHOT_LOCK:
-                main._api_process_snapshot_cache = (time.monotonic(), {'snapshot': 'fresh'})
+            with application._API_PROCESS_SNAPSHOT_LOCK:
+                application._api_process_snapshot_cache = (time.monotonic(), {'snapshot': 'fresh'})
             return {'snapshot': 'fresh'}
 
-        monkeypatch.setattr(main, '_api_process_snapshot', refresh_snapshot)
+        monkeypatch.setattr(application, '_api_process_snapshot', refresh_snapshot)
         try:
             snapshots = await asyncio.wait_for(
                 asyncio.gather(*(_api_observability_snapshot() for _ in range(20))),
@@ -103,8 +103,8 @@ class TestUvicornSettings:
             allow_refresh.set()
             deadline = time.monotonic() + 1
             while time.monotonic() < deadline:
-                with main._API_PROCESS_SNAPSHOT_LOCK:
-                    cache = main._api_process_snapshot_cache
+                with application._API_PROCESS_SNAPSHOT_LOCK:
+                    cache = application._api_process_snapshot_cache
                 if cache is not None and cache[1].get('snapshot') == 'fresh':
                     break
                 await asyncio.sleep(0.01)
@@ -116,7 +116,7 @@ class TestUvicornSettings:
     def test_api_uvicorn_disables_websocket_compression(self, monkeypatch) -> None:
         import uvicorn
 
-        import main
+        import backend_core.application as application
 
         call: dict[str, object] = {}
 
@@ -124,14 +124,14 @@ class TestUvicornSettings:
             call.update(kwargs)
 
         monkeypatch.setattr(uvicorn, 'run', capture_run)
-        monkeypatch.setattr(main, '_resolve_uvicorn_workers', lambda: 1)
-        monkeypatch.setattr(main, '_guard_runtime_workers', lambda workers: workers)
-        monkeypatch.setattr(main, '_resolve_uvicorn_limit_concurrency', lambda: None)
+        monkeypatch.setattr(application, '_resolve_uvicorn_workers', lambda: 1)
+        monkeypatch.setattr(application, '_guard_runtime_workers', lambda workers: workers)
+        monkeypatch.setattr(application, '_resolve_uvicorn_limit_concurrency', lambda: None)
 
-        main._run_api_server()
+        application._run_api_server()
 
         assert call['ws_per_message_deflate'] is False
-        assert call['timeout_keep_alive'] == main.settings.uvicorn_timeout_keep_alive
+        assert call['timeout_keep_alive'] == application.settings.uvicorn_timeout_keep_alive
 
     def test_cors_allows_and_exposes_client_request_ids(self) -> None:
         cors = next(middleware for middleware in app.user_middleware if middleware.cls is CORSMiddleware)
@@ -199,7 +199,7 @@ class TestUvicornSettings:
 
         monkeypatch.setattr(settings, 'debug', False, raising=False)
         monkeypatch.setattr(settings, 'workers', 0, raising=False)
-        monkeypatch.setattr('main.os.cpu_count', lambda: 4)
+        monkeypatch.setattr('backend_core.application.os.cpu_count', lambda: 4)
 
         assert _resolve_uvicorn_workers() == 9
 
@@ -216,7 +216,7 @@ class TestUvicornSettings:
 
         monkeypatch.setattr(settings, 'debug', False, raising=False)
         monkeypatch.setattr(settings, 'workers', 0, raising=False)
-        monkeypatch.setattr('main.os.cpu_count', lambda: 4)
+        monkeypatch.setattr('backend_core.application.os.cpu_count', lambda: 4)
 
         monkeypatch.setattr(settings, 'runtime_coordinator_target', '', raising=False)
 
@@ -264,41 +264,41 @@ class TestUvicornSettings:
         assert _resolve_uvicorn_limit_concurrency() == 100
 
     def test_main_module_no_longer_owns_scheduler_loop(self) -> None:
-        import main
+        import backend_core.application as application
 
-        assert not hasattr(main, 'scheduler_loop')
+        assert not hasattr(application, 'scheduler_loop')
 
     def test_main_module_no_longer_owns_embedded_build_worker_toggle(self) -> None:
-        import main
+        import backend_core.application as application
 
-        assert not hasattr(main, '_should_start_embedded_build_worker')
+        assert not hasattr(application, '_should_start_embedded_build_worker')
 
     @pytest.mark.asyncio
     async def test_static_route_serves_prerendered_extensionless_document(self, monkeypatch, tmp_path) -> None:
-        import main
+        import backend_core.application as application
 
         (tmp_path / 'login.html').write_text('<h1>Sign in</h1>', encoding='utf8')
         (tmp_path / '200.html').write_text('<script>spa fallback</script>', encoding='utf8')
-        monkeypatch.setattr(main.settings, 'prod_mode_enabled', True, raising=False)
-        monkeypatch.setattr(main, 'frontend_build_dir', tmp_path)
+        monkeypatch.setattr(application.settings, 'prod_mode_enabled', True, raising=False)
+        monkeypatch.setattr(application, 'frontend_build_dir', tmp_path)
 
-        response = await main.serve_static_or_index('login')
+        response = await application.serve_static_or_index('login')
 
         assert isinstance(response, FileResponse)
         assert response.path == str(tmp_path / 'login.html')
 
     @pytest.mark.asyncio
     async def test_static_route_uses_loaded_frontend_asset_cache(self, monkeypatch, tmp_path) -> None:
-        import main
+        import backend_core.application as application
 
         asset = tmp_path / '_app' / 'immutable' / 'entry.js'
         asset.parent.mkdir(parents=True)
         asset.write_bytes(b'console.log("cached");')
-        monkeypatch.setattr(main.settings, 'prod_mode_enabled', True, raising=False)
-        monkeypatch.setattr(main, 'frontend_build_dir', tmp_path)
+        monkeypatch.setattr(application.settings, 'prod_mode_enabled', True, raising=False)
+        monkeypatch.setattr(application, 'frontend_build_dir', tmp_path)
 
-        main._load_frontend_asset_cache()
-        response = await main.serve_static_or_index('_app/immutable/entry.js')
+        application._load_frontend_asset_cache()
+        response = await application.serve_static_or_index('_app/immutable/entry.js')
 
         assert not isinstance(response, FileResponse)
         assert response.body == b'console.log("cached");'
@@ -306,7 +306,7 @@ class TestUvicornSettings:
 
     @pytest.mark.asyncio
     async def test_frontend_asset_cache_supports_symlinked_build_root(self, monkeypatch, tmp_path) -> None:
-        import main
+        import backend_core.application as application
 
         target = tmp_path / 'build-target'
         asset = target / '_app' / 'immutable' / 'entry.js'
@@ -315,21 +315,21 @@ class TestUvicornSettings:
         linked_build = tmp_path / 'build-link'
         linked_build.symlink_to(target, target_is_directory=True)
 
-        monkeypatch.setattr(main.settings, 'prod_mode_enabled', True, raising=False)
-        monkeypatch.setattr(main, 'frontend_build_dir', linked_build)
-        monkeypatch.setattr(main, '_FRONTEND_ASSET_CACHE', {})
-        monkeypatch.setattr(main, '_FRONTEND_ASSET_CACHE_ROOT', None)
-        monkeypatch.setattr(main, '_FRONTEND_ASSET_CACHE_SOURCE', None)
+        monkeypatch.setattr(application.settings, 'prod_mode_enabled', True, raising=False)
+        monkeypatch.setattr(application, 'frontend_build_dir', linked_build)
+        monkeypatch.setattr(application, '_FRONTEND_ASSET_CACHE', {})
+        monkeypatch.setattr(application, '_FRONTEND_ASSET_CACHE_ROOT', None)
+        monkeypatch.setattr(application, '_FRONTEND_ASSET_CACHE_SOURCE', None)
 
-        main._load_frontend_asset_cache()
-        response = await main.serve_static_or_index('_app/immutable/entry.js')
+        application._load_frontend_asset_cache()
+        response = await application.serve_static_or_index('_app/immutable/entry.js')
 
         assert not isinstance(response, FileResponse)
         assert response.body == b'console.log("cached symlink");'
 
     @pytest.mark.asyncio
     async def test_static_file_fallback_checks_filesystem_off_event_loop(self, monkeypatch, tmp_path) -> None:
-        import main
+        import backend_core.application as application
 
         page = tmp_path / 'login.html'
         page.write_text('<html>login</html>')
@@ -341,13 +341,13 @@ class TestUvicornSettings:
             check_threads.append(threading.get_ident())
             return original_is_file(path)
 
-        monkeypatch.setattr(main.settings, 'prod_mode_enabled', True, raising=False)
-        monkeypatch.setattr(main, 'frontend_build_dir', tmp_path)
-        monkeypatch.setattr(main, '_FRONTEND_ASSET_CACHE_ROOT', None)
-        monkeypatch.setattr(main, '_cached_frontend_response', lambda _path: None)
+        monkeypatch.setattr(application.settings, 'prod_mode_enabled', True, raising=False)
+        monkeypatch.setattr(application, 'frontend_build_dir', tmp_path)
+        monkeypatch.setattr(application, '_FRONTEND_ASSET_CACHE_ROOT', None)
+        monkeypatch.setattr(application, '_cached_frontend_response', lambda _path: None)
         monkeypatch.setattr(type(page), 'is_file', is_file)
 
-        response = await main.serve_static_or_index('login')
+        response = await application.serve_static_or_index('login')
 
         assert isinstance(response, FileResponse)
         assert response.path == str(page)
@@ -355,7 +355,7 @@ class TestUvicornSettings:
 
     @pytest.mark.asyncio
     async def test_slow_request_snapshot_is_offloaded_and_coalesced(self, monkeypatch) -> None:
-        import main
+        import backend_core.application as application
 
         loop_thread = threading.get_ident()
         snapshot_started = threading.Event()
@@ -374,18 +374,18 @@ class TestUvicornSettings:
             stack_calls.append(threading.get_ident())
             return {'api_blocking_threads': ['api-blocking_0:route.py:10:handler']}
 
-        monkeypatch.setattr(main, 'database_pool_snapshot', database_snapshot)
-        monkeypatch.setattr(main, '_api_thread_snapshot', thread_snapshot)
-        monkeypatch.setattr(main, '_api_process_snapshot_refreshing', False)
+        monkeypatch.setattr(application, 'database_pool_snapshot', database_snapshot)
+        monkeypatch.setattr(application, '_api_thread_snapshot', thread_snapshot)
+        monkeypatch.setattr(application, '_api_process_snapshot_refreshing', False)
         monkeypatch.setattr(
-            main,
+            application,
             '_api_process_snapshot_cache',
             (time.monotonic() - 10, {'settings_checkedout': 0, 'api_blocking_threads': []}),
         )
 
         try:
             snapshots = await asyncio.wait_for(
-                asyncio.gather(*(main._api_observability_snapshot() for _ in range(20))),
+                asyncio.gather(*(application._api_observability_snapshot() for _ in range(20))),
                 timeout=0.2,
             )
             assert all(snapshot['settings_checkedout'] == 0 for snapshot in snapshots)
@@ -396,8 +396,8 @@ class TestUvicornSettings:
 
         deadline = time.monotonic() + 1
         while time.monotonic() < deadline:
-            with main._API_PROCESS_SNAPSHOT_LOCK:
-                cache = main._api_process_snapshot_cache
+            with application._API_PROCESS_SNAPSHOT_LOCK:
+                cache = application._api_process_snapshot_cache
             if cache is not None and cache[1].get('settings_checkedout') == 2:
                 break
             await asyncio.sleep(0.01)
@@ -413,7 +413,7 @@ class TestUvicornSettings:
 
 
 def test_event_loop_lag_diagnostic_uses_info_until_warning_threshold() -> None:
-    import main
+    import backend_core.application as application
 
-    assert main._event_loop_lag_log_level(0.9, 1.5) == logging.INFO
-    assert main._event_loop_lag_log_level(1.5, 1.5) == logging.WARNING
+    assert application._event_loop_lag_log_level(0.9, 1.5) == logging.INFO
+    assert application._event_loop_lag_log_level(1.5, 1.5) == logging.WARNING

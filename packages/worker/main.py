@@ -69,8 +69,8 @@ _TAKEOVER_HEALTH_GRACE_SECONDS = 600.0
 _DISPATCH_LANES = ("compute-active", "compute-shutdown", "build", "datasource-delete", "outbox-cleanup")
 
 
-def coordinator_id() -> str:
-    return f"runtime-coordinator:{uuid.uuid4()}"
+def worker_manager_id() -> str:
+    return f"worker-manager:{uuid.uuid4()}"
 
 
 def _manager_heartbeat_loop(
@@ -128,7 +128,7 @@ async def _supervise_runtime_loop(
                 delay = min(delay * 2, 5.0)
 
 
-async def run_runtime_coordinator(
+async def run_worker_manager_runtime(
     *,
     stop_event: asyncio.Event | None = None,
     coordinator_generation: int | None = None,
@@ -138,12 +138,12 @@ async def run_runtime_coordinator(
 ) -> None:
     owns_client = client is None
     runtime_client = client if client is not None else await async_client_from_env()
-    worker_id = coordinator_id()
+    worker_id = worker_manager_id()
     try:
         if health is not None:
             # The manager process serves one health endpoint across standby,
             # takeover and every coordinator generation.
-            await _run_runtime_coordinator(
+            await _run_worker_manager_runtime(
                 stop_event=stop_event,
                 coordinator_generation=coordinator_generation,
                 coordinator_guard=coordinator_guard,
@@ -154,7 +154,7 @@ async def run_runtime_coordinator(
             return
         owned_health = manager_health(worker_id)
         async with owned_health.serve():
-            await _run_runtime_coordinator(
+            await _run_worker_manager_runtime(
                 stop_event=stop_event,
                 coordinator_generation=coordinator_generation,
                 coordinator_guard=coordinator_guard,
@@ -175,7 +175,7 @@ def manager_health(worker_id: str) -> DispatcherHealth:
     )
 
 
-async def _run_runtime_coordinator(
+async def _run_worker_manager_runtime(
     *,
     stop_event: asyncio.Event | None,
     coordinator_generation: int | None,
@@ -186,7 +186,7 @@ async def _run_runtime_coordinator(
 ) -> None:
     _configure_blocking_executor(max_workers=_DEFAULT_EXECUTOR_WORKERS, thread_name_prefix="runtime-default")
     await run_control_in_thread(configure_logging)
-    logger.info("Starting runtime coordinator...")
+    logger.info("Starting worker manager runtime...")
     await run_control_in_thread(validate_compute_worker_runtime_readiness)
     if coordinator_generation is not None:
         os.environ["RUNTIME_COORDINATOR_GENERATION"] = str(coordinator_generation)
@@ -496,7 +496,7 @@ async def _watch_coordinator_generation(
             continue
 
 
-async def _run_worker_generation(
+async def _run_worker_manager_generation(
     process_stop_event: asyncio.Event,
     client: WorkerRuntimeClient,
     generation: int,
@@ -504,7 +504,7 @@ async def _run_worker_generation(
     manager_guard: Callable[[], None] | None = None,
     health: DispatcherHealth | None = None,
 ) -> None:
-    def coordinator_guard() -> None:
+    def runtime_guard() -> None:
         # Every Docker mutation and lifecycle RPC first proves this process
         # still holds the manager lease, then that the coordinator generation
         # it works for is still the active one.
@@ -514,14 +514,14 @@ async def _run_worker_generation(
 
     generation_stop_event = asyncio.Event()
     runtime_task = asyncio.create_task(
-        run_runtime_coordinator(
+        run_worker_manager_runtime(
             stop_event=generation_stop_event,
             coordinator_generation=generation,
-            coordinator_guard=coordinator_guard,
+            coordinator_guard=runtime_guard,
             client=client,
             health=health,
         ),
-        name=f"worker-runtime-generation-{generation}",
+        name=f"worker-manager-runtime-generation-{generation}",
     )
     monitor_task = asyncio.create_task(
         _watch_coordinator_generation(process_stop_event, generation_stop_event, client, generation),
@@ -643,7 +643,7 @@ async def _run_as_manager(
                 break
             os.environ["RUNTIME_COORDINATOR_GENERATION"] = str(generation)
             try:
-                await _run_worker_generation(role_stop, client, generation, manager_guard=lease.check, health=health)
+                await _run_worker_manager_generation(role_stop, client, generation, manager_guard=lease.check, health=health)
             except asyncio.CancelledError:
                 raise
             except Exception:
@@ -671,7 +671,7 @@ async def main() -> None:
     data_plane_server = start_data_plane_grpc_server_in_thread()
     # One health endpoint for the whole process: Docker keeps probing it
     # through standby, takeover and every coordinator generation.
-    health = manager_health(coordinator_id())
+    health = manager_health(worker_manager_id())
     try:
         async with health.serve():
             while not stop_event.is_set():

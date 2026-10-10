@@ -21,6 +21,7 @@ from backend_core.api_execution_budget import (
     install_api_blocking_executor,
     remove_api_blocking_executor,
 )
+from backend_core.application import app
 from backend_core.dependencies import get_manager, get_runtime_availability_probe
 from backend_core.domain.compute import schemas as compute_schemas
 from backend_core.domain.compute_worker_runs.schemas import ComputeWorkerRunKind, ComputeWorkerRunStatus
@@ -35,7 +36,6 @@ from backend_core.persistence.datasource.models import DataSource
 from backend_core.persistence.runtime_events.models import RuntimeOutboxEvent, RuntimeOutboxStatus
 from backend_core.sqlmodel_typing import sa
 from dataforge_protocol import compute_pb2, enums_pb2
-from main import app
 from modules.compute import executor_client, routes as compute_routes
 
 

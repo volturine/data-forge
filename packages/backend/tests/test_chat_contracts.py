@@ -67,7 +67,7 @@ class TestModelsRoute:
         mock_list.assert_awaited_once_with('sk-session')
 
     def test_models_route_requires_auth(self, client: TestClient, monkeypatch: pytest.MonkeyPatch) -> None:
-        from main import app
+        from backend_core.application import app
         from modules.auth.dependencies import get_current_user
 
         monkeypatch.setattr('backend_core.auth_config.settings.auth_required', True)
@@ -704,7 +704,7 @@ class TestSessionOwnership:
 
 class TestSessionEndpoints:
     def test_chat_routes_require_auth(self, client: TestClient, monkeypatch: pytest.MonkeyPatch) -> None:
-        from main import app
+        from backend_core.application import app
         from modules.auth.dependencies import get_current_user
 
         monkeypatch.setattr('backend_core.auth_config.settings.auth_required', True)

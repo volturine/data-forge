@@ -117,7 +117,7 @@ async def test_losing_the_lease_stops_the_running_generation_and_returns_to_stan
         generation_stopped.set()
 
     monkeypatch.setattr(runtime_process, "_wait_for_coordinator_generation", wait_for_generation)
-    monkeypatch.setattr(runtime_process, "_run_worker_generation", run_generation)
+    monkeypatch.setattr(runtime_process, "_run_worker_manager_generation", run_generation)
 
     role = asyncio.create_task(runtime_process._run_as_manager(asyncio.Event(), cast(WorkerRuntimeClient, object()), cast(Any, lease), health))
     await asyncio.wait_for(generation_started.wait(), timeout=1.0)
@@ -150,7 +150,7 @@ async def test_process_stop_ends_the_manager_role_without_losing_the_lease(monke
         await stop_event.wait()
 
     monkeypatch.setattr(runtime_process, "_wait_for_coordinator_generation", wait_for_generation)
-    monkeypatch.setattr(runtime_process, "_run_worker_generation", run_generation)
+    monkeypatch.setattr(runtime_process, "_run_worker_manager_generation", run_generation)
 
     lost = await asyncio.wait_for(
         runtime_process._run_as_manager(process_stop, cast(WorkerRuntimeClient, object()), cast(Any, lease), health),
@@ -186,7 +186,7 @@ async def test_a_manager_between_coordinator_generations_stays_healthy(monkeypat
             await stop_event.wait()
 
     monkeypatch.setattr(runtime_process, "_wait_for_coordinator_generation", wait_for_generation)
-    monkeypatch.setattr(runtime_process, "_run_worker_generation", run_generation)
+    monkeypatch.setattr(runtime_process, "_run_worker_manager_generation", run_generation)
 
     lost = await asyncio.wait_for(
         runtime_process._run_as_manager(process_stop, cast(WorkerRuntimeClient, object()), cast(Any, lease), health),
@@ -214,13 +214,13 @@ async def test_generation_guard_proves_the_lease_before_the_coordinator_generati
     async def monitor(process_stop_event: asyncio.Event, generation_stop_event: asyncio.Event, _client, _generation: int) -> None:
         await generation_stop_event.wait()
 
-    monkeypatch.setattr(runtime_process, "run_runtime_coordinator", runtime)
+    monkeypatch.setattr(runtime_process, "run_worker_manager_runtime", runtime)
     monkeypatch.setattr(runtime_process, "_watch_coordinator_generation", monitor)
 
     def manager_guard() -> None:
         order.append("lease")
 
-    await runtime_process._run_worker_generation(asyncio.Event(), cast(WorkerRuntimeClient, Client()), 9, manager_guard=manager_guard)
+    await runtime_process._run_worker_manager_generation(asyncio.Event(), cast(WorkerRuntimeClient, Client()), 9, manager_guard=manager_guard)
     captured["guard"]()
     assert order == ["lease", "coordinator:9"]
 
@@ -228,7 +228,7 @@ async def test_generation_guard_proves_the_lease_before_the_coordinator_generati
         raise WorkerManagerLeaseLost("gone")
 
     order.clear()
-    await runtime_process._run_worker_generation(asyncio.Event(), cast(WorkerRuntimeClient, Client()), 9, manager_guard=lost_lease)
+    await runtime_process._run_worker_manager_generation(asyncio.Event(), cast(WorkerRuntimeClient, Client()), 9, manager_guard=lost_lease)
     with pytest.raises(WorkerManagerLeaseLost):
         captured["guard"]()
     assert order == []

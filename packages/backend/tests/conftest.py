@@ -220,12 +220,12 @@ def test_user() -> User:
 
 @pytest.fixture(scope='function')
 def client(test_db_session, test_user, monkeypatch):
-    from main import app
+    from backend_core.application import app
     from modules.auth.dependencies import get_current_user, get_current_user_id, get_optional_user_id
 
     # Namespace engine credential provisioning talks to a real object store;
     # unit tests have none.
-    monkeypatch.setattr('main._provision_default_namespace_credentials', lambda: asyncio.sleep(0))
+    monkeypatch.setattr('backend_core.application._provision_default_namespace_credentials', lambda: asyncio.sleep(0))
 
     if hasattr(app.state, 'mcp_registry'):
         del app.state.mcp_registry

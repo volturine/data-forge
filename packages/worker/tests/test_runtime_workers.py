@@ -631,11 +631,11 @@ async def test_worker_generation_waits_for_runtime_teardown_after_monitor_error(
     async def failing_monitor(*_args) -> None:
         raise RuntimeError("generation monitor failed")
 
-    monkeypatch.setattr(runtime_process, "run_runtime_coordinator", runtime)
+    monkeypatch.setattr(runtime_process, "run_worker_manager_runtime", runtime)
     monkeypatch.setattr(runtime_process, "_watch_coordinator_generation", failing_monitor)
 
     with pytest.raises(RuntimeError, match="generation monitor failed"):
-        await runtime_process._run_worker_generation(asyncio.Event(), cast(WorkerRuntimeClient, object()), 7)
+        await runtime_process._run_worker_manager_generation(asyncio.Event(), cast(WorkerRuntimeClient, object()), 7)
 
     assert teardown_finished.is_set()
 
@@ -1292,7 +1292,7 @@ async def test_build_worker_loop_does_not_start_after_claim_deadline() -> None:
 
 
 @pytest.mark.asyncio
-async def test_run_runtime_coordinator_shares_compute_budget_across_lanes(
+async def test_run_worker_manager_runtime_shares_compute_budget_across_lanes(
     monkeypatch,
 ) -> None:
     coordinator_thread_id = threading.get_ident()
@@ -1303,7 +1303,7 @@ async def test_run_runtime_coordinator_shares_compute_budget_across_lanes(
     logging_threads: list[int] = []
 
     monkeypatch.setattr(runtime_process, "async_client_from_env", lambda: asyncio.sleep(0, result=client))
-    monkeypatch.setattr(runtime_process, "coordinator_id", lambda: "manager-1")
+    monkeypatch.setattr(runtime_process, "worker_manager_id", lambda: "manager-1")
     monkeypatch.setattr(runtime_process, "configure_logging", lambda: logging_threads.append(threading.get_ident()))
     monkeypatch.setattr(runtime_process, "validate_compute_worker_runtime_readiness", lambda: None)
     monkeypatch.setattr(runtime_process, "reconcile_deployment_containers", lambda **_kwargs: 0)
@@ -1356,7 +1356,7 @@ async def test_run_runtime_coordinator_shares_compute_budget_across_lanes(
 
     monkeypatch.setattr(runtime_process, "build_worker_loop", fake_build_worker_loop)
 
-    await runtime_process.run_runtime_coordinator(stop_event=stop_event)
+    await runtime_process.run_worker_manager_runtime(stop_event=stop_event)
 
     assert len(logging_threads) == 1
     assert logging_threads[0] != coordinator_thread_id
@@ -1403,7 +1403,7 @@ async def test_runtime_coordinator_cleans_up_when_registration_fails(monkeypatch
 
     client.register_worker = fail_registration
     monkeypatch.setattr(runtime_process, "async_client_from_env", lambda: asyncio.sleep(0, result=client))
-    monkeypatch.setattr(runtime_process, "coordinator_id", lambda: "manager-1")
+    monkeypatch.setattr(runtime_process, "worker_manager_id", lambda: "manager-1")
     monkeypatch.setattr(runtime_process, "configure_logging", lambda: None)
     monkeypatch.setattr(runtime_process, "validate_compute_worker_runtime_readiness", lambda: None)
     monkeypatch.setattr(runtime_process, "reconcile_deployment_containers", lambda **_kwargs: 0)
@@ -1452,7 +1452,7 @@ async def test_runtime_coordinator_cleans_up_when_registration_fails(monkeypatch
     monkeypatch.setattr(runtime_process, "ProcessManager", FakeManager)
 
     with pytest.raises(ConnectionError, match="coordinator unavailable"):
-        await runtime_process.run_runtime_coordinator(stop_event=asyncio.Event())
+        await runtime_process.run_worker_manager_runtime(stop_event=asyncio.Event())
 
     assert cleanup == ["listener", "manager", "notifier"]
 
