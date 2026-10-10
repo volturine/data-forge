@@ -4,6 +4,7 @@ from urllib.parse import urlparse, urlunparse
 import psycopg
 from alembic import command
 from alembic.config import Config
+from alembic.script import ScriptDirectory
 from psycopg import sql
 from sqlalchemy import create_engine, pool, text
 
@@ -149,56 +150,38 @@ def _upgrade_schema(*, scope: str, schema: str, revision: str) -> None:
     command.upgrade(_alembic_config(scope=scope, schema=schema), revision, tag=scope)
 
 
+def _revision_is_on_upgrade_path(*, scope: str, schema: str, revision: str, target: str) -> bool:
+    script = ScriptDirectory.from_config(_alembic_config(scope=scope, schema=schema))
+    return any(item.revision == revision for item in script.iterate_revisions(target, 'base'))
+
+
 def migrate_runtime(namespaces: list[str]) -> None:
     ensure_database_exists()
     public_revision = _current_revision('public')
-    if public_revision in {
-        None,
-        '0001_runtime_public',
-        '0006_runtime_namespace_work',
-        '0008_schedule_wake_due',
-        '0009_runtime_lease_wake_due',
-        '0010_mcp_pending_actions',
-        '0013_runtime_work_wakes',
-        '0014_runtime_coordinator_fencing',
-        '0015_durable_chat_turns',
-        '0016_telegram_runtime',
-        '0017_compute_source_index',
-        '0018_runtime_work_generations',
-        '0020_runtime_wakes',
-        '0025_compute_worker_instances',
-        '0027_compute_worker_instance',
-    }:
+    if public_revision != _PUBLIC_REVISION:
+        if public_revision is not None and not _revision_is_on_upgrade_path(
+            scope='public',
+            schema='public',
+            revision=public_revision,
+            target=_PUBLIC_REVISION,
+        ):
+            raise RuntimeError(f'Unsupported existing public schema revision: {public_revision}. Expected {_PUBLIC_REVISION}. Recreate the database.')
         _upgrade_schema(scope='public', schema='public', revision=_PUBLIC_REVISION)
-    elif public_revision != _PUBLIC_REVISION:
-        raise RuntimeError(f'Unsupported existing public schema revision: {public_revision}. Expected {_PUBLIC_REVISION}. Recreate the database.')
-    supported_tenant_revisions = (
-        None,
-        '0002_runtime_tenant',
-        '0003_engine_request_identity',
-        '0004_compute_request_datasources',
-        '0007_schedule_due_index',
-        '0008_schedule_wake_due',
-        '0008_schedule_trigger_index',
-        '0009_runtime_lease_wake_due',
-        '0010_mcp_pending_actions',
-        '0011_namespace_preview_flights',
-        '0012_compute_request_flights',
-        '0013_runtime_work_wakes',
-        '0014_runtime_coordinator_fencing',
-        '0015_durable_chat_turns',
-        '0016_telegram_runtime',
-        '0017_compute_source_index',
-        '0018_runtime_work_generations',
-        _TENANT_REVISION,
-    )
     for namespace in namespaces:
         tenant_schema = namespace_database_schema(namespace)
         revision = _current_revision(tenant_schema)
         if revision is None and _schema_is_empty(tenant_schema):
             _bootstrap_empty_tenant_schema(tenant_schema)
             continue
-        if revision not in supported_tenant_revisions:
+        if revision != _TENANT_REVISION and (
+            revision is None
+            or not _revision_is_on_upgrade_path(
+                scope='tenant',
+                schema=tenant_schema,
+                revision=revision,
+                target=_TENANT_REVISION,
+            )
+        ):
             raise RuntimeError(
                 f'Unsupported existing tenant schema revision for namespace {namespace}: {revision}. Expected {_TENANT_REVISION}. Recreate the database.'
             )
