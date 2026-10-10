@@ -26,8 +26,8 @@ env:
 
 jobs:
   # Dev channel: every PR publishes dev-pr-<number> images and master publishes
-  # a rolling dev-master image (linux/amd64 only). These feed the dev /
-  # PR-preview deployment stacks in the central deployments workspace.
+  # a rolling dev-master multi-arch image. These feed the dev / PR-preview
+  # deployment stacks in the central deployments workspace.
   dev:
     if: github.event_name == 'pull_request' || github.ref == 'refs/heads/master'
     runs-on: ubuntu-latest
@@ -50,6 +50,8 @@ jobs:
             image: data-forge-polars-engine
     steps:
       - uses: actions/checkout@v7
+
+      - uses: docker/setup-qemu-action@v4
 
       - uses: docker/setup-buildx-action@v4
 
@@ -77,7 +79,7 @@ jobs:
           file: docker/Dockerfile
           target: ${{ matrix.target }}
           push: ${{ github.event_name != 'pull_request' || github.event.pull_request.head.repo.full_name == github.repository }}
-          platforms: linux/amd64
+          platforms: linux/amd64,linux/arm64
           tags: '${{ env.REGISTRY }}/${{ steps.tag.outputs.owner }}/${{ matrix.image }}:${{ steps.tag.outputs.value }}'
           build-args: |
             APP_VERSION=${{ github.sha }}
