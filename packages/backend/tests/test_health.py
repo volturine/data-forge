@@ -80,7 +80,7 @@ class TestHealthEndpoints:
 
 def test_readiness_object_store_failure_does_not_expose_exception_detail(monkeypatch) -> None:
     import backend_core.object_store_probe as object_store_probe
-    from main import _readiness_checks
+    from backend_core.application import _readiness_checks
 
     def fail(*, namespace: str | None = None) -> str:
         raise RuntimeError('endpoint http://internal-s3:9000 bucket secret-bucket')
@@ -96,7 +96,7 @@ def test_readiness_object_store_failure_does_not_expose_exception_detail(monkeyp
 
 @pytest.mark.asyncio
 async def test_readiness_probe_coalesces_callers_and_survives_one_cancellation() -> None:
-    from main import ReadinessProbe
+    from backend_core.application import ReadinessProbe
 
     executor = ThreadPoolExecutor(max_workers=1, thread_name_prefix='readiness-coalescing-test')
     started = threading.Event()

@@ -28,7 +28,7 @@ from backend_core.persistence.analysis.models import Analysis
 from backend_core.persistence.datasource.models import DataSource
 from backend_core.persistence.udfs.models import Udf
 from backend_core.sqlmodel_typing import sa
-from main import app
+from backend_core.application import app
 from modules.auth import commands as auth_commands, routes as auth_routes
 from modules.auth.dependencies import get_current_user, get_optional_user
 from modules.auth.models import (

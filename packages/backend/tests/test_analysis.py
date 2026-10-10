@@ -16,7 +16,7 @@ from backend_core.persistence.datasource.models import DataSource
 from backend_core.persistence.locks.models import ResourceLock
 from backend_core.sqlmodel_typing import sa
 from dataforge_protocol import compute_pb2
-from main import app
+from backend_core.application import app
 from modules.analysis import routes as analysis_routes, service as analysis_service
 from modules.analysis.schemas import AnalysisResponseSchema
 from modules.auth.dependencies import get_optional_user

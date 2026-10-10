@@ -35,7 +35,7 @@ from backend_core.persistence.datasource.models import DataSource
 from backend_core.persistence.runtime_events.models import RuntimeOutboxEvent, RuntimeOutboxStatus
 from backend_core.sqlmodel_typing import sa
 from dataforge_protocol import compute_pb2, enums_pb2
-from main import app
+from backend_core.application import app
 from modules.compute import executor_client, routes as compute_routes
 
 

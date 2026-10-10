@@ -7,7 +7,7 @@ from sqlmodel import select
 
 from backend_core.exceptions import DataSourceValidationError
 from backend_core.persistence.datasource.models import DataSource, DataSourceColumnMetadata
-from main import app
+from backend_core.application import app
 from modules.auth.dependencies import get_optional_user
 
 

@@ -59,7 +59,7 @@ def test_namespaces_endpoint_reads_only_the_runtime_registry(monkeypatch):
     # PostgreSQL alone and never from a replica's local filesystem.
     monkeypatch.setattr(namespace_routes, 'list_runtime_namespaces', lambda session: ['beta', 'default'])
 
-    from main import app
+    from backend_core.application import app
 
     client = TestClient(app)
     response = client.get('/api/v1/namespaces')
@@ -110,7 +110,7 @@ def test_create_namespace_endpoint_registers_namespace(monkeypatch: pytest.Monke
     monkeypatch.setattr(namespace_routes, 'initialize_namespace_db', lambda name: None)
     monkeypatch.setattr(namespace_routes, 'namespace_provision_lock', lambda _name: nullcontext())
 
-    from main import app
+    from backend_core.application import app
 
     client = TestClient(app)
     response = client.post('/api/v1/namespaces', json={'name': 'test'})
@@ -247,7 +247,7 @@ def test_provision_namespace_bucket_uses_explicit_data_plane_operation(monkeypat
 
 
 def test_namespace_storage_plan_endpoint_previews_exact_roots() -> None:
-    from main import app
+    from backend_core.application import app
 
     client = TestClient(app)
     response = client.get('/api/v1/namespaces/storage-plan', params={'name': 'analytics'})

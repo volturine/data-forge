@@ -481,11 +481,11 @@ async def test_recovery_db_session_creation_use_and_close_stay_in_worker_thread(
 
 @pytest.mark.asyncio
 async def test_main_api_listener_recovery_wiring_has_mandatory_projection_callbacks(monkeypatch) -> None:
-    import main
+    import backend_core.application as application
 
     recover = AsyncMock()
-    monkeypatch.setattr(main, 'recover_runtime_notifications', recover)
-    await main._recover_api_notifications()
+    monkeypatch.setattr(application, 'recover_runtime_notifications', recover)
+    await application._recover_api_notifications()
     recover.assert_awaited_once_with(
-        refresh_builds=main.refresh_build_projections, refresh_engines=main.compute_worker_registry.recover_active, refresh_locks=main.refresh_lock_projections
+        refresh_builds=application.refresh_build_projections, refresh_engines=application.compute_worker_registry.recover_active, refresh_locks=application.refresh_lock_projections
     )

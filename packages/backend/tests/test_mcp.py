@@ -77,7 +77,7 @@ class TestMCPToolListing:
         assert not any('/engine-runs' in path for path in paths)
 
     def test_routes_require_auth(self, client: TestClient, monkeypatch: pytest.MonkeyPatch) -> None:
-        from main import app
+        from backend_core.application import app
         from modules.auth.dependencies import get_current_user
 
         monkeypatch.setattr('backend_core.auth_config.settings.auth_required', True)

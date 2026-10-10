@@ -494,7 +494,7 @@ async def _run_owned_epoch(process_stop_event: asyncio.Event, lease: RuntimeCoor
     try:
         if process_stop_event.is_set():
             return
-        from main import app
+        from backend_core.application import app
 
         tasks.append(asyncio.create_task(_lease_monitor(process_stop_event, owner_stop_event, lease), name='coordinator-lease'))
         await init_db()
