@@ -177,6 +177,18 @@ def test_migrate_runtime_upgrades_existing_public_schema(monkeypatch: pytest.Mon
     assert calls == [('public', f'public:{_PUBLIC_REVISION}')]
 
 
+def test_migrate_runtime_upgrades_existing_pivot_tenant_revision(monkeypatch: pytest.MonkeyPatch) -> None:
+    calls: list[tuple[str, str]] = []
+    revisions = {'public': _PUBLIC_REVISION, 'default': '0024_pivot_value_columns'}
+    monkeypatch.setattr('backend_core.migrations._current_revision', revisions.__getitem__)
+    monkeypatch.setattr('backend_core.migrations.ensure_database_exists', lambda _database_url=None: None)
+    monkeypatch.setattr('backend_core.migrations._upgrade_schema', lambda *, scope, schema, revision: calls.append((scope, f'{schema}:{revision}')))
+
+    migrate_runtime(['default'])
+
+    assert calls == [('tenant', f'default:{_TENANT_REVISION}')]
+
+
 def test_migrate_runtime_upgrades_durable_chat_revision_to_telegram_head(monkeypatch: pytest.MonkeyPatch) -> None:
     calls: list[tuple[str, str]] = []
     monkeypatch.setattr('backend_core.migrations._current_revision', lambda schema: '0015_durable_chat_turns' if schema == 'public' else _TENANT_REVISION)
