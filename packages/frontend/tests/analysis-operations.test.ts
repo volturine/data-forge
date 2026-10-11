@@ -641,6 +641,8 @@ test.describe('Analyses – pivot config editing', () => {
 			const monthSchemaResponse = waitForSchema();
 			await reopenedPivot.getByRole('button', { name: 'Apply' }).click();
 			expect((await monthSchemaResponse).ok()).toBeTruthy();
+			// The response completes before the apply handler updates the pivot and downstream schema.
+			await expect(reopenedPivot.getByTestId('pivot-output-schema')).toContainText('January');
 			await page.locator('[data-step-type="select"]').locator('[data-action="edit"]').click();
 			await expect(selectPanel).toBeVisible();
 			await selectPanel.getByRole('button', { name: 'Select columns to keep...' }).click();
