@@ -14,6 +14,7 @@ DEV_ENV = ROOT / 'docker' / 'env' / 'dev.env'
 DOCKERFILE = ROOT / 'docker' / 'Dockerfile'
 JUSTFILE = ROOT / 'Justfile'
 PUBLISH_WORKFLOW = ROOT / '.github' / 'workflows' / 'docker-publish.yml'
+CI_WORKFLOW = ROOT / '.github' / 'workflows' / 'ci.yml'
 
 
 def test_single_production_compose_has_no_build_directive() -> None:
@@ -172,5 +173,15 @@ def test_publish_workflow_publishes_dev_channel_images() -> None:
     assert 'pull_request' in text
     assert 'dev-pr-' in text
     assert 'dev-master' in text
-    # Dev images are amd64-only, matching the central deployments preview stacks.
-    assert 'platforms: linux/amd64\n' in text
+    # Dev and preview tags must select native images on Apple Silicon too.
+    dev_job = text.split('  dev:\n', maxsplit=1)[1].split('\n  publish:\n', maxsplit=1)[0]
+    assert 'platforms: linux/amd64,linux/arm64' in dev_job
+    assert 'docker/setup-qemu-action@v4' in dev_job
+    assert "push: ${{ github.event_name != 'pull_request' || github.event.pull_request.head.repo.full_name == github.repository }}" in dev_job
+
+    ci_text = CI_WORKFLOW.read_text()
+    ci_publish_job = ci_text.split('  publish-images:\n', maxsplit=1)[1].split('\n  publish-pr-images:', maxsplit=1)[0]
+    ci_pr_job = ci_text.split('  publish-pr-images:\n', maxsplit=1)[1]
+    for ci_job in (ci_publish_job, ci_pr_job):
+        assert 'platforms: linux/amd64,linux/arm64' in ci_job
+        assert 'docker/setup-qemu-action@v4' in ci_job
