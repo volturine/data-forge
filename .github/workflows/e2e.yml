@@ -48,7 +48,7 @@ jobs:
         run: |
           set -euo pipefail
           docker_root_dir="$(docker info --format '{{.DockerRootDir}}')"
-          minimum_free_bytes=$((20 * 1024 * 1024 * 1024))
+          minimum_free_bytes=$((18 * 1024 * 1024 * 1024))
           for path in "$GITHUB_WORKSPACE" "$docker_root_dir"; do
             available_bytes="$(df -P -B1 "$path" | awk 'NR == 2 { print $4 }')"
             if [[ ! "$available_bytes" =~ ^[0-9]+$ ]]; then
@@ -57,7 +57,7 @@ jobs:
             fi
             if ((available_bytes < minimum_free_bytes)); then
               available_gib="$(awk -v bytes="$available_bytes" 'BEGIN { printf "%.1f", bytes / 1024 / 1024 / 1024 }')"
-              echo "::error::E2E runner has ${available_gib} GiB free on ${path}; at least 20 GiB is required." >&2
+              echo "::error::E2E runner has ${available_gib} GiB free on ${path}; at least 18 GiB is required." >&2
               exit 1
             fi
             available_gib="$(awk -v bytes="$available_bytes" 'BEGIN { printf "%.1f", bytes / 1024 / 1024 / 1024 }')"
