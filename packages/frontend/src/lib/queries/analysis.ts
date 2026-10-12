@@ -2,7 +2,7 @@ import {
 	getAnalysisWithHeaders,
 	type AnalysisDetail,
 	type AnalysisDetailResult
-} from '$lib/api/analysis';
+} from '#lib/api/analysis.js';
 
 export const analysisQueryKey = (analysisId: string) => ['analysis', analysisId] as const;
 

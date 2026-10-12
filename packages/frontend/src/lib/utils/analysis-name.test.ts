@@ -1,7 +1,7 @@
 import { describe, expect, test, vi } from 'vitest';
 import { timestampedAnalysisName } from './analysis-name';
 
-vi.mock('$lib/utils/datetime', () => ({
+vi.mock('#lib/utils/datetime.js', () => ({
 	getTimezoneSettings: () => ({ timezone: 'UTC' })
 }));
 

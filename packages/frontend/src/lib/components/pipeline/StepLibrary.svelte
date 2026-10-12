@@ -1,6 +1,6 @@
 <script lang="ts">
-	import { drag, type DropTarget } from '$lib/stores/drag.svelte';
-	import { css } from '$lib/styles/panda';
+	import { drag, type DropTarget } from '#lib/stores/drag.svelte.js';
+	import { css } from '#lib/styles/panda.js';
 
 	interface StepType {
 		type: string;

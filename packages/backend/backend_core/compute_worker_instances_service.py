@@ -67,7 +67,19 @@ def _lock_engine_snapshot(session: Session, *, worker_id: str, namespace: str) -
     session.execute(text('SELECT pg_advisory_xact_lock(:key)'), {'key': key})
 
 
-def _compute_worker_status_projection(*, status: ComputeWorkerStatusInfo, last_activity_at: datetime | None, stamp: datetime) -> dict[str, object]:
+def _compute_worker_instance_status(status: ComputeWorkerStatusInfo) -> ComputeWorkerInstanceStatus:
+    if status.lifecycle_status:
+        return ComputeWorkerInstanceStatus.require(status.lifecycle_status)
+    return ComputeWorkerInstanceStatus.from_compute_worker_status(status.status, status.current_job_id)
+
+
+def _compute_worker_status_projection(
+    *,
+    status: ComputeWorkerStatusInfo,
+    instance_status: ComputeWorkerInstanceStatus,
+    last_activity_at: datetime | None,
+    stamp: datetime,
+) -> dict[str, object]:
     return {
         'container_id': status.container_id,
         'image_digest': status.image_digest,
@@ -77,11 +89,7 @@ def _compute_worker_status_projection(*, status: ComputeWorkerStatusInfo, last_a
         'supervisor_id': status.supervisor_id,
         'owner_id': status.owner_id,
         'docker_host': status.docker_host,
-        'status': (
-            ComputeWorkerInstanceStatus.require(status.lifecycle_status)
-            if status.lifecycle_status
-            else ComputeWorkerInstanceStatus.from_compute_worker_status(status.status, status.current_job_id)
-        ),
+        'status': instance_status,
         'compute_worker_scope': _required_identity_value(status.scope, 'scope'),
         'compute_worker_reuse_policy': _required_identity_value(status.reuse_policy, 'reuse_policy'),
         'datasource_id': status.datasource_id,
@@ -95,8 +103,14 @@ def _compute_worker_status_projection(*, status: ComputeWorkerStatusInfo, last_a
     }
 
 
-def _apply_compute_worker_status(row: ComputeWorkerInstance, *, status: ComputeWorkerStatusInfo, stamp: datetime) -> None:
-    projection = _compute_worker_status_projection(status=status, last_activity_at=row.last_activity_at, stamp=stamp)
+def _apply_compute_worker_status(
+    row: ComputeWorkerInstance,
+    *,
+    status: ComputeWorkerStatusInfo,
+    instance_status: ComputeWorkerInstanceStatus,
+    stamp: datetime,
+) -> None:
+    projection = _compute_worker_status_projection(status=status, instance_status=instance_status, last_activity_at=row.last_activity_at, stamp=stamp)
     changed = {field: value for field, value in projection.items() if getattr(row, field, None) != value}
     if not changed:
         return
@@ -119,6 +133,7 @@ def _upsert_compute_worker_status(
         _lock_engine_snapshot(session, worker_id=worker_id, namespace=namespace)
     stamp = now or _utcnow()
     scope = _required_identity_value(status.scope, 'scope')
+    instance_status = _compute_worker_instance_status(status)
     instance_id = f'{worker_id}:{namespace}:{scope}:{status.resource_id}'
     row = session.get(ComputeWorkerInstance, instance_id)
     if row is None:
@@ -139,9 +154,7 @@ def _upsert_compute_worker_status(
             supervisor_id=status.supervisor_id,
             owner_id=status.owner_id,
             docker_host=status.docker_host,
-            status=ComputeWorkerInstanceStatus.require(status.lifecycle_status)
-            if status.lifecycle_status
-            else ComputeWorkerInstanceStatus.from_compute_worker_status(status.status, status.current_job_id),
+            status=instance_status,
             current_job_id=status.current_job_id,
             current_build_id=status.current_build_id,
             current_compute_worker_run_id=status.current_compute_worker_run_id,
@@ -152,7 +165,7 @@ def _upsert_compute_worker_status(
             updated_at=stamp,
         )
     else:
-        _apply_compute_worker_status(row, status=status, stamp=stamp)
+        _apply_compute_worker_status(row, status=status, instance_status=instance_status, stamp=stamp)
     session.add(row)
     if not commit:
         return row
@@ -163,7 +176,7 @@ def _upsert_compute_worker_status(
         row = session.get(ComputeWorkerInstance, instance_id)
         if row is None:
             raise
-        _apply_compute_worker_status(row, status=status, stamp=stamp)
+        _apply_compute_worker_status(row, status=status, instance_status=instance_status, stamp=stamp)
         session.add(row)
         session.commit()
     session.refresh(row)
@@ -255,6 +268,7 @@ def _persist_engine_snapshot_locked(
     phase_started = _start_snapshot_phase(phase_timings)
     updates: list[dict[str, object]] = []
     for instance_id, status in active_by_id.items():
+        instance_status = _compute_worker_instance_status(status)
         row = existing.get(instance_id)
         if row is None:
             scope = _required_identity_value(status.scope, 'scope')
@@ -265,14 +279,20 @@ def _persist_engine_snapshot_locked(
                 analysis_id=status.analysis_id,
                 compute_worker_scope=scope,
                 compute_worker_reuse_policy=_required_identity_value(status.reuse_policy, 'reuse_policy'),
+                status=instance_status,
                 last_seen_at=stamp,
                 updated_at=stamp,
             )
-            _apply_compute_worker_status(row, status=status, stamp=stamp)
+            _apply_compute_worker_status(row, status=status, instance_status=instance_status, stamp=stamp)
             session.add(row)
             continue
 
-        projection = _compute_worker_status_projection(status=status, last_activity_at=row['last_activity_at'], stamp=stamp)
+        projection = _compute_worker_status_projection(
+            status=status,
+            instance_status=instance_status,
+            last_activity_at=row['last_activity_at'],
+            stamp=stamp,
+        )
         changed = {field: value for field, value in projection.items() if row[field] != value}
         if changed:
             updates.append({'id': instance_id, **changed, 'last_seen_at': stamp, 'updated_at': stamp})

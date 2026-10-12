@@ -1,11 +1,11 @@
 <script lang="ts">
 	import { Debounced } from 'runed';
 	import { X } from '@lucide/svelte';
-	import type { DataSource } from '$lib/types/datasource';
-	import FileTypeBadge from '$lib/components/common/FileTypeBadge.svelte';
-	import type { SourceType } from '$lib/utils/file-types';
-	import BaseModal from '$lib/components/ui/BaseModal.svelte';
-	import { css, iconButton } from '$lib/styles/panda';
+	import type { DataSource } from '#lib/types/datasource.js';
+	import FileTypeBadge from '#lib/components/common/FileTypeBadge.svelte';
+	import type { SourceType } from '#lib/utils/file-types.js';
+	import BaseModal from '#lib/components/ui/BaseModal.svelte';
+	import { css, iconButton } from '#lib/styles/panda.js';
 
 	interface Props {
 		show: boolean;

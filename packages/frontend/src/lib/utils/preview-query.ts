@@ -1,6 +1,6 @@
-import { previewStepData, throwIfAborted } from '$lib/api/compute';
-import type { StepPreviewRequest, StepPreviewResponse } from '$lib/api/compute';
-import { toComputeError } from '$lib/utils/compute-error';
+import { previewStepData, throwIfAborted } from '#lib/api/compute.js';
+import type { StepPreviewRequest, StepPreviewResponse } from '#lib/api/compute.js';
+import { toComputeError } from '#lib/utils/compute-error.js';
 
 export async function fetchPreviewQueryData(
 	request: StepPreviewRequest,

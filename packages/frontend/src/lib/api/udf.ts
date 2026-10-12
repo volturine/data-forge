@@ -2,7 +2,7 @@ import type { ResultAsync } from 'neverthrow';
 
 import { apiRequest } from './client';
 import type { ApiError } from './client';
-import type { Udf, UdfClone, UdfCreate, UdfExport, UdfImport, UdfUpdate } from '$lib/types/udf';
+import type { Udf, UdfClone, UdfCreate, UdfExport, UdfImport, UdfUpdate } from '#lib/types/udf.js';
 
 export function listUdfs(
 	params?: {

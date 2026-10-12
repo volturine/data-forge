@@ -1,18 +1,18 @@
 <script lang="ts">
 	import { createQuery } from '@tanstack/svelte-query';
-	import { cancelBuild, type CancelBuildResponse } from '$lib/api/compute';
-	import { connectBuildListStream } from '$lib/api/build-stream';
-	import { getBuild } from '$lib/api/builds';
-	import { getDatasource, listDatasources } from '$lib/api/datasource';
-	import { listAnalyses } from '$lib/api/analysis';
-	import type { BuildRunDetail, BuildRunSummary } from '$lib/types/build-stream';
+	import { cancelBuild, type CancelBuildResponse } from '#lib/api/compute.js';
+	import { connectBuildListStream } from '#lib/api/build-stream.js';
+	import { getBuild } from '#lib/api/builds.js';
+	import { getDatasource, listDatasources } from '#lib/api/datasource.js';
+	import { listAnalyses } from '#lib/api/analysis.js';
+	import type { BuildRunDetail, BuildRunSummary } from '#lib/types/build-stream.js';
 	import {
 		buildLifecycleStatusLabel,
 		canCancelBuildLifecycleStatus,
 		computeWorkerRunDisplayKind,
 		computeWorkerRunKindLabel
-	} from '$lib/types/build-stream';
-	import { BuildsStore } from '$lib/stores/builds.svelte';
+	} from '#lib/types/build-stream.js';
+	import { BuildsStore } from '#lib/stores/builds.svelte.js';
 	import { page as pageState } from '$app/state';
 	import {
 		Search,
@@ -31,21 +31,21 @@
 		Hash,
 		TriangleAlert
 	} from '@lucide/svelte';
-	import BranchPicker from '$lib/components/common/BranchPicker.svelte';
-	import BuildPreview from '$lib/components/common/BuildPreview.svelte';
-	import ConfirmDialog from '$lib/components/common/ConfirmDialog.svelte';
-	import DurationTrendChart from '$lib/components/common/DurationTrendChart.svelte';
-	import { BuildStreamStore } from '$lib/stores/build-stream.svelte';
-	import { ReconnectionManager } from '$lib/stores/reconnection-manager';
-	import type { StreamHandle } from '$lib/api/websocket';
-	import { useNamespace } from '$lib/stores/namespace.svelte';
-	import { getDurationStats } from '$lib/api/compute-worker-runs';
-	import { formatDateTimeDisplay, toEpochDisplay } from '$lib/utils/datetime';
-	import { elapsedSince, formatDuration } from '$lib/utils/format-duration';
-	import { endOfDayEpoch, startOfDayEpoch } from '$lib/utils/temporal';
+	import BranchPicker from '#lib/components/common/BranchPicker.svelte';
+	import BuildPreview from '#lib/components/common/BuildPreview.svelte';
+	import ConfirmDialog from '#lib/components/common/ConfirmDialog.svelte';
+	import DurationTrendChart from '#lib/components/common/DurationTrendChart.svelte';
+	import { BuildStreamStore } from '#lib/stores/build-stream.svelte.js';
+	import { ReconnectionManager } from '#lib/stores/reconnection-manager.js';
+	import type { StreamHandle } from '#lib/api/websocket.js';
+	import { useNamespace } from '#lib/stores/namespace.svelte.js';
+	import { getDurationStats } from '#lib/api/compute-worker-runs.js';
+	import { formatDateTimeDisplay, toEpochDisplay } from '#lib/utils/datetime.js';
+	import { elapsedSince, formatDuration } from '#lib/utils/format-duration.js';
+	import { endOfDayEpoch, startOfDayEpoch } from '#lib/utils/temporal.js';
 	import { onDestroy, onMount } from 'svelte';
 	import { SvelteMap, SvelteSet } from 'svelte/reactivity';
-	import { css, spinner, button, emptyText, input } from '$lib/styles/panda';
+	import { css, spinner, button, emptyText, input } from '#lib/styles/panda.js';
 
 	interface Props {
 		compact?: boolean;

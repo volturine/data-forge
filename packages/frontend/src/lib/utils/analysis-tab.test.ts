@@ -6,7 +6,7 @@ import {
 	validatePipelineTabs,
 	formatPipelineErrors
 } from './analysis-tab';
-import type { AnalysisTab } from '$lib/types/analysis';
+import type { AnalysisTab } from '#lib/types/analysis.js';
 
 describe('isUuid', () => {
 	test('accepts valid v4 UUID', () => {

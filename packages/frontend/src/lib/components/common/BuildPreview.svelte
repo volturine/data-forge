@@ -1,12 +1,12 @@
 <script lang="ts">
-	import type { BuildStreamStore } from '$lib/stores/build-stream.svelte';
-	import type { QueryPlan, BuildLogEntry } from '$lib/types/build-stream';
+	import type { BuildStreamStore } from '#lib/stores/build-stream.svelte.js';
+	import type { QueryPlan, BuildLogEntry } from '#lib/types/build-stream.js';
 	import {
 		buildStatusLabel,
 		buildStatusTone,
 		buildTabStatusLabel,
 		buildTabStatusTone
-	} from '$lib/types/build-stream';
+	} from '#lib/types/build-stream.js';
 	import {
 		CircleCheckBig,
 		CircleX,
@@ -26,9 +26,9 @@
 		CirclePlay,
 		FileCode
 	} from '@lucide/svelte';
-	import { css, tabButton, chip, spinner } from '$lib/styles/panda';
-	import { buildStepLabel } from '$lib/utils/build-step-label';
-	import { formatDuration } from '$lib/utils/format-duration';
+	import { css, tabButton, chip, spinner } from '#lib/styles/panda.js';
+	import { buildStepLabel } from '#lib/utils/build-step-label.js';
+	import { formatDuration } from '#lib/utils/format-duration.js';
 
 	interface Props {
 		store: BuildStreamStore;
@@ -157,12 +157,6 @@
 		if (!logsRef) return;
 		logsRef.scrollTop = logsRef.scrollHeight;
 		scrollPaused = false;
-	}
-
-	function levelColor(level: string): string {
-		if (level === 'error') return 'fg.error';
-		if (level === 'warning') return 'fg.warning';
-		return 'fg.muted';
 	}
 
 	const activeTab = $derived.by((): PreviewTab => {
@@ -1082,7 +1076,16 @@
 					{:else}
 						{#each filteredLogs as entry, i (i)}
 							<div class={css({ paddingY: '0.5', whiteSpace: 'pre-wrap', wordBreak: 'break-all' })}>
-								<span class={css({ color: levelColor(entry.level) })}>[{entry.level}]</span>
+								<span
+									class={css({
+										color:
+											entry.level === 'error'
+												? 'fg.error'
+												: entry.level === 'warning'
+													? 'fg.warning'
+													: 'fg.muted'
+									})}>[{entry.level}]</span
+								>
 								{#if entry.step_name}
 									<span class={css({ color: 'fg.faint' })}>[{entry.step_name}]</span>
 								{/if}

@@ -1,5 +1,5 @@
-import type { ChartType, ProtocolPipelineStepType } from '$lib/types/protocol-enum-tokens';
-import { STEP_TYPE_TOKENS } from '$lib/types/protocol-enum-tokens';
+import type { ChartType, ProtocolPipelineStepType } from '#lib/types/protocol-enum-tokens.js';
+import { STEP_TYPE_TOKENS } from '#lib/types/protocol-enum-tokens.js';
 
 export type { ChartType };
 

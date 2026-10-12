@@ -1,10 +1,10 @@
 <script lang="ts">
 	import { onMount } from 'svelte';
 	import { CheckCircle, XCircle, Save, Loader2 } from '@lucide/svelte';
-	import { getSettings, updateSettings, isMasked, MASKED_PLACEHOLDER } from '$lib/api/settings';
-	import type { AppSettings } from '$lib/api/settings';
-	import { listAIModels, testAIConnection } from '$lib/api/ai';
-	import { button, css, input, label } from '$lib/styles/panda';
+	import { getSettings, updateSettings, isMasked, MASKED_PLACEHOLDER } from '#lib/api/settings.js';
+	import type { AppSettings } from '#lib/api/settings.js';
+	import { listAIModels, testAIConnection } from '#lib/api/ai.js';
+	import { button, css, input, label } from '#lib/styles/panda.js';
 
 	let loading = $state(true);
 	let saving = $state(false);

@@ -2,7 +2,7 @@ import type {
 	ComputeWorkerRun,
 	ComputeWorkerRunExecutionEntry,
 	ListComputeWorkerRunsParams
-} from '$lib/api/compute-worker-runs';
+} from '#lib/api/compute-worker-runs.js';
 import type {
 	BuildRunDetailJson as ProtocolBuildRunDetailJson,
 	BuildRunListResponseJson as ProtocolBuildRunListResponseJson,
@@ -17,14 +17,14 @@ import type {
 	BuildStepSnapshotJson as ProtocolBuildStepSnapshotJson,
 	BuildTabResultJson as ProtocolBuildTabResultJson,
 	BuildWebsocketErrorMessageJson as ProtocolBuildWebsocketErrorMessageJson
-} from '$lib/protocol/dataforge_protocol/compute_pb';
+} from '#lib/protocol/dataforge_protocol/compute_pb.js';
 import type {
 	BuildLifecycleStatus,
 	BuildLogLevel,
 	BuildStepState,
 	BuildTabStatus,
 	ComputeWorkerRunKind
-} from '$lib/types/protocol-enum-tokens';
+} from '#lib/types/protocol-enum-tokens.js';
 
 export type {
 	BuildLifecycleStatus,

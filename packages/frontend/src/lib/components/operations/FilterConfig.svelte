@@ -1,17 +1,17 @@
 <script lang="ts">
-	import type { Schema } from '$lib/types/schema';
+	import type { Schema } from '#lib/types/schema.js';
 	import type {
 		FilterCondition as Condition,
 		FilterConfigData,
 		FilterValueType as ValueType
-	} from '$lib/types/operation-config';
-	import type { FilterOperator } from '$lib/types/protocol-enum-tokens';
+	} from '#lib/types/operation-config.js';
+	import type { FilterOperator } from '#lib/types/protocol-enum-tokens.js';
 	import { X, Plus } from '@lucide/svelte';
-	import ColumnDropdown from '$lib/components/common/ColumnDropdown.svelte';
-	import DateTimeInput from '$lib/components/common/DateTimeInput.svelte';
-	import SectionHeader from '$lib/components/ui/SectionHeader.svelte';
-	import ToggleButton from '$lib/components/ui/ToggleButton.svelte';
-	import { css, input } from '$lib/styles/panda';
+	import ColumnDropdown from '#lib/components/common/ColumnDropdown.svelte';
+	import DateTimeInput from '#lib/components/common/DateTimeInput.svelte';
+	import SectionHeader from '#lib/components/ui/SectionHeader.svelte';
+	import ToggleButton from '#lib/components/ui/ToggleButton.svelte';
+	import { css, input } from '#lib/styles/panda.js';
 
 	const uid = $props.id();
 

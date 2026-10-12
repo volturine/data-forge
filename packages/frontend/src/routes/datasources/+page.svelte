@@ -1,9 +1,9 @@
 <script lang="ts">
-	import { createQuery, createMutation, useQueryClient } from '@tanstack/svelte-query';
+	import { createQuery, createMutation, hashKey, useQueryClient } from '@tanstack/svelte-query';
 	import { afterNavigate, goto } from '$app/navigation';
 	import { onMount } from 'svelte';
 	import { resolve } from '$app/paths';
-	import { listDatasources, deleteDatasource, getDatasource } from '$lib/api/datasource';
+	import { listDatasources, deleteDatasource, getDatasource } from '#lib/api/datasource.js';
 	import {
 		Plus,
 		Trash2,
@@ -14,19 +14,23 @@
 		Upload,
 		GitBranch
 	} from '@lucide/svelte';
-	import ConfirmDialog from '$lib/components/common/ConfirmDialog.svelte';
-	import BranchPicker from '$lib/components/common/BranchPicker.svelte';
-	import RowActionMenu from '$lib/components/common/RowActionMenu.svelte';
-	import DatasourcePreview from '$lib/components/datasources/DatasourcePreview.svelte';
-	import DatasourceConfigPanel from '$lib/components/datasources/DatasourceConfigPanel.svelte';
-	import SnapshotPicker from '$lib/components/datasources/SnapshotPicker.svelte';
-	import BuildComparisonPanel from '$lib/components/datasources/BuildComparisonPanel.svelte';
+	import ConfirmDialog from '#lib/components/common/ConfirmDialog.svelte';
+	import BranchPicker from '#lib/components/common/BranchPicker.svelte';
+	import RowActionMenu from '#lib/components/common/RowActionMenu.svelte';
+	import DatasourcePreview from '#lib/components/datasources/DatasourcePreview.svelte';
+	import DatasourceConfigPanel from '#lib/components/datasources/DatasourceConfigPanel.svelte';
+	import SnapshotPicker from '#lib/components/datasources/SnapshotPicker.svelte';
+	import BuildComparisonPanel from '#lib/components/datasources/BuildComparisonPanel.svelte';
 	import { page } from '$app/state';
-	import Callout from '$lib/components/ui/Callout.svelte';
-	import { css, spinner } from '$lib/styles/panda';
-	import { useNamespace } from '$lib/stores/namespace.svelte';
-	import { datasourceIsAnalysisOutput, datasourceNeedsExternalIngest } from '$lib/types/datasource';
-	import type { DataSource } from '$lib/types/datasource';
+	import Callout from '#lib/components/ui/Callout.svelte';
+	import { css, spinner } from '#lib/styles/panda.js';
+	import { useNamespace } from '#lib/stores/namespace.svelte.js';
+	import {
+		datasourceIsAnalysisOutput,
+		datasourceNeedsExternalIngest
+	} from '#lib/types/datasource.js';
+	import type { DataSource } from '#lib/types/datasource.js';
+	import { buildDatasourcePreviewPipelinePayload } from '#lib/utils/analysis-pipeline.js';
 
 	const queryClient = useQueryClient();
 	const ns = useNamespace();
@@ -102,6 +106,7 @@
 		searchQuery
 			? datasources.filter((d) => {
 					const query = searchQuery.toLowerCase();
+
 					return (
 						d.name.toLowerCase().includes(query) ||
 						(d.description ?? '').toLowerCase().includes(query)
@@ -128,7 +133,11 @@
 		const ds = previewDatasource;
 		const config = effectiveConfig;
 		if (!ds || !config) return '';
-		return `${ds.id}:${JSON.stringify(config)}`;
+		// Metadata changes must not remount and cancel an unchanged preview command.
+		return hashKey([
+			ds.id,
+			buildDatasourcePreviewPipelinePayload({ datasource: ds, datasourceConfig: config })
+		]);
 	});
 
 	function resetPreviewLocals(): void {
@@ -156,7 +165,7 @@
 	}
 
 	function handleCreateAnalysis(datasourceId: string) {
-		void goto(resolve(`/analysis/new?datasource=${datasourceId}`));
+		void goto(resolve(`analysis/new?datasource=${datasourceId}`));
 	}
 
 	function confirmDelete() {
@@ -267,7 +276,7 @@
 						{/if}
 					</button>
 					<a
-						href={resolve('/datasources/new')}
+						href={resolve('datasources/new')}
 						class={css({
 							display: 'inline-flex',
 							alignItems: 'center',
@@ -352,7 +361,7 @@
 						No data sources yet.
 					</p>
 					<a
-						href={resolve('/datasources/new')}
+						href={resolve('datasources/new')}
 						class={css({
 							display: 'inline-flex',
 							alignItems: 'center',
@@ -383,10 +392,7 @@
 						class={css({
 							borderBottomWidth: '1',
 							...(activeSelectedId === datasource.id
-								? {
-										backgroundColor: 'bg.accent',
-										borderLeftWidth: '2'
-									}
+								? { backgroundColor: 'bg.accent', borderLeftWidth: '2' }
 								: {})
 						})}
 					>

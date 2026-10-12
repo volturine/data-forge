@@ -5,7 +5,7 @@
 	import { HighlightStyle, syntaxHighlighting } from '@codemirror/language';
 	import { tags } from '@lezer/highlight';
 	import { fromAction } from 'svelte/attachments';
-	import { css } from '$lib/styles/panda';
+	import { css } from '#lib/styles/panda.js';
 
 	interface Props {
 		value?: string;

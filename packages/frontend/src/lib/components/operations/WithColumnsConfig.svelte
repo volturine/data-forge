@@ -1,16 +1,16 @@
 <script lang="ts">
-	import type { Schema } from '$lib/types/schema';
-	import type { Udf, UdfCreate } from '$lib/types/udf';
-	import type { WithColumnsConfigData, WithColumnsExpr } from '$lib/types/operation-config';
+	import type { Schema } from '#lib/types/schema.js';
+	import type { Udf, UdfCreate } from '#lib/types/udf.js';
+	import type { WithColumnsConfigData, WithColumnsExpr } from '#lib/types/operation-config.js';
 
 	import { createQuery } from '@tanstack/svelte-query';
-	import { listUdfs } from '$lib/api/udf';
-	import UdfPickerModal from '$lib/components/common/UdfPickerModal.svelte';
-	import ColumnDropdown from '$lib/components/common/ColumnDropdown.svelte';
-	import MultiSelectColumnDropdown from '$lib/components/common/MultiSelectColumnDropdown.svelte';
-	import SectionHeader from '$lib/components/ui/SectionHeader.svelte';
+	import { listUdfs } from '#lib/api/udf.js';
+	import UdfPickerModal from '#lib/components/common/UdfPickerModal.svelte';
+	import ColumnDropdown from '#lib/components/common/ColumnDropdown.svelte';
+	import MultiSelectColumnDropdown from '#lib/components/common/MultiSelectColumnDropdown.svelte';
+	import SectionHeader from '#lib/components/ui/SectionHeader.svelte';
 	import { Pencil, X } from '@lucide/svelte';
-	import { css, button, emptyText, input, label, stepConfig } from '$lib/styles/panda';
+	import { css, button, emptyText, input, label, stepConfig } from '#lib/styles/panda.js';
 
 	interface Props {
 		schema: Schema;

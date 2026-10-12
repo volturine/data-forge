@@ -162,7 +162,7 @@ def get_password_provider(session: Session, user_id: str) -> AuthProvider | None
     return _get_password_provider(session, user_id)
 
 
-def _build_default_provider_metadata(password: str) -> dict[str, str]:
+def _build_default_provider_metadata(password: str) -> dict[str, object]:
     return {
         'managed_by': _DEFAULT_USER_MARKER,
         'password_hash': hash_password(password),

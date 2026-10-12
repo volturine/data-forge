@@ -1,11 +1,11 @@
 <script lang="ts">
-	import { browser } from '$app/environment';
+	import { browser } from '$app/env';
 	import { goto } from '$app/navigation';
 	import { resolve } from '$app/paths';
-	import { css, button, input, label, spinner } from '$lib/styles/panda';
-	import { configStore } from '$lib/stores/config.svelte';
-	import { authStore } from '$lib/stores/auth.svelte';
-	import AuthProviders from '$lib/components/auth/AuthProviders.svelte';
+	import { css, button, input, label, spinner } from '#lib/styles/panda.js';
+	import { configStore } from '#lib/stores/config.svelte.js';
+	import { authStore } from '#lib/stores/auth.svelte.js';
+	import AuthProviders from '#lib/components/auth/AuthProviders.svelte';
 
 	let name = $state('');
 	let email = $state('');
@@ -108,10 +108,8 @@
 			<button
 				type="button"
 				class={button({ variant: 'primary' })}
-				onclick={() => goto(resolve('/verify'))}
+				onclick={() => goto(resolve('verify'))}>Check verification status</button
 			>
-				Check verification status
-			</button>
 		{:else}
 			<button
 				type="button"
@@ -195,7 +193,7 @@
 	<p class={css({ fontSize: 'sm', color: 'fg.muted', textAlign: 'center' })}>
 		Already have an account?
 		<a
-			href={resolve('/login')}
+			href={resolve('login')}
 			class={css({
 				color: 'accent.primary',
 				textDecoration: 'underline',

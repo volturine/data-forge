@@ -544,7 +544,15 @@ test.describe('Datasources – schema refresh', () => {
 		const routePattern = `**/api/v1/datasource/${datasourceId}/ingest`;
 		await page.route(routePattern, async (route) => {
 			await released;
-			await route.fulfill({ status: 200, contentType: 'application/json', json: {} });
+			const response = await route.fetch({
+				url: route
+					.request()
+					.url()
+					.replace(/\/ingest$/, ''),
+				method: 'GET'
+			});
+			expect(response.status()).toBe(200);
+			await route.fulfill({ response });
 		});
 		return { release, routePattern };
 	}

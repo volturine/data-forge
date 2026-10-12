@@ -1,6 +1,6 @@
 <script lang="ts">
 	import { GitBranch } from '@lucide/svelte';
-	import { button, css } from '$lib/styles/panda';
+	import { button, css } from '#lib/styles/panda.js';
 </script>
 
 <div class={css({ display: 'flex', alignItems: 'center', gap: '3' })}>

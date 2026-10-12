@@ -71,7 +71,7 @@ def test_datasource_target_kind_is_model_owned() -> None:
         config={'analysis_tab_id': 'tab-1'},
         created_by=DataSourceCreatedBy.ANALYSIS.value,
         created_by_analysis_id='analysis-1',
-        created_at='2024-01-01T00:00:00Z',
+        created_at=datetime(2024, 1, 1, tzinfo=UTC),
     )
     raw_import = DataSource(
         id='ds-raw',
@@ -79,7 +79,7 @@ def test_datasource_target_kind_is_model_owned() -> None:
         source_type=DataSourceType.ICEBERG.value,
         config={'source': {'source_type': DataSourceType.FILE.value}},
         created_by=DataSourceCreatedBy.IMPORT.value,
-        created_at='2024-01-01T00:00:00Z',
+        created_at=datetime(2024, 1, 1, tzinfo=UTC),
     )
     derived = DataSource(
         id='ds-derived',
@@ -87,7 +87,7 @@ def test_datasource_target_kind_is_model_owned() -> None:
         source_type=DataSourceType.ICEBERG.value,
         config={},
         created_by=DataSourceCreatedBy.IMPORT.value,
-        created_at='2024-01-01T00:00:00Z',
+        created_at=datetime(2024, 1, 1, tzinfo=UTC),
     )
 
     assert analysis_output.target_kind() == DataSourceTargetKind.ANALYSIS
@@ -108,7 +108,7 @@ def test_datasource_model_owns_query_and_connection_normalization() -> None:
             'connection_string': 'postgresql+psycopg://example/db',
         },
         created_by=DataSourceCreatedBy.IMPORT.value,
-        created_at='2024-01-01T00:00:00Z',
+        created_at=datetime(2024, 1, 1, tzinfo=UTC),
     )
     nested = DataSource(
         id='ds-nested',
@@ -121,7 +121,7 @@ def test_datasource_model_owns_query_and_connection_normalization() -> None:
             }
         },
         created_by=DataSourceCreatedBy.IMPORT.value,
-        created_at='2024-01-01T00:00:00Z',
+        created_at=datetime(2024, 1, 1, tzinfo=UTC),
     )
 
     assert direct.query_and_connection() == ('select * from public.users', 'postgresql://example/db')
@@ -144,7 +144,7 @@ def test_healthcheck_model_owns_metric_aliases_and_details() -> None:
         config={'min_rows': 1},
         enabled=True,
         critical=False,
-        created_at='2024-01-01T00:00:00Z',
+        created_at=datetime(2024, 1, 1, tzinfo=UTC),
     )
     column_check = HealthCheck(
         id='hc-column-null',
@@ -154,7 +154,7 @@ def test_healthcheck_model_owns_metric_aliases_and_details() -> None:
         config={'column': 'name', 'threshold': 10},
         enabled=True,
         critical=False,
-        created_at='2024-01-01T00:00:00Z',
+        created_at=datetime(2024, 1, 1, tzinfo=UTC),
     )
 
     assert row_count_check.metric_alias('count') == 'row_count__count'
@@ -252,7 +252,7 @@ def test_compute_worker_instance_serialization_parses_persisted_status_token() -
         analysis_id='analysis-1',
         compute_worker_scope='analysis',
         compute_worker_reuse_policy='reuse',
-        status=ComputeWorkerInstanceStatus.RUNNING.value,
+        status=ComputeWorkerInstanceStatus.RUNNING,
         last_seen_at=datetime.now(UTC),
         updated_at=datetime.now(UTC),
     )
@@ -271,7 +271,7 @@ def test_datasource_compute_worker_instance_serialization_omits_analysis_identit
         compute_worker_scope='datasource_preview',
         compute_worker_reuse_policy='shared',
         datasource_id='datasource-1',
-        status=ComputeWorkerInstanceStatus.RUNNING.value,
+        status=ComputeWorkerInstanceStatus.RUNNING,
         last_seen_at=datetime.now(UTC),
         updated_at=datetime.now(UTC),
     )

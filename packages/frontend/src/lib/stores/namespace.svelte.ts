@@ -1,6 +1,6 @@
-import { registerNamespace } from '$lib/api/namespaces';
-import { idbGet, idbSet, idbDelete } from '$lib/utils/indexeddb';
-import { configStore } from '$lib/stores/config.svelte';
+import { registerNamespace } from '#lib/api/namespaces.js';
+import { idbGet, idbSet, idbDelete } from '#lib/utils/indexeddb.js';
+import { configStore } from '#lib/stores/config.svelte.js';
 import { SvelteURLSearchParams } from 'svelte/reactivity';
 
 const NAMESPACE_KEY = 'namespace';

@@ -1,7 +1,7 @@
 import type {
 	ComputeWorkerRun,
 	ComputeWorkerRunExecutionEntry
-} from '$lib/api/compute-worker-runs';
+} from '#lib/api/compute-worker-runs.js';
 import type {
 	BuildRunDetail,
 	BuildLogEntry,
@@ -11,7 +11,7 @@ import type {
 	BuildResourceSnapshot,
 	BuildStepSnapshot,
 	BuildTabResult
-} from '$lib/types/build-stream';
+} from '#lib/types/build-stream.js';
 import {
 	buildStepStateFromComputeWorkerRunStatus,
 	buildStepTypeFromExecutionEntry,
@@ -20,7 +20,7 @@ import {
 	isPlanExecutionEntry,
 	readBuildTabStatus,
 	readComputeWorkerRunKind
-} from '$lib/types/build-stream';
+} from '#lib/types/build-stream.js';
 
 function readArray<T>(value: unknown): T[] {
 	return Array.isArray(value) ? (value as T[]) : [];

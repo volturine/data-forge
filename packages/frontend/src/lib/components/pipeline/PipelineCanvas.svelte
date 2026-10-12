@@ -1,15 +1,15 @@
 <script lang="ts">
 	import { onDestroy, onMount } from 'svelte';
-	import type { PipelineStep, AnalysisTab } from '$lib/types/analysis';
-	import type { DataSource } from '$lib/types/datasource';
-	import type { BuildStreamStore } from '$lib/stores/build-stream.svelte';
-	import { drag, type DropTarget } from '$lib/stores/drag.svelte';
+	import type { PipelineStep, AnalysisTab } from '#lib/types/analysis.js';
+	import type { DataSource } from '#lib/types/datasource.js';
+	import type { BuildStreamStore } from '#lib/stores/build-stream.svelte.js';
+	import { drag, type DropTarget } from '#lib/stores/drag.svelte.js';
 	import StepNode from './StepNode.svelte';
 	import OutputNode from './OutputNode.svelte';
 	import ConnectionLine from './ConnectionLine.svelte';
 	import DatasourceNode from './DatasourceNode.svelte';
 	import PipelineMinimap from './PipelineMinimap.svelte';
-	import { css } from '$lib/styles/panda';
+	import { css } from '#lib/styles/panda.js';
 	import { ClipboardPaste, Plus, Eye, ArrowDown } from '@lucide/svelte';
 	import { stepTypes, isChartStep } from './utils';
 

@@ -1,9 +1,9 @@
 <script lang="ts">
 	import { ChevronDown, LoaderCircle, Send, Square, Timer, WifiOff } from '@lucide/svelte';
-	import { css, iconButton } from '$lib/styles/panda';
-	import { chatStore } from '$lib/stores/chat.svelte';
-	import type { ChatProvider } from '$lib/stores/chat.svelte';
-	import { formatTokens } from '$lib/chat/presentation';
+	import { css, iconButton } from '#lib/styles/panda.js';
+	import { chatStore } from '#lib/stores/chat.svelte.js';
+	import type { ChatProvider } from '#lib/stores/chat.svelte.js';
+	import { formatTokens } from '#lib/chat/presentation.js';
 
 	interface Props {
 		inputValue?: string;

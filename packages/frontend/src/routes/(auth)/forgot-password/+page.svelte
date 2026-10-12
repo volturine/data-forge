@@ -1,7 +1,7 @@
 <script lang="ts">
 	import { resolve } from '$app/paths';
-	import { css, button, input, label, spinner } from '$lib/styles/panda';
-	import { forgotPassword } from '$lib/api/auth';
+	import { css, button, input, label, spinner } from '#lib/styles/panda.js';
+	import { forgotPassword } from '#lib/api/auth.js';
 
 	let email = $state('');
 	let loading = $state(false);
@@ -100,7 +100,7 @@
 
 	<p class={css({ fontSize: 'sm', color: 'fg.muted', textAlign: 'center' })}>
 		<a
-			href={resolve('/login')}
+			href={resolve('login')}
 			class={css({
 				color: 'accent.primary',
 				textDecoration: 'underline',

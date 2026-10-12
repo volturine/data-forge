@@ -1,7 +1,7 @@
 <script lang="ts">
 	import { Search, LoaderCircle } from '@lucide/svelte';
-	import { css, button, input, label } from '$lib/styles/panda';
-	import { chatStore } from '$lib/stores/chat.svelte';
+	import { css, button, input, label } from '#lib/styles/panda.js';
+	import { chatStore } from '#lib/stores/chat.svelte.js';
 
 	interface Props {
 		maximized: boolean;

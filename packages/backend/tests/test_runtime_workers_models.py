@@ -1,12 +1,13 @@
 from datetime import UTC, datetime, timedelta
 
+from backend_core.domain.runtime_workers.models import RuntimeWorkerKind
 from backend_core.persistence.runtime_workers.models import RuntimeWorker
 
 
 def _worker(heartbeat: datetime, stopped: datetime | None = None) -> RuntimeWorker:
     return RuntimeWorker(
         id='worker-1',
-        kind='build_worker',
+        kind=RuntimeWorkerKind.BUILD_WORKER,
         hostname='host',
         pid=1,
         capacity=1,

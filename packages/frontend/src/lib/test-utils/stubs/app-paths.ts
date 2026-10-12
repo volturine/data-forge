@@ -1,3 +1,3 @@
 export function resolve(value: string): string {
-	return value;
+	return value.startsWith('/') ? value : `/${value}`;
 }

@@ -1,14 +1,14 @@
 <script lang="ts">
 	import { onMount } from 'svelte';
-	import type { Schema } from '$lib/types/schema';
-	import type { UnionByNameConfigData } from '$lib/types/operation-config';
-	import { analysisStore } from '$lib/stores/analysis.svelte';
-	import { datasourceStore } from '$lib/stores/datasource.svelte';
-	import { schemaStore } from '$lib/stores/schema.svelte';
-	import DatasourcePicker from '$lib/components/common/DatasourcePicker.svelte';
-	import SectionHeader from '$lib/components/ui/SectionHeader.svelte';
-	import Callout from '$lib/components/ui/Callout.svelte';
-	import { css, stepConfig, label } from '$lib/styles/panda';
+	import type { Schema } from '#lib/types/schema.js';
+	import type { UnionByNameConfigData } from '#lib/types/operation-config.js';
+	import { analysisStore } from '#lib/stores/analysis.svelte.js';
+	import { datasourceStore } from '#lib/stores/datasource.svelte.js';
+	import { schemaStore } from '#lib/stores/schema.svelte.js';
+	import DatasourcePicker from '#lib/components/common/DatasourcePicker.svelte';
+	import SectionHeader from '#lib/components/ui/SectionHeader.svelte';
+	import Callout from '#lib/components/ui/Callout.svelte';
+	import { css, stepConfig, label } from '#lib/styles/panda.js';
 	import { SvelteSet } from 'svelte/reactivity';
 
 	const defaultConfig: UnionByNameConfigData = {

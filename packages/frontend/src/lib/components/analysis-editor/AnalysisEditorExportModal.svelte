@@ -1,15 +1,15 @@
 <script lang="ts">
 	import { onDestroy, onMount } from 'svelte';
-	import BaseModal from '$lib/components/ui/BaseModal.svelte';
-	import Callout from '$lib/components/ui/Callout.svelte';
+	import BaseModal from '#lib/components/ui/BaseModal.svelte';
+	import Callout from '#lib/components/ui/Callout.svelte';
 	import { Copy, Download, X } from '@lucide/svelte';
-	import { css, button, spinner } from '$lib/styles/panda';
+	import { css, button, spinner } from '#lib/styles/panda.js';
 	import {
 		exportAnalysisCode,
 		type CodeExportFormat,
 		type CodeExportResponse
-	} from '$lib/api/analysis';
-	import { downloadBlob } from '$lib/api/compute';
+	} from '#lib/api/analysis.js';
+	import { downloadBlob } from '#lib/api/compute.js';
 
 	interface Props {
 		open: boolean;

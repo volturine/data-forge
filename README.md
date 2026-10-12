@@ -79,7 +79,7 @@ Data-Forge is a **local-first**, **no-code** data transformation tool. Build mul
 | **Database**          | PostgreSQL 18+                                                                      |
 | **Schema Validation** | Pydantic V2                                                                         |
 | **Frontend Runtime**  | [Bun](https://bun.sh)                                                               |
-| **UI Framework**      | [SvelteKit 2](https://kit.svelte.dev) + [Svelte 5](https://svelte.dev) (runes mode) |
+| **UI Framework**      | [SvelteKit 3](https://svelte.dev/docs/kit) + [Svelte 5](https://svelte.dev) (runes mode) |
 | **Type System**       | TypeScript                                                                          |
 | **Styling**           | [Panda CSS](https://panda-css.com)                                                  |
 | **Data Fetching**     | [TanStack Query](https://tanstack.com/query)                                        |

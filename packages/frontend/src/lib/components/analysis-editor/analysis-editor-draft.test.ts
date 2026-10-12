@@ -1,11 +1,11 @@
 import { afterEach, beforeEach, describe, expect, test, vi } from 'vitest';
-import type { AnalysisTab } from '$lib/types/analysis';
+import type { AnalysisTab } from '#lib/types/analysis.js';
 
 const idbGet = vi.fn();
 const idbSet = vi.fn();
 const idbDelete = vi.fn();
 
-vi.mock('$lib/utils/indexeddb', () => ({
+vi.mock('#lib/utils/indexeddb.js', () => ({
 	idbGet: (...args: unknown[]) => idbGet(...args),
 	idbSet: (...args: unknown[]) => idbSet(...args),
 	idbDelete: (...args: unknown[]) => idbDelete(...args)

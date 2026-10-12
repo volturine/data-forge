@@ -2,15 +2,15 @@
 	import { goto } from '$app/navigation';
 	import { resolve } from '$app/paths';
 	import { useQueryClient } from '@tanstack/svelte-query';
-	import { uploadFile, uploadBulkFiles, connectDatabase } from '$lib/api/datasource';
-	import { confirmExcel } from '$lib/api/excel';
-	import type { ExcelParams } from '$lib/api/excel';
-	import ExcelTableSelector from '$lib/components/common/ExcelTableSelector.svelte';
-	import type { BulkUploadResult } from '$lib/api/datasource';
+	import { uploadFile, uploadBulkFiles, connectDatabase } from '#lib/api/datasource.js';
+	import { confirmExcel } from '#lib/api/excel.js';
+	import type { ExcelParams } from '#lib/api/excel.js';
+	import ExcelTableSelector from '#lib/components/common/ExcelTableSelector.svelte';
+	import type { BulkUploadResult } from '#lib/api/datasource.js';
 
 	import { SvelteSet } from 'svelte/reactivity';
 	import { Check, X } from '@lucide/svelte';
-	import { css, button, input, tabButton, label } from '$lib/styles/panda';
+	import { css, button, input, tabButton, label } from '#lib/styles/panda.js';
 
 	type Tab = 'file' | 'database';
 
@@ -144,14 +144,14 @@
 				: undefined;
 		const result = await uploadBulkFiles(selectedFiles, csvOptions);
 		result.match(
-			(response: import('$lib/api/datasource').BulkUploadResponse) => {
+			(response: import('#lib/api/datasource.js').BulkUploadResponse) => {
 				bulkResults = response.results;
 				showBulkResults = true;
 				if (response.successful === response.total) {
 					selectedFiles = [];
 					queryClient.invalidateQueries({ queryKey: ['datasources'] });
 					queryClient.invalidateQueries({ queryKey: ['datasources-lookup'] });
-					goto(resolve('/datasources'), { invalidateAll: true });
+					goto(resolve('datasources'), { refreshAll: true });
 				}
 			},
 			(err: { message?: string }) => {
@@ -193,7 +193,7 @@
 		queryClient.invalidateQueries({ queryKey: ['datasources'] });
 		queryClient.invalidateQueries({ queryKey: ['datasources-lookup'] });
 		// Select the created datasource via the list page's canonical `id` param.
-		await goto(resolve(`/datasources?id=${datasourceId}` as '/'), { invalidateAll: true });
+		await goto(resolve(`/datasources?id=${datasourceId}` as '/'), { refreshAll: true });
 	}
 
 	async function handleFileUpload() {
@@ -290,7 +290,7 @@
 	>
 		<h1 class={css({ margin: '0', fontSize: '2xl', fontWeight: 'semibold' })}>Add Data Source</h1>
 		<a
-			href={resolve('/datasources')}
+			href={resolve('datasources')}
 			class={css({
 				borderWidth: '1',
 				backgroundColor: 'transparent',
@@ -313,16 +313,13 @@
 	>
 		<button
 			class={tabButton({ active: activeTab === 'file', size: 'lg' })}
-			onclick={() => (activeTab = 'file')}
+			onclick={() => (activeTab = 'file')}>File Upload</button
 		>
-			File Upload
-		</button>
+
 		<button
 			class={tabButton({ active: activeTab === 'database', size: 'lg' })}
-			onclick={() => (activeTab = 'database')}
+			onclick={() => (activeTab = 'database')}>External DB</button
 		>
-			External DB
-		</button>
 	</div>
 
 	{#if error}
@@ -552,7 +549,7 @@
 								>
 									<option value=",">Comma (,)</option>
 									<option value=";">Semicolon (;)</option>
-									<option value="&#9;">Tab</option>
+									<option value="	">Tab</option>
 									<option value="|">Pipe (|)</option>
 									<option value=" ">Space</option>
 								</select>
@@ -568,10 +565,9 @@
 										textTransform: 'none',
 										letterSpacing: 'normal',
 										marginBottom: '1.5'
-									})}
+									})}>Quote</label
 								>
-									Quote
-								</label>
+
 								<select id="csv-quote" bind:value={csvQuoteChar} disabled={loading} class={input()}>
 									<option value="&quot;">Double Quote (")</option>
 									<option value="'">Single Quote (')</option>

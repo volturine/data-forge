@@ -23,15 +23,15 @@ const mockAuth = {
 let namespaceStatus: 'pending' | 'ready' | 'failed' = 'pending';
 let namespaceError: string | null = null;
 
-vi.mock('$lib/stores/config.svelte', () => ({
+vi.mock('#lib/stores/config.svelte.js', () => ({
 	configStore: mockConfig
 }));
 
-vi.mock('$lib/stores/auth.svelte', () => ({
+vi.mock('#lib/stores/auth.svelte.js', () => ({
 	authStore: mockAuth
 }));
 
-vi.mock('$lib/stores/namespace.svelte', () => ({
+vi.mock('#lib/stores/namespace.svelte.js', () => ({
 	initNamespace: (...args: unknown[]) => mockInitNamespace(...args),
 	isNamespaceReady: () => namespaceStatus === 'ready',
 	getNamespaceStatus: () => namespaceStatus,

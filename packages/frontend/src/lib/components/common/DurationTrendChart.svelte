@@ -1,12 +1,12 @@
 <script lang="ts">
-	import type { DurationStatsResponse } from '$lib/api/compute-worker-runs';
-	import { formatDuration } from '$lib/utils/format-duration';
+	import type { DurationStatsResponse } from '#lib/api/compute-worker-runs.js';
+	import { formatDuration } from '#lib/utils/format-duration.js';
 	import {
 		isSuccessfulBuildStatus,
 		trendDirectionLabel,
 		trendTone
-	} from '$lib/utils/duration-stats';
-	import { css } from '$lib/styles/panda';
+	} from '#lib/utils/duration-stats.js';
+	import { css } from '#lib/styles/panda.js';
 
 	interface Props {
 		stats: DurationStatsResponse | null;

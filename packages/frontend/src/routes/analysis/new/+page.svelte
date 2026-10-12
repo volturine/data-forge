@@ -4,22 +4,22 @@
 	import { resolve } from '$app/paths';
 	import { page as pageState } from '$app/state';
 	import { createQuery } from '@tanstack/svelte-query';
-	import { createAnalysis } from '$lib/api/analysis';
-	import { listDatasources } from '$lib/api/datasource';
-	import { previewStepData } from '$lib/api/compute';
+	import { createAnalysis } from '#lib/api/analysis.js';
+	import { listDatasources } from '#lib/api/datasource.js';
+	import { previewStepData } from '#lib/api/compute.js';
 	import { ArrowLeft, ChevronDown, Search } from '@lucide/svelte';
-	import DatasourcePreview from '$lib/components/datasources/DatasourcePreview.svelte';
-	import { buildDatasourcePreviewPipelinePayloadSafe } from '$lib/utils/analysis-pipeline';
-	import Callout from '$lib/components/ui/Callout.svelte';
-	import { button, css, spinner } from '$lib/styles/panda';
-	import { configStore } from '$lib/stores/config.svelte';
-	import { useNamespace } from '$lib/stores/namespace.svelte';
-	import type { AnalysisTab } from '$lib/types/analysis';
-	import type { DataSource } from '$lib/types/datasource';
-	import { timestampedAnalysisName } from '$lib/utils/analysis-name';
-	import { rankDatasources } from '$lib/utils/datasource-picker';
-	import { buildOutputConfig } from '$lib/utils/analysis-tab';
-	import { uuid } from '$lib/utils/uuid';
+	import DatasourcePreview from '#lib/components/datasources/DatasourcePreview.svelte';
+	import { buildDatasourcePreviewPipelinePayloadSafe } from '#lib/utils/analysis-pipeline.js';
+	import Callout from '#lib/components/ui/Callout.svelte';
+	import { button, css, spinner } from '#lib/styles/panda.js';
+	import { configStore } from '#lib/stores/config.svelte.js';
+	import { useNamespace } from '#lib/stores/namespace.svelte.js';
+	import type { AnalysisTab } from '#lib/types/analysis.js';
+	import type { DataSource } from '#lib/types/datasource.js';
+	import { timestampedAnalysisName } from '#lib/utils/analysis-name.js';
+	import { rankDatasources } from '#lib/utils/datasource-picker.js';
+	import { buildOutputConfig } from '#lib/utils/analysis-tab.js';
+	import { uuid } from '#lib/utils/uuid.js';
 
 	const ns = useNamespace();
 	// A datasource in the query means the user already asked to start an
@@ -146,7 +146,8 @@
 				createError = result.error.message;
 				return;
 			}
-			await goto(resolve(`/analysis/${result.value.id}`));
+
+			await goto(resolve(`analysis/${result.value.id}`));
 		} catch (cause) {
 			createError =
 				cause instanceof Error ? cause.message : 'Could not start the analysis. Try again.';
@@ -285,7 +286,7 @@
 					No datasources yet.
 				</p>
 				<a
-					href={resolve('/datasources/new')}
+					href={resolve('datasources/new')}
 					class={css({
 						display: 'inline-flex',
 						alignItems: 'center',
@@ -323,7 +324,10 @@
 								borderLeftWidth: '2',
 								_hover: { backgroundColor: 'bg.hover' },
 								...(isExpanded
-									? { backgroundColor: 'bg.accent', borderLeftColor: 'border.accent' }
+									? {
+											backgroundColor: 'bg.accent',
+											borderLeftColor: 'border.accent'
+										}
 									: { borderLeftColor: 'transparent' })
 							})}
 						>
@@ -467,9 +471,8 @@
 							type="button"
 							class={button({ variant: 'ghost', size: 'sm' })}
 							onclick={() => (visibleCount += PAGE_SIZE)}
+							>Show {Math.min(PAGE_SIZE, filteredDatasources.length - visibleDatasources.length)} more</button
 						>
-							Show {Math.min(PAGE_SIZE, filteredDatasources.length - visibleDatasources.length)} more
-						</button>
 					{/if}
 				</div>
 			{/if}

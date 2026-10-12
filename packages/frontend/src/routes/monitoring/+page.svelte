@@ -1,11 +1,11 @@
 <script lang="ts">
-	import BuildsManager from '$lib/components/common/BuildsManager.svelte';
-	import ScheduleManager from '$lib/components/common/ScheduleManager.svelte';
-	import HealthChecksManager from '$lib/components/common/HealthChecksManager.svelte';
+	import BuildsManager from '#lib/components/common/BuildsManager.svelte';
+	import ScheduleManager from '#lib/components/common/ScheduleManager.svelte';
+	import HealthChecksManager from '#lib/components/common/HealthChecksManager.svelte';
 	import { page } from '$app/state';
 	import { goto } from '$app/navigation';
 	import { resolve } from '$app/paths';
-	import { css, tabButton } from '$lib/styles/panda';
+	import { css, tabButton } from '#lib/styles/panda.js';
 
 	const tabs = [
 		{ key: 'builds', label: 'Builds' },
@@ -27,8 +27,7 @@
 	function selectTab(key: TabKey) {
 		goto(resolve(`/monitoring?tab=${key}` as '/'), {
 			replaceState: true,
-			keepFocus: true,
-			noScroll: true
+			reset: false
 		});
 	}
 

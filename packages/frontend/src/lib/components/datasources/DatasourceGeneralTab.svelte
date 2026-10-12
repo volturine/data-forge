@@ -7,7 +7,7 @@
 		FileDataSource,
 		IcebergDataSource,
 		SchemaInfo
-	} from '$lib/types/datasource';
+	} from '#lib/types/datasource.js';
 	import {
 		datasourceExternalSourceConfig,
 		datasourceExternalSourceType,
@@ -16,11 +16,11 @@
 		datasourceIsFile,
 		datasourceIsIceberg,
 		datasourceRowCount
-	} from '$lib/types/datasource';
-	import FileTypeBadge from '$lib/components/common/FileTypeBadge.svelte';
-	import RelativeTime from '$lib/components/common/RelativeTime.svelte';
-	import { formatDateDisplay } from '$lib/utils/datetime';
-	import { css, input, chip } from '$lib/styles/panda';
+	} from '#lib/types/datasource.js';
+	import FileTypeBadge from '#lib/components/common/FileTypeBadge.svelte';
+	import RelativeTime from '#lib/components/common/RelativeTime.svelte';
+	import { formatDateDisplay } from '#lib/utils/datetime.js';
+	import { css, input, chip } from '#lib/styles/panda.js';
 
 	interface Props {
 		datasourceId: string;

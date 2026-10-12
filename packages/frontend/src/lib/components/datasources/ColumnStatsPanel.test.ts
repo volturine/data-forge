@@ -1,10 +1,10 @@
 import { describe, test, expect, vi, beforeEach } from 'vitest';
 import { render, screen, fireEvent } from '@testing-library/svelte';
 import ColumnStatsPanel from './ColumnStatsPanel.svelte';
-import type { ColumnStatsResponse } from '$lib/api/datasource';
+import type { ColumnStatsResponse } from '#lib/api/datasource.js';
 
 const mockGetColumnStats = vi.fn();
-vi.mock('$lib/api/datasource', () => ({
+vi.mock('#lib/api/datasource.js', () => ({
 	getColumnStats: (...args: unknown[]) => mockGetColumnStats(...args)
 }));
 

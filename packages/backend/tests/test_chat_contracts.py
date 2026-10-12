@@ -574,9 +574,11 @@ class TestProviderResponseValidation:
 
         transport = httpx.MockTransport(lambda _request: httpx.Response(200, json=[]))
         async with httpx.AsyncClient(transport=transport) as async_client:
-            with patch('modules.chat.chat_http.http_client.get_async_client', return_value=async_client):
-                with pytest.raises(ChatHttpError, match='non-object JSON response'):
-                    await chat_with_tools('sk-test', 'gpt-test', [{'role': 'user', 'content': 'hello'}], [])
+            with (
+                patch('modules.chat.chat_http.http_client.get_async_client', return_value=async_client),
+                pytest.raises(ChatHttpError, match='non-object JSON response'),
+            ):
+                await chat_with_tools('sk-test', 'gpt-test', [{'role': 'user', 'content': 'hello'}], [])
 
     @pytest.mark.asyncio
     async def test_chat_with_tools_returns_provider_json_object(self) -> None:

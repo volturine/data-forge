@@ -21,7 +21,7 @@ services:
       TRUSTED_PROXY_HOPS: ${DF_API_REPLICA_TRUSTED_PROXY_HOPS:-1}
 
   ingress:
-    image: nginx:1.27-alpine
+    image: nginx:1.31-alpine
     depends_on:
       api:
         condition: service_healthy

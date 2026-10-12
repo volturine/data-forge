@@ -58,7 +58,8 @@ ENV PYTHONPATH="/app/packages/worker"
 HEALTHCHECK NONE
 CMD ["python3", "compute_worker_main.py"]
 
-FROM oven/bun:${BUN_VERSION}-alpine AS frontend-builder
+FROM node:26-slim AS frontend-builder
+COPY --from=bun-runtime /usr/local/bin/bun /usr/local/bin/bun
 WORKDIR /app/packages/frontend
 COPY packages/frontend/package.json packages/frontend/bun.lock* ./
 RUN bun install --frozen-lockfile

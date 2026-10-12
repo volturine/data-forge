@@ -2,11 +2,11 @@
 	import { goto } from '$app/navigation';
 	import { resolve } from '$app/paths';
 	import { page } from '$app/state';
-	import { css } from '$lib/styles/panda';
+	import { css } from '#lib/styles/panda.js';
 
 	const id = page.params.id;
 	if (id) {
-		goto(resolve('/datasources'), { replaceState: true });
+		goto(resolve('datasources'), { replaceState: true });
 	}
 </script>
 

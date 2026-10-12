@@ -1,7 +1,7 @@
 <script lang="ts">
 	import { goto } from '$app/navigation';
 	import { resolve } from '$app/paths';
-	import { css, spinner } from '$lib/styles/panda';
+	import { css, spinner } from '#lib/styles/panda.js';
 
 	interface Props {
 		isLoading: boolean;
@@ -66,7 +66,7 @@
 				marginTop: '4',
 				'&:hover:not(:disabled)': { opacity: '0.9' }
 			})}
-			onclick={() => goto(resolve('/analysis/new'))}
+			onclick={() => goto(resolve('analysis/new'))}
 			type="button"
 		>
 			Create analysis

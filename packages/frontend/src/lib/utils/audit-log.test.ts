@@ -1,23 +1,23 @@
 import { describe, test, expect, vi, beforeAll, beforeEach, afterAll } from 'vitest';
 
-vi.mock('$app/environment', () => ({
+vi.mock('$app/env', () => ({
 	browser: true,
 	building: false,
 	dev: true,
 	version: 'test'
 }));
 
-vi.mock('$lib/utils/indexeddb', () => ({
+vi.mock('#lib/utils/indexeddb.js', () => ({
 	idbGet: vi.fn().mockResolvedValue(null),
 	idbSet: vi.fn().mockResolvedValue(undefined)
 }));
 
-vi.mock('$lib/stores/clientIdentity.svelte', () => ({
+vi.mock('#lib/stores/clientIdentity.svelte.js', () => ({
 	getClientIdentity: () => ({ clientId: 'test-client', clientSignature: 'test-sig' }),
 	getEditorClientId: () => 'editor-client-1'
 }));
 
-vi.mock('$lib/stores/config.svelte', () => ({
+vi.mock('#lib/stores/config.svelte.js', () => ({
 	configStore: {
 		config: {
 			log_client_dedupe_window_ms: 0,

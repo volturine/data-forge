@@ -21,11 +21,11 @@
 		deleteSubscriber,
 		isMasked,
 		MASKED_PLACEHOLDER
-	} from '$lib/api/settings';
-	import type { AppSettings } from '$lib/api/settings';
-	import { configStore } from '$lib/stores/config.svelte';
-	import SectionHeader from '$lib/components/ui/SectionHeader.svelte';
-	import { button, css, input, label } from '$lib/styles/panda';
+	} from '#lib/api/settings.js';
+	import type { AppSettings } from '#lib/api/settings.js';
+	import { configStore } from '#lib/stores/config.svelte.js';
+	import SectionHeader from '#lib/components/ui/SectionHeader.svelte';
+	import { button, css, input, label } from '#lib/styles/panda.js';
 
 	let loading = $state(true);
 	let saving = $state(false);

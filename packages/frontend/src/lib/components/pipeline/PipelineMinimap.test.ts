@@ -1,7 +1,7 @@
 import { afterEach, beforeEach, describe, expect, test, vi } from 'vitest';
 import { fireEvent, render, screen } from '@testing-library/svelte';
 import PipelineMinimap from './PipelineMinimap.svelte';
-import type { PipelineStep } from '$lib/types/analysis';
+import type { PipelineStep } from '#lib/types/analysis.js';
 
 const steps: PipelineStep[] = [
 	{ id: 'step-1', type: 'filter', config: {}, is_applied: true },

@@ -1,13 +1,13 @@
 <script lang="ts">
 	import { untrack } from 'svelte';
 	import { useQueryClient } from '@tanstack/svelte-query';
-	import { createUdf, updateUdf } from '$lib/api/udf';
-	import CodeEditor from '$lib/components/common/CodeEditor.svelte';
-	import ColumnTypeDropdown from '$lib/components/common/ColumnTypeDropdown.svelte';
-	import UdfSignatureBuilder from '$lib/components/udfs/UdfSignatureBuilder.svelte';
-	import type { Udf, UdfCreate, UdfInput, UdfSignature } from '$lib/types/udf';
+	import { createUdf, updateUdf } from '#lib/api/udf.js';
+	import CodeEditor from '#lib/components/common/CodeEditor.svelte';
+	import ColumnTypeDropdown from '#lib/components/common/ColumnTypeDropdown.svelte';
+	import UdfSignatureBuilder from '#lib/components/udfs/UdfSignatureBuilder.svelte';
+	import type { Udf, UdfCreate, UdfInput, UdfSignature } from '#lib/types/udf.js';
 	import { ArrowLeft, Save } from '@lucide/svelte';
-	import { css, button, input, label } from '$lib/styles/panda';
+	import { css, button, input, label } from '#lib/styles/panda.js';
 
 	interface Props {
 		initialUdf?: Udf;

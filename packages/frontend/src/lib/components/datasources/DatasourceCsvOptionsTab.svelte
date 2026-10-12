@@ -10,7 +10,7 @@
 
 <script lang="ts">
 	import { Loader, Save } from '@lucide/svelte';
-	import { css, input } from '$lib/styles/panda';
+	import { css, input } from '#lib/styles/panda.js';
 
 	interface Props {
 		datasourceId: string;

@@ -1,10 +1,10 @@
 import { describe, test, expect, vi, beforeEach } from 'vitest';
 import { fireEvent, render, screen, within } from '@testing-library/svelte';
 import BuildPreview from './BuildPreview.svelte';
-import { BuildStreamStore } from '$lib/stores/build-stream.svelte';
-import type { BuildRunDetail } from '$lib/types/build-stream';
+import { BuildStreamStore } from '#lib/stores/build-stream.svelte.js';
+import type { BuildRunDetail } from '#lib/types/build-stream.js';
 
-vi.mock('$lib/api/build-stream', () => ({
+vi.mock('#lib/api/build-stream.js', () => ({
 	startRuntimeBuild: () => ({
 		match: async (onOk: (build: BuildRunDetail) => void) => {
 			onOk(makeDetail());
@@ -13,12 +13,12 @@ vi.mock('$lib/api/build-stream', () => ({
 	connectBuildDetailStream: () => ({ close: vi.fn() })
 }));
 
-vi.mock('$lib/stores/clientIdentity.svelte', () => ({
+vi.mock('#lib/stores/clientIdentity.svelte.js', () => ({
 	getClientIdentity: () => ({ clientId: 'client-1', clientSignature: 'sig-1' }),
 	getEditorClientId: () => 'editor-client-1'
 }));
 
-vi.mock('$lib/stores/namespace.svelte', () => ({
+vi.mock('#lib/stores/namespace.svelte.js', () => ({
 	requireNamespace: () => 'default',
 	isNamespaceReady: () => true
 }));

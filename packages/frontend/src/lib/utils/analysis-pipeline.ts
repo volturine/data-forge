@@ -3,11 +3,11 @@ import type {
 	AnalysisTabDatasourceConfig,
 	AnalysisTabOutput,
 	PipelineStep
-} from '$lib/types/analysis';
-import type { DataSource } from '$lib/types/datasource';
-import { applySteps } from '$lib/utils/pipeline';
-import { isRecord } from '$lib/utils/json';
-import { normalizeConfig } from '$lib/utils/step-config-defaults';
+} from '#lib/types/analysis.js';
+import type { DataSource } from '#lib/types/datasource.js';
+import { applySteps } from '#lib/utils/pipeline.js';
+import { isRecord } from '#lib/utils/json.js';
+import { normalizeConfig } from '#lib/utils/step-config-defaults.js';
 
 type PipelineDatasource = {
 	id: string;

@@ -1,10 +1,10 @@
 <script lang="ts">
-	import type { Schema } from '$lib/types/schema';
-	import type { PivotConfigData } from '$lib/types/operation-config';
-	import ColumnDropdown from '$lib/components/common/ColumnDropdown.svelte';
-	import MultiSelectColumnDropdown from '$lib/components/common/MultiSelectColumnDropdown.svelte';
-	import SectionHeader from '$lib/components/ui/SectionHeader.svelte';
-	import { css, input, label, stepConfig } from '$lib/styles/panda';
+	import type { Schema } from '#lib/types/schema.js';
+	import type { PivotConfigData } from '#lib/types/operation-config.js';
+	import ColumnDropdown from '#lib/components/common/ColumnDropdown.svelte';
+	import MultiSelectColumnDropdown from '#lib/components/common/MultiSelectColumnDropdown.svelte';
+	import SectionHeader from '#lib/components/ui/SectionHeader.svelte';
+	import { css, input, label, stepConfig } from '#lib/styles/panda.js';
 
 	const uid = $props.id();
 	const rowsLabelId = `${uid}-rows`;

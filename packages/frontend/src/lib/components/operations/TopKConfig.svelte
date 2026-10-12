@@ -1,7 +1,7 @@
 <script lang="ts">
-	import type { Schema } from '$lib/types/schema';
-	import ColumnDropdown from '$lib/components/common/ColumnDropdown.svelte';
-	import { css, input, label, stepConfig } from '$lib/styles/panda';
+	import type { Schema } from '#lib/types/schema.js';
+	import ColumnDropdown from '#lib/components/common/ColumnDropdown.svelte';
+	import { css, input, label, stepConfig } from '#lib/styles/panda.js';
 
 	interface Props {
 		schema: Schema;

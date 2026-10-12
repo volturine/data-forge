@@ -13,11 +13,11 @@
 	} from '@lucide/svelte';
 	import { onDestroy, onMount } from 'svelte';
 	import { SvelteSet } from 'svelte/reactivity';
-	import { css } from '$lib/styles/panda';
-	import { chatStore } from '$lib/stores/chat.svelte';
-	import { timelineDateSeparator, timelineEntriesAreGrouped } from '$lib/chat/presentation';
-	import { timeAgo } from '$lib/utils/markdown';
-	import { nowEpochMs } from '$lib/utils/temporal';
+	import { css } from '#lib/styles/panda.js';
+	import { chatStore } from '#lib/stores/chat.svelte.js';
+	import { timelineDateSeparator, timelineEntriesAreGrouped } from '#lib/chat/presentation.js';
+	import { timeAgo } from '#lib/utils/markdown.js';
+	import { nowEpochMs } from '#lib/utils/temporal.js';
 	import ChatMessageBubble from './ChatMessageBubble.svelte';
 	import ToolCallCard from './ToolCallCard.svelte';
 

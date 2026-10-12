@@ -1,5 +1,5 @@
 <script lang="ts">
-	import { panelHeader } from '$lib/styles/panda';
+	import { panelHeader } from '#lib/styles/panda.js';
 	import type { Snippet } from 'svelte';
 
 	interface Props {

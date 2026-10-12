@@ -1,4 +1,4 @@
-import type { CSVOptions, DataSource, SchemaInfo } from '$lib/types/datasource';
+import type { CSVOptions, DataSource, SchemaInfo } from '#lib/types/datasource.js';
 import { apiRequest } from './client';
 import type { ResultAsync } from 'neverthrow';
 import type { ApiError } from './client';

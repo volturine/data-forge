@@ -1,6 +1,6 @@
 import { describe, test, expect, vi, beforeEach } from 'vitest';
 
-vi.mock('$app/environment', () => ({
+vi.mock('$app/env', () => ({
 	browser: false,
 	building: false,
 	dev: true,
@@ -39,7 +39,7 @@ describe('indexeddb (browser without indexedDB)', () => {
 	});
 
 	test('idbGet returns null when indexedDB is unavailable', async () => {
-		vi.doMock('$app/environment', () => ({
+		vi.doMock('$app/env', () => ({
 			browser: true,
 			building: false,
 			dev: true,
@@ -51,7 +51,7 @@ describe('indexeddb (browser without indexedDB)', () => {
 	});
 
 	test('idbSet silently fails when indexedDB is unavailable', async () => {
-		vi.doMock('$app/environment', () => ({
+		vi.doMock('$app/env', () => ({
 			browser: true,
 			building: false,
 			dev: true,
@@ -62,7 +62,7 @@ describe('indexeddb (browser without indexedDB)', () => {
 	});
 
 	test('idbDelete silently fails when indexedDB is unavailable', async () => {
-		vi.doMock('$app/environment', () => ({
+		vi.doMock('$app/env', () => ({
 			browser: true,
 			building: false,
 			dev: true,
@@ -73,7 +73,7 @@ describe('indexeddb (browser without indexedDB)', () => {
 	});
 
 	test('idbClear silently fails when indexedDB is unavailable', async () => {
-		vi.doMock('$app/environment', () => ({
+		vi.doMock('$app/env', () => ({
 			browser: true,
 			building: false,
 			dev: true,
@@ -84,7 +84,7 @@ describe('indexeddb (browser without indexedDB)', () => {
 	});
 
 	test('idbEntries returns empty array when indexedDB is unavailable', async () => {
-		vi.doMock('$app/environment', () => ({
+		vi.doMock('$app/env', () => ({
 			browser: true,
 			building: false,
 			dev: true,

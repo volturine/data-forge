@@ -1,9 +1,9 @@
 <script lang="ts">
 	import { onDestroy, onMount, untrack } from 'svelte';
-	import { preflightExcel, preflightExcelFromPath, previewExcel } from '$lib/api/excel';
-	import type { ExcelParams } from '$lib/api/excel';
-	import DataTable from '$lib/components/common/DataTable.svelte';
-	import { css, button, input, label } from '$lib/styles/panda';
+	import { preflightExcel, preflightExcelFromPath, previewExcel } from '#lib/api/excel.js';
+	import type { ExcelParams } from '#lib/api/excel.js';
+	import DataTable from '#lib/components/common/DataTable.svelte';
+	import { css, button, input, label } from '#lib/styles/panda.js';
 
 	interface ExcelConfig {
 		sheet_name: string;

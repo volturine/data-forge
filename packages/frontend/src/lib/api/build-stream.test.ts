@@ -1,5 +1,5 @@
 import { beforeEach, describe, expect, test, vi } from 'vitest';
-import type { BuildEvent } from '$lib/types/build-stream';
+import type { BuildEvent } from '#lib/types/build-stream.js';
 import type { StreamCallbacks } from './websocket';
 
 type StreamOptions = {

@@ -1,10 +1,10 @@
-import type { DataSource, SchemaInfo } from '$lib/types/datasource';
+import type { DataSource, SchemaInfo } from '#lib/types/datasource.js';
 import {
 	listDatasources,
 	uploadFile as uploadFileApi,
 	getDatasourceSchema,
 	deleteDatasource as deleteDatasourceApi
-} from '$lib/api/datasource';
+} from '#lib/api/datasource.js';
 import { SvelteMap } from 'svelte/reactivity';
 
 export class DatasourceStore {

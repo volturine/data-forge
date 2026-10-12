@@ -1,6 +1,6 @@
 import { Marked } from 'marked';
 import DOMPurify from 'dompurify';
-import { formatEpoch, isSameLocalDay, isYesterday, nowEpochMs } from '$lib/utils/temporal';
+import { formatEpoch, isSameLocalDay, isYesterday, nowEpochMs } from '#lib/utils/temporal.js';
 
 const marked = new Marked({
 	breaks: true,

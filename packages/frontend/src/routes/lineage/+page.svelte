@@ -6,10 +6,10 @@
 		type LineageResponse,
 		type LineageMode,
 		type NodeKind
-	} from '$lib/api/lineage';
-	import { listDatasources } from '$lib/api/datasource';
-	import LineageGraph from '$lib/components/common/LineageGraph.svelte';
-	import ScheduleManager from '$lib/components/common/ScheduleManager.svelte';
+	} from '#lib/api/lineage.js';
+	import { listDatasources } from '#lib/api/datasource.js';
+	import LineageGraph from '#lib/components/common/LineageGraph.svelte';
+	import ScheduleManager from '#lib/components/common/ScheduleManager.svelte';
 	import {
 		Loader,
 		X,
@@ -24,7 +24,7 @@
 		Layers,
 		GitBranch
 	} from '@lucide/svelte';
-	import { css, button, toggleButton, chip } from '$lib/styles/panda';
+	import { css, button, toggleButton, chip } from '#lib/styles/panda.js';
 
 	type LayoutMode = 'horizontal' | 'vertical' | 'grid';
 	type LineageGraphApi = {

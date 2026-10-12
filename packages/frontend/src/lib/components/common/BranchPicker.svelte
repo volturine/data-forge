@@ -1,8 +1,8 @@
 <script lang="ts">
 	import { onDestroy } from 'svelte';
 	import { ChevronDown, Plus } from '@lucide/svelte';
-	import SearchableDropdown from '$lib/components/ui/SearchableDropdown.svelte';
-	import { css } from '$lib/styles/panda';
+	import SearchableDropdown from '#lib/components/ui/SearchableDropdown.svelte';
+	import { css } from '#lib/styles/panda.js';
 
 	interface BranchOption {
 		id: string;

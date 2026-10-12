@@ -1,9 +1,9 @@
 <script lang="ts">
-	import { browser } from '$app/environment';
+	import { browser } from '$app/env';
 	import { afterNavigate } from '$app/navigation';
 	import { resolve } from '$app/paths';
-	import { css, button, spinner } from '$lib/styles/panda';
-	import { verifyEmail, resendVerification } from '$lib/api/auth';
+	import { css, button, spinner } from '#lib/styles/panda.js';
+	import { verifyEmail, resendVerification } from '#lib/api/auth.js';
 
 	let status = $state<'idle' | 'loading' | 'success' | 'error'>('idle');
 	let message = $state('');
@@ -111,7 +111,7 @@
 				{message}
 			</div>
 
-			<a href={resolve('/login')} class={button({ variant: 'primary' })}> Continue to sign in </a>
+			<a href={resolve('login')} class={button({ variant: 'primary' })}>Continue to sign in</a>
 		{/if}
 
 		{#if status === 'error'}
@@ -152,7 +152,7 @@
 
 		<p class={css({ fontSize: 'sm', color: 'fg.muted', textAlign: 'center' })}>
 			<a
-				href={resolve('/login')}
+				href={resolve('login')}
 				class={css({
 					color: 'accent.primary',
 					textDecoration: 'underline',

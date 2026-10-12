@@ -1,5 +1,5 @@
-import { getClientIdentity, getEditorClientId } from '$lib/stores/clientIdentity.svelte';
-import { requireNamespace } from '$lib/stores/namespace.svelte';
+import { getClientIdentity, getEditorClientId } from '#lib/stores/clientIdentity.svelte.js';
+import { requireNamespace } from '#lib/stores/namespace.svelte.js';
 
 const CLOSE_NORMAL = 1000;
 const CLOSE_GOING_AWAY = 1001;

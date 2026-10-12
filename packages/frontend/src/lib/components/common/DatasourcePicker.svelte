@@ -2,14 +2,14 @@
 	import { X } from '@lucide/svelte';
 	import { SvelteSet } from 'svelte/reactivity';
 	import { createQuery } from '@tanstack/svelte-query';
-	import type { DataSource } from '$lib/types/datasource';
-	import type { AnalysisGalleryItem } from '$lib/types/analysis';
-	import { listAnalyses } from '$lib/api/analysis';
-	import FileTypeBadge from '$lib/components/common/FileTypeBadge.svelte';
-	import type { SourceType } from '$lib/utils/file-types';
-	import SearchableDropdown from '$lib/components/ui/SearchableDropdown.svelte';
-	import { css } from '$lib/styles/panda';
-	import { useNamespace } from '$lib/stores/namespace.svelte';
+	import type { DataSource } from '#lib/types/datasource.js';
+	import type { AnalysisGalleryItem } from '#lib/types/analysis.js';
+	import { listAnalyses } from '#lib/api/analysis.js';
+	import FileTypeBadge from '#lib/components/common/FileTypeBadge.svelte';
+	import type { SourceType } from '#lib/utils/file-types.js';
+	import SearchableDropdown from '#lib/components/ui/SearchableDropdown.svelte';
+	import { css } from '#lib/styles/panda.js';
+	import { useNamespace } from '#lib/stores/namespace.svelte.js';
 
 	interface PickerOption {
 		id: string;

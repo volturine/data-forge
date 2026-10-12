@@ -3,9 +3,9 @@ import type {
 	AnalysisTabDatasource,
 	AnalysisTabDatasourceConfig,
 	AnalysisTabOutput
-} from '$lib/types/analysis';
-import { isRecord } from '$lib/utils/json';
-import { nowEpochMs } from '$lib/utils/temporal';
+} from '#lib/types/analysis.js';
+import { isRecord } from '#lib/utils/json.js';
+import { nowEpochMs } from '#lib/utils/temporal.js';
 
 const uuidPattern = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i;
 

@@ -1,43 +1,43 @@
 <script lang="ts">
-	import { page } from '$app/stores';
+	import { page } from '$app/state';
 	import { afterNavigate } from '$app/navigation';
 	import { onDestroy, onMount } from 'svelte';
 	import { createQuery, useQueryClient } from '@tanstack/svelte-query';
-	import { analysisStore } from '$lib/stores/analysis.svelte';
-	import { datasourceStore } from '$lib/stores/datasource.svelte';
-	import { BuildStreamStore } from '$lib/stores/build-stream.svelte';
-	import { formatPipelineErrors, isUuid, validatePipelineTabs } from '$lib/utils/analysis-tab';
-	import { favoriteAnalysis, unfavoriteAnalysis, type AnalysisDetail } from '$lib/api/analysis';
-	import { analysisQueryKey, fetchAnalysis } from '$lib/queries/analysis';
-	import { listDatasources } from '$lib/api/datasource';
-	import type { Analysis } from '$lib/types/analysis';
-	import { idbDelete } from '$lib/utils/indexeddb';
-	import StepLibrary from '$lib/components/pipeline/StepLibrary.svelte';
-	import PipelineCanvas from '$lib/components/pipeline/PipelineCanvas.svelte';
-	import StepConfig from '$lib/components/pipeline/StepConfig.svelte';
-	import DragPreview from '$lib/components/pipeline/DragPreview.svelte';
-	import DatasourceSelectorModal from '$lib/components/common/DatasourceSelectorModal.svelte';
-	import Callout from '$lib/components/ui/Callout.svelte';
-	import { schemaStore } from '$lib/stores/schema.svelte';
-	import { favoriteStore } from '$lib/stores/favorites.svelte';
-	import { css } from '$lib/styles/panda';
-	import AnalysisEditorLoadGate from '$lib/components/analysis-editor/AnalysisEditorLoadGate.svelte';
-	import AnalysisEditorHeader from '$lib/components/analysis-editor/AnalysisEditorHeader.svelte';
-	import AnalysisEditorDescriptionModal from '$lib/components/analysis-editor/AnalysisEditorDescriptionModal.svelte';
-	import AnalysisEditorExportModal from '$lib/components/analysis-editor/AnalysisEditorExportModal.svelte';
-	import AnalysisEditorVersionModal from '$lib/components/analysis-editor/AnalysisEditorVersionModal.svelte';
+	import { analysisStore } from '#lib/stores/analysis.svelte.js';
+	import { datasourceStore } from '#lib/stores/datasource.svelte.js';
+	import { BuildStreamStore } from '#lib/stores/build-stream.svelte.js';
+	import { formatPipelineErrors, isUuid, validatePipelineTabs } from '#lib/utils/analysis-tab.js';
+	import { favoriteAnalysis, unfavoriteAnalysis, type AnalysisDetail } from '#lib/api/analysis.js';
+	import { analysisQueryKey, fetchAnalysis } from '#lib/queries/analysis.js';
+	import { listDatasources } from '#lib/api/datasource.js';
+	import type { Analysis } from '#lib/types/analysis.js';
+	import { idbDelete } from '#lib/utils/indexeddb.js';
+	import StepLibrary from '#lib/components/pipeline/StepLibrary.svelte';
+	import PipelineCanvas from '#lib/components/pipeline/PipelineCanvas.svelte';
+	import StepConfig from '#lib/components/pipeline/StepConfig.svelte';
+	import DragPreview from '#lib/components/pipeline/DragPreview.svelte';
+	import DatasourceSelectorModal from '#lib/components/common/DatasourceSelectorModal.svelte';
+	import Callout from '#lib/components/ui/Callout.svelte';
+	import { schemaStore } from '#lib/stores/schema.svelte.js';
+	import { favoriteStore } from '#lib/stores/favorites.svelte.js';
+	import { css } from '#lib/styles/panda.js';
+	import AnalysisEditorLoadGate from '#lib/components/analysis-editor/AnalysisEditorLoadGate.svelte';
+	import AnalysisEditorHeader from '#lib/components/analysis-editor/AnalysisEditorHeader.svelte';
+	import AnalysisEditorDescriptionModal from '#lib/components/analysis-editor/AnalysisEditorDescriptionModal.svelte';
+	import AnalysisEditorExportModal from '#lib/components/analysis-editor/AnalysisEditorExportModal.svelte';
+	import AnalysisEditorVersionModal from '#lib/components/analysis-editor/AnalysisEditorVersionModal.svelte';
 	import {
 		setupInferredSchemaHydrationEffect,
 		setupSourceSchemaLoadingEffect
-	} from '$lib/components/analysis-editor/analysis-editor-schema-effects.svelte';
-	import { createEditorLockController } from '$lib/components/analysis-editor/analysis-editor-lock.svelte';
-	import { createAnalysisEditorActions } from '$lib/components/analysis-editor/analysis-editor-actions.svelte';
-	import { createDraftController } from '$lib/components/analysis-editor/analysis-editor-draft.svelte';
-	import { useNamespace } from '$lib/stores/namespace.svelte';
+	} from '#lib/components/analysis-editor/analysis-editor-schema-effects.svelte.js';
+	import { createEditorLockController } from '#lib/components/analysis-editor/analysis-editor-lock.svelte.js';
+	import { createAnalysisEditorActions } from '#lib/components/analysis-editor/analysis-editor-actions.svelte.js';
+	import { createDraftController } from '#lib/components/analysis-editor/analysis-editor-draft.svelte.js';
+	import { useNamespace } from '#lib/stores/namespace.svelte.js';
 
 	const queryClient = useQueryClient();
 	const ns = useNamespace();
-	const analysisId = $derived($page.params.id ?? null);
+	const analysisId = $derived(page.params.id ?? null);
 	const validAnalysisId = $derived(analysisId && isUuid(analysisId) ? analysisId : null);
 
 	let selectedStepId = $state<string | null>(null);
@@ -689,7 +689,11 @@
 					transitionDuration: 'normal',
 					'& > *': { width: '100%', visibility: 'visible' },
 					...(leftPaneCollapsed
-						? { width: '0', border: 'none', '& > *': { width: '100%', visibility: 'hidden' } }
+						? {
+								width: '0',
+								border: 'none',
+								'& > *': { width: '100%', visibility: 'hidden' }
+							}
 						: {})
 				})}
 			>
@@ -806,7 +810,11 @@
 						transitionDuration: 'normal',
 						'& > *': { width: '100%', visibility: 'visible' },
 						...(rightPaneCollapsed
-							? { width: '0', border: 'none', '& > *': { width: '100%', visibility: 'hidden' } }
+							? {
+									width: '0',
+									border: 'none',
+									'& > *': { width: '100%', visibility: 'hidden' }
+								}
 							: {})
 					})}
 				>

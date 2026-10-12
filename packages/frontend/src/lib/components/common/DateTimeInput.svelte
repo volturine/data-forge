@@ -8,10 +8,10 @@
 		X,
 		Clock
 	} from '@lucide/svelte';
-	import { css } from '$lib/styles/panda';
-	import { monthMeta, nowInputParts, shiftMonthKey } from '$lib/utils/temporal';
-	import { overlayStack } from '$lib/stores/overlay.svelte';
-	import type { OverlayConfig } from '$lib/stores/overlay.svelte';
+	import { css } from '#lib/styles/panda.js';
+	import { monthMeta, nowInputParts, shiftMonthKey } from '#lib/utils/temporal.js';
+	import { overlayStack } from '#lib/stores/overlay.svelte.js';
+	import type { OverlayConfig } from '#lib/stores/overlay.svelte.js';
 
 	interface Props {
 		value: string;

@@ -170,6 +170,29 @@ test.describe('Lineage – with datasource data', () => {
 			);
 			await expect(analysisNode.getByText('Analysis', { exact: true })).toHaveCount(0);
 
+			const graph = page.getByTestId('lineage-canvas');
+			const nodeBox = await node.boundingBox();
+			const minimapBox = await graph.locator('.svelte-flow__minimap').boundingBox();
+			const graphBox = await graph.boundingBox();
+			if (!nodeBox || !minimapBox || !graphBox) {
+				throw new Error('Expected lineage node, minimap, and canvas bounding boxes');
+			}
+			const centerX = nodeBox.x + nodeBox.width / 2;
+			const centerY = nodeBox.y + nodeBox.height / 2;
+			if (
+				centerX >= minimapBox.x &&
+				centerX <= minimapBox.x + minimapBox.width &&
+				centerY >= minimapBox.y &&
+				centerY <= minimapBox.y + minimapBox.height
+			) {
+				// Pan the node out from under the interactive minimap before clicking it.
+				await page.mouse.move(graphBox.x + 24, graphBox.y + 24);
+				await page.mouse.down();
+				await page.mouse.move(graphBox.x + 24 + minimapBox.width + 32, graphBox.y + 24, {
+					steps: 12
+				});
+				await page.mouse.up();
+			}
 			await node.click();
 
 			// Sidebar should show node details instead of the default prompt

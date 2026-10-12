@@ -1,9 +1,9 @@
 <script lang="ts">
-	import { browser } from '$app/environment';
+	import { browser } from '$app/env';
 	import { page } from '$app/state';
 	import { resolve } from '$app/paths';
-	import { css, button, input, label, spinner } from '$lib/styles/panda';
-	import { resetPassword } from '$lib/api/auth';
+	import { css, button, input, label, spinner } from '#lib/styles/panda.js';
+	import { resetPassword } from '#lib/api/auth.js';
 
 	let password = $state('');
 	let confirm = $state('');
@@ -106,7 +106,7 @@
 			Your password has been reset successfully. You can now sign in with your new password.
 		</div>
 
-		<a href={resolve('/login')} class={button({ variant: 'primary' })}> Continue to sign in </a>
+		<a href={resolve('login')} class={button({ variant: 'primary' })}>Continue to sign in</a>
 	{:else if token}
 		<form onsubmit={submit} class={css({ display: 'flex', flexDirection: 'column', gap: '4' })}>
 			<div>
@@ -147,14 +147,14 @@
 	{/if}
 
 	{#if !token}
-		<a href={resolve('/forgot-password')} class={button({ variant: 'primary' })}>
-			Request new reset link
-		</a>
+		<a href={resolve('forgot-password')} class={button({ variant: 'primary' })}
+			>Request new reset link</a
+		>
 	{/if}
 
 	<p class={css({ fontSize: 'sm', color: 'fg.muted', textAlign: 'center' })}>
 		<a
-			href={resolve('/login')}
+			href={resolve('login')}
 			class={css({
 				color: 'accent.primary',
 				textDecoration: 'underline',

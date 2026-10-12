@@ -12,15 +12,15 @@
 		Plus
 	} from '@lucide/svelte';
 	import { onMount } from 'svelte';
-	import { css, iconButton } from '$lib/styles/panda';
+	import { css, iconButton } from '#lib/styles/panda.js';
 	import { useQueryClient } from '@tanstack/svelte-query';
-	import { chatStore } from '$lib/stores/chat.svelte';
-	import { overlayStack } from '$lib/stores/overlay.svelte';
-	import type { OverlayConfig } from '$lib/stores/overlay.svelte';
-	import type { ChatUiPatchEvent } from '$lib/api/chat';
-	import { stopGeneration as stopChatGeneration } from '$lib/api/chat';
-	import { ChatPanelLayout } from '$lib/chat/panel-layout.svelte';
-	import ConfirmDialog from '$lib/components/common/ConfirmDialog.svelte';
+	import { chatStore } from '#lib/stores/chat.svelte.js';
+	import { overlayStack } from '#lib/stores/overlay.svelte.js';
+	import type { OverlayConfig } from '#lib/stores/overlay.svelte.js';
+	import type { ChatUiPatchEvent } from '#lib/api/chat.js';
+	import { stopGeneration as stopChatGeneration } from '#lib/api/chat.js';
+	import { ChatPanelLayout } from '#lib/chat/panel-layout.svelte.js';
+	import ConfirmDialog from '#lib/components/common/ConfirmDialog.svelte';
 	import ChatMessages from './chat-panel/ChatMessages.svelte';
 	import ChatComposer from './chat-panel/ChatComposer.svelte';
 	import ChatConfigPanel from './chat-panel/ChatConfigPanel.svelte';

@@ -144,9 +144,7 @@ class InternalPostgresOnboarding:
                     """
                     ),
                     {'excluded_table': next(iter(_INTERNAL_POSTGRES_EXCLUDED_TABLES))},
-                )
-                .tuples()
-                .all()
+                ).all()
             ]
         else:
             physical_tables = [

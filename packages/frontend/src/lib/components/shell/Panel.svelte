@@ -6,7 +6,7 @@
 		PanelRightClose,
 		PanelRightOpen
 	} from '@lucide/svelte';
-	import { css, spinner as spinnerRecipe } from '$lib/styles/panda';
+	import { css, spinner as spinnerRecipe } from '#lib/styles/panda.js';
 	import type { Snippet } from 'svelte';
 
 	type PanelWidth = 'panelSm' | 'panelMd' | 'panelLg';

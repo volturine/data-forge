@@ -3,7 +3,7 @@ import type {
 	ComputeWorkerResourceConfig,
 	ComputeWorkerScope,
 	ComputeWorkerStatusResponse
-} from '$lib/types/compute';
+} from '#lib/types/compute.js';
 import type {
 	DownloadCommandJson as ProtocolDownloadCommandJson,
 	StepPreviewCommandJson as ProtocolStepPreviewCommandJson,
@@ -11,15 +11,15 @@ import type {
 	StepRowCountResultJson as ProtocolStepRowCountResultJson,
 	StepSchemaCommandJson as ProtocolStepSchemaCommandJson,
 	StepSchemaResultJson as ProtocolStepSchemaResultJson
-} from '$lib/protocol/dataforge_protocol/compute_pb';
-import type { ExportFormat } from '$lib/types/protocol-enum-tokens';
-import type { AnalysisPipelinePayload } from '$lib/utils/analysis-pipeline';
+} from '#lib/protocol/dataforge_protocol/compute_pb.js';
+import type { ExportFormat } from '#lib/types/protocol-enum-tokens.js';
+import type { AnalysisPipelinePayload } from '#lib/utils/analysis-pipeline.js';
 import { apiBlobRequest, apiRequest } from './client';
 import { okAsync, ResultAsync } from 'neverthrow';
 import type { ApiError } from './client';
 import { createStream, type StreamHandle } from './websocket';
-import { computeActivityStore } from '$lib/stores/compute-activity.svelte';
-import { isNamespaceReady, requireNamespace } from '$lib/stores/namespace.svelte';
+import { computeActivityStore } from '#lib/stores/compute-activity.svelte.js';
+import { isNamespaceReady, requireNamespace } from '#lib/stores/namespace.svelte.js';
 import { shareInFlight, shareInFlightWithSignal, type SharedInFlight } from './in-flight';
 
 type Field<T, K extends keyof T> = NonNullable<T[K]>;

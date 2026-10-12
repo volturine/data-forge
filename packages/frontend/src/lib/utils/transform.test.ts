@@ -1,5 +1,5 @@
 import { describe, test, expect } from 'vitest';
-import type { Schema } from '$lib/types/schema';
+import type { Schema } from '#lib/types/schema.js';
 import type { StepConfig } from './transform';
 import {
 	normalizeDtype,

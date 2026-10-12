@@ -4,29 +4,29 @@
 	import { afterNavigate, goto } from '$app/navigation';
 	import { resolve } from '$app/paths';
 	import { onMount } from 'svelte';
-	import { idbGet, idbSet } from '$lib/utils/indexeddb';
-	import favicon from '$lib/assets/favicon.svg';
-	import { css, spinner } from '$lib/styles/panda';
+	import { idbGet, idbSet } from '#lib/utils/indexeddb.js';
+	import favicon from '#lib/assets/favicon.svg';
+	import { css, spinner } from '#lib/styles/panda.js';
 	import { PanelLeftClose } from '@lucide/svelte';
-	import NamespacePickerModal from '$lib/components/common/NamespacePickerModal.svelte';
-	import IndexedDbButton from '$lib/components/common/IndexedDbButton.svelte';
-	import ChatPanel from '$lib/components/common/ChatPanel.svelte';
-	import Sidebar from '$lib/components/shell/Sidebar.svelte';
-	import { chatStore } from '$lib/stores/chat.svelte';
-	import { computeWorkersStore } from '$lib/stores/compute-workers.svelte';
-	import { computeActivityStore } from '$lib/stores/compute-activity.svelte';
-	import { analysisStore } from '$lib/stores/analysis.svelte';
-	import { datasourceStore } from '$lib/stores/datasource.svelte';
-	import { favoriteStore } from '$lib/stores/favorites.svelte';
-	import { schemaStore } from '$lib/stores/schema.svelte';
-	import { overlayStack } from '$lib/stores/overlay.svelte';
-	import { switchNamespace, useNamespace, isNamespaceReady } from '$lib/stores/namespace.svelte';
-	import { configStore } from '$lib/stores/config.svelte';
-	import { authStore } from '$lib/stores/auth.svelte';
-	import { AppLifecycle } from '$lib/services/app-lifecycle';
-	import { appBootstrap } from '$lib/services/app-bootstrap.svelte';
-	import { installAuditListeners, setAuditPage, track } from '$lib/utils/audit-log';
-	import 'styled-system/styles.css';
+	import NamespacePickerModal from '#lib/components/common/NamespacePickerModal.svelte';
+	import IndexedDbButton from '#lib/components/common/IndexedDbButton.svelte';
+	import ChatPanel from '#lib/components/common/ChatPanel.svelte';
+	import Sidebar from '#lib/components/shell/Sidebar.svelte';
+	import { chatStore } from '#lib/stores/chat.svelte.js';
+	import { computeWorkersStore } from '#lib/stores/compute-workers.svelte.js';
+	import { computeActivityStore } from '#lib/stores/compute-activity.svelte.js';
+	import { analysisStore } from '#lib/stores/analysis.svelte.js';
+	import { datasourceStore } from '#lib/stores/datasource.svelte.js';
+	import { favoriteStore } from '#lib/stores/favorites.svelte.js';
+	import { schemaStore } from '#lib/stores/schema.svelte.js';
+	import { overlayStack } from '#lib/stores/overlay.svelte.js';
+	import { switchNamespace, useNamespace, isNamespaceReady } from '#lib/stores/namespace.svelte.js';
+	import { configStore } from '#lib/stores/config.svelte.js';
+	import { authStore } from '#lib/stores/auth.svelte.js';
+	import { AppLifecycle } from '#lib/services/app-lifecycle.js';
+	import { appBootstrap } from '#lib/services/app-bootstrap.svelte.js';
+	import { installAuditListeners, setAuditPage, track } from '#lib/utils/audit-log.js';
+	import '../../styled-system/styles.css';
 
 	let { children } = $props();
 
@@ -88,7 +88,7 @@
 		if (authStore.bootstrapFailed) return;
 		if (onAuthPage) return;
 		if (authStore.status !== 'unauthenticated') return;
-		void goto(resolve('/login'));
+		void goto(resolve('login'));
 	}
 
 	function enableShell(_node: HTMLElement): () => void {
@@ -162,17 +162,16 @@
 		await switchNamespace(value, {
 			async beforeCommit() {
 				if (currentPath === '/datasources' && page.url.searchParams.has('id')) {
-					await goto(resolve('/datasources'), {
+					await goto(resolve('datasources'), {
 						replaceState: true,
-						invalidateAll: false,
-						keepFocus: true,
-						noScroll: true
+						refreshAll: false,
+						reset: false
 					});
 				}
 				await appLifecycle.releaseNamespace();
 			},
 			afterCommit() {
-				const nextUrl = new URL(page.url);
+				const nextUrl = new URL(page.url.href);
 				if (nextUrl.pathname === '/datasources') {
 					nextUrl.searchParams.delete('id');
 				}
@@ -184,9 +183,9 @@
 				appLifecycle.activateNamespace();
 				bindNamespaceServices();
 				void goto(resolve(`${nextUrl.pathname}${nextUrl.search}${nextUrl.hash}` as '/'), {
-					invalidateAll: false,
+					refreshAll: false,
 					replaceState: true,
-					keepFocus: true
+					reset: false
 				}).catch((error: unknown) => {
 					namespaceError = error instanceof Error ? error.message : String(error);
 				});
@@ -207,7 +206,7 @@
 	async function handleSignOut() {
 		await authStore.logout();
 		chatStore.resetForSignOut();
-		void goto(resolve('/login'));
+		void goto(resolve('login'));
 	}
 
 	function handleOpenChat() {
@@ -268,7 +267,9 @@
 		};
 	});
 
-	afterNavigate(() => {
+	afterNavigate(({ shallow, type }) => {
+		if (shallow && type === 'goto') return;
+
 		setAuditPage(currentPath);
 		redirectIfNeeded();
 	});
@@ -283,8 +284,11 @@
 
 <svelte:head>
 	<link rel="icon" href={favicon} />
+
 	<link rel="preconnect" href="https://fonts.googleapis.com" />
+
 	<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin="anonymous" />
+
 	<link
 		href="https://fonts.googleapis.com/css2?family=JetBrains+Mono:wght@400;500;600;700&display=swap"
 		rel="stylesheet"

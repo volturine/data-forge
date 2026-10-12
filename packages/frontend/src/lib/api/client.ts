@@ -1,8 +1,8 @@
 import { err, okAsync, ResultAsync } from 'neverthrow';
-import { getClientIdentity, getEditorClientId } from '$lib/stores/clientIdentity.svelte';
-import { requireNamespace, isNamespaceReady } from '$lib/stores/namespace.svelte';
-import { uuid } from '$lib/utils/uuid';
-import { track } from '$lib/utils/audit-log';
+import { getClientIdentity, getEditorClientId } from '#lib/stores/clientIdentity.svelte.js';
+import { requireNamespace, isNamespaceReady } from '#lib/stores/namespace.svelte.js';
+import { uuid } from '#lib/utils/uuid.js';
+import { track } from '#lib/utils/audit-log.js';
 
 export const BASE_URL = '/api';
 

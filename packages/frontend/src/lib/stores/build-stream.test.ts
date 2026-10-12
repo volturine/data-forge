@@ -1,13 +1,13 @@
 import { afterEach, beforeEach, describe, expect, test, vi } from 'vitest';
-import type { BuildRunDetail } from '$lib/types/build-stream';
-import type { BuildRequest } from '$lib/api/compute';
+import type { BuildRunDetail } from '#lib/types/build-stream.js';
+import type { BuildRequest } from '#lib/api/compute.js';
 
 const mockStartRuntimeBuild = vi.fn();
 const mockGetRuntimeBuild = vi.fn();
 const mockRetainActivity = vi.fn();
 const mockReleaseActivity = vi.fn();
 
-vi.mock('$lib/api/build-stream', () => ({
+vi.mock('#lib/api/build-stream.js', () => ({
 	startRuntimeBuild: (...args: unknown[]) => mockStartRuntimeBuild(...args),
 	getRuntimeBuild: (...args: unknown[]) => mockGetRuntimeBuild(...args),
 	connectBuildDetailStream: (
@@ -54,17 +54,17 @@ vi.mock('$lib/api/build-stream', () => ({
 	}
 }));
 
-vi.mock('$lib/stores/clientIdentity.svelte', () => ({
+vi.mock('#lib/stores/clientIdentity.svelte.js', () => ({
 	getClientIdentity: () => ({ clientId: 'client-1', clientSignature: 'signature-1' }),
 	getEditorClientId: () => 'editor-client-1'
 }));
 
-vi.mock('$lib/stores/namespace.svelte', () => ({
+vi.mock('#lib/stores/namespace.svelte.js', () => ({
 	requireNamespace: () => 'default',
 	isNamespaceReady: () => true
 }));
 
-vi.mock('$lib/stores/compute-activity.svelte', () => ({
+vi.mock('#lib/stores/compute-activity.svelte.js', () => ({
 	computeActivityStore: {
 		retain: () => {
 			mockRetainActivity();

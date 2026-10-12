@@ -1,6 +1,6 @@
-import type { Schedule } from '$lib/api/schedule';
-import type { DataSource } from '$lib/types/datasource';
-import { formatDateTimeDisplay } from '$lib/utils/datetime';
+import type { Schedule } from '#lib/api/schedule.js';
+import type { DataSource } from '#lib/types/datasource.js';
+import { formatDateTimeDisplay } from '#lib/utils/datetime.js';
 
 export function getTriggerType(schedule: Schedule): 'cron' | 'depends' | 'event' {
 	if (schedule.trigger_on_datasource_id) return 'event';

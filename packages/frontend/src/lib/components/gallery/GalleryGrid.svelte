@@ -1,7 +1,7 @@
 <script lang="ts">
-	import type { AnalysisGalleryItem } from '$lib/types/analysis';
+	import type { AnalysisGalleryItem } from '#lib/types/analysis.js';
 	import AnalysisCard from './AnalysisCard.svelte';
-	import { css } from '$lib/styles/panda';
+	import { css } from '#lib/styles/panda.js';
 
 	interface Props {
 		analyses: AnalysisGalleryItem[];

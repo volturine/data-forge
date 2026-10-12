@@ -1,9 +1,9 @@
 <script lang="ts">
 	import { onDestroy } from 'svelte';
-	import type { PipelineStep } from '$lib/types/analysis';
-	import { drag, type DropTarget } from '$lib/stores/drag.svelte';
-	import InlineDataTable from '$lib/components/pipeline/InlineDataTable.svelte';
-	import ChartPreview from '$lib/components/pipeline/ChartPreview.svelte';
+	import type { PipelineStep } from '#lib/types/analysis.js';
+	import { drag, type DropTarget } from '#lib/stores/drag.svelte.js';
+	import InlineDataTable from '#lib/components/pipeline/InlineDataTable.svelte';
+	import ChartPreview from '#lib/components/pipeline/ChartPreview.svelte';
 	import { createQuery } from '@tanstack/svelte-query';
 	import {
 		previewStepData,
@@ -11,21 +11,21 @@
 		throwIfAborted,
 		downloadStep,
 		type StepPreviewResponse
-	} from '$lib/api/compute';
-	import { applySteps } from '$lib/utils/pipeline';
-	import { hashPipeline } from '$lib/utils/hash';
-	import { toComputeError } from '$lib/utils/compute-error';
+	} from '#lib/api/compute.js';
+	import { applySteps } from '#lib/utils/pipeline.js';
+	import { hashPipeline } from '#lib/utils/hash.js';
+	import { toComputeError } from '#lib/utils/compute-error.js';
 	import { GripVertical, Hash, RefreshCw, Copy, Trash2 } from '@lucide/svelte';
-	import { analysisStore } from '$lib/stores/analysis.svelte';
-	import { datasourceStore } from '$lib/stores/datasource.svelte';
-	import { isNamespaceReady, requireNamespace } from '$lib/stores/namespace.svelte';
-	import { getStepTypeConfig, isChartStep } from '$lib/components/pipeline/utils';
+	import { analysisStore } from '#lib/stores/analysis.svelte.js';
+	import { datasourceStore } from '#lib/stores/datasource.svelte.js';
+	import { isNamespaceReady, requireNamespace } from '#lib/stores/namespace.svelte.js';
+	import { getStepTypeConfig, isChartStep } from '#lib/components/pipeline/utils.js';
 	import {
 		buildAnalysisPipelinePayload,
 		buildDatasourceConfig
-	} from '$lib/utils/analysis-pipeline';
+	} from '#lib/utils/analysis-pipeline.js';
 	import { SvelteMap } from 'svelte/reactivity';
-	import { css, spinner } from '$lib/styles/panda';
+	import { css, spinner } from '#lib/styles/panda.js';
 
 	interface Props {
 		step: PipelineStep;
@@ -100,6 +100,10 @@
 			resource_config: analysisStore.resourceConfig
 		};
 	});
+	// The query can start synchronously, so its cancellation state must already exist.
+	let previewRequestKey: string | null = null;
+	let previewRequestController = new AbortController();
+
 	const chartQuery = createQuery(() => ({
 		// The request captured in the cache key is also the request executed;
 		// a reactive component update cannot make an older query run a newer command.
@@ -176,8 +180,6 @@
 		`${analysisId ?? ''}:${datasourceId ?? ''}:${step.id}:${previewRowLimit}:${rowCountPipelineKey}:${JSON.stringify(rowCountDatasourceConfig)}`
 	);
 	let rowCountAbortController: AbortController | null = null;
-	let previewRequestKey: string | null = null;
-	let previewRequestController = new AbortController();
 
 	function previewSignal(request: Parameters<typeof previewStepData>[0]): AbortSignal {
 		const nextKey = JSON.stringify(request);

@@ -4,7 +4,7 @@ import { describe, expect, test } from 'vitest';
 import {
 	dataforge_token,
 	file_dataforge_protocol_enums
-} from '$lib/protocol/dataforge_protocol/enums_pb';
+} from '#lib/protocol/dataforge_protocol/enums_pb.js';
 import * as tokenTables from './protocol-enum-tokens';
 
 function screamingSnake(name: string): string {

@@ -13,9 +13,9 @@
 	};
 
 	import type { Snippet } from 'svelte';
-	import { css } from '$lib/styles/panda';
-	import { overlayStack } from '$lib/stores/overlay.svelte';
-	import type { OverlayConfig } from '$lib/stores/overlay.svelte';
+	import { css } from '#lib/styles/panda.js';
+	import { overlayStack } from '#lib/stores/overlay.svelte.js';
+	import type { OverlayConfig } from '#lib/stores/overlay.svelte.js';
 
 	interface Props {
 		open: boolean;

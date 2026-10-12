@@ -2,7 +2,7 @@
 	import { Handle, Position, type NodeProps } from '@xyflow/svelte';
 	import type { Node } from '@xyflow/svelte';
 	import type { LineageNodeData } from './lineage-flow';
-	import { css } from '$lib/styles/panda';
+	import { css } from '#lib/styles/panda.js';
 	import { Database, GitBranch, Table, Workflow } from '@lucide/svelte';
 
 	type LineageNodeProps = NodeProps<Node<LineageNodeData, 'lineage'>>;

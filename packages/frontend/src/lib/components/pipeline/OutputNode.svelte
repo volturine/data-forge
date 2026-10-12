@@ -5,32 +5,32 @@
 		AnalysisTabIcebergConfig,
 		AnalysisTabNotificationConfig,
 		AnalysisTabOutput
-	} from '$lib/types/analysis';
-	import type { DataSource } from '$lib/types/datasource';
-	import type { Subscriber } from '$lib/api/settings';
-	import { getSubscribers } from '$lib/api/settings';
-	import { cancelBuild } from '$lib/api/compute';
-	import { apiRequest } from '$lib/api/client';
-	import { getDatasource, listDatasources, updateDatasource } from '$lib/api/datasource';
-	import { analysisQueryKey } from '$lib/queries/analysis';
+	} from '#lib/types/analysis.js';
+	import type { DataSource } from '#lib/types/datasource.js';
+	import type { Subscriber } from '#lib/api/settings.js';
+	import { getSubscribers } from '#lib/api/settings.js';
+	import { cancelBuild } from '#lib/api/compute.js';
+	import { apiRequest } from '#lib/api/client.js';
+	import { getDatasource, listDatasources, updateDatasource } from '#lib/api/datasource.js';
+	import { analysisQueryKey } from '#lib/queries/analysis.js';
 	import { createQuery, useQueryClient } from '@tanstack/svelte-query';
-	import { analysisStore } from '$lib/stores/analysis.svelte';
-	import { configStore } from '$lib/stores/config.svelte';
-	import { datasourceStore } from '$lib/stores/datasource.svelte';
-	import { useNamespace } from '$lib/stores/namespace.svelte';
-	import type { BuildStreamStore } from '$lib/stores/build-stream.svelte';
-	import type { BuildRunDetail } from '$lib/types/build-stream';
-	import { buildAnalysisPipelinePayload } from '$lib/utils/analysis-pipeline';
-	import { isUuid } from '$lib/utils/analysis-tab';
-	import ScheduleManager from '$lib/components/common/ScheduleManager.svelte';
-	import HealthChecksManager from '$lib/components/common/HealthChecksManager.svelte';
-	import BranchPicker from '$lib/components/common/BranchPicker.svelte';
-	import { overlayStack } from '$lib/stores/overlay.svelte';
-	import type { OverlayConfig } from '$lib/stores/overlay.svelte';
-	import BuildPreview from '$lib/components/common/BuildPreview.svelte';
-	import ConfirmDialog from '$lib/components/common/ConfirmDialog.svelte';
-	import BaseModal from '$lib/components/ui/BaseModal.svelte';
-	import { css, chip } from '$lib/styles/panda';
+	import { analysisStore } from '#lib/stores/analysis.svelte.js';
+	import { configStore } from '#lib/stores/config.svelte.js';
+	import { datasourceStore } from '#lib/stores/datasource.svelte.js';
+	import { useNamespace } from '#lib/stores/namespace.svelte.js';
+	import type { BuildStreamStore } from '#lib/stores/build-stream.svelte.js';
+	import type { BuildRunDetail } from '#lib/types/build-stream.js';
+	import { buildAnalysisPipelinePayload } from '#lib/utils/analysis-pipeline.js';
+	import { isUuid } from '#lib/utils/analysis-tab.js';
+	import ScheduleManager from '#lib/components/common/ScheduleManager.svelte';
+	import HealthChecksManager from '#lib/components/common/HealthChecksManager.svelte';
+	import BranchPicker from '#lib/components/common/BranchPicker.svelte';
+	import { overlayStack } from '#lib/stores/overlay.svelte.js';
+	import type { OverlayConfig } from '#lib/stores/overlay.svelte.js';
+	import BuildPreview from '#lib/components/common/BuildPreview.svelte';
+	import ConfirmDialog from '#lib/components/common/ConfirmDialog.svelte';
+	import BaseModal from '#lib/components/ui/BaseModal.svelte';
+	import { css, chip } from '#lib/styles/panda.js';
 	import {
 		Bell,
 		CalendarClock,
@@ -45,8 +45,8 @@
 		Check,
 		X
 	} from '@lucide/svelte';
-	import { listHealthChecks, listHealthCheckResults } from '$lib/api/healthcheck';
-	import { listSchedules } from '$lib/api/schedule';
+	import { listHealthChecks, listHealthCheckResults } from '#lib/api/healthcheck.js';
+	import { listSchedules } from '#lib/api/schedule.js';
 	import { SvelteMap } from 'svelte/reactivity';
 
 	interface Props {

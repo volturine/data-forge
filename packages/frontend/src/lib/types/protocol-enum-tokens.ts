@@ -51,14 +51,14 @@ import {
 	TimeseriesOperationType as ProtocolTimeseriesOperationType,
 	WithColumnsExprType as ProtocolWithColumnsExprType,
 	YAxisPosition as ProtocolYAxisPosition
-} from '$lib/protocol/dataforge_protocol/enums_pb';
+} from '#lib/protocol/dataforge_protocol/enums_pb.js';
 import type {
 	BuildLogLevelJson as ProtocolBuildLogLevelJson,
 	BuildTabStatusJson as ProtocolBuildTabStatusJson,
 	ComputeWorkerRunExecutionCategoryJson as ProtocolComputeWorkerRunExecutionCategoryJson,
 	ComputeWorkerRunKindJson as ProtocolComputeWorkerRunKindJson,
 	StepTypeJson as ProtocolStepTypeJson
-} from '$lib/protocol/dataforge_protocol/enums_pb';
+} from '#lib/protocol/dataforge_protocol/enums_pb.js';
 
 type EnumToken<T extends object> = T[keyof T];
 

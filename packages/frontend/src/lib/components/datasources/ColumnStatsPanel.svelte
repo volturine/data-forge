@@ -1,12 +1,12 @@
 <script lang="ts">
 	import { createQuery } from '@tanstack/svelte-query';
 	import { ChartColumn, X } from '@lucide/svelte';
-	import { getColumnStats } from '$lib/api/datasource';
-	import type { HistogramBin } from '$lib/api/datasource';
-	import PanelHeader from '$lib/components/ui/PanelHeader.svelte';
-	import Callout from '$lib/components/ui/Callout.svelte';
-	import { useNamespace } from '$lib/stores/namespace.svelte';
-	import { css } from '$lib/styles/panda';
+	import { getColumnStats } from '#lib/api/datasource.js';
+	import type { HistogramBin } from '#lib/api/datasource.js';
+	import PanelHeader from '#lib/components/ui/PanelHeader.svelte';
+	import Callout from '#lib/components/ui/Callout.svelte';
+	import { useNamespace } from '#lib/stores/namespace.svelte.js';
+	import { css } from '#lib/styles/panda.js';
 
 	interface Props {
 		datasourceId: string;

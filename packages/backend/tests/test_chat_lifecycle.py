@@ -86,7 +86,7 @@ def test_delete_conflicts_with_active_turn(status: str) -> None:
         store.set_checkpoint(turn_id=turn_id, claim_token=claim.claim_token, generation=1, checkpoint={}, status=status)
 
     with pytest.raises(HTTPException) as result:
-        routes_module.delete_session(session.id, User(id='user'))
+        routes_module.delete_session(session.id, User(id='user', email='user@example.com', display_name='User'))
 
     assert result.value.status_code == 409
     assert session_store.get(session.id) is not None
@@ -98,11 +98,14 @@ def test_delete_conflicts_with_active_turn(status: str) -> None:
 def test_idle_delete_keeps_closed_response_and_owned_404() -> None:
     session = session_store.create('openrouter', 'test', 'key', user_id='user')
     with pytest.raises(HTTPException) as foreign:
-        routes_module.delete_session(session.id, User(id='foreign'))
+        routes_module.delete_session(session.id, User(id='foreign', email='foreign@example.com', display_name='Foreign'))
     assert foreign.value.status_code == 404
-    assert routes_module.delete_session(session.id, User(id='user')) == {'status': 'closed', 'session_id': session.id}
+    assert routes_module.delete_session(session.id, User(id='user', email='user@example.com', display_name='User')) == {
+        'status': 'closed',
+        'session_id': session.id,
+    }
     with pytest.raises(HTTPException) as missing:
-        routes_module.delete_session(session.id, User(id='user'))
+        routes_module.delete_session(session.id, User(id='user', email='user@example.com', display_name='User'))
     assert missing.value.status_code == 404
 
 

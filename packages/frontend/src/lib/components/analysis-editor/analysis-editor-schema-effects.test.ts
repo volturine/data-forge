@@ -21,14 +21,14 @@ const mocks = vi.hoisted(() => {
 	};
 });
 
-vi.mock('$lib/stores/analysis.svelte', () => ({ analysisStore: mocks.analysisStore }));
-vi.mock('$lib/stores/datasource.svelte', () => ({ datasourceStore: mocks.datasourceStore }));
-vi.mock('$lib/stores/schema.svelte', () => ({ schemaStore: {} }));
-vi.mock('$lib/api/datasource', () => ({ getDatasourceSchema: mocks.getDatasourceSchema }));
-vi.mock('$lib/api/compute', () => ({
+vi.mock('#lib/stores/analysis.svelte.js', () => ({ analysisStore: mocks.analysisStore }));
+vi.mock('#lib/stores/datasource.svelte.js', () => ({ datasourceStore: mocks.datasourceStore }));
+vi.mock('#lib/stores/schema.svelte.js', () => ({ schemaStore: {} }));
+vi.mock('#lib/api/datasource.js', () => ({ getDatasourceSchema: mocks.getDatasourceSchema }));
+vi.mock('#lib/api/compute.js', () => ({
 	getStepSchema: mocks.getStepSchema
 }));
-vi.mock('$lib/utils/audit-log', () => ({ track: mocks.track }));
+vi.mock('#lib/utils/audit-log.js', () => ({ track: mocks.track }));
 
 const { setupSourceSchemaLoadingEffect } = await import('./analysis-editor-schema-effects.svelte');
 

@@ -1,5 +1,5 @@
-import { authStore } from '$lib/stores/auth.svelte';
-import { localTimeZone, parseInstantWithZone } from '$lib/utils/temporal';
+import { authStore } from '#lib/stores/auth.svelte.js';
+import { localTimeZone, parseInstantWithZone } from '#lib/utils/temporal.js';
 
 type DateInput = string | number | Temporal.Instant;
 

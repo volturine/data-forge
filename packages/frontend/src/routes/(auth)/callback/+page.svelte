@@ -2,8 +2,8 @@
 	import { goto } from '$app/navigation';
 	import { resolve } from '$app/paths';
 	import { onMount } from 'svelte';
-	import { css, spinner } from '$lib/styles/panda';
-	import { authStore } from '$lib/stores/auth.svelte';
+	import { css, spinner } from '#lib/styles/panda.js';
+	import { authStore } from '#lib/stores/auth.svelte.js';
 
 	onMount(() => {
 		let cancelled = false;

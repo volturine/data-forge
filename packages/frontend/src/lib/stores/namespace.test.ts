@@ -4,7 +4,7 @@ const mockIdbGet = vi.fn();
 const mockIdbSet = vi.fn();
 const mockIdbDelete = vi.fn();
 
-vi.mock('$lib/utils/indexeddb', () => ({
+vi.mock('#lib/utils/indexeddb.js', () => ({
 	idbGet: (...args: unknown[]) => mockIdbGet(...args),
 	idbSet: (...args: unknown[]) => mockIdbSet(...args),
 	idbDelete: (...args: unknown[]) => mockIdbDelete(...args)
@@ -16,11 +16,11 @@ const mockConfigStore = {
 };
 const mockRegisterNamespace = vi.fn();
 
-vi.mock('$lib/stores/config.svelte', () => ({
+vi.mock('#lib/stores/config.svelte.js', () => ({
 	configStore: mockConfigStore
 }));
 
-vi.mock('$lib/api/namespaces', () => ({
+vi.mock('#lib/api/namespaces.js', () => ({
 	registerNamespace: (...args: unknown[]) => mockRegisterNamespace(...args)
 }));
 

@@ -1,7 +1,7 @@
 import { afterEach, describe, test, expect } from 'vitest';
-import type { UserPublic } from '$lib/api/auth';
-import { authStore } from '$lib/stores/auth.svelte';
-import { localTimeZone } from '$lib/utils/temporal';
+import type { UserPublic } from '#lib/api/auth.js';
+import { authStore } from '#lib/stores/auth.svelte.js';
+import { localTimeZone } from '#lib/utils/temporal.js';
 import {
 	formatDateValue,
 	formatDateTimeValue,

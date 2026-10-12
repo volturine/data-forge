@@ -2,8 +2,8 @@
 import 'temporal-polyfill/global';
 import '@testing-library/jest-dom/vitest';
 import { afterEach } from 'vitest';
-import { overlayStack } from '$lib/stores/overlay.svelte';
-import { patchTemporalForBun } from '$lib/test-utils/temporal-patch';
+import { overlayStack } from '#lib/stores/overlay.svelte.js';
+import { patchTemporalForBun } from '#lib/test-utils/temporal-patch.js';
 
 patchTemporalForBun();
 

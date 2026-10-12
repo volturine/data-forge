@@ -1,21 +1,21 @@
 <script lang="ts">
 	import { onMount } from 'svelte';
 	import { createQuery } from '@tanstack/svelte-query';
-	import { compareDatasourceSnapshots, listIcebergSnapshots } from '$lib/api/datasource';
-	import type { IcebergSnapshotInfo, SnapshotCompareResponse } from '$lib/api/datasource';
+	import { compareDatasourceSnapshots, listIcebergSnapshots } from '#lib/api/datasource.js';
+	import type { IcebergSnapshotInfo, SnapshotCompareResponse } from '#lib/api/datasource.js';
 	import {
 		datasourceIsAnalysisOutput,
 		datasourceNeedsExternalIngest,
 		type DataSource
-	} from '$lib/types/datasource';
-	import type { BuildRunSummary } from '$lib/types/build-stream';
-	import DataTable from '$lib/components/common/DataTable.svelte';
+	} from '#lib/types/datasource.js';
+	import type { BuildRunSummary } from '#lib/types/build-stream.js';
+	import DataTable from '#lib/components/common/DataTable.svelte';
 	import { GitCompareArrows, RefreshCw, X, Plus, Minus, Search } from '@lucide/svelte';
 	import { SvelteSet } from 'svelte/reactivity';
-	import { buildSnapshotMap } from '$lib/utils/build-snapshot-map';
-	import { BuildsStore } from '$lib/stores/builds.svelte';
-	import { formatDateTimeDisplay } from '$lib/utils/datetime';
-	import { css, button } from '$lib/styles/panda';
+	import { buildSnapshotMap } from '#lib/utils/build-snapshot-map.js';
+	import { BuildsStore } from '#lib/stores/builds.svelte.js';
+	import { formatDateTimeDisplay } from '#lib/utils/datetime.js';
+	import { css, button } from '#lib/styles/panda.js';
 
 	interface Props {
 		datasource: DataSource;

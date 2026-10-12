@@ -1,6 +1,6 @@
 <script lang="ts">
 	import { Check, Pencil, X } from '@lucide/svelte';
-	import { css, input } from '$lib/styles/panda';
+	import { css, input } from '#lib/styles/panda.js';
 
 	interface Props {
 		scheduleId: string;

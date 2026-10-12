@@ -1,38 +1,25 @@
-# sv
+# Data-Forge frontend
 
-Everything you need to build a Svelte project, powered by [`sv`](https://github.com/sveltejs/cli).
-
-## Creating a project
-
-If you're seeing this, you've probably already done this step. Congrats!
+SvelteKit 3, Svelte 5 runes, Panda CSS 2, and Bun. Run the shared services through `just dev` from the repository root.
 
 ```sh
-# create a new project in the current directory
-npx sv create
-
-# create a new project in my-app
-npx sv create my-app
+bun install --frozen-lockfile
+bun run check
+bun run build
 ```
 
-## Developing
+Configuration lives in `vite.config.ts`. Project imports use the `#lib` subpath declared in `package.json`; `tsconfig.json` mirrors that path so the native checker resolves generated Svelte component declarations.
 
-Once you've created a project and installed dependencies with `npm install` (or `pnpm install` or `yarn`), start a development server:
+Type checking uses stable TypeScript 7 through `svelte-check --tsgo`. The `@typescript/native` npm alias supplies TS7, while `typescript` remains on TS6 to provide the compiler API used by Svelte tooling and ESLint. Check scripts clear only the generated `.svelte-kit/.svelte-check` directory before starting, so removed components cannot leave stale diagnostics.
+
+Panda's base and theme presets are explicit in `panda.config.ts`. After changing Panda versions, regenerate once with `bunx panda build --clean` to remove obsolete generated modules.
+
+Use the public isolated test recipes from the repository root:
 
 ```sh
-npm run dev
-
-# or start the server and open the app in a new browser tab
-npm run dev -- --open
+just verify
+just test-frontend
+just test-e2e
 ```
 
-## Building
-
-To create a production version of your app:
-
-```sh
-npm run build
-```
-
-You can preview the production build with `npm run preview`.
-
-> To deploy your app, you may need to install an [adapter](https://svelte.dev/docs/kit/adapters) for your target environment.
+Never run Playwright directly on the host. For Mac-hosted development services, use `rolands-mac-mini.bee-justice.ts.net` with the service port.

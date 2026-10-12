@@ -1,11 +1,11 @@
 <script lang="ts">
 	import { LoaderCircle, Power, Search, X } from '@lucide/svelte';
 	import type { SvelteSet } from 'svelte/reactivity';
-	import BaseModal from '$lib/components/ui/BaseModal.svelte';
-	import ConfirmDialog from '$lib/components/common/ConfirmDialog.svelte';
-	import PanelHeader from '$lib/components/ui/PanelHeader.svelte';
-	import { computeWorkersStore } from '$lib/stores/compute-workers.svelte';
-	import type { ComputeWorkerStatusResponse } from '$lib/types/compute';
+	import BaseModal from '#lib/components/ui/BaseModal.svelte';
+	import ConfirmDialog from '#lib/components/common/ConfirmDialog.svelte';
+	import PanelHeader from '#lib/components/ui/PanelHeader.svelte';
+	import { computeWorkersStore } from '#lib/stores/compute-workers.svelte.js';
+	import type { ComputeWorkerStatusResponse } from '#lib/types/compute.js';
 	import {
 		computeWorkerActivityLabel,
 		computeWorkerHasActiveJob,
@@ -14,8 +14,8 @@
 		computeWorkerShutdownHeading,
 		computeWorkerShutdownMessage,
 		computeWorkerStatusColor
-	} from '$lib/nxt/compute-worker';
-	import { css, iconButton, input, label } from '$lib/styles/panda';
+	} from '#lib/nxt/compute-worker.js';
+	import { css, iconButton, input, label } from '#lib/styles/panda.js';
 
 	interface Props {
 		onClose: () => void;

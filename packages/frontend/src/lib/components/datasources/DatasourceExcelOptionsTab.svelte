@@ -14,8 +14,8 @@
 
 <script lang="ts">
 	import { Loader, Save } from '@lucide/svelte';
-	import ExcelTableSelector from '$lib/components/common/ExcelTableSelector.svelte';
-	import { css } from '$lib/styles/panda';
+	import ExcelTableSelector from '#lib/components/common/ExcelTableSelector.svelte';
+	import { css } from '#lib/styles/panda.js';
 
 	interface Props {
 		filePath: string | null;

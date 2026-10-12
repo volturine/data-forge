@@ -1,6 +1,6 @@
-import type { MCPTool } from '$lib/api/mcp';
-import type { TimelineEntry } from '$lib/stores/chat.svelte';
-import { formatEpoch, isSameLocalDay, isYesterday, nowEpochMs } from '$lib/utils/temporal';
+import type { MCPTool } from '#lib/api/mcp.js';
+import type { TimelineEntry } from '#lib/stores/chat.svelte.js';
+import { formatEpoch, isSameLocalDay, isYesterday, nowEpochMs } from '#lib/utils/temporal.js';
 
 export function timelineEntriesAreGrouped(timeline: TimelineEntry[], index: number): boolean {
 	if (index === 0) return false;
