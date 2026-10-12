@@ -2,7 +2,6 @@ from __future__ import annotations
 
 import asyncio
 import threading
-import time
 from io import BytesIO
 from typing import cast
 
@@ -21,7 +20,10 @@ async def test_cancelled_staging_joins_late_upload_then_deletes_only_its_target(
     deleted: list[str] = []
     target_url = 's3://analytics/uploads/unique.csv'
     intent_operations: list[str] = []
+    intent_now = 0.0
     intent_expiry = 0.0
+    intent_clock = threading.Lock()
+    intent_renewed = threading.Event()
     cleanup_eligible = False
 
     class DataPlane:
@@ -48,7 +50,10 @@ async def test_cancelled_staging_joins_late_upload_then_deletes_only_its_target(
         del kwargs
         intent_operations.append(operation.__name__)
         if operation.__name__ in {'register_upload_source', 'renew_upload_source', 'complete_upload_source'}:
-            intent_expiry = time.monotonic() + 0.03
+            with intent_clock:
+                intent_expiry = intent_now + 0.03
+                if operation.__name__ == 'renew_upload_source':
+                    intent_renewed.set()
         elif operation.__name__ == 'release_upload_source_for_cleanup':
             cleanup_eligible = True
 
@@ -62,10 +67,19 @@ async def test_cancelled_staging_joins_late_upload_then_deletes_only_its_target(
     try:
         assert await asyncio.to_thread(upload_started.wait, 2)
         staging.cancel()
-        await asyncio.sleep(0.07)  # Exceed the initial intent TTL while S3 is still blocked.
+        # Cross the initial TTL while observing each renewal, without tying the
+        # simulated lease's validity to the loaded runner's scheduling latency.
+        for tick in range(1, 8):
+            with intent_clock:
+                intent_renewed.clear()
+                intent_now = tick * 0.01
+                assert intent_expiry > intent_now
+            assert await asyncio.to_thread(intent_renewed.wait, 2)
+            with intent_clock:
+                assert intent_expiry > intent_now
         assert not staging.done()
         assert not upload.file.closed
-        assert intent_expiry > time.monotonic()
+        assert intent_expiry > intent_now
         assert intent_operations.count('renew_upload_source') >= 1
         assert not cleanup_eligible
 

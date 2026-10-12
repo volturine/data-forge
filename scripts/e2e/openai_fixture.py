@@ -41,6 +41,12 @@ def _analysis_reply(prompt: str) -> str:
 class OpenAIFixtureHandler(BaseHTTPRequestHandler):
     protocol_version = 'HTTP/1.1'
 
+    def handle(self) -> None:
+        try:
+            super().handle()
+        except BrokenPipeError, ConnectionResetError:
+            self.close_connection = True
+
     def do_GET(self) -> None:
         if self.path == '/health':
             self._json(200, {'status': 'ok'})
@@ -102,7 +108,7 @@ class OpenAIFixtureHandler(BaseHTTPRequestHandler):
         except urllib.error.HTTPError as exc:
             raw = exc.read()
             status = exc.code
-        except (urllib.error.URLError, TimeoutError, OSError):
+        except urllib.error.URLError, TimeoutError, OSError:
             self._json(502, {'error': {'message': 'upstream chat provider unavailable'}})
             return
         self.send_response(status)

@@ -406,6 +406,8 @@ deployment's `/api/v1/auth/github/callback` URL in the GitHub OAuth app.
 | `TEST_CPUS`      | unset   | Optional total CPU budget per test recipe invocation; when set, it must be at least `0.1`. Without it, the invocation uses the Docker-reported CPU capacity. E2E allocates at least 0.5 CPUs or 20% of the total to its controller, whichever is greater, and gives the remainder to DinD; its total must leave CPU for both. Concurrent invocations each get their own cap. |
 | `STRICT_TEST_TEARDOWN` | derived | Whether a test recipe fails when its Compose enclave teardown fails or exceeds its 90 s bound after the tests themselves passed. Defaults to `1` locally, where leftovers accumulate, and `0` when `CI` is set, where runners are ephemeral or cleaned by a runner-level post-step; a non-strict failure still writes `compose-down.log` and emits a GitHub Actions warning. Set `0` or `1` to override. |
 
+For GitHub CI, configure the dedicated `E2E_OPENROUTER_API_KEY` in both repository Actions secrets and Dependabot secrets. Dependabot-triggered workflows use the Dependabot secret store; the live-provider test still requires a valid key.
+
 Every public per-suite recipe creates a fresh daemon, network, and volumes in
 its own private Compose enclave. `just test` runs the per-suite recipes
 sequentially, while independent recipe invocations such as CI matrix jobs may
