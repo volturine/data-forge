@@ -1,19 +1,17 @@
 export function uuid(): string {
-	const randomUuid = globalThis.crypto?.randomUUID;
+	const cryptoApi = globalThis.crypto;
+	const randomUuid = cryptoApi?.randomUUID;
 	if (typeof randomUuid === 'function') {
-		return randomUuid.call(globalThis.crypto);
+		return randomUuid.call(cryptoApi);
+	}
+
+	const fill = cryptoApi?.getRandomValues;
+	if (typeof fill !== 'function') {
+		throw new Error('Cryptographically secure random values are unavailable');
 	}
 
 	const bytes = new Uint8Array(16);
-	const fill = globalThis.crypto?.getRandomValues;
-	if (typeof fill === 'function') {
-		fill.call(globalThis.crypto, bytes);
-	} else {
-		for (let i = 0; i < bytes.length; i += 1) {
-			bytes[i] = Math.floor(Math.random() * 256);
-		}
-	}
-
+	fill.call(cryptoApi, bytes);
 	bytes[6] = (bytes[6] & 0x0f) | 0x40;
 	bytes[8] = (bytes[8] & 0x3f) | 0x80;
 

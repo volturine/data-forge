@@ -1,5 +1,5 @@
 <script lang="ts">
-	import { createQuery, createMutation, useQueryClient } from '@tanstack/svelte-query';
+	import { createQuery, createMutation, hashKey, useQueryClient } from '@tanstack/svelte-query';
 	import { afterNavigate, goto } from '$app/navigation';
 	import { onMount } from 'svelte';
 	import { resolve } from '$app/paths';
@@ -30,6 +30,7 @@
 		datasourceNeedsExternalIngest
 	} from '#lib/types/datasource.js';
 	import type { DataSource } from '#lib/types/datasource.js';
+	import { buildDatasourcePreviewPipelinePayload } from '#lib/utils/analysis-pipeline.js';
 
 	const queryClient = useQueryClient();
 	const ns = useNamespace();
@@ -132,7 +133,11 @@
 		const ds = previewDatasource;
 		const config = effectiveConfig;
 		if (!ds || !config) return '';
-		return `${ds.id}:${JSON.stringify(config)}`;
+		// Metadata changes must not remount and cancel an unchanged preview command.
+		return hashKey([
+			ds.id,
+			buildDatasourcePreviewPipelinePayload({ datasource: ds, datasourceConfig: config })
+		]);
 	});
 
 	function resetPreviewLocals(): void {
