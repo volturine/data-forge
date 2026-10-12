@@ -4,6 +4,8 @@ from urllib.parse import urlparse, urlunparse
 import psycopg
 from alembic import command
 from alembic.config import Config
+from alembic.operations import Operations
+from alembic.runtime.migration import MigrationContext
 from alembic.script import ScriptDirectory
 from psycopg import sql
 from sqlalchemy import create_engine, pool, text
@@ -11,8 +13,22 @@ from sqlalchemy import create_engine, pool, text
 from backend_core.config import settings
 from backend_core.namespace import namespace_database_schema
 
-_PUBLIC_REVISION = '0029_compute_worker_host'
-_TENANT_REVISION = '0028_compute_worker_run'
+_SCHEMA_REVISION = 'runtime_schema_baseline'
+_LEGACY_REVISIONS = {
+    'public': {
+        '0020_runtime_wakes',
+        '0025_compute_worker_instances',
+        '0027_compute_worker_instance',
+        '0029_compute_worker_host',
+    },
+    'tenant': {
+        '0022_telegram_part_receipts',
+        '0023_drop_ds_freshness',
+        '0024_pivot_value_columns',
+        '0026_compute_worker_runs',
+        '0028_compute_worker_run',
+    },
+}
 _MISSING_DATABASE_SQLSTATE = '3D000'
 
 
@@ -105,7 +121,6 @@ def _current_revision(schema: str) -> str | None:
 
 
 def _schema_is_empty(schema: str) -> bool:
-    """Check whether a tenant schema can be bootstrapped from current metadata."""
     engine = create_engine(settings.database_url, poolclass=pool.NullPool)
     try:
         with engine.connect() as connection:
@@ -118,72 +133,63 @@ def _schema_is_empty(schema: str) -> bool:
         engine.dispose()
 
 
-def _bootstrap_empty_tenant_schema(schema: str) -> None:
-    """Create a fresh tenant schema directly at head instead of replaying history.
+def _upgrade_schema(*, scope: str, schema: str) -> None:
+    command.upgrade(_alembic_config(scope=scope, schema=schema), _SCHEMA_REVISION, tag=scope)
 
-    Historical data migrations still run for existing schemas. A new namespace
-    has no rows to transform, so create its final table/index definitions from
-    the same SQLModel metadata and stamp the current tenant revision atomically.
-    """
-    from backend_core.database import _tenant_tables
 
-    tables = _tenant_tables()
-    if not tables:
-        raise RuntimeError('Tenant metadata contains no tables')
+def _upgrade_legacy_schema(*, scope: str, schema: str, revision: str) -> None:
+    config = _alembic_config(scope=scope, schema=schema)
+    baseline = ScriptDirectory.from_config(config).get_revision(_SCHEMA_REVISION)
+    if baseline is None:
+        raise RuntimeError(f'Missing migration baseline {_SCHEMA_REVISION}')
+
     engine = create_engine(settings.database_url, poolclass=pool.NullPool)
     try:
         with engine.begin() as connection:
-            quoted_schema = connection.dialect.identifier_preparer.quote(schema)
-            connection.execute(text(f'CREATE SCHEMA IF NOT EXISTS {quoted_schema}'))
+            preparer = connection.dialect.identifier_preparer
+            quoted_schema = preparer.quote_schema(schema)
             connection.execute(text(f'SET LOCAL search_path TO {quoted_schema}, public'))
-            tables[0].metadata.create_all(connection, tables=tables, checkfirst=False)
-            connection.execute(text(f'CREATE TABLE {quoted_schema}.alembic_version (version_num VARCHAR(32) NOT NULL PRIMARY KEY)'))
-            connection.execute(
-                text(f'INSERT INTO {quoted_schema}.alembic_version (version_num) VALUES (:revision)'),
-                {'revision': _TENANT_REVISION},
+            migration_context = MigrationContext.configure(
+                connection,
+                opts={
+                    'version_table_schema': schema,
+                    'tag': scope,
+                    'target_schema': schema,
+                    'source_revision': revision,
+                },
             )
+            with Operations.context(migration_context):
+                baseline.module.upgrade()
+            result = connection.execute(
+                text(f'UPDATE {quoted_schema}.alembic_version SET version_num = :revision'),
+                {'revision': _SCHEMA_REVISION},
+            )
+            if result.rowcount != 1:
+                raise RuntimeError(f'Expected one {schema}.alembic_version row while adopting {revision}; found {result.rowcount}')
     finally:
         engine.dispose()
 
 
-def _upgrade_schema(*, scope: str, schema: str, revision: str) -> None:
-    command.upgrade(_alembic_config(scope=scope, schema=schema), revision, tag=scope)
+def _migrate_scope(*, scope: str, schema: str) -> None:
+    revision = _current_revision(schema)
+    if revision == _SCHEMA_REVISION:
+        return
 
+    if revision is None:
+        if scope == 'tenant' and not _schema_is_empty(schema):
+            raise RuntimeError(f'Unsupported existing tenant schema without a migration revision: {schema}')
+        _upgrade_schema(scope=scope, schema=schema)
+        return
 
-def _revision_is_on_upgrade_path(*, scope: str, schema: str, revision: str, target: str) -> bool:
-    script = ScriptDirectory.from_config(_alembic_config(scope=scope, schema=schema))
-    return any(item.revision == revision for item in script.iterate_revisions(target, 'base'))
+    if revision in _LEGACY_REVISIONS[scope]:
+        _upgrade_legacy_schema(scope=scope, schema=schema, revision=revision)
+        return
+
+    raise RuntimeError(f'Unsupported existing {scope} schema revision: {revision}. Expected {_SCHEMA_REVISION} or a managed pre-squash revision.')
 
 
 def migrate_runtime(namespaces: list[str]) -> None:
     ensure_database_exists()
-    public_revision = _current_revision('public')
-    if public_revision != _PUBLIC_REVISION:
-        if public_revision is not None and not _revision_is_on_upgrade_path(
-            scope='public',
-            schema='public',
-            revision=public_revision,
-            target=_PUBLIC_REVISION,
-        ):
-            raise RuntimeError(f'Unsupported existing public schema revision: {public_revision}. Expected {_PUBLIC_REVISION}. Recreate the database.')
-        _upgrade_schema(scope='public', schema='public', revision=_PUBLIC_REVISION)
+    _migrate_scope(scope='public', schema='public')
     for namespace in namespaces:
-        tenant_schema = namespace_database_schema(namespace)
-        revision = _current_revision(tenant_schema)
-        if revision is None and _schema_is_empty(tenant_schema):
-            _bootstrap_empty_tenant_schema(tenant_schema)
-            continue
-        if revision != _TENANT_REVISION and (
-            revision is None
-            or not _revision_is_on_upgrade_path(
-                scope='tenant',
-                schema=tenant_schema,
-                revision=revision,
-                target=_TENANT_REVISION,
-            )
-        ):
-            raise RuntimeError(
-                f'Unsupported existing tenant schema revision for namespace {namespace}: {revision}. Expected {_TENANT_REVISION}. Recreate the database.'
-            )
-        if revision != _TENANT_REVISION:
-            _upgrade_schema(scope='tenant', schema=tenant_schema, revision=_TENANT_REVISION)
+        _migrate_scope(scope='tenant', schema=namespace_database_schema(namespace))

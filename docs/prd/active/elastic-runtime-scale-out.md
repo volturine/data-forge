@@ -71,9 +71,8 @@ manager, and compute containers remain separate roles.
   refresh only the target namespace/kind, CAS the marker projection, and delete
   only those IDs atomically. Namespace discovery unions indexed pending/due
   markers with journal rows. Sequence maxima are not acknowledgement
-  watermarks because sequence allocation can commit out of order. Migration
-  `0020_runtime_wakes` restores the journal after `0018` while
-  retaining the migrated marker state.
+  watermarks because sequence allocation can commit out of order. The runtime
+  schema baseline provisions both the wake journal and marker projection.
 - **Chat lifecycle:** enqueue and deletion lock the same session row; competing
   enqueue or deletion with an active turn returns HTTP 409. Typed claim revocation within the local
   epoch settles that turn. SQL failures and coordinator-epoch fencing propagate

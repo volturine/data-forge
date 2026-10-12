@@ -198,7 +198,7 @@ Evidence:
 
 - `backend/core/config.py` requires PostgreSQL when `DISTRIBUTED_RUNTIME_ENABLED=true` and adds explicit pool settings
 - `backend/core/database.py` separates shared public tables from tenant schema tables and applies Postgres search path handling per namespace
-- `backend/core/migrations.py` provides the Postgres-first migration/bootstrap path with `0001_runtime_public` and `0002_runtime_tenant`
+- `backend/core/migrations.py` provides the Postgres-first migration/bootstrap path using one shared public/tenant schema baseline
 - `backend/tests/test_postgres_runtime_integration.py` validates schema bootstrap, advisory-lock-safe startup, Postgres notification delivery, and cross-worker runtime flows
 - `docker/docker-compose.yml` is the supported Postgres distributed runtime topology
 - `docker/docker-compose.test.yml` provides the Docker validation topology with Postgres plus fixed `api`, `scheduler`, and `worker` role containers, runtime tests, and e2e

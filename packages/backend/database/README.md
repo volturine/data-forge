@@ -2,6 +2,8 @@
 
 This directory contains Alembic migrations for the Postgres-backed Data-Forge runtime.
 
+Before the first release, the full current schema is represented by one shared baseline revision. It creates or upgrades the public and tenant scopes to the same revision; existing managed pre-squash revisions are upgraded in place. After release, add normal forward-only Alembic revisions instead of rewriting this baseline.
+
 ## Overview
 
 The runtime uses:
