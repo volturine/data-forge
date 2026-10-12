@@ -1,4 +1,4 @@
-import { getConfig, type FrontendConfig } from '$lib/api/config';
+import { getConfig, type FrontendConfig } from '#lib/api/config.js';
 
 export class ConfigStore {
 	config = $state<FrontendConfig | null>(null);

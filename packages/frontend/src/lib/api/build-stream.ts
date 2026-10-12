@@ -1,17 +1,17 @@
 import type { BuildRequest } from './compute';
 import { apiRequest } from './client';
 import { createStream, type StreamHandle } from './websocket';
-import type { BuildEventJson } from '$lib/protocol/dataforge_protocol/compute_pb';
+import type { BuildEventJson } from '#lib/protocol/dataforge_protocol/compute_pb.js';
 import {
 	isProtocolBuildEvent,
 	protocolBuildEventToBuildEvent
-} from '$lib/types/protocol-build-stream';
+} from '#lib/types/protocol-build-stream.js';
 import type {
 	BuildEvent,
 	BuildDetailSnapshot,
 	BuildWebsocketErrorMessage
-} from '$lib/types/build-stream';
-import type { BuildRunDetail, BuildRunSummary } from '$lib/types/build-stream';
+} from '#lib/types/build-stream.js';
+import type { BuildRunDetail, BuildRunSummary } from '#lib/types/build-stream.js';
 import type { ResultAsync } from 'neverthrow';
 import type { ApiError } from './client';
 

@@ -1,9 +1,9 @@
 <script lang="ts">
-	import { authStore } from '$lib/stores/auth.svelte';
-	import { isValidTimeZone } from '$lib/utils/datetime';
-	import { localTimeZone } from '$lib/utils/temporal';
-	import { button, css, input, label } from '$lib/styles/panda';
-	import FeedbackBanner from '$lib/components/ui/FeedbackBanner.svelte';
+	import { authStore } from '#lib/stores/auth.svelte.js';
+	import { isValidTimeZone } from '#lib/utils/datetime.js';
+	import { localTimeZone } from '#lib/utils/temporal.js';
+	import { button, css, input, label } from '#lib/styles/panda.js';
+	import FeedbackBanner from '#lib/components/ui/FeedbackBanner.svelte';
 
 	const deviceTimeZone = localTimeZone();
 	const supportedTimeZones = [

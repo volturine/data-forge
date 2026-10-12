@@ -1,6 +1,6 @@
 <script lang="ts">
 	import { SvelteSet } from 'svelte/reactivity';
-	import ComputeWorkersDialog from '$lib/components/common/ComputeWorkersDialog.svelte';
+	import ComputeWorkersDialog from '#lib/components/common/ComputeWorkersDialog.svelte';
 
 	interface Props {
 		open: boolean;

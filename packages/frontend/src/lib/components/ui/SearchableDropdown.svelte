@@ -2,9 +2,9 @@
 	import { Debounced } from 'runed';
 	import { SvelteSet } from 'svelte/reactivity';
 	import { ChevronDown } from '@lucide/svelte';
-	import { css, emptyText, input } from '$lib/styles/panda';
-	import { overlayStack } from '$lib/stores/overlay.svelte';
-	import type { OverlayConfig } from '$lib/stores/overlay.svelte';
+	import { css, emptyText, input } from '#lib/styles/panda.js';
+	import { overlayStack } from '#lib/stores/overlay.svelte.js';
+	import type { OverlayConfig } from '#lib/stores/overlay.svelte.js';
 
 	import type { Snippet } from 'svelte';
 

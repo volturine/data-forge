@@ -1,12 +1,12 @@
 <script lang="ts">
 	import { untrack } from 'svelte';
 	import { X } from '@lucide/svelte';
-	import type { Udf, UdfCreate } from '$lib/types/udf';
-	import UdfEditor from '$lib/components/udfs/UdfEditor.svelte';
-	import UdfLibrary from '$lib/components/udfs/UdfLibrary.svelte';
-	import BaseModal from '$lib/components/ui/BaseModal.svelte';
-	import PanelHeader from '$lib/components/ui/PanelHeader.svelte';
-	import { css, button } from '$lib/styles/panda';
+	import type { Udf, UdfCreate } from '#lib/types/udf.js';
+	import UdfEditor from '#lib/components/udfs/UdfEditor.svelte';
+	import UdfLibrary from '#lib/components/udfs/UdfLibrary.svelte';
+	import BaseModal from '#lib/components/ui/BaseModal.svelte';
+	import PanelHeader from '#lib/components/ui/PanelHeader.svelte';
+	import { css, button } from '#lib/styles/panda.js';
 
 	interface Props {
 		show: boolean;

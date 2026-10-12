@@ -1,14 +1,18 @@
 <script lang="ts">
 	import { onMount, untrack } from 'svelte';
-	import { listIcebergSnapshots } from '$lib/api/datasource';
-	import { apiRequest } from '$lib/api/client';
+	import { listIcebergSnapshots } from '#lib/api/datasource.js';
+	import { apiRequest } from '#lib/api/client.js';
 	import { Trash2, ChevronDown, Clock } from '@lucide/svelte';
 	import { SvelteMap } from 'svelte/reactivity';
-	import { formatDateInput, formatDateTimeDisplay, formatTimeDisplay } from '$lib/utils/datetime';
-	import { monthMeta, shiftMonthKey } from '$lib/utils/temporal';
-	import { css, spinner } from '$lib/styles/panda';
-	import { overlayStack } from '$lib/stores/overlay.svelte';
-	import type { OverlayConfig } from '$lib/stores/overlay.svelte';
+	import {
+		formatDateInput,
+		formatDateTimeDisplay,
+		formatTimeDisplay
+	} from '#lib/utils/datetime.js';
+	import { monthMeta, shiftMonthKey } from '#lib/utils/temporal.js';
+	import { css, spinner } from '#lib/styles/panda.js';
+	import { overlayStack } from '#lib/stores/overlay.svelte.js';
+	import type { OverlayConfig } from '#lib/stores/overlay.svelte.js';
 
 	interface Props {
 		datasourceId: string;

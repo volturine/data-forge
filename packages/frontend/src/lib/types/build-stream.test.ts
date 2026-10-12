@@ -1,6 +1,6 @@
 import { describe, expect, it } from 'vitest';
 
-import type { ComputeWorkerRunExecutionEntry } from '$lib/api/compute-worker-runs';
+import type { ComputeWorkerRunExecutionEntry } from '#lib/api/compute-worker-runs.js';
 import {
 	buildStatusLabel,
 	buildStatusTone,

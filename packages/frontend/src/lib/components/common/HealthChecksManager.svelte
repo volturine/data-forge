@@ -12,9 +12,9 @@
 		type HealthCheckConfig,
 		type HealthCheckCreate,
 		type HealthCheckResult
-	} from '$lib/api/healthcheck';
-	import { listDatasources } from '$lib/api/datasource';
-	import type { DataSource } from '$lib/types/datasource';
+	} from '#lib/api/healthcheck.js';
+	import { listDatasources } from '#lib/api/datasource.js';
+	import type { DataSource } from '#lib/types/datasource.js';
 	import { createQuery, createMutation, useQueryClient } from '@tanstack/svelte-query';
 	import {
 		Loader,
@@ -31,10 +31,10 @@
 		PowerOff
 	} from '@lucide/svelte';
 	import { SvelteMap } from 'svelte/reactivity';
-	import ConfirmDialog from '$lib/components/common/ConfirmDialog.svelte';
-	import { useNamespace } from '$lib/stores/namespace.svelte';
-	import { formatDateTimeDisplay } from '$lib/utils/datetime';
-	import { button, css, emptyText, input, label } from '$lib/styles/panda';
+	import ConfirmDialog from '#lib/components/common/ConfirmDialog.svelte';
+	import { useNamespace } from '#lib/stores/namespace.svelte.js';
+	import { formatDateTimeDisplay } from '#lib/utils/datetime.js';
+	import { button, css, emptyText, input, label } from '#lib/styles/panda.js';
 
 	interface Props {
 		datasourceId?: string;

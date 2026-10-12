@@ -1,6 +1,6 @@
 import { describe, test, expect } from 'vitest';
-import type { AnalysisTab } from '$lib/types/analysis';
-import type { DataSource } from '$lib/types/datasource';
+import type { AnalysisTab } from '#lib/types/analysis.js';
+import type { DataSource } from '#lib/types/datasource.js';
 import {
 	buildAnalysisPipelinePayload,
 	buildDatasourceConfig,

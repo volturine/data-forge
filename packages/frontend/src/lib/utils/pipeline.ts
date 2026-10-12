@@ -1,4 +1,4 @@
-import type { PipelineStep } from '$lib/types/analysis';
+import type { PipelineStep } from '#lib/types/analysis.js';
 
 export function applySteps(steps: PipelineStep[]): PipelineStep[] {
 	const applied = steps.filter((step) => step.is_applied !== false);

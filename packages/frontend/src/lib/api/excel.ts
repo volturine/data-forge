@@ -1,7 +1,7 @@
 import { apiRequest } from './client';
 import type { ApiError } from './client';
 import type { ResultAsync } from 'neverthrow';
-import type { DataSource } from '$lib/types/datasource';
+import type { DataSource } from '#lib/types/datasource.js';
 
 export interface ExcelParams {
 	sheet_name?: string;

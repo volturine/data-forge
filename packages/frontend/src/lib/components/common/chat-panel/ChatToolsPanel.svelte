@@ -1,7 +1,7 @@
 <script lang="ts">
-	import { css } from '$lib/styles/panda';
-	import { chatStore } from '$lib/stores/chat.svelte';
-	import { methodColor, outputHint } from '$lib/chat/presentation';
+	import { css } from '#lib/styles/panda.js';
+	import { chatStore } from '#lib/stores/chat.svelte.js';
+	import { methodColor, outputHint } from '#lib/chat/presentation.js';
 
 	interface Props {
 		maximized: boolean;

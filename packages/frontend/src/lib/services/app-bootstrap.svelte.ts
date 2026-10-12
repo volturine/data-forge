@@ -1,11 +1,11 @@
-import { authStore } from '$lib/stores/auth.svelte';
-import { configStore } from '$lib/stores/config.svelte';
+import { authStore } from '#lib/stores/auth.svelte.js';
+import { configStore } from '#lib/stores/config.svelte.js';
 import {
 	getNamespaceError,
 	getNamespaceStatus,
 	initNamespace,
 	isNamespaceReady
-} from '$lib/stores/namespace.svelte';
+} from '#lib/stores/namespace.svelte.js';
 
 /**
  * What the root layout should render after bootstrap is considered.

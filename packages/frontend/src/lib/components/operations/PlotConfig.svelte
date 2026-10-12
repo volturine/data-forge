@@ -1,10 +1,10 @@
 <script lang="ts">
-	import type { Schema } from '$lib/types/schema';
+	import type { Schema } from '#lib/types/schema.js';
 	import type {
 		OverlayConfig,
 		PlotConfigData as PlotConfigBase,
 		ReferenceLineConfig
-	} from '$lib/types/operation-config';
+	} from '#lib/types/operation-config.js';
 	import {
 		ChartNoAxesColumn,
 		ChartLine,
@@ -17,9 +17,9 @@
 		Plus,
 		X
 	} from '@lucide/svelte';
-	import ColumnDropdown from '$lib/components/common/ColumnDropdown.svelte';
-	import SectionHeader from '$lib/components/ui/SectionHeader.svelte';
-	import { css, label, stepConfig, input } from '$lib/styles/panda';
+	import ColumnDropdown from '#lib/components/common/ColumnDropdown.svelte';
+	import SectionHeader from '#lib/components/ui/SectionHeader.svelte';
+	import { css, label, stepConfig, input } from '#lib/styles/panda.js';
 
 	type PlotConfigData = Omit<PlotConfigBase, 'aggregation' | 'chart_type' | 'stack_mode'> & {
 		chart_type:

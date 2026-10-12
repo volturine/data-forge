@@ -2,6 +2,7 @@
 
 import asyncio
 from concurrent.futures import ThreadPoolExecutor
+from datetime import datetime
 from threading import Event
 from types import SimpleNamespace
 from unittest.mock import AsyncMock, patch
@@ -76,6 +77,10 @@ def test_enqueue_flushes_turn_before_persisting_dependent_rows(client: TestClien
         event = db.execute(select(ChatEvent).where(col(ChatEvent.session_id) == session_id, col(ChatEvent.turn_id) == turn_id)).scalar_one()
 
     assert turn is not None and turn.status == 'queued'
+    assert isinstance(turn.created_at, datetime) and turn.created_at.tzinfo is not None
+    assert isinstance(turn.updated_at, datetime) and turn.updated_at.tzinfo is not None
+    assert isinstance(message.created_at, datetime) and message.created_at.tzinfo is not None
+    assert isinstance(event.created_at, datetime) and event.created_at.tzinfo is not None
     assert message.message == {'role': 'user', 'content': 'persist in order'}
     assert event.payload['type'] == 'message'
     assert event.payload['role'] == 'user'

@@ -1,5 +1,5 @@
 <script lang="ts">
-	import { css, input, label, stepConfig } from '$lib/styles/panda';
+	import { css, input, label, stepConfig } from '#lib/styles/panda.js';
 
 	interface Props {
 		config?: { n?: number };

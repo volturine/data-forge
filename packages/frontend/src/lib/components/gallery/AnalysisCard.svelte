@@ -1,13 +1,13 @@
 <script lang="ts">
-	import type { AnalysisGalleryItem } from '$lib/types/analysis';
+	import type { AnalysisGalleryItem } from '#lib/types/analysis.js';
 	import { goto } from '$app/navigation';
 	import { resolve } from '$app/paths';
 	import { useQueryClient } from '@tanstack/svelte-query';
 	import { ChartBar, Copy, Star, Trash2 } from '@lucide/svelte';
-	import { formatDateDisplay, getYearDisplay } from '$lib/utils/datetime';
-	import { nowEpochMs } from '$lib/utils/temporal';
-	import { analysisQueryKey, fetchAnalysis } from '$lib/queries/analysis';
-	import { css } from '$lib/styles/panda';
+	import { formatDateDisplay, getYearDisplay } from '#lib/utils/datetime.js';
+	import { nowEpochMs } from '#lib/utils/temporal.js';
+	import { analysisQueryKey, fetchAnalysis } from '#lib/queries/analysis.js';
+	import { css } from '#lib/styles/panda.js';
 
 	interface Props {
 		analysis: AnalysisGalleryItem;
@@ -45,7 +45,7 @@
 			return;
 		}
 		e.preventDefault();
-		goto(resolve(`/analysis/${analysis.id}`), { invalidateAll: true });
+		goto(resolve(`analysis/${analysis.id}`), { refreshAll: true });
 	}
 
 	function handleKeyPress(e: KeyboardEvent) {
@@ -55,7 +55,7 @@
 			!(e.target as HTMLElement).closest('input[type=checkbox]')
 		) {
 			e.preventDefault();
-			goto(resolve(`/analysis/${analysis.id}`), { invalidateAll: true });
+			goto(resolve(`analysis/${analysis.id}`), { refreshAll: true });
 		}
 	}
 
@@ -72,7 +72,7 @@
 
 <a
 	data-analysis-card={analysis.name}
-	href={resolve(`/analysis/${analysis.id}`)}
+	href={resolve(`analysis/${analysis.id}`)}
 	class={css({
 		position: 'relative',
 		cursor: 'pointer',
@@ -152,6 +152,7 @@
 			>
 				{analysis.name}
 			</h3>
+
 			<div class={css({ display: 'inline-flex', alignItems: 'center', gap: '1' })}>
 				<button
 					type="button"

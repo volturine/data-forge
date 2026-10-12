@@ -44,7 +44,7 @@ def _insert_build_run(
     *,
     analysis_id: str,
     completed_at: datetime,
-    status: str = BuildRunStatus.COMPLETED,
+    status: BuildRunStatus = BuildRunStatus.COMPLETED,
 ) -> None:
     run = BuildRun(
         id=f'build-{analysis_id}-{completed_at.timestamp()}',

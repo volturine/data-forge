@@ -3,12 +3,12 @@ import { describe, test, expect, vi, beforeEach } from 'vitest';
 const mockIdbGet = vi.fn();
 const mockIdbSet = vi.fn();
 
-vi.mock('$lib/utils/indexeddb', () => ({
+vi.mock('#lib/utils/indexeddb.js', () => ({
 	idbGet: (...args: unknown[]) => mockIdbGet(...args),
 	idbSet: (...args: unknown[]) => mockIdbSet(...args)
 }));
 
-vi.mock('$app/environment', () => ({ browser: true, building: false, dev: true, version: 'test' }));
+vi.mock('$app/env', () => ({ browser: true, building: false, dev: true, version: 'test' }));
 
 const { hashFingerprint, getClientIdentity, getEditorClientId } =
 	await import('./clientIdentity.svelte');

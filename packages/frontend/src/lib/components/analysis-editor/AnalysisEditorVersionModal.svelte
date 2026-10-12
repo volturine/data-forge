@@ -1,16 +1,16 @@
 <script lang="ts">
 	import { createQuery } from '@tanstack/svelte-query';
-	import BaseModal from '$lib/components/ui/BaseModal.svelte';
+	import BaseModal from '#lib/components/ui/BaseModal.svelte';
 	import { Pencil, Trash2, X } from '@lucide/svelte';
-	import { css, button } from '$lib/styles/panda';
+	import { css, button } from '#lib/styles/panda.js';
 	import {
 		listAnalysisVersions,
 		restoreAnalysisVersion,
 		renameAnalysisVersion,
 		deleteAnalysisVersion
-	} from '$lib/api/analysis';
-	import { formatDateTimeDisplay, toEpochDisplay } from '$lib/utils/datetime';
-	import type { Analysis } from '$lib/types/analysis';
+	} from '#lib/api/analysis.js';
+	import { formatDateTimeDisplay, toEpochDisplay } from '#lib/utils/datetime.js';
+	import type { Analysis } from '#lib/types/analysis.js';
 
 	interface Props {
 		open: boolean;

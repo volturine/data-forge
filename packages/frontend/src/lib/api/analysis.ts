@@ -9,7 +9,7 @@ import type {
 	GenerateAnalysisRequest,
 	GeneratedAnalysisResponse,
 	ImportAnalysisRequest
-} from '$lib/types/analysis';
+} from '#lib/types/analysis.js';
 import { apiRequest, apiConditionalRequestWithHeaders, apiRequestWithHeaders } from './client';
 import { errAsync, okAsync, type ResultAsync } from 'neverthrow';
 import type { ApiError } from './client';

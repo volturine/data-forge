@@ -1,10 +1,10 @@
 <script lang="ts">
-	import type { Schema } from '$lib/types/schema';
-	import type { RenameConfigData } from '$lib/types/operation-config';
-	import ColumnDropdown from '$lib/components/common/ColumnDropdown.svelte';
+	import type { Schema } from '#lib/types/schema.js';
+	import type { RenameConfigData } from '#lib/types/operation-config.js';
+	import ColumnDropdown from '#lib/components/common/ColumnDropdown.svelte';
 	import { ArrowRight, X } from '@lucide/svelte';
-	import SectionHeader from '$lib/components/ui/SectionHeader.svelte';
-	import { css, emptyText, label, stepConfig } from '$lib/styles/panda';
+	import SectionHeader from '#lib/components/ui/SectionHeader.svelte';
+	import { css, emptyText, label, stepConfig } from '#lib/styles/panda.js';
 
 	interface Props {
 		schema: Schema;

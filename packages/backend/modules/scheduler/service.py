@@ -661,7 +661,7 @@ def should_run(cron_expr: str, last_run: datetime | None) -> bool:
     return next_run <= now
 
 
-def _schedule_candidate_query(now: datetime) -> Select[tuple[Schedule]]:
+def _schedule_candidate_query(now: datetime) -> Select[Schedule]:
     due_candidates = or_(
         col(Schedule.depends_on).is_not(None),
         col(Schedule.trigger_on_datasource_id).is_not(None),
@@ -671,7 +671,7 @@ def _schedule_candidate_query(now: datetime) -> Select[tuple[Schedule]]:
     return select(Schedule).where(col(Schedule.enabled).is_(True)).where(due_candidates)
 
 
-def _schedule_candidate_batches(session: Session, statement: Select[tuple[Schedule]]) -> Iterator[list[Schedule]]:
+def _schedule_candidate_batches(session: Session, statement: Select[Schedule]) -> Iterator[list[Schedule]]:
     # NULL next_run sorts first, followed by a stable total order. Advance over
     # every examined candidate, including dependency/event rows that are not due.
     due_key = func.coalesce(col(Schedule.next_run), datetime.min)

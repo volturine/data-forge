@@ -1,14 +1,14 @@
 <script lang="ts">
 	import { createMutation, createQuery, useQueryClient } from '@tanstack/svelte-query';
-	import { listUdfs, deleteUdf, exportUdfs, importUdfs, cloneUdf } from '$lib/api/udf';
-	import type { Udf, UdfExport } from '$lib/types/udf';
+	import { listUdfs, deleteUdf, exportUdfs, importUdfs, cloneUdf } from '#lib/api/udf.js';
+	import type { Udf, UdfExport } from '#lib/types/udf.js';
 	import { Plus, Upload, Download, Copy, Trash2, Pencil, X } from '@lucide/svelte';
-	import ColumnTypeBadge from '$lib/components/common/ColumnTypeBadge.svelte';
-	import BaseModal from '$lib/components/ui/BaseModal.svelte';
-	import PanelHeader from '$lib/components/ui/PanelHeader.svelte';
-	import PanelFooter from '$lib/components/ui/PanelFooter.svelte';
-	import Callout from '$lib/components/ui/Callout.svelte';
-	import { css, spinner, button, chip, input, label } from '$lib/styles/panda';
+	import ColumnTypeBadge from '#lib/components/common/ColumnTypeBadge.svelte';
+	import BaseModal from '#lib/components/ui/BaseModal.svelte';
+	import PanelHeader from '#lib/components/ui/PanelHeader.svelte';
+	import PanelFooter from '#lib/components/ui/PanelFooter.svelte';
+	import Callout from '#lib/components/ui/Callout.svelte';
+	import { css, spinner, button, chip, input, label } from '#lib/styles/panda.js';
 
 	interface Props {
 		onSelect: (udf: Udf) => void;

@@ -73,14 +73,17 @@ def _enqueue(session: Session, *, url: str, payload: dict[str, object], availabl
             event.available_at = now
             _wake(session)
         return event
+    catalog_namespace = payload.get('catalog_namespace')
+    catalog_table = payload.get('catalog_table')
+    catalog_family_prefix = payload.get('catalog_family_prefix')
     event = RuntimeOutboxEvent(
         id=_event_id(url),
         kind=STORAGE_CLEANUP_KIND,
         status=RuntimeOutboxStatus.PENDING,
         payload_json={**payload, 'url': url, 'phase': StorageCleanupPhase.TRACKED.value},
-        catalog_namespace=payload.get('catalog_namespace') if isinstance(payload.get('catalog_namespace'), str) else None,
-        catalog_table=payload.get('catalog_table') if isinstance(payload.get('catalog_table'), str) else None,
-        catalog_family_prefix=payload.get('catalog_family_prefix') if isinstance(payload.get('catalog_family_prefix'), str) else None,
+        catalog_namespace=catalog_namespace if isinstance(catalog_namespace, str) else None,
+        catalog_table=catalog_table if isinstance(catalog_table, str) else None,
+        catalog_family_prefix=catalog_family_prefix if isinstance(catalog_family_prefix, str) else None,
         available_at=available_at or now,
         created_at=now,
         updated_at=now,

@@ -1,23 +1,23 @@
-import type { Analysis, AnalysisTab, AnalysisUpdate, PipelineStep } from '$lib/types/analysis';
+import type { Analysis, AnalysisTab, AnalysisUpdate, PipelineStep } from '#lib/types/analysis.js';
 
-import type { SchemaInfo } from '$lib/types/datasource';
-import type { ComputeWorkerResourceConfig } from '$lib/types/compute';
-import { getAnalysisWithHeaders, updateAnalysis, type AnalysisDetail } from '$lib/api/analysis';
+import type { SchemaInfo } from '#lib/types/datasource.js';
+import type { ComputeWorkerResourceConfig } from '#lib/types/compute.js';
+import { getAnalysisWithHeaders, updateAnalysis, type AnalysisDetail } from '#lib/api/analysis.js';
 import {
 	buildOutputConfig,
 	ensureTabDefaults,
 	generateOutputName,
 	validatePipelineTabs
-} from '$lib/utils/analysis-tab';
-import { normalizeConfig } from '$lib/utils/step-config-defaults';
-import { isChartStep, normalizeStepType } from '$lib/components/pipeline/utils';
-import { track } from '$lib/utils/audit-log';
-import { cloneJson, isRecord } from '$lib/utils/json';
-import { uuid } from '$lib/utils/uuid';
+} from '#lib/utils/analysis-tab.js';
+import { normalizeConfig } from '#lib/utils/step-config-defaults.js';
+import { isChartStep, normalizeStepType } from '#lib/components/pipeline/utils.js';
+import { track } from '#lib/utils/audit-log.js';
+import { cloneJson, isRecord } from '#lib/utils/json.js';
+import { uuid } from '#lib/utils/uuid.js';
 import { SvelteMap } from 'svelte/reactivity';
 import { ResultAsync, errAsync, ok } from 'neverthrow';
-import type { ApiError } from '$lib/api/client';
-import { PreviewState } from '$lib/editor/preview-state.svelte';
+import type { ApiError } from '#lib/api/client.js';
+import { PreviewState } from '#lib/editor/preview-state.svelte.js';
 
 function cloneConfig<T extends Record<string, unknown>>(config: T): T {
 	return cloneJson(config);

@@ -1,3 +1,5 @@
+import adapter from '@sveltejs/adapter-static';
+import { vitePreprocess } from '@sveltejs/vite-plugin-svelte';
 import { sveltekit } from '@sveltejs/kit/vite';
 import type { ProxyOptions } from 'vite';
 import { createLogger, defineConfig } from 'vite';
@@ -59,13 +61,35 @@ export default defineConfig({
 			'@lezer/lr'
 		]
 	},
-	plugins: [sveltekit()],
+	plugins: [
+		sveltekit({
+			preprocess: [vitePreprocess()],
+			// Enable runes for all project files; leave dependencies as-is
+			dynamicCompileOptions({ filename }) {
+				if (!filename || filename.includes('node_modules')) return;
+				return { runes: true };
+			},
+			onwarn: (warning, handler) => {
+				// Panda selectors are consumed at runtime and cannot be resolved statically.
+				if (warning.code === 'css_unused_selector') return;
+				handler(warning);
+			},
 
+			adapter: adapter({
+				pages: 'build',
+				assets: 'build',
+				fallback: '200.html',
+				precompress: false,
+				strict: true
+			}),
+			paths: { base: '' }
+		})
+	],
 	build: {
-		rollupOptions: {
+		rolldownOptions: {
 			output: {
-				manualChunks(id) {
-					if (id.includes('/node_modules/svelte/')) return 'svelte-runtime';
+				codeSplitting: {
+					groups: [{ name: 'svelte-runtime', test: /\/node_modules\/svelte\// }]
 				}
 			}
 		}

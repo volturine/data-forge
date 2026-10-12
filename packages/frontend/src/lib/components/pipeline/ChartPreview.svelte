@@ -2,12 +2,12 @@
 	import { Chart } from '@tanstack/charts/svelte';
 	import { downloadChartImage } from '@tanstack/charts/export';
 	import { ChevronLeft, ChevronRight } from '@lucide/svelte';
-	import { css } from '$lib/styles/panda';
-	import { downloadBlob } from '$lib/api/compute';
+	import { css } from '#lib/styles/panda.js';
+	import { downloadBlob } from '#lib/api/compute.js';
 	import { SvelteSet } from 'svelte/reactivity';
-	import { buildChart, type ChartHandlers, type ChartInteraction } from '$lib/charts/definition';
-	import { readString, type ChartType as ConfigChartType } from '$lib/charts/format';
-	import { chartCsv } from '$lib/charts/csv';
+	import { buildChart, type ChartHandlers, type ChartInteraction } from '#lib/charts/definition.js';
+	import { readString, type ChartType as ConfigChartType } from '#lib/charts/format.js';
+	import { chartCsv } from '#lib/charts/csv.js';
 
 	interface Props {
 		data: Record<string, unknown>[];

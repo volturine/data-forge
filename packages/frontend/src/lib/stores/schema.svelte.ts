@@ -1,16 +1,16 @@
-import type { Schema, ColumnInfo } from '$lib/types/schema';
-import { analysisStore } from '$lib/stores/analysis.svelte';
-import { emptySchema } from '$lib/types/schema';
+import type { Schema, ColumnInfo } from '#lib/types/schema.js';
+import { analysisStore } from '#lib/stores/analysis.svelte.js';
+import { emptySchema } from '#lib/types/schema.js';
 import {
 	getStepTransform,
 	joinTransform,
 	unionByNameTransform,
 	type StepConfig
-} from '$lib/utils/transform';
-import { resolveColumnType } from '$lib/utils/column-types';
-import { isChartStep } from '$lib/components/pipeline/utils';
-import { hashPipeline } from '$lib/utils/hash';
-import { applySteps } from '$lib/utils/pipeline';
+} from '#lib/utils/transform.js';
+import { resolveColumnType } from '#lib/utils/column-types.js';
+import { isChartStep } from '#lib/components/pipeline/utils.js';
+import { hashPipeline } from '#lib/utils/hash.js';
+import { applySteps } from '#lib/utils/pipeline.js';
 import { SvelteMap } from 'svelte/reactivity';
 
 export interface StepSchemas {

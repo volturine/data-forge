@@ -19,6 +19,7 @@ import {
 } from './src/lib/styles/recipes';
 
 export default defineConfig({
+	presets: ['@pandacss/preset-base', '@pandacss/preset-panda'],
 	preflight: false,
 	include: ['./src/**/*.{js,ts,svelte}'],
 	exclude: [],
@@ -109,8 +110,8 @@ export default defineConfig({
 		recipes: '*'
 	},
 	importMap: {
-		css: ['styled-system/css', '$lib/styles/panda'],
-		recipes: ['styled-system/recipes', '$lib/styles/panda']
+		css: ['styled-system/css', '#lib/styles/panda.js'],
+		recipes: ['styled-system/recipes', '#lib/styles/panda.js']
 	},
 	conditions: {
 		extend: {

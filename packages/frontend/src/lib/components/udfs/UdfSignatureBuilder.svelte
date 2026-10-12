@@ -1,7 +1,7 @@
 <script lang="ts">
-	import type { UdfInput } from '$lib/types/udf';
-	import ColumnTypeDropdown from '$lib/components/common/ColumnTypeDropdown.svelte';
-	import { css, button, emptyText, input } from '$lib/styles/panda';
+	import type { UdfInput } from '#lib/types/udf.js';
+	import ColumnTypeDropdown from '#lib/components/common/ColumnTypeDropdown.svelte';
+	import { css, button, emptyText, input } from '#lib/styles/panda.js';
 
 	interface Props {
 		inputs: UdfInput[];

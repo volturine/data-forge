@@ -1,18 +1,18 @@
 <script lang="ts">
 	import { onMount } from 'svelte';
-	import type { Schema } from '$lib/types/schema';
-	import type { JoinConfigData } from '$lib/types/operation-config';
-	import { datasourceStore } from '$lib/stores/datasource.svelte';
-	import { schemaStore } from '$lib/stores/schema.svelte';
-	import { analysisStore } from '$lib/stores/analysis.svelte';
-	import { uuid } from '$lib/utils/uuid';
-	import DatasourcePicker from '$lib/components/common/DatasourcePicker.svelte';
-	import ColumnDropdown from '$lib/components/common/ColumnDropdown.svelte';
-	import MultiSelectColumnDropdown from '$lib/components/common/MultiSelectColumnDropdown.svelte';
-	import SectionHeader from '$lib/components/ui/SectionHeader.svelte';
-	import Callout from '$lib/components/ui/Callout.svelte';
+	import type { Schema } from '#lib/types/schema.js';
+	import type { JoinConfigData } from '#lib/types/operation-config.js';
+	import { datasourceStore } from '#lib/stores/datasource.svelte.js';
+	import { schemaStore } from '#lib/stores/schema.svelte.js';
+	import { analysisStore } from '#lib/stores/analysis.svelte.js';
+	import { uuid } from '#lib/utils/uuid.js';
+	import DatasourcePicker from '#lib/components/common/DatasourcePicker.svelte';
+	import ColumnDropdown from '#lib/components/common/ColumnDropdown.svelte';
+	import MultiSelectColumnDropdown from '#lib/components/common/MultiSelectColumnDropdown.svelte';
+	import SectionHeader from '#lib/components/ui/SectionHeader.svelte';
+	import Callout from '#lib/components/ui/Callout.svelte';
 	import { X } from '@lucide/svelte';
-	import { css, stepConfig, label, input, button } from '$lib/styles/panda';
+	import { css, stepConfig, label, input, button } from '#lib/styles/panda.js';
 
 	const _uid = $props.id();
 

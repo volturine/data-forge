@@ -14,9 +14,9 @@
 		Star,
 		X
 	} from '@lucide/svelte';
-	import { css } from '$lib/styles/panda';
-	import type { EditorAccessState } from '$lib/utils/analysis-lock-state';
-	import type { AnalysisTab } from '$lib/types/analysis';
+	import { css } from '#lib/styles/panda.js';
+	import type { EditorAccessState } from '#lib/utils/analysis-lock-state.js';
+	import type { AnalysisTab } from '#lib/types/analysis.js';
 
 	interface Props {
 		tabs: AnalysisTab[];

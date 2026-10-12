@@ -1,6 +1,6 @@
 <script lang="ts">
 	import { SvelteFlow, MiniMap, type Node, type Edge, type OnMove } from '@xyflow/svelte';
-	import type { LineageNode, LineageResponse } from '$lib/api/lineage';
+	import type { LineageNode, LineageResponse } from '#lib/api/lineage.js';
 	import LineageNodeView from './LineageNode.svelte';
 	import LineageFlowController, { type LineageFlowApi } from './LineageFlowController.svelte';
 	import {
@@ -9,9 +9,9 @@
 		type LineageFlowNode,
 		type LineageLayoutMode
 	} from './lineage-flow';
-	import { css } from '$lib/styles/panda';
+	import { css } from '#lib/styles/panda.js';
 	import '@xyflow/svelte/dist/style.css';
-	import '$lib/styles/xyflow-theme.css';
+	import '#lib/styles/xyflow-theme.css';
 
 	interface Props {
 		lineage: LineageResponse;
@@ -27,7 +27,7 @@
 		// The zoom label lives in the page toolbar; the value is written back
 		// through the binding and never read inside this component.
 		// eslint-disable-next-line no-useless-assignment
-		zoomPercent = $bindable(100)
+		zoomPercent: _zoomPercent = $bindable(100)
 	}: Props = $props();
 
 	const nodeTypes = { lineage: LineageNodeView };
@@ -39,11 +39,11 @@
 
 	function syncZoom() {
 		const zoom = flowApi?.getZoom();
-		if (zoom !== undefined) zoomPercent = Math.round(zoom * 100);
+		if (zoom !== undefined) _zoomPercent = Math.round(zoom * 100);
 	}
 
 	const handleMove: OnMove = (_event, viewport) => {
-		zoomPercent = Math.round(viewport.zoom * 100);
+		_zoomPercent = Math.round(viewport.zoom * 100);
 	};
 
 	function handleNodeClick(node: Node) {

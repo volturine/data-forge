@@ -1,4 +1,4 @@
-import type { ComputeWorkerStatus, ComputeWorkerStatusResponse } from '$lib/types/compute';
+import type { ComputeWorkerStatus, ComputeWorkerStatusResponse } from '#lib/types/compute.js';
 
 export function computeWorkerIdentityKey(computeWorker: ComputeWorkerStatusResponse): string {
 	return `${computeWorker.scope ?? 'analysis_interactive'}:${computeWorker.resource_id}`;

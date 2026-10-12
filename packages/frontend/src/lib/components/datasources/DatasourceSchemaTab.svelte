@@ -1,9 +1,9 @@
 <script lang="ts">
 	import { CircleAlert, Loader, Pencil } from '@lucide/svelte';
-	import type { ColumnSchema } from '$lib/types/datasource';
-	import ColumnTypeBadge from '$lib/components/common/ColumnTypeBadge.svelte';
-	import Callout from '$lib/components/ui/Callout.svelte';
-	import { css, emptyText } from '$lib/styles/panda';
+	import type { ColumnSchema } from '#lib/types/datasource.js';
+	import ColumnTypeBadge from '#lib/components/common/ColumnTypeBadge.svelte';
+	import Callout from '#lib/components/ui/Callout.svelte';
+	import { css, emptyText } from '#lib/styles/panda.js';
 
 	interface Props {
 		columns: ColumnSchema[];

@@ -5,8 +5,8 @@
 		getSourceTypeConfig,
 		type FileType,
 		type SourceType
-	} from '$lib/utils/file-types';
-	import { css, badge } from '$lib/styles/panda';
+	} from '#lib/utils/file-types.js';
+	import { css, badge } from '#lib/styles/panda.js';
 
 	interface Props {
 		fileType?: FileType;

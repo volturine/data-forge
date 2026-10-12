@@ -3,13 +3,13 @@ import type {
 	ComputeWorkerIdentityJson as ProtocolComputeWorkerIdentityJson,
 	ComputeWorkerResourceConfigJson as ProtocolComputeWorkerResourceConfigJson,
 	ComputeWorkerStatusResultJson as ProtocolComputeWorkerStatusResultJson
-} from '$lib/protocol/dataforge_protocol/compute_pb';
+} from '#lib/protocol/dataforge_protocol/compute_pb.js';
 import type {
 	ComputeWorkerInstanceStatus,
 	ComputeWorkerReusePolicy,
 	ComputeWorkerScope,
 	ComputeWorkerStatus
-} from '$lib/types/protocol-enum-tokens';
+} from '#lib/types/protocol-enum-tokens.js';
 
 export type { ComputeWorkerReusePolicy, ComputeWorkerScope, ComputeWorkerStatus };
 

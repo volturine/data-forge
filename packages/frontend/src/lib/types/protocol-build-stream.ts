@@ -3,26 +3,26 @@ import type {
 	BuildEventContextJson,
 	BuildEventJson,
 	BuildTabResultJson
-} from '$lib/protocol/dataforge_protocol/compute_pb';
+} from '#lib/protocol/dataforge_protocol/compute_pb.js';
 import type {
 	BuildLogLevelJson,
 	BuildTabStatusJson,
 	ComputeWorkerRunExecutionCategoryJson,
 	ComputeWorkerRunKindJson
-} from '$lib/protocol/dataforge_protocol/enums_pb';
-import type { BuildEvent, BuildTabResult } from '$lib/types/build-stream';
+} from '#lib/protocol/dataforge_protocol/enums_pb.js';
+import type { BuildEvent, BuildTabResult } from '#lib/types/build-stream.js';
 import {
 	BUILD_LOG_LEVEL_JSON_TOKENS,
 	BUILD_TAB_STATUS_JSON_TOKENS,
 	COMPUTE_WORKER_RUN_EXECUTION_CATEGORY_JSON_TOKENS,
 	COMPUTE_WORKER_RUN_KIND_JSON_TOKENS,
 	STEP_TYPE_JSON_TOKENS
-} from '$lib/types/protocol-enum-tokens';
+} from '#lib/types/protocol-enum-tokens.js';
 import type {
 	BuildLogLevel,
 	BuildTabStatus,
 	ComputeWorkerRunKind
-} from '$lib/types/protocol-enum-tokens';
+} from '#lib/types/protocol-enum-tokens.js';
 
 type BuildEventOneofKey =
 	| 'cancelled'

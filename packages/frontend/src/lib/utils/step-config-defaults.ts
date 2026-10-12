@@ -28,13 +28,13 @@ import type {
 	UnpivotConfigData,
 	ViewConfigData,
 	WithColumnsConfigData
-} from '$lib/types/operation-config';
+} from '#lib/types/operation-config.js';
 import {
 	chartTypeForStep,
 	isChartStepType,
 	normalizePipelineStepType
-} from '$lib/types/pipeline-step';
-import { cloneJson } from '$lib/utils/json';
+} from '#lib/types/pipeline-step.js';
+import { cloneJson } from '#lib/utils/json.js';
 
 // ChartConfigData re-uses the richer PlotConfigData type from operation-config.
 export type ChartConfigData = PlotConfigData;

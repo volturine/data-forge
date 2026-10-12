@@ -3,16 +3,16 @@
 		datasourceIsAnalysisOutput,
 		datasourceNeedsExternalIngest,
 		type DataSource
-	} from '$lib/types/datasource';
-	import type { AnalysisTab, AnalysisTabDatasource } from '$lib/types/analysis';
+	} from '#lib/types/datasource.js';
+	import type { AnalysisTab, AnalysisTabDatasource } from '#lib/types/analysis.js';
 	import { createQuery } from '@tanstack/svelte-query';
-	import { analysisStore } from '$lib/stores/analysis.svelte';
-	import { datasourceStore } from '$lib/stores/datasource.svelte';
-	import { useNamespace } from '$lib/stores/namespace.svelte';
-	import { getDatasource } from '$lib/api/datasource';
-	import { getComputeWorkerDefaults } from '$lib/api/compute';
-	import { schemaStore } from '$lib/stores/schema.svelte';
-	import { track } from '$lib/utils/audit-log';
+	import { analysisStore } from '#lib/stores/analysis.svelte.js';
+	import { datasourceStore } from '#lib/stores/datasource.svelte.js';
+	import { useNamespace } from '#lib/stores/namespace.svelte.js';
+	import { getDatasource } from '#lib/api/datasource.js';
+	import { getComputeWorkerDefaults } from '#lib/api/compute.js';
+	import { schemaStore } from '#lib/stores/schema.svelte.js';
+	import { track } from '#lib/utils/audit-log.js';
 	import {
 		Copy,
 		FileText,
@@ -28,12 +28,12 @@
 		Cpu,
 		ChevronDown
 	} from '@lucide/svelte';
-	import { drag } from '$lib/stores/drag.svelte';
-	import FileTypeBadge from '$lib/components/common/FileTypeBadge.svelte';
-	import BranchPicker from '$lib/components/common/BranchPicker.svelte';
-	import SnapshotPicker from '$lib/components/datasources/SnapshotPicker.svelte';
-	import type { SourceType } from '$lib/utils/file-types';
-	import { css } from '$lib/styles/panda';
+	import { drag } from '#lib/stores/drag.svelte.js';
+	import FileTypeBadge from '#lib/components/common/FileTypeBadge.svelte';
+	import BranchPicker from '#lib/components/common/BranchPicker.svelte';
+	import SnapshotPicker from '#lib/components/datasources/SnapshotPicker.svelte';
+	import type { SourceType } from '#lib/utils/file-types.js';
+	import { css } from '#lib/styles/panda.js';
 
 	interface Props {
 		datasource: DataSource | null;

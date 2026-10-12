@@ -1,5 +1,5 @@
 import { SvelteMap } from 'svelte/reactivity';
-import { idbGet, idbSet } from '$lib/utils/indexeddb';
+import { idbGet, idbSet } from '#lib/utils/indexeddb.js';
 
 export class PreviewState {
 	runs = $state(new SvelteMap<string, boolean>());

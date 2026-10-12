@@ -1,16 +1,16 @@
 import { SvelteSet } from 'svelte/reactivity';
-import { analysisStore } from '$lib/stores/analysis.svelte';
-import { datasourceStore } from '$lib/stores/datasource.svelte';
-import { schemaStore } from '$lib/stores/schema.svelte';
-import { getDatasourceSchema } from '$lib/api/datasource';
-import type { DataSource } from '$lib/types/datasource';
-import { getStepSchema } from '$lib/api/compute';
-import { buildAnalysisPipelinePayload } from '$lib/utils/analysis-pipeline';
-import { hashPipeline } from '$lib/utils/hash';
-import { applySteps } from '$lib/utils/pipeline';
-import { createAsyncGate } from '$lib/utils/async-gate';
-import { track } from '$lib/utils/audit-log';
-import { isUuid } from '$lib/utils/analysis-tab';
+import { analysisStore } from '#lib/stores/analysis.svelte.js';
+import { datasourceStore } from '#lib/stores/datasource.svelte.js';
+import { schemaStore } from '#lib/stores/schema.svelte.js';
+import { getDatasourceSchema } from '#lib/api/datasource.js';
+import type { DataSource } from '#lib/types/datasource.js';
+import { getStepSchema } from '#lib/api/compute.js';
+import { buildAnalysisPipelinePayload } from '#lib/utils/analysis-pipeline.js';
+import { hashPipeline } from '#lib/utils/hash.js';
+import { applySteps } from '#lib/utils/pipeline.js';
+import { createAsyncGate } from '#lib/utils/async-gate.js';
+import { track } from '#lib/utils/audit-log.js';
+import { isUuid } from '#lib/utils/analysis-tab.js';
 
 type CancellableEffect = (() => void) & { cancel: () => void };
 

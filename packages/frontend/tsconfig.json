@@ -1,17 +1,12 @@
 {
-	"extends": "./.svelte-kit/tsconfig.json",
+	"extends": "$app/tsconfig",
 	"compilerOptions": {
-		"types": ["node"],
+		"paths": { "#lib/*": ["./src/lib/*"] },
+		"types": ["$app/types", "node"],
 		"rewriteRelativeImportExtensions": true,
-		"allowJs": true,
-		"checkJs": true,
-		"esModuleInterop": true,
-		"forceConsistentCasingInFileNames": true,
-		"resolveJsonModule": true,
-		"skipLibCheck": true,
 		"sourceMap": true,
-		"strict": true,
-		"moduleResolution": "bundler"
+		"strict": true
 	},
-	"exclude": ["node_modules/**", "tests/.artifacts/**"]
+	"exclude": ["node_modules/**", "tests/.artifacts/**"],
+	"include": ["src", "vite.config.ts", "playwright.config.ts", "tests"]
 }

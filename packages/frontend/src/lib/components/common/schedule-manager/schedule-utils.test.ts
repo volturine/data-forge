@@ -1,6 +1,6 @@
 import { describe, test, expect } from 'vitest';
-import type { Schedule } from '$lib/api/schedule';
-import type { DataSource } from '$lib/types/datasource';
+import type { Schedule } from '#lib/api/schedule.js';
+import type { DataSource } from '#lib/types/datasource.js';
 import {
 	depLabel,
 	depOptions,

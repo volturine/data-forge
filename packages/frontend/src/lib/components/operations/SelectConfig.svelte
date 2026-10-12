@@ -1,14 +1,14 @@
 <script lang="ts">
-	import type { Schema } from '$lib/types/schema';
-	import type { SelectConfigData } from '$lib/types/operation-config';
-	import type { CastMapType } from '$lib/types/protocol-enum-tokens';
-	import { CAST_MAP_TYPE_TOKENS } from '$lib/types/protocol-enum-tokens';
-	import MultiSelectColumnDropdown from '$lib/components/common/MultiSelectColumnDropdown.svelte';
-	import ColumnTypeBadge from '$lib/components/common/ColumnTypeBadge.svelte';
-	import ColumnTypeDropdown from '$lib/components/common/ColumnTypeDropdown.svelte';
-	import SectionHeader from '$lib/components/ui/SectionHeader.svelte';
-	import Callout from '$lib/components/ui/Callout.svelte';
-	import { css, stepConfig } from '$lib/styles/panda';
+	import type { Schema } from '#lib/types/schema.js';
+	import type { SelectConfigData } from '#lib/types/operation-config.js';
+	import type { CastMapType } from '#lib/types/protocol-enum-tokens.js';
+	import { CAST_MAP_TYPE_TOKENS } from '#lib/types/protocol-enum-tokens.js';
+	import MultiSelectColumnDropdown from '#lib/components/common/MultiSelectColumnDropdown.svelte';
+	import ColumnTypeBadge from '#lib/components/common/ColumnTypeBadge.svelte';
+	import ColumnTypeDropdown from '#lib/components/common/ColumnTypeDropdown.svelte';
+	import SectionHeader from '#lib/components/ui/SectionHeader.svelte';
+	import Callout from '#lib/components/ui/Callout.svelte';
+	import { css, stepConfig } from '#lib/styles/panda.js';
 	import { ArrowRight } from '@lucide/svelte';
 
 	interface Props {

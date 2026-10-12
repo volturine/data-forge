@@ -3,7 +3,7 @@ import { fireEvent, render, screen, waitFor } from '@testing-library/svelte';
 import { SvelteMap } from 'svelte/reactivity';
 import { onDestroy } from 'svelte';
 import { okAsync } from 'neverthrow';
-import type { NamespaceStoragePlan } from '$lib/api/namespaces';
+import type { NamespaceStoragePlan } from '#lib/api/namespaces.js';
 
 const mocks = vi.hoisted(() => ({
 	createQuery: vi.fn(),
@@ -12,7 +12,7 @@ const mocks = vi.hoisted(() => ({
 }));
 
 vi.mock('@tanstack/svelte-query', () => ({ createQuery: mocks.createQuery }));
-vi.mock('$lib/api/namespaces', () => ({
+vi.mock('#lib/api/namespaces.js', () => ({
 	listNamespaces: mocks.listNamespaces,
 	previewNamespaceStorage: mocks.previewNamespaceStorage
 }));

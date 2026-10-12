@@ -1,6 +1,6 @@
 import { describe, expect, test, vi, beforeEach } from 'vitest';
 import { flushSync } from 'svelte';
-import type { LockSession, LockSessionError, LockStatus } from '$lib/api/locks';
+import type { LockSession, LockSessionError, LockStatus } from '#lib/api/locks.js';
 
 type StatusHandler = (lock: LockStatus | null, ownsLock: boolean) => void;
 
@@ -8,7 +8,7 @@ const acquire = vi.fn();
 const close = vi.fn();
 let onStatus: StatusHandler | null = null;
 
-vi.mock('$lib/api/locks', () => ({
+vi.mock('#lib/api/locks.js', () => ({
 	openLockSession: vi.fn(
 		(options: {
 			onStatus: StatusHandler;

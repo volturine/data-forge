@@ -1,5 +1,5 @@
 <script lang="ts">
-	import { css } from '$lib/styles/panda';
+	import { css } from '#lib/styles/panda.js';
 
 	let { kind, message }: { kind: 'success' | 'error'; message: string } = $props();
 </script>

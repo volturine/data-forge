@@ -1,11 +1,11 @@
 <script lang="ts">
-	import type { DownloadConfigData } from '$lib/types/operation-config';
+	import type { DownloadConfigData } from '#lib/types/operation-config.js';
 
 	interface Props {
 		config?: DownloadConfigData;
 	}
 
-	import { css, stepConfig, input } from '$lib/styles/panda';
+	import { css, stepConfig, input } from '#lib/styles/panda.js';
 
 	let { config = $bindable({ format: 'csv', filename: 'download' }) }: Props = $props();
 

@@ -1,7 +1,7 @@
 import { apiRequest } from './client';
 import type { ResultAsync } from 'neverthrow';
 import type { ApiError } from './client';
-import type { SourceType } from '$lib/types/datasource';
+import type { SourceType } from '#lib/types/datasource.js';
 
 export type NodeKind = 'source' | 'output' | 'internal' | 'analysis';
 export type EdgeType = 'uses' | 'produces' | 'chains' | 'consumes_internal';

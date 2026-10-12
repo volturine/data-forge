@@ -1,17 +1,17 @@
 <script lang="ts">
 	import { createQuery } from '@tanstack/svelte-query';
 	import { onDestroy } from 'svelte';
-	import { previewStepData, throwIfAborted, type StepPreviewResponse } from '$lib/api/compute';
-	import { applySteps } from '$lib/utils/pipeline';
-	import { toComputeError } from '$lib/utils/compute-error';
-	import { hashPipeline } from '$lib/utils/hash';
-	import { analysisStore } from '$lib/stores/analysis.svelte';
-	import { datasourceStore } from '$lib/stores/datasource.svelte';
-	import { schemaStore } from '$lib/stores/schema.svelte';
-	import { isNamespaceReady, requireNamespace } from '$lib/stores/namespace.svelte';
-	import { buildAnalysisPipelinePayload } from '$lib/utils/analysis-pipeline';
-	import DataTable from '$lib/components/common/DataTable.svelte';
-	import { css } from '$lib/styles/panda';
+	import { previewStepData, throwIfAborted, type StepPreviewResponse } from '#lib/api/compute.js';
+	import { applySteps } from '#lib/utils/pipeline.js';
+	import { toComputeError } from '#lib/utils/compute-error.js';
+	import { hashPipeline } from '#lib/utils/hash.js';
+	import { analysisStore } from '#lib/stores/analysis.svelte.js';
+	import { datasourceStore } from '#lib/stores/datasource.svelte.js';
+	import { schemaStore } from '#lib/stores/schema.svelte.js';
+	import { isNamespaceReady, requireNamespace } from '#lib/stores/namespace.svelte.js';
+	import { buildAnalysisPipelinePayload } from '#lib/utils/analysis-pipeline.js';
+	import DataTable from '#lib/components/common/DataTable.svelte';
+	import { css } from '#lib/styles/panda.js';
 
 	interface Props {
 		analysisId: string;

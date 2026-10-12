@@ -7,16 +7,16 @@ import { createRequestTrace } from '../../../tests/utils/request-trace';
 
 const mockTrack = vi.fn();
 
-vi.mock('$lib/utils/audit-log', () => ({
+vi.mock('#lib/utils/audit-log.js', () => ({
 	track: (...args: unknown[]) => mockTrack(...args)
 }));
 
-vi.mock('$lib/stores/clientIdentity.svelte', () => ({
+vi.mock('#lib/stores/clientIdentity.svelte.js', () => ({
 	getClientIdentity: () => ({ clientId: 'client-1', clientSignature: 'signature-1' }),
 	getEditorClientId: () => 'editor-client-1'
 }));
 
-vi.mock('$lib/stores/namespace.svelte', () => ({
+vi.mock('#lib/stores/namespace.svelte.js', () => ({
 	requireNamespace: () => 'ns-a',
 	isNamespaceReady: () => true
 }));

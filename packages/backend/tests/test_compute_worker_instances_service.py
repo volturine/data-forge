@@ -56,7 +56,7 @@ def _compute_worker_instance(worker_id: str, namespace: str, resource_id: str, *
         analysis_id=resource_id,
         compute_worker_scope='analysis_interactive',
         compute_worker_reuse_policy='shared',
-        status=ComputeWorkerInstanceStatus.RUNNING.value,
+        status=ComputeWorkerInstanceStatus.RUNNING,
         current_job_id=f'job-{resource_id}',
         current_build_id=f'build-{resource_id}',
         current_compute_worker_run_id=f'run-{resource_id}',

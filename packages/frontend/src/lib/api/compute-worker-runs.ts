@@ -1,7 +1,7 @@
 import { apiRequest } from './client';
 import type { ApiError } from './client';
 import type { ResultAsync } from 'neverthrow';
-import { isNamespaceReady, requireNamespace } from '$lib/stores/namespace.svelte';
+import { isNamespaceReady, requireNamespace } from '#lib/stores/namespace.svelte.js';
 import { shareInFlight } from './in-flight';
 
 export interface ComputeWorkerRunExecutionEntry {

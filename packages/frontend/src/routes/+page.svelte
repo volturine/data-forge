@@ -1,7 +1,7 @@
 <script lang="ts">
 	import { createQuery, useQueryClient } from '@tanstack/svelte-query';
 	import { goto } from '$app/navigation';
-	import { idbGet, idbSet } from '$lib/utils/indexeddb';
+	import { idbGet, idbSet } from '#lib/utils/indexeddb.js';
 	import { SvelteMap, SvelteSet } from 'svelte/reactivity';
 	import { resolve } from '$app/paths';
 	import {
@@ -10,23 +10,23 @@
 		favoriteAnalysis,
 		listAnalyses,
 		unfavoriteAnalysis
-	} from '$lib/api/analysis';
-	import GalleryGrid from '$lib/components/gallery/GalleryGrid.svelte';
-	import EmptyState from '$lib/components/gallery/EmptyState.svelte';
-	import AnalysisFilters from '$lib/components/gallery/AnalysisFilters.svelte';
-	import ConfirmDialog from '$lib/components/common/ConfirmDialog.svelte';
-	import BaseModal from '$lib/components/ui/BaseModal.svelte';
-	import PanelHeader from '$lib/components/ui/PanelHeader.svelte';
-	import PanelFooter from '$lib/components/ui/PanelFooter.svelte';
+	} from '#lib/api/analysis.js';
+	import GalleryGrid from '#lib/components/gallery/GalleryGrid.svelte';
+	import EmptyState from '#lib/components/gallery/EmptyState.svelte';
+	import AnalysisFilters from '#lib/components/gallery/AnalysisFilters.svelte';
+	import ConfirmDialog from '#lib/components/common/ConfirmDialog.svelte';
+	import BaseModal from '#lib/components/ui/BaseModal.svelte';
+	import PanelHeader from '#lib/components/ui/PanelHeader.svelte';
+	import PanelFooter from '#lib/components/ui/PanelFooter.svelte';
 	import { Plus } from '@lucide/svelte';
-	import type { SortOption } from '$lib/components/gallery/AnalysisFilters.svelte';
-	import type { AnalysisGalleryItem } from '$lib/types/analysis';
-	import { toEpochDisplay } from '$lib/utils/datetime';
-	import Callout from '$lib/components/ui/Callout.svelte';
-	import { button, css, input, spinner } from '$lib/styles/panda';
-	import { favoriteStore } from '$lib/stores/favorites.svelte';
-	import { useNamespace } from '$lib/stores/namespace.svelte';
-	import { timestampedAnalysisName } from '$lib/utils/analysis-name';
+	import type { SortOption } from '#lib/components/gallery/AnalysisFilters.svelte';
+	import type { AnalysisGalleryItem } from '#lib/types/analysis.js';
+	import { toEpochDisplay } from '#lib/utils/datetime.js';
+	import Callout from '#lib/components/ui/Callout.svelte';
+	import { button, css, input, spinner } from '#lib/styles/panda.js';
+	import { favoriteStore } from '#lib/stores/favorites.svelte.js';
+	import { useNamespace } from '#lib/stores/namespace.svelte.js';
+	import { timestampedAnalysisName } from '#lib/utils/analysis-name.js';
 
 	const queryClient = useQueryClient();
 	const ns = useNamespace();
@@ -177,9 +177,11 @@
 		// but the gallery and sidebar must not wait for a slow control-plane
 		// round-trip before reflecting a click.
 		favoriteStore.apply(id, next);
+
 		queryClient.setQueryData<AnalysisGalleryItem[]>(analysesKey, (current) =>
 			current?.map((item) => (item.id === id ? { ...item, is_favorite: next } : item))
 		);
+
 		queryClient.setQueryData<AnalysisGalleryItem[]>(favoritesKey, (current) => {
 			if (!current && !analysis) return current;
 			const existing = current ?? [];
@@ -323,7 +325,7 @@
 		result.match(
 			(analysis) => {
 				duplicateSource = null;
-				void goto(resolve(`/analysis/${analysis.id}`), { invalidateAll: false });
+				void goto(resolve(`analysis/${analysis.id}`), { refreshAll: false });
 			},
 			(err) => {
 				duplicateError = err.message;
@@ -379,7 +381,7 @@
 			</p>
 		</div>
 		<a
-			href={resolve('/analysis/new')}
+			href={resolve('analysis/new')}
 			class={css({
 				width: '100%',
 				justifyContent: 'center',
@@ -459,7 +461,7 @@
 			</div>
 		{:else if query.data}
 			{#if query.data.length === 0}
-				<EmptyState onCreate={() => void goto(resolve('/analysis/new'))} />
+				<EmptyState onCreate={() => void goto(resolve('analysis/new'))} />
 			{:else}
 				<AnalysisFilters
 					{searchQuery}
@@ -578,9 +580,10 @@
 	</div>
 
 	<PanelFooter>
-		<button type="button" class={button({ variant: 'secondary' })} onclick={closeDuplicate}>
-			Cancel
-		</button>
+		<button type="button" class={button({ variant: 'secondary' })} onclick={closeDuplicate}
+			>Cancel</button
+		>
+
 		<button
 			type="button"
 			class={button({ variant: 'primary' })}

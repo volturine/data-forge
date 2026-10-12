@@ -1,4 +1,4 @@
-import { getTimezoneSettings } from '$lib/utils/datetime';
+import { getTimezoneSettings } from '#lib/utils/datetime.js';
 
 const TIMESTAMP_SUFFIX_RE = / · [A-Z][a-z]{2} \d{1,2}, \d{4}, \d{2}:\d{2}:\d{2}\.\d{3}( UTC)?$/;
 

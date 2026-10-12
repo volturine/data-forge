@@ -1,7 +1,7 @@
 <script lang="ts">
-	import FileTypeBadge from '$lib/components/common/FileTypeBadge.svelte';
-	import type { FileType } from '$lib/utils/file-types';
-	import { css, label, stepConfig, input } from '$lib/styles/panda';
+	import FileTypeBadge from '#lib/components/common/FileTypeBadge.svelte';
+	import type { FileType } from '#lib/utils/file-types.js';
+	import { css, label, stepConfig, input } from '#lib/styles/panda.js';
 
 	interface Props {
 		config?: {

@@ -1,4 +1,4 @@
-import { getStepTypeConfig } from '$lib/components/pipeline/utils';
+import { getStepTypeConfig } from '#lib/components/pipeline/utils.js';
 
 const UUID_LIKE_PATTERN = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i;
 const OPAQUE_ID_PATTERN = /^(step[-_][0-9a-f-]+|[0-9a-f]{16,})$/i;

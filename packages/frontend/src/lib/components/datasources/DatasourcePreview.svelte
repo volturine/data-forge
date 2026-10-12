@@ -1,14 +1,14 @@
 <script lang="ts">
 	import { createQuery, useQueryClient } from '@tanstack/svelte-query';
 	import { onDestroy } from 'svelte';
-	import type { StepPreviewRequest, StepPreviewResponse } from '$lib/api/compute';
-	import DataTable from '$lib/components/common/DataTable.svelte';
-	import ColumnStatsPanel from '$lib/components/datasources/ColumnStatsPanel.svelte';
-	import { datasourceHasMaterializedSnapshot, type DataSource } from '$lib/types/datasource';
-	import { useNamespace } from '$lib/stores/namespace.svelte';
-	import { buildDatasourcePreviewPipelinePayload } from '$lib/utils/analysis-pipeline';
-	import { fetchPreviewQueryData } from '$lib/utils/preview-query';
-	import { css } from '$lib/styles/panda';
+	import type { StepPreviewRequest, StepPreviewResponse } from '#lib/api/compute.js';
+	import DataTable from '#lib/components/common/DataTable.svelte';
+	import ColumnStatsPanel from '#lib/components/datasources/ColumnStatsPanel.svelte';
+	import { datasourceHasMaterializedSnapshot, type DataSource } from '#lib/types/datasource.js';
+	import { useNamespace } from '#lib/stores/namespace.svelte.js';
+	import { buildDatasourcePreviewPipelinePayload } from '#lib/utils/analysis-pipeline.js';
+	import { fetchPreviewQueryData } from '#lib/utils/preview-query.js';
+	import { css } from '#lib/styles/panda.js';
 
 	interface Props {
 		datasourceId: string;

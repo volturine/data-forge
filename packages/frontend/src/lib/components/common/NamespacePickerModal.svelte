@@ -3,11 +3,11 @@
 	import { createQuery } from '@tanstack/svelte-query';
 	import { Debounced } from 'runed';
 	import { tick } from 'svelte';
-	import BaseModal from '$lib/components/ui/BaseModal.svelte';
-	import PanelHeader from '$lib/components/ui/PanelHeader.svelte';
-	import { listNamespaces, previewNamespaceStorage } from '$lib/api/namespaces';
-	import { NAMESPACE_NAME_RULES, normalizeNamespace } from '$lib/utils/namespace';
-	import { button, css } from '$lib/styles/panda';
+	import BaseModal from '#lib/components/ui/BaseModal.svelte';
+	import PanelHeader from '#lib/components/ui/PanelHeader.svelte';
+	import { listNamespaces, previewNamespaceStorage } from '#lib/api/namespaces.js';
+	import { NAMESPACE_NAME_RULES, normalizeNamespace } from '#lib/utils/namespace.js';
+	import { button, css } from '#lib/styles/panda.js';
 
 	interface Props {
 		open: boolean;

@@ -1,4 +1,4 @@
-import { formatEpoch, parsePlainDateTime } from '$lib/utils/temporal';
+import { formatEpoch, parsePlainDateTime } from '#lib/utils/temporal.js';
 import { stringValue, type ChartRow } from './preparation';
 
 export type ChartConfig = Record<string, unknown>;

@@ -1,5 +1,5 @@
 import { describe, test, expect } from 'vitest';
-import type { PipelineStep } from '$lib/types/analysis';
+import type { PipelineStep } from '#lib/types/analysis.js';
 import { applySteps } from './pipeline';
 
 function step(overrides: Partial<PipelineStep> = {}): PipelineStep {

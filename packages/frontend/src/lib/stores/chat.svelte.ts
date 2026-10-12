@@ -8,16 +8,16 @@ import {
 	listModels,
 	listSessions,
 	confirmTool
-} from '$lib/api/chat';
-import type { ChatEvent, ChatUiPatchEvent, ChatModel, ChatSessionInfo } from '$lib/api/chat';
-import { getSettings, updateSettings, isMasked } from '$lib/api/settings';
-import type { AppSettings } from '$lib/api/settings';
-import { listTools } from '$lib/api/mcp';
-import type { MCPTool } from '$lib/api/mcp';
-import { analysisStore } from '$lib/stores/analysis.svelte';
-import { schemaStore } from '$lib/stores/schema.svelte';
-import type { Schema } from '$lib/types/schema';
-import { nowEpochMs } from '$lib/utils/temporal';
+} from '#lib/api/chat.js';
+import type { ChatEvent, ChatUiPatchEvent, ChatModel, ChatSessionInfo } from '#lib/api/chat.js';
+import { getSettings, updateSettings, isMasked } from '#lib/api/settings.js';
+import type { AppSettings } from '#lib/api/settings.js';
+import { listTools } from '#lib/api/mcp.js';
+import type { MCPTool } from '#lib/api/mcp.js';
+import { analysisStore } from '#lib/stores/analysis.svelte.js';
+import { schemaStore } from '#lib/stores/schema.svelte.js';
+import type { Schema } from '#lib/types/schema.js';
+import { nowEpochMs } from '#lib/utils/temporal.js';
 import { SvelteSet, SvelteMap } from 'svelte/reactivity';
 
 const SESSION_KEY = 'chat_session_id';

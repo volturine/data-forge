@@ -1,5 +1,5 @@
 import { describe, expect, test } from 'vitest';
-import type { DataSource } from '$lib/types/datasource';
+import type { DataSource } from '#lib/types/datasource.js';
 import { rankDatasources } from './datasource-picker';
 
 function ds(name: string, createdAt: string, lastDataUpdate: string | null = null): DataSource {

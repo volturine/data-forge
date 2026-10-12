@@ -1,5 +1,5 @@
 import { describe, test, expect, vi, beforeEach } from 'vitest';
-import type { Schema } from '$lib/types/schema';
+import type { Schema } from '#lib/types/schema.js';
 
 let mockPipeline: Array<{
 	id: string;
@@ -15,7 +15,7 @@ const mockSourceSchemas = new Map<
 	{ columns: Array<{ name: string; dtype: string; nullable: boolean }>; row_count: number | null }
 >();
 
-vi.mock('$lib/stores/analysis.svelte', () => ({
+vi.mock('#lib/stores/analysis.svelte.js', () => ({
 	analysisStore: {
 		get activeTab() {
 			return mockActiveTab;
@@ -32,7 +32,7 @@ vi.mock('$lib/stores/analysis.svelte', () => ({
 	}
 }));
 
-vi.mock('$lib/utils/column-types', () => ({
+vi.mock('#lib/utils/column-types.js', () => ({
 	resolveColumnType: (type?: string | null) => type ?? 'Any'
 }));
 

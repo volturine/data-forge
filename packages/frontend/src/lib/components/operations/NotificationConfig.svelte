@@ -1,15 +1,15 @@
 <script lang="ts">
-	import type { Schema } from '$lib/types/schema';
-	import type { Subscriber } from '$lib/api/settings';
-	import type { NotificationConfigData } from '$lib/types/operation-config';
-	import { getSubscribers } from '$lib/api/settings';
+	import type { Schema } from '#lib/types/schema.js';
+	import type { Subscriber } from '#lib/api/settings.js';
+	import type { NotificationConfigData } from '#lib/types/operation-config.js';
+	import { getSubscribers } from '#lib/api/settings.js';
 	import { createQuery } from '@tanstack/svelte-query';
-	import ColumnDropdown from '$lib/components/common/ColumnDropdown.svelte';
-	import MultiSelectColumnDropdown from '$lib/components/common/MultiSelectColumnDropdown.svelte';
-	import Callout from '$lib/components/ui/Callout.svelte';
-	import ToggleButton from '$lib/components/ui/ToggleButton.svelte';
+	import ColumnDropdown from '#lib/components/common/ColumnDropdown.svelte';
+	import MultiSelectColumnDropdown from '#lib/components/common/MultiSelectColumnDropdown.svelte';
+	import Callout from '#lib/components/ui/Callout.svelte';
+	import ToggleButton from '#lib/components/ui/ToggleButton.svelte';
 	import { Search } from '@lucide/svelte';
-	import { css, input, label, stepConfig } from '$lib/styles/panda';
+	import { css, input, label, stepConfig } from '#lib/styles/panda.js';
 
 	interface Props {
 		config?: NotificationConfigData;

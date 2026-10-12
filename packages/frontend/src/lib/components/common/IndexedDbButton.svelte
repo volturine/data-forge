@@ -1,11 +1,11 @@
 <script lang="ts">
 	import { onDestroy } from 'svelte';
 	import { Check, Copy, Database, LoaderCircle, X } from '@lucide/svelte';
-	import { configStore } from '$lib/stores/config.svelte';
-	import { idbEntries, idbDelete, idbClear } from '$lib/utils/indexeddb';
-	import { css, emptyText, iconButton } from '$lib/styles/panda';
-	import { overlayStack } from '$lib/stores/overlay.svelte';
-	import type { OverlayConfig } from '$lib/stores/overlay.svelte';
+	import { configStore } from '#lib/stores/config.svelte.js';
+	import { idbEntries, idbDelete, idbClear } from '#lib/utils/indexeddb.js';
+	import { css, emptyText, iconButton } from '#lib/styles/panda.js';
+	import { overlayStack } from '#lib/stores/overlay.svelte.js';
+	import type { OverlayConfig } from '#lib/stores/overlay.svelte.js';
 
 	let open = $state(false);
 	let entries = $state.raw<Array<{ key: string; value: unknown }>>([]);

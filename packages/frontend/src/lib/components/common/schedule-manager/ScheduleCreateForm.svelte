@@ -1,10 +1,10 @@
 <script lang="ts">
 	import { createMutation, useQueryClient } from '@tanstack/svelte-query';
-	import { createSchedule } from '$lib/api/schedule';
-	import type { Schedule, ScheduleCreate } from '$lib/api/schedule';
-	import type { DataSource } from '$lib/types/datasource';
+	import { createSchedule } from '#lib/api/schedule.js';
+	import type { Schedule, ScheduleCreate } from '#lib/api/schedule.js';
+	import type { DataSource } from '#lib/types/datasource.js';
 	import { ArrowRight, ChartColumn, Clock, Database, FileText, Link } from '@lucide/svelte';
-	import { css, label } from '$lib/styles/panda';
+	import { css, label } from '#lib/styles/panda.js';
 	import { getCronDescription, depLabel, depOptions } from './schedule-utils';
 
 	const defaultCron = '0 * * * *';

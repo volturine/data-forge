@@ -1,6 +1,6 @@
 <script lang="ts">
-	import { css } from '$lib/styles/panda';
-	import 'styled-system/styles.css';
+	import { css } from '#lib/styles/panda.js';
+	import '../../../styled-system/styles.css';
 
 	let { children } = $props();
 </script>

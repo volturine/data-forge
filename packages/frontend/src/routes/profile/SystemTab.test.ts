@@ -18,17 +18,17 @@ const mockUpdateSettings = vi.fn();
 const mockListInternalPostgresTables = vi.fn();
 const mockToggleInternalPostgresTable = vi.fn();
 
-vi.mock('$lib/api/settings', () => ({
+vi.mock('#lib/api/settings.js', () => ({
 	getSettings: (...args: unknown[]) => mockGetSettings(...args),
 	updateSettings: (...args: unknown[]) => mockUpdateSettings(...args)
 }));
 
-vi.mock('$lib/api/datasource', () => ({
+vi.mock('#lib/api/datasource.js', () => ({
 	listInternalPostgresTables: (...args: unknown[]) => mockListInternalPostgresTables(...args),
 	toggleInternalPostgresTable: (...args: unknown[]) => mockToggleInternalPostgresTable(...args)
 }));
 
-vi.mock('$lib/stores/namespace.svelte', () => ({
+vi.mock('#lib/stores/namespace.svelte.js', () => ({
 	useNamespace: () => ({
 		ready: true,
 		value: 'default'
@@ -36,7 +36,7 @@ vi.mock('$lib/stores/namespace.svelte', () => ({
 }));
 
 const mockConfigRefresh = vi.fn().mockResolvedValue(undefined);
-vi.mock('$lib/stores/config.svelte', () => ({
+vi.mock('#lib/stores/config.svelte.js', () => ({
 	configStore: {
 		refresh: (...args: unknown[]) => mockConfigRefresh(...args)
 	}

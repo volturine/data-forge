@@ -1,10 +1,10 @@
-import { browser } from '$app/environment';
+import { browser } from '$app/env';
 import { ResultAsync, errAsync, okAsync } from 'neverthrow';
-import { getClientIdentity } from '$lib/stores/clientIdentity.svelte';
-import { configStore } from '$lib/stores/config.svelte';
-import { idbGet, idbSet } from '$lib/utils/indexeddb';
-import { nowEpochMs } from '$lib/utils/temporal';
-import { uuid } from '$lib/utils/uuid';
+import { getClientIdentity } from '#lib/stores/clientIdentity.svelte.js';
+import { configStore } from '#lib/stores/config.svelte.js';
+import { idbGet, idbSet } from '#lib/utils/indexeddb.js';
+import { nowEpochMs } from '#lib/utils/temporal.js';
+import { uuid } from '#lib/utils/uuid.js';
 
 export type AuditField = {
 	name: string;
@@ -197,14 +197,16 @@ export function flush() {
 
 export function setAuditPage(path: string) {
 	state.page = path;
-	pushLog({ event: 'page_view', page: path, session_id: ensureSessionId() });
+
+	pushLog({
+		event: 'page_view',
+		page: path,
+		session_id: ensureSessionId()
+	});
 }
 
 export function track(event: AuditLogItem) {
-	pushLog({
-		...event,
-		page: event.page ?? state.page
-	});
+	pushLog({ ...event, page: event.page ?? state.page });
 }
 
 export function installAuditListeners(): (() => void) | undefined {

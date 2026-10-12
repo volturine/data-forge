@@ -7,26 +7,26 @@ const mockApiBlobRequest = vi.fn();
 const mockRetain = vi.fn();
 const mockRelease = vi.fn();
 
-vi.mock('$lib/utils/audit-log', () => ({
+vi.mock('#lib/utils/audit-log.js', () => ({
 	track: (...args: unknown[]) => mockTrack(...args)
 }));
 
-vi.mock('$lib/stores/clientIdentity.svelte', () => ({
+vi.mock('#lib/stores/clientIdentity.svelte.js', () => ({
 	getClientIdentity: () => ({ clientId: 'client-1', clientSignature: 'signature-1' }),
 	getEditorClientId: () => 'editor-client-1'
 }));
 
-vi.mock('$lib/stores/namespace.svelte', () => ({
+vi.mock('#lib/stores/namespace.svelte.js', () => ({
 	requireNamespace: () => 'default',
 	isNamespaceReady: () => true
 }));
 
-vi.mock('$lib/api/client', () => ({
+vi.mock('#lib/api/client.js', () => ({
 	apiRequest: (...args: unknown[]) => mockApiRequest(...args),
 	apiBlobRequest: (...args: unknown[]) => mockApiBlobRequest(...args)
 }));
 
-vi.mock('$lib/stores/compute-activity.svelte', () => ({
+vi.mock('#lib/stores/compute-activity.svelte.js', () => ({
 	computeActivityStore: {
 		track: <T>(result: T) => {
 			mockRetain();

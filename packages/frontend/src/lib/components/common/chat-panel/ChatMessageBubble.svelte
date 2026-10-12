@@ -1,10 +1,10 @@
 <script lang="ts">
 	import { CircleAlert, Copy, ClipboardCheck, Play, Eye } from '@lucide/svelte';
 	import { onDestroy } from 'svelte';
-	import { css } from '$lib/styles/panda';
-	import { chatStore } from '$lib/stores/chat.svelte';
-	import type { ChatMessage } from '$lib/stores/chat.svelte';
-	import { renderMarkdown, timeAgo } from '$lib/utils/markdown';
+	import { css } from '#lib/styles/panda.js';
+	import { chatStore } from '#lib/stores/chat.svelte.js';
+	import type { ChatMessage } from '#lib/stores/chat.svelte.js';
+	import { renderMarkdown, timeAgo } from '#lib/utils/markdown.js';
 
 	interface Props {
 		msg: ChatMessage;

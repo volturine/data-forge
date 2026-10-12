@@ -1,13 +1,13 @@
-import { analysisStore } from '$lib/stores/analysis.svelte';
-import type { PipelineStep, AnalysisTab } from '$lib/types/analysis';
-import { getDefaultConfig } from '$lib/utils/step-config-defaults';
-import { buildOutputConfig, generateOutputName } from '$lib/utils/analysis-tab';
-import { isChartStep } from '$lib/components/pipeline/utils';
-import { nowEpochMs } from '$lib/utils/temporal';
-import { uuid } from '$lib/utils/uuid';
-import { cloneJson } from '$lib/utils/json';
-import type { ClipboardStep } from '$lib/components/pipeline/PipelineCanvas.svelte';
-import type { DropTarget } from '$lib/stores/drag.svelte';
+import { analysisStore } from '#lib/stores/analysis.svelte.js';
+import type { PipelineStep, AnalysisTab } from '#lib/types/analysis.js';
+import { getDefaultConfig } from '#lib/utils/step-config-defaults.js';
+import { buildOutputConfig, generateOutputName } from '#lib/utils/analysis-tab.js';
+import { isChartStep } from '#lib/components/pipeline/utils.js';
+import { nowEpochMs } from '#lib/utils/temporal.js';
+import { uuid } from '#lib/utils/uuid.js';
+import { cloneJson } from '#lib/utils/json.js';
+import type { ClipboardStep } from '#lib/components/pipeline/PipelineCanvas.svelte';
+import type { DropTarget } from '#lib/stores/drag.svelte.js';
 
 export type AnalysisEditorActionsDeps = {
 	analysisId: () => string | null;

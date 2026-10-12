@@ -1,7 +1,7 @@
-import type { Schema } from '$lib/types/schema';
-import type { PipelineStep } from '$lib/types/analysis';
-import type { ColumnInfo } from '$lib/types/schema';
-import { isChartStep } from '$lib/components/pipeline/utils';
+import type { Schema } from '#lib/types/schema.js';
+import type { PipelineStep } from '#lib/types/analysis.js';
+import type { ColumnInfo } from '#lib/types/schema.js';
+import { isChartStep } from '#lib/components/pipeline/utils.js';
 import {
 	emptySchema,
 	unionByName,
@@ -10,7 +10,7 @@ import {
 	rightJoinSchema,
 	outerJoinSchema,
 	crossJoinSchema
-} from '$lib/types/schema';
+} from '#lib/types/schema.js';
 
 export interface StepConfig {
 	conditions?: Array<{ column: string; operator: string; value: string }>;

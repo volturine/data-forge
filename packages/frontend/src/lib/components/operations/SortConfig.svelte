@@ -1,10 +1,10 @@
 <script lang="ts">
-	import type { Schema } from '$lib/types/schema';
+	import type { Schema } from '#lib/types/schema.js';
 	import { X, Plus, ArrowUp, ArrowDown } from '@lucide/svelte';
-	import ColumnDropdown from '$lib/components/common/ColumnDropdown.svelte';
-	import SectionHeader from '$lib/components/ui/SectionHeader.svelte';
-	import ToggleButton from '$lib/components/ui/ToggleButton.svelte';
-	import { css, emptyText, stepConfig } from '$lib/styles/panda';
+	import ColumnDropdown from '#lib/components/common/ColumnDropdown.svelte';
+	import SectionHeader from '#lib/components/ui/SectionHeader.svelte';
+	import ToggleButton from '#lib/components/ui/ToggleButton.svelte';
+	import { css, emptyText, stepConfig } from '#lib/styles/panda.js';
 
 	const uid = $props.id();
 

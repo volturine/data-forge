@@ -1,10 +1,10 @@
 import { afterEach, beforeEach, describe, expect, test, vi } from 'vitest';
 import { BuildsStore } from './builds.svelte';
-import type { BuildRunSummary } from '$lib/types/build-stream';
+import type { BuildRunSummary } from '#lib/types/build-stream.js';
 
 const mockListBuilds = vi.fn();
 
-vi.mock('$lib/api/builds', () => ({
+vi.mock('#lib/api/builds.js', () => ({
 	listBuilds: (...args: unknown[]) => mockListBuilds(...args)
 }));
 

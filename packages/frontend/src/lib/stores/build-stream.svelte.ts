@@ -9,19 +9,19 @@ import type {
 	BuildRunDetail,
 	BuildDetailSnapshot,
 	QueryPlan
-} from '$lib/types/build-stream';
+} from '#lib/types/build-stream.js';
 import {
 	buildResultStatusFromLifecycle,
 	coerceBuildStepState,
 	isTerminalBuildStatus
-} from '$lib/types/build-stream';
+} from '#lib/types/build-stream.js';
 import {
 	connectBuildDetailStream,
 	getRuntimeBuild,
 	startRuntimeBuild
-} from '$lib/api/build-stream';
-import type { BuildRequest, CancelBuildResponse } from '$lib/api/compute';
-import { computeActivityStore } from '$lib/stores/compute-activity.svelte';
+} from '#lib/api/build-stream.js';
+import type { BuildRequest, CancelBuildResponse } from '#lib/api/compute.js';
+import { computeActivityStore } from '#lib/stores/compute-activity.svelte.js';
 import { ReconnectionManager } from './reconnection-manager';
 
 const MAX_LOGS = 500;

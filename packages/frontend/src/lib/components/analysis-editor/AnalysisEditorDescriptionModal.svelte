@@ -1,7 +1,7 @@
 <script lang="ts">
-	import BaseModal from '$lib/components/ui/BaseModal.svelte';
+	import BaseModal from '#lib/components/ui/BaseModal.svelte';
 	import { X } from '@lucide/svelte';
-	import { css, button } from '$lib/styles/panda';
+	import { css, button } from '#lib/styles/panda.js';
 
 	interface Props {
 		open: boolean;

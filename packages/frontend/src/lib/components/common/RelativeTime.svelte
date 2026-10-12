@@ -1,8 +1,8 @@
 <script lang="ts">
 	import { onMount } from 'svelte';
-	import { formatDateDisplay, formatDateTimeDisplay, toEpochDisplay } from '$lib/utils/datetime';
-	import { formatRelativeTime } from '$lib/utils/relative-time';
-	import { css } from '$lib/styles/panda';
+	import { formatDateDisplay, formatDateTimeDisplay, toEpochDisplay } from '#lib/utils/datetime.js';
+	import { formatRelativeTime } from '#lib/utils/relative-time.js';
+	import { css } from '#lib/styles/panda.js';
 
 	interface Props {
 		timestamp: string | number;

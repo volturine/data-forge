@@ -13,15 +13,15 @@
 		ClipboardCheck
 	} from '@lucide/svelte';
 	import { onDestroy } from 'svelte';
-	import { css } from '$lib/styles/panda';
-	import { chatStore } from '$lib/stores/chat.svelte';
-	import type { ToolCall } from '$lib/stores/chat.svelte';
+	import { css } from '#lib/styles/panda.js';
+	import { chatStore } from '#lib/stores/chat.svelte.js';
+	import type { ToolCall } from '#lib/stores/chat.svelte.js';
 	import {
 		formatDuration,
 		methodColor,
 		resultSummary,
 		toolDisplayName
-	} from '$lib/chat/presentation';
+	} from '#lib/chat/presentation.js';
 
 	interface Props {
 		tc: ToolCall;

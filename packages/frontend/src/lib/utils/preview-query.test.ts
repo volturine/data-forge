@@ -1,9 +1,9 @@
 import { afterEach, describe, expect, test, vi } from 'vitest';
 import { CancelledError, QueryClient } from '@tanstack/svelte-query';
 import { err, okAsync, ResultAsync, type Result } from 'neverthrow';
-import type { ApiError } from '$lib/api/client';
-import type { StepPreviewRequest, StepPreviewResponse } from '$lib/api/compute';
-import * as computeApi from '$lib/api/compute';
+import type { ApiError } from '#lib/api/client.js';
+import type { StepPreviewRequest, StepPreviewResponse } from '#lib/api/compute.js';
+import * as computeApi from '#lib/api/compute.js';
 import { fetchPreviewQueryData } from './preview-query';
 
 const previewStepData = vi.spyOn(computeApi, 'previewStepData');

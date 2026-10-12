@@ -1,10 +1,10 @@
 <script lang="ts">
-	import type { Schema } from '$lib/types/schema';
-	import type { DropConfigData } from '$lib/types/operation-config';
+	import type { Schema } from '#lib/types/schema.js';
+	import type { DropConfigData } from '#lib/types/operation-config.js';
 	import { TriangleAlert } from '@lucide/svelte';
-	import MultiSelectColumnDropdown from '$lib/components/common/MultiSelectColumnDropdown.svelte';
-	import Callout from '$lib/components/ui/Callout.svelte';
-	import { css, stepConfig } from '$lib/styles/panda';
+	import MultiSelectColumnDropdown from '#lib/components/common/MultiSelectColumnDropdown.svelte';
+	import Callout from '#lib/components/ui/Callout.svelte';
+	import { css, stepConfig } from '#lib/styles/panda.js';
 
 	interface Props {
 		schema: Schema;

@@ -1,8 +1,8 @@
 import { apiRequest } from './client';
 import type { ApiError } from './client';
 import type { ResultAsync } from 'neverthrow';
-import { isNamespaceReady, requireNamespace } from '$lib/stores/namespace.svelte';
-import type { BuildRunDetail, BuildRunListResponse } from '$lib/types/build-stream';
+import { isNamespaceReady, requireNamespace } from '#lib/stores/namespace.svelte.js';
+import type { BuildRunDetail, BuildRunListResponse } from '#lib/types/build-stream.js';
 import { shareInFlight } from './in-flight';
 
 export interface ListBuildsParams {

@@ -1,12 +1,12 @@
 import { describe, test, expect, vi, beforeEach } from 'vitest';
-import type { DataSource, SchemaInfo } from '$lib/types/datasource';
+import type { DataSource, SchemaInfo } from '#lib/types/datasource.js';
 
 const mockListDatasources = vi.fn();
 const mockUploadFile = vi.fn();
 const mockGetDatasourceSchema = vi.fn();
 const mockDeleteDatasource = vi.fn();
 
-vi.mock('$lib/api/datasource', () => ({
+vi.mock('#lib/api/datasource.js', () => ({
 	listDatasources: (...args: unknown[]) => mockListDatasources(...args),
 	uploadFile: (...args: unknown[]) => mockUploadFile(...args),
 	getDatasourceSchema: (...args: unknown[]) => mockGetDatasourceSchema(...args),

@@ -1,16 +1,16 @@
 import { describe, test, expect, vi, beforeEach } from 'vitest';
 import { render, screen, fireEvent } from '@testing-library/svelte';
 import DatasourceConfigPanel from './DatasourceConfigPanel.svelte';
-import type { DataSource, SchemaInfo } from '$lib/types/datasource';
+import type { DataSource, SchemaInfo } from '#lib/types/datasource.js';
 
-vi.mock('$lib/stores/namespace.svelte', () => ({
+vi.mock('#lib/stores/namespace.svelte.js', () => ({
 	requireNamespace: () => 'default',
 	isNamespaceReady: () => true,
 	useNamespace: () => ({ value: 'default', switching: false })
 }));
 
-vi.mock('$lib/components/datasources/ColumnStatsPanel.svelte', async () => ({
-	default: (await import('$lib/test-utils/stubs/IconStub.svelte')).default
+vi.mock('#lib/components/datasources/ColumnStatsPanel.svelte', async () => ({
+	default: (await import('#lib/test-utils/stubs/IconStub.svelte')).default
 }));
 
 const mockGetDatasource = vi.fn();
@@ -19,7 +19,7 @@ const mockIngestDatasource = vi.fn();
 const mockUpdateDatasource = vi.fn();
 const mockUpdateDatasourceColumnDescriptions = vi.fn();
 
-vi.mock('$lib/api/datasource', () => ({
+vi.mock('#lib/api/datasource.js', () => ({
 	getDatasource: (...args: unknown[]) => mockGetDatasource(...args),
 	getDatasourceSchema: (...args: unknown[]) => mockGetDatasourceSchema(...args),
 	ingestDatasource: (...args: unknown[]) => mockIngestDatasource(...args),
@@ -36,7 +36,7 @@ let mockBuilds: unknown[] = [];
 let mockBuildStatus = 'disconnected';
 let mockBuildError: string | null = null;
 
-vi.mock('$lib/stores/builds.svelte', () => ({
+vi.mock('#lib/stores/builds.svelte.js', () => ({
 	BuildsStore: class {
 		get builds() {
 			return mockBuilds;

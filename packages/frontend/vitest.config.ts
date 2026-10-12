@@ -9,9 +9,9 @@ export default defineConfig({
 	plugins: [svelte({ compilerOptions: { runes: true } }), svelteTesting()],
 	resolve: {
 		alias: {
-			$lib: resolve(import.meta.dirname, 'src/lib'),
+			'#lib': resolve(import.meta.dirname, 'src/lib'),
 			'@lucide/svelte': resolve(stub, 'lucide.ts'),
-			'$app/environment': resolve(stub, 'app-environment.ts'),
+			'$app/env': resolve(stub, 'app-environment.ts'),
 			'$app/paths': resolve(stub, 'app-paths.ts'),
 			'$app/navigation': resolve(stub, 'app-navigation.ts'),
 			'$app/state': resolve(stub, 'app-state.ts')

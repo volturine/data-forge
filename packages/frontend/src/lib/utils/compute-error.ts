@@ -1,4 +1,4 @@
-import type { ApiError } from '$lib/api/client';
+import type { ApiError } from '#lib/api/client.js';
 
 export class ComputeError extends Error {
 	readonly status?: number;

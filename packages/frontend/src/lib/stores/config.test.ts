@@ -1,9 +1,9 @@
 import { describe, test, expect, vi, beforeEach } from 'vitest';
-import type { FrontendConfig } from '$lib/api/config';
+import type { FrontendConfig } from '#lib/api/config.js';
 
 const mockGetConfig = vi.fn();
 
-vi.mock('$lib/api/config', () => ({
+vi.mock('#lib/api/config.js', () => ({
 	getConfig: (...args: unknown[]) => mockGetConfig(...args)
 }));
 

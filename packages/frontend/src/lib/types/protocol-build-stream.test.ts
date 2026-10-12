@@ -1,10 +1,10 @@
 import { describe, expect, test } from 'vitest';
-import type { BuildEventJson } from '$lib/protocol/dataforge_protocol/compute_pb';
+import type { BuildEventJson } from '#lib/protocol/dataforge_protocol/compute_pb.js';
 import {
 	BUILD_LOG_LEVEL_JSON_TOKENS,
 	BUILD_TAB_STATUS_JSON_TOKENS,
 	COMPUTE_WORKER_RUN_KIND_JSON_TOKENS
-} from '$lib/types/protocol-enum-tokens';
+} from '#lib/types/protocol-enum-tokens.js';
 import { isProtocolBuildEvent, protocolBuildEventToBuildEvent } from './protocol-build-stream';
 
 const BASE_CONTEXT = {

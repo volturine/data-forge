@@ -1,6 +1,6 @@
 <script lang="ts">
-	import type { PipelineStep } from '$lib/types/analysis';
-	import { css } from '$lib/styles/panda';
+	import type { PipelineStep } from '#lib/types/analysis.js';
+	import { css } from '#lib/styles/panda.js';
 	import { getStepTypeConfig } from './utils';
 
 	interface Props {

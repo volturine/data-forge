@@ -1,9 +1,9 @@
 <script lang="ts">
-	import { css, button, input, label, spinner } from '$lib/styles/panda';
-	import { authStore } from '$lib/stores/auth.svelte';
-	import { configStore } from '$lib/stores/config.svelte';
-	import { updateProfile, changePassword, unlinkProvider, getMe } from '$lib/api/auth';
-	import FeedbackBanner from '$lib/components/ui/FeedbackBanner.svelte';
+	import { css, button, input, label, spinner } from '#lib/styles/panda.js';
+	import { authStore } from '#lib/stores/auth.svelte.js';
+	import { configStore } from '#lib/stores/config.svelte.js';
+	import { updateProfile, changePassword, unlinkProvider, getMe } from '#lib/api/auth.js';
+	import FeedbackBanner from '#lib/components/ui/FeedbackBanner.svelte';
 	import { GitBranch } from '@lucide/svelte';
 
 	const editable = $derived(configStore.authRequired);

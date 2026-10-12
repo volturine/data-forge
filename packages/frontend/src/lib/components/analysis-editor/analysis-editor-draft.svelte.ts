@@ -1,9 +1,9 @@
-import { createAsyncGate } from '$lib/utils/async-gate';
-import { idbGet, idbSet, idbDelete } from '$lib/utils/indexeddb';
-import { ensureTabDefaults } from '$lib/utils/analysis-tab';
-import { cloneJson } from '$lib/utils/json';
-import type { AnalysisTab } from '$lib/types/analysis';
-import type { ComputeWorkerResourceConfig } from '$lib/types/compute';
+import { createAsyncGate } from '#lib/utils/async-gate.js';
+import { idbGet, idbSet, idbDelete } from '#lib/utils/indexeddb.js';
+import { ensureTabDefaults } from '#lib/utils/analysis-tab.js';
+import { cloneJson } from '#lib/utils/json.js';
+import type { AnalysisTab } from '#lib/types/analysis.js';
+import type { ComputeWorkerResourceConfig } from '#lib/types/compute.js';
 
 export type AnalysisDraftSnapshot = {
 	analysisId: string | null;

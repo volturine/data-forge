@@ -2,7 +2,7 @@ import {
 	listComputeWorkerRuns,
 	type ComputeWorkerRun,
 	type ListComputeWorkerRunsParams
-} from '$lib/api/compute-worker-runs';
+} from '#lib/api/compute-worker-runs.js';
 import { PaginatedStore } from './paginated-store.svelte';
 
 export class ComputeWorkerRunsStore extends PaginatedStore<

@@ -1,4 +1,4 @@
-import { getMe, login, logout, register, updateProfile, type UserPublic } from '$lib/api/auth';
+import { getMe, login, logout, register, updateProfile, type UserPublic } from '#lib/api/auth.js';
 
 type AuthStatus = 'unknown' | 'authenticated' | 'unauthenticated' | 'failed';
 

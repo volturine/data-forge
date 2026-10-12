@@ -1,20 +1,20 @@
 import { describe, test, expect, vi, beforeEach } from 'vitest';
-import type { AnalysisTab, PipelineStep } from '$lib/types/analysis';
+import type { AnalysisTab, PipelineStep } from '#lib/types/analysis.js';
 
-vi.mock('$lib/utils/indexeddb', () => ({
+vi.mock('#lib/utils/indexeddb.js', () => ({
 	idbGet: vi.fn().mockResolvedValue(null),
 	idbSet: vi.fn().mockResolvedValue(undefined)
 }));
 
-vi.mock('$lib/utils/audit-log', () => ({
+vi.mock('#lib/utils/audit-log.js', () => ({
 	track: vi.fn()
 }));
 
-vi.mock('$lib/stores/schema.svelte', () => ({
+vi.mock('#lib/stores/schema.svelte.js', () => ({
 	schemaStore: { getLastOutput: () => null }
 }));
 
-vi.mock('$lib/api/analysis', () => ({
+vi.mock('#lib/api/analysis.js', () => ({
 	getAnalysisWithHeaders: vi.fn(),
 	updateAnalysis: vi.fn()
 }));

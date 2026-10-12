@@ -1,5 +1,5 @@
-import { listBuilds, type ListBuildsParams } from '$lib/api/builds';
-import type { BuildRunSummary } from '$lib/types/build-stream';
+import { listBuilds, type ListBuildsParams } from '#lib/api/builds.js';
+import type { BuildRunSummary } from '#lib/types/build-stream.js';
 import { PaginatedStore } from './paginated-store.svelte';
 
 interface BuildsPage {

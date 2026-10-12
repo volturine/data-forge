@@ -1,6 +1,6 @@
-import { browser } from '$app/environment';
-import { idbGet, idbSet } from '$lib/utils/indexeddb';
-import { uuid } from '$lib/utils/uuid';
+import { browser } from '$app/env';
+import { idbGet, idbSet } from '#lib/utils/indexeddb.js';
+import { uuid } from '#lib/utils/uuid.js';
 
 export interface Fingerprint {
 	screen: string;

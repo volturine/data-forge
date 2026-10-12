@@ -1,8 +1,8 @@
 <script lang="ts">
 	import { onDestroy } from 'svelte';
 	import { EllipsisVertical, Workflow } from '@lucide/svelte';
-	import { overlayStack } from '$lib/stores/overlay.svelte';
-	import { css } from '$lib/styles/panda';
+	import { overlayStack } from '#lib/stores/overlay.svelte.js';
+	import { css } from '#lib/styles/panda.js';
 
 	interface MenuItem {
 		id: string;

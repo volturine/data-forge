@@ -30,7 +30,7 @@ import {
 	isChartStepType,
 	normalizePipelineStepType,
 	type CanonicalStepType
-} from '$lib/types/pipeline-step';
+} from '#lib/types/pipeline-step.js';
 
 function truncate(items: string[], max = 3, len = 20): string {
 	if (!items?.length) return '';

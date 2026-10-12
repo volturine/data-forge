@@ -1,6 +1,6 @@
 <script lang="ts">
 	import { LayoutGrid, Plus } from '@lucide/svelte';
-	import { css } from '$lib/styles/panda';
+	import { css } from '#lib/styles/panda.js';
 
 	interface Props {
 		onCreate: () => void;

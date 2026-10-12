@@ -2,16 +2,16 @@
 	import { onMount } from 'svelte';
 	import { SvelteSet } from 'svelte/reactivity';
 	import { CheckCircle, XCircle, Save, Loader2, Database, ChevronDown } from '@lucide/svelte';
-	import { getSettings, updateSettings } from '$lib/api/settings';
-	import type { AppSettings } from '$lib/api/settings';
+	import { getSettings, updateSettings } from '#lib/api/settings.js';
+	import type { AppSettings } from '#lib/api/settings.js';
 	import {
 		listInternalPostgresTables,
 		toggleInternalPostgresTable,
 		type InternalPostgresTable
-	} from '$lib/api/datasource';
-	import { configStore } from '$lib/stores/config.svelte';
-	import { useNamespace } from '$lib/stores/namespace.svelte';
-	import { button, css } from '$lib/styles/panda';
+	} from '#lib/api/datasource.js';
+	import { configStore } from '#lib/stores/config.svelte.js';
+	import { useNamespace } from '#lib/stores/namespace.svelte.js';
+	import { button, css } from '#lib/styles/panda.js';
 
 	let loading = $state(true);
 	let saving = $state(false);

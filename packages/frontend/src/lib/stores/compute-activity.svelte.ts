@@ -1,5 +1,5 @@
 import type { ResultAsync } from 'neverthrow';
-import { computeWorkersStore } from '$lib/stores/compute-workers.svelte';
+import { computeWorkersStore } from '#lib/stores/compute-workers.svelte.js';
 
 export class ComputeActivityStore {
 	private leases = $state(0);

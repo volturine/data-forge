@@ -1,8 +1,8 @@
 <script lang="ts">
 	import { createMutation, useQueryClient } from '@tanstack/svelte-query';
-	import { updateSchedule } from '$lib/api/schedule';
-	import type { Schedule } from '$lib/api/schedule';
-	import type { DataSource } from '$lib/types/datasource';
+	import { updateSchedule } from '#lib/api/schedule.js';
+	import type { Schedule } from '#lib/api/schedule.js';
+	import type { DataSource } from '#lib/types/datasource.js';
 	import {
 		ChartColumn,
 		Check,
@@ -16,7 +16,7 @@
 		Trash2,
 		X
 	} from '@lucide/svelte';
-	import { css, input } from '$lib/styles/panda';
+	import { css, input } from '#lib/styles/panda.js';
 	import CronField from './CronField.svelte';
 	import {
 		depLabel,

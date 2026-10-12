@@ -1,6 +1,6 @@
 import ElkConstructor from 'elkjs/lib/elk.bundled.js';
 import { MarkerType } from '@xyflow/svelte';
-import type { EdgeType, LineageResponse, NodeKind } from '$lib/api/lineage';
+import type { EdgeType, LineageResponse, NodeKind } from '#lib/api/lineage.js';
 
 export const LINEAGE_NODE_WIDTH = 240;
 export const LINEAGE_NODE_HEIGHT = 72;

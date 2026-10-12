@@ -1,8 +1,8 @@
 <script lang="ts">
-	import type { Schema } from '$lib/types/schema';
-	import ColumnTypeBadge from '$lib/components/common/ColumnTypeBadge.svelte';
-	import SearchableDropdown from '$lib/components/ui/SearchableDropdown.svelte';
-	import { css } from '$lib/styles/panda';
+	import type { Schema } from '#lib/types/schema.js';
+	import ColumnTypeBadge from '#lib/components/common/ColumnTypeBadge.svelte';
+	import SearchableDropdown from '#lib/components/ui/SearchableDropdown.svelte';
+	import { css } from '#lib/styles/panda.js';
 
 	interface ColumnOption {
 		id: string;

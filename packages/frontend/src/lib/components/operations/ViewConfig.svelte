@@ -1,7 +1,7 @@
 <script lang="ts">
-	import type { Schema } from '$lib/types/schema';
-	import type { ViewConfigData } from '$lib/types/operation-config';
-	import { css, input, stepConfig } from '$lib/styles/panda';
+	import type { Schema } from '#lib/types/schema.js';
+	import type { ViewConfigData } from '#lib/types/operation-config.js';
+	import { css, input, stepConfig } from '#lib/styles/panda.js';
 
 	interface Props {
 		schema: Schema;

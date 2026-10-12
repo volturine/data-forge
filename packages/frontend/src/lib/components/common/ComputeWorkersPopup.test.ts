@@ -3,17 +3,17 @@ import { fireEvent, render, screen, waitFor } from '@testing-library/svelte';
 import { tick } from 'svelte';
 import { flushSync } from 'svelte';
 import { errAsync, ResultAsync } from 'neverthrow';
-import type { ComputeWorkerStatusResponse } from '$lib/types/compute';
+import type { ComputeWorkerStatusResponse } from '#lib/types/compute.js';
 
 const mockConnectComputeWorkersStream = vi.fn();
 const mockShutdownComputeWorker = vi.fn();
 
-vi.mock('$lib/api/compute', () => ({
+vi.mock('#lib/api/compute.js', () => ({
 	connectComputeWorkersStream: (...args: unknown[]) => mockConnectComputeWorkersStream(...args),
 	shutdownComputeWorkerByIdentity: (...args: unknown[]) => mockShutdownComputeWorker(...args)
 }));
 
-const { computeWorkersStore } = await import('$lib/stores/compute-workers.svelte');
+const { computeWorkersStore } = await import('#lib/stores/compute-workers.svelte.js');
 const { default: ComputeWorkersPopup } = await import('./ComputeWorkersPopup.svelte');
 
 function makeComputeWorker(

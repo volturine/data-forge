@@ -30,13 +30,13 @@
 		Play
 	} from '@lucide/svelte';
 	import { SvelteMap, SvelteSet } from 'svelte/reactivity';
-	import ColumnTypeBadge from '$lib/components/common/ColumnTypeBadge.svelte';
-	import { css, menuItem } from '$lib/styles/panda';
+	import ColumnTypeBadge from '#lib/components/common/ColumnTypeBadge.svelte';
+	import { css, menuItem } from '#lib/styles/panda.js';
 	type TableCellValue = string | number | boolean | null | undefined;
-	import { resolveColumnType } from '$lib/utils/column-types';
-	import { formatDateTimeDisplay, formatDateDisplay } from '$lib/utils/datetime';
-	import { overlayStack } from '$lib/stores/overlay.svelte';
-	import type { OverlayConfig } from '$lib/stores/overlay.svelte';
+	import { resolveColumnType } from '#lib/utils/column-types.js';
+	import { formatDateTimeDisplay, formatDateDisplay } from '#lib/utils/datetime.js';
+	import { overlayStack } from '#lib/stores/overlay.svelte.js';
+	import type { OverlayConfig } from '#lib/stores/overlay.svelte.js';
 
 	interface Props {
 		columns: string[];

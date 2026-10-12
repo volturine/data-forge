@@ -3,8 +3,8 @@
 	import { goto } from '$app/navigation';
 	import { resolve } from '$app/paths';
 	import { SvelteSet } from 'svelte/reactivity';
-	import { css, tabButton } from '$lib/styles/panda';
-	import { useNamespace } from '$lib/stores/namespace.svelte';
+	import { css, tabButton } from '#lib/styles/panda.js';
+	import { useNamespace } from '#lib/stores/namespace.svelte.js';
 	import AccountTab from './AccountTab.svelte';
 	import PreferencesTab from './PreferencesTab.svelte';
 	import NotificationsTab from './NotificationsTab.svelte';
@@ -38,8 +38,7 @@
 		activated.add(key);
 		goto(resolve(`/profile#${key}` as '/'), {
 			replaceState: true,
-			keepFocus: true,
-			noScroll: true
+			reset: false
 		});
 	}
 

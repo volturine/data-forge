@@ -11,8 +11,8 @@
 		"prepare": "svelte-kit sync && panda codegen && panda cssgen || echo ''",
 		"panda:codegen": "svelte-kit sync && panda codegen",
 		"panda:watch": "panda codegen --watch",
-		"check": "svelte-kit sync && svelte-check --tsconfig ./tsconfig.json",
-		"check:watch": "svelte-kit sync && svelte-check --tsconfig ./tsconfig.json --watch",
+		"check": "svelte-kit sync && rm -rf .svelte-kit/.svelte-check && svelte-check --tsgo --tsconfig ./tsconfig.json",
+		"check:watch": "svelte-kit sync && rm -rf .svelte-kit/.svelte-check && svelte-check --tsgo --tsconfig ./tsconfig.json --watch",
 		"format": "prettier --write .",
 		"lint": "prettier --check . && eslint .",
 		"generate:protocol": "cd ../.. && just generate-protocol",
@@ -26,9 +26,12 @@
 		"@eslint/compat": "^2.1.1",
 		"@eslint/js": "^10.0.1",
 		"@pandacss/dev": "^2.1.2",
+		"@pandacss/preset-base": "^2.1.2",
+		"@pandacss/preset-panda": "^2.1.2",
 		"@playwright/test": "^1.64.0",
 		"@sveltejs/adapter-static": "^4.0.0",
 		"@sveltejs/kit": "^3.0.1",
+		"@sveltejs/load-config": "^0.2.2",
 		"@sveltejs/vite-plugin-svelte": "^7.3.1",
 		"@testing-library/dom": "^10.4.2",
 		"@testing-library/jest-dom": "^7.0.1",
@@ -37,6 +40,7 @@
 		"@types/d3-scale-chromatic": "^3.1.0",
 		"@types/d3-shape": "^3.2.0",
 		"@types/node": "^26.6.4",
+		"@typescript/native": "npm:typescript@~7.0.2",
 		"eslint": "^10.12.0",
 		"eslint-config-prettier": "^10.1.8",
 		"eslint-plugin-svelte": "^3.23.0",
@@ -70,5 +74,9 @@
 		"neverthrow": "^8.2.0",
 		"runed": "^0.37.1",
 		"temporal-polyfill": "^1.0.5"
+	},
+	"imports": {
+		"#lib": "./src/lib/index.js",
+		"#lib/*": "./src/lib/*"
 	}
 }

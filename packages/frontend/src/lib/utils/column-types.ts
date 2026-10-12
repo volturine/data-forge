@@ -12,7 +12,7 @@
  *
  * Usage:
  * ```typescript
- * import { getColumnTypeConfig, normalizeColumnType } from '$lib/utils/column-types';
+ * import { getColumnTypeConfig, normalizeColumnType } from '#lib/utils/column-types.js';
  *
  * // Get full configuration for a type
  * const config = getColumnTypeConfig('Int64');

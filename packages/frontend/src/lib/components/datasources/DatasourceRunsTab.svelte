@@ -12,17 +12,17 @@
 		RefreshCw,
 		Save
 	} from '@lucide/svelte';
-	import type { BuildRunSummary } from '$lib/types/build-stream';
+	import type { BuildRunSummary } from '#lib/types/build-stream.js';
 	import {
 		buildLifecycleStatusLabel,
 		buildLifecycleStatusTone,
 		computeWorkerRunDisplayKind,
 		computeWorkerRunKindLabel
-	} from '$lib/types/build-stream';
-	import type { PaginatedStatus } from '$lib/stores/paginated-store.svelte';
-	import Callout from '$lib/components/ui/Callout.svelte';
-	import { formatDateDisplay, toEpochDisplay } from '$lib/utils/datetime';
-	import { css, chip, emptyText } from '$lib/styles/panda';
+	} from '#lib/types/build-stream.js';
+	import type { PaginatedStatus } from '#lib/stores/paginated-store.svelte.js';
+	import Callout from '#lib/components/ui/Callout.svelte';
+	import { formatDateDisplay, toEpochDisplay } from '#lib/utils/datetime.js';
+	import { css, chip, emptyText } from '#lib/styles/panda.js';
 
 	type DatasourceRunRow = {
 		id: string;
@@ -250,11 +250,12 @@
 			<p class={css({ fontSize: 'xs', color: 'fg.tertiary', textAlign: 'center' })}>
 				Showing last 50 runs.
 				<a
-					href="{resolve('/monitoring')}?datasource_id={datasourceId}"
-					class={css({ color: 'accent.primary', _hover: { textDecoration: 'underline' } })}
+					href="{resolve('monitoring')}?datasource_id={datasourceId}"
+					class={css({
+						color: 'accent.primary',
+						_hover: { textDecoration: 'underline' }
+					})}>View all runs</a
 				>
-					View all runs
-				</a>
 			</p>
 		{/if}
 	{/if}

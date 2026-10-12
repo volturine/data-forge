@@ -1,11 +1,11 @@
 import { describe, test, expect, vi, beforeEach, afterEach } from 'vitest';
 import { errAsync, okAsync, ResultAsync } from 'neverthrow';
-import type { ChatEvent, ChatModel } from '$lib/api/chat';
-import type { ApiError } from '$lib/api/client';
-import type { MCPTool } from '$lib/api/mcp';
-import type { AppSettings } from '$lib/api/settings';
+import type { ChatEvent, ChatModel } from '#lib/api/chat.js';
+import type { ApiError } from '#lib/api/client.js';
+import type { MCPTool } from '#lib/api/mcp.js';
+import type { AppSettings } from '#lib/api/settings.js';
 
-vi.mock('$lib/api/chat', () => ({
+vi.mock('#lib/api/chat.js', () => ({
 	createSession: vi.fn(),
 	sendMessage: vi.fn(),
 	openEventStream: vi.fn(),
@@ -17,18 +17,18 @@ vi.mock('$lib/api/chat', () => ({
 	confirmTool: vi.fn()
 }));
 
-vi.mock('$lib/api/settings', () => ({
+vi.mock('#lib/api/settings.js', () => ({
 	MASKED_PLACEHOLDER: '••••••••',
 	isMasked: (value: string) => value === '••••••••' || /^\*+$/.test(value),
 	getSettings: vi.fn(),
 	updateSettings: vi.fn()
 }));
 
-vi.mock('$lib/api/mcp', () => ({
+vi.mock('#lib/api/mcp.js', () => ({
 	listTools: vi.fn()
 }));
 
-vi.mock('$lib/stores/analysis.svelte', () => ({
+vi.mock('#lib/stores/analysis.svelte.js', () => ({
 	analysisStore: {
 		current: null,
 		activeTab: null,
@@ -38,7 +38,7 @@ vi.mock('$lib/stores/analysis.svelte', () => ({
 	}
 }));
 
-vi.mock('$lib/stores/schema.svelte', () => ({
+vi.mock('#lib/stores/schema.svelte.js', () => ({
 	schemaStore: { getLastOutput: () => null }
 }));
 
@@ -61,9 +61,9 @@ vi.stubGlobal('window', {
 	localStorage: mockLocalStorage
 });
 
-const chatApi = await import('$lib/api/chat');
-const settingsApi = await import('$lib/api/settings');
-const mcpApi = await import('$lib/api/mcp');
+const chatApi = await import('#lib/api/chat.js');
+const settingsApi = await import('#lib/api/settings.js');
+const mcpApi = await import('#lib/api/mcp.js');
 const { ChatStore } = await import('./chat.svelte');
 
 function makeSettings(overrides: Partial<AppSettings> = {}): AppSettings {

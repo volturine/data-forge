@@ -1,4 +1,4 @@
-import type { DataSource } from '$lib/types/datasource';
+import type { DataSource } from '#lib/types/datasource.js';
 
 function recency(datasource: DataSource): number {
 	const value = Date.parse(datasource.last_data_update ?? datasource.created_at);

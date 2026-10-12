@@ -45,8 +45,8 @@ class ChatTurn(SQLModel, table=True):
     confirmation_decision: bool | None = Field(default=None, sa_column=Column(Boolean, nullable=True))
     claim_token: str | None = Field(default=None, sa_column=Column(String, nullable=True))
     coordinator_generation: int | None = Field(default=None, sa_column=Column(BigInteger, nullable=True))
-    created_at: datetime = Field(sa_column=Column(DateTime(timezone=True), nullable=False, server_default=text('CURRENT_TIMESTAMP')))
-    updated_at: datetime = Field(sa_column=Column(DateTime(timezone=True), nullable=False, server_default=text('CURRENT_TIMESTAMP')))
+    created_at: datetime = Field(default=None, sa_column=Column(DateTime(timezone=True), nullable=False, server_default=text('CURRENT_TIMESTAMP')))
+    updated_at: datetime = Field(default=None, sa_column=Column(DateTime(timezone=True), nullable=False, server_default=text('CURRENT_TIMESTAMP')))
 
 
 class ChatMessage(SQLModel, table=True):
@@ -57,7 +57,7 @@ class ChatMessage(SQLModel, table=True):
     session_id: str = Field(sa_column=Column(String, ForeignKey('chat_sessions.id', ondelete='CASCADE'), nullable=False))
     turn_id: str | None = Field(default=None, sa_column=Column(String, ForeignKey('chat_turns.id', ondelete='CASCADE'), nullable=True))
     message: dict[str, Any] = Field(sa_column=Column(JSON, nullable=False))
-    created_at: datetime = Field(sa_column=Column(DateTime(timezone=True), nullable=False, server_default=text('CURRENT_TIMESTAMP')))
+    created_at: datetime = Field(default=None, sa_column=Column(DateTime(timezone=True), nullable=False, server_default=text('CURRENT_TIMESTAMP')))
 
 
 class ChatEvent(SQLModel, table=True):
@@ -67,4 +67,4 @@ class ChatEvent(SQLModel, table=True):
     session_id: str = Field(sa_column=Column(String, ForeignKey('chat_sessions.id', ondelete='CASCADE'), nullable=False, primary_key=True))
     turn_id: str | None = Field(default=None, sa_column=Column(String, ForeignKey('chat_turns.id', ondelete='CASCADE'), nullable=True))
     payload: dict[str, Any] = Field(sa_column=Column(JSON, nullable=False))
-    created_at: datetime = Field(sa_column=Column(DateTime(timezone=True), nullable=False, server_default=text('CURRENT_TIMESTAMP')))
+    created_at: datetime = Field(default=None, sa_column=Column(DateTime(timezone=True), nullable=False, server_default=text('CURRENT_TIMESTAMP')))

@@ -1,9 +1,9 @@
 <script lang="ts">
 	import { createQuery, createMutation, useQueryClient } from '@tanstack/svelte-query';
-	import { listSchedules, updateSchedule, deleteSchedule } from '$lib/api/schedule';
-	import type { Schedule } from '$lib/api/schedule';
-	import { listDatasources } from '$lib/api/datasource';
-	import { datasourceIsAnalysisOutput, type DataSource } from '$lib/types/datasource';
+	import { listSchedules, updateSchedule, deleteSchedule } from '#lib/api/schedule.js';
+	import type { Schedule } from '#lib/api/schedule.js';
+	import { listDatasources } from '#lib/api/datasource.js';
+	import { datasourceIsAnalysisOutput, type DataSource } from '#lib/types/datasource.js';
 	import {
 		Plus,
 		Calendar,
@@ -13,12 +13,12 @@
 		Database,
 		Search
 	} from '@lucide/svelte';
-	import ConfirmDialog from '$lib/components/common/ConfirmDialog.svelte';
+	import ConfirmDialog from '#lib/components/common/ConfirmDialog.svelte';
 	import ScheduleCreateForm from './schedule-manager/ScheduleCreateForm.svelte';
 	import ScheduleList from './schedule-manager/ScheduleList.svelte';
-	import { useNamespace } from '$lib/stores/namespace.svelte';
+	import { useNamespace } from '#lib/stores/namespace.svelte.js';
 	import { SvelteMap } from 'svelte/reactivity';
-	import { button, css, emptyText, spinner } from '$lib/styles/panda';
+	import { button, css, emptyText, spinner } from '#lib/styles/panda.js';
 
 	interface Props {
 		datasourceId?: string;

@@ -2,8 +2,8 @@ import {
 	getEditorAccessState,
 	isEditorReadOnly,
 	type EditorLockMode
-} from '$lib/utils/analysis-lock-state';
-import { openLockSession, type LockSessionError } from '$lib/api/locks';
+} from '#lib/utils/analysis-lock-state.js';
+import { openLockSession, type LockSessionError } from '#lib/api/locks.js';
 
 export type EditorLockControllerDeps = {
 	validAnalysisId: () => string | null;

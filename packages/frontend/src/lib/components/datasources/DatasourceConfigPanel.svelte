@@ -7,10 +7,10 @@
 		ingestDatasource,
 		updateDatasource,
 		updateDatasourceColumnDescriptions
-	} from '$lib/api/datasource';
-	import { BuildsStore } from '$lib/stores/builds.svelte';
+	} from '#lib/api/datasource.js';
+	import { BuildsStore } from '#lib/stores/builds.svelte.js';
 	import { CircleAlert } from '@lucide/svelte';
-	import type { DataSource, ColumnSchema } from '$lib/types/datasource';
+	import type { DataSource, ColumnSchema } from '#lib/types/datasource.js';
 	import {
 		datasourceFileConfig,
 		datasourceIsAnalysisOutput,
@@ -21,20 +21,20 @@
 		datasourceIsSchedulableRaw,
 		datasourceNeedsExternalIngest,
 		datasourceSupportsSchemaRefresh
-	} from '$lib/types/datasource';
-	import type { FileDataSource, IcebergDataSource } from '$lib/types/datasource';
-	import ColumnStatsPanel from '$lib/components/datasources/ColumnStatsPanel.svelte';
-	import HealthChecksManager from '$lib/components/common/HealthChecksManager.svelte';
-	import ScheduleManager from '$lib/components/common/ScheduleManager.svelte';
-	import Callout from '$lib/components/ui/Callout.svelte';
+	} from '#lib/types/datasource.js';
+	import type { FileDataSource, IcebergDataSource } from '#lib/types/datasource.js';
+	import ColumnStatsPanel from '#lib/components/datasources/ColumnStatsPanel.svelte';
+	import HealthChecksManager from '#lib/components/common/HealthChecksManager.svelte';
+	import ScheduleManager from '#lib/components/common/ScheduleManager.svelte';
+	import Callout from '#lib/components/ui/Callout.svelte';
 	import DatasourceGeneralTab from './DatasourceGeneralTab.svelte';
 	import DatasourceSchemaTab from './DatasourceSchemaTab.svelte';
 	import DatasourceCsvOptionsTab, { type CsvConfig } from './DatasourceCsvOptionsTab.svelte';
 	import DatasourceExcelOptionsTab, { type ExcelConfig } from './DatasourceExcelOptionsTab.svelte';
 	import DatasourceRunsTab from './DatasourceRunsTab.svelte';
-	import { resolveColumnType } from '$lib/utils/column-types';
-	import { css, tabButton } from '$lib/styles/panda';
-	import { useNamespace } from '$lib/stores/namespace.svelte';
+	import { resolveColumnType } from '#lib/utils/column-types.js';
+	import { css, tabButton } from '#lib/styles/panda.js';
+	import { useNamespace } from '#lib/stores/namespace.svelte.js';
 
 	function initialCsvConfig(ds: DataSource): CsvConfig {
 		if (!datasourceIsCsv(ds)) {

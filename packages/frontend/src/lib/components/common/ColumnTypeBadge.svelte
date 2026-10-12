@@ -1,6 +1,6 @@
 <script lang="ts">
-	import { getColumnTypeConfig } from '$lib/utils/column-types';
-	import { css, badge } from '$lib/styles/panda';
+	import { getColumnTypeConfig } from '#lib/utils/column-types.js';
+	import { css, badge } from '#lib/styles/panda.js';
 
 	interface Props {
 		columnType: string;

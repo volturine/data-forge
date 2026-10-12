@@ -1,15 +1,15 @@
 import { describe, test, expect, vi, beforeEach } from 'vitest';
 import { render, screen, fireEvent } from '@testing-library/svelte';
 import BuildComparisonPanel from './BuildComparisonPanel.svelte';
-import type { DataSource } from '$lib/types/datasource';
-import type { BuildRunSummary } from '$lib/types/build-stream';
-import type { SnapshotCompareResponse } from '$lib/api/datasource';
+import type { DataSource } from '#lib/types/datasource.js';
+import type { BuildRunSummary } from '#lib/types/build-stream.js';
+import type { SnapshotCompareResponse } from '#lib/api/datasource.js';
 
 let mockStoreRuns: BuildRunSummary[] = [];
 let mockStoreStatus: string = 'disconnected';
 let mockStoreError: string | null = null;
 
-vi.mock('$lib/stores/builds.svelte', () => ({
+vi.mock('#lib/stores/builds.svelte.js', () => ({
 	BuildsStore: class {
 		get builds() {
 			return mockStoreRuns;
@@ -29,7 +29,7 @@ vi.mock('$lib/stores/builds.svelte', () => ({
 const mockListIcebergSnapshots = vi.fn();
 const mockCompareDatasourceSnapshots = vi.fn();
 
-vi.mock('$lib/api/datasource', () => ({
+vi.mock('#lib/api/datasource.js', () => ({
 	listIcebergSnapshots: (...args: unknown[]) => mockListIcebergSnapshots(...args),
 	compareDatasourceSnapshots: (...args: unknown[]) => mockCompareDatasourceSnapshots(...args)
 }));

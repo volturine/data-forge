@@ -17,11 +17,11 @@
 		User,
 		Star
 	} from '@lucide/svelte';
-	import { listFavoriteAnalyses } from '$lib/api/analysis';
-	import { css } from '$lib/styles/panda';
-	import { computeWorkersStore } from '$lib/stores/compute-workers.svelte';
-	import { favoriteStore } from '$lib/stores/favorites.svelte';
-	import ComputeWorkersPopup from '$lib/components/common/ComputeWorkersPopup.svelte';
+	import { listFavoriteAnalyses } from '#lib/api/analysis.js';
+	import { css } from '#lib/styles/panda.js';
+	import { computeWorkersStore } from '#lib/stores/compute-workers.svelte.js';
+	import { favoriteStore } from '#lib/stores/favorites.svelte.js';
+	import ComputeWorkersPopup from '#lib/components/common/ComputeWorkersPopup.svelte';
 
 	interface Props {
 		collapsed: boolean;
@@ -361,7 +361,7 @@
 					>
 						{#each favoriteAnalyses as analysis (analysis.id)}
 							<a
-								href={resolve(`/analysis/${analysis.id}`)}
+								href={resolve(`analysis/${analysis.id}`)}
 								class={css({
 									display: 'flex',
 									alignItems: 'center',

@@ -1,8 +1,8 @@
 <script lang="ts">
 	import { RefreshCw, Trash2 } from '@lucide/svelte';
-	import { css } from '$lib/styles/panda';
-	import { chatStore } from '$lib/stores/chat.svelte';
-	import { timeAgo } from '$lib/utils/markdown';
+	import { css } from '#lib/styles/panda.js';
+	import { chatStore } from '#lib/stores/chat.svelte.js';
+	import { timeAgo } from '#lib/utils/markdown.js';
 
 	interface Props {
 		maximized: boolean;

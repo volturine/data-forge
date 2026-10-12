@@ -36,7 +36,7 @@ import type {
 	ViewConfigJson as ProtocolViewConfigJson,
 	WithColumnsConfigJson as ProtocolWithColumnsConfigJson,
 	WithColumnsExprJson as ProtocolWithColumnsExprJson
-} from '$lib/protocol/dataforge_protocol/analysis_pb';
+} from '#lib/protocol/dataforge_protocol/analysis_pb.js';
 import type {
 	AIProvider,
 	AxisScale,
@@ -74,7 +74,7 @@ import type {
 	TimeseriesOperationType,
 	WithColumnsExprType,
 	YAxisPosition
-} from '$lib/types/protocol-enum-tokens';
+} from '#lib/types/protocol-enum-tokens.js';
 
 type Field<T, K extends keyof T> = NonNullable<T[K]>;
 type OptionalField<T, K extends keyof T> = Field<T, K> | null;

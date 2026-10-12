@@ -1,10 +1,10 @@
 import { afterEach, beforeEach, describe, expect, test, vi } from 'vitest';
 import { ComputeWorkerRunsStore } from './compute-worker-runs.svelte';
-import type { ComputeWorkerRun } from '$lib/api/compute-worker-runs';
+import type { ComputeWorkerRun } from '#lib/api/compute-worker-runs.js';
 
 const mockListComputeWorkerRuns = vi.fn();
 
-vi.mock('$lib/api/compute-worker-runs', () => ({
+vi.mock('#lib/api/compute-worker-runs.js', () => ({
 	listComputeWorkerRuns: (...args: unknown[]) => mockListComputeWorkerRuns(...args)
 }));
 

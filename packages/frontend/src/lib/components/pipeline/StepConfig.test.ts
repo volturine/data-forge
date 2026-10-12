@@ -1,8 +1,8 @@
 import { afterEach, describe, expect, test, vi } from 'vitest';
 import { fireEvent, render, screen } from '@testing-library/svelte';
 import StepConfig from './StepConfig.svelte';
-import { analysisStore } from '$lib/stores/analysis.svelte';
-import type { Analysis } from '$lib/types/analysis';
+import { analysisStore } from '#lib/stores/analysis.svelte.js';
+import type { Analysis } from '#lib/types/analysis.js';
 
 describe('StepConfig', () => {
 	test('renders read-only config when the editor is locked', async () => {

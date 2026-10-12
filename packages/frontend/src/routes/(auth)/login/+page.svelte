@@ -1,9 +1,9 @@
 <script lang="ts">
 	import { goto } from '$app/navigation';
 	import { resolve } from '$app/paths';
-	import { css, button, input, label, spinner } from '$lib/styles/panda';
-	import { authStore } from '$lib/stores/auth.svelte';
-	import AuthProviders from '$lib/components/auth/AuthProviders.svelte';
+	import { css, button, input, label, spinner } from '#lib/styles/panda.js';
+	import { authStore } from '#lib/stores/auth.svelte.js';
+	import AuthProviders from '#lib/components/auth/AuthProviders.svelte';
 
 	let email = $state('');
 	let password = $state('');
@@ -81,7 +81,7 @@
 				autocomplete="current-password"
 			/>
 			<a
-				href={resolve('/forgot-password')}
+				href={resolve('forgot-password')}
 				class={css({
 					display: 'block',
 					fontSize: 'xs',
@@ -109,7 +109,7 @@
 	<p class={css({ fontSize: 'sm', color: 'fg.muted', textAlign: 'center' })}>
 		Don't have an account?
 		<a
-			href={resolve('/register')}
+			href={resolve('register')}
 			class={css({
 				color: 'accent.primary',
 				textDecoration: 'underline',

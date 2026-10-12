@@ -1,12 +1,12 @@
-import type { ComputeWorkerStatusResponse } from '$lib/types/compute';
+import type { ComputeWorkerStatusResponse } from '#lib/types/compute.js';
 import {
 	connectComputeWorkersStream,
 	shutdownAnalysisComputeWorker as shutdownAnalysisComputeWorkerApi,
 	shutdownComputeWorkerByIdentity
-} from '$lib/api/compute';
+} from '#lib/api/compute.js';
 import { ReconnectionManager } from './reconnection-manager';
 import { SvelteSet } from 'svelte/reactivity';
-import { computeWorkerIdentityKey } from '$lib/representations/compute-worker';
+import { computeWorkerIdentityKey } from '#lib/representations/compute-worker.js';
 
 const RECONNECT_DELAY_MS = 1_000;
 const SNAPSHOT_REFRESH_COOLDOWN_MS = 15_000;

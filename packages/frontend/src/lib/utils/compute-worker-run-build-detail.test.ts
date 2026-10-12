@@ -1,13 +1,13 @@
 import { describe, expect, it } from 'vitest';
 
-import type { ComputeWorkerRun } from '$lib/api/compute-worker-runs';
+import type { ComputeWorkerRun } from '#lib/api/compute-worker-runs.js';
 import {
 	computeWorkerRunBuildDetail,
 	computeWorkerRunDatasourceId,
 	computeWorkerRunDatasourceName,
 	computeWorkerRunOutputName,
 	computeWorkerRunStatus
-} from '$lib/utils/compute-worker-run-build-detail';
+} from '#lib/utils/compute-worker-run-build-detail.js';
 
 function makeRun(overrides: Partial<ComputeWorkerRun> = {}): ComputeWorkerRun {
 	return {

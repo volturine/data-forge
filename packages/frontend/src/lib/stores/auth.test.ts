@@ -1,5 +1,5 @@
 import { describe, test, expect, vi, beforeEach } from 'vitest';
-import type { UserPublic } from '$lib/api/auth';
+import type { UserPublic } from '#lib/api/auth.js';
 
 const mockGetMe = vi.fn();
 const mockLogin = vi.fn();
@@ -7,7 +7,7 @@ const mockLogout = vi.fn();
 const mockRegister = vi.fn();
 const mockUpdateProfile = vi.fn();
 
-vi.mock('$lib/api/auth', () => ({
+vi.mock('#lib/api/auth.js', () => ({
 	getMe: (...args: unknown[]) => mockGetMe(...args),
 	login: (...args: unknown[]) => mockLogin(...args),
 	logout: (...args: unknown[]) => mockLogout(...args),

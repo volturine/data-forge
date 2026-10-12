@@ -1,6 +1,6 @@
 import { describe, expect, test, vi } from 'vitest';
 import { fireEvent, render, screen } from '@testing-library/svelte';
-import type { DataSource } from '$lib/types/datasource';
+import type { DataSource } from '#lib/types/datasource.js';
 import NewAnalysisPage from './+page.svelte';
 
 const datasources: DataSource[] = Array.from(
@@ -18,17 +18,17 @@ const datasources: DataSource[] = Array.from(
 		}) as DataSource
 );
 
-vi.mock('$lib/stores/namespace.svelte', () => ({
+vi.mock('#lib/stores/namespace.svelte.js', () => ({
 	useNamespace: () => ({ value: 'default', switching: false })
 }));
-vi.mock('$lib/stores/config.svelte', () => ({ configStore: { config: null } }));
+vi.mock('#lib/stores/config.svelte.js', () => ({ configStore: { config: null } }));
 const mockCreateAnalysis = vi.fn();
-vi.mock('$lib/api/analysis', () => ({
+vi.mock('#lib/api/analysis.js', () => ({
 	createAnalysis: (...args: unknown[]) => mockCreateAnalysis(...args)
 }));
-vi.mock('$lib/api/datasource', () => ({ listDatasources: vi.fn() }));
-vi.mock('$lib/components/datasources/DatasourcePreview.svelte', async () => ({
-	default: (await import('$lib/test-utils/stubs/IconStub.svelte')).default
+vi.mock('#lib/api/datasource.js', () => ({ listDatasources: vi.fn() }));
+vi.mock('#lib/components/datasources/DatasourcePreview.svelte', async () => ({
+	default: (await import('#lib/test-utils/stubs/IconStub.svelte')).default
 }));
 vi.mock('@tanstack/svelte-query', () => ({
 	createQuery: () => ({ data: datasources, isPending: false, isError: false, error: null })
