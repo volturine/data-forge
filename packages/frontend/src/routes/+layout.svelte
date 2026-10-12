@@ -155,7 +155,6 @@
 	}
 
 	let namespaceOpen = $state(false);
-	let namespaceTrigger = $state<HTMLButtonElement>();
 	let namespaceError = $state<string | null>(null);
 	const namespaceDraft = $derived(namespaceState.value);
 
@@ -186,7 +185,8 @@
 				bindNamespaceServices();
 				void goto(resolve(`${nextUrl.pathname}${nextUrl.search}${nextUrl.hash}` as '/'), {
 					invalidateAll: false,
-					replaceState: true
+					replaceState: true,
+					keepFocus: true
 				}).catch((error: unknown) => {
 					namespaceError = error instanceof Error ? error.message : String(error);
 				});
@@ -355,7 +355,6 @@
 					authenticated={authStore.authenticated}
 					authRequired={configStore.authRequired}
 					avatarUrl={authStore.user?.avatar_url ?? null}
-					bind:namespaceTrigger
 				/>
 
 				{#if !sidebarCollapsed}
@@ -459,7 +458,6 @@
 			onSelect={handleNamespaceSelect}
 			onSelectError={handleNamespaceError}
 			onClose={() => (namespaceOpen = false)}
-			anchor={namespaceTrigger}
 		/>
 		<ChatPanel />
 	{/if}

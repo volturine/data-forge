@@ -3,6 +3,7 @@ import { expect, request as playwrightRequest } from '@playwright/test';
 import {
 	findAnalysisIdByName,
 	findDatasourceIdsByName,
+	nameForAnalysisId,
 	unregisterAnalysis,
 	unregisterDatasource,
 	type E2EStorageState
@@ -10,13 +11,15 @@ import {
 import { installE2eContextGuards } from './page-guards.js';
 import { getCleanupSessionState, rememberCleanupSessionState } from './page-session-state.js';
 import { e2eBaseURL } from './base-url.js';
-import { DEFAULT_NAMESPACE } from './namespace.js';
+import { DEFAULT_NAMESPACE, switchNamespace } from './namespace.js';
 import {
+	gotoAuthedRoute,
 	gotoAnalysesGallery,
 	gotoUdfLibrary,
 	gotoMonitoringTab,
 	readyTimeoutMs,
 	waitForDatasourceList,
+	waitForUdfList,
 	waitForLayoutReady
 } from './readiness.js';
 
@@ -572,29 +575,58 @@ export async function deleteAnalysisViaUI(
 	}
 }
 
+async function prepareUdfCleanupAnalysis(page: Page): Promise<{ id: string; name: string } | null> {
+	const route = new URL(page.url()).pathname;
+	if (/^\/analysis\/[^/]+$/.test(route)) return null;
+	const shell = page.locator('[data-shell-interactive="true"]');
+	if (!(await shell.isVisible().catch(() => false))) await gotoAuthedRoute(page, '/');
+	await switchNamespace(page, DEFAULT_NAMESPACE);
+
+	const { createAnalysisViaUi } = await import('./user-flows.js');
+	const id = await createAnalysisViaUi(page);
+	const name = nameForAnalysisId(id);
+	if (!name) throw new Error(`Temporary analysis ${id} was not registered for cleanup`);
+	const { gotoAnalysisEditor } = await import('./analysis.js');
+	await gotoAnalysisEditor(page, id);
+	return { id, name };
+}
+
 async function deleteUdfViaUIOnPage(page: Page, name: string): Promise<void> {
-	await gotoUdfLibrary(page, 5_000).catch(() => undefined);
-	const card = page.locator(`[data-udf-card="${name}"]`);
-	if (!(await card.isVisible().catch(() => false))) return;
-	const deleteResponse = page
-		.waitForResponse(
-			(response) =>
-				response.request().method() === 'DELETE' && response.url().includes('/api/v1/udf/'),
-			{ timeout: 5_000 }
-		)
-		.catch(() => null);
-	await card.getByRole('button', { name: /^Delete$/i }).click({ timeout: 5_000 });
-	await Promise.all([
-		deleteResponse,
-		card.getByRole('button', { name: /Confirm/i }).click({ timeout: 5_000 })
-	]).then(([response]) => {
-		if (response && !response.ok()) {
-			throw new Error(`Failed to delete UDF ${name}: HTTP ${response.status()}`);
+	const temporaryAnalysis = await prepareUdfCleanupAnalysis(page);
+	try {
+		await gotoUdfLibrary(page, 10_000);
+		const search = page.locator('#udf-search');
+		if (await search.isVisible()) await search.fill('');
+		await waitForUdfList(page, 10_000);
+		const card = page.locator(`[data-udf-card="${name}"]`);
+		if (!(await card.isVisible().catch(() => false))) return;
+		const deleteResponse = page
+			.waitForResponse(
+				(response) =>
+					response.request().method() === 'DELETE' && response.url().includes('/api/v1/udf/'),
+				{ timeout: 5_000 }
+			)
+			.catch(() => null);
+		await card.getByRole('button', { name: /^Delete$/i }).click({ timeout: 5_000 });
+		await Promise.all([
+			deleteResponse,
+			card.getByRole('button', { name: /Confirm/i }).click({ timeout: 5_000 })
+		]).then(([response]) => {
+			if (response && !response.ok()) {
+				throw new Error(`Failed to delete UDF ${name}: HTTP ${response.status()}`);
+			}
+		});
+		await expect(card).toBeHidden({ timeout: 5_000 });
+		await gotoUdfLibrary(page, 10_000);
+		await expect(page.locator(`[data-udf-card="${name}"]`)).toHaveCount(0, { timeout: 10_000 });
+	} finally {
+		if (temporaryAnalysis) {
+			await deleteAnalysisViaUI(page, temporaryAnalysis.name, {
+				id: temporaryAnalysis.id,
+				namespace: DEFAULT_NAMESPACE
+			});
 		}
-	});
-	await expect(card).toBeHidden({ timeout: 5_000 });
-	await gotoUdfLibrary(page, 10_000);
-	await expect(page.locator(`[data-udf-card="${name}"]`)).toHaveCount(0, { timeout: 10_000 });
+	}
 }
 
 export async function deleteUdfViaUI(

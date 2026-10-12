@@ -21,7 +21,7 @@ The root [README](../../README.md) is the human-facing project overview. [AGENTS
 - [Docker Release](implemented/docker-release.md)
 - [Dataset Column Descriptions](implemented/dataset-column-descriptions.md)
 - [Dataset Descriptions](implemented/dataset-descriptions.md)
-- [Core Product Specification](implemented/data-forge.md)
+- [Core Product Specification](implemented/data-forge.md) — includes analysis UDF editing and large namespace/compute worker dialogs
 - [Distributed Runtime v2](implemented/distributed-runtime-v2.md)
 - [Distributed Runtime v2 Progress](implemented/distributed-runtime-v2-progress.md) — archived progress record
 - [Documentation Update](implemented/documentation-update.md)

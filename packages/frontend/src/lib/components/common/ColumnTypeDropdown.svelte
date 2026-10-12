@@ -17,6 +17,7 @@
 		placeholder?: string;
 		disabled?: boolean;
 		allowed?: string[];
+		ariaLabelledby?: string;
 	}
 
 	let {
@@ -24,7 +25,8 @@
 		onChange,
 		placeholder = 'Select type...',
 		disabled = false,
-		allowed
+		allowed,
+		ariaLabelledby
 	}: Props = $props();
 
 	const allColumnTypes = getAllColumnTypes();
@@ -48,6 +50,7 @@
 	{placeholder}
 	searchPlaceholder="Search types..."
 	{disabled}
+	triggerAriaLabelledby={ariaLabelledby}
 	{renderOption}
 />
 

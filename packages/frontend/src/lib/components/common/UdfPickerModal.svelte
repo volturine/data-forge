@@ -1,50 +1,149 @@
 <script lang="ts">
-	import type { Udf } from '$lib/types/udf';
-	import ColumnTypeBadge from '$lib/components/common/ColumnTypeBadge.svelte';
+	import { untrack } from 'svelte';
 	import { X } from '@lucide/svelte';
+	import type { Udf, UdfCreate } from '$lib/types/udf';
+	import UdfEditor from '$lib/components/udfs/UdfEditor.svelte';
+	import UdfLibrary from '$lib/components/udfs/UdfLibrary.svelte';
 	import BaseModal from '$lib/components/ui/BaseModal.svelte';
 	import PanelHeader from '$lib/components/ui/PanelHeader.svelte';
-	import PanelFooter from '$lib/components/ui/PanelFooter.svelte';
-	import { css, button, input } from '$lib/styles/panda';
+	import { css, button } from '$lib/styles/panda';
 
 	interface Props {
 		show: boolean;
-		udfs: Udf[];
 		onSelect: (udf: Udf) => void;
 		onClose: () => void;
+		initialUdf?: Udf;
+		initialDraft?: UdfCreate;
+		onApply?: (draft: UdfCreate) => void;
 	}
 
-	let { show, udfs, onSelect, onClose }: Props = $props();
-	let search = $state('');
+	const { show, onSelect, onClose, initialUdf, initialDraft, onApply }: Props = $props();
+	type View = 'library' | 'editor';
+	type DiscardIntent = 'close' | 'back' | null;
 
-	const filtered = $derived.by(() => {
-		if (!search.trim()) return udfs;
-		const q = search.trim().toLowerCase();
-		return udfs.filter((udf) => udf.name.toLowerCase().includes(q));
-	});
+	let view = $state<View>(untrack(() => (initialUdf || initialDraft ? 'editor' : 'library')));
+	let selectedUdf = $state(untrack(() => initialUdf));
+	let selectedDraft = $state(untrack(() => initialDraft));
+	let dirty = $state(false);
+	let saving = $state(false);
+	let discardIntent = $state<DiscardIntent>(null);
+
+	function requestClose() {
+		if (saving) return;
+		if (dirty) {
+			discardIntent = 'close';
+			return;
+		}
+		resetToInitialView();
+		onClose();
+	}
+
+	function requestBack() {
+		if (saving) return;
+		if (dirty) {
+			discardIntent = 'back';
+			return;
+		}
+		showLibrary();
+	}
+
+	function showLibrary() {
+		view = 'library';
+		selectedUdf = undefined;
+		selectedDraft = undefined;
+		dirty = false;
+		discardIntent = null;
+	}
+
+	function resetToInitialView() {
+		view = initialUdf || initialDraft ? 'editor' : 'library';
+		selectedUdf = initialUdf;
+		selectedDraft = initialDraft;
+		dirty = false;
+		discardIntent = null;
+	}
+
+	function confirmDiscard() {
+		if (!discardIntent || saving) return;
+		const intent = discardIntent;
+		if (intent === 'back') {
+			showLibrary();
+			return;
+		}
+		resetToInitialView();
+		onClose();
+	}
+
+	function cancelDiscard() {
+		if (saving) return;
+		discardIntent = null;
+	}
+
+	function handleCreate() {
+		selectedUdf = undefined;
+		selectedDraft = undefined;
+		dirty = false;
+		discardIntent = null;
+		view = 'editor';
+	}
+
+	function handleEdit(udf: Udf) {
+		selectedUdf = udf;
+		selectedDraft = undefined;
+		dirty = false;
+		discardIntent = null;
+		view = 'editor';
+	}
+
+	function handleSaved(udf: Udf) {
+		showLibrary();
+		onSelect(udf);
+	}
+
+	function handleApply(draft: UdfCreate) {
+		if (saving) return;
+		dirty = false;
+		onApply?.(draft);
+	}
+
+	function focusHeading(node: HTMLHeadingElement, currentView: View) {
+		node.tabIndex = -1;
+		return {
+			update(nextView: View) {
+				if (nextView === currentView) return;
+				currentView = nextView;
+				node.focus();
+			}
+		};
+	}
+
+	function focusDiscard(node: HTMLElement): () => void {
+		const previousFocus = document.activeElement;
+		node.querySelector<HTMLButtonElement>('button')?.focus({ preventScroll: true });
+		return () => {
+			if (previousFocus instanceof HTMLElement && previousFocus.isConnected) {
+				previousFocus.focus({ preventScroll: true });
+			}
+		};
+	}
 </script>
 
 <BaseModal
 	open={show}
-	{onClose}
+	{content}
+	onClose={requestClose}
 	closeOnEscape={true}
 	closeOnBackdrop={true}
-	panelClass={css({
-		width: 'full',
-		maxWidth: 'modalSm',
-		maxHeight: 'screenTall',
-		overflowY: 'auto',
-		borderWidth: '1',
-		backgroundColor: 'bg.primary'
-	})}
+	size="large"
 	ariaLabelledby="udf-modal-title"
-	{content}
 />
 
 {#snippet content()}
 	<PanelHeader>
 		{#snippet title()}
-			<h2 id="udf-modal-title" class={css({ margin: '0', fontSize: 'md' })}>Select UDF</h2>
+			<h2 id="udf-modal-title" class={css({ margin: '0', fontSize: 'md' })} use:focusHeading={view}>
+				{view === 'library' ? 'UDF Library' : selectedUdf ? 'Edit UDF' : 'New UDF'}
+			</h2>
 		{/snippet}
 		{#snippet actions()}
 			<button
@@ -57,114 +156,79 @@
 					display: 'flex',
 					alignItems: 'center',
 					justifyContent: 'center',
-					_hover: { backgroundColor: 'bg.hover', color: 'fg.primary' }
+					_hover: { backgroundColor: 'bg.hover', color: 'fg.primary' },
+					_disabled: { opacity: '0.5', cursor: 'not-allowed' }
 				})}
-				onclick={onClose}
-				aria-label="Close"
+				onclick={requestClose}
+				aria-label="Close UDF dialog"
+				disabled={saving}
 				type="button"
 			>
 				<X size={16} />
 			</button>
 		{/snippet}
 	</PanelHeader>
-	<div
-		class={css({
-			padding: '4',
-			overflowY: 'auto',
-			display: 'flex',
-			flexDirection: 'column',
-			gap: '3'
-		})}
-	>
-		<input
-			name="search"
-			type="text"
-			placeholder="Search UDFs..."
-			bind:value={search}
-			class={input()}
-		/>
+
+	{#if discardIntent}
 		<div
+			role="alertdialog"
+			aria-labelledby="udf-discard-heading"
+			{@attach focusDiscard}
 			class={css({
 				display: 'flex',
-				flexDirection: 'column',
-				gap: '2',
-				maxHeight: 'popover',
-				overflow: 'auto'
+				flexWrap: 'wrap',
+				alignItems: 'center',
+				justifyContent: 'space-between',
+				gap: '3',
+				margin: '4',
+				padding: '4',
+				borderWidth: '1',
+				borderColor: 'border.warning',
+				backgroundColor: 'bg.secondary'
 			})}
 		>
-			{#if filtered.length === 0}
-				<p class={css({ margin: '0', color: 'fg.muted' })}>No matching UDFs.</p>
-			{:else}
-				{#each filtered as udf (udf.id)}
-					<button
-						class={css({
-							textAlign: 'left',
-							padding: '3',
-							borderWidth: '1',
-
-							backgroundColor: 'bg.secondary',
-							cursor: 'pointer',
-							_hover: { backgroundColor: 'bg.hover' }
-						})}
-						type="button"
-						onclick={() => onSelect(udf)}
-					>
-						<div
-							class={css({
-								display: 'flex',
-								justifyContent: 'space-between',
-								gap: '3',
-								fontWeight: 'medium'
-							})}
-						>
-							<span>{udf.name}</span>
-							<div
-								class={css({
-									display: 'flex',
-									alignItems: 'center',
-									gap: '1',
-									flexWrap: 'wrap'
-								})}
-							>
-								{#if udf.signature?.inputs?.length}
-									{#each udf.signature.inputs as input, i (i)}
-										<ColumnTypeBadge columnType={input.dtype} size="xs" showIcon={false} />
-										{#if i < udf.signature.inputs.length - 1}
-											<span class={css({ fontSize: 'xs', marginX: '0.5', color: 'fg.muted' })}
-												>,</span
-											>
-										{/if}
-									{/each}
-								{:else}
-									<span
-										class={css({
-											fontSize: 'xs',
-											textTransform: 'uppercase',
-											letterSpacing: 'wide',
-											color: 'fg.muted'
-										})}>No inputs</span
-									>
-								{/if}
-							</div>
-						</div>
-						{#if udf.description}
-							<p
-								class={css({
-									marginTop: '2',
-									marginBottom: '0',
-									fontSize: 'sm',
-									color: 'fg.secondary'
-								})}
-							>
-								{udf.description}
-							</p>
-						{/if}
-					</button>
-				{/each}
-			{/if}
+			<div>
+				<h3 id="udf-discard-heading" class={css({ margin: '0', fontSize: 'sm' })}>
+					Discard unsaved changes?
+				</h3>
+				<p class={css({ margin: '1 0 0', color: 'fg.tertiary', fontSize: 'sm' })}>
+					Your edits will be lost if you leave the editor.
+				</p>
+			</div>
+			<div class={css({ display: 'flex', gap: '2' })}>
+				<button
+					class={button({ variant: 'secondary' })}
+					onclick={cancelDiscard}
+					disabled={saving}
+					type="button"
+				>
+					Keep editing
+				</button>
+				<button
+					class={button({ variant: 'danger' })}
+					onclick={confirmDiscard}
+					disabled={saving}
+					type="button"
+				>
+					Discard changes
+				</button>
+			</div>
 		</div>
-	</div>
-	<PanelFooter>
-		<button class={button({ variant: 'secondary' })} onclick={onClose} type="button">Close</button>
-	</PanelFooter>
+	{/if}
+
+	{#if view === 'library'}
+		<UdfLibrary {onSelect} onEdit={handleEdit} onCreate={handleCreate} />
+	{:else}
+		{#key selectedUdf?.id ?? (selectedDraft ? 'draft' : 'new')}
+			<UdfEditor
+				initialUdf={selectedUdf}
+				initialDraft={selectedDraft}
+				onSave={handleSaved}
+				onBack={requestBack}
+				onApply={selectedDraft && onApply ? handleApply : undefined}
+				bind:dirty
+				bind:saving
+			/>
+		{/key}
+	{/if}
 {/snippet}

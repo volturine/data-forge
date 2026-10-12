@@ -1,18 +1,14 @@
 <script lang="ts">
 	import type { Schema } from '$lib/types/schema';
-	import type { Udf } from '$lib/types/udf';
+	import type { Udf, UdfCreate } from '$lib/types/udf';
 	import type { WithColumnsConfigData, WithColumnsExpr } from '$lib/types/operation-config';
 
-	import { createMutation, createQuery, useQueryClient } from '@tanstack/svelte-query';
-	import { listUdfs, createUdf } from '$lib/api/udf';
-	import CodeEditor from '$lib/components/common/CodeEditor.svelte';
+	import { createQuery } from '@tanstack/svelte-query';
+	import { listUdfs } from '$lib/api/udf';
 	import UdfPickerModal from '$lib/components/common/UdfPickerModal.svelte';
 	import ColumnDropdown from '$lib/components/common/ColumnDropdown.svelte';
 	import MultiSelectColumnDropdown from '$lib/components/common/MultiSelectColumnDropdown.svelte';
-	import BaseModal from '$lib/components/ui/BaseModal.svelte';
 	import SectionHeader from '$lib/components/ui/SectionHeader.svelte';
-	import PanelHeader from '$lib/components/ui/PanelHeader.svelte';
-	import PanelFooter from '$lib/components/ui/PanelFooter.svelte';
 	import { Pencil, X } from '@lucide/svelte';
 	import { css, button, emptyText, input, label, stepConfig } from '$lib/styles/panda';
 
@@ -31,17 +27,14 @@
 	let exprCode = $state('');
 	let exprUdfId = $state('');
 	let useLibrary = $state(false);
-	let showEditor = $state(false);
 	let codeEdited = $state(false);
 	let editIndex = $state<number | null>(null);
 	const isEditing = $derived(editIndex !== null);
 	let pickerOpen = $state(false);
-	let saveToLibrary = $state(false);
-	let saveName = $state('');
-	let saveDescription = $state('');
-	let saveTags = $state('');
-
-	const queryClient = useQueryClient();
+	let editorUdf = $state<Udf | undefined>();
+	let editorDraft = $state<UdfCreate | undefined>();
+	let inlineDraft = $state<UdfCreate | undefined>();
+	let inlineInputCount = $state<number | null>(null);
 
 	const udfQuery = createQuery(() => ({
 		queryKey: ['udfs'],
@@ -54,49 +47,18 @@
 		}
 	}));
 
-	const saveMutation = createMutation(() => ({
-		mutationFn: async () => {
-			const tagList = saveTags
-				.split(',')
-				.map((item) => item.trim())
-				.filter(Boolean);
-			const signature = {
-				inputs: exprArgs.map((name, index) => {
-					const column = schema.columns.find((col) => col.name === name);
-					return { position: index, dtype: column?.dtype ?? 'Any', label: name };
-				}),
-				output_dtype: null
-			};
-			const result = await createUdf({
-				name: saveName || exprName,
-				description: saveDescription || null,
-				signature,
-				code: exprCode,
-				tags: tagList.length ? tagList : null
-			});
-			if (result.isErr()) throw new Error(result.error.message);
-			return result.value;
-		},
-		onSuccess: (udf: Udf) => {
-			queryClient.invalidateQueries({ queryKey: ['udfs'] });
-			exprUdfId = udf.id;
-			useLibrary = true;
-			saveToLibrary = false;
-			saveName = '';
-			saveDescription = '';
-			saveTags = '';
-		}
-	}));
+	const selectedUdf = $derived((udfQuery.data ?? []).find((udf) => udf.id === exprUdfId));
 
 	const canAdd = $derived(
-		!!exprName &&
+		!!exprName.trim() &&
 			(exprType === 'column'
 				? !!exprColumn
 				: exprType === 'literal'
 					? exprValue !== ''
 					: useLibrary
-						? !!exprUdfId && exprArgs.length > 0
-						: !!exprCode)
+						? !!selectedUdf && exprArgs.length === selectedUdf.signature.inputs.length
+						: !!exprCode.trim() &&
+							(inlineInputCount === null || exprArgs.length === inlineInputCount))
 	);
 
 	function toArg(name: string): string {
@@ -127,10 +89,40 @@
 		syncGeneratedCode();
 	}
 
-	function openEditor() {
-		showEditor = true;
-		if (codeEdited) return;
-		if (!exprCode) exprCode = buildUdfCode(exprArgs);
+	function openEditor(): void {
+		if (useLibrary) {
+			if (!selectedUdf) return;
+			editorUdf = selectedUdf;
+			editorDraft = undefined;
+			pickerOpen = true;
+			return;
+		}
+		const code = exprCode || buildUdfCode(exprArgs);
+		editorUdf = undefined;
+		editorDraft = {
+			...inlineDraft,
+			name: inlineDraft?.name ?? exprName,
+			code,
+			signature: inlineDraft?.signature ?? {
+				inputs: exprArgs.map((name, position) => ({
+					position,
+					dtype: schema.columns.find((column) => column.name === name)?.dtype ?? 'Any',
+					label: toArg(name)
+				})),
+				output_dtype: null
+			}
+		};
+		pickerOpen = true;
+	}
+
+	function applyInlineUdf(draft: UdfCreate): void {
+		inlineDraft = draft;
+		exprCode = draft.code;
+		inlineInputCount = draft.signature.inputs.length;
+		if (exprArgs.length !== inlineInputCount) exprArgs = [];
+		codeEdited = true;
+		useLibrary = false;
+		pickerOpen = false;
 	}
 
 	function buildExpression(): WithColumnsExpr {
@@ -153,10 +145,10 @@
 		codeEdited = false;
 		exprType = 'column';
 		editIndex = null;
-		saveToLibrary = false;
-		saveName = '';
-		saveDescription = '';
-		saveTags = '';
+		inlineInputCount = null;
+		editorUdf = undefined;
+		editorDraft = undefined;
+		inlineDraft = undefined;
 	}
 
 	function addExpression() {
@@ -177,6 +169,7 @@
 	function editExpression(index: number) {
 		const expr = config.expressions?.[index];
 		if (!expr) return;
+		resetForm();
 		exprType = expr.type;
 		exprName = expr.name;
 		exprColumn = expr.column ?? '';
@@ -186,16 +179,30 @@
 		exprUdfId = expr.udf_id ?? '';
 		useLibrary = !!expr.udf_id;
 		codeEdited = !!expr.code;
+		if (expr.type === 'udf' && !useLibrary) inlineInputCount = exprArgs.length;
 		editIndex = index;
 	}
 
 	function openPicker() {
+		editorUdf = undefined;
+		editorDraft = undefined;
 		pickerOpen = true;
 	}
 
 	function handlePick(udf: Udf) {
+		if (exprArgs.length !== udf.signature.inputs.length) exprArgs = [];
 		exprUdfId = udf.id;
-		exprArgs = [];
+		exprCode = udf.code;
+		inlineInputCount = udf.signature.inputs.length;
+		inlineDraft = {
+			name: udf.name,
+			description: udf.description,
+			tags: udf.tags,
+			code: udf.code,
+			signature: udf.signature
+		};
+		codeEdited = true;
+		useLibrary = true;
 		pickerOpen = false;
 	}
 
@@ -271,134 +278,54 @@
 				</div>
 
 				{#if useLibrary}
-					<div class={css({ display: 'flex', alignItems: 'center', gap: '2' })}>
+					<div class={css({ display: 'flex', alignItems: 'center', gap: '2', flexWrap: 'wrap' })}>
 						<button
 							type="button"
 							class={button({ variant: 'secondary', size: 'sm' })}
-							onclick={openPicker}
+							onclick={openPicker}>Select UDF</button
 						>
-							Select UDF
-						</button>
-						{#if exprUdfId}
-							{@const selectedUdf = (udfQuery.data ?? []).find((item) => item.id === exprUdfId)}
-							<span class={label()}>Selected: {selectedUdf?.name ?? exprUdfId}</span>
+						{#if selectedUdf}
+							<button
+								type="button"
+								class={button({ variant: 'ghost', size: 'sm' })}
+								onclick={openEditor}>Edit UDF</button
+							>
+							<span class={label()}>Selected: {selectedUdf.name}</span>
 						{:else}
 							<span class={label()}>No UDF selected</span>
 						{/if}
 					</div>
-					<span class={label()}>Input columns</span>
-					<MultiSelectColumnDropdown
-						{schema}
-						value={exprArgs}
-						onChange={setExprArgs}
-						placeholder="Select input columns..."
-					/>
-				{:else}
-					<span class={label()}>Input columns</span>
-					<MultiSelectColumnDropdown
-						{schema}
-						value={exprArgs}
-						onChange={setExprArgs}
-						placeholder="Select input columns..."
-					/>
-
-					<div
-						class={css({ display: 'flex', alignItems: 'center', justifyContent: 'space-between' })}
-					>
-						<label for="wc-expr-code" class={label()}>Function</label>
-						<button
-							type="button"
-							class={button({ variant: 'ghost', size: 'sm' })}
-							onclick={openEditor}>Expand</button
-						>
-					</div>
-					<textarea
-						id="wc-expr-code"
-						class={css({
-							width: 'full',
-							color: 'fg.primary',
-							backgroundColor: 'bg.primary',
-							borderWidth: '1',
-							borderRadius: '0',
-							paddingX: '3.5',
-							paddingY: '2.25',
-							transitionProperty: 'border-color',
-							transitionDuration: '160ms',
-							transitionTimingFunction: 'ease',
-							_focus: { outline: 'none' },
-							_focusVisible: { borderColor: 'border.accent' },
-							_disabled: { opacity: '0.5', cursor: 'not-allowed', backgroundColor: 'bg.tertiary' },
-							_placeholder: { color: 'fg.muted' },
-							resize: 'vertical',
-							minHeight: 'fieldSm',
-							fontSize: 'sm'
-						})}
-						rows="5"
-						placeholder="def udf(*args):&#10;    return ..."
-						bind:value={exprCode}
-						oninput={() => (codeEdited = true)}></textarea>
-					<label
-						class={css({
-							display: 'inline-flex',
-							alignItems: 'center',
-							gap: '2',
-							fontSize: 'sm',
-							fontWeight: 'normal',
-							color: 'fg.secondary',
-							textTransform: 'none',
-							letterSpacing: 'normal',
-							marginBottom: '0',
-							marginTop: '2'
-						})}
-					>
-						<input id="wc-save-to-lib" type="checkbox" bind:checked={saveToLibrary} />
-						Save to UDF Library
-					</label>
-					{#if saveToLibrary}
-						<div
-							class={css({
-								borderTopWidth: '1',
-								display: 'flex',
-								flexDirection: 'column',
-								gap: '3',
-								marginTop: '3',
-								paddingTop: '3'
-							})}
-						>
-							<label class={label()} for="wc-save-name">Name</label>
-							<input
-								id="wc-save-name"
-								type="text"
-								class={input()}
-								placeholder="UDF name"
-								bind:value={saveName}
-							/>
-							<label class={label()} for="wc-save-desc">Description</label>
-							<input
-								id="wc-save-desc"
-								type="text"
-								class={input()}
-								placeholder="Description"
-								bind:value={saveDescription}
-							/>
-							<label class={label()} for="wc-save-tags">Tags</label>
-							<input
-								id="wc-save-tags"
-								type="text"
-								class={input()}
-								placeholder="Tags (comma-separated)"
-								bind:value={saveTags}
-							/>
-							<button
-								type="button"
-								class={button({ variant: 'secondary', size: 'sm' })}
-								onclick={() => saveMutation.mutate()}
-								disabled={!exprCode.trim()}
-							>
-								Save to Library
-							</button>
-						</div>
+					{#if udfQuery.isError}
+						<p role="alert" class={css({ color: 'fg.error', margin: '0' })}>
+							{udfQuery.error.message}
+						</p>
 					{/if}
+				{:else}
+					<button
+						type="button"
+						class={button({ variant: 'secondary', size: 'sm' })}
+						onclick={openEditor}>Edit UDF</button
+					>
+					<p class={css({ color: 'fg.muted', fontSize: 'xs', margin: '0' })}>
+						Edit the function, inputs, and output type in the UDF editor. You can also save it to
+						the library.
+					</p>
+				{/if}
+				<span class={label()}>Input columns</span>
+				<MultiSelectColumnDropdown
+					{schema}
+					value={exprArgs}
+					onChange={setExprArgs}
+					placeholder="Select input columns..."
+				/>
+				{#if useLibrary && selectedUdf}
+					<p class={css({ color: 'fg.muted', fontSize: 'xs', margin: '0' })}>
+						Select {selectedUdf.signature.inputs.length} input columns in function argument order.
+					</p>
+				{:else if inlineInputCount !== null}
+					<p class={css({ color: 'fg.muted', fontSize: 'xs', margin: '0' })}>
+						Select {inlineInputCount} input columns in function argument order.
+					</p>
 				{/if}
 			</div>
 		{/if}
@@ -528,77 +455,13 @@
 	{/if}
 </div>
 
-<BaseModal
-	open={showEditor}
-	onClose={() => (showEditor = false)}
-	closeOnEscape={true}
-	closeOnBackdrop={true}
-	panelClass={css({
-		width: 'min(720px, 92vw)',
-		backgroundColor: 'bg.primary',
-		borderWidth: '1',
-		display: 'flex',
-		flexDirection: 'column',
-		_focus: { outline: 'none' }
-	})}
-	ariaLabelledby="wc-editor-title"
-	{content}
-/>
-
-{#snippet content()}
-	<PanelHeader>
-		{#snippet title()}
-			<span id="wc-editor-title">UDF Editor</span>
-		{/snippet}
-		{#snippet actions()}
-			<button
-				class={css({
-					background: 'transparent',
-					border: 'none',
-					color: 'fg.muted',
-					cursor: 'pointer',
-					fontSize: 'xl',
-					padding: '1',
-					display: 'flex',
-					alignItems: 'center',
-					justifyContent: 'center',
-					transition: 'color 160ms ease, background-color 160ms ease',
-					_hover: { backgroundColor: 'bg.hover', color: 'fg.primary' }
-				})}
-				onclick={() => (showEditor = false)}
-				aria-label="Close"
-				type="button"
-			>
-				<X size={16} />
-			</button>
-		{/snippet}
-	</PanelHeader>
-	<div
-		class={css({
-			padding: '4',
-			overflowY: 'auto',
-			display: 'flex',
-			flexDirection: 'column',
-			gap: '3'
-		})}
-	>
-		<CodeEditor bind:value={exprCode} height="400px" onEdit={() => (codeEdited = true)} />
-		<p class={css({ fontSize: 'sm', margin: '0', color: 'fg.muted' })}>
-			Define a function named <code>udf</code> that returns a value per row.
-		</p>
-	</div>
-	<PanelFooter>
-		<button
-			class={button({ variant: 'secondary' })}
-			onclick={() => (showEditor = false)}
-			type="button">Done</button
-		>
-	</PanelFooter>
-{/snippet}
-
-<UdfPickerModal
-	show={pickerOpen}
-	udfs={udfQuery.data ?? []}
-	onSelect={handlePick}
-	onClose={() => (pickerOpen = false)}
-/>
+{#if pickerOpen}
+	<UdfPickerModal
+		show={true}
+		initialUdf={editorUdf}
+		initialDraft={editorDraft}
+		onSelect={handlePick}
+		onApply={applyInlineUdf}
+		onClose={() => (pickerOpen = false)}
+	/>
+{/if}

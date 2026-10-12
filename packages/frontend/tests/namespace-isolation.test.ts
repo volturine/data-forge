@@ -5,12 +5,14 @@ import {
 	expect,
 	test
 } from './fixtures.js';
+import { nameForAnalysisId } from './utils/api.js';
+import { gotoAnalysisEditor } from './utils/analysis.js';
 import { screenshot } from './utils/visual.js';
 import {
 	gotoMonitoringTab,
+	readyTimeoutMs,
 	waitForAppShell,
-	waitForDatasourceList,
-	waitForLayoutReady
+	waitForDatasourceList
 } from './utils/readiness.js';
 import {
 	DEFAULT_NAMESPACE,
@@ -18,6 +20,9 @@ import {
 	expectNamespace,
 	restoreDefaultNamespace
 } from './utils/namespace.js';
+import { createAnalysisViaUi } from './utils/user-flows.js';
+import { deleteAnalysisViaUI } from './utils/ui-cleanup.js';
+import { uid } from './utils/uid.js';
 
 /**
  * E2E tests for namespace data isolation.
@@ -27,6 +32,47 @@ import {
 test.describe('Namespace – data isolation', () => {
 	test.afterEach(async ({ page }) => {
 		await restoreDefaultNamespace(page);
+	});
+
+	test('creates a namespace through the large picker and preserves it after reload', async ({
+		page
+	}) => {
+		const namespace = `e2e-picker-${uid()}`;
+		await page.goto('/datasources');
+		await waitForAppShell(page);
+		const trigger = page.getByRole('button', { name: 'Select namespace' });
+		await trigger.click();
+		const dialog = page.locator('[role="dialog"][aria-labelledby="namespace-picker-title"]');
+		await expect(dialog.getByRole('textbox', { name: 'Search namespaces' })).toBeFocused();
+		await dialog.getByRole('button', { name: 'New namespace' }).click();
+		const name = dialog.getByRole('textbox', { name: 'Name', exact: true });
+		await expect(name).toBeFocused();
+		const create = dialog.getByRole('button', { name: 'Create namespace' });
+		await name.fill('Invalid_Name');
+		await expect(dialog.getByRole('alert')).toContainText('lowercase letters');
+		await expect(create).toBeDisabled();
+		await name.fill(namespace);
+		await expect(dialog.getByText(`S3 bucket (root): ${namespace}`, { exact: true })).toBeVisible({
+			timeout: readyTimeoutMs()
+		});
+		await expect(create).toBeEnabled();
+		await screenshot(page, 'namespace', 'namespace-creation-dialog');
+		await create.click();
+		await expect(dialog).not.toBeVisible({ timeout: readyTimeoutMs() });
+		await expectNamespace(page, namespace);
+		await expect(page).toHaveURL('/datasources');
+		await expect(trigger).toBeFocused();
+
+		await page.reload();
+		await waitForAppShell(page);
+		await expectNamespace(page, namespace);
+		await trigger.click();
+		await dialog.getByRole('textbox', { name: 'Search namespaces' }).fill(namespace);
+		await expect(dialog.locator(`[data-namespace-option="${namespace}"]`)).toHaveAttribute(
+			'aria-pressed',
+			'true'
+		);
+		await page.keyboard.press('Escape');
 	});
 
 	test('datasource in namespace A is invisible from namespace B', async ({ page }) => {
@@ -80,7 +126,7 @@ test.describe('Namespace – data isolation', () => {
 		await screenshot(page, 'namespace', 'persistence-after-refresh');
 	});
 
-	test('switching namespace preserves current route', async ({ page }) => {
+	test('switching namespace preserves current route', async ({ page, sharedDatasource }) => {
 		const nsA = E2E_SHARED_NAMESPACE_A;
 		const nsB = E2E_SHARED_NAMESPACE_B;
 
@@ -114,17 +160,24 @@ test.describe('Namespace – data isolation', () => {
 		await expectNamespace(page, nsA);
 		await screenshot(page, 'namespace', 'route-preserved-monitoring');
 
-		// Navigate to /udfs and switch again
-		await page.goto('/udfs');
-		await waitForLayoutReady(page);
-		await expect(page.getByRole('heading', { name: 'UDF Library' })).toBeVisible({
-			timeout: 5_000
-		});
+		await switchNamespace(page, DEFAULT_NAMESPACE);
+		const analysisId = await createAnalysisViaUi(page, sharedDatasource.name);
+		const analysisName = nameForAnalysisId(analysisId);
+		if (!analysisName) throw new Error(`Analysis ${analysisId} was not registered for cleanup`);
 
-		await switchNamespace(page, nsB);
-		await expect(page).toHaveURL(/udfs/, { timeout: 5_000 });
-		await expectNamespace(page, nsB);
-		await screenshot(page, 'namespace', 'route-preserved-udfs');
+		try {
+			await gotoAnalysisEditor(page, analysisId);
+			await switchNamespace(page, nsB);
+			await expect(page).toHaveURL(`/analysis/${analysisId}`, { timeout: 5_000 });
+			await expectNamespace(page, nsB);
+			await screenshot(page, 'namespace', 'route-preserved-analysis');
+		} finally {
+			await switchNamespace(page, DEFAULT_NAMESPACE);
+			await deleteAnalysisViaUI(page, analysisName, {
+				id: analysisId,
+				namespace: DEFAULT_NAMESPACE
+			});
+		}
 	});
 
 	test('namespace switch clears stale datasource selection', async ({ page }) => {

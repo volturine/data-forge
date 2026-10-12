@@ -6,18 +6,19 @@ import {
 	gotoAuthedRoute,
 	gotoMonitoringTab,
 	gotoNewAnalysis,
-	gotoNewUdfPage,
-	gotoUdfLibrary,
 	gotoProfile,
 	waitForProfileTab,
 	readyTimeoutMs,
 	waitForAppShell,
 	waitForLayoutReady
 } from './utils/readiness.js';
-import { gotoAnalysisEditor } from './utils/analysis.js';
-import { deleteAnalysisViaUI } from './utils/ui-cleanup.js';
+import { addStepAndOpenConfig, gotoAnalysisEditor } from './utils/analysis.js';
+import { closeComputeWorkersPopup, deleteAnalysisViaUI } from './utils/ui-cleanup.js';
+import { createAnalysisViaUi } from './utils/user-flows.js';
+import { nameForAnalysisId } from './utils/api.js';
+import { DEFAULT_NAMESPACE, switchNamespace } from './utils/namespace.js';
 import { uid } from './utils/uid.js';
-import { dialogByTextbox } from './utils/locators.js';
+import { dialogByHeading, dialogByTextbox } from './utils/locators.js';
 import { waitForBuildPreview, waitForBuildPreviewId } from './utils/builds.js';
 
 /**
@@ -40,9 +41,10 @@ test.describe('Navigation – page load smoke tests', () => {
 		await screenshot(page, 'navigation', 'datasources-page');
 	});
 
-	test('UDF library page renders UDF Library heading', async ({ page }) => {
-		await gotoUdfLibrary(page);
-		await expect(page.getByRole('heading', { name: 'UDF Library' })).toBeVisible();
+	test('UDFs are not a sidebar destination', async ({ page }) => {
+		await gotoAuthedRoute(page, '/');
+		const sidebar = page.locator('aside[aria-label="Main navigation"]');
+		await expect(sidebar.getByRole('link', { name: 'UDFs', exact: true })).toHaveCount(0);
 	});
 
 	test('monitoring page renders Monitoring heading', async ({ page }) => {
@@ -65,11 +67,6 @@ test.describe('Navigation – page load smoke tests', () => {
 	test('new datasource page loads', async ({ page }) => {
 		await gotoAuthedRoute(page, '/datasources/new');
 		await expect(page).toHaveURL(/datasources\/new/);
-	});
-
-	test('new UDF page loads', async ({ page }) => {
-		await gotoNewUdfPage(page);
-		await expect(page).toHaveURL(/udfs\/new/);
 	});
 
 	// ── header nav links ──────────────────────────────────────────────────────
@@ -98,12 +95,53 @@ test.describe('Navigation – page load smoke tests', () => {
 		await expect(page).toHaveURL(/datasources\/new/, { timeout: 5_000 });
 	});
 
-	test('UDFs "New UDF" link navigates to /udfs/new', async ({ page }) => {
-		await gotoUdfLibrary(page);
-		const newUdfLink = page.getByRole('link', { name: 'New UDF' });
-		await expect(newUdfLink).toBeVisible();
-		await newUdfLink.click();
-		await expect(page).toHaveURL(/udfs\/new/, { timeout: 5_000 });
+	test('UDF library opens from With Columns without changing the analysis URL', async ({
+		page,
+		sharedDatasource
+	}) => {
+		await gotoAuthedRoute(page, '/');
+		await switchNamespace(page, DEFAULT_NAMESPACE);
+		const analysisId = await createAnalysisViaUi(page, sharedDatasource.name);
+		const analysisName = nameForAnalysisId(analysisId);
+		if (!analysisName) throw new Error(`Analysis ${analysisId} was not registered for cleanup`);
+
+		try {
+			const config = await addStepAndOpenConfig(page, analysisId, 'with_columns');
+			await config.locator('#wc-expr-type').selectOption('udf');
+			await config.locator('#wc-use-lib-yes').check();
+			const selectUdf = config.getByRole('button', { name: 'Select UDF', exact: true });
+			await selectUdf.click();
+
+			const library = dialogByHeading(page, 'UDF Library');
+			await expect(library).toBeVisible();
+			await expect(page).toHaveURL(`/analysis/${analysisId}`);
+			const treatment = await library.evaluate((panel) => {
+				if (!panel.parentElement) throw new Error('UDF dialog has no backdrop');
+				const backdrop = getComputedStyle(panel.parentElement);
+				return { background: backdrop.backgroundColor, filter: backdrop.backdropFilter };
+			});
+			expect(treatment.background).not.toBe('rgba(0, 0, 0, 0)');
+			expect(treatment.filter).toContain('blur(');
+			await page.keyboard.press('Tab');
+			expect(await library.evaluate((panel) => panel.contains(document.activeElement))).toBe(true);
+			await library.getByRole('button', { name: 'Close UDF dialog' }).click();
+			await expect(page.getByRole('dialog')).toHaveCount(0);
+			await expect(selectUdf).toBeFocused();
+
+			await selectUdf.click();
+			await expect(library).toBeVisible();
+			await page.setViewportSize({ width: 720, height: 900 });
+			const bounds = await library.boundingBox();
+			if (!bounds) throw new Error('UDF library dialog has no visible bounds');
+			expect(bounds.x).toBeGreaterThanOrEqual(0);
+			expect(bounds.x + bounds.width).toBeLessThanOrEqual(720);
+			expect(bounds.y).toBeGreaterThanOrEqual(0);
+			expect(bounds.y + bounds.height).toBeLessThanOrEqual(900);
+			await page.keyboard.press('Escape');
+			await expect(page.getByRole('dialog')).toHaveCount(0);
+		} finally {
+			await deleteAnalysisViaUI(page, analysisName, { id: analysisId });
+		}
 	});
 });
 
@@ -293,6 +331,7 @@ test.describe('Navigation – compute worker monitor', () => {
 			).toBeVisible({
 				timeout: readyTimeoutMs()
 			});
+			await closeComputeWorkersPopup(page);
 
 			const panel = page.locator('#panel-builds');
 			// Build may finish before cancel under load (especially with multi-thread
@@ -309,7 +348,7 @@ test.describe('Navigation – compute worker monitor', () => {
 				const cancelButton = historyRow.getByLabel('Cancel build');
 				await expect(cancelButton).toBeVisible({ timeout: 5_000 });
 				await expect(cancelButton).toBeEnabled({ timeout: 5_000 });
-				await cancelButton.click({ force: true, timeout: 5_000 });
+				await cancelButton.click({ timeout: 5_000 });
 				await confirmCancelBuild(page);
 
 				const cancelledRow = await waitForBuildRowEventually(page, panel, runId, 'cancelled');
@@ -669,6 +708,25 @@ test.describe('Navigation – namespace persistence', () => {
 		await expect(dialog).toBeVisible({ timeout: 5_000 });
 
 		const search = dialog.locator('#namespace-picker-search');
+		await expect(search).toBeFocused();
+		const treatment = await dialog.evaluate((panel) => {
+			const backdrop = getComputedStyle(panel.parentElement!);
+			return {
+				width: panel.getBoundingClientRect().width,
+				filter: backdrop.backdropFilter,
+				background: backdrop.backgroundColor
+			};
+		});
+		expect(treatment.width).toBeGreaterThan(800);
+		expect(treatment.filter).toContain('blur(');
+		expect(treatment.background).not.toBe('rgba(0, 0, 0, 0)');
+		await page.keyboard.press('Tab');
+		expect(await dialog.evaluate((panel) => panel.contains(document.activeElement))).toBe(true);
+		await page.setViewportSize({ width: 390, height: 844 });
+		const bounds = await dialog.boundingBox();
+		expect(bounds!.x).toBeGreaterThanOrEqual(0);
+		expect(bounds!.x + bounds!.width).toBeLessThanOrEqual(390);
+		expect(await dialog.evaluate((panel) => panel.scrollWidth <= panel.clientWidth)).toBe(true);
 		await search.fill('default');
 		await expect(dialog.locator('[data-namespace-option="default"]')).toBeVisible({
 			timeout: 3_000
@@ -677,5 +735,6 @@ test.describe('Navigation – namespace persistence', () => {
 		await dialog.locator('[data-namespace-option="default"]').click();
 		await expect(dialog).not.toBeVisible({ timeout: 5_000 });
 		await expect(page.getByRole('button', { name: 'Select namespace' })).toContainText('default');
+		await expect(page.getByRole('button', { name: 'Select namespace' })).toBeFocused();
 	});
 });
