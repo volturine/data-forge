@@ -1,9 +1,11 @@
 import { expect, type Page } from '@playwright/test';
-import { waitForCurrentAnalysisEditor } from './analysis.js';
+import { gotoAnalysisEditor, waitForCurrentAnalysisEditor } from './analysis.js';
 import {
 	gotoAuthedRoute,
 	gotoMonitoringTab,
 	gotoNewAnalysis,
+	gotoNewUdfPage,
+	gotoUdfLibrary,
 	readyTimeoutMs,
 	waitForDatasourceList,
 	waitForUdfList
@@ -148,13 +150,21 @@ export async function uploadDatasourceWithDatesViaUi(
 	return uploadDatasourceViaUi(page, name, { csv: DATE_CSV });
 }
 
-export async function createAnalysisViaUi(page: Page, datasourceName: string): Promise<string> {
+export async function createAnalysisViaUi(page: Page, datasourceName?: string): Promise<string> {
 	const { registerAnalysis } = await import('./api.js');
 	await gotoNewAnalysis(page);
-	await page.getByLabel('Search datasources').fill(datasourceName);
-	await page.locator(`[data-ds-option="${datasourceName}"]`).click();
+	const firstDatasource = page.locator('[data-ds-option]').first();
+	if (!datasourceName) {
+		await expect(firstDatasource).toBeVisible({ timeout: readyTimeoutMs() });
+	}
+	const selectedDatasourceName =
+		datasourceName ?? (await firstDatasource.getAttribute('data-ds-option')) ?? '';
+	if (!selectedDatasourceName)
+		throw new Error('No datasource is available to create a UDF analysis');
+	await page.getByLabel('Search datasources').fill(selectedDatasourceName);
+	await page.locator(`[data-ds-option="${selectedDatasourceName}"]`).click();
 	const createButton = page
-		.locator('li', { has: page.locator(`[data-ds-option="${datasourceName}"]`) })
+		.locator('li', { has: page.locator(`[data-ds-option="${selectedDatasourceName}"]`) })
 		.getByRole('button', { name: 'Create analysis' });
 	await createButton.waitFor({ state: 'visible', timeout: 10_000 });
 	const createResponsePromise = page.waitForResponse(
@@ -177,25 +187,42 @@ export async function createAnalysisViaUi(page: Page, datasourceName: string): P
 }
 
 export async function createUdfViaUi(page: Page, name: string): Promise<string> {
-	await gotoAuthedRoute(page, '/udfs/new');
-	await page.locator('#udf-name').fill(name);
-	await page.locator('#udf-description').fill(`Test UDF: ${name}`);
-	await page.locator('#udf-tags').fill('test');
-	const [response] = await Promise.all([
-		page.waitForResponse(
-			(resp) =>
-				resp.url().includes('/api/v1/udf') &&
-				resp.request().method() === 'POST' &&
-				resp.status() !== 0
-		),
-		page.getByTestId('udf-save-button').click()
-	]);
-	if (!response.ok()) {
-		throw new Error(`UDF create failed: HTTP ${response.status()}`);
+	const currentAnalysisId = new URL(page.url()).pathname.match(/^\/analysis\/([^/]+)$/)?.[1];
+	const setupAnalysisId = currentAnalysisId ? undefined : await createAnalysisViaUi(page);
+	const analysisId = currentAnalysisId ?? setupAnalysisId;
+	if (!analysisId) throw new Error('Could not open an analysis for the UDF editor');
+
+	try {
+		if (setupAnalysisId) await gotoAnalysisEditor(page, setupAnalysisId);
+		await gotoNewUdfPage(page);
+		await page.locator('#udf-name').fill(name);
+		await page.locator('#udf-description').fill(`Test UDF: ${name}`);
+		await page.locator('#udf-tags').fill('test');
+		const [response] = await Promise.all([
+			page.waitForResponse(
+				(resp) =>
+					resp.url().includes('/api/v1/udf') &&
+					resp.request().method() === 'POST' &&
+					resp.status() !== 0
+			),
+			page.getByTestId('udf-save-button').click()
+		]);
+		if (!response.ok()) throw new Error(`UDF create failed: HTTP ${response.status()}`);
+		const payload = (await response.json()) as { id: string };
+		await expect(page).toHaveURL(`/analysis/${analysisId}`, { timeout: readyTimeoutMs() });
+		return payload.id;
+	} finally {
+		if (setupAnalysisId) {
+			const [{ nameForAnalysisId }, { deleteAnalysisViaUI }] = await Promise.all([
+				import('./api.js'),
+				import('./ui-cleanup.js')
+			]);
+			const analysisName = nameForAnalysisId(setupAnalysisId);
+			if (analysisName) {
+				await deleteAnalysisViaUI(page, analysisName, { id: setupAnalysisId });
+			}
+		}
 	}
-	const payload = (await response.json()) as { id: string };
-	await expect(page).toHaveURL(new RegExp(`/udfs/${payload.id}$`), { timeout: 5_000 });
-	return payload.id;
 }
 
 export async function createScheduleViaUi(
@@ -259,7 +286,7 @@ export async function createHealthCheckViaUi(
 }
 
 export async function waitForUdfVisible(page: Page, name: string): Promise<void> {
-	await page.goto('/udfs');
+	await gotoUdfLibrary(page);
 	await waitForUdfList(page);
 	await expect(page.locator(`[data-udf-card="${name}"]`)).toBeVisible({ timeout: 5_000 });
 }

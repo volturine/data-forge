@@ -69,14 +69,19 @@
 					<input
 						type="text"
 						id="udf-input-{index}-label"
+						aria-label="Input {index + 1} name"
 						placeholder="Label"
 						value={item.label ?? ''}
 						class={input()}
 						oninput={(e) => updateInput(index, { label: e.currentTarget.value })}
 					/>
 					<div>
+						<span id="udf-input-{index}-type" class={css({ srOnly: true })}>
+							Input {index + 1} type
+						</span>
 						<ColumnTypeDropdown
 							value={item.dtype}
+							ariaLabelledby="udf-input-{index}-type"
 							onChange={(val) => updateInput(index, { dtype: val })}
 							placeholder="Select type..."
 						/>

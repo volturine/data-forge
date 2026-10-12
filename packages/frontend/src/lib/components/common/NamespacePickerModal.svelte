@@ -1,11 +1,13 @@
 <script lang="ts">
-	import { Debounced } from 'runed';
+	import { Check, Plus, ArrowLeft, X } from '@lucide/svelte';
 	import { createQuery } from '@tanstack/svelte-query';
+	import { Debounced } from 'runed';
+	import { tick } from 'svelte';
+	import BaseModal from '$lib/components/ui/BaseModal.svelte';
+	import PanelHeader from '$lib/components/ui/PanelHeader.svelte';
 	import { listNamespaces, previewNamespaceStorage } from '$lib/api/namespaces';
 	import { NAMESPACE_NAME_RULES, normalizeNamespace } from '$lib/utils/namespace';
-	import { css } from '$lib/styles/panda';
-	import { overlayStack } from '$lib/stores/overlay.svelte';
-	import type { OverlayConfig } from '$lib/stores/overlay.svelte';
+	import { button, css } from '$lib/styles/panda';
 
 	interface Props {
 		open: boolean;
@@ -13,16 +15,18 @@
 		onSelect: (value: string) => void | Promise<void>;
 		onSelectError?: (message: string) => void;
 		onClose: () => void;
-		anchor?: HTMLElement | null;
 	}
 
-	let { open, selected, onSelect, onSelectError, onClose, anchor = null }: Props = $props();
+	type View = 'namespaces' | 'create';
 
+	let { open, selected, onSelect, onSelectError, onClose }: Props = $props();
+
+	let view = $state<View>('namespaces');
 	let searchQuery = $state('');
+	let createName = $state('');
 	let selecting = $state(false);
 	let selectionError = $state<string | null>(null);
 	const debouncedSearch = new Debounced(() => searchQuery, 200);
-	let popoverRect = $state({ left: 0, top: 0, width: 360 });
 
 	const namespacesQuery = createQuery(() => ({
 		queryKey: ['namespaces'],
@@ -43,13 +47,17 @@
 			: rawNamespaces
 	);
 
-	const trimmedSearch = $derived(debouncedSearch.current.trim());
-	const normalizedCandidate = $derived(trimmedSearch ? normalizeNamespace(trimmedSearch) : '');
-	const invalidCandidate = $derived(!!trimmedSearch && !normalizedCandidate);
-	const canCreate = $derived(
-		!!normalizedCandidate && !rawNamespaces.some((name) => name === normalizedCandidate)
+	const normalizedCandidate = $derived(normalizeNamespace(createName));
+	const invalidCandidate = $derived(!!createName.trim() && !normalizedCandidate);
+	const duplicateCandidate = $derived(
+		!!normalizedCandidate && rawNamespaces.includes(normalizedCandidate)
 	);
-
+	const canCreate = $derived(
+		!!normalizedCandidate &&
+			!duplicateCandidate &&
+			!namespacesQuery.isLoading &&
+			!namespacesQuery.isError
+	);
 	const storagePlanQuery = createQuery(() => ({
 		queryKey: ['namespace-storage-plan', normalizedCandidate],
 		queryFn: async () => {
@@ -58,16 +66,45 @@
 			return result.value;
 		},
 		staleTime: 30_000,
-		enabled: open && canCreate
+		enabled: open && view === 'create' && canCreate
 	}));
+	const canSubmit = $derived(
+		canCreate && !!storagePlanQuery.data && !storagePlanQuery.isLoading && !storagePlanQuery.isError
+	);
 
-	let popupRef = $state<HTMLElement | null>(null);
-
-	function handleClose() {
-		if (selecting) return;
-		onClose();
+	function resetAndClose(): void {
+		view = 'namespaces';
 		searchQuery = '';
+		createName = '';
 		selectionError = null;
+		onClose();
+	}
+
+	function handleClose(): void {
+		if (selecting) return;
+		resetAndClose();
+	}
+
+	async function handleBack(): Promise<void> {
+		if (selecting) return;
+		view = 'namespaces';
+		selectionError = null;
+		await tick();
+		document.querySelector<HTMLInputElement>('#namespace-picker-search')?.focus();
+	}
+
+	async function handleStartCreate(): Promise<void> {
+		if (selecting) return;
+		const candidate = normalizeNamespace(searchQuery);
+		createName = candidate && !rawNamespaces.includes(candidate) ? candidate : '';
+		selectionError = null;
+		view = 'create';
+		await tick();
+		document.querySelector<HTMLInputElement>('#namespace-create-name')?.focus();
+	}
+
+	function errorMessage(error: unknown): string {
+		return error instanceof Error ? error.message : String(error);
 	}
 
 	async function handleSelect(value: string): Promise<void> {
@@ -76,28 +113,18 @@
 			handleClose();
 			return;
 		}
+
 		selecting = true;
 		selectionError = null;
-		let selection: void | Promise<void>;
 		try {
-			selection = onSelect(value);
-		} catch (error) {
-			const message = error instanceof Error ? error.message : String(error);
-			selectionError = message;
-			onSelectError?.(message);
-			selecting = false;
-			return;
-		}
-		// Namespace registration can provision storage and run migrations. Keep
-		// the picker visible while that promise is pending so the user has a
-		// truthful progress surface and the old namespace is never presented as
-		// if the selection had already committed.
-		try {
-			await selection;
+			await onSelect(value);
+			view = 'namespaces';
 			searchQuery = '';
+			createName = '';
 			onClose();
 		} catch (error) {
-			const message = error instanceof Error ? error.message : String(error);
+			const message = errorMessage(error);
+			selectionError = message;
 			onSelectError?.(message);
 		} finally {
 			selecting = false;
@@ -105,283 +132,476 @@
 	}
 
 	async function handleCreate(): Promise<void> {
-		if (!normalizedCandidate) return;
+		if (selecting || !canSubmit || !normalizedCandidate) return;
 		await handleSelect(normalizedCandidate);
-	}
-
-	const overlayConfig = $derived<OverlayConfig>({
-		onEscape: handleClose,
-		onOutsideClick: (target: Node) => {
-			if (popupRef?.contains(target)) return;
-			if (anchor?.contains(target)) return;
-			handleClose();
-		}
-	});
-
-	function updatePopoverPosition() {
-		const node = anchor;
-		if (!node) return;
-		const rect = node.getBoundingClientRect();
-		const width = Math.max(rect.width, 240);
-		let left = rect.left;
-		const maxLeft = window.innerWidth - width - 8;
-		if (left > maxLeft) left = Math.max(8, maxLeft);
-		popoverRect = {
-			left,
-			top: rect.bottom + 6,
-			width
-		};
-	}
-
-	function applyPopoverPosition(
-		node: HTMLElement | undefined,
-		rect: { left: number; top: number; width: number }
-	) {
-		if (!node) return;
-		node.style.left = `${rect.left}px`;
-		node.style.top = `${rect.top}px`;
-		node.style.width = `${rect.width}px`;
-	}
-
-	function portal(node: HTMLElement, rect: { left: number; top: number; width: number }) {
-		document.body.appendChild(node);
-		applyPopoverPosition(node, rect);
-		updatePopoverPosition();
-		applyPopoverPosition(node, popoverRect);
-		const handleResize = () => updatePopoverPosition();
-		window.addEventListener('resize', handleResize);
-		window.addEventListener('scroll', handleResize, true);
-		return {
-			update(next: { left: number; top: number; width: number }) {
-				applyPopoverPosition(node, next);
-			},
-			destroy() {
-				window.removeEventListener('resize', handleResize);
-				window.removeEventListener('scroll', handleResize, true);
-				node.remove();
-			}
-		};
-	}
-
-	function focusInput(node: HTMLInputElement): void {
-		node.focus();
 	}
 </script>
 
-{#if open}
-	<div
-		bind:this={popupRef}
-		class={css({
-			position: 'fixed',
-			zIndex: 'overlay',
-			display: 'flex',
-			flexDirection: 'column',
-			borderWidth: '1',
-			backgroundColor: 'bg.primary',
-			boxShadow: 'drag',
-			outline: 'none',
-			maxHeight: '60vh'
-		})}
-		role="dialog"
-		aria-modal="false"
-		aria-labelledby="namespace-picker-title"
-		tabindex="-1"
-		use:portal={popoverRect}
-		use:overlayStack.action={overlayConfig}
-	>
-		<div class={css({ display: 'flex', flexDirection: 'column', gap: '2', padding: '2' })}>
-			<h2
-				id="namespace-picker-title"
-				class={css({
-					margin: '0',
-					paddingX: '1',
-					fontSize: 'sm',
-					fontWeight: 'semibold',
-					color: 'fg.primary'
-				})}
-			>
-				Switch namespace
-			</h2>
-			<input
-				id="namespace-picker-search"
-				class={css({
-					width: 'full',
-					color: 'fg.primary',
-					backgroundColor: 'bg.primary',
-					borderWidth: '1',
-					borderRadius: '0',
-					transitionProperty: 'border-color',
-					transitionDuration: '160ms',
-					transitionTimingFunction: 'ease',
-					_focusVisible: { borderColor: 'border.accent' },
-					_disabled: { opacity: '0.5', cursor: 'not-allowed', backgroundColor: 'bg.tertiary' },
-					_placeholder: { color: 'fg.muted' },
-					paddingX: '2',
-					paddingY: '1.5',
-					fontSize: 'sm',
-					_focus: { borderColor: 'border.accent' }
-				})}
-				type="text"
-				{@attach focusInput}
-				bind:value={searchQuery}
-				disabled={selecting}
-				placeholder="Search or create (lowercase)..."
-				aria-label="Search namespaces"
-				autocomplete="off"
-			/>
-
-			{#if selectionError}
-				<div
-					class={css({ paddingX: '1', fontSize: '2xs', color: 'error', lineHeight: 'snug' })}
-					role="alert"
-				>
-					{selectionError}
-				</div>
-			{/if}
-
-			{#if invalidCandidate}
-				<div class={css({ paddingX: '1', fontSize: '2xs', color: 'error', lineHeight: 'snug' })}>
-					{NAMESPACE_NAME_RULES}
-				</div>
-			{/if}
-
-			<div
-				class={css({
-					display: 'flex',
-					maxHeight: 'list',
-					flexDirection: 'column',
-					overflowY: 'auto'
-				})}
-			>
-				{#if namespacesQuery.isLoading}
-					<div class={css({ padding: '2', fontSize: 'xs', color: 'fg.muted' })}>Loading...</div>
-				{:else if namespacesQuery.isError}
-					<div class={css({ padding: '2', fontSize: 'xs', color: 'error' })}>
-						Error loading namespaces
+<BaseModal
+	{open}
+	size="large"
+	initialFocus="#namespace-picker-search"
+	onClose={handleClose}
+	ariaLabelledby="namespace-picker-title"
+	ariaDescribedby="namespace-picker-description"
+>
+	{#snippet content()}
+		<div class={css({ display: 'flex', height: 'full', minHeight: '0', flexDirection: 'column' })}>
+			<PanelHeader>
+				{#snippet title()}
+					<div class={css({ minWidth: '0' })}>
+						<h2 id="namespace-picker-title" class={css({ margin: '0', fontSize: 'md' })}>
+							{view === 'namespaces' ? 'Namespaces' : 'New namespace'}
+						</h2>
+						<p
+							id="namespace-picker-description"
+							class={css({ margin: '0', marginTop: '1', color: 'fg.tertiary', fontSize: 'sm' })}
+						>
+							{view === 'namespaces'
+								? 'Choose a namespace for data and analyses.'
+								: 'Choose a name for this namespace and review its storage plan.'}
+						</p>
 					</div>
-				{:else if filteredNamespaces.length === 0 && !canCreate && !invalidCandidate}
-					<div class={css({ padding: '2', fontSize: 'xs', color: 'fg.muted' })}>No results</div>
-				{:else}
-					{#if canCreate}
+				{/snippet}
+				{#snippet actions()}
+					<div class={css({ display: 'flex', flexWrap: 'wrap', alignItems: 'center', gap: '2' })}>
+						{#if view === 'create'}
+							<button
+								class={button({ variant: 'ghost', size: 'compact' })}
+								onclick={handleBack}
+								disabled={selecting}
+								type="button"
+							>
+								<ArrowLeft size={16} />
+								Back to namespaces
+							</button>
+						{/if}
 						<button
-							data-namespace-create={normalizedCandidate}
 							class={css({
 								display: 'flex',
-								width: '100%',
+								alignItems: 'center',
+								justifyContent: 'center',
+								borderWidth: '1',
+								backgroundColor: 'transparent',
+								color: 'fg.muted',
 								cursor: 'pointer',
-								flexDirection: 'column',
-								alignItems: 'stretch',
-								gap: '1',
-								borderBottomWidth: '1',
-								paddingX: '2',
-								paddingY: '1.5',
-								textAlign: 'left',
-								color: 'fg.secondary',
-								transitionProperty: 'color, background-color',
-								transitionDuration: '150ms',
-								_hover: { backgroundColor: 'bg.hover', color: 'fg.primary' }
+								padding: '1',
+								_hover: { backgroundColor: 'bg.hover', color: 'fg.primary' },
+								_disabled: { cursor: 'not-allowed', opacity: '0.5' }
 							})}
-							onclick={() => void handleCreate()}
+							onclick={handleClose}
+							aria-label="Close namespace picker"
 							disabled={selecting}
 							type="button"
 						>
-							<div
+							<X size={16} />
+						</button>
+					</div>
+				{/snippet}
+			</PanelHeader>
+
+			{#if view === 'namespaces'}
+				<div
+					class={css({
+						display: 'flex',
+						flexWrap: 'wrap',
+						alignItems: 'end',
+						gap: '3',
+						paddingX: '4',
+						paddingTop: '4'
+					})}
+				>
+					<label
+						class={css({
+							display: 'flex',
+							minWidth: '0',
+							flex: '1',
+							flexDirection: 'column',
+							gap: '1'
+						})}
+					>
+						<span class={css({ color: 'fg.secondary', fontSize: 'xs', fontWeight: 'medium' })}>
+							Search namespaces
+						</span>
+						<input
+							id="namespace-picker-search"
+							class={css({
+								width: 'full',
+								minWidth: '0',
+								borderWidth: '1',
+								backgroundColor: 'bg.primary',
+								color: 'fg.primary',
+								paddingX: '3',
+								paddingY: '2',
+								fontSize: 'sm',
+								_placeholder: { color: 'fg.muted' },
+								_focusVisible: { borderColor: 'border.accent', outline: 'none' },
+								_disabled: { cursor: 'not-allowed', opacity: '0.5' }
+							})}
+							type="text"
+							bind:value={searchQuery}
+							disabled={selecting}
+							placeholder="Search namespaces"
+							aria-label="Search namespaces"
+							autocomplete="off"
+						/>
+					</label>
+					<button
+						class={button({ variant: 'secondary' })}
+						onclick={handleStartCreate}
+						disabled={selecting}
+						type="button"
+					>
+						<Plus size={16} />
+						New namespace
+					</button>
+				</div>
+
+				{#if selectionError}
+					<div
+						class={css({
+							marginX: '4',
+							marginTop: '3',
+							padding: '3',
+							borderWidth: '1',
+							borderColor: 'border.error',
+							color: 'fg.error',
+							fontSize: 'sm'
+						})}
+						role="alert"
+					>
+						{selectionError}
+					</div>
+				{/if}
+				{#if selecting}
+					<div
+						class={css({ paddingX: '4', paddingTop: '3', color: 'fg.muted', fontSize: 'sm' })}
+						role="status"
+					>
+						Switching namespace…
+					</div>
+				{/if}
+
+				<div
+					class={css({
+						display: 'flex',
+						minHeight: '0',
+						flex: '1',
+						flexDirection: 'column',
+						gap: '2',
+						overflowY: 'auto',
+						padding: '4'
+					})}
+				>
+					{#if namespacesQuery.isLoading}
+						<div class={css({ padding: '4', color: 'fg.muted', fontSize: 'sm' })}>
+							Loading namespaces…
+						</div>
+					{:else if namespacesQuery.isError}
+						<div
+							class={css({
+								display: 'flex',
+								flexWrap: 'wrap',
+								alignItems: 'center',
+								gap: '3',
+								borderWidth: '1',
+								borderColor: 'border.error',
+								padding: '4',
+								color: 'fg.error',
+								fontSize: 'sm'
+							})}
+						>
+							<span role="alert">Could not load namespaces.</span>
+							<button
+								class={button({ variant: 'secondary', size: 'sm' })}
+								onclick={() => void namespacesQuery.refetch()}
+								disabled={selecting}
+								type="button"
+							>
+								Retry
+							</button>
+						</div>
+					{:else if filteredNamespaces.length === 0}
+						<div class={css({ padding: '4', color: 'fg.muted', fontSize: 'sm' })}>
+							No namespaces match your search.
+						</div>
+					{:else}
+						{#each filteredNamespaces as name (name)}
+							<button
+								data-namespace-option={name}
 								class={css({
 									display: 'flex',
-									width: '100%',
+									width: 'full',
+									minHeight: '16',
 									alignItems: 'center',
-									justifyContent: 'space-between'
+									justifyContent: 'space-between',
+									gap: '4',
+									borderWidth: '1',
+									borderColor: name === selected ? 'border.accent' : 'border.primary',
+									backgroundColor: name === selected ? 'bg.accent' : 'bg.secondary',
+									color: name === selected ? 'fg.primary' : 'fg.secondary',
+									cursor: 'pointer',
+									paddingX: '4',
+									paddingY: '3',
+									textAlign: 'left',
+									transitionProperty: 'background-color, border-color',
+									transitionDuration: '150ms',
+									_hover: { backgroundColor: 'bg.hover', borderColor: 'border.accent' },
+									_focusVisible: {
+										outline: '2px solid',
+										outlineColor: 'border.accent',
+										outlineOffset: '2px'
+									},
+									_disabled: { cursor: 'not-allowed', opacity: '0.5' }
 								})}
+								onclick={() => void handleSelect(name)}
+								disabled={selecting}
+								aria-pressed={name === selected}
+								type="button"
 							>
-								<span class={css({ fontSize: 'xs', fontWeight: 'semibold' })}>
-									Create "{normalizedCandidate}"
-								</span>
 								<span
 									class={css({
-										fontSize: '2xs',
-										color: 'fg.muted',
-										textTransform: 'uppercase',
-										letterSpacing: 'wider'
+										overflow: 'hidden',
+										textOverflow: 'ellipsis',
+										whiteSpace: 'nowrap',
+										fontSize: 'md',
+										fontWeight: 'medium'
 									})}
 								>
-									New
+									{name}
 								</span>
-							</div>
-							{#if storagePlanQuery.data}
-								{@const plan = storagePlanQuery.data}
+								{#if name === selected}
+									<span
+										class={css({
+											display: 'inline-flex',
+											flexShrink: '0',
+											alignItems: 'center',
+											gap: '2',
+											color: 'accent.primary',
+											fontSize: 'xs',
+											fontWeight: 'semibold'
+										})}
+									>
+										<Check size={16} />
+										Current namespace
+									</span>
+								{/if}
+							</button>
+						{/each}
+					{/if}
+				</div>
+			{:else}
+				<form
+					class={css({ display: 'flex', minHeight: '0', flex: '1', flexDirection: 'column' })}
+					onsubmit={(event) => {
+						event.preventDefault();
+						void handleCreate();
+					}}
+				>
+					<div class={css({ minHeight: '0', flex: '1', overflowY: 'auto', padding: '4' })}>
+						<div
+							class={css({
+								display: 'flex',
+								maxWidth: 'pageWide',
+								flexDirection: 'column',
+								gap: '4'
+							})}
+						>
+							<label class={css({ display: 'flex', flexDirection: 'column', gap: '2' })}>
+								<span class={css({ color: 'fg.secondary', fontSize: 'sm', fontWeight: 'medium' })}>
+									Name
+								</span>
+								<input
+									id="namespace-create-name"
+									class={css({
+										width: 'full',
+										borderWidth: '1',
+										backgroundColor: 'bg.primary',
+										color: 'fg.primary',
+										paddingX: '3',
+										paddingY: '2',
+										fontSize: 'sm',
+										_placeholder: { color: 'fg.muted' },
+										_focusVisible: { borderColor: 'border.accent', outline: 'none' },
+										_disabled: { cursor: 'not-allowed', opacity: '0.5' }
+									})}
+									bind:value={createName}
+									disabled={selecting}
+									placeholder="analytics"
+									aria-label="Name"
+									aria-describedby="namespace-create-name-rules"
+									autocomplete="off"
+								/>
+							</label>
+
+							<p
+								id="namespace-create-name-rules"
+								class={css({
+									margin: '0',
+									color: invalidCandidate ? 'fg.error' : 'fg.muted',
+									fontSize: 'sm'
+								})}
+								role={invalidCandidate ? 'alert' : undefined}
+							>
+								{NAMESPACE_NAME_RULES}
+							</p>
+
+							{#if duplicateCandidate}
+								<p class={css({ margin: '0', color: 'fg.error', fontSize: 'sm' })} role="alert">
+									A namespace with this name already exists. Choose it from the namespace list.
+								</p>
+							{:else if namespacesQuery.isLoading}
+								<p class={css({ margin: '0', color: 'fg.muted', fontSize: 'sm' })}>
+									Loading namespaces before checking the name…
+								</p>
+							{:else if namespacesQuery.isError}
 								<div
 									class={css({
 										display: 'flex',
-										flexDirection: 'column',
-										gap: '0.5',
-										fontSize: '2xs',
-										color: 'fg.muted',
-										fontFamily: 'mono',
-										lineHeight: 'snug'
+										flexWrap: 'wrap',
+										alignItems: 'center',
+										gap: '3',
+										color: 'fg.error',
+										fontSize: 'sm'
 									})}
 								>
-									<span>S3 bucket (root): {plan.bucket}</span>
-									<span>uploads: {plan.uploads_root}/…</span>
-									<span>clean: {plan.clean_root}/…</span>
-									<span>exports: {plan.exports_root}/…</span>
+									<span role="alert">Could not verify whether this namespace already exists.</span>
+									<button
+										class={button({ variant: 'secondary', size: 'sm' })}
+										onclick={() => void namespacesQuery.refetch()}
+										disabled={selecting}
+										type="button"
+									>
+										Retry
+									</button>
 								</div>
-							{:else if storagePlanQuery.isLoading}
-								<span class={css({ fontSize: '2xs', color: 'fg.muted' })}>
-									Loading storage plan…
-								</span>
-							{:else if storagePlanQuery.isError}
-								<span class={css({ fontSize: '2xs', color: 'error' })}>
-									Could not load storage plan
-								</span>
 							{/if}
-						</button>
-					{/if}
 
-					{#each filteredNamespaces as name (name)}
-						<button
-							data-namespace-option={name}
-							class={css({
-								display: 'flex',
-								width: '100%',
-								cursor: 'pointer',
-								alignItems: 'center',
-								justifyContent: 'space-between',
-								borderLeftWidth: '2',
-								borderLeftColor: name === selected ? 'accent.primary' : 'transparent',
-								backgroundColor: name === selected ? 'bg.accent' : 'transparent',
-								color: name === selected ? 'fg.primary' : 'fg.secondary',
-								paddingX: '2',
-								paddingY: '1.5',
-								textAlign: 'left',
-								transitionProperty: 'background-color',
-								transitionDuration: '150ms',
-								_hover: { backgroundColor: 'bg.hover' }
-							})}
-							onclick={() => void handleSelect(name)}
-							disabled={selecting}
-							type="button"
-						>
-							<span
+							<div
 								class={css({
-									overflow: 'hidden',
-									textOverflow: 'ellipsis',
-									whiteSpace: 'nowrap',
-									fontSize: 'sm',
-									fontWeight: 'medium'
+									display: 'flex',
+									flexDirection: 'column',
+									gap: '3',
+									borderWidth: '1',
+									backgroundColor: 'bg.secondary',
+									padding: '4'
 								})}
+								aria-live="polite"
 							>
-								{name}
-							</span>
-						</button>
-					{/each}
-				{/if}
+								<h3
+									class={css({
+										margin: '0',
+										color: 'fg.primary',
+										fontSize: 'sm',
+										fontWeight: 'semibold'
+									})}
+								>
+									Storage plan
+								</h3>
+								{#if !normalizedCandidate || duplicateCandidate || invalidCandidate}
+									<p class={css({ margin: '0', color: 'fg.muted', fontSize: 'sm' })}>
+										Enter a valid, unused name to preview its storage plan.
+									</p>
+								{:else if namespacesQuery.isLoading || namespacesQuery.isError}
+									<p class={css({ margin: '0', color: 'fg.muted', fontSize: 'sm' })}>
+										The storage plan appears after the namespace name is verified.
+									</p>
+								{:else if storagePlanQuery.isLoading}
+									<p class={css({ margin: '0', color: 'fg.muted', fontSize: 'sm' })}>
+										Loading storage plan…
+									</p>
+								{:else if storagePlanQuery.isError}
+									<div
+										class={css({
+											display: 'flex',
+											flexWrap: 'wrap',
+											alignItems: 'center',
+											gap: '3',
+											color: 'fg.error',
+											fontSize: 'sm'
+										})}
+									>
+										<span role="alert">Could not load storage plan.</span>
+										<button
+											class={button({ variant: 'secondary', size: 'sm' })}
+											onclick={() => void storagePlanQuery.refetch()}
+											disabled={selecting}
+											type="button"
+										>
+											Retry
+										</button>
+									</div>
+								{:else if storagePlanQuery.data}
+									{@const plan = storagePlanQuery.data}
+									<div
+										class={css({
+											display: 'grid',
+											gridTemplateColumns: 'repeat(auto-fit, minmax(min(100%, 18rem), 1fr))',
+											gap: '2',
+											color: 'fg.muted',
+											fontFamily: 'mono',
+											fontSize: 'xs',
+											lineHeight: 'snug',
+											overflowWrap: 'anywhere'
+										})}
+									>
+										<span>S3 bucket (root): {plan.bucket}</span>
+										<span>uploads: {plan.uploads_root}/…</span>
+										<span>clean: {plan.clean_root}/…</span>
+										<span>exports: {plan.exports_root}/…</span>
+									</div>
+								{/if}
+							</div>
 
-				{#if selecting}
-					<div class={css({ paddingX: '1', fontSize: '2xs', color: 'fg.muted' })}>
-						Preparing namespace…
+							{#if selectionError}
+								<div
+									class={css({
+										borderWidth: '1',
+										borderColor: 'border.error',
+										backgroundColor: 'bg.error',
+										padding: '3',
+										color: 'fg.error',
+										fontSize: 'sm'
+									})}
+									role="alert"
+								>
+									{selectionError}
+								</div>
+							{/if}
+						</div>
 					</div>
-				{/if}
-			</div>
+
+					<div
+						class={css({
+							display: 'flex',
+							flexWrap: 'wrap',
+							alignItems: 'center',
+							justifyContent: 'space-between',
+							gap: '3',
+							borderTopWidth: '1',
+							padding: '4'
+						})}
+					>
+						{#if selecting}
+							<p class={css({ margin: '0', color: 'fg.muted', fontSize: 'sm' })} aria-live="polite">
+								Preparing namespace…
+							</p>
+						{:else}
+							<span class={css({ color: 'fg.muted', fontSize: 'sm' })}
+								>Namespace names cannot be changed later.</span
+							>
+						{/if}
+						<button
+							class={button({ variant: 'primary' })}
+							data-namespace-create={normalizedCandidate}
+							disabled={selecting || !canSubmit}
+							type="submit"
+						>
+							Create namespace
+						</button>
+					</div>
+				</form>
+			{/if}
 		</div>
-	</div>
-{/if}
+	{/snippet}
+</BaseModal>

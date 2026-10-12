@@ -1,6 +1,5 @@
 <script lang="ts">
 	import { createMutation, createQuery, useQueryClient } from '@tanstack/svelte-query';
-	import { resolve } from '$app/paths';
 	import { listUdfs, deleteUdf, exportUdfs, importUdfs, cloneUdf } from '$lib/api/udf';
 	import type { Udf, UdfExport } from '$lib/types/udf';
 	import { Plus, Upload, Download, Copy, Trash2, Pencil, X } from '@lucide/svelte';
@@ -11,6 +10,13 @@
 	import Callout from '$lib/components/ui/Callout.svelte';
 	import { css, spinner, button, chip, input, label } from '$lib/styles/panda';
 
+	interface Props {
+		onSelect: (udf: Udf) => void;
+		onEdit: (udf: Udf) => void;
+		onCreate: () => void;
+	}
+
+	let { onSelect, onEdit, onCreate }: Props = $props();
 	const queryClient = useQueryClient();
 
 	let search = $state('');
@@ -20,6 +26,7 @@
 	let importError = $state('');
 	let importing = $state(false);
 	let exportError = $state('');
+	let actionError = $state('');
 	let cloningId = $state<string | null>(null);
 	let deletingId = $state<string | null>(null);
 
@@ -44,7 +51,11 @@
 			const result = await deleteUdf(id);
 			if (result.isErr()) throw new Error(result.error.message);
 		},
+		onError: (error) => {
+			actionError = error.message;
+		},
 		onSuccess: (_data, deletedId) => {
+			actionError = '';
 			queryClient.setQueriesData<Udf[]>({ queryKey: ['udfs'] }, (current) =>
 				current?.filter((udf) => udf.id !== deletedId)
 			);
@@ -58,7 +69,12 @@
 			return result.value;
 		},
 		onSuccess: () => {
+			actionError = '';
 			queryClient.invalidateQueries({ queryKey: ['udfs'] });
+			cloningId = null;
+		},
+		onError: (error) => {
+			actionError = error.message;
 			cloningId = null;
 		}
 	}));
@@ -110,6 +126,7 @@
 				);
 			}
 			closeImport();
+			actionError = '';
 			void queryClient.invalidateQueries({ queryKey: ['udfs'] });
 		} finally {
 			importing = false;
@@ -125,8 +142,7 @@
 			await deleteMutation.mutateAsync(id);
 			deletingId = null;
 		} catch {
-			// The mutation error is rendered by the existing query/error state; keep
-			// the inline confirmation open so a failed delete is actionable.
+			// Keep the inline confirmation open so a failed delete can be retried.
 		}
 	}
 
@@ -140,28 +156,36 @@
 	}
 </script>
 
-<div class={css({ marginX: 'auto', maxWidth: 'pageWide', paddingX: '6', paddingY: '7' })}>
+<div
+	class={css({
+		display: 'flex',
+		minHeight: '0',
+		flex: '1',
+		flexDirection: 'column',
+		overflowY: 'auto',
+		padding: '5'
+	})}
+>
 	<header
 		class={css({
 			marginBottom: '6',
 			display: 'flex',
-			flexDirection: 'column',
-			alignItems: 'stretch',
-			justifyContent: 'space-between',
-			gap: '6',
+			alignItems: 'flex-start',
+			justifyContent: 'flex-end',
+			gap: '4',
 			borderBottomWidth: '1',
 			paddingBottom: '5',
-			md: { flexDirection: 'row', alignItems: 'flex-start' }
+			md: { alignItems: 'center' }
 		})}
 	>
-		<div>
-			<h1 class={css({ margin: '0', marginBottom: '2', fontSize: '2xl' })}>UDF Library</h1>
-			<p class={css({ margin: '0', color: 'fg.tertiary' })}>
-				Reusable Python transforms stored globally
-			</p>
-		</div>
 		<div
-			class={css({ display: 'flex', flexDirection: 'column', gap: '2', alignItems: 'flex-end' })}
+			class={css({
+				display: 'flex',
+				flex: '1',
+				flexDirection: 'column',
+				gap: '2',
+				alignItems: 'flex-end'
+			})}
 		>
 			<div class={css({ display: 'flex', flexWrap: 'wrap', gap: '2' })}>
 				<button class={button({ variant: 'secondary' })} onclick={() => (importOpen = true)}>
@@ -172,10 +196,10 @@
 					<Download size={16} />
 					Export
 				</button>
-				<a class={button({ variant: 'primary' })} href={resolve('/udfs/new')}>
+				<button class={button({ variant: 'primary' })} onclick={onCreate} type="button">
 					<Plus size={16} />
 					New UDF
-				</a>
+				</button>
 			</div>
 			{#if exportError}
 				<Callout tone="error">
@@ -229,6 +253,9 @@
 			{query.error instanceof Error ? query.error.message : 'Error loading UDFs.'}
 		</Callout>
 	{:else if query.data}
+		{#if actionError}
+			<Callout tone="error">{actionError}</Callout>
+		{/if}
 		{#if query.data.length === 0}
 			<div
 				class={css({
@@ -238,10 +265,12 @@
 					textAlign: 'center'
 				})}
 			>
-				<p>No UDFs yet.</p>
-				<a class={button({ variant: 'primary' })} href={resolve('/udfs/new')}
-					>Create your first UDF</a
-				>
+				<p>{search.trim() ? 'No matching UDFs.' : 'No UDFs yet.'}</p>
+				{#if !search.trim()}
+					<button class={button({ variant: 'primary' })} onclick={onCreate} type="button"
+						>Create your first UDF</button
+					>
+				{/if}
 			</div>
 		{:else}
 			<div class={css({ display: 'flex', flexDirection: 'column', gap: '3' })}>
@@ -302,10 +331,21 @@
 							{/if}
 						</div>
 						<div class={css({ display: 'flex', alignItems: 'center', gap: '2' })}>
-							<a class={button({ variant: 'ghost', size: 'sm' })} href={resolve(`/udfs/${udf.id}`)}>
+							<button
+								class={button({ variant: 'primary', size: 'sm' })}
+								onclick={() => onSelect(udf)}
+								type="button"
+							>
+								Use UDF
+							</button>
+							<button
+								class={button({ variant: 'ghost', size: 'sm' })}
+								onclick={() => onEdit(udf)}
+								type="button"
+							>
 								<Pencil size={14} />
 								Edit
-							</a>
+							</button>
 							<button
 								class={button({ variant: 'ghost', size: 'sm' })}
 								onclick={() => handleClone(udf.id)}

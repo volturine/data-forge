@@ -8,7 +8,6 @@
 		Database,
 		Activity,
 		GitBranch,
-		CodeXml,
 		PanelLeftOpen,
 		Sun,
 		Moon,
@@ -37,7 +36,6 @@
 		authenticated: boolean;
 		authRequired: boolean;
 		avatarUrl: string | null;
-		namespaceTrigger?: HTMLButtonElement;
 	}
 
 	let {
@@ -52,13 +50,11 @@
 		namespace,
 		authenticated,
 		authRequired,
-		avatarUrl,
-		namespaceTrigger = $bindable()
+		avatarUrl
 	}: Props = $props();
 
 	const currentPath = $derived(page.url.pathname);
 	let computeWorkersOpen = $state(false);
-	let computeWorkersTrigger = $state<HTMLButtonElement>();
 
 	const analysesQuery = createQuery(() => ({
 		queryKey: ['favorite-analyses', namespace],
@@ -77,8 +73,7 @@
 		{ href: '/', label: 'Analyses', icon: LayoutGrid, prefix: '/analysis' },
 		{ href: '/datasources', label: 'Data Sources', icon: Database, prefix: '/datasources' },
 		{ href: '/monitoring', label: 'Monitoring', icon: Activity, prefix: '/monitoring' },
-		{ href: '/lineage', label: 'Lineage', icon: GitBranch, prefix: '/lineage' },
-		{ href: '/udfs', label: 'UDFs', icon: CodeXml, prefix: '/udfs' }
+		{ href: '/lineage', label: 'Lineage', icon: GitBranch, prefix: '/lineage' }
 	] as const;
 
 	function isActive(item: (typeof navItems)[number]): boolean {
@@ -241,7 +236,6 @@
 				aria-label="Select namespace"
 				disabled={!interactive}
 				aria-busy={interactive ? undefined : 'true'}
-				bind:this={namespaceTrigger}
 			>
 				<span
 					class={css({ display: 'flex', alignItems: 'center', gap: '1.5', overflow: 'hidden' })}
@@ -454,7 +448,6 @@
 				aria-expanded={computeWorkersOpen}
 				type="button"
 				onclick={openComputeWorkers}
-				bind:this={computeWorkersTrigger}
 			>
 				<span
 					class={css({
@@ -494,11 +487,6 @@
 					<span>Compute workers</span>
 				{/if}
 			</button>
-
-			<ComputeWorkersPopup
-				bind:open={() => computeWorkersOpen, setComputeWorkersOpen}
-				anchor={computeWorkersTrigger}
-			/>
 		</div>
 
 		<button
@@ -606,3 +594,5 @@
 		</div>
 	{/if}
 </aside>
+
+<ComputeWorkersPopup bind:open={() => computeWorkersOpen, setComputeWorkersOpen} />
