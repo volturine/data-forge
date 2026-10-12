@@ -21,10 +21,19 @@ jobs:
     env:
       E2E_SHARDS: "3"
       E2E_API_WORKERS: "4"
+      # Configure this dedicated key in both Actions and Dependabot secrets.
       E2E_OPENROUTER_API_KEY: ${{ secrets.E2E_OPENROUTER_API_KEY }}
       # Leave compute headroom for previews and cleanup during browser tests.
       PW_E2E_WORKERS: "2"
     steps:
+      - name: Check live-provider E2E credential
+        shell: bash
+        run: |
+          if [[ -z "${E2E_OPENROUTER_API_KEY//[[:space:]]/}" ]]; then
+            echo '::error::Configure E2E_OPENROUTER_API_KEY in both Actions and Dependabot repository secrets.'
+            exit 1
+          fi
+
       - name: Reclaim stale E2E Docker resources before checkout
         shell: bash
         env:
