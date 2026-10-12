@@ -120,12 +120,87 @@ describe('BaseModal', () => {
 			unmount();
 			expect(document.body.style.overflow).toBe('');
 		});
+
+		test('keeps scrolling locked until every nested modal closes', () => {
+			const outer = renderModal();
+			const inner = renderModal();
+			outer.unmount();
+			expect(document.body.style.overflow).toBe('hidden');
+			inner.unmount();
+			expect(document.body.style.overflow).toBe('');
+		});
+
+		test('preserves the original body overflow', () => {
+			document.body.style.overflow = 'clip';
+			const modal = renderModal();
+			modal.unmount();
+			expect(document.body.style.overflow).toBe('clip');
+			document.body.style.overflow = '';
+		});
 	});
 
 	describe('focus management', () => {
+		test('focuses the requested search field and returns to the trigger', () => {
+			const trigger = document.createElement('button');
+			document.body.append(trigger);
+			trigger.focus();
+			const content = createRawSnippet(() => ({
+				render: () => '<div><input id="modal-search" aria-label="Search" /></div>'
+			}));
+			const modal = renderModal({ content, initialFocus: '#modal-search' });
+			expect(screen.getByRole('textbox', { name: 'Search' })).toHaveFocus();
+			modal.unmount();
+			expect(trigger).toHaveFocus();
+			trigger.remove();
+		});
+
 		test('panel has tabindex -1 for programmatic focus', () => {
 			renderModal();
 			expect(screen.getByRole('dialog')).toHaveAttribute('tabindex', '-1');
+		});
+
+		test('wraps Tab and Shift-Tab inside the dialog', async () => {
+			const content = createRawSnippet(() => ({
+				render: () => '<div><button>First</button><button>Last</button></div>'
+			}));
+			renderModal({ content });
+			const first = screen.getByRole('button', { name: 'First' });
+			const last = screen.getByRole('button', { name: 'Last' });
+			first.focus();
+			await fireEvent.keyDown(first, { key: 'Tab', shiftKey: true });
+			expect(last).toHaveFocus();
+			await fireEvent.keyDown(last, { key: 'Tab' });
+			expect(first).toHaveFocus();
+		});
+
+		test('restores focus to the trigger after closing', () => {
+			const trigger = document.createElement('button');
+			document.body.append(trigger);
+			trigger.focus();
+			const modal = renderModal();
+			expect(screen.getByRole('dialog')).toHaveFocus();
+			modal.unmount();
+			expect(trigger).toHaveFocus();
+			trigger.remove();
+		});
+
+		test('allows a nested dialog to take focus and restores the parent', () => {
+			const outer = renderModal();
+			const outerPanel = screen.getByRole('dialog');
+			const inner = renderModal();
+			expect(screen.getAllByRole('dialog')[1]).toHaveFocus();
+			inner.unmount();
+			expect(outerPanel).toHaveFocus();
+			outer.unmount();
+		});
+
+		test('keeps focus out of the analysis behind the dialog', () => {
+			const background = document.createElement('button');
+			document.body.append(background);
+			renderModal();
+			background.focus();
+			expect(screen.getByRole('dialog')).toHaveFocus();
+			background.remove();
 		});
 	});
 });

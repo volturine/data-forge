@@ -345,47 +345,105 @@ export async function gotoMonitoringTab(
 }
 
 /**
- * Wait for the UDF list query to reach a terminal state.
+ * Wait for the UDF library dialog query to reach a terminal state.
  *
- * First waits for the page to mount (the "UDF Library" heading), then
- * waits for the query's terminal state: at least one `[data-udf-card]`,
- * the empty-state text, or an error callout.
+ * Terminal states are a visible UDF card, an empty-state message, or a query
+ * error. The dialog is hosted by the With Columns analysis operation.
  */
 export async function waitForUdfList(page: Page, timeout = readyTimeoutMs()): Promise<void> {
 	await waitForLayoutReady(page, timeout);
-	await expect(page.getByRole('heading', { name: 'UDF Library' })).toBeVisible({ timeout });
-
-	const terminal = page.locator(
-		'[data-udf-card], :text("No UDFs yet"), main[data-app-route="/udfs"] [aria-live="polite"]'
+	const library = page
+		.getByRole('dialog')
+		.filter({ has: page.getByRole('heading', { name: 'UDF Library', exact: true }) });
+	await expect(library).toBeVisible({ timeout });
+	await waitForAnyVisible(
+		library.locator(
+			'[data-udf-card], :text("No UDFs yet"), :text("No matching UDFs"), [role="alert"], [aria-live="polite"]'
+		),
+		timeout
 	);
-	await waitForAnyVisible(terminal, timeout);
 }
 
+async function isVisible(locator: Locator): Promise<boolean> {
+	return locator.isVisible().catch(() => false);
+}
+
+/** Open the UDF library from the current analysis's With Columns operation. */
 export async function gotoUdfLibrary(page: Page, timeout = readyTimeoutMs()): Promise<void> {
-	await gotoAuthedRoute(page, '/udfs', timeout);
+	await waitForLayoutReady(page, timeout);
+	const route = new URL(page.url()).pathname;
+	if (!/^\/analysis\/[^/]+$/.test(route)) {
+		throw new Error(`UDF Library requires an analysis editor, got ${route}`);
+	}
+
+	const libraryHeading = page.getByRole('heading', { name: 'UDF Library', exact: true });
+	if (await isVisible(libraryHeading)) {
+		await waitForUdfList(page, timeout);
+		return;
+	}
+
+	const editorHeading = page.getByRole('heading', { name: /^(New|Edit) UDF$/ });
+	if (await isVisible(editorHeading)) {
+		await page.getByRole('button', { name: 'Back to UDF library' }).click();
+		const discard = page.getByRole('alertdialog').getByRole('button', { name: 'Discard changes' });
+		if (await isVisible(discard)) await discard.click();
+		await expect(libraryHeading).toBeVisible({ timeout });
+		await waitForUdfList(page, timeout);
+		return;
+	}
+
+	const config = page.locator('[data-step-config="with_columns"]');
+	if (!(await isVisible(config))) {
+		const existingNode = page.locator('[data-step-type="with_columns"]').filter({ visible: true });
+		if (await existingNode.count()) {
+			await existingNode.last().locator('[data-action="edit"]').click();
+		} else {
+			await page.locator('button[data-step="with_columns"]').click();
+			const node = page.locator('[data-step-type="with_columns"]').filter({ visible: true }).last();
+			await expect(node).toBeVisible({ timeout });
+			await node.locator('[data-action="edit"]').click();
+		}
+	}
+
+	await expect(config).toBeVisible({ timeout });
+	const typeSelect = config.locator('#wc-expr-type');
+	if ((await typeSelect.inputValue()) !== 'udf') await typeSelect.selectOption('udf');
+	const libraryRadio = config.locator('#wc-use-lib-yes');
+	if (!(await libraryRadio.isChecked())) await libraryRadio.check();
+	await config.getByRole('button', { name: 'Select UDF', exact: true }).click();
 	await waitForUdfList(page, timeout);
 }
 
+/** Open the new-UDF editor inside the library dialog. */
 export async function gotoNewUdfPage(page: Page, timeout = readyTimeoutMs()): Promise<void> {
-	await gotoAuthedRoute(page, '/udfs/new', timeout);
+	const editorHeading = page.getByRole('heading', { name: 'New UDF', exact: true });
+	if (await isVisible(editorHeading)) {
+		await expect(page.locator('#udf-name')).toBeVisible({ timeout });
+		return;
+	}
+	await gotoUdfLibrary(page, timeout);
+	await page.getByRole('button', { name: 'New UDF', exact: true }).click();
+	await expect(editorHeading).toBeVisible({ timeout });
 	await expect(page.locator('#udf-name')).toBeVisible({ timeout });
 }
 
-/**
- * Navigate to a UDF editor page and wait for the editor form to be ready.
- *
- * Readiness chain:
- *  1. Layout ready (shell hydrated).
- *  2. The `#udf-name` input is visible — proving the UDF query resolved
- *     and the editor form rendered.
- */
+/** Open an existing UDF editor by its visible library name. */
 export async function gotoUdfEditor(
 	page: Page,
-	udfId: string,
+	udfName: string,
 	timeout = readyTimeoutMs()
 ): Promise<void> {
-	await gotoAuthedRoute(page, `/udfs/${udfId}`, timeout);
-	await expect(page.locator('#udf-name')).toBeVisible({ timeout });
+	const editorHeading = page.getByRole('heading', { name: 'Edit UDF', exact: true });
+	if (await isVisible(editorHeading)) {
+		await expect(page.locator('#udf-name')).toHaveValue(udfName, { timeout });
+		return;
+	}
+	await gotoUdfLibrary(page, timeout);
+	const card = page.locator(`[data-udf-card="${udfName}"]`);
+	await expect(card).toBeVisible({ timeout });
+	await card.getByRole('button', { name: 'Edit', exact: true }).click();
+	await expect(editorHeading).toBeVisible({ timeout });
+	await expect(page.locator('#udf-name')).toHaveValue(udfName, { timeout });
 }
 
 /**

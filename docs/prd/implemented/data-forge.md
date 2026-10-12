@@ -91,7 +91,7 @@ Enable users to design and operate end-to-end dataset pipelines visually while k
   - Excel preflight works reliably for uploads without preselected sheet.
   - Bulk upload enforces single file type per batch; CSV/Excel settings apply globally.
   - Iceberg datasource addition accepts only root UUID path (no branch input); auto-scan branches.
-  - Analysis/namespace picker anchored under button (popover-style), not centered modal.
+  - Analysis picker anchored under its button; namespace selection and creation use a large centered dialog.
   - Branch picker buttons wider with long branch name support; dropdown appears above table headers.
   - Build logs include datasource create/update events for uploads, database ingest/refresh, and Iceberg registration.
   - Output node hidden toggle visible and first row (hidden/branch/table/build) is compact.
@@ -104,6 +104,7 @@ Enable users to design and operate end-to-end dataset pipelines visually while k
 - Expand run details (request/result/query plan/step timings).
 - Compare two runs (row/schema/timing diffs).
 - Mark schedule-triggered runs.
+- The sidebar compute worker monitor opens a large dialog with live status, worker counts, search by resource/scope/container/host/job/build, and busy/idle filters. Shutdown keeps its confirmation step; workers start automatically for analyses and data sources.
 
 ### FR-5 Scheduling (Dataset-Centric)
 
@@ -128,6 +129,8 @@ Enable users to design and operate end-to-end dataset pipelines visually while k
 
 - Create/manage reusable UDF definitions.
 - UDFs available in transformation expressions.
+- Open the UDF library and full editor in a large modal from an analysis's With Columns configuration. Edit inline functions, update existing library functions (including defaults), or save edited functions as new UDFs.
+- Analysis modals dim and blur the background and contain keyboard focus until closed.
 
 ### FR-8 Settings and Notifications
 
@@ -242,7 +245,9 @@ Build that tab (with lazyframe deps auto-resolved)
 - Single `DATA_DIR` environment variable replaces multiple data directories.
 - Directories automatically derived: `${DATA_DIR}/${NAMESPACE}/uploads`, `${DATA_DIR}/${NAMESPACE}/clean`, `${DATA_DIR}/${NAMESPACE}/exports`.
 - Namespace selector in top-left corner (replaces polars/analysis indicator).
+- Opens a large searchable picker with a current-namespace indicator and an explicit creation view. Creation validates the name and previews its storage plan before submission. Selection and creation show progress and errors inside the dialog.
 - Changing namespace switches all data operations to that namespace's directories.
+- Namespace, compute worker, and UDF dialogs share a dimmed, blurred backdrop, contained keyboard focus, and focus restoration when closed.
 
 **Storage Layout**:
 - `DATA_DIR/app.db`: Main database for global settings (SMTP, Telegram, app config).

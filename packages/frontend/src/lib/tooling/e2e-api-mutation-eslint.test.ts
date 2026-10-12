@@ -1,6 +1,6 @@
 import { ESLint } from 'eslint';
 import { resolve } from 'node:path';
-import { describe, expect, it } from 'vitest';
+import { beforeAll, describe, expect, it } from 'vitest';
 
 const frontendRoot = resolve(import.meta.dirname, '../../..');
 const eslint = new ESLint({
@@ -68,6 +68,11 @@ async function lintMessages(source: string, filePath = probePath) {
 }
 
 describe('Playwright API mutation ESLint policy', () => {
+	beforeAll(async () => {
+		// Load the TypeScript parser and ESLint config before timing individual policy checks.
+		await lintMessages('export {};');
+	});
+
 	it.each(mutationExamples)('rejects $name', async ({ source }) => {
 		const messages = await lintMessages(source);
 		expect(messages.filter((message) => message.ruleId === 'no-restricted-syntax')).toHaveLength(1);

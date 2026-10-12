@@ -106,12 +106,24 @@ case "$1" in
 		;;
 	image)
 		case "$2" in
-			ls) ;;
-			rm) ;;
+			ls)
+				cat <<'IMAGES'
+dataforge-test-runner:stale
+data-forge-api:e2e
+data-forge-polars-engine:integration
+data-forge-polars-engine:latest
+data-forge-api:0.4.0
+postgres:18-alpine
+IMAGES
+				;;
+			rm)
+				printf '%s\n' "$3" >>"$state_dir/removed-images"
+				;;
 			*) exit 2 ;;
 		esac
 		;;
 	builder)
+		printf '%s\n' "$*" >>"$state_dir/builder-prunes"
 		;;
 	run)
 		;;
@@ -153,5 +165,24 @@ if [[ "$(cat "$temp_dir/state/volume_removed")" != 1 ]]; then
 	echo "$output" >&2
 	exit 1
 fi
+for image in dataforge-test-runner:stale data-forge-api:e2e data-forge-polars-engine:integration data-forge-polars-engine:latest; do
+	if ! grep -Fxq "$image" "$temp_dir/state/removed-images"; then
+		echo "Expected cleanup to remove ${image}. Output:" >&2
+		echo "$output" >&2
+		exit 1
+	fi
+done
+for image in data-forge-api:0.4.0 postgres:18-alpine; do
+	if grep -Fxq "$image" "$temp_dir/state/removed-images"; then
+		echo "Expected cleanup to preserve ${image}. Output:" >&2
+		echo "$output" >&2
+		exit 1
+	fi
+done
+if ! grep -Fq 'builder prune --all --force' "$temp_dir/state/builder-prunes"; then
+	echo "Expected post cleanup to prune all Docker build cache. Output:" >&2
+	echo "$output" >&2
+	exit 1
+fi
 
-echo 'E2E cleanup retries a late-created container holding a Compose volume.'
+echo 'E2E cleanup retries Compose teardown races and removes its images/cache.'

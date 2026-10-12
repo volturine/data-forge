@@ -1,6 +1,5 @@
 import { expect, type Page } from '@playwright/test';
 import { readyTimeoutMs, waitForAppShell, waitForDatasourceList } from './readiness.js';
-import { dialogByTextbox } from './locators.js';
 
 const SIDEBAR = 'aside[aria-label="Main navigation"]';
 
@@ -15,7 +14,7 @@ export const DEFAULT_NAMESPACE = process.env.DEFAULT_NAMESPACE?.trim() || 'defau
 
 /**
  * Switch to a namespace via the sidebar picker.
- * If the namespace doesn't exist yet, creates it inline.
+ * If the namespace doesn't exist yet, creates it in the namespace dialog.
  * Preserves the current route — waits for sidebar to reflect the new namespace.
  */
 export async function switchNamespace(
@@ -28,21 +27,24 @@ export async function switchNamespace(
 	if ((await picker.textContent())?.trim() === name) return;
 
 	await picker.click();
-	const dialog = dialogByTextbox(page, 'Search namespaces');
+	const dialog = page.locator('[role="dialog"][aria-labelledby="namespace-picker-title"]');
 	await expect(dialog).toBeVisible({ timeout: 5_000 });
 
 	const search = dialog.getByRole('textbox', { name: 'Search namespaces' });
 	await search.fill(name);
 
 	const exact = dialog.locator(`[data-namespace-option="${name}"]`);
-	const create = dialog.locator(`[data-namespace-create="${name}"]`);
-	// Namespace list is server-filtered after search; under CI load the option
-	// (or create row) can lag behind the fill.
-	await expect(exact.or(create)).toBeVisible({ timeout: readyTimeoutMs() });
+	const noResults = dialog.getByText('No namespaces match your search.');
+	// The debounced filter and initial query can both lag behind the search input.
+	await expect(exact.or(noResults)).toBeVisible({ timeout: readyTimeoutMs() });
 
 	if (await exact.isVisible()) {
 		await exact.click();
 	} else {
+		await dialog.getByRole('button', { name: 'New namespace' }).click();
+		await dialog.locator('#namespace-create-name').fill(name);
+		const create = dialog.locator(`[data-namespace-create="${name}"]`);
+		await expect(create).toBeEnabled({ timeout: readyTimeoutMs() });
 		await create.click();
 	}
 

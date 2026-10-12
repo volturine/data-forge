@@ -49,7 +49,32 @@ test('the compute worker monitor keeps its snapshot after an analysis page reloa
 		expect(countBefore).toBeGreaterThan(0);
 		expect(countBefore).toBe(rowsBefore.length);
 		expect(rowsBefore).toContain(`analysis_interactive:${analysisId}`);
+		const dialog = page.getByRole('dialog', { name: 'Compute workers', exact: true });
+		const search = dialog.getByRole('searchbox', { name: 'Search compute workers' });
+		await expect(search).toBeFocused();
+		const treatment = await dialog.evaluate((panel) => ({
+			width: panel.getBoundingClientRect().width,
+			filter: getComputedStyle(panel.parentElement!).backdropFilter
+		}));
+		expect(treatment.width).toBeGreaterThan(800);
+		expect(treatment.filter).toContain('blur(');
+		await search.fill(analysisId);
+		const analysisWorker = popupBefore.locator(
+			`[data-compute-worker-row="analysis_interactive:${analysisId}"]`
+		);
+		await expect(analysisWorker).toBeVisible();
+		const shutdown = analysisWorker.locator('[data-compute-worker-shutdown]');
+		await shutdown.click();
+		await expect(page.getByRole('dialog')).toHaveCount(2);
+		await page.getByRole('button', { name: 'Keep running', exact: true }).click();
+		await expect(page.getByRole('dialog')).toHaveCount(1);
+		await expect(shutdown).toBeFocused();
+		await expect(analysisWorker).toBeVisible();
+		await search.fill('no-worker-can-match-this-search');
+		await expect(popupBefore.getByText('No compute workers match your filters')).toBeVisible();
+		await dialog.getByRole('combobox', { name: 'Activity' }).selectOption('busy');
 		await closeComputeWorkersPopup(page);
+		await expect(page.getByRole('button', { name: 'Compute workers', exact: true })).toBeFocused();
 
 		await page.getByRole('link', { name: 'Analyses', exact: true }).click();
 		await expect(page).toHaveURL('/');
@@ -64,6 +89,10 @@ test('the compute worker monitor keeps its snapshot after an analysis page reloa
 		await expect(badgeAfter).toHaveText(String(countBefore));
 
 		const popupAfter = await openComputeWorkersPopup(page);
+		await expect(popupAfter.getByRole('searchbox', { name: 'Search compute workers' })).toHaveValue(
+			''
+		);
+		await expect(popupAfter.getByRole('combobox', { name: 'Activity' })).toHaveValue('all');
 		const rowsAfter = await popupAfter.locator('[data-compute-worker-row]').evaluateAll((rows) =>
 			rows
 				.map((row) => row.getAttribute('data-compute-worker-row'))
