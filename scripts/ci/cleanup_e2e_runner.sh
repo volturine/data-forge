@@ -187,18 +187,27 @@ clean_workspace_artifacts() {
 }
 
 clean_runner_images() {
-	local output image
-	if ! output="$(docker image ls --filter 'reference=dataforge-test-runner:*' --format '{{.Repository}}:{{.Tag}}' 2>/dev/null)"; then
-		warn 'Could not list stale E2E runner images.'
+	local output image repository tag
+	if ! output="$(docker image ls --format '{{.Repository}}:{{.Tag}}' 2>/dev/null)"; then
+		warn 'Could not list stale E2E images.'
 	else
 		while IFS= read -r image; do
 			[[ -n "$image" ]] || continue
-			if ! docker image rm "$image" >/dev/null 2>&1; then
-				warn "Could not remove E2E runner image ${image}."
+			repository="${image%%:*}"
+			tag="${image##*:}"
+			if [[ "$repository" == dataforge-test-runner || ( "$repository" == data-forge-* && ( "$tag" == e2e || "$tag" == integration || "$tag" == latest ) ) ]]; then
+				if ! docker image rm "$image" >/dev/null 2>&1; then
+					warn "Could not remove E2E image ${image}."
+				fi
 			fi
 		done <<<"$output"
 	fi
-	if ! docker builder prune --force --filter until=72h >/dev/null 2>&1; then
+	if [[ "$mode" == post ]]; then
+		# These multi-service E2E builds leave large intermediate layers on the runner.
+		if ! docker builder prune --all --force >/dev/null 2>&1; then
+			warn 'Could not prune Docker build cache after E2E.'
+		fi
+	elif ! docker builder prune --force --filter until=72h >/dev/null 2>&1; then
 		warn 'Could not prune stale Docker build cache.'
 	fi
 }
