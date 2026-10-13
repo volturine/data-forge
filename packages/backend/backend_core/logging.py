@@ -191,10 +191,6 @@ class DatabaseLogKind(DataForgeStrEnum):
                     return
 
 
-def _adapt_datetime(value: datetime) -> str:
-    return value.isoformat()
-
-
 def _day_from_ts(ts: datetime | None) -> date:
     """Get the date in the configured timezone for daily table partitioning."""
     tz = ZoneInfo(settings.timezone)

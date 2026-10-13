@@ -13,13 +13,13 @@ from backend_core import settings_store
 from backend_core.api_execution_budget import run_api_blocking
 from backend_core.database import run_settings_db
 from backend_core.error_handlers import handle_errors
+from backend_core.namespace import get_namespace
 from backend_core.secrets import MASKED_SECRET
 from backend_core.settings_schemas import (
     DetectCustomBotRequest,
     DetectTelegramResponse,
     SettingsResponse,
     SettingsUpdate,
-    SettingsUpdate as CoreSettingsUpdate,
     TestResult,
     TestSmtpRequest,
     TestTelegramRequest,
@@ -68,8 +68,7 @@ async def read_settings(
     user: User = Depends(get_current_user),
 ) -> SettingsResponse:
     """Get application settings including SMTP config, Telegram token, OpenRouter API key, and feature flags."""
-    settings = await run_api_blocking(run_settings_db, settings_store.get_settings)
-    return SettingsResponse.model_validate(settings)
+    return await run_api_blocking(run_settings_db, settings_store.get_settings)
 
 
 @router.put('', response_model=SettingsResponse, mcp=True)
@@ -79,15 +78,11 @@ async def write_settings(
     user: User = Depends(get_current_user),
 ) -> SettingsResponse:
     """Update application settings. Only provided fields are changed; omitted fields keep current values."""
-    update = CoreSettingsUpdate.model_validate(data.model_dump(exclude_unset=True))
-    result = await run_api_blocking(
+    return await run_api_blocking(
         run_settings_db,
         settings_store.update_settings,
-        update,
+        data,
     )
-    typed_result = SettingsResponse.model_validate(result)
-
-    return typed_result
 
 
 @router.post('/test-smtp', response_model=TestResult, mcp=True)
@@ -183,7 +178,7 @@ async def detect_telegram_chat(
     if not resolved.enabled:
         return DetectTelegramResponse(success=False, message='Telegram bot token not configured')
     try:
-        result = await request_chat_detection(token=resolved.token, request_user_id=user.id, namespace=_request_namespace())
+        result = await request_chat_detection(token=resolved.token, request_user_id=user.id, namespace=get_namespace())
         return DetectTelegramResponse.model_validate(result)
     except telegram_runtime_store.DetectionQueueFull as exc:
         raise HTTPException(status_code=429, detail=str(exc)) from exc
@@ -209,7 +204,7 @@ async def detect_custom_bot_chat(
         result = await request_chat_detection(
             token=body.bot_token,
             request_user_id=user.id,
-            namespace=_request_namespace(),
+            namespace=get_namespace(),
         )
         return DetectTelegramResponse.model_validate(result)
     except telegram_runtime_store.DetectionQueueFull as exc:
@@ -218,9 +213,3 @@ async def detect_custom_bot_chat(
         raise HTTPException(status_code=504, detail=str(exc)) from exc
     except TelegramDetectionFailed as exc:
         raise HTTPException(status_code=502, detail=str(exc)) from exc
-
-
-def _request_namespace() -> str:
-    from backend_core.namespace import get_namespace
-
-    return get_namespace()

@@ -9,13 +9,11 @@ from sqlalchemy import desc, or_, select, text
 from sqlmodel import Session
 
 from backend_core.compute_worker_runs_utils import normalize_step_timings
-from backend_core.domain.analysis.step_types import get_step_timing_key
 from backend_core.domain.compute import schemas as compute_schemas
 from backend_core.domain.compute.schemas import BuildLogLevel, BuildStepState
 from backend_core.domain.compute_worker_runs.schemas import (
     BuildComparisonResponse,
     ColumnDiff,
-    ComputeWorkerRunExecutionCategory,
     ComputeWorkerRunExecutionEntry,
     ComputeWorkerRunKind,
     ComputeWorkerRunResponseSchema,
@@ -67,81 +65,6 @@ class _UnsetType:
 
 
 _UNSET: Final = _UnsetType()
-
-
-def build_execution_entries(
-    *,
-    step_timings: dict[str, float] | None = None,
-    query_plans: dict[str, Any] | None = None,
-    query_plan: str | None = None,
-    read_duration_ms: float | None = None,
-    collect_duration_ms: float | None = None,
-    write_duration_ms: float | None = None,
-    total_duration_ms: int | None = None,
-) -> list[dict[str, Any]]:
-    normalized_timings = normalize_step_timings(step_timings)
-    timed_total = sum(normalized_timings.values())
-    if isinstance(read_duration_ms, (int, float)):
-        timed_total += float(read_duration_ms)
-    if isinstance(collect_duration_ms, (int, float)):
-        timed_total += float(collect_duration_ms)
-    if isinstance(write_duration_ms, (int, float)):
-        timed_total += float(write_duration_ms)
-    denominator = float(total_duration_ms) if total_duration_ms and total_duration_ms > 0 else timed_total
-
-    entries: list[dict[str, Any]] = []
-
-    def append_entry(
-        *,
-        key: str,
-        label: str,
-        category: ComputeWorkerRunExecutionCategory,
-        duration_ms: float | None = None,
-        optimized_plan: str | None = None,
-        unoptimized_plan: str | None = None,
-        metadata: dict[str, Any] | None = None,
-    ) -> None:
-        share_pct = round((duration_ms / denominator) * 100, 1) if duration_ms is not None and denominator > 0 else None
-        entries.append(
-            {
-                'key': key,
-                'label': label,
-                'category': category,
-                'order': len(entries),
-                'duration_ms': round(duration_ms, 2) if duration_ms is not None else None,
-                'share_pct': share_pct,
-                'optimized_plan': optimized_plan,
-                'unoptimized_plan': unoptimized_plan,
-                'metadata': metadata,
-            }
-        )
-
-    if isinstance(read_duration_ms, (int, float)):
-        append_entry(key='initial_read', label='Initial Read', category=ComputeWorkerRunExecutionCategory.READ, duration_ms=float(read_duration_ms))
-
-    optimized_plan = query_plans.get('optimized') if isinstance(query_plans, dict) and isinstance(query_plans.get('optimized'), str) else None
-    unoptimized_plan = query_plans.get('unoptimized') if isinstance(query_plans, dict) and isinstance(query_plans.get('unoptimized'), str) else None
-    if optimized_plan or unoptimized_plan or query_plan:
-        append_entry(
-            key='query_plan',
-            label='Query Plan',
-            category=ComputeWorkerRunExecutionCategory.PLAN,
-            duration_ms=None,
-            optimized_plan=optimized_plan or query_plan,
-            unoptimized_plan=unoptimized_plan or query_plan,
-        )
-
-    for timing_key, duration_ms in normalized_timings.items():
-        base_key, label = get_step_timing_key(timing_key)
-        append_entry(key=timing_key, label=label, category=ComputeWorkerRunExecutionCategory.STEP, duration_ms=duration_ms, metadata={'step_type': base_key})
-
-    if isinstance(collect_duration_ms, (int, float)):
-        append_entry(key='compute', label='Compute', category=ComputeWorkerRunExecutionCategory.COMPUTE, duration_ms=float(collect_duration_ms))
-
-    if isinstance(write_duration_ms, (int, float)):
-        append_entry(key='write_output', label='Write Output', category=ComputeWorkerRunExecutionCategory.WRITE, duration_ms=float(write_duration_ms))
-
-    return entries
 
 
 def _latest_completed_step_name(result_json: dict[str, Any]) -> str | None:

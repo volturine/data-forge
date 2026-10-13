@@ -44,9 +44,6 @@ class ComputeWorkerRunStatus(ApiEnumValue):
     def is_terminal(self) -> bool:
         return self in {ComputeWorkerRunStatus.SUCCESS, ComputeWorkerRunStatus.FAILED, ComputeWorkerRunStatus.CANCELLED}
 
-    def blocks_transition_to(self, next_status: ComputeWorkerRunStatus) -> bool:
-        return self.is_terminal and next_status != self
-
 
 ComputeWorkerRunStatus.RUNNING = ComputeWorkerRunStatus(
     enums_pb2.COMPUTE_WORKER_RUN_STATUS_RUNNING, api_token('ComputeWorkerRunStatus', enums_pb2.COMPUTE_WORKER_RUN_STATUS_RUNNING)
@@ -68,18 +65,6 @@ class ComputeWorkerRunExecutionCategory(ApiEnumValue):
     PLAN: ClassVar[Self]
     COMPUTE: ClassVar[Self]
     WRITE: ClassVar[Self]
-
-    @property
-    def is_query_plan(self) -> bool:
-        return self == ComputeWorkerRunExecutionCategory.PLAN
-
-    @property
-    def default_step_type(self) -> str:
-        match self:
-            case ComputeWorkerRunExecutionCategory.READ | ComputeWorkerRunExecutionCategory.WRITE:
-                return self.value
-            case _:
-                return 'unknown'
 
 
 ComputeWorkerRunExecutionCategory.READ = ComputeWorkerRunExecutionCategory(

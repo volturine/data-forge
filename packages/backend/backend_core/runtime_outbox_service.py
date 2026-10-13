@@ -394,43 +394,6 @@ def _claim_next_events(
     return claims
 
 
-def _claim_next_event(session: Session) -> tuple[str, str, int, str, dict[str, object]] | None:
-    claims = _claim_next_events(session, limit=1)
-    if not claims:
-        return None
-    claim = claims[0]
-    return claim.event_id, claim.claim_token, claim.lease_generation, claim.event_kind, claim.payload
-
-
-def pending_event_count(session: Session) -> int:
-    table = RuntimeOutboxEvent.metadata.tables[RuntimeOutboxEvent.__tablename__]
-    stmt = (
-        select(func.count())
-        .select_from(table)
-        .where(table.c.status.in_([RuntimeOutboxStatus.PENDING, RuntimeOutboxStatus.FAILED, RuntimeOutboxStatus.DISPATCHING]))
-    )
-    return session.execute(stmt).scalar_one()
-
-
-def _finalize_claim(
-    session: Session,
-    event_id: str,
-    *,
-    claim_token: str,
-    lease_generation: int,
-    error: str | None,
-) -> bool:
-    claim = OutboxClaim(
-        event_id=event_id,
-        claim_token=claim_token,
-        lease_generation=lease_generation,
-        event_kind='',
-        payload={},
-    )
-    finalized, _dispatched = _finalize_claims(session, [(claim, error)])
-    return finalized == 1
-
-
 def _finalize_claims(
     session: Session,
     outcomes: Sequence[tuple[OutboxClaim, str | None]],

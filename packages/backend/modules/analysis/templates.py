@@ -33,13 +33,9 @@ class AnalysisTemplate:
         }
 
 
-def _template_file() -> Path:
-    return Path(__file__).with_name('builtin_templates.json')
-
-
 @lru_cache(maxsize=1)
 def load_builtin_templates() -> tuple[AnalysisTemplate, ...]:
-    payload = json.loads(_template_file().read_text())
+    payload = json.loads(Path(__file__).with_name('builtin_templates.json').read_text())
     templates: list[AnalysisTemplate] = []
     for item in payload:
         steps = tuple(item.get('steps', []))

@@ -3,14 +3,11 @@ import datetime as dt
 from sqlalchemy import JSON, Column, DateTime, Float, Integer, String
 from sqlmodel import Field, SQLModel
 
-from backend_core.domain.compute_worker_runs.schemas import ComputeWorkerRunKind, ComputeWorkerRunStatus
+from backend_core.domain.compute_worker_runs.schemas import ComputeWorkerRunStatus
 
 
 class ComputeWorkerRun(SQLModel, table=True):  # type: ignore[call-arg, assignment]
     __tablename__ = 'compute_worker_runs'  # type: ignore[assignment]
-
-    def kind_kind(self) -> ComputeWorkerRunKind:
-        return ComputeWorkerRunKind.require(self.kind)
 
     def status_kind(self) -> ComputeWorkerRunStatus:
         return ComputeWorkerRunStatus.require(self.status)

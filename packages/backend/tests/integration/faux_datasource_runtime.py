@@ -48,12 +48,10 @@ class FauxDatasourceRuntime:
         *,
         source_path: str,
         selection: dict[str, object],
-        runtime_probe: object,
         delete_source: bool,
     ) -> tuple[str, Any, dict[str, object]]:
         from modules.datasource.preflight import ExcelPreflight
 
-        del runtime_probe
         preflight_id = str(uuid.uuid4())
         self.preflight_calls.append(('initial', dict(selection)))
         preflight = ExcelPreflight(
@@ -81,11 +79,10 @@ class FauxDatasourceRuntime:
         source_path: str,
         action: int,
         selection: dict[str, object],
-        runtime_probe: object,
         delete_source: bool = False,
         datasource_id: str | None = None,
     ) -> dict[str, object]:
-        del preflight_id, source_path, runtime_probe, delete_source, datasource_id
+        del preflight_id, source_path, delete_source, datasource_id
         self.preflight_calls.append((str(action), dict(selection)))
         return self._preflight_result(selection)
 
@@ -161,7 +158,7 @@ class FauxDatasourceRuntime:
                         'file_path': file_path,
                         'file_type': file_type,
                         'options': options or csv_options or {},
-                        **{key: value for key, value in kwargs.items() if value is not None and key not in {'runtime_probe', 'branch'}},
+                        **{key: value for key, value in kwargs.items() if value is not None and key != 'branch'},
                     },
                 },
                 owner_id=owner_id,

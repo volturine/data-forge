@@ -61,7 +61,6 @@ def test_dispatch_pending_events_quarantines_poison_event(test_db_session, monke
     test_db_session.refresh(event)
     assert event.status == RuntimeOutboxStatus.POISONED
     assert event.attempts == 1
-    assert runtime_outbox_service.pending_event_count(test_db_session) == 0
 
 
 def test_runtime_dispatch_leaves_external_delivery_for_its_lane(test_db_session, monkeypatch) -> None:
@@ -218,38 +217,35 @@ def test_external_delivery_finalization_rejects_stale_lease(test_db_session) -> 
 
 def test_expired_dispatch_claim_is_reclaimed_and_stale_finalizer_is_rejected(test_db_session) -> None:
     event = runtime_outbox_service.enqueue_build_job_notification(test_db_session)
-    first_claim = runtime_outbox_service._claim_next_event(test_db_session)
-    assert first_claim is not None
-    event_id, first_token, first_generation, _, _ = first_claim
+    first_claims = runtime_outbox_service._claim_next_events(test_db_session, limit=1)
+    assert len(first_claims) == 1
+    first_claim = first_claims[0]
+    assert first_claim.event_id == event.id
 
     test_db_session.refresh(event)
     event.lease_expires_at = datetime.now(UTC) - timedelta(seconds=1)
     test_db_session.add(event)
     test_db_session.commit()
 
-    second_claim = runtime_outbox_service._claim_next_event(test_db_session)
-    assert second_claim is not None
-    _, second_token, second_generation, _, _ = second_claim
-    assert second_token != first_token
-    assert second_generation == first_generation + 1
+    second_claims = runtime_outbox_service._claim_next_events(test_db_session, limit=1)
+    assert len(second_claims) == 1
+    second_claim = second_claims[0]
+    assert second_claim.event_id == first_claim.event_id
+    assert second_claim.claim_token != first_claim.claim_token
+    assert second_claim.lease_generation == first_claim.lease_generation + 1
+    test_db_session.refresh(event)
+    assert event.status == RuntimeOutboxStatus.DISPATCHING
+    assert event.claim_token == second_claim.claim_token
+    assert event.lease_generation == second_claim.lease_generation
+    assert event.attempts == 2
 
-    stale_applied = runtime_outbox_service._finalize_claim(
-        test_db_session,
-        event_id,
-        claim_token=first_token,
-        lease_generation=first_generation,
-        error=None,
-    )
-    assert stale_applied is False
+    stale_finalized, stale_dispatched = runtime_outbox_service._finalize_claims(test_db_session, [(first_claim, None)])
+    assert stale_finalized == 0
+    assert stale_dispatched == 0
 
-    current_applied = runtime_outbox_service._finalize_claim(
-        test_db_session,
-        event_id,
-        claim_token=second_token,
-        lease_generation=second_generation,
-        error=None,
-    )
-    assert current_applied is True
+    current_finalized, current_dispatched = runtime_outbox_service._finalize_claims(test_db_session, [(second_claim, None)])
+    assert current_finalized == 1
+    assert current_dispatched == 1
     test_db_session.refresh(event)
     assert event.status == RuntimeOutboxStatus.DISPATCHED
     assert event.attempts == 2

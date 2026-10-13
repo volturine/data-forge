@@ -9,7 +9,6 @@ import pytest
 from fastapi import FastAPI
 
 from backend_core import database
-from backend_core.dependencies import get_runtime_availability_probe
 from backend_core.namespace import get_namespace, reset_namespace, set_namespace_context
 from modules.auth.dependencies import get_current_user
 from modules.compute import executor_client, routes as compute_routes
@@ -25,9 +24,8 @@ async def test_async_compute_and_datasource_routes_keep_responses(monkeypatch, r
     app.include_router(datasource_routes.router)
 
     app.dependency_overrides[get_current_user] = lambda: None
-    app.dependency_overrides[get_runtime_availability_probe] = lambda: object()
 
-    async def preview(request, *, runtime_probe, http_request):
+    async def preview(request, *, http_request):
         return {'step_id': request.target_step_id, 'total_rows': 0}
 
     def update(_session, datasource_id, payload):
@@ -113,7 +111,6 @@ async def test_update_runs_complete_db_operation_off_loop_with_fresh_session_and
             datasource_routes.update_datasource(
                 '22222222-2222-4222-8222-000000000099',
                 DataSourceUpdate(name='Updated name'),
-                runtime_probe=object(),
             )
         )
         assert await asyncio.to_thread(db_started.wait, 1)

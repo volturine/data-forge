@@ -11,7 +11,6 @@ from fastapi import Response
 from sqlalchemy import select
 from sqlmodel import Session
 
-from backend_core.application import app
 from backend_core.persistence.analysis.models import Analysis, AnalysisDataSource, AnalysisFavorite
 from backend_core.persistence.datasource.models import DataSource
 from backend_core.persistence.locks.models import ResourceLock
@@ -19,7 +18,6 @@ from backend_core.sqlmodel_typing import sa
 from dataforge_protocol import compute_pb2
 from modules.analysis import routes as analysis_routes, service as analysis_service
 from modules.analysis.schemas import AnalysisResponseSchema
-from modules.auth.dependencies import get_optional_user
 from modules.compute import executor_client
 from tests.http_client import TestClient
 
@@ -560,15 +558,13 @@ class TestAnalysisCreate:
         output_ds = test_db_session.get(DataSource, output_id)
         assert output_ds is None
 
-    def test_create_analysis_sets_owner_id_when_optional_user_present(
+    def test_create_analysis_sets_owner_id_for_authenticated_user(
         self,
         client,
         sample_datasource: DataSource,
         test_db_session,
         test_user,
-        monkeypatch,
     ):
-        monkeypatch.setitem(app.dependency_overrides, get_optional_user, lambda: test_user)
         payload = {
             'name': 'Owned Analysis',
             'tabs': [
@@ -1396,7 +1392,6 @@ class TestAnalysisDelete:
         executor_client.request_compute_worker_shutdown(
             cast(Session, object()),
             identity=compute_pb2.ComputeWorkerIdentity(analysis_id='analysis-1', resource_id='analysis-1'),
-            runtime_probe=cast(Any, object()),
         )
 
         assert len(submitted) == 1
@@ -1405,7 +1400,7 @@ class TestAnalysisDelete:
     def test_delete_analysis_queues_engine_shutdown_without_waiting(self, client, sample_analysis: Analysis, monkeypatch):
         shutdown_calls: list[compute_pb2.ComputeWorkerIdentity] = []
 
-        def request_shutdown(session, *, identity, runtime_probe) -> None:
+        def request_shutdown(session, *, identity) -> None:
             shutdown_calls.append(identity)
 
         monkeypatch.setattr(executor_client, 'request_compute_worker_shutdown', request_shutdown)

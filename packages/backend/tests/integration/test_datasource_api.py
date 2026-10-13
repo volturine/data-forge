@@ -5,10 +5,8 @@ from unittest.mock import AsyncMock, patch
 
 from sqlmodel import select
 
-from backend_core.application import app
 from backend_core.exceptions import DataSourceValidationError
 from backend_core.persistence.datasource.models import DataSource, DataSourceColumnMetadata
-from modules.auth.dependencies import get_optional_user
 
 
 class TestDataSourceUpload:
@@ -128,8 +126,7 @@ class TestDataSourceUpload:
         assert response.status_code == 400
         assert 'Unsupported file type' in response.json()['detail']
 
-    def test_upload_sets_owner_id_when_optional_user_present(self, client, mock_file_upload: dict, test_db_session, test_user, monkeypatch):
-        monkeypatch.setitem(app.dependency_overrides, get_optional_user, lambda: test_user)
+    def test_upload_sets_owner_id_for_authenticated_user(self, client, mock_file_upload: dict, test_db_session, test_user):
         files = {
             'file': (
                 mock_file_upload['filename'],
@@ -227,8 +224,7 @@ class TestDataSourceConnect:
         result = response.json()
         assert result['description'] == 'Read-only reporting extract for finance reconciliation.'
 
-    def test_connect_sets_owner_id_when_optional_user_present(self, client, test_db_session, test_user, monkeypatch):
-        monkeypatch.setitem(app.dependency_overrides, get_optional_user, lambda: test_user)
+    def test_connect_sets_owner_id_for_authenticated_user(self, client, test_db_session, test_user):
         payload = {
             'name': 'Owned Database Connection',
             'source_type': 'database',

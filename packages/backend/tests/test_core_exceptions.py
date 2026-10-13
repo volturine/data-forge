@@ -11,7 +11,6 @@ from backend_core.exceptions import (
     DataSourceValidationError,
     FileError,
     FileSizeExceededError,
-    JobError,
     PipelineError,
     PipelineExecutionCancelledError,
     PipelineExecutionError,
@@ -122,7 +121,6 @@ class TestExceptions:
         assert issubclass(AnalysisError, AppError)
         assert issubclass(ComputeError, AppError)
         assert issubclass(PipelineError, AppError)
-        assert issubclass(JobError, AppError)
         assert issubclass(FileError, AppError)
 
     def test_exception_with_long_message(self):

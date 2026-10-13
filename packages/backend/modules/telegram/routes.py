@@ -39,8 +39,7 @@ async def bot_status() -> BotStatusResponse:
 @handle_errors(operation='list subscribers')
 async def get_subscribers() -> list[SubscriberResponse]:
     """List all Telegram subscribers (chats that have interacted with the bot)."""
-    subscribers = await run_api_blocking(run_db, telegram_store.list_subscribers)
-    return [SubscriberResponse.model_validate(item) for item in subscribers]
+    return await run_api_blocking(run_db, telegram_store.list_subscribers)
 
 
 @router.delete('/subscribers/{subscriber_id}', status_code=204, mcp=True)
@@ -60,13 +59,12 @@ async def get_listeners(
 
     A listener links a Telegram subscriber to a datasource for build notifications.
     """
-    listeners = await run_api_blocking(
+    return await run_api_blocking(
         run_db,
         telegram_store.list_listeners,
         subscriber_id,
         parse_datasource_id(datasource_id) if datasource_id else None,
     )
-    return [ListenerResponse.model_validate(item) for item in listeners]
 
 
 @router.post('/listeners', response_model=ListenerResponse, mcp=True)
@@ -77,9 +75,7 @@ async def create_listener(payload: ListenerCreate) -> ListenerResponse:
     Requires subscriber_id (from GET /telegram/subscribers) and datasource_id
     (from GET /datasource). The subscriber will receive notifications when the datasource is built.
     """
-    listener = telegram_store.ListenerCreate.model_validate(payload.model_dump())
-    created = await run_api_blocking(run_db, telegram_store.add_listener, listener)
-    return ListenerResponse.model_validate(created)
+    return await run_api_blocking(run_db, telegram_store.add_listener, payload)
 
 
 @router.delete('/listeners/{listener_id}', status_code=204, mcp=True)

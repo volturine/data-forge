@@ -7,7 +7,7 @@ import secrets
 import time
 from typing import Any
 
-from sqlalchemy import func, select
+from sqlalchemy import select
 from sqlmodel import Session as DbSession
 
 from backend_core.database import get_settings_engine, run_settings_db
@@ -153,14 +153,13 @@ class SessionStore:
 
     def history(self, session_id: str) -> tuple[list[dict[str, Any]], int, bool]:
         with DbSession(get_settings_engine()) as db:
-            latest = db.execute(select(func.max(col(ChatEvent.sequence))).where(col(ChatEvent.session_id) == session_id)).scalar_one_or_none()
-            cursor = int(latest or 0)
-            rows = (
+            rows = list(
                 db.execute(select(ChatEvent).where(col(ChatEvent.session_id) == session_id).order_by(col(ChatEvent.sequence).desc()).limit(MAX_EVENTS))
                 .scalars()
                 .all()
             )
-            rows = list(reversed(rows))
+            cursor = int(rows[0].sequence) if rows else 0
+            rows.reverse()
             first = rows[0].sequence if rows else cursor
             gap = bool(rows and int(first or 0) > 1)
             history = []

@@ -10,8 +10,7 @@ def export_slug(value: str, *, fallback: str) -> str:
     return slug or fallback
 
 
-def build_export_filename(analysis_name: str, tab_name: str | None, format_name: CodeExportFormat | str) -> str:
-    export_format = CodeExportFormat.require(format_name)
+def build_export_filename(analysis_name: str, tab_name: str | None, export_format: CodeExportFormat) -> str:
     extension = export_format.file_extension
     analysis_slug = export_slug(analysis_name, fallback='analysis')
     if tab_name:

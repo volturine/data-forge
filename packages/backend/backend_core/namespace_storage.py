@@ -41,16 +41,6 @@ class NamespaceStoragePlan:
     exports_root: str
     runtime_artifacts_root: str
 
-    def as_dict(self) -> dict[str, str]:
-        return {
-            'name': self.name,
-            'bucket': self.bucket,
-            'uploads_root': self.uploads_root,
-            'clean_root': self.clean_root,
-            'exports_root': self.exports_root,
-            'runtime_artifacts_root': self.runtime_artifacts_root,
-        }
-
 
 def namespace_storage_plan(namespace: str) -> NamespaceStoragePlan:
     name = validate_namespace_name(namespace)

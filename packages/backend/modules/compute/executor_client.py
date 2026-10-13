@@ -23,14 +23,13 @@ from backend_core.api_execution_budget import BoundedThreadPoolExecutor, run_api
 from backend_core.compute_response_recovery import response_recovery
 from backend_core.data_plane_client import client_from_settings
 from backend_core.database import run_db
-from backend_core.dependencies import RuntimeAvailabilityProbe
 from backend_core.domain.compute import schemas as compute_schemas
 from backend_core.domain.compute_requests.models import command_from_payload
 from backend_core.exceptions import AppError, ClientDisconnectedError, PipelineExecutionCancelledError, PipelineExecutionError
 from backend_core.namespace import get_namespace, reset_namespace, set_namespace_context
 from backend_core.persistence.compute_requests.models import ComputeRequest
 from dataforge_protocol import compute_pb2, datasource_pb2, enums_pb2
-from modules.analysis.step_schemas import normalize_step_config_for_protocol
+from modules.analysis.step_schemas import normalize_pipeline_step_configs_for_protocol
 from modules.datasource import schemas as datasource_schemas
 from modules.datasource.schema_protocol import schema_info_proto
 
@@ -161,24 +160,8 @@ def _require_active_datasource_for_enqueue(session: Session, datasource_id: str)
 def _protocol_request_payload(request: BaseModel) -> dict[str, object]:
     payload = cast(dict[str, object], request.model_dump(mode='json'))
     pipeline = payload.get('analysis_pipeline')
-    if not isinstance(pipeline, dict):
-        return payload
-    tabs = pipeline.get('tabs')
-    if not isinstance(tabs, list):
-        return payload
-    for tab in tabs:
-        if not isinstance(tab, dict):
-            continue
-        steps = tab.get('steps')
-        if not isinstance(steps, list):
-            continue
-        for step in steps:
-            if not isinstance(step, dict):
-                continue
-            step_type = step.get('type')
-            config = step.get('config')
-            if isinstance(step_type, str) and isinstance(config, dict):
-                step['config'] = normalize_step_config_for_protocol(step_type, config)
+    if isinstance(pipeline, dict):
+        payload['analysis_pipeline'] = normalize_pipeline_step_configs_for_protocol(pipeline)
     return payload
 
 
@@ -203,26 +186,15 @@ async def _payload_command(
     return await _run_compute_serialization(command_from_payload, kind, payload)
 
 
-def _ensure_runtime_available(runtime_probe: RuntimeAvailabilityProbe) -> None:
-    # Compute requests are durable queue entries. A heartbeat is only a
-    # liveness observation and can become stale between this check and the
-    # enqueue, so rejecting here turns a transient observation into a lost
-    # user operation. The worker claims the request when it is available and
-    # the response wait already covers that queueing period.
-    del runtime_probe
-
-
 def _submit(
     session: Session,
     *,
     kind: enums_pb2.ComputeRequestKind,
     command: compute_pb2.ComputeCommand,
-    runtime_probe: RuntimeAvailabilityProbe,
     request_id: str | None = None,
     source_preflight_id: str | None = None,
     validate: Callable[[], None] | None = None,
 ):
-    _ensure_runtime_available(runtime_probe)
     try:
         if kind in compute_requests_service.SHARED_FLIGHT_REQUEST_KINDS:
             request, created = compute_requests_service.stage_shared_flight_request(
@@ -285,7 +257,6 @@ def _stage_validated_request(
     datasource_ids: tuple[str, ...],
     kind: enums_pb2.ComputeRequestKind,
     command: compute_pb2.ComputeCommand,
-    runtime_probe: RuntimeAvailabilityProbe,
     request_id: str | None = None,
     source_preflight_id: str | None = None,
 ):
@@ -311,7 +282,6 @@ def _stage_validated_request(
         session,
         kind=kind,
         command=command,
-        runtime_probe=runtime_probe,
         request_id=request_id,
         source_preflight_id=source_preflight_id,
         validate=validate,
@@ -325,7 +295,6 @@ def _stage_validated_request_in_new_session(
     datasource_ids: tuple[str, ...],
     kind: enums_pb2.ComputeRequestKind,
     command: compute_pb2.ComputeCommand,
-    runtime_probe: RuntimeAvailabilityProbe,
     request_id: str | None = None,
     source_preflight_id: str | None = None,
 ):
@@ -338,7 +307,6 @@ def _stage_validated_request_in_new_session(
             datasource_ids=datasource_ids,
             kind=kind,
             command=command,
-            runtime_probe=runtime_probe,
             request_id=request_id,
             source_preflight_id=source_preflight_id,
         )
@@ -361,7 +329,6 @@ async def _submit_and_wait(
     *,
     kind: enums_pb2.ComputeRequestKind,
     command: compute_pb2.ComputeCommand,
-    runtime_probe: RuntimeAvailabilityProbe,
     request_id: str | None = None,
     source_preflight_id: str | None = None,
     pipeline: compute_schemas.AnalysisPipelinePayload | None = None,
@@ -380,7 +347,6 @@ async def _submit_and_wait(
         datasource_ids=datasource_ids,
         kind=kind,
         command=command,
-        runtime_probe=runtime_probe,
         request_id=request_id,
         source_preflight_id=source_preflight_id,
     )
@@ -564,7 +530,6 @@ def _lifecycle_command(field_name: str, identity: ComputeWorkerIdentity, resourc
 async def preview_step(
     request: compute_schemas.StepPreviewRequest,
     *,
-    runtime_probe: RuntimeAvailabilityProbe,
     http_request: Request | None = None,
 ) -> compute_schemas.StepPreviewResponse:
     normalized = request.model_copy(update={'compute_worker_identity': compute_schemas.default_preview_compute_worker_identity(request)})
@@ -572,7 +537,6 @@ async def preview_step(
     completed = await _submit_and_wait(
         kind=enums_pb2.COMPUTE_REQUEST_KIND_PREVIEW,
         command=command,
-        runtime_probe=runtime_probe,
         pipeline=normalized.analysis_pipeline,
         http_request=http_request,
     )
@@ -582,14 +546,12 @@ async def preview_step(
 async def get_step_schema(
     request: compute_schemas.StepSchemaRequest,
     *,
-    runtime_probe: RuntimeAvailabilityProbe,
     http_request: Request | None = None,
 ) -> compute_schemas.StepSchemaResponse:
     command = await _request_command(enums_pb2.COMPUTE_REQUEST_KIND_SCHEMA, request)
     completed = await _submit_and_wait(
         kind=enums_pb2.COMPUTE_REQUEST_KIND_SCHEMA,
         command=command,
-        runtime_probe=runtime_probe,
         pipeline=request.analysis_pipeline,
         http_request=http_request,
     )
@@ -599,14 +561,12 @@ async def get_step_schema(
 async def get_step_row_count(
     request: compute_schemas.StepRowCountRequest,
     *,
-    runtime_probe: RuntimeAvailabilityProbe,
     http_request: Request | None = None,
 ) -> compute_schemas.StepRowCountResponse:
     command = await _request_command(enums_pb2.COMPUTE_REQUEST_KIND_ROW_COUNT, request)
     completed = await _submit_and_wait(
         kind=enums_pb2.COMPUTE_REQUEST_KIND_ROW_COUNT,
         command=command,
-        runtime_probe=runtime_probe,
         pipeline=request.analysis_pipeline,
         http_request=http_request,
     )
@@ -615,14 +575,11 @@ async def get_step_row_count(
 
 async def download_step(
     request: compute_schemas.DownloadRequest,
-    *,
-    runtime_probe: RuntimeAvailabilityProbe,
 ) -> tuple[bytes, str, str]:
     command = await _request_command(enums_pb2.COMPUTE_REQUEST_KIND_DOWNLOAD, request)
     completed = await _submit_and_wait(
         kind=enums_pb2.COMPUTE_REQUEST_KIND_DOWNLOAD,
         command=command,
-        runtime_probe=runtime_probe,
         pipeline=request.analysis_pipeline,
     )
     if not completed.artifact_path or not completed.artifact_name or not completed.artifact_content_type:
@@ -641,14 +598,11 @@ async def download_step(
 
 async def export_data(
     request: compute_schemas.ExportRequest,
-    *,
-    runtime_probe: RuntimeAvailabilityProbe,
 ) -> compute_schemas.ExportResponse:
     command = await _request_command(enums_pb2.COMPUTE_REQUEST_KIND_EXPORT, request)
     completed = await _submit_and_wait(
         kind=enums_pb2.COMPUTE_REQUEST_KIND_EXPORT,
         command=command,
-        runtime_probe=runtime_probe,
         pipeline=request.analysis_pipeline,
     )
     return await _validated_response(compute_schemas.ExportResponse, completed)
@@ -656,7 +610,6 @@ async def export_data(
 
 async def create_file_datasource(
     *,
-    runtime_probe: RuntimeAvailabilityProbe,
     name: str,
     description: str | None,
     file_path: str,
@@ -698,7 +651,6 @@ async def create_file_datasource(
     )
     completed = await _submit_and_wait(
         kind=enums_pb2.COMPUTE_REQUEST_KIND_CREATE_FILE_DATASOURCE,
-        runtime_probe=runtime_probe,
         command=command,
         source_preflight_id=source_preflight_id,
     )
@@ -711,7 +663,6 @@ async def execute_excel_preflight(
     source_path: str,
     action: enums_pb2.DatasourcePreflightAction,
     selection: Mapping[str, object],
-    runtime_probe: RuntimeAvailabilityProbe,
     delete_source: bool = False,
     datasource_id: str | None = None,
 ) -> dict[str, object]:
@@ -729,7 +680,6 @@ async def execute_excel_preflight(
     completed = await _submit_and_wait(
         kind=enums_pb2.COMPUTE_REQUEST_KIND_DATASOURCE_PREFLIGHT,
         command=command,
-        runtime_probe=runtime_probe,
         request_id=preflight_id if action == enums_pb2.DATASOURCE_PREFLIGHT_ACTION_INITIAL else None,
         datasource_ids=(datasource_id,) if datasource_id is not None else (),
     )
@@ -738,7 +688,6 @@ async def execute_excel_preflight(
 
 async def create_database_datasource(
     *,
-    runtime_probe: RuntimeAvailabilityProbe,
     name: str,
     description: str | None,
     connection_string: str,
@@ -759,7 +708,6 @@ async def create_database_datasource(
     )
     completed = await _submit_and_wait(
         kind=enums_pb2.COMPUTE_REQUEST_KIND_CREATE_DATABASE_DATASOURCE,
-        runtime_probe=runtime_probe,
         command=command,
     )
     return await _validated_response(datasource_schemas.DataSourceResponse, completed)
@@ -767,7 +715,6 @@ async def create_database_datasource(
 
 async def create_iceberg_datasource(
     *,
-    runtime_probe: RuntimeAvailabilityProbe,
     name: str,
     description: str | None,
     source: dict[str, object],
@@ -786,7 +733,6 @@ async def create_iceberg_datasource(
     )
     completed = await _submit_and_wait(
         kind=enums_pb2.COMPUTE_REQUEST_KIND_CREATE_ICEBERG_DATASOURCE,
-        runtime_probe=runtime_probe,
         command=command,
     )
     return await _validated_response(datasource_schemas.DataSourceResponse, completed)
@@ -795,7 +741,6 @@ async def create_iceberg_datasource(
 async def ingest_datasource(
     *,
     datasource_id: str,
-    runtime_probe: RuntimeAvailabilityProbe,
 ) -> datasource_schemas.DataSourceResponse:
     command = await _payload_command(
         enums_pb2.COMPUTE_REQUEST_KIND_INGEST_DATASOURCE,
@@ -804,7 +749,6 @@ async def ingest_datasource(
     completed = await _submit_and_wait(
         kind=enums_pb2.COMPUTE_REQUEST_KIND_INGEST_DATASOURCE,
         command=command,
-        runtime_probe=runtime_probe,
         datasource_ids=(datasource_id,),
     )
     return await _validated_response(datasource_schemas.DataSourceResponse, completed)
@@ -815,7 +759,6 @@ async def get_datasource_schema(
     datasource_id: str,
     sheet_name: str | None,
     refresh: bool,
-    runtime_probe: RuntimeAvailabilityProbe,
 ) -> datasource_pb2.SchemaInfo:
     command = await _payload_command(
         enums_pb2.COMPUTE_REQUEST_KIND_DATASOURCE_SCHEMA,
@@ -828,7 +771,6 @@ async def get_datasource_schema(
     completed = await _submit_and_wait(
         kind=enums_pb2.COMPUTE_REQUEST_KIND_DATASOURCE_SCHEMA,
         command=command,
-        runtime_probe=runtime_probe,
         datasource_ids=(datasource_id,),
     )
     return await run_api_blocking(schema_info_proto, await _response_payload(completed))
@@ -841,7 +783,6 @@ async def get_column_stats(
     use_sample: bool,
     sample_size: int,
     datasource_config: dict[str, object] | None,
-    runtime_probe: RuntimeAvailabilityProbe,
 ) -> datasource_schemas.ColumnStatsResponse:
     command = await _payload_command(
         enums_pb2.COMPUTE_REQUEST_KIND_DATASOURCE_COLUMN_STATS,
@@ -856,7 +797,6 @@ async def get_column_stats(
     completed = await _submit_and_wait(
         kind=enums_pb2.COMPUTE_REQUEST_KIND_DATASOURCE_COLUMN_STATS,
         command=command,
-        runtime_probe=runtime_probe,
         datasource_ids=(datasource_id,),
     )
     return await _validated_response(datasource_schemas.ColumnStatsResponse, completed)
@@ -868,7 +808,6 @@ async def compare_iceberg_snapshots(
     snapshot_a: str,
     snapshot_b: str,
     row_limit: int,
-    runtime_probe: RuntimeAvailabilityProbe,
 ) -> datasource_schemas.SnapshotCompareResponse:
     command = await _payload_command(
         enums_pb2.COMPUTE_REQUEST_KIND_COMPARE_ICEBERG_SNAPSHOTS,
@@ -882,7 +821,6 @@ async def compare_iceberg_snapshots(
     completed = await _submit_and_wait(
         kind=enums_pb2.COMPUTE_REQUEST_KIND_COMPARE_ICEBERG_SNAPSHOTS,
         command=command,
-        runtime_probe=runtime_probe,
         datasource_ids=(datasource_id,),
     )
     return await _validated_response(datasource_schemas.SnapshotCompareResponse, completed)
@@ -891,13 +829,11 @@ async def compare_iceberg_snapshots(
 async def spawn_compute_worker(
     *,
     identity: ComputeWorkerIdentity,
-    runtime_probe: RuntimeAvailabilityProbe,
     resource_config: dict[str, object] | None,
 ) -> compute_schemas.ComputeWorkerStatusSchema:
     completed = await _submit_and_wait(
         kind=enums_pb2.COMPUTE_REQUEST_KIND_SPAWN_ENGINE,
         command=_lifecycle_command('spawn_engine', identity, resource_config or {}),
-        runtime_probe=runtime_probe,
     )
     return await _validated_response(compute_schemas.ComputeWorkerStatusSchema, completed)
 
@@ -905,13 +841,11 @@ async def spawn_compute_worker(
 async def configure_compute_worker(
     *,
     identity: ComputeWorkerIdentity,
-    runtime_probe: RuntimeAvailabilityProbe,
     resource_config: dict[str, object],
 ) -> compute_schemas.ComputeWorkerStatusSchema:
     completed = await _submit_and_wait(
         kind=enums_pb2.COMPUTE_REQUEST_KIND_CONFIGURE_ENGINE,
         command=_lifecycle_command('configure_engine', identity, resource_config),
-        runtime_probe=runtime_probe,
     )
     return await _validated_response(compute_schemas.ComputeWorkerStatusSchema, completed)
 
@@ -919,7 +853,6 @@ async def configure_compute_worker(
 async def shutdown_compute_worker(
     *,
     identity: ComputeWorkerIdentity,
-    runtime_probe: RuntimeAvailabilityProbe,
 ) -> None:
     await run_api_blocking(
         _cancel_active_requests_for_engine_in_new_session,
@@ -928,7 +861,6 @@ async def shutdown_compute_worker(
     await _submit_and_wait(
         kind=enums_pb2.COMPUTE_REQUEST_KIND_SHUTDOWN_ENGINE,
         command=_lifecycle_command('shutdown_engine', identity),
-        runtime_probe=runtime_probe,
     )
 
 
@@ -936,7 +868,6 @@ def request_compute_worker_shutdown(
     session: Session,
     *,
     identity: ComputeWorkerIdentity,
-    runtime_probe: RuntimeAvailabilityProbe,
 ) -> None:
     """Durably queue engine shutdown without coupling an API response to its completion."""
     compute_requests_service.cancel_active_requests_for_engine(
@@ -949,5 +880,4 @@ def request_compute_worker_shutdown(
         session,
         kind=enums_pb2.COMPUTE_REQUEST_KIND_SHUTDOWN_ENGINE,
         command=_lifecycle_command('shutdown_engine', identity),
-        runtime_probe=runtime_probe,
     )

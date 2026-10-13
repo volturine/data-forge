@@ -1491,19 +1491,3 @@ def _validate_response_envelope(
         raise ValueError(f'Compute request {request.id} response status does not match completion status')
     if envelope.correlation_id != request.id:
         raise ValueError(f'Compute request {request.id} response correlation id does not match request id')
-
-
-def queued_request_count(session: Session) -> int:
-    stmt = select(func.count()).select_from(ComputeRequest).where(sa(ComputeRequest.status == enums_pb2.COMPUTE_REQUEST_STATUS_QUEUED))
-    return session.execute(stmt).scalar_one()
-
-
-def cleanup_completed_requests(session: Session, *, older_than_seconds: int) -> int:
-    cutoff = _utcnow() - timedelta(seconds=older_than_seconds)
-    table = ComputeRequest.metadata.tables[ComputeRequest.__tablename__]
-    stmt = select(ComputeRequest).where(table.c.completed_at.is_not(None)).where(table.c.completed_at < cutoff)
-    rows = list(session.execute(stmt).scalars().all())
-    for row in rows:
-        session.delete(row)
-    session.commit()
-    return len(rows)

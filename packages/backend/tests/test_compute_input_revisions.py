@@ -1,5 +1,4 @@
 from datetime import UTC, datetime
-from types import SimpleNamespace
 from typing import cast
 from uuid import uuid4
 
@@ -105,7 +104,6 @@ def test_datasource_enqueue_transfers_preflight_source_ownership_atomically(test
         test_db_session,
         kind=enums_pb2.COMPUTE_REQUEST_KIND_CREATE_FILE_DATASOURCE,
         command=create,
-        runtime_probe=SimpleNamespace(),
         source_preflight_id=preflight_id,
     )
     test_db_session.expire_all()

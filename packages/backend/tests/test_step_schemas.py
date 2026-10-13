@@ -10,8 +10,8 @@ from modules.analysis.step_schemas import (
     WithColumnsExprSchema,
     get_step_catalog,
     normalize_pipeline_step_configs_for_protocol,
+    normalize_step_config,
     normalize_step_config_for_protocol,
-    validate_step,
 )
 
 
@@ -146,39 +146,39 @@ def test_step_catalog_excludes_removed_counts_steps() -> None:
     assert 'null_count' not in types
 
 
-def test_validate_step_rejects_removed_counts_steps() -> None:
+def test_normalize_step_config_rejects_removed_counts_steps() -> None:
     with pytest.raises(ValueError, match='Unknown step type'):
-        validate_step('value_counts', {'column': 'x'})
+        normalize_step_config('value_counts', {'column': 'x'})
     with pytest.raises(ValueError, match='Unknown step type'):
-        validate_step('null_count', {})
+        normalize_step_config('null_count', {})
 
 
-def test_validate_step_rejects_unknown_config_fields() -> None:
+def test_normalize_step_config_rejects_unknown_config_fields() -> None:
     with pytest.raises(ValueError, match='Extra inputs are not permitted'):
-        validate_step('filter', {'conditions': [], 'logic': 'AND', 'typo': True})
+        normalize_step_config('filter', {'conditions': [], 'logic': 'AND', 'typo': True})
 
 
-def test_validate_step_rejects_unknown_nested_config_fields() -> None:
+def test_normalize_step_config_rejects_unknown_nested_config_fields() -> None:
     with pytest.raises(ValueError, match='Extra inputs are not permitted'):
-        validate_step(
+        normalize_step_config(
             'with_columns',
             {'expressions': [{'name': 'x', 'type': 'literal', 'value': 1, 'surprise': True}]},
         )
 
 
-def test_validate_step_rejects_flat_filter_config() -> None:
+def test_normalize_step_config_rejects_flat_filter_config() -> None:
     with pytest.raises(ValueError, match='Extra inputs are not permitted'):
-        validate_step('filter', {'column': 'city', 'operator': 'equals', 'value': 'NYC'})
+        normalize_step_config('filter', {'column': 'city', 'operator': 'equals', 'value': 'NYC'})
 
 
-def test_validate_step_rejects_flat_groupby_config() -> None:
+def test_normalize_step_config_rejects_flat_groupby_config() -> None:
     with pytest.raises(ValueError, match='Extra inputs are not permitted'):
-        validate_step('groupby', {'column': 'city', 'operation': 'count'})
+        normalize_step_config('groupby', {'column': 'city', 'operation': 'count'})
 
 
-def test_validate_step_rejects_flat_join_config() -> None:
+def test_normalize_step_config_rejects_flat_join_config() -> None:
     with pytest.raises(ValueError, match='Extra inputs are not permitted'):
-        validate_step('join', {'right': 'orders', 'on': 'customer_id'})
+        normalize_step_config('join', {'right': 'orders', 'on': 'customer_id'})
 
 
 def test_pipeline_protocol_normalization_removes_http_aliases() -> None:

@@ -18,10 +18,6 @@ from modules.mcp.registry import build_tool_registry
 router = APIRouter(prefix='/mcp', tags=['mcp'])
 
 
-def _coerce_tool(item: MCPToolDefinition | dict[str, Any]) -> MCPToolDefinition:
-    return MCPToolDefinition.coerce(item)
-
-
 def _request_tool_context(request: Request, *, namespace: str | None = None) -> dict[str, dict[str, str]]:
     return build_tool_context(
         {
@@ -40,7 +36,7 @@ def get_registry(app: FastAPI) -> list[MCPToolDefinition]:
         app.state.mcp_registry = []
         registry = app.state.mcp_registry
     elif any(not isinstance(item, MCPToolDefinition) for item in registry):
-        registry = [_coerce_tool(item) for item in registry]
+        registry = [MCPToolDefinition.coerce(item) for item in registry]
         app.state.mcp_registry = registry
     return registry
 

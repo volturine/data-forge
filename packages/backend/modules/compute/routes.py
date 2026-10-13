@@ -4,9 +4,7 @@ import logging
 import os
 import re
 import uuid
-from collections.abc import Callable
 from datetime import datetime
-from typing import Any
 from urllib.parse import quote
 
 import anyio
@@ -15,7 +13,6 @@ from fastapi.responses import Response
 from sqlmodel import Session
 
 from backend_core import (
-    build_event_service,
     build_runs_service as build_run_service,
     compute_worker_runs_service as compute_worker_run_service,
     runtime_ipc,
@@ -26,16 +23,10 @@ from backend_core.compute_worker_live import load_compute_worker_snapshot, regis
 from backend_core.config import settings
 from backend_core.data_plane_client import client_from_settings
 from backend_core.database import run_db, run_settings_db
-from backend_core.dependencies import (
-    RuntimeAvailabilityProbe,
-    get_manager,
-    get_runtime_availability_probe,
-)
 from backend_core.domain.build_runs.live import BuildNotification, hub as build_hub
 from backend_core.domain.compute import schemas
 from backend_core.domain.compute_worker_runs.schemas import ComputeWorkerRunKind
 from backend_core.error_handlers import handle_errors
-from backend_core.exceptions import compute_worker_not_found
 from backend_core.namespace import get_namespace, reset_namespace, set_namespace_context
 from backend_core.persistence.analysis.models import Analysis
 from backend_core.time import utc_now as _utcnow
@@ -107,24 +98,6 @@ async def _wait_for_websocket_disconnect(websocket: WebSocket) -> None:
             raise
         if message.get('type') == 'websocket.disconnect':
             return
-
-
-def _override_manager(container) -> Any | None:
-    overrides = getattr(container.app, 'dependency_overrides', None)
-    if not isinstance(overrides, dict):
-        return None
-    override = overrides.get(get_manager)
-    if override is None:
-        return None
-    return override()
-
-
-def _override_compute_executor(container) -> Any | None:
-    return getattr(container.app.state, 'compute_override_executor', None)
-
-
-def _run_compute_override[T](session: Session, execute: Callable[..., T], **kwargs: object) -> T:
-    return execute(session=session, **kwargs)
 
 
 def _resolve_websocket_user(websocket: WebSocket) -> User | None:
@@ -293,13 +266,6 @@ async def _wait_for_namespace_build_update(websocket: WebSocket, namespace: str,
     return last_seen
 
 
-def _get_durable_build_detail_by_compute_worker_run(session: Session, compute_worker_run_id: str) -> schemas.BuildRunDetail | None:
-    build_run = build_run_service.get_build_run_by_compute_worker_run(session, compute_worker_run_id)
-    if build_run is None or build_run.namespace != get_namespace():
-        return None
-    return build_run_service.fold_build_detail(session, build_run)
-
-
 async def _require_websocket_user(websocket: WebSocket) -> User:
     user = await run_api_blocking(_resolve_websocket_user, websocket)
     if user is None:
@@ -326,19 +292,6 @@ def _build_analysis_name(session: Session, pipeline: dict) -> str:
 def _normalize_build_pipeline(request: schemas.BuildRequest) -> dict[str, object]:
     """Normalize a complete build payload outside the API event loop."""
     return normalize_pipeline_step_configs_for_protocol(request.pipeline_payload())
-
-
-def _build_triggered_by(user: User | None) -> str:
-    if user is None:
-        return 'user'
-    return user.id
-
-
-async def _send_build_snapshot(websocket: WebSocket, build_id: str) -> None:
-    message = await run_api_blocking(run_db, lambda session: _build_snapshot_message(session, build_id))
-    if message is None:
-        raise HTTPException(status_code=404, detail='Build not found')
-    await safe_send_json(websocket, message)
 
 
 async def _send_build_list_snapshot(websocket: WebSocket, namespace: str) -> None:
@@ -412,7 +365,6 @@ async def preview_step(
     http_request: Request,
     request: schemas.StepPreviewRequest = Depends(_parse_preview_request),
     _user: User = Depends(get_current_user),
-    runtime_probe: RuntimeAvailabilityProbe = Depends(get_runtime_availability_probe),
 ):
     """Preview the result of a pipeline step with pagination.
 
@@ -424,30 +376,7 @@ async def preview_step(
     if analysis_id is None and request.datasource_id is None:
         analysis_id = request.analysis_pipeline.analysis_id
     normalized = request.model_copy(update={'analysis_id': analysis_id})
-    compute_worker_identity = schemas.default_preview_compute_worker_identity(normalized)
-    manager = _override_manager(http_request)
-    if manager is not None:
-        executor = _override_compute_executor(http_request)
-        if executor is None:
-            raise RuntimeError('Missing compute override executor for manager override')
-
-        response = await run_api_blocking(
-            run_db,
-            _run_compute_override,
-            executor.preview_step,
-            manager=manager,
-            target_step_id=normalized.target_step_id,
-            analysis_pipeline=await executor_client.model_payload(normalized.analysis_pipeline, mode='json'),
-            row_limit=normalized.row_limit,
-            page=normalized.page,
-            analysis_id=analysis_id,
-            compute_worker_identity=compute_worker_identity,
-            resource_config=await executor_client.model_payload(normalized.resource_config) if normalized.resource_config else None,
-            tab_id=normalized.tab_id,
-            request_json=await executor_client.model_payload(normalized, mode='json'),
-        )
-        return await executor_client.json_response(response)
-    response = await executor_client.preview_step(normalized, runtime_probe=runtime_probe, http_request=http_request)
+    response = await executor_client.preview_step(normalized, http_request=http_request)
     return await executor_client.json_response(response)
 
 
@@ -457,7 +386,6 @@ async def get_step_schema(
     http_request: Request,
     request: schemas.StepSchemaRequest = Depends(_parse_schema_request),
     _user: User = Depends(get_current_user),
-    runtime_probe: RuntimeAvailabilityProbe = Depends(get_runtime_availability_probe),
 ):
     """Get the output column schema of a pipeline step without fetching data.
 
@@ -466,24 +394,7 @@ async def get_step_schema(
     """
     analysis_id = request.analysis_id if request.analysis_id is not None else request.analysis_pipeline.analysis_id
     normalized = request.model_copy(update={'analysis_id': analysis_id})
-    manager = _override_manager(http_request)
-    if manager is not None:
-        executor = _override_compute_executor(http_request)
-        if executor is None:
-            raise RuntimeError('Missing compute override executor for manager override')
-
-        response = await run_api_blocking(
-            run_db,
-            _run_compute_override,
-            executor.get_step_schema,
-            manager=manager,
-            target_step_id=normalized.target_step_id,
-            analysis_id=analysis_id,
-            analysis_pipeline=await executor_client.model_payload(normalized.analysis_pipeline, mode='json'),
-            tab_id=normalized.tab_id,
-        )
-        return await executor_client.json_response(response)
-    response = await executor_client.get_step_schema(normalized, runtime_probe=runtime_probe, http_request=http_request)
+    response = await executor_client.get_step_schema(normalized, http_request=http_request)
     return await executor_client.json_response(response)
 
 
@@ -493,30 +404,11 @@ async def get_step_row_count(
     http_request: Request,
     request: schemas.StepRowCountRequest = Depends(_parse_row_count_request),
     _user: User = Depends(get_current_user),
-    runtime_probe: RuntimeAvailabilityProbe = Depends(get_runtime_availability_probe),
 ):
     """Get the row count of a pipeline step result without fetching data. Faster than a full preview."""
     analysis_id = request.analysis_id if request.analysis_id is not None else request.analysis_pipeline.analysis_id
     normalized = request.model_copy(update={'analysis_id': analysis_id})
-    manager = _override_manager(http_request)
-    if manager is not None:
-        executor = _override_compute_executor(http_request)
-        if executor is None:
-            raise RuntimeError('Missing compute override executor for manager override')
-
-        response = await run_api_blocking(
-            run_db,
-            _run_compute_override,
-            executor.get_step_row_count,
-            manager=manager,
-            target_step_id=normalized.target_step_id,
-            analysis_id=analysis_id,
-            analysis_pipeline=await executor_client.model_payload(normalized.analysis_pipeline, mode='json'),
-            tab_id=normalized.tab_id,
-            request_json=await executor_client.model_payload(normalized, mode='json'),
-        )
-        return await executor_client.json_response(response)
-    response = await executor_client.get_step_row_count(normalized, runtime_probe=runtime_probe, http_request=http_request)
+    response = await executor_client.get_step_row_count(normalized, http_request=http_request)
     return await executor_client.json_response(response)
 
 
@@ -573,13 +465,10 @@ async def delete_iceberg_snapshot(
 async def start_build(
     request: schemas.BuildRequest = Depends(_parse_build_request),
     user: User = Depends(get_current_user),
-    runtime_probe: RuntimeAvailabilityProbe = Depends(get_runtime_availability_probe),
 ):
     # Build jobs are durable queue entries too. Do not turn a momentarily stale
     # worker heartbeat into a lost build; dispatch below will wake the manager
     # when it is available.
-    del runtime_probe
-
     pipeline = await run_api_blocking(_normalize_build_pipeline, request)
     analysis_id = str(pipeline.get('analysis_id') or '')
     analysis_name = await run_api_blocking(run_db, _build_analysis_name, pipeline)
@@ -715,7 +604,7 @@ async def cancel_build(
     except commands.BuildCancellationConflict as exc:
         raise HTTPException(status_code=409, detail=str(exc)) from exc
 
-    await build_event_service.publish_build_notification(detail.namespace, detail.build_id, latest_sequence=event_sequence)
+    await build_hub.publish(BuildNotification(namespace=detail.namespace, build_id=detail.build_id, latest_sequence=event_sequence))
 
     return schemas.CancelBuildResponse(
         id=detail.build_id,
@@ -731,7 +620,6 @@ async def cancel_build(
 @router.get('/builds', response_model=schemas.BuildRunListResponse, mcp=True)
 @handle_errors(operation='list builds')
 async def list_builds(
-    request: Request,
     analysis_id: str | None = None,
     datasource_id: str | None = None,
     kind: str | None = None,
@@ -741,7 +629,6 @@ async def list_builds(
     offset: int = 0,
     _user: User = Depends(get_current_user),
 ):
-    del request
     namespace = get_namespace()
     fetch_limit = limit + offset
 
@@ -803,85 +690,33 @@ async def get_build(
 
 async def _spawn_compute_worker_identity(
     identity,
-    http_request: Request,
     request: schemas.SpawnComputeWorkerRequest | None,
-    runtime_probe: RuntimeAvailabilityProbe,
 ):
     resource_config = await executor_client.model_payload(request.resource_config) if request and request.resource_config else None
-    manager = _override_manager(http_request)
-    if manager is not None:
-
-        def spawn_and_read_status():
-            manager.spawn_compute_worker(identity, resource_config=resource_config)
-            return manager.get_compute_worker_status(identity)
-
-        return await run_api_blocking(spawn_and_read_status)
     return await executor_client.spawn_compute_worker(
         identity=identity,
         resource_config=resource_config,
-        runtime_probe=runtime_probe,
     )
 
 
 async def _configure_compute_worker_identity(
     identity,
     request: schemas.ComputeWorkerResourceConfig,
-    http_request: Request,
-    runtime_probe: RuntimeAvailabilityProbe,
 ):
     resource_config = await executor_client.model_payload(request)
-    manager = _override_manager(http_request)
-    if manager is not None:
-
-        def configure_and_read_status():
-            manager.restart_engine_with_config(identity, resource_config)
-            return manager.get_compute_worker_status(identity)
-
-        return await run_api_blocking(configure_and_read_status)
     return await executor_client.configure_compute_worker(
         identity=identity,
         resource_config=resource_config,
-        runtime_probe=runtime_probe,
     )
 
 
 async def _shutdown_compute_worker_identity(
     identity,
-    http_request: Request,
-    runtime_probe: RuntimeAvailabilityProbe,
 ) -> None:
-    """Queue engine shutdown after cancelling any active job.
-
-    The in-process override manager may perform synchronous container work, so
-    keep it off the ASGI event loop too. The production worker path queues a
-    durable shutdown command and returns without waiting for container teardown.
-    """
-    manager = _override_manager(http_request)
-    if manager is not None:
-
-        def shutdown_override_engine() -> None:
-            engine = manager.get_engine(identity)
-            if not engine:
-                raise compute_worker_not_found(identity.resource_id)
-            # Cancel the active job before tearing down so shutdown never blocks on
-            # "busy". Container/process shutdown is the hard cancel for jobs.
-            if engine.current_job_id and engine.is_process_alive():
-                cancel = getattr(engine, 'cancel_current_job', None)
-                if callable(cancel):
-                    cancel()
-                else:
-                    # Stub / lightweight engines: clear the job marker so shutdown
-                    # is allowed. Production Docker engines cancel via container stop.
-                    engine.current_job_id = None
-            manager.shutdown_compute_worker(identity)
-
-        await run_api_blocking(shutdown_override_engine)
-        return
     await run_api_blocking(
         run_db,
         executor_client.request_compute_worker_shutdown,
         identity=identity,
-        runtime_probe=runtime_probe,
     )
 
 
@@ -889,10 +724,8 @@ async def _shutdown_compute_worker_identity(
 @handle_errors(operation='spawn analysis compute worker')
 async def spawn_analysis_compute_worker(
     analysis_id: AnalysisId,
-    http_request: Request,
     request: schemas.SpawnComputeWorkerRequest | None = None,
     _user: User = Depends(get_current_user),
-    runtime_probe: RuntimeAvailabilityProbe = Depends(get_runtime_availability_probe),
 ):
     return await _spawn_compute_worker_identity(
         compute_pb2.ComputeWorkerIdentity(
@@ -901,9 +734,7 @@ async def spawn_analysis_compute_worker(
             analysis_id=analysis_id,
             resource_id=analysis_id,
         ),
-        http_request,
         request,
-        runtime_probe,
     )
 
 
@@ -911,10 +742,8 @@ async def spawn_analysis_compute_worker(
 @handle_errors(operation='spawn datasource preview compute worker')
 async def spawn_datasource_preview_compute_worker(
     datasource_id: DataSourceId,
-    http_request: Request,
     request: schemas.SpawnComputeWorkerRequest | None = None,
     _user: User = Depends(get_current_user),
-    runtime_probe: RuntimeAvailabilityProbe = Depends(get_runtime_availability_probe),
 ):
     datasource_id_value = parse_datasource_id(datasource_id)
     return await _spawn_compute_worker_identity(
@@ -924,9 +753,7 @@ async def spawn_datasource_preview_compute_worker(
             datasource_id=datasource_id_value,
             resource_id=datasource_id_value,
         ),
-        http_request,
         request,
-        runtime_probe,
     )
 
 
@@ -935,9 +762,7 @@ async def spawn_datasource_preview_compute_worker(
 async def configure_analysis_compute_worker(
     analysis_id: AnalysisId,
     request: schemas.ComputeWorkerResourceConfig,
-    http_request: Request,
     _user: User = Depends(get_current_user),
-    runtime_probe: RuntimeAvailabilityProbe = Depends(get_runtime_availability_probe),
 ):
     return await _configure_compute_worker_identity(
         compute_pb2.ComputeWorkerIdentity(
@@ -947,8 +772,6 @@ async def configure_analysis_compute_worker(
             resource_id=analysis_id,
         ),
         request,
-        http_request,
-        runtime_probe,
     )
 
 
@@ -957,9 +780,7 @@ async def configure_analysis_compute_worker(
 async def configure_datasource_preview_compute_worker(
     datasource_id: DataSourceId,
     request: schemas.ComputeWorkerResourceConfig,
-    http_request: Request,
     _user: User = Depends(get_current_user),
-    runtime_probe: RuntimeAvailabilityProbe = Depends(get_runtime_availability_probe),
 ):
     datasource_id_value = parse_datasource_id(datasource_id)
     return await _configure_compute_worker_identity(
@@ -970,8 +791,6 @@ async def configure_datasource_preview_compute_worker(
             resource_id=datasource_id_value,
         ),
         request,
-        http_request,
-        runtime_probe,
     )
 
 
@@ -979,9 +798,7 @@ async def configure_datasource_preview_compute_worker(
 @handle_errors(operation='shutdown analysis compute worker')
 async def shutdown_analysis_compute_worker(
     analysis_id: AnalysisId,
-    http_request: Request,
     _user: User = Depends(get_current_user),
-    runtime_probe: RuntimeAvailabilityProbe = Depends(get_runtime_availability_probe),
 ):
     await _shutdown_compute_worker_identity(
         compute_pb2.ComputeWorkerIdentity(
@@ -990,8 +807,6 @@ async def shutdown_analysis_compute_worker(
             analysis_id=analysis_id,
             resource_id=analysis_id,
         ),
-        http_request,
-        runtime_probe,
     )
 
 
@@ -999,9 +814,7 @@ async def shutdown_analysis_compute_worker(
 @handle_errors(operation='shutdown datasource preview compute worker')
 async def shutdown_datasource_preview_compute_worker(
     datasource_id: DataSourceId,
-    http_request: Request,
     _user: User = Depends(get_current_user),
-    runtime_probe: RuntimeAvailabilityProbe = Depends(get_runtime_availability_probe),
 ):
     datasource_id_value = parse_datasource_id(datasource_id)
     await _shutdown_compute_worker_identity(
@@ -1011,8 +824,6 @@ async def shutdown_datasource_preview_compute_worker(
             datasource_id=datasource_id_value,
             resource_id=datasource_id_value,
         ),
-        http_request,
-        runtime_probe,
     )
 
 
@@ -1020,9 +831,7 @@ async def shutdown_datasource_preview_compute_worker(
 @handle_errors(operation='shutdown build compute worker')
 async def shutdown_build_compute_worker(
     build_id: str,
-    http_request: Request,
     _user: User = Depends(get_current_user),
-    runtime_probe: RuntimeAvailabilityProbe = Depends(get_runtime_availability_probe),
 ):
     await _shutdown_compute_worker_identity(
         compute_pb2.ComputeWorkerIdentity(
@@ -1031,8 +840,6 @@ async def shutdown_build_compute_worker(
             build_id=build_id,
             resource_id=build_id,
         ),
-        http_request,
-        runtime_probe,
     )
 
 
@@ -1221,10 +1028,8 @@ async def get_compute_worker_defaults():
 @router.post('/export', mcp=True)
 @handle_errors(operation='export data')
 async def export_data(
-    http_request: Request,
     request: schemas.ExportRequest = Depends(_parse_export_request),
     _user: User = Depends(get_current_user),
-    runtime_probe: RuntimeAvailabilityProbe = Depends(get_runtime_availability_probe),
 ):
     """Export pipeline results to a file download or output datasource.
 
@@ -1240,29 +1045,7 @@ async def export_data(
             format=request.format,
             filename=request.filename,
         )
-        manager = _override_manager(http_request)
-        if manager is not None:
-            executor = _override_compute_executor(http_request)
-            if executor is None:
-                raise RuntimeError('Missing compute override executor for manager override')
-
-            file_bytes, filename, content_type = await run_api_blocking(
-                run_db,
-                _run_compute_override,
-                executor.download_step,
-                manager=manager,
-                target_step_id=download_request.target_step_id,
-                analysis_pipeline=await executor_client.model_payload(download_request.analysis_pipeline, mode='json'),
-                export_format=download_request.format.value,
-                filename=download_request.filename,
-                analysis_id=download_request.analysis_id,
-                tab_id=download_request.tab_id,
-            )
-        else:
-            file_bytes, filename, content_type = await executor_client.download_step(
-                download_request,
-                runtime_probe=runtime_probe,
-            )
+        file_bytes, filename, content_type = await executor_client.download_step(download_request)
         safe_name = quote(filename)
         return Response(
             content=file_bytes,
@@ -1270,75 +1053,22 @@ async def export_data(
             headers={'Content-Disposition': f'attachment; filename="{safe_name}"'},
         )
 
-    manager = _override_manager(http_request)
-    if manager is not None:
-        executor = _override_compute_executor(http_request)
-        if executor is None:
-            raise RuntimeError('Missing compute override executor for manager override')
-
-        result = await run_api_blocking(
-            run_db,
-            _run_compute_override,
-            executor.export_data,
-            manager=manager,
-            target_step_id=request.target_step_id,
-            analysis_pipeline=await executor_client.model_payload(request.analysis_pipeline, mode='json'),
-            filename=request.filename,
-            iceberg_options=await executor_client.model_payload(request.iceberg_options) if request.iceberg_options else None,
-            analysis_id=request.analysis_id,
-            tab_id=request.tab_id,
-            request_json=await executor_client.model_payload(request, mode='json'),
-            result_id=request.result_id,
-        )
-        return schemas.ExportResponse(
-            success=True,
-            filename=result.datasource_name,
-            format='iceberg',
-            destination=request.destination.value,
-            message=f'Created datasource {result.datasource_name}',
-            datasource_id=result.datasource_id,
-            datasource_name=result.result_meta.get('datasource_name') if isinstance(result.result_meta, dict) else None,
-        )
-    response = await executor_client.export_data(request, runtime_probe=runtime_probe)
+    response = await executor_client.export_data(request)
     return await executor_client.json_response(response)
 
 
 @router.post('/download', mcp=True)
 @handle_errors(operation='download step')
 async def download_step(
-    http_request: Request,
     request: schemas.DownloadRequest = Depends(_parse_download_request),
     _user: User = Depends(get_current_user),
-    runtime_probe: RuntimeAvailabilityProbe = Depends(get_runtime_availability_probe),
 ):
     """Download pipeline step result as a file.
 
     Returns the file bytes with appropriate Content-Type header.
     Supported formats: csv, parquet, json, ndjson, duckdb, excel.
     """
-    manager = _override_manager(http_request)
-    if manager is not None:
-        executor = _override_compute_executor(http_request)
-        if executor is None:
-            raise RuntimeError('Missing compute override executor for manager override')
-
-        file_bytes, filename, content_type = await run_api_blocking(
-            run_db,
-            _run_compute_override,
-            executor.download_step,
-            manager=manager,
-            target_step_id=request.target_step_id,
-            analysis_pipeline=await executor_client.model_payload(request.analysis_pipeline, mode='json'),
-            export_format=request.format.value,
-            filename=request.filename,
-            analysis_id=request.analysis_id,
-            tab_id=request.tab_id,
-        )
-    else:
-        file_bytes, filename, content_type = await executor_client.download_step(
-            request,
-            runtime_probe=runtime_probe,
-        )
+    file_bytes, filename, content_type = await executor_client.download_step(request)
 
     if file_bytes is None or filename is None or content_type is None:
         from fastapi import HTTPException

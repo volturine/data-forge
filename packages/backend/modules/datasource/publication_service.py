@@ -211,7 +211,3 @@ def attach_column_descriptions(
         if description is not None:
             column.description = description
     return schema_info
-
-
-def get_datasource_for_worker(session: Session, datasource_id: str) -> DataSource | None:
-    return session.get(DataSource, datasource_id)

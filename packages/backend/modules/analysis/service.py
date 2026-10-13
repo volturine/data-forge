@@ -51,7 +51,7 @@ from modules.analysis.schemas import (
     ImportAnalysisSchema,
     TabSchema,
 )
-from modules.analysis.templates import AnalysisTemplate, get_template, list_templates
+from modules.analysis.templates import get_template, list_templates
 from modules.analysis_versions import service as version_service
 
 
@@ -70,15 +70,6 @@ def _to_response(analysis: Analysis, *, is_favorite: bool = False) -> AnalysisRe
             'is_favorite': is_favorite,
         }
     )
-
-
-def _favorite_ids(session: Session, user_id: str | None, analysis_ids: list[str]) -> set[str]:
-    if not user_id or not analysis_ids:
-        return set()
-    stmt = select(col(AnalysisFavorite.analysis_id)).where(col(AnalysisFavorite.user_id) == user_id)
-    stmt = stmt.where(col(AnalysisFavorite.analysis_id).in_(analysis_ids))
-    rows = session.execute(stmt).all()
-    return {str(analysis_id) for (analysis_id,) in rows}
 
 
 _ANALYSIS_TIMESTAMP_SUFFIX = re.compile(r' · [A-Z][a-z]{2} \d{1,2}, \d{4}, \d{2}:\d{2}:\d{2}\.\d{3}( UTC)?$')
@@ -115,25 +106,6 @@ def _build_output_config(analysis_name: str, tab_name: str, branch: str, index: 
     }
 
 
-def _clone_step_config(config: dict[str, Any]) -> dict[str, Any]:
-    return deepcopy(config)
-
-
-def _build_template_steps(template: AnalysisTemplate) -> list[dict[str, Any]]:
-    steps: list[dict[str, Any]] = []
-    for raw in template.steps:
-        steps.append(
-            {
-                'id': str(uuid.uuid4()),
-                'type': str(raw['type']),
-                'config': _clone_step_config(raw.get('config', {})),
-                'depends_on': [],
-                'is_applied': True,
-            },
-        )
-    return steps
-
-
 def _datasource_config_from_request(
     item: AnalysisGenerationDatasourceSchema,
 ) -> dict[str, Any]:
@@ -143,60 +115,6 @@ def _datasource_config_from_request(
     if item.snapshot_timestamp_ms is not None:
         config['snapshot_timestamp_ms'] = item.snapshot_timestamp_ms
     return config
-
-
-def _build_tabs_from_template(
-    analysis_name: str,
-    datasources: list[AnalysisGenerationDatasourceSchema],
-    template: AnalysisTemplate,
-) -> list[dict[str, Any]]:
-    if not datasources:
-        raise ValueError('At least one datasource is required')
-
-    tabs: list[dict[str, Any]] = []
-    first_output_id: str | None = None
-    first_tab_id: str | None = None
-    for index, datasource in enumerate(datasources):
-        tab_id = str(uuid.uuid4())
-        branch = datasource.branch.strip()
-        tab_name = f'Source {index + 1}'
-        steps = _build_template_steps(template)
-        if template.id == 'join_and_enrich' and index > 0:
-            steps = []
-        if template.id == 'join_and_enrich' and index == 0 and len(datasources) > 1:
-            for step in steps:
-                if step['type'] == 'join':
-                    step['config']['right_source'] = datasources[1].id
-        output = _build_output_config(analysis_name, tab_name, branch, index)
-        tabs.append(
-            {
-                'id': tab_id,
-                'name': tab_name,
-                'parent_id': None,
-                'datasource': {
-                    'id': datasource.id,
-                    'analysis_tab_id': None,
-                    'config': _datasource_config_from_request(datasource),
-                },
-                'output': output,
-                'steps': steps,
-            },
-        )
-        if first_output_id is None:
-            first_output_id = output['result_id']
-            first_tab_id = tab_id
-
-    if template.id == 'join_and_enrich' and len(tabs) > 1 and first_output_id and first_tab_id:
-        for index, tab in enumerate(tabs[1:], start=1):
-            tab['datasource'] = {
-                'id': first_output_id,
-                'analysis_tab_id': first_tab_id,
-                'config': dict(tab['datasource']['config']),
-            }
-            tab['steps'] = []
-            tab['parent_id'] = first_tab_id
-            tab['name'] = f'Joined Output {index + 1}'
-    return tabs
 
 
 def _extract_json_object(content: str) -> dict[str, Any]:
@@ -548,14 +466,11 @@ def _validate_analysis_payload(
     for tab in tabs_payload:
         step_ids: set[str] = set()
         for step in tab.steps:
-            compiled = compile_step(
+            step.config = compile_step(
                 step_id=step.id,
                 step_type=step.type,
                 config=step.config,
-                depends_on=step.depends_on,
-                is_applied=step.is_applied,
             )
-            step.config = compiled.config
             if step.id:
                 step_ids.add(step.id)
             for dep_id in step.depends_on:
@@ -1349,7 +1264,7 @@ def duplicate_tab(
             rewritten_deps.append(mapped)
         duplicated_step.depends_on = rewritten_deps
 
-    duplicated_output = TabOutput.from_dict(source.output.to_dict())
+    duplicated_output = deepcopy(source.output)
     duplicated_output.result_id = str(uuid.uuid4())
     duplicated_output.filename = _slugify_output_name(next_name)
 

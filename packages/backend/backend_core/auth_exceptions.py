@@ -20,11 +20,6 @@ class EmailAlreadyExistsError(AuthError):
         )
 
 
-class SessionExpiredError(AuthError):
-    def __init__(self):
-        super().__init__(message='Session is invalid or expired', error_code='SESSION_EXPIRED')
-
-
 class AccountDisabledError(AuthError):
     def __init__(self):
         super().__init__(message='Account is disabled', error_code='ACCOUNT_DISABLED')

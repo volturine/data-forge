@@ -26,7 +26,6 @@ class _ApiRouteDispatcher(BaseRoute):
         self._indexed_route_count = -1
         self._groups: dict[tuple[str, ...], list[tuple[int, BaseRoute]]] = {}
         self._fallback: list[tuple[int, BaseRoute]] = []
-        self._route_count = 0
 
     def _rebuild_index(self) -> None:
         groups: dict[tuple[str, ...], list[tuple[int, BaseRoute]]] = {}
@@ -50,7 +49,6 @@ class _ApiRouteDispatcher(BaseRoute):
             groups.setdefault(tuple(static_segments), []).append((index, route))
         self._groups = groups
         self._fallback = fallback
-        self._route_count = sum(len(group) for group in groups.values()) + len(fallback)
         self._indexed_route_count = len(self._route_registry)
 
     def _candidates(self, path: str, *, root_path: str = '') -> list[BaseRoute]:

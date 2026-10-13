@@ -5,7 +5,7 @@ from sqlalchemy import JSON, Column, DateTime, ForeignKey, Integer, String
 from sqlmodel import Field, SQLModel
 
 from backend_core.domain.analysis.models import AnalysisStatus
-from backend_core.domain.analysis.pipeline_types import PipelineDefinition, parse_pipeline
+from backend_core.domain.analysis.pipeline_types import PipelineDefinition
 from backend_core.persistence.mutable_json import CopyOnAssignMutableDict
 
 
@@ -20,7 +20,7 @@ class Analysis(SQLModel, table=True):  # type: ignore[call-arg]
     @property
     def pipeline(self) -> PipelineDefinition:
         """Parse the raw JSON pipeline_definition into typed dataclasses."""
-        return parse_pipeline(self.pipeline_definition)
+        return PipelineDefinition.from_dict(self.pipeline_definition)
 
     status: AnalysisStatus = Field(default=AnalysisStatus.DRAFT, sa_column=Column(String, nullable=False))
     created_at: datetime = Field(sa_column=Column(DateTime(timezone=True), nullable=False))

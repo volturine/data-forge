@@ -8,6 +8,7 @@ from backend_core import runtime_workers_service as runtime_worker_service
 from backend_core.database import run_settings_db
 from backend_core.docker_healthcheck import worker_healthy
 from backend_core.domain.runtime_workers.models import RuntimeWorkerKind
+from backend_core.persistence.runtime_workers.models import RuntimeWorker
 
 
 def test_worker_healthy_accepts_recent_scheduler_heartbeat(monkeypatch) -> None:
@@ -63,7 +64,7 @@ def test_heartbeat_worker_updates_jobs_and_rejects_unknown_worker() -> None:
     )
 
     run_settings_db(lambda session: runtime_worker_service.heartbeat_worker(session, worker_id='heartbeat-worker', active_jobs=2, now=now))
-    worker = run_settings_db(lambda session: runtime_worker_service.get_worker(session, 'heartbeat-worker'))
+    worker = run_settings_db(lambda session: session.get(RuntimeWorker, 'heartbeat-worker'))
     assert worker is not None
     assert worker.active_jobs == 2
     assert worker.last_heartbeat_at.replace(tzinfo=UTC) == now

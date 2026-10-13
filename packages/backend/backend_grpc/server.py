@@ -30,7 +30,6 @@ from backend_core import (
     build_runs_service as build_run_service,
     compute_requests_service,
     compute_worker_instances_service as compute_worker_instance_service,
-    compute_worker_run_commands,
     compute_worker_runs_service as compute_worker_run_service,
     datasource_delete_service,
     runtime_outbox_service,
@@ -62,7 +61,6 @@ from backend_core.domain.compute_requests.models import (
 )
 from backend_core.domain.runtime_workers.models import RuntimeWorkerKind
 from backend_core.exceptions import AppError
-from backend_core.json_utils import copy_json_object
 from backend_core.namespace import reset_namespace, set_namespace_context
 from backend_core.notification_delivery import EMAIL_DELIVERY_KIND, TELEGRAM_DELIVERY_KIND
 from backend_core.persistence.analysis.models import Analysis
@@ -727,26 +725,8 @@ def _proto_runtime_worker_kind(value: int) -> RuntimeWorkerKind:
     return _parse_worker_kind(proto_value_to_enum_name(enums_pb2.RuntimeWorkerKind, 'RUNTIME_WORKER_KIND', value))
 
 
-def _proto_compute_request_kind(value: int) -> enums_pb2.ComputeRequestKind:
-    return kind_from_proto(value)
-
-
 def _proto_value(prefix: str, value: object) -> Any:
     return enum_to_proto_value(prefix, str(value))
-
-
-def _read_optional_str(payload: dict[str, object], key: str) -> str | None:
-    value = payload.get(key)
-    return str(value) if value is not None else None
-
-
-def _read_optional_int(payload: dict[str, object], key: str) -> int | None:
-    value = payload.get(key)
-    return int(value) if value is not None and isinstance(value, (str, int)) else None
-
-
-def _read_optional_dict(payload: dict[str, object], key: str) -> dict[str, object] | None:
-    return copy_json_object(payload.get(key))
 
 
 def _optional_str(message: Any, field: str) -> str | None:
@@ -1886,7 +1866,7 @@ class WorkerRuntimeServicer(worker_runtime_pb2_grpc.WorkerRuntimeServiceServicer
             def _persist(session: Session) -> Any:
                 return _record_rpc_phase(
                     'compute_worker_run_persistence_service_ms',
-                    lambda: compute_worker_run_commands.create_compute_worker_run(session, payload),
+                    lambda: compute_worker_run_service.create_compute_worker_run(session, payload),
                 )
 
             run = _record_rpc_phase('db_unit_ms', lambda: run_db(_persist))
@@ -1899,7 +1879,7 @@ class WorkerRuntimeServicer(worker_runtime_pb2_grpc.WorkerRuntimeServiceServicer
         kwargs = _compute_worker_run_update_kwargs(request.update, merge_result=request.merge_result)
         token = set_namespace_context(request.namespace)
         try:
-            run = run_db(lambda session: compute_worker_run_commands.update_compute_worker_run(session, request.run_id, **kwargs))
+            run = run_db(lambda session: compute_worker_run_service.update_compute_worker_run(session, request.run_id, **kwargs))
             return _id(run.id)
         finally:
             reset_namespace(token)
@@ -2489,14 +2469,12 @@ class SchedulerRuntimeServicer(scheduler_runtime_pb2_grpc.SchedulerRuntimeServic
                     def _mark_failed(
                         session: Any,
                         target_id: str = schedule_id,
-                        error: str = str(exc),
                         target_token: str = claim_token,
                         target_generation: int = lease_generation,
                     ) -> None:
                         scheduler_service.mark_schedule_enqueue_failed(
                             session,
                             target_id,
-                            error=error,
                             claim_token=target_token,
                             lease_generation=target_generation,
                         )

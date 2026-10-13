@@ -17,7 +17,7 @@ from fastapi.responses import StreamingResponse
 from pydantic import BaseModel, ConfigDict
 from sqlalchemy.exc import SQLAlchemyError
 
-from backend_core.ai_clients import AIError, ai_provider_name, get_ai_client, resolve_ai_provider
+from backend_core.ai_clients import AIError, ai_provider_name, get_ai_client, require_ai_provider
 from backend_core.api_execution_budget import run_api_blocking
 from backend_core.database import RuntimeCoordinatorFenced
 from backend_core.error_handlers import handle_errors
@@ -71,7 +71,7 @@ class ChatProviderDefinition:
 
     @classmethod
     def require(cls, provider: str | enums_pb2.AIProvider) -> ChatProviderDefinition:
-        normalized = resolve_ai_provider(provider)
+        normalized = require_ai_provider(provider)
         return CHAT_PROVIDER_DEFINITIONS[normalized]
 
     async def list_models(self, body: ChatModelsRequest) -> list[dict]:
@@ -282,9 +282,10 @@ def _build_tool_system_message(tools: Sequence[MCPToolDefinition | dict[str, Any
         'Available tools:',
     ]
     for t in tools:
-        desc = t.get('description', '')
-        schema = t['input_schema']
-        meta = t.get('arg_metadata', {}) or {}
+        tool = t.to_api_dict() if isinstance(t, MCPToolDefinition) else t
+        desc = tool.get('description', '')
+        schema = tool['input_schema']
+        meta = tool.get('arg_metadata', {}) or {}
         path_meta = meta.get('path') or []
         query_meta = meta.get('query') or []
         payload_meta = meta.get('payload')
@@ -329,9 +330,9 @@ def _build_tool_system_message(tools: Sequence[MCPToolDefinition | dict[str, Any
             param_parts = _format_fallback_param_details(schema)
 
         params_str = '\n'.join(param_parts) if param_parts else '    (no parameters)'
-        lines.append(f'- {t["id"]} [{t["method"]}]: {desc}')
+        lines.append(f'- {tool["id"]} [{tool["method"]}]: {desc}')
         lines.append(f'  Parameters:\n{params_str}')
-        hint = format_output_hint(t.get('output_schema'))
+        hint = format_output_hint(tool.get('output_schema'))
         if hint:
             lines.append(f'  {hint}')
     return '\n'.join(lines)

@@ -6,7 +6,7 @@ from backend_core.domain.build_jobs.models import BuildJobStatus
 from backend_core.domain.build_runs.models import BuildRunStatus
 from backend_core.domain.compute import schemas as compute_schemas
 from backend_core.domain.compute_worker_instances.models import ComputeWorkerInstanceStatus
-from backend_core.domain.compute_worker_runs.schemas import ComputeWorkerRunExecutionCategory, ComputeWorkerRunStatus
+from backend_core.domain.compute_worker_runs.schemas import ComputeWorkerRunStatus
 from backend_core.domain.datasource.models import DataSourceCreatedBy, DataSourceTargetKind
 from backend_core.domain.datasource.source_types import DataSourceFileType, DataSourceLoadType, DataSourceType, IcebergReader
 from backend_core.domain.healthcheck_models import HealthCheckType
@@ -26,7 +26,6 @@ from backend_core.persistence.build_jobs.models import BuildJob
 from backend_core.persistence.build_runs.models import BuildRun
 from backend_core.persistence.compute_worker_instances.models import ComputeWorkerInstance
 from backend_core.persistence.datasource.models import DataSource
-from backend_core.persistence.healthchecks.models import HealthCheck
 from dataforge_protocol import enums_pb2
 
 
@@ -135,34 +134,6 @@ def test_healthcheck_type_owns_uniqueness_rule() -> None:
     assert HealthCheckType.ROW_COUNT.requires_column is False
 
 
-def test_healthcheck_model_owns_metric_aliases_and_details() -> None:
-    row_count_check = HealthCheck(
-        id='hc-row-count',
-        datasource_id='ds-1',
-        name='Row Count',
-        check_type=HealthCheckType.ROW_COUNT.value,
-        config={'min_rows': 1},
-        enabled=True,
-        critical=False,
-        created_at=datetime(2024, 1, 1, tzinfo=UTC),
-    )
-    column_check = HealthCheck(
-        id='hc-column-null',
-        datasource_id='ds-1',
-        name='Column Null',
-        check_type=HealthCheckType.COLUMN_NULL.value,
-        config={'column': 'name', 'threshold': 10},
-        enabled=True,
-        critical=False,
-        created_at=datetime(2024, 1, 1, tzinfo=UTC),
-    )
-
-    assert row_count_check.metric_alias('count') == 'row_count__count'
-    assert column_check.metric_alias('null_pct') == 'hc-column-null__null_pct'
-    assert column_check.column_name() == 'name'
-    assert column_check.result_details(actual_percentage=12.5) == {'column': 'name', 'threshold': 10, 'actual_percentage': 12.5}
-
-
 def test_runtime_payload_kind_is_model_owned() -> None:
     assert RuntimePayloadKind.from_payload({'kind': RuntimePayloadKind.BUILD.value}) == RuntimePayloadKind.BUILD
     assert RuntimePayloadKind.from_payload({'kind': 'unknown'}) is None
@@ -225,16 +196,6 @@ def test_build_job_owns_activity_and_orphan_rules() -> None:
 def test_compute_worker_run_status_owns_terminal_rules() -> None:
     assert ComputeWorkerRunStatus.RUNNING.is_terminal is False
     assert ComputeWorkerRunStatus.SUCCESS.is_terminal is True
-    assert ComputeWorkerRunStatus.SUCCESS.blocks_transition_to(ComputeWorkerRunStatus.FAILED) is True
-    assert ComputeWorkerRunStatus.SUCCESS.blocks_transition_to(ComputeWorkerRunStatus.SUCCESS) is False
-
-
-def test_compute_worker_run_execution_category_owns_plan_and_step_defaults() -> None:
-    assert ComputeWorkerRunExecutionCategory.PLAN.is_query_plan is True
-    assert ComputeWorkerRunExecutionCategory.STEP.is_query_plan is False
-    assert ComputeWorkerRunExecutionCategory.READ.default_step_type == 'read'
-    assert ComputeWorkerRunExecutionCategory.WRITE.default_step_type == 'write'
-    assert ComputeWorkerRunExecutionCategory.STEP.default_step_type == 'unknown'
 
 
 def test_compute_worker_instance_status_owns_projection_flags() -> None:

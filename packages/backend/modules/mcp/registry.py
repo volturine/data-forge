@@ -5,7 +5,7 @@ from __future__ import annotations
 from typing import Any
 
 from fastapi import FastAPI
-from fastapi.routing import APIRoute
+from fastapi.routing import APIRoute, iter_route_contexts
 
 from modules.mcp.models import MCPHttpMethod, MCPToolDefinition
 from modules.mcp.router import get_mcp_route_meta
@@ -216,43 +216,14 @@ def _build_tool(route_data: dict, components: dict) -> MCPToolDefinition:
     )
 
 
-def _collect_api_routes(routes: list[Any]) -> list[tuple[APIRoute, str]]:
-    """Recursively collect (APIRoute, effective_path) pairs, unwrapping _IncludedRouter wrappers.
-
-    FastAPI ≥0.137 stores sub-routers as ``_IncludedRouter`` nodes instead of
-    flattening them into ``app.routes``.  Each ``_IncludedRouter`` lazily
-    resolves its children via ``effective_candidates()`` which may yield more
-    ``_IncludedRouter`` instances or ``_EffectiveRouteContext`` wrappers around
-    the original ``APIRoute``.
-
-    Returns ``(route, effective_path)`` where *effective_path* includes any
-    prefix applied by ``include_router`` (e.g. ``/api/v1/analysis``).
-    """
-    collected: list[tuple[APIRoute, str]] = []
-    for route in routes:
-        if isinstance(route, APIRoute):
-            collected.append((route, route.path))
-            continue
-        # FastAPI ≥0.137 _IncludedRouter – unwrap via effective_candidates()
-        if hasattr(route, 'effective_candidates'):
-            for candidate in route.effective_candidates():
-                if isinstance(candidate, APIRoute):
-                    collected.append((candidate, candidate.path))
-                elif hasattr(candidate, 'effective_candidates'):
-                    collected.extend(_collect_api_routes([candidate]))
-                elif hasattr(candidate, 'original_route'):
-                    original = candidate.original_route
-                    if isinstance(original, APIRoute):
-                        # _EffectiveRouteContext stores the prefixed path
-                        effective_path = getattr(candidate, 'path', original.path)
-                        collected.append((original, effective_path))
-    return collected
-
-
 def _marked_routes(app: FastAPI) -> list[dict[str, Any]]:
     """Return metadata for routes onboarded via MCP route registration."""
     marked: list[dict[str, Any]] = []
-    for route, effective_path in _collect_api_routes(list(app.routes)):
+    for route_context in iter_route_contexts(list(app.routes)):
+        route = route_context.original_route
+        if not isinstance(route, APIRoute):
+            continue
+        effective_path = route_context.path or route.path
         route_meta = get_mcp_route_meta(route)
         if not isinstance(route_meta, dict):
             continue

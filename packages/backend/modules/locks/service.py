@@ -53,11 +53,6 @@ def lookup_lock_status(session: Session, resource_type: str, resource_id: str) -
     return _status(lock, now), False
 
 
-def get_lock_status(session: Session, resource_type: str, resource_id: str) -> LockStatusResponse | None:
-    status, _ = lookup_lock_status(session, resource_type, resource_id)
-    return status
-
-
 def _lock_table():
     return ResourceLock.metadata.tables[ResourceLock.__tablename__]
 

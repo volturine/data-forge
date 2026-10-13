@@ -15,7 +15,7 @@ from pydantic import (
     model_validator,
 )
 
-from backend_core.domain.analysis.step_types import is_step_type
+from backend_core.domain.analysis.step_types import STEP_TYPES
 from backend_core.domain.api_enums import ApiEnumValue, api_token
 from backend_core.domain.compute_worker_runs.schemas import ComputeWorkerRunKind
 from dataforge_protocol import compute_pb2, enums_pb2
@@ -153,7 +153,7 @@ class AnalysisPipelineTab(BaseModel):
             step_type = step.get('type')
             if not isinstance(step_type, str) or not step_type.strip():
                 raise ValueError(f'Analysis pipeline step {index} type is required')
-            if not is_step_type(step_type):
+            if not STEP_TYPES.has(step_type):
                 raise ValueError(f"Analysis pipeline step {index} has unknown type '{step_type}'")
             config = step.get('config')
             if config is not None and not isinstance(config, dict):
@@ -617,10 +617,7 @@ class BuildRequest(BaseModel):
     tab_id: str
 
     def pipeline_payload(self) -> dict[str, object]:
-        pipeline = self.analysis_pipeline.model_dump(mode='json')
-        if not isinstance(pipeline, dict):
-            raise ValueError('analysis_pipeline is required')
-        return {**pipeline, 'tab_id': self.tab_id}
+        return {**self.analysis_pipeline.model_dump(mode='json'), 'tab_id': self.tab_id}
 
     def is_schedule_ingest_request(self) -> bool:
         if len(self.analysis_pipeline.tabs) != 1:

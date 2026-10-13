@@ -160,17 +160,6 @@ def _reset_backend_settings_state(engine: Engine) -> None:
             conn.execute(table.delete())
 
 
-class _UnavailableRuntimeAvailabilityProbe:
-    def available(self, *, kind) -> bool:
-        del kind
-        return False
-
-
-class _BackendTestManager:
-    def shutdown_all(self) -> None:
-        return None
-
-
 @pytest.fixture(scope='function')
 def test_engine(postgres_container):
     from backend_core.persistence.locks.models import ResourceLock
@@ -230,20 +219,11 @@ def client(test_db_session, test_user, monkeypatch):
     if hasattr(app.state, 'mcp_registry'):
         del app.state.mcp_registry
 
-    app.state.manager = _BackendTestManager()
-    app.state.runtime_availability_probe = _UnavailableRuntimeAvailabilityProbe()
     app.dependency_overrides[get_current_user] = lambda: test_user
     app.dependency_overrides[get_current_user_id] = lambda: test_user.id
     app.dependency_overrides[get_optional_user_id] = lambda: test_user.id
     with TestClient(app) as ac:
-        try:
-            yield ac
-        finally:
-            if hasattr(app.state, 'runtime_availability_probe'):
-                del app.state.runtime_availability_probe
-            if hasattr(app.state, 'compute_override_executor'):
-                del app.state.compute_override_executor
-            app.state.manager.shutdown_all()
+        yield ac
     app.dependency_overrides.clear()
 
 

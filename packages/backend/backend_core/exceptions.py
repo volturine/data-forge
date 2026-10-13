@@ -87,14 +87,6 @@ def analysis_version_not_found(analysis_id: str, version: int) -> AppError:
     )
 
 
-def data_file_not_found(file_path: str) -> AppError:
-    return not_found_error(
-        f'File not found: {file_path}',
-        error_code='FILE_NOT_FOUND',
-        details={'file_path': file_path},
-    )
-
-
 def schedule_not_found(schedule_id: str) -> AppError:
     return not_found_error(
         f'Schedule {schedule_id} not found',
@@ -173,11 +165,6 @@ class ComputeError(AppError):
     pass
 
 
-class ComputeWorkerStartError(ComputeError):
-    def __init__(self, message: str, details: dict | None = None):
-        super().__init__(message=message, error_code='ENGINE_START_ERROR', details=details)
-
-
 class ComputeWorkerBusyError(ComputeError):
     def __init__(self, analysis_id: str | None = None):
         details = {'analysis_id': analysis_id} if analysis_id is not None else None
@@ -194,16 +181,6 @@ class ComputeWorkerRunComparisonError(ComputeError):
         if datasource_id is not None:
             details['datasource_id'] = datasource_id
         super().__init__(message=message, error_code='ENGINE_RUN_COMPARISON_ERROR', details=details)
-
-
-# Job Exceptions
-class JobError(AppError):
-    pass
-
-
-class JobCancelledError(JobError):
-    def __init__(self, job_id: str):
-        super().__init__(message=f'Job {job_id} was cancelled', error_code='JOB_CANCELLED', details={'job_id': job_id})
 
 
 # Analysis Exceptions
@@ -226,11 +203,6 @@ class FileError(AppError):
     pass
 
 
-class FileValidationError(FileError):
-    def __init__(self, message: str, details: dict | None = None):
-        super().__init__(message=message, error_code='FILE_VALIDATION_ERROR', details=details)
-
-
 class FileSizeExceededError(FileError):
     def __init__(self, file_size: int, max_size: int):
         super().__init__(
@@ -238,16 +210,6 @@ class FileSizeExceededError(FileError):
             error_code='FILE_SIZE_EXCEEDED',
             details={'file_size': file_size, 'max_size': max_size},
         )
-
-
-# Export Exceptions
-class ExportError(AppError):
-    pass
-
-
-class UnsupportedExportFormatError(ExportError):
-    def __init__(self, format: str):
-        super().__init__(message=f'Unsupported export format: {format}', error_code='UNSUPPORTED_EXPORT_FORMAT', details={'format': format})
 
 
 # Schedule Exceptions

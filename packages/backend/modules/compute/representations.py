@@ -80,8 +80,7 @@ def compute_worker_run_summary(run: ComputeWorkerRunResponseSchema, *, namespace
 
 def compute_worker_run_detail(run: ComputeWorkerRunResponseSchema, *, namespace: str) -> schemas.BuildRunDetail:
     summary = compute_worker_run_summary(run, namespace=namespace)
-    summary_payload = summary.model_dump()
-    summary_payload.pop('result_json', None)
+    summary_payload = summary.model_dump(exclude={'result_json'})
     return schemas.BuildRunDetail(
         **summary_payload,
         steps=[],

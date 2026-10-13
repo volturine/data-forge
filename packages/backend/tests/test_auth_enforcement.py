@@ -206,10 +206,12 @@ class TestNamespaceMiddleware:
 
         monkeypatch.setattr('backend_core.auth_config.settings.auth_required', False)
 
-        async def reject_namespace_database_work(*_args, **_kwargs):
+        def reject_namespace_database_work(*_args, **_kwargs):
             raise AssertionError('Headerless process health must not access the namespace database')
 
-        monkeypatch.setattr(application, '_run_namespace_middleware', reject_namespace_database_work)
+        monkeypatch.setattr(application, '_namespace_registered', reject_namespace_database_work)
+        monkeypatch.setattr(application, '_has_valid_session', reject_namespace_database_work)
+        monkeypatch.setattr(application, 'register_namespace', reject_namespace_database_work)
 
         response = client.get('/health')
 

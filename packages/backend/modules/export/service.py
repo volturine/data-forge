@@ -43,7 +43,7 @@ def export_analysis_code(
     filename = build_export_filename(
         analysis_name=analysis.name,
         tab_name=selection.target_tab.name if tab_id else None,
-        format_name=export_format,
+        export_format=export_format,
     )
     return CodeExportResult(
         code=code,

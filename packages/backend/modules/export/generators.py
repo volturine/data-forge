@@ -8,7 +8,7 @@ from dataclasses import dataclass
 from typing import Any
 
 from backend_core.domain.analysis.pipeline_types import PipelineDefinition, PipelineTab
-from backend_core.domain.analysis.step_types import STEP_TYPES, get_step_dependency_values
+from backend_core.domain.analysis.step_types import STEP_TYPES
 from backend_core.domain.datasource.source_types import DataSourceFileType, DataSourceType
 from backend_core.domain.step_config_enums import (
     DeduplicateKeep,
@@ -120,7 +120,7 @@ def _tab_dependencies(tab: PipelineTab) -> set[str]:
     if isinstance(source_tab_id, str) and source_tab_id:
         deps.add(source_tab_id)
     for step in tab.steps:
-        deps.update(get_step_dependency_values(step.type, step.config))
+        deps.update(STEP_TYPES.dependency_values(step.type, step.config))
     return deps
 
 

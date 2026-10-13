@@ -8,7 +8,7 @@ from modules.auth.models import User
 from modules.auth.service import ensure_default_user, get_default_user_id, validate_session
 
 
-def _resolve_session_token(request: HTTPConnection) -> str | None:
+def resolve_session_token(request: HTTPConnection) -> str | None:
     cookie_token = request.cookies.get('session_token')
     if cookie_token:
         return cookie_token
@@ -19,7 +19,7 @@ def _resolve_session_token(request: HTTPConnection) -> str | None:
 
 
 async def _resolve_user(request: HTTPConnection) -> User | None:
-    token = _resolve_session_token(request)
+    token = resolve_session_token(request)
     if token:
         user = await run_api_blocking(run_settings_db, validate_session, token)
         if user:
@@ -40,12 +40,8 @@ async def get_current_user(request: HTTPConnection) -> User | None:
     return user
 
 
-async def get_optional_user(request: Request) -> User | None:
-    return await _resolve_user(request)
-
-
 async def get_optional_user_id(request: Request) -> str | None:
-    token = _resolve_session_token(request)
+    token = resolve_session_token(request)
     if token:
         user = await run_api_blocking(run_settings_db, validate_session, token)
         if user:

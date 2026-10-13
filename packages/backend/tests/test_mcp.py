@@ -1075,9 +1075,7 @@ class TestRouterRegistrationOnboarding:
 
     def test_router_metadata_survives_nested_include_router(self) -> None:
         from fastapi import APIRouter, FastAPI
-        from fastapi.routing import APIRoute
-
-        from modules.mcp import registry as reg
+        from fastapi.routing import APIRoute, iter_route_contexts
 
         leaf = MCPRouter(prefix='/leaf', tags=['leaf'])
 
@@ -1090,14 +1088,21 @@ class TestRouterRegistrationOnboarding:
         app = FastAPI()
         app.include_router(v1)
 
-        route = next(r for r, _ in reg._collect_api_routes(list(app.routes)) if isinstance(r, APIRoute) and r.path == '/leaf/value')
+        route_context = next(
+            context
+            for context in iter_route_contexts(list(app.routes))
+            if isinstance(context.original_route, APIRoute) and context.original_route.path == '/leaf/value'
+        )
+        route = route_context.original_route
+        assert isinstance(route, APIRoute)
+        assert route_context.path == '/api/v1/leaf/value'
         meta = get_mcp_route_meta(route)
         assert isinstance(meta, dict)
         assert meta['name'] == 'value'
 
     def test_registry_prefers_route_registered_metadata(self) -> None:
         from fastapi import APIRouter, FastAPI
-        from fastapi.routing import APIRoute
+        from fastapi.routing import APIRoute, iter_route_contexts
 
         from modules.mcp import registry as reg
 
@@ -1118,7 +1123,14 @@ class TestRouterRegistrationOnboarding:
         app = FastAPI()
         app.include_router(v1)
 
-        app_route = next(r for r, _ in reg._collect_api_routes(list(app.routes)) if isinstance(r, APIRoute) and r.path == '/demo/item/{item_id}')
+        route_context = next(
+            context
+            for context in iter_route_contexts(list(app.routes))
+            if isinstance(context.original_route, APIRoute) and context.original_route.path == '/demo/item/{item_id}'
+        )
+        app_route = route_context.original_route
+        assert isinstance(app_route, APIRoute)
+        assert route_context.path == '/api/v1/demo/item/{item_id}'
         app_meta = dict(get_mcp_route_meta(app_route) or {})
         app_meta['confirm_required'] = False
         app_meta['name'] = 'stable_override_name'

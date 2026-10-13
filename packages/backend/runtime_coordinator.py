@@ -28,7 +28,6 @@ from backend_core.database import (
 from backend_core.logging import configure_logging_off_loop
 from backend_core.public_schema import ensure_backend_public_tables
 from backend_core.runtime_integration_delivery import NotificationDeliveryDispatcher
-from backend_core.runtime_ipc import RuntimeListenerKind
 from backend_core.runtime_outbox_dispatcher import OUTBOX_WAKE_HUB, RuntimeOutboxDispatcher
 from backend_core.runtime_outbox_service import OUTBOX_WAKE_KIND
 from backend_grpc.server import start_runtime_grpc_server
@@ -427,7 +426,7 @@ async def _stop_endpoints_and_settle_epoch(
         shutdown_errors.append(exc)
         logger.error('Runtime coordinator gRPC shutdown failed', exc_info=(type(exc), exc, exc.__traceback__))
     try:
-        await runtime_ipc.stop_api_server(listener, listener=RuntimeListenerKind.JOB)
+        await runtime_ipc.stop_api_server(listener)
     except BaseException as exc:
         shutdown_errors.append(exc)
         logger.error('Runtime coordinator listener shutdown failed', exc_info=(type(exc), exc, exc.__traceback__))
@@ -506,7 +505,7 @@ async def _run_owned_epoch(process_stop_event: asyncio.Event, lease: RuntimeCoor
         grpc_server = await start_runtime_grpc_server(coordinator_guard=lease.check)
         if process_stop_event.is_set() or owner_stop_event.is_set():
             raise RuntimeError('Runtime coordinator lease was lost during gRPC startup')
-        listener = await runtime_ipc.start_api_server(listener=RuntimeListenerKind.JOB)
+        listener = await runtime_ipc.start_api_server()
         if health is not None:
             health.active(coordinator_generation)
         chat_consumer = await asyncio.to_thread(ChatTurnConsumer, app, coordinator_generation)

@@ -87,13 +87,6 @@ def _resolve_dir(value: Path | str) -> Path:
     return path_value
 
 
-def _resolve_file_parent(value: Path | str) -> Path:
-    """Ensure the parent directory for a file path exists and return it."""
-    path_value = Path(value)
-    path_value.parent.mkdir(parents=True, exist_ok=True)
-    return path_value
-
-
 class Settings(BaseSettings):
     model_config = SettingsConfigDict(env_file=None, env_file_encoding='utf8', extra='ignore')
 

@@ -1987,7 +1987,7 @@ def test_postgres_outbox_claim_recovers_after_dispatcher_process_crash(monkeypat
                 (
                     'import time; from sqlmodel import Session; from backend_core import database, runtime_outbox_service; '
                     'session = Session(database._get_tenant_engine()); '
-                    'assert runtime_outbox_service._claim_next_event(session) is not None; time.sleep(300)'
+                    'assert runtime_outbox_service._claim_next_events(session, limit=1); time.sleep(300)'
                 ),
             ],
             cwd=CORE_ROOT,
@@ -2273,7 +2273,15 @@ async def test_postgres_runtime_ipc_delivers_notifications(monkeypatch, tmp_path
         try:
             task = asyncio.create_task(runtime_ipc.serve_api_notifications(server, stop_event, handler, recover=recover))
             await asyncio.wait_for(recovered.wait(), timeout=15)
-            await asyncio.to_thread(runtime_ipc.notify_api_build, 'default', 'build-1', 7)
+            await asyncio.to_thread(
+                runtime_ipc.notify_runtime_payload,
+                {
+                    'kind': RuntimePayloadKind.BUILD.value,
+                    'namespace': 'default',
+                    'build_id': 'build-1',
+                    'latest_sequence': 7,
+                },
+            )
             await asyncio.to_thread(runtime_ipc.notify_build_job)
 
             build_payload = await asyncio.wait_for(received.get(), timeout=15)

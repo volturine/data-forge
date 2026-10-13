@@ -335,37 +335,6 @@ def _persist_engine_snapshot_locked(
     _finish_snapshot_phase(phase_timings, 'snapshot_commit_ms', phase_started)
 
 
-def mark_namespace_compute_workers_stopped(
-    session: Session,
-    *,
-    worker_id: str,
-    namespace: str,
-    active_engine_identities: set[str],
-    now: datetime | None = None,
-    commit: bool = True,
-) -> int:
-    stamp = now or _utcnow()
-    stmt = select(ComputeWorkerInstance).where(sa(ComputeWorkerInstance.worker_id == worker_id)).where(sa(ComputeWorkerInstance.namespace == namespace))
-    rows = list(session.execute(stmt).scalars().all())
-    updated = 0
-    for row in rows:
-        if _row_identity_key(row) in active_engine_identities:
-            continue
-        if row.status == ComputeWorkerInstanceStatus.STOPPED:
-            continue
-        row.status = ComputeWorkerInstanceStatus.STOPPED
-        row.current_job_id = None
-        row.current_build_id = None
-        row.current_compute_worker_run_id = None
-        row.last_seen_at = stamp
-        row.updated_at = stamp
-        session.add(row)
-        updated += 1
-    if updated and commit:
-        session.commit()
-    return updated
-
-
 def list_compute_worker_instances(session: Session, *, namespace: str) -> list[ComputeWorkerInstance]:
     active = [status for status in ComputeWorkerInstanceStatus.members() if status.is_active]
     stmt = (
