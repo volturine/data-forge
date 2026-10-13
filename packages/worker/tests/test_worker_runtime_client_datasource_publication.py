@@ -75,7 +75,7 @@ def test_publish_datasource_create_returns_the_exact_proto_record() -> None:
     )
 
     assert published == record
-    assert published.SerializeToString() == record.SerializeToString()
+    assert published.SerializeToString(deterministic=True) == record.SerializeToString(deterministic=True)
     assert published.HasField("description")
     assert published.HasField("created_by_analysis_id")
     assert published.HasField("created_at")
@@ -101,7 +101,7 @@ def test_publish_datasource_ingest_preserves_absent_optional_fields() -> None:
     )
 
     assert published == record
-    assert published.SerializeToString() == record.SerializeToString()
+    assert published.SerializeToString(deterministic=True) == record.SerializeToString(deterministic=True)
     assert not published.HasField("description")
     assert not published.HasField("created_by_analysis_id")
     assert not published.HasField("created_at")

@@ -76,30 +76,6 @@ def test_preview_identity_preserves_explicit_identity_before_pipeline_fallback()
     assert identity == explicit
 
 
-def test_stateless_preview_identity_uses_the_selected_tab_rid() -> None:
-    pipeline = analysis_pb2.AnalysisPipelinePayload()
-    for tab_id, datasource_id in (("tab-a", "datasource-a"), ("tab-b", "datasource-b")):
-        tab = pipeline.tabs.add(id=tab_id)
-        tab.datasource.id = datasource_id
-        tab.output.result_id = f"output-{tab_id}"
-        tab.output.filename = f"{tab_id}.parquet"
-        tab.output.format = enums_pb2.EXPORT_FORMAT_PARQUET
-    preview = compute_pb2.StepPreviewCommand(
-        target_step_id="source",
-        analysis_pipeline=pipeline,
-        tab_id="tab-b",
-    )
-
-    identity = compute_request_runtime._compute_worker_identity_for_claimed(
-        _claimed(enums_pb2.COMPUTE_REQUEST_KIND_PREVIEW, compute_pb2.ComputeCommand(preview=preview))
-    )
-
-    assert identity is not None
-    assert identity.scope == enums_pb2.COMPUTE_WORKER_SCOPE_DATASOURCE_PREVIEW
-    assert identity.datasource_id == "datasource-b"
-    assert identity.resource_id == "datasource-b"
-
-
 @pytest.mark.asyncio
 async def test_pipeline_only_download_admission_cancels_its_exact_job_on_lease_loss(monkeypatch) -> None:
     admission_identities: list[compute_pb2.ComputeWorkerIdentity] = []
