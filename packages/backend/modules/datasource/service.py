@@ -14,7 +14,6 @@ from backend_core.domain.build_runs.models import BuildRunStatus
 from backend_core.domain.datasource.models import DataSourceCreatedBy
 from backend_core.domain.datasource.source_types import DataSourceFileType, DataSourceType
 from backend_core.exceptions import DataSourceValidationError, datasource_not_found
-from backend_core.persistence.analysis.models import Analysis
 from backend_core.persistence.build_runs.models import BuildRun
 from backend_core.persistence.datasource.models import DataSource, DataSourceColumnMetadata
 from backend_core.secrets import MASKED_SECRET
@@ -427,42 +426,6 @@ def create_database_datasource_record(
             'branch': branch,
         },
         owner_id=owner_id,
-        created_at=datetime.now(UTC).replace(tzinfo=None),
-    )
-
-    session.add(datasource)
-    session.commit()
-    session.refresh(datasource)
-
-    return DataSourceResponse.model_validate(datasource)
-
-
-def create_analysis_datasource(
-    session: Session,
-    name: str,
-    description: str | None,
-    analysis_id: str,
-    analysis_tab_id: str | None = None,
-    is_hidden: bool = False,
-    source_type: DataSourceType = DataSourceType.ANALYSIS,
-) -> DataSourceResponse:
-    analysis = session.get(Analysis, analysis_id)
-    if not analysis:
-        raise ValueError(f'Analysis {analysis_id} not found')
-    datasource_id = str(uuid.uuid4())
-    config = {}
-    if analysis_tab_id:
-        config['analysis_tab_id'] = analysis_tab_id
-
-    datasource = DataSource(
-        id=datasource_id,
-        name=name,
-        description=DataSourceDescriptionModel.normalize_description(description),
-        source_type=source_type,
-        config=config,
-        created_by_analysis_id=analysis_id,
-        created_by=DataSourceCreatedBy.ANALYSIS.value,
-        is_hidden=is_hidden,
         created_at=datetime.now(UTC).replace(tzinfo=None),
     )
 

@@ -13,7 +13,6 @@ from backend_core.persistence.analysis.models import Analysis
 from backend_core.persistence.compute_worker_runs.models import ComputeWorkerRun
 from backend_core.persistence.datasource.models import DataSource
 from backend_core.sqlmodel_typing import sa
-from modules.datasource.service import create_analysis_datasource
 
 
 class TestDataSourceValidation:
@@ -588,27 +587,6 @@ class TestIsHidden:
         ids = [ds['id'] for ds in response.json()]
         assert visible.id in ids
         assert hidden.id in ids
-
-    def test_create_analysis_datasource_hidden(self, test_db_session, sample_analysis: Analysis):
-        """create_analysis_datasource with is_hidden=True sets the flag."""
-        result = create_analysis_datasource(
-            test_db_session,
-            name='Hidden Analysis DS',
-            description=None,
-            analysis_id=sample_analysis.id,
-            is_hidden=True,
-        )
-        assert result.is_hidden is True
-
-    def test_create_analysis_datasource_visible_by_default(self, test_db_session, sample_analysis: Analysis):
-        """create_analysis_datasource without is_hidden defaults to False."""
-        result = create_analysis_datasource(
-            test_db_session,
-            name='Visible Analysis DS',
-            description=None,
-            analysis_id=sample_analysis.id,
-        )
-        assert result.is_hidden is False
 
     def test_hidden_datasource_still_accessible_by_id(self, client, test_db_session, sample_csv_file: Path):
         """GET /api/v1/datasource/{id} returns a hidden datasource."""

@@ -13,7 +13,7 @@ import pyarrow as pa
 import pytest
 from openpyxl import Workbook
 
-from dataforge_protocol import compute_pb2, compute_worker_runtime_pb2, compute_worker_runtime_pb2_grpc, enums_pb2
+from dataforge_protocol import compute_pb2, compute_worker_runtime_pb2, compute_worker_runtime_pb2_grpc, datasource_pb2, enums_pb2
 from datasources import execution
 from datasources.excel_batches import iter_excel_batches
 from runtime import compute_request_runtime
@@ -309,7 +309,14 @@ def test_scheduled_ingest_uses_the_same_manifest_commit_path_as_manual_ingest(mo
 
         def publish_datasource_ingest(self, **kwargs):
             calls.append(("publish", kwargs))
-            return execution.DataSourceRecord(id="source", name="Source", source_type="iceberg", config=kwargs["config"])
+            record = datasource_pb2.DataSourceRecord(
+                id="source",
+                name="Source",
+                source_type=enums_pb2.DATA_SOURCE_TYPE_ICEBERG,
+                created_by=enums_pb2.DATA_SOURCE_CREATED_BY_IMPORT,
+            )
+            record.config.update(kwargs["config"])
+            return record
 
         def update_compute_worker_run(self, **_kwargs):
             return None
@@ -323,7 +330,7 @@ def test_scheduled_ingest_uses_the_same_manifest_commit_path_as_manual_ingest(mo
     monkeypatch.setattr("runtime.compute_utils.await_compute_worker_result", lambda *_args, **_kwargs: {"data": manifest})
     monkeypatch.setattr("runtime.object_store.delete_object", lambda _path: None)
 
-    execution.ingest_datasource_for_schedule(
+    published = execution.ingest_datasource_for_schedule(
         Client(),
         manager=Manager(),
         namespace="default",
@@ -347,6 +354,46 @@ def test_scheduled_ingest_uses_the_same_manifest_commit_path_as_manual_ingest(mo
         "database_url": "catalog-credentials-stay-in-manager",
     }
     assert calls[-1][0] == "publish"
+    assert isinstance(published, datasource_pb2.DataSourceRecord)
+    assert published.source_type == enums_pb2.DATA_SOURCE_TYPE_ICEBERG
+
+
+def test_completed_ingest_run_keeps_the_same_proto_summary_fields() -> None:
+    from runtime.domain.datasource.source_types import DataSourceType
+
+    record = datasource_pb2.DataSourceRecord(
+        id="source-1",
+        name="Published source",
+        source_type=enums_pb2.DATA_SOURCE_TYPE_ICEBERG,
+        created_by=enums_pb2.DATA_SOURCE_CREATED_BY_IMPORT,
+    )
+    record.config.update({"snapshot_id": "17", "snapshot_timestamp_ms": 1234, "branch": "main"})
+    updates = []
+
+    class Client:
+        def update_compute_worker_run(self, **kwargs):
+            updates.append(kwargs)
+
+    execution._complete_ingest_run(
+        Client(),
+        namespace="default",
+        run_id="run-1",
+        started=0.0,
+        record=record,
+        original_source_type=DataSourceType.FILE,
+        metadata_path="s3://default/clean/source/metadata.json",
+    )
+
+    fields = updates[0]["fields"]
+    assert fields["status"] == "success"
+    assert fields["result_json"] == {
+        "datasource_name": "Published source",
+        "storage_type": "iceberg",
+        "original_source_type": "file",
+        "snapshot_id": "17",
+        "branch": "main",
+        "metadata_path": "s3://default/clean/source/metadata.json",
+    }
 
 
 @pytest.mark.parametrize("published_table_name", ["ds-1", "ds-1__claim_previous"])

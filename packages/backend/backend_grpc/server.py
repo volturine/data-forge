@@ -733,10 +733,6 @@ def _optional_str(message: Any, field: str) -> str | None:
     return getattr(message, field) if message.HasField(field) else None
 
 
-def _optional_bool(message: Any, field: str) -> bool | None:
-    return getattr(message, field) if message.HasField(field) else None
-
-
 def _optional_int(message: Any, field: str) -> int | None:
     return getattr(message, field) if message.HasField(field) else None
 

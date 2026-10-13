@@ -1,16 +1,10 @@
 from __future__ import annotations
 
 import logging
-from collections import Counter
-from collections.abc import Mapping
-from threading import Lock
 
 from backend_core.transitions import TransitionOutcome
 
 logger = logging.getLogger('dataforge.runtime.leases')
-
-_counts: Counter[tuple[str, str, str]] = Counter()
-_lock = Lock()
 
 
 def record_lease_transition(
@@ -24,8 +18,6 @@ def record_lease_transition(
     generation: int,
     attempt: int | None = None,
 ) -> None:
-    with _lock:
-        _counts[(kind, transition, outcome.value)] += 1
     level = logging.DEBUG if transition == 'renew' and outcome is TransitionOutcome.APPLIED else logging.INFO
     logger.log(
         level,
@@ -49,13 +41,3 @@ def record_lease_transition(
             'runtime_attempt': attempt,
         },
     )
-
-
-def lease_transition_counts() -> Mapping[tuple[str, str, str], int]:
-    with _lock:
-        return dict(_counts)
-
-
-def reset_lease_transition_counts() -> None:
-    with _lock:
-        _counts.clear()

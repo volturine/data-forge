@@ -75,7 +75,7 @@ _WARM_WORKER_CLEANUP_RETRY_MAX_SECONDS = 4.0
 
 @dataclass(slots=True)
 class _CapacityAdmission:
-    evicted: tuple[ComputeWorkerIdentityKey, ComputeWorkerInfo, ComputeWorkerIdentity] | None = None
+    evicted: tuple[ComputeWorkerIdentityKey, ComputeWorkerInfo] | None = None
     eviction_event: threading.Event | None = None
     # Reserve one warm candidate explicitly so a burst cannot all observe the
     # same non-empty pool and then claim it while they race to pop the pool.
@@ -188,8 +188,9 @@ def _log_engine_acquisition(
 class ComputeWorkerInfo:
     """Tracks engine metadata for reuse, status, and eviction decisions."""
 
-    def __init__(self, engine: ComputeWorker):
+    def __init__(self, engine: ComputeWorker, identity: ComputeWorkerIdentity):
         self.engine = engine
+        self.identity = identity
         self.last_activity = datetime.now(UTC)
         self._last_snapshot_at = time.monotonic()
         self.current_build_id: str | None = None
@@ -224,7 +225,6 @@ class ProcessManager:
         reconcile_docker_containers: bool = True,
     ) -> None:
         self._engines: dict[ComputeWorkerIdentityKey, ComputeWorkerInfo] = {}
-        self._engine_identities: dict[ComputeWorkerIdentityKey, ComputeWorkerIdentity] = {}
         self._engines_lock = threading.Lock()
         # The shared compute budget also caps active engine identities. Running
         # identities + in-flight starts count; unassigned warm workers are
@@ -542,7 +542,6 @@ class ProcessManager:
         cold_start = not warm_claim
         if cold_start:
             self._cold_starts += 1
-        identity = self._engine_identities.pop(idle_key)
         del self._engines[idle_key]
         self._stopping_engines[id(idle_info.engine)] = idle_info.engine
         self._capacity_reserved_stops.add(id(idle_info.engine))
@@ -552,7 +551,7 @@ class ProcessManager:
         if warm_claim:
             self._warm_worker_claims += 1
         return _CapacityAdmission(
-            evicted=(idle_key, idle_info, identity),
+            evicted=(idle_key, idle_info),
             eviction_event=eviction_event,
             warm_claim=warm_claim,
             cold_start=cold_start,
@@ -608,7 +607,7 @@ class ProcessManager:
         if identity is None or not owned:
             return False
         key = self._key(identity, namespace=namespace)
-        evicted: tuple[ComputeWorkerIdentityKey, ComputeWorkerInfo, ComputeWorkerIdentity] | None = None
+        evicted: tuple[ComputeWorkerIdentityKey, ComputeWorkerInfo] | None = None
         eviction_event: threading.Event | None = None
         with self._capacity_changed:
             admissions = self._spawn_admissions.get(key)
@@ -644,11 +643,10 @@ class ProcessManager:
         if evicted is not None:
             with self._capacity_changed:
                 if evicted_is_alive and not self._closed:
-                    evicted_key, evicted_info, evicted_identity = evicted
+                    evicted_key, evicted_info = evicted
                     self._stopping_engines.pop(id(evicted_info.engine), None)
                     self._capacity_reserved_stops.discard(id(evicted_info.engine))
                     self._engines[evicted_key] = evicted_info
-                    self._engine_identities[evicted_key] = evicted_identity
                     self._capacity_starts = max(0, self._capacity_starts - 1)
                     restored_eviction = True
                     self._admit_spawn_waiters_locked()
@@ -789,13 +787,6 @@ class ProcessManager:
         if shutdown:
             self.shutdown_compute_worker(identity, namespace=namespace)
         return shutdown
-
-    def can_admit_spawn(self) -> bool:
-        """True if an active engine slot can be claimed or an idle one evicted."""
-        with self._capacity_changed:
-            if self._closed:
-                return False
-            return self._capacity_used_locked() < settings.compute_workers or self._find_idle_engine_locked()[0] is not None
 
     async def wait_for_capacity(self, *, timeout_seconds: float | None = None) -> bool:
         """Park until local capacity may have freed.
@@ -1057,7 +1048,6 @@ class ProcessManager:
                         info.current_build_id = None
                         info.current_compute_worker_run_id = None
                         del self._engines[qualified_key]
-                        self._engine_identities.pop(qualified_key, None)
                     break
 
             if wait_event is not None:
@@ -1132,7 +1122,7 @@ class ProcessManager:
                 )
                 raise ComputeWorkerCapacityFull(f"Compute worker capacity ({settings.compute_workers}) is full")
             if evict_info is not None:
-                _, idle_engine_info, _ = evict_info
+                _, idle_engine_info = evict_info
                 shutdown_started = time.perf_counter()
                 try:
                     idle_engine_info.engine.shutdown()
@@ -1205,13 +1195,12 @@ class ProcessManager:
             if not process_alive:
                 engine.shutdown()
                 raise RuntimeError(f"Failed to start engine for {qualified_key}")
-            info = ComputeWorkerInfo(engine)
+            info = ComputeWorkerInfo(engine, identity)
             if _reserve:
                 info.active_reservations = 1
             with self._capacity_changed:
                 self._starting_engines.pop(id(engine), None)
                 self._engines[qualified_key] = info
-                self._engine_identities[qualified_key] = identity
                 # Ticket transfers from "starting" to a live engine slot.
                 if capacity_start_held:
                     self._capacity_starts = max(self._capacity_starts - 1, 0)
@@ -1332,7 +1321,7 @@ class ProcessManager:
     def _try_claim_capacity_slot(
         self,
         qualified_key: ComputeWorkerIdentityKey,
-    ) -> tuple[tuple[ComputeWorkerIdentityKey, ComputeWorkerInfo, ComputeWorkerIdentity] | None, bool, threading.Event | None, bool, bool]:
+    ) -> tuple[tuple[ComputeWorkerIdentityKey, ComputeWorkerInfo] | None, bool, threading.Event | None, bool, bool]:
         """Non-blocking claim: eviction, ticket, event, warm claim, cold-start token.
 
         Does not park the caller. On failure returns (None, False, None) so runners
@@ -1369,7 +1358,6 @@ class ProcessManager:
                     qualified_key,
                 )
                 del self._engines[idle_key]
-                identity = self._engine_identities.pop(idle_key)
                 eviction_event = threading.Event()
                 self._engine_events[idle_key] = eviction_event
                 self._stopping_engines[id(idle_info.engine)] = idle_info.engine
@@ -1378,12 +1366,8 @@ class ProcessManager:
                 if warm_claim:
                     self._warm_worker_claims += 1
                 self._capacity_changed.notify_all()
-                return (idle_key, idle_info, identity), True, eviction_event, warm_claim, cold_start
+                return (idle_key, idle_info), True, eviction_event, warm_claim, cold_start
             return None, False, None, False, False
-
-    def get_or_create_engine(self, identity: ComputeWorkerIdentity, resource_config: dict | None = None) -> ComputeWorker:
-        info = self.spawn_compute_worker(identity, resource_config=resource_config)
-        return info.engine
 
     @contextlib.contextmanager
     def acquire_engine(self, identity: ComputeWorkerIdentity, resource_config: dict | None = None) -> Iterator[ComputeWorker]:
@@ -1449,8 +1433,8 @@ class ProcessManager:
         qualified_key = self._key(identity)
         with self._engines_lock:
             info = self._engines.get(qualified_key)
-            persisted_identity = self._engine_identities.get(qualified_key, identity)
             if info is None:
+                persisted_identity = identity
                 return ComputeWorkerStatusInfo(
                     analysis_id=_compute_worker_identity_analysis_id(persisted_identity) or "",
                     resource_id=persisted_identity.resource_id,
@@ -1480,6 +1464,7 @@ class ProcessManager:
             # every engine in the namespace and run inline on engine lifecycle
             # changes. The heartbeat loop owns liveness and marks an engine dead
             # as soon as it stops answering.
+            persisted_identity = info.identity
             engine = info.engine
             is_alive = engine.last_known_alive
             resource_config = (self._normalize_config(engine.resource_config) or None) if engine.resource_config else None
@@ -1523,7 +1508,6 @@ class ProcessManager:
                     shutdown_event = threading.Event()
                     self._engine_events[qualified_key] = shutdown_event
                     info = self._engines.pop(qualified_key, None)
-                    self._engine_identities.pop(qualified_key, None)
                     if info is not None:
                         self._stopping_engines[id(info.engine)] = info.engine
                         self._capacity_changed.notify_all()
@@ -1585,7 +1569,6 @@ class ProcessManager:
                     shutdown_event = threading.Event()
                     self._engine_events[key] = shutdown_event
                     del self._engines[key]
-                    self._engine_identities.pop(key, None)
                     self._stopping_engines[id(info.engine)] = info.engine
                     self._capacity_changed.notify_all()
                     break
@@ -1656,7 +1639,6 @@ class ProcessManager:
         with self._capacity_changed:
             shutdown_targets = list(self._engines.items())
             self._engines.clear()
-            self._engine_identities.clear()
             for _key, info in shutdown_targets:
                 self._stopping_engines[id(info.engine)] = info.engine
             self._capacity_changed.notify_all()
@@ -1667,7 +1649,7 @@ class ProcessManager:
                 info.engine.shutdown()
             finally:
                 self._untrack_stopping_engine(info.engine)
-        for _key, info, _identity in admitted_evictions:
+        for _key, info in admitted_evictions:
             try:
                 info.engine.shutdown()
             finally:
@@ -1681,14 +1663,6 @@ class ProcessManager:
         if changed_namespaces:
             self._emit_snapshot_for_namespaces(changed_namespaces)
 
-    def list_engines(self) -> list[str]:
-        namespace = get_namespace()
-        with self._engines_lock:
-            return [key.resource_id for key in self._engines if key.namespace == namespace]
-
-    def list_all_compute_worker_statuses(self) -> list[ComputeWorkerStatusInfo]:
-        return self._list_compute_worker_statuses_for_namespace(get_namespace())
-
     def resynchronize_snapshots(self) -> None:
         """Republish every durable engine projection after API reconnect."""
         with self._engines_lock:
@@ -1698,10 +1672,10 @@ class ProcessManager:
     def _list_compute_worker_statuses_for_namespace(self, namespace: str) -> list[ComputeWorkerStatusInfo]:
         defaults = self._get_defaults()
         with self._engines_lock:
-            identities = [(self._engine_identities[key], info) for key, info in self._engines.items() if key.namespace == namespace]
-            for _identity, info in identities:
+            infos = [info for key, info in self._engines.items() if key.namespace == namespace]
+            for info in infos:
                 info.mark_snapshot_published()
-        return [self.get_compute_worker_status(identity, defaults=defaults) for identity, _info in identities]
+        return [self.get_compute_worker_status(info.identity, defaults=defaults) for info in infos]
 
     def _emit_snapshot_for_namespaces(self, namespaces: set[str]) -> None:
         if self._on_snapshot is None:
@@ -1852,7 +1826,6 @@ class ProcessManager:
                 self._engine_events[key] = lifecycle_event
                 stale.append((key, info, lifecycle_event))
                 del self._engines[key]
-                self._engine_identities.pop(key, None)
                 self._stopping_engines[id(engine)] = engine
                 changed_namespaces.add(key.namespace)
             if stale:

@@ -117,10 +117,8 @@ def compute_chart_data(lf: pl.LazyFrame, params: dict) -> pl.LazyFrame:
     """
     p = ChartParams.model_validate(params)
 
-    if p.chart_type in (ChartType.BAR, ChartType.HORIZONTAL_BAR):
-        return _aggregate_bar(lf, p)
-    if p.chart_type in (ChartType.LINE, ChartType.AREA):
-        return _aggregate_line(lf, p)
+    if p.chart_type in (ChartType.BAR, ChartType.HORIZONTAL_BAR, ChartType.LINE, ChartType.AREA):
+        return _aggregate_grouped(lf, p)
     if p.chart_type == ChartType.PIE:
         return _aggregate_pie(lf, p)
     if p.chart_type == ChartType.HEATGRID:
@@ -343,22 +341,7 @@ def _apply_group_sort(
     )
 
 
-def _aggregate_bar(lf: pl.LazyFrame, p: ChartParams) -> pl.LazyFrame:
-    lf = _apply_date_bucket(lf, p.x_column, p)
-    group_cols = [p.x_column] + ([p.group_column] if p.group_column else [])
-
-    group_order_lf: pl.LazyFrame | None = None
-    if p.group_sort_by == GroupSortBy.CUSTOM and p.group_sort_column and p.group_column:
-        group_order_lf = lf.select(p.group_column, p.group_sort_column)
-
-    agg_expr = _agg_expr(p.y_column, p.aggregation) if p.y_column else pl.len().alias("y")
-
-    result = lf.group_by(group_cols).agg(agg_expr).rename({p.x_column: "x"})
-    sorted_result = _apply_sort(result, p)
-    return _apply_group_sort(sorted_result, p, order_lf=group_order_lf)
-
-
-def _aggregate_line(lf: pl.LazyFrame, p: ChartParams) -> pl.LazyFrame:
+def _aggregate_grouped(lf: pl.LazyFrame, p: ChartParams) -> pl.LazyFrame:
     lf = _apply_date_bucket(lf, p.x_column, p)
     group_cols = [p.x_column] + ([p.group_column] if p.group_column else [])
 

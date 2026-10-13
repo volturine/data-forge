@@ -686,9 +686,10 @@ def normalize_step_config_for_protocol(step_type: str, config: dict) -> dict[str
     if not STEP_TYPES.has(step_type):
         raise ValueError(f"Unknown step type '{step_type}'")
     model = cast(type[BaseModel], STEP_CATALOG[step_type]['config'])
+    validated_config = model.model_validate(config)
     payload = cast(
         dict[str, object],
-        model.model_validate(config).model_dump(
+        validated_config.model_dump(
             mode='python',
             by_alias=False,
             context={'protocol_enum_numbers': True},
@@ -707,7 +708,7 @@ def normalize_step_config_for_protocol(step_type: str, config: dict) -> dict[str
         payload['value'] = _filter_value_for_protocol(payload['value'])
     elif normalized_type == STEP_TYPES.select.value:
         # SelectConfig.cast_map is intentionally a string map in the wire schema.
-        cast_map = model.model_validate(config).model_dump(mode='json', by_alias=True).get('cast_map')
+        cast_map = validated_config.model_dump(mode='json', by_alias=True).get('cast_map')
         if isinstance(cast_map, dict):
             payload['cast_map'] = cast_map
     return payload

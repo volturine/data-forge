@@ -4,11 +4,8 @@ import asyncio
 import contextlib
 import logging
 import os
-import queue
 import socket
 import threading
-import uuid
-from collections import deque
 from collections.abc import Awaitable, Callable
 
 from runtime.domain.runtime_workers.models import RuntimeWorkerKind
@@ -39,10 +36,8 @@ class RuntimeNamespaceDirectory:
 
     Claims are always directed to one namespace. The directory reads the
     indexed durable work table only for missed-notification recovery. All
-    request classes consume that snapshot in round-robin order. A lock around
-    refresh also prevents four lanes waking at the same instant from issuing
-    duplicate recovery RPCs. Build children use directed hints instead of
-    owning a cursor.
+    consumers rotate through that snapshot in round-robin order. A lock around
+    refresh prevents recovery lanes waking together from issuing duplicate RPCs.
     """
 
     def __init__(
@@ -50,36 +45,15 @@ class RuntimeNamespaceDirectory:
         client: WorkerRuntimeClient,
         *,
         refresh_seconds: float = 5.0,
-        namespace_hint_queue: object | None = None,
         work_kinds: tuple[str, ...] = (),
     ) -> None:
         self._client = client
         self._refresh_seconds = max(refresh_seconds, 1.0)
-        self._namespace_hint_queue = namespace_hint_queue
         self._work_kinds = work_kinds
-        self._local_hints: deque[str] = deque()
         self._namespaces: list[str] = []
         self._cursor = 0
         self._next_refresh = 0.0
         self._lock = asyncio.Lock()
-
-    def enqueue_hint(self, namespace: str) -> None:
-        if namespace:
-            self._local_hints.append(namespace)
-
-    def _next_queued_hint(self) -> str | None:
-        if self._local_hints:
-            return self._local_hints.popleft()
-        if self._namespace_hint_queue is None:
-            return None
-        get_nowait = getattr(self._namespace_hint_queue, "get_nowait", None)
-        if not callable(get_nowait):
-            raise TypeError("Namespace hint queue must provide get_nowait()")
-        try:
-            hint = get_nowait()
-        except EOFError, OSError, queue.Empty:
-            return None
-        return hint if isinstance(hint, str) and hint else None
 
     async def _refresh_locked(self) -> None:
         now = asyncio.get_running_loop().time()
@@ -99,13 +73,6 @@ class RuntimeNamespaceDirectory:
             return list(self._namespaces)
 
     async def next_namespace(self) -> str | None:
-        queued_hint = self._next_queued_hint()
-        if self._namespace_hint_queue is not None:
-            # Build children receive directed namespace hints from the
-            # manager. They never refresh the complete tenant directory. The
-            # manager's recovery cursor is the durable five-second backstop
-            # for missed notifications and child restarts.
-            return queued_hint
         async with self._lock:
             await self._refresh_locked()
             if not self._namespaces:
@@ -149,26 +116,14 @@ async def build_worker_loop(
     client: WorkerRuntimeClient,
     capacity: int = 1,
     heartbeat_seconds: float = 5.0,
-    idle_exit_seconds: float | None = None,
-    max_jobs: int | None = None,
     poll_interval_seconds: float = 1.0,
     on_reconnected: Callable[[], None] | None = None,
-    process_idle_signal: Callable[[bool], None] | None = None,
-    namespace_hint_queue: object | None = None,
     namespace_directory: RuntimeNamespaceDirectory | None = None,
     recovery: NamespaceRecovery | None = None,
     announce_worker: bool = True,
     on_progress: Callable[[], None] | None = None,
 ) -> None:
-    concurrency = max(1, min(capacity, max_jobs) if max_jobs is not None else capacity)
-
-    def mark_process_busy() -> None:
-        if process_idle_signal is not None:
-            process_idle_signal(False)
-
-    def mark_process_idle() -> None:
-        if process_idle_signal is not None:
-            process_idle_signal(True)
+    concurrency = max(1, capacity)
 
     if announce_worker:
         await client.register_worker_async(
@@ -199,50 +154,38 @@ async def build_worker_loop(
             daemon=True,
         )
         heartbeat_thread.start()
-    handled_jobs = 0
-    active_tasks: dict[asyncio.Task[None], str] = {}
+    active_tasks: set[asyncio.Task[None]] = set()
     if namespace_directory is None:
         namespace_directory = RuntimeNamespaceDirectory(
             client,
             refresh_seconds=max(poll_interval_seconds, 5.0),
-            namespace_hint_queue=namespace_hint_queue,
         )
-    idle_started = asyncio.get_running_loop().time()
-    mark_process_busy()
 
     async def collect_finished(done: set[asyncio.Task[None]]) -> None:
-        nonlocal handled_jobs, idle_started
         for task in done:
-            namespace = active_tasks.pop(task)
+            active_tasks.discard(task)
             try:
                 task.result()
             except Exception as exc:
                 logger.error("Build job execution failed: %s", exc, exc_info=True)
-            else:
-                handled_jobs += 1
-                idle_started = asyncio.get_running_loop().time()
-                namespace_directory.enqueue_hint(namespace)
         active_job_count = len(active_tasks)
         if active_job_count:
             active_job.set()
-            mark_process_busy()
         else:
             active_job.clear()
-            mark_process_idle()
         await client.heartbeat_worker_async(worker_id=worker_id, active_jobs=active_job_count)
 
     try:
-        while not stop_event.is_set() and (max_jobs is None or handled_jobs < max_jobs):
+        while not stop_event.is_set():
             if on_progress is not None:
                 on_progress()
-            while len(active_tasks) < concurrency and not stop_event.is_set() and (max_jobs is None or handled_jobs + len(active_tasks) < max_jobs):
+            while len(active_tasks) < concurrency and not stop_event.is_set():
                 try:
                     namespace = await namespace_directory.next_namespace()
                     if namespace is None:
                         break
                     if stop_event.is_set():
                         break
-                    mark_process_busy()
                     if recovery is not None:
                         await recovery.reconcile(namespace)
                     claim_started = asyncio.get_running_loop().time()
@@ -262,7 +205,7 @@ async def build_worker_loop(
                             lease_deadline=lease_deadline,
                         )
                     )
-                    active_tasks[task] = namespace
+                    active_tasks.add(task)
                     active_job.set()
                     await client.heartbeat_worker_async(worker_id=worker_id, active_jobs=len(active_tasks))
                 except Exception as exc:
@@ -288,14 +231,7 @@ async def build_worker_loop(
                     await asyncio.gather(stop_task, return_exceptions=True)
                 continue
 
-            mark_process_idle()
-            if idle_exit_seconds is not None:
-                remaining_idle = idle_exit_seconds - (asyncio.get_running_loop().time() - idle_started)
-                if remaining_idle <= 0:
-                    return
-                await _wait_until_stopped(stop_event, min(poll_interval_seconds, remaining_idle))
-            else:
-                await _wait_until_stopped(stop_event, poll_interval_seconds)
+            await _wait_until_stopped(stop_event, poll_interval_seconds)
 
         if active_tasks:
             await asyncio.wait(
@@ -315,7 +251,6 @@ async def build_worker_loop(
             task.cancel()
         if tasks:
             await asyncio.gather(*tasks, return_exceptions=True)
-        mark_process_idle()
         stop_event.set()
         heartbeat_stop.set()
         if heartbeat_thread is not None:
@@ -448,7 +383,3 @@ async def _renew_lease(
             raise BuildJobLeaseLost(f"Build job {job.job_id} lease is no longer active")
         deadline = renewal_started + lease_ttl_seconds
         delay = renewal_seconds
-
-
-def worker_id() -> str:
-    return f"local-worker:{uuid.uuid4()}"

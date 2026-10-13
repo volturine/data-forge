@@ -14,20 +14,17 @@ def domain_token(enum_name: str, number: int) -> str:
 
 
 class DomainEnumValue(str):
-    _token_by_number: ClassVar[dict[int, str]]
     _number_by_token: ClassVar[dict[str, int]]
     _value_by_number: ClassVar[dict[int, Self]]
     _value_by_token: ClassVar[dict[str, Self]]
 
     def __init_subclass__(cls) -> None:
-        cls._token_by_number = {}
         cls._number_by_token = {}
         cls._value_by_number = {}
         cls._value_by_token = {}
 
     def __new__(cls, number: int, token: str) -> Self:
         value = cast(Self, str.__new__(cls, token))
-        cls._token_by_number[number] = token
         cls._number_by_token[token] = number
         cls._value_by_number[number] = value
         cls._value_by_token[token] = value

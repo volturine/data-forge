@@ -23,7 +23,6 @@ def _build() -> RuntimeBuild:
         analysis_name="Analysis",
         namespace="tenant-a",
         starter=schemas.BuildStarter(triggered_by="user"),
-        started_at=datetime.now(UTC),
     )
 
 
@@ -99,8 +98,8 @@ async def test_build_cancellation_hands_off_exact_job_before_joining_thread(monk
 
     monkeypatch.setattr(compute_service, "export_data", export_data)
 
-    async def run_build(*, manager, worker_id, claim, work_semaphore):
-        await compute_service.run_analysis_build_stream(None, manager, _pipeline(), build=_build(), emitter=None)
+    async def run_build(*, manager, worker_id, claim):
+        await compute_service.run_analysis_build_stream(manager, _pipeline(), build=_build(), emitter=None)
 
     monkeypatch.setattr(build_execution, "_run_queued_build_job", run_build)
     claim = ClaimedBuildJob(
@@ -177,7 +176,7 @@ async def test_build_cancelled_before_executor_starts_never_submits_engine_work(
     monkeypatch.setattr(compute_service, "run_compute_in_thread", run_compute)
     export = create_autospec(compute_service.export_data)
     monkeypatch.setattr(compute_service, "export_data", export)
-    task = asyncio.create_task(compute_service.run_analysis_build_stream(None, manager, _pipeline(), build=_build(), emitter=None))
+    task = asyncio.create_task(compute_service.run_analysis_build_stream(manager, _pipeline(), build=_build(), emitter=None))
     try:
         assert await asyncio.to_thread(blocker_started.wait, 5)
         async with asyncio.timeout(5):

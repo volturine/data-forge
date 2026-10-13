@@ -7,7 +7,6 @@ from concurrent.futures import ThreadPoolExecutor
 from dataclasses import replace
 from datetime import UTC, datetime, timedelta
 from pathlib import Path
-from queue import Queue
 from types import SimpleNamespace
 from typing import Any, cast
 
@@ -339,7 +338,6 @@ async def test_compute_recovery_drains_all_pending_namespaces_in_one_poll(monkey
 
 def test_worker_control_rpcs_have_a_short_deadline() -> None:
     calls: list[tuple[str, float]] = []
-    pending_kinds: list[tuple[str, ...]] = []
 
     class Stub:
         def ClaimBuildJob(self, _request, *, timeout, metadata):  # noqa: N802
@@ -351,22 +349,6 @@ def test_worker_control_rpcs_have_a_short_deadline() -> None:
             del metadata
             calls.append(("claim-compute", timeout))
             return worker_runtime_pb2.WorkerClaimComputeRequestResponse()
-
-        def GetQueuedBuildJobCount(self, _request, *, timeout, metadata):  # noqa: N802
-            del metadata
-            calls.append(("queued-count", timeout))
-            return worker_runtime_pb2.CountResponse()
-
-        def ReconcileExpiredBuildJobs(self, _request, *, timeout, metadata):  # noqa: N802
-            del metadata
-            calls.append(("reconcile-build", timeout))
-            return worker_runtime_pb2.CountResponse()
-
-        def ListPendingRuntimeWorkNamespaces(self, request, *, timeout, metadata):  # noqa: N802
-            del metadata
-            calls.append(("pending-namespaces", timeout))
-            pending_kinds.append(tuple(request.kinds))
-            return worker_runtime_pb2.WorkerNamespacesResponse()
 
     client = WorkerRuntimeClient(target="unused:50051", token="token", timeout_seconds=120.0)
     client._stub = Stub()  # type: ignore[assignment]
@@ -380,20 +362,117 @@ def test_worker_control_rpcs_have_a_short_deadline() -> None:
         )
         is None
     )
-    assert client.queued_build_job_count(namespace="default") == 0
-    assert client.reconcile_expired_build_jobs(namespace="default") == 0
-    assert client.pending_runtime_work_namespaces() == []
-    assert client.pending_runtime_work_namespaces(work_kinds=("build",)) == []
+    assert calls == [("claim-build", 15.0), ("claim-compute", 15.0)]
 
-    assert calls == [
-        ("claim-build", 15.0),
-        ("claim-compute", 15.0),
-        ("queued-count", 15.0),
-        ("reconcile-build", 15.0),
-        ("pending-namespaces", 15.0),
-        ("pending-namespaces", 15.0),
-    ]
-    assert pending_kinds == [(), ("build",)]
+
+@pytest.mark.asyncio
+async def test_sync_and_async_claim_transports_share_domain_mapping(monkeypatch) -> None:
+    expires_at = datetime.now(UTC) + timedelta(minutes=5)
+    build_response = worker_runtime_pb2.WorkerClaimBuildJobResponse(
+        job=worker_runtime_pb2.WorkerClaimedBuildJob(
+            job_id="job-1",
+            build_id="build-1",
+            namespace="tenant-a",
+            claim_token="build-token",
+            lease_generation=4,
+            attempt=2,
+            lease_ttl_seconds=300,
+        )
+    )
+    build_response.job.lease_expires_at.CopyFrom(datetime_to_timestamp(expires_at))
+    command = compute_pb2.ComputeCommandEnvelope(
+        kind=enums_pb2.COMPUTE_REQUEST_KIND_PREVIEW,
+        version=1,
+        idempotency_key="key-1",
+        correlation_id="correlation-1",
+        command=compute_pb2.ComputeCommand(),
+    )
+    request_response = worker_runtime_pb2.WorkerClaimComputeRequestResponse(
+        request=worker_runtime_pb2.WorkerClaimedComputeRequest(
+            id="request-1",
+            namespace="tenant-a",
+            command=command,
+            claim_token="compute-token",
+            lease_generation=7,
+            attempt=3,
+            lease_ttl_seconds=300,
+        )
+    )
+    request_response.request.lease_expires_at.CopyFrom(datetime_to_timestamp(expires_at))
+
+    class SyncStub:
+        def ClaimBuildJob(self, request, *, timeout, metadata):  # noqa: N802
+            return build_response
+
+        def ClaimComputeRequest(self, request, *, timeout, metadata):  # noqa: N802
+            return request_response
+
+    class AsyncStub:
+        async def ClaimBuildJob(self, request, *, timeout, metadata):  # noqa: N802
+            return build_response
+
+        async def ClaimComputeRequest(self, request, *, timeout, metadata):  # noqa: N802
+            return request_response
+
+    client = WorkerRuntimeClient(target="unused:50051", token="token")
+    client._stub = SyncStub()  # type: ignore[assignment]
+    monkeypatch.setattr(client, "_async_stubs", lambda: (AsyncStub(), None))
+
+    sync_build = client.claim_build_job(worker_id="worker-1", namespace="tenant-a")
+    async_build = await client.claim_build_job_async(worker_id="worker-1", namespace="tenant-a")
+    sync_compute = client.claim_compute_request(
+        worker_id="worker-1",
+        allowed_kinds=frozenset({enums_pb2.COMPUTE_REQUEST_KIND_PREVIEW}),
+        namespace="tenant-a",
+    )
+    async_compute = await client.claim_compute_request_async(
+        worker_id="worker-1",
+        allowed_kinds=frozenset({enums_pb2.COMPUTE_REQUEST_KIND_PREVIEW}),
+        namespace="tenant-a",
+    )
+
+    assert sync_build is not None and async_build is not None
+    assert (
+        sync_build.job_id,
+        sync_build.build_id,
+        sync_build.namespace,
+        sync_build.claim_token,
+        sync_build.lease_generation,
+        sync_build.lease_expires_at,
+        sync_build.attempt,
+    ) == (
+        async_build.job_id,
+        async_build.build_id,
+        async_build.namespace,
+        async_build.claim_token,
+        async_build.lease_generation,
+        async_build.lease_expires_at,
+        async_build.attempt,
+    )
+    assert sync_compute is not None and async_compute is not None
+    assert (
+        sync_compute.id,
+        sync_compute.namespace,
+        sync_compute.kind,
+        sync_compute.command_envelope,
+        sync_compute.worker_id,
+        sync_compute.claim_token,
+        sync_compute.lease_generation,
+        sync_compute.lease_expires_at,
+        sync_compute.attempt,
+        sync_compute.command_hash,
+    ) == (
+        async_compute.id,
+        async_compute.namespace,
+        async_compute.kind,
+        async_compute.command_envelope,
+        async_compute.worker_id,
+        async_compute.claim_token,
+        async_compute.lease_generation,
+        async_compute.lease_expires_at,
+        async_compute.attempt,
+        async_compute.command_hash,
+    )
 
 
 def test_claim_lease_deadline_uses_remaining_database_expiry() -> None:
@@ -501,10 +580,6 @@ class FakeWorkerRuntimeClient:
         time.sleep(self.claim_delay_seconds)
         return self.jobs.pop(0) if self.jobs else None
 
-    def pending_runtime_work_namespaces(self, *, work_kinds: tuple[str, ...] = ()) -> list[str]:
-        self.calls.append(("pending_runtime_work_namespaces", work_kinds))
-        return ["default"]
-
     def fail_build_job(self, **kwargs) -> bool:
         self.calls.append(("fail_build_job", kwargs))
         return True
@@ -522,27 +597,13 @@ class FakeWorkerRuntimeClient:
             return None
         return 300
 
-    def release_build_worker_jobs(self, **kwargs) -> int:
-        self.calls.append(("release_build_worker_jobs", kwargs))
-        return 0
-
-    def queued_build_job_count(self, **kwargs) -> int:
-        self.calls.append(("queued_build_job_count", kwargs))
-        return 0
-
-    def reconcile_expired_build_jobs(self, **kwargs) -> int:
+    async def reconcile_expired_build_jobs_async(self, **kwargs) -> int:
         self.calls.append(("reconcile_expired_build_jobs", kwargs))
         return 0
 
-    async def reconcile_expired_build_jobs_async(self, **kwargs) -> int:
-        return self.reconcile_expired_build_jobs(**kwargs)
-
-    def reconcile_expired_compute_requests(self, **kwargs) -> int:
+    async def reconcile_expired_compute_requests_async(self, **kwargs) -> int:
         self.calls.append(("reconcile_expired_compute_requests", kwargs))
         return 0
-
-    async def reconcile_expired_compute_requests_async(self, **kwargs) -> int:
-        return self.reconcile_expired_compute_requests(**kwargs)
 
     async def register_worker_async(self, **kwargs) -> None:
         self.register_worker(**kwargs)
@@ -577,10 +638,6 @@ class FakeWorkerRuntimeClient:
 
     async def finalize_build_job_async(self, **kwargs) -> bool:
         return self.finalize_build_job(**kwargs)
-
-    def idle_build_worker_pids(self) -> set[int]:
-        self.calls.append(("idle_build_worker_pids", None))
-        return set()
 
 
 def _load_runtime_process():
@@ -723,102 +780,6 @@ async def test_cancelled_build_only_stops_its_exclusive_engine(monkeypatch) -> N
 
 
 @pytest.mark.asyncio
-async def test_build_waiting_for_worker_admission_does_not_hold_execution_permit() -> None:
-    admission_started = asyncio.Event()
-    release_admission = asyncio.Event()
-    execution_started = asyncio.Event()
-    work_semaphore = asyncio.Semaphore(1)
-
-    class Manager:
-        async def await_engine_request_admission(self, _identity, *, namespace, priority):
-            assert namespace == "default"
-            assert priority == build_execution.COMPUTE_WORKER_ADMISSION_PRIORITY_LIFECYCLE
-            admission_started.set()
-            await release_admission.wait()
-            return True
-
-        def reserve_engine_request(self, _identity, *, namespace):
-            assert namespace == "default"
-
-        def release_engine_request(self, _identity, *, namespace):
-            assert namespace == "default"
-
-        def release_spawn_admission(self, _identity, *, namespace, owned):
-            assert namespace == "default"
-            assert owned is True
-
-    identity = compute_pb2.ComputeWorkerIdentity(
-        scope=enums_pb2.COMPUTE_WORKER_SCOPE_BUILD,
-        reuse_policy=enums_pb2.COMPUTE_WORKER_REUSE_POLICY_EXCLUSIVE,
-        build_id="build-gated",
-        resource_id="build-gated",
-    )
-
-    async def execute_after_admission() -> None:
-        async with build_execution._admitted_build_work_slot(
-            cast(Any, Manager()),
-            identity,
-            namespace="default",
-            work_semaphore=work_semaphore,
-        ):
-            execution_started.set()
-
-    task = asyncio.create_task(execute_after_admission())
-    await asyncio.wait_for(admission_started.wait(), timeout=1)
-
-    # A build parked on worker admission leaves the shared running-work budget
-    # available to unrelated work.
-    assert await asyncio.wait_for(work_semaphore.acquire(), timeout=0.1)
-    work_semaphore.release()
-    release_admission.set()
-    await asyncio.wait_for(execution_started.wait(), timeout=1)
-    await asyncio.wait_for(task, timeout=1)
-
-
-@pytest.mark.asyncio
-async def test_engine_build_does_not_wait_for_duplicate_execution_permit() -> None:
-    execution_started = asyncio.Event()
-    work_semaphore = asyncio.Semaphore(0)
-
-    class Manager:
-        async def await_engine_request_admission(self, _identity, *, namespace, priority):
-            assert namespace == "default"
-            assert priority == build_execution.COMPUTE_WORKER_ADMISSION_PRIORITY_LIFECYCLE
-            return True
-
-        def reserve_engine_request(self, _identity, *, namespace):
-            assert namespace == "default"
-
-        def release_engine_request(self, _identity, *, namespace):
-            assert namespace == "default"
-
-        def release_spawn_admission(self, _identity, *, namespace, owned):
-            assert namespace == "default"
-            assert owned is True
-
-    identity = compute_pb2.ComputeWorkerIdentity(
-        scope=enums_pb2.COMPUTE_WORKER_SCOPE_BUILD,
-        reuse_policy=enums_pb2.COMPUTE_WORKER_REUSE_POLICY_EXCLUSIVE,
-        build_id="build-with-manager-capacity",
-        resource_id="build-with-manager-capacity",
-    )
-
-    async def execute_engine_build() -> None:
-        async with build_execution._admitted_build_work_slot(
-            cast(Any, Manager()),
-            identity,
-            namespace="default",
-            work_semaphore=work_semaphore,
-        ):
-            execution_started.set()
-
-    task = asyncio.create_task(execute_engine_build())
-    await asyncio.wait_for(execution_started.wait(), timeout=1)
-    assert work_semaphore.locked()
-    await asyncio.wait_for(task, timeout=1)
-
-
-@pytest.mark.asyncio
 async def test_build_dispatch_progress_ticks_without_jobs() -> None:
     client = FakeWorkerRuntimeClient()
     stop = asyncio.Event()
@@ -946,11 +907,10 @@ async def test_build_worker_loop_tracks_runtime_worker_lifecycle() -> None:
     )
     stop_event = asyncio.Event()
     seen: list[tuple[str, str]] = []
-    process_idle_states: list[bool] = []
 
     async def run_job(claim: ClaimedBuildJob) -> None:
         seen.append((claim.build_id, claim.namespace))
-        assert process_idle_states[-1] is False
+        assert any(name == "heartbeat_worker" and payload.get("active_jobs") == 1 for name, payload in client.calls if isinstance(payload, dict))
         await asyncio.sleep(0.05)
         stop_event.set()
 
@@ -961,15 +921,15 @@ async def test_build_worker_loop_tracks_runtime_worker_lifecycle() -> None:
             run_job,
             client=cast(WorkerRuntimeClient, client),
             heartbeat_seconds=0.01,
-            process_idle_signal=process_idle_states.append,
             recovery=recovery,
         )
     )
     await asyncio.gather(task)
 
     assert seen == [(job.build_id, "default")]
-    assert process_idle_states[0] is False
-    assert process_idle_states[-1] is True
+    heartbeat_active_jobs = [payload.get("active_jobs") for name, payload in client.calls if name == "heartbeat_worker" and isinstance(payload, dict)]
+    assert 1 in heartbeat_active_jobs
+    assert 0 in heartbeat_active_jobs
     assert (
         "finalize_build_job",
         {
@@ -1001,15 +961,16 @@ async def test_build_claim_rpc_does_not_block_the_runtime_event_loop() -> None:
     loop = asyncio.get_running_loop()
     tick_scheduled = loop.time()
     tick_ran = asyncio.Event()
+    stop_event = asyncio.Event()
     loop.call_later(0.005, tick_ran.set)
+    loop.call_later(0.15, stop_event.set)
     task = asyncio.create_task(
         build_worker_loop(
-            asyncio.Event(),
+            stop_event,
             "manager",
             run_job,
             client=cast(WorkerRuntimeClient, client),
             namespace_directory=cast(Any, Directory()),
-            idle_exit_seconds=0.1,
             poll_interval_seconds=0.05,
             announce_worker=False,
         )
@@ -1020,7 +981,7 @@ async def test_build_claim_rpc_does_not_block_the_runtime_event_loop() -> None:
 
 
 @pytest.mark.asyncio
-async def test_build_worker_loop_exits_after_one_job_when_max_jobs_set() -> None:
+async def test_build_worker_loop_stops_via_stop_event_after_one_job() -> None:
     first = _job()
     second = _job()
     client = FakeWorkerRuntimeClient([first, second])
@@ -1030,8 +991,9 @@ async def test_build_worker_loop_exits_after_one_job_when_max_jobs_set() -> None
     async def run_job(claim: ClaimedBuildJob) -> None:
         assert claim.namespace == "default"
         seen.append(claim.build_id)
+        stop_event.set()
 
-    await build_worker_loop(stop_event, "worker-once", run_job, client=cast(WorkerRuntimeClient, client), max_jobs=1)
+    await build_worker_loop(stop_event, "worker-once", run_job, client=cast(WorkerRuntimeClient, client))
 
     assert len(seen) == 1
 
@@ -1042,6 +1004,7 @@ async def test_build_dispatcher_runs_jobs_concurrently_without_parallel_claimers
     client = FakeWorkerRuntimeClient(jobs)
     all_started = asyncio.Event()
     release = asyncio.Event()
+    stop_event = asyncio.Event()
     active = 0
     peak_active = 0
 
@@ -1053,15 +1016,16 @@ async def test_build_dispatcher_runs_jobs_concurrently_without_parallel_claimers
             all_started.set()
         await release.wait()
         active -= 1
+        if active == 0:
+            stop_event.set()
 
     task = asyncio.create_task(
         build_worker_loop(
-            asyncio.Event(),
+            stop_event,
             "worker-pool",
             run_job,
             client=cast(WorkerRuntimeClient, client),
             capacity=3,
-            max_jobs=3,
             poll_interval_seconds=0.01,
         )
     )
@@ -1086,6 +1050,7 @@ async def test_build_worker_dispatches_claimed_work_to_its_capacity_gate() -> No
     async def run_job(claim: ClaimedBuildJob) -> None:
         seen.append(claim.build_id)
         await release.wait()
+        stop_event.set()
 
     task = asyncio.create_task(
         build_worker_loop(
@@ -1093,7 +1058,6 @@ async def test_build_worker_dispatches_claimed_work_to_its_capacity_gate() -> No
             "worker-capacity",
             run_job,
             client=cast(WorkerRuntimeClient, client),
-            max_jobs=1,
         )
     )
     for _ in range(100):
@@ -1132,27 +1096,34 @@ async def test_build_worker_cancels_claimed_dispatch_when_stopping() -> None:
 
 
 @pytest.mark.asyncio
-async def test_build_worker_loop_uses_manager_namespace_hints_without_scanning() -> None:
+async def test_build_worker_loop_uses_filtered_durable_namespace_directory() -> None:
     job = replace(_job(), namespace="tenant-a")
-    client = FakeWorkerRuntimeClient([job])
-    namespace_hints = Queue()
-    namespace_hints.put("tenant-a")
+    requested_kinds: list[tuple[str, ...]] = []
     seen: list[str] = []
+    stop_event = asyncio.Event()
+
+    class FilteredClient(FakeWorkerRuntimeClient):
+        async def pending_runtime_work_namespaces_async(self, *, work_kinds: tuple[str, ...] = ()) -> list[str]:
+            requested_kinds.append(work_kinds)
+            return ["tenant-a"]
+
+    client = FilteredClient([job])
+    directory = RuntimeNamespaceDirectory(cast(WorkerRuntimeClient, client), work_kinds=("build",))
 
     async def run_job(claim: ClaimedBuildJob) -> None:
         seen.append(claim.namespace)
+        stop_event.set()
 
     await build_worker_loop(
-        asyncio.Event(),
-        "worker-hinted",
+        stop_event,
+        "worker-filtered",
         run_job,
         client=cast(WorkerRuntimeClient, client),
-        max_jobs=1,
-        namespace_hint_queue=namespace_hints,
+        namespace_directory=directory,
     )
 
     assert seen == ["tenant-a"]
-    assert not any(name == "runtime_namespaces" for name, _ in client.calls)
+    assert requested_kinds == [("build",)]
 
 
 @pytest.mark.asyncio
@@ -1186,6 +1157,7 @@ async def test_build_worker_loop_stops_execution_when_lease_is_lost() -> None:
             await asyncio.Event().wait()
         finally:
             execution_stopped.set()
+            stop_event.set()
 
     await build_worker_loop(
         stop_event,
@@ -1193,7 +1165,6 @@ async def test_build_worker_loop_stops_execution_when_lease_is_lost() -> None:
         run_job,
         client=cast(WorkerRuntimeClient, client),
         heartbeat_seconds=0.001,
-        max_jobs=1,
     )
 
     assert execution_stopped.is_set()
@@ -1273,17 +1244,18 @@ async def test_build_worker_loop_does_not_start_after_claim_deadline() -> None:
     client = FakeWorkerRuntimeClient([job])
     client.claim_delay_seconds = 1.05
     started = False
+    stop_event = asyncio.Event()
+    asyncio.get_running_loop().call_later(1.1, stop_event.set)
 
     async def run_job(_claim: ClaimedBuildJob) -> None:
         nonlocal started
         started = True
 
     await build_worker_loop(
-        asyncio.Event(),
+        stop_event,
         "worker-expired-claim",
         run_job,
         client=cast(WorkerRuntimeClient, client),
-        max_jobs=1,
     )
 
     assert started is False
@@ -1292,7 +1264,7 @@ async def test_build_worker_loop_does_not_start_after_claim_deadline() -> None:
 
 
 @pytest.mark.asyncio
-async def test_run_worker_manager_runtime_shares_compute_budget_across_lanes(
+async def test_run_worker_manager_runtime_uses_manager_capacity_for_builds(
     monkeypatch,
 ) -> None:
     coordinator_thread_id = threading.get_ident()
@@ -1382,11 +1354,9 @@ async def test_run_worker_manager_runtime_shares_compute_budget_across_lanes(
     assert [payload["poll_for_work"] for payload in request_lane_kwargs] == [True, True]
     assert [payload["max_concurrency"] for payload in request_lane_kwargs] == [4, 4]
     assert len({id(payload["claim_semaphore"]) for payload in request_lane_kwargs}) == 2
-    shared_compute_budget = request_lane_kwargs[0]["work_semaphore"]
-    assert request_lane_kwargs[1]["work_semaphore"] is None
-    assert "work_semaphore" not in build_calls[0]
+    assert all("work_semaphore" not in payload for payload in request_lane_kwargs)
     build_execution_calls = [payload for name, payload in calls if name == "run_queued_build_job"]
-    assert build_execution_calls[0]["work_semaphore"] is shared_compute_budget
+    assert "work_semaphore" not in build_execution_calls[0]
     assert ("stop_worker", {"worker_id": "manager-1", "timeout_seconds": 2.0}) in client.calls
     stop_thread = next(thread_id for name, thread_id in client.call_threads if name == "stop_worker")
     assert stop_thread == coordinator_thread_id

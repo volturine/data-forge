@@ -9,14 +9,11 @@ from backend_core.exceptions import (
     ComputeError,
     DataSourceError,
     DataSourceValidationError,
-    FileError,
-    FileSizeExceededError,
     PipelineError,
     PipelineExecutionCancelledError,
     PipelineExecutionError,
     analysis_not_found,
     datasource_not_found,
-    job_not_found,
 )
 
 
@@ -90,14 +87,6 @@ class TestExceptions:
         assert isinstance(exc, PipelineExecutionError)
         assert exc.error_code == 'PIPELINE_EXECUTION_ERROR'
 
-    def test_job_not_found_error(self):
-        """Test job_not_found."""
-        exc = job_not_found(job_id='job-123')
-
-        assert 'job-123' in str(exc)
-        assert exc.error_code == 'JOB_NOT_FOUND'
-        assert exc.details['job_id'] == 'job-123'
-
     def test_exception_with_none_details(self):
         """Test exception with None details."""
         exc = AppError(message='Test', error_code='VALIDATION', details=None)
@@ -121,7 +110,6 @@ class TestExceptions:
         assert issubclass(AnalysisError, AppError)
         assert issubclass(ComputeError, AppError)
         assert issubclass(PipelineError, AppError)
-        assert issubclass(FileError, AppError)
 
     def test_exception_with_long_message(self):
         """Test exception with very long message."""
@@ -142,13 +130,3 @@ class TestExceptions:
 
         assert exc.details == details
         assert exc.details['fields']['name'] == ['required', 'min_length']
-
-    def test_file_size_exceeded_error(self):
-        """Test FileSizeExceededError."""
-        exc = FileSizeExceededError(file_size=1000000, max_size=500000)
-
-        assert '1000000' in str(exc)
-        assert '500000' in str(exc)
-        assert exc.error_code == 'FILE_SIZE_EXCEEDED'
-        assert exc.details['file_size'] == 1000000
-        assert exc.details['max_size'] == 500000

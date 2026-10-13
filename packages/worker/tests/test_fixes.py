@@ -30,10 +30,8 @@ from runtime.compute_manager import (
     ProcessManager,
 )
 from runtime.compute_service import ExportDatasourceResult
-from runtime.compute_worker import PolarsComputeWorker
 from runtime.domain.compute import schemas as compute_schemas
 from runtime.domain.compute.base import ComputeWorkerStatusInfo
-from runtime.domain.compute_worker_runs.schemas import ComputeWorkerRunResponseSchema
 from runtime.executors import (
     CLEANUP_EXECUTOR,
     COMPUTE_EXECUTOR,
@@ -43,6 +41,7 @@ from runtime.executors import (
     run_control_in_thread,
     run_engine_io_in_thread,
 )
+from runtime.polars_compute import _build_pipeline_details, classify_engine_error
 from runtime.worker_runtime_client import BackendWorkerRpcError, PendingDatasourceDelete
 
 # ---------------------------------------------------------------------------
@@ -187,7 +186,7 @@ async def test_claim_hash_survives_client_to_dispatcher_handoff(monkeypatch) -> 
         async def claim_compute_request_async(self, **_kwargs):
             return claimed_by_client
 
-    async def execute_request(_claimed, _manager, *, work_semaphore=None) -> None:
+    async def execute_request(_claimed, _manager) -> None:
         return None
 
     async def get_client() -> Client:
@@ -465,7 +464,7 @@ async def test_control_executor_remains_available_when_compute_budget_is_full() 
     await asyncio.gather(*calls)
 
 
-def test_compute_executor_matches_the_single_runtime_work_budget() -> None:
+def test_compute_executor_width_matches_request_dispatcher_width() -> None:
     workers = compute_request_runtime.compute_request_worker_count()
     assert COMPUTE_EXECUTOR._max_workers == workers
     assert ENGINE_IO_EXECUTOR._max_workers == workers
@@ -1022,88 +1021,7 @@ async def test_compute_request_renewal_reports_lost_claim(monkeypatch) -> None:
 
 
 @pytest.mark.asyncio
-async def test_compute_waiting_for_worker_admission_does_not_hold_execution_permit(monkeypatch) -> None:
-    admission_started = asyncio.Event()
-    release_admission = asyncio.Event()
-    execution_started = asyncio.Event()
-    work_semaphore = asyncio.Semaphore(1)
-
-    class _Client:
-        def close(self):
-            pass
-
-        async def renew_compute_request_lease(self, **_kwargs):
-            return None
-
-    class _Manager:
-        async def await_engine_request_admission(self, _identity, *, namespace, priority):
-            assert namespace == "tenant-a"
-            assert priority == compute_request_runtime.COMPUTE_WORKER_ADMISSION_PRIORITY_INTERACTIVE
-            admission_started.set()
-            await release_admission.wait()
-            return True
-
-        def reserve_engine_request(self, _identity, *, namespace):
-            assert namespace == "tenant-a"
-
-        def release_engine_request(self, _identity, *, namespace):
-            assert namespace == "tenant-a"
-
-        async def await_engine_job_slot(self, _identity, *, namespace):
-            assert namespace == "tenant-a"
-
-        def release_engine_job_slot(self, _identity, *, namespace):
-            assert namespace == "tenant-a"
-
-        def release_spawn_admission(self, _identity, *, namespace, owned: bool) -> None:
-            assert namespace == "tenant-a"
-            assert owned is True
-
-    async def keep_lease_alive(_claimed, *, stop_event: asyncio.Event, lease_confirmed: asyncio.Event) -> None:
-        lease_confirmed.set()
-        await stop_event.wait()
-
-    async def run_in_thread(function, *args, **kwargs) -> None:
-        del kwargs
-        function(*args)
-
-    monkeypatch.setattr(compute_request_runtime, "worker_runtime_client", lambda: _Client())
-    monkeypatch.setattr(compute_request_runtime, "_renew_compute_lease", keep_lease_alive)
-    monkeypatch.setattr(compute_request_runtime, "run_compute_in_thread", run_in_thread)
-    monkeypatch.setattr(
-        compute_request_runtime,
-        "_execute_request_sync",
-        lambda *_args: execution_started.set(),
-    )
-    claimed = compute_request_runtime.ClaimedComputeRequest(
-        id="req-admission-permit",
-        namespace="tenant-a",
-        kind=enums_pb2.COMPUTE_REQUEST_KIND_PREVIEW,
-        worker_id="worker-test",
-        claim_token="claim-test",
-        lease_generation=1,
-        lease_ttl_seconds=300,
-        command_envelope=_preview_command_envelope(request_id="req-admission-permit"),
-    )
-
-    task = asyncio.create_task(
-        compute_request_runtime._execute_request(
-            claimed,
-            cast(Any, _Manager()),
-            work_semaphore=work_semaphore,
-        )
-    )
-    await asyncio.wait_for(admission_started.wait(), timeout=1)
-    assert await asyncio.wait_for(work_semaphore.acquire(), timeout=0.1)
-    work_semaphore.release()
-    release_admission.set()
-    await asyncio.wait_for(execution_started.wait(), timeout=1)
-    await asyncio.wait_for(task, timeout=1)
-
-
-@pytest.mark.asyncio
-async def test_same_engine_waiter_does_not_hold_global_permit_or_overtake_other_engine(monkeypatch) -> None:
-    work_semaphore = asyncio.Semaphore(2)
+async def test_same_engine_waiter_does_not_overtake_other_engine(monkeypatch) -> None:
     first_started = asyncio.Event()
     second_started = asyncio.Event()
     third_started = asyncio.Event()
@@ -1173,11 +1091,11 @@ async def test_same_engine_waiter_does_not_hold_global_permit_or_overtake_other_
         )
 
     manager = cast(Any, _Manager())
-    first = asyncio.create_task(compute_request_runtime._execute_request(claim("same-rid-first", "analysis-shared"), manager, work_semaphore=work_semaphore))
+    first = asyncio.create_task(compute_request_runtime._execute_request(claim("same-rid-first", "analysis-shared"), manager))
     await asyncio.wait_for(first_started.wait(), timeout=1)
-    second = asyncio.create_task(compute_request_runtime._execute_request(claim("same-rid-second", "analysis-shared"), manager, work_semaphore=work_semaphore))
+    second = asyncio.create_task(compute_request_runtime._execute_request(claim("same-rid-second", "analysis-shared"), manager))
     await asyncio.sleep(0)
-    third = asyncio.create_task(compute_request_runtime._execute_request(claim("other-rid", "analysis-other"), manager, work_semaphore=work_semaphore))
+    third = asyncio.create_task(compute_request_runtime._execute_request(claim("other-rid", "analysis-other"), manager))
     try:
         await asyncio.wait_for(third_started.wait(), timeout=1)
         assert not second_started.is_set()
@@ -1189,8 +1107,7 @@ async def test_same_engine_waiter_does_not_hold_global_permit_or_overtake_other_
 
 
 @pytest.mark.asyncio
-async def test_compute_capacity_race_releases_permit_before_rejoining_admission(monkeypatch) -> None:
-    work_semaphore = asyncio.Semaphore(1)
+async def test_compute_capacity_race_releases_manager_admission_before_retry(monkeypatch) -> None:
     race_wait_started = asyncio.Event()
     race_wait_release = asyncio.Event()
     admissions = 0
@@ -1239,9 +1156,9 @@ async def test_compute_capacity_race_releases_permit_before_rejoining_admission(
         function(*args)
 
     async def wait_after_capacity_race(_manager) -> None:
-        # The failed attempt has already released its permit and manager slot.
-        assert await asyncio.wait_for(work_semaphore.acquire(), timeout=0.1)
-        work_semaphore.release()
+        # The failed attempt has already returned its manager admission.
+        assert admissions == 1
+        assert releases == 1
         race_wait_started.set()
         await race_wait_release.wait()
 
@@ -1261,13 +1178,7 @@ async def test_compute_capacity_race_releases_permit_before_rejoining_admission(
         command_envelope=_preview_command_envelope(request_id="req-capacity-race"),
     )
 
-    task = asyncio.create_task(
-        compute_request_runtime._execute_request(
-            claimed,
-            cast(Any, _Manager()),
-            work_semaphore=work_semaphore,
-        )
-    )
+    task = asyncio.create_task(compute_request_runtime._execute_request(claimed, cast(Any, _Manager())))
     await asyncio.wait_for(race_wait_started.wait(), timeout=1)
     assert admissions == 1
     assert releases == 1
@@ -1276,86 +1187,6 @@ async def test_compute_capacity_race_releases_permit_before_rejoining_admission(
     assert admissions == 2
     assert releases == 2
     assert executions == 2
-
-
-@pytest.mark.asyncio
-async def test_cancelled_compute_holds_permit_until_executor_thread_stops(monkeypatch) -> None:
-    thread_started = threading.Event()
-    release_thread = threading.Event()
-    work_semaphore = asyncio.Semaphore(1)
-    admission_released = asyncio.Event()
-
-    class _Manager:
-        async def await_engine_request_admission(self, _identity, *, namespace, priority):
-            assert namespace == "tenant-a"
-            return False
-
-        def reserve_engine_request(self, _identity, *, namespace):
-            assert namespace == "tenant-a"
-
-        def release_engine_request(self, _identity, *, namespace):
-            assert namespace == "tenant-a"
-
-        async def await_engine_job_slot(self, _identity, *, namespace):
-            assert namespace == "tenant-a"
-
-        def release_engine_job_slot(self, _identity, *, namespace):
-            assert namespace == "tenant-a"
-
-        def release_spawn_admission(self, _identity, *, namespace, owned: bool) -> None:
-            assert namespace == "tenant-a"
-            assert owned is False
-            admission_released.set()
-
-    class _Client:
-        def close(self):
-            pass
-
-    async def keep_lease_alive(_claimed, *, stop_event: asyncio.Event, lease_confirmed: asyncio.Event) -> None:
-        lease_confirmed.set()
-        await stop_event.wait()
-
-    def blocking_execution(*_args) -> None:
-        thread_started.set()
-        release_thread.wait()
-
-    monkeypatch.setattr(compute_request_runtime, "worker_runtime_client", lambda: _Client())
-    monkeypatch.setattr(compute_request_runtime, "_renew_compute_lease", keep_lease_alive)
-    monkeypatch.setattr(compute_request_runtime, "_execute_request_sync", blocking_execution)
-    claimed = compute_request_runtime.ClaimedComputeRequest(
-        id="req-cancel-running",
-        namespace="tenant-a",
-        kind=enums_pb2.COMPUTE_REQUEST_KIND_PREVIEW,
-        worker_id="worker-test",
-        claim_token="claim-test",
-        lease_generation=1,
-        lease_ttl_seconds=300,
-        command_envelope=_preview_command_envelope(request_id="req-cancel-running"),
-    )
-
-    task = asyncio.create_task(
-        compute_request_runtime._execute_request(
-            claimed,
-            cast(Any, _Manager()),
-            work_semaphore=work_semaphore,
-        )
-    )
-    try:
-        assert await asyncio.wait_for(asyncio.to_thread(thread_started.wait, 2), timeout=3)
-        task.cancel()
-        await asyncio.sleep(0.05)
-        assert not task.done()
-        assert not admission_released.is_set()
-        with pytest.raises(TimeoutError):
-            await asyncio.wait_for(work_semaphore.acquire(), timeout=0.05)
-    finally:
-        release_thread.set()
-
-    with pytest.raises(asyncio.CancelledError):
-        await task
-    await asyncio.wait_for(admission_released.wait(), timeout=1)
-    assert await asyncio.wait_for(work_semaphore.acquire(), timeout=1)
-    work_semaphore.release()
 
 
 @pytest.mark.asyncio
@@ -1654,13 +1485,7 @@ async def test_lease_loss_releases_engine_lane_acquired_in_same_turn(monkeypatch
         command_envelope=_preview_command_envelope(request_id="req-engine-lane-handoff"),
     )
 
-    task = asyncio.create_task(
-        compute_request_runtime._execute_request(
-            claimed,
-            cast(Any, manager),
-            work_semaphore=asyncio.Semaphore(0),
-        )
-    )
+    task = asyncio.create_task(compute_request_runtime._execute_request(claimed, cast(Any, manager)))
     try:
         await asyncio.wait_for(job_slot_started.wait(), timeout=1)
         await asyncio.wait_for(renewal_ready.wait(), timeout=1)
@@ -1784,111 +1609,6 @@ async def test_parent_cancellation_releases_rid_slot_acquired_before_handoff(mon
 
     assert not engine_job_locked
     assert request_reservations == 0
-
-
-@pytest.mark.asyncio
-async def test_lease_loss_releases_work_permit_acquired_in_same_turn(monkeypatch) -> None:
-    permit_waiting = asyncio.Event()
-    renewal_ready = asyncio.Event()
-    acquire = asyncio.Event()
-    request_reservations = 0
-    engine_job_locked = False
-
-    class TrackedSemaphore(asyncio.Semaphore):
-        async def acquire(self) -> bool:
-            permit_waiting.set()
-            return await super().acquire()
-
-    work_semaphore = TrackedSemaphore(0)
-
-    class _Manager:
-        async def await_engine_request_admission(self, _identity, *, namespace, priority):
-            assert namespace == "tenant-a"
-            nonlocal request_reservations
-            request_reservations += 1
-            return False
-
-        def release_spawn_admission(self, _identity, *, namespace, owned):
-            assert namespace == "tenant-a"
-            assert owned is False
-
-        async def await_engine_job_slot(self, _identity, *, namespace):
-            assert namespace == "tenant-a"
-            nonlocal engine_job_locked
-            engine_job_locked = True
-
-        def release_engine_job_slot(self, _identity, *, namespace):
-            assert namespace == "tenant-a"
-            nonlocal engine_job_locked
-            assert engine_job_locked
-            engine_job_locked = False
-
-        def release_engine_request(self, _identity, *, namespace):
-            assert namespace == "tenant-a"
-            nonlocal request_reservations
-            request_reservations -= 1
-
-        def cancel_engine_job(self, _identity, *, namespace, job_id):
-            assert namespace == "tenant-a"
-            assert job_id == "req-work-permit-handoff"
-
-        def shutdown_compute_worker_after_request_lease_loss(self, _identity, *, namespace):
-            assert namespace == "tenant-a"
-
-    async def lose_lease(_claimed, *, stop_event, lease_confirmed):
-        del stop_event
-        lease_confirmed.set()
-        renewal_ready.set()
-        await acquire.wait()
-        raise compute_request_runtime.ComputeRequestLeaseLost("lease lost during work permit acquisition")
-
-    async def block_execution(_function, *_args, **_kwargs):
-        await asyncio.Future()
-
-    manager = _Manager()
-    monkeypatch.setattr(compute_request_runtime, "_renew_compute_lease", lose_lease)
-    monkeypatch.setattr(compute_request_runtime, "run_compute_in_thread", block_execution)
-    claimed = compute_request_runtime.ClaimedComputeRequest(
-        id="req-work-permit-handoff",
-        namespace="tenant-a",
-        kind=enums_pb2.COMPUTE_REQUEST_KIND_PREVIEW,
-        worker_id="worker-test",
-        claim_token="claim-test",
-        lease_generation=1,
-        lease_ttl_seconds=300,
-        command_envelope=_preview_command_envelope(request_id="req-work-permit-handoff"),
-    )
-
-    task = asyncio.create_task(
-        compute_request_runtime._execute_request(
-            claimed,
-            cast(Any, manager),
-            work_semaphore=work_semaphore,
-        )
-    )
-    try:
-        await asyncio.wait_for(permit_waiting.wait(), timeout=1)
-        await asyncio.wait_for(renewal_ready.wait(), timeout=1)
-        # Wake both child acquisitions before the parent consumes either
-        # result, reproducing lease loss during ownership handoff.
-        work_semaphore.release()
-        acquire.set()
-
-        with pytest.raises(
-            compute_request_runtime.ComputeRequestLeaseLost,
-            match="lease lost during work permit acquisition",
-        ):
-            await asyncio.wait_for(task, timeout=1)
-
-        assert not engine_job_locked
-        assert request_reservations == 0
-        assert await asyncio.wait_for(work_semaphore.acquire(), timeout=1)
-        work_semaphore.release()
-    finally:
-        acquire.set()
-        if not task.done():
-            task.cancel()
-            await asyncio.gather(task, return_exceptions=True)
 
 
 @pytest.mark.asyncio
@@ -2364,7 +2084,6 @@ async def test_run_analysis_build_stream_shuts_down_build_engine_after_completio
         analysis_name="Analysis 1",
         namespace="default",
         starter=compute_schemas.BuildStarter(triggered_by="user"),
-        started_at=datetime.now(UTC),
     )
     events: list[compute_schemas.BuildEvent] = []
     shutdown_calls: list[str] = []
@@ -2377,7 +2096,6 @@ async def test_run_analysis_build_stream_shuts_down_build_engine_after_completio
             datasource_name="output_table",
             result_meta={},
             source_datasource_id="source-1",
-            compute_worker_run_id="run-1",
         )
 
     monkeypatch.setattr(compute_service, "export_data", fake_export_data)
@@ -2393,69 +2111,16 @@ async def test_run_analysis_build_stream_shuts_down_build_engine_after_completio
         events.append(event)
 
     result = await compute_service.run_analysis_build_stream(
-        session=None,
         manager=manager,
         pipeline=pipeline,
         build=build,
         emitter=emitter,
-        triggered_by="user",
     )
 
     assert result["analysis_id"] == "analysis-1"
     assert seen_engine_identities == ["build-1"]
     assert shutdown_calls == ["build-1"]
     assert events[-1].type == compute_schemas.BuildEventType.COMPLETE
-
-
-# ---------------------------------------------------------------------------
-# ComputeWorkerRunResponseSchema.progress default
-# ---------------------------------------------------------------------------
-
-
-class TestComputeWorkerRunProgressDefault:
-    def test_progress_defaults_to_zero(self):
-        """progress: float = 0.0 means NULL from DB should not crash."""
-        data = {
-            "id": "run-1",
-            "namespace": "default",
-            "analysis_id": None,
-            "datasource_id": "ds-1",
-            "kind": "preview",
-            "status": "success",
-            "request_json": {},
-            "result_json": None,
-            "error_message": None,
-            "created_at": "2024-01-01T00:00:00",
-            "completed_at": None,
-            "duration_ms": None,
-            "step_timings": {},
-            "query_plan": None,
-            "current_step": None,
-        }
-        schema = ComputeWorkerRunResponseSchema.model_validate(data)
-        assert schema.progress == 0.0
-
-    def test_progress_explicit_value(self):
-        data = {
-            "id": "run-2",
-            "namespace": "default",
-            "analysis_id": None,
-            "datasource_id": "ds-1",
-            "kind": "preview",
-            "status": "success",
-            "request_json": {},
-            "result_json": None,
-            "error_message": None,
-            "created_at": "2024-01-01T00:00:00",
-            "completed_at": None,
-            "duration_ms": None,
-            "step_timings": {},
-            "query_plan": None,
-            "progress": 0.75,
-            "current_step": "filter",
-        }
-        schema = ComputeWorkerRunResponseSchema.model_validate(data)
-        assert schema.progress == 0.75
 
 
 # ---------------------------------------------------------------------------
@@ -3257,7 +2922,7 @@ class TestStepTimingLabels:
     def test_missing_object_store_metadata_is_datasource_metadata_missing(self):
         error = RuntimeError("AWS Error NO_SUCH_KEY during GetObject operation: The specified key does not exist.")
 
-        error_kind, error_details = PolarsComputeWorker._classify_engine_error(error)
+        error_kind, error_details = classify_engine_error(error)
 
         assert error_kind == "datasource_metadata_missing"
         assert error_details == {}
@@ -3282,7 +2947,7 @@ class TestStepTimingLabels:
                     "depends_on": [],
                 },
             ]
-            _, timings, _plan_frames, _read_duration_ms = PolarsComputeWorker._build_pipeline(config, steps, "job-1")
+            _, timings, _plan_frames, _read_duration_ms = _build_pipeline_details(config, steps, "job-1")
             assert "select" in timings
             assert "id-abc123" not in timings
         finally:
@@ -3306,7 +2971,7 @@ class TestStepTimingLabels:
                     "depends_on": ["id-1"],
                 },
             ]
-            _, timings, _plan_frames, _read_duration_ms = PolarsComputeWorker._build_pipeline(config, steps, "job-2")
+            _, timings, _plan_frames, _read_duration_ms = _build_pipeline_details(config, steps, "job-2")
             assert "select" in timings
             assert "select_2" in timings
         finally:

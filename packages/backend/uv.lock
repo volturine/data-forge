@@ -1,5 +1,5 @@
 version = 1
-revision = 3
+revision = 5
 requires-python = ">=3.14"
 resolution-markers = [
     "python_full_version >= '3.15'",
@@ -682,34 +682,30 @@ dependencies = [
     { name = "croniter" },
     { name = "cryptography" },
     { name = "fastapi" },
-    { name = "fsspec" },
     { name = "grpcio" },
     { name = "httpx" },
     { name = "jsonschema" },
     { name = "miniopy-async" },
-    { name = "openpyxl" },
-    { name = "polars", extra = ["rtcompat"] },
     { name = "protobuf" },
     { name = "protovalidate" },
-    { name = "psutil" },
     { name = "psycopg", extra = ["binary"] },
     { name = "pydantic" },
     { name = "pydantic-settings" },
-    { name = "pyiceberg", extra = ["pyarrow"] },
     { name = "python-multipart" },
-    { name = "requests" },
     { name = "sqlalchemy" },
     { name = "sqlmodel" },
     { name = "uvicorn" },
     { name = "websockets" },
-    { name = "xlsxwriter" },
 ]
 
 [package.dev-dependencies]
 dev = [
     { name = "fastexcel" },
     { name = "mypy" },
+    { name = "openpyxl" },
     { name = "polars", extra = ["rtcompat"] },
+    { name = "psutil" },
+    { name = "pyiceberg", extra = ["pyarrow"] },
     { name = "pytest" },
     { name = "pytest-asyncio" },
     { name = "pytest-cov" },
@@ -720,6 +716,7 @@ dev = [
     { name = "types-jsonschema" },
     { name = "types-openpyxl" },
     { name = "types-protobuf" },
+    { name = "xlsxwriter" },
 ]
 
 [package.metadata]
@@ -730,34 +727,30 @@ requires-dist = [
     { name = "croniter", specifier = ">=6.2.4" },
     { name = "cryptography", specifier = ">=46.0.6" },
     { name = "fastapi", specifier = ">=0.136.3" },
-    { name = "fsspec", specifier = ">=2026.7.0" },
     { name = "grpcio", specifier = ">=1.83.0" },
     { name = "httpx", specifier = ">=0.28.1" },
     { name = "jsonschema", specifier = ">=4.0.0" },
     { name = "miniopy-async", specifier = ">=1.23.5" },
-    { name = "openpyxl", specifier = ">=3.1.5" },
-    { name = "polars", extras = ["rtcompat"], specifier = ">=1.41.2" },
     { name = "protobuf", specifier = ">=7.36.0" },
     { name = "protovalidate", specifier = ">=2.0.0" },
-    { name = "psutil", specifier = ">=7.2.2" },
     { name = "psycopg", extras = ["binary"], specifier = ">=3.3.3" },
     { name = "pydantic", specifier = ">=2.12" },
     { name = "pydantic-settings", specifier = ">=2.14.1" },
-    { name = "pyiceberg", extras = ["pyarrow"], specifier = ">=0.7.0" },
     { name = "python-multipart" },
-    { name = "requests", specifier = ">=2.34.2" },
     { name = "sqlalchemy", specifier = ">=2.0.52" },
     { name = "sqlmodel", specifier = ">=0.0.24" },
     { name = "uvicorn", specifier = ">=0.49.0" },
     { name = "websockets", specifier = ">=16.0" },
-    { name = "xlsxwriter", specifier = ">=3.2.9" },
 ]
 
 [package.metadata.requires-dev]
 dev = [
     { name = "fastexcel", specifier = ">=0.21.0" },
     { name = "mypy", specifier = ">=2.3.1" },
+    { name = "openpyxl", specifier = ">=3.1.5" },
     { name = "polars", extras = ["rtcompat"], specifier = ">=1.41.2" },
+    { name = "psutil", specifier = ">=7.2.2" },
+    { name = "pyiceberg", extras = ["pyarrow"], specifier = ">=0.7.0" },
     { name = "pytest", specifier = ">=9.1.1" },
     { name = "pytest-asyncio", specifier = ">=1.4.0" },
     { name = "pytest-cov", specifier = ">=7.1.0" },
@@ -768,6 +761,7 @@ dev = [
     { name = "types-jsonschema", specifier = ">=4.26.0.20260518" },
     { name = "types-openpyxl", specifier = ">=3.1.5.20260807" },
     { name = "types-protobuf", specifier = ">=7.34.1.20260518" },
+    { name = "xlsxwriter", specifier = ">=3.2.9" },
 ]
 
 [[package]]

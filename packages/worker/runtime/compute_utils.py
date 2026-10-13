@@ -24,6 +24,33 @@ def _build_step_map(steps: list[dict]) -> dict[str, dict]:
     return {str(s["id"]): s for s in steps if s.get("id")}
 
 
+def _nearest_applied_ancestor(step_id: str, step_map: dict[str, dict], applied_ids: set[str]) -> str | None:
+    step = step_map.get(step_id)
+    if step is None:
+        return None
+
+    dependencies = step.get("depends_on") or []
+    if not dependencies or not dependencies[0]:
+        return None
+
+    parent_id = str(dependencies[0])
+    seen: set[str] = set()
+    while parent_id not in applied_ids:
+        if parent_id in seen:
+            return None
+        seen.add(parent_id)
+
+        parent = step_map.get(parent_id)
+        if parent is None:
+            return None
+        dependencies = parent.get("depends_on") or []
+        if not dependencies or not dependencies[0]:
+            return None
+        parent_id = str(dependencies[0])
+
+    return parent_id
+
+
 def apply_steps(steps: list[dict]) -> list[dict]:
     applied = [step for step in steps if is_step_applied(step)]
     if not applied:
@@ -33,31 +60,13 @@ def apply_steps(steps: list[dict]) -> list[dict]:
 
     applied_ids = {str(s["id"]) for s in applied if s.get("id")}
 
-    def resolve_parent(step_id: str, seen: set[str] | None = None) -> str | None:
-        step = step_map.get(step_id)
-        if not step:
-            return None
-        deps = step.get("depends_on") or []
-        if not deps:
-            return None
-        parent_id = deps[0]
-        if not parent_id:
-            return None
-        parent_id = str(parent_id)
-        if parent_id in applied_ids:
-            return parent_id
-        visited = seen or set()
-        if parent_id in visited:
-            return None
-        return resolve_parent(parent_id, visited | {parent_id})
-
     next_steps: list[dict] = []
     for step in applied:
         step_id = step.get("id")
         if not step_id:
             next_steps.append(step)
             continue
-        parent_id = resolve_parent(str(step_id))
+        parent_id = _nearest_applied_ancestor(str(step_id), step_map, applied_ids)
         if parent_id:
             next_steps.append({**step, "depends_on": [parent_id]})
             continue
@@ -78,28 +87,8 @@ def resolve_applied_target(steps: list[dict], target_step_id: str) -> str:
     if is_step_applied(step_map[target_step_id]):
         return target_step_id
 
-    current: str | None = target_step_id
-    seen: set[str] = set()
-    while True:
-        if current is None:
-            return "source"
-        step = step_map.get(current)
-        if not step:
-            return "source"
-        deps = step.get("depends_on") or []
-        if not deps:
-            return "source"
-        parent = deps[0]
-        if not parent:
-            return "source"
-        parent_id = str(parent)
-        if parent_id in seen:
-            return "source"
-        seen.add(parent_id)
-        parent_step = step_map.get(parent_id)
-        if parent_step and is_step_applied(parent_step):
-            return parent_id
-        current = parent_id
+    applied_ids = {step_id for step_id, step in step_map.items() if is_step_applied(step)}
+    return _nearest_applied_ancestor(target_step_id, step_map, applied_ids) or "source"
 
 
 def _compute_worker_result_to_dict(result: ComputeWorkerResult) -> dict[str, Any]:
@@ -134,14 +123,6 @@ def await_compute_worker_result(engine: ComputeWorker, job_id: str | None = None
         result = engine.get_result(timeout=0.1, job_id=job_id)
         if result is not None:
             return _compute_worker_result_to_dict(result)
-
-
-def build_datasource_config(datasource, overrides: dict | None = None) -> dict:
-    return {
-        "source_type": datasource.source_type,
-        **datasource.config,
-        **(overrides or {}),
-    }
 
 
 def normalize_timezones(lf: pl.LazyFrame, schema: pl.Schema | None = None) -> pl.LazyFrame:

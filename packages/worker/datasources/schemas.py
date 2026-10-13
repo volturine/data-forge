@@ -8,46 +8,7 @@ serialized to protocol payloads for compute responses and publication RPCs only.
 
 from __future__ import annotations
 
-from datetime import datetime
-from typing import Any
-
 from pydantic import BaseModel, ConfigDict
-
-
-class CSVOptions(BaseModel):
-    model_config = ConfigDict(from_attributes=True)
-
-    delimiter: str = ","
-    quote_char: str = '"'
-    has_header: bool = True
-    skip_rows: int = 0
-    encoding: str = "utf8"
-
-
-class DataSourceDescriptionModel(BaseModel):
-    @classmethod
-    def normalize_description(cls, value: str | None) -> str | None:
-        if value is None:
-            return None
-        if value.strip() == "":
-            return None
-        return value
-
-
-class DataSourceRecord(BaseModel):
-    model_config = ConfigDict(from_attributes=True)
-
-    id: str
-    name: str
-    description: str | None = None
-    source_type: str
-    config: dict[str, Any]
-    schema_cache: dict[str, Any] | None = None
-    created_by_analysis_id: str | None = None
-    created_by: str = "import"
-    is_hidden: bool = False
-    created_at: datetime | None = None
-    output_of_tab_id: str | None = None
 
 
 class SnapshotPreview(BaseModel):

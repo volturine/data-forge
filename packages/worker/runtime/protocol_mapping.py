@@ -1,4 +1,4 @@
-from datetime import UTC, datetime
+from datetime import datetime
 from typing import Any, cast
 
 from google.protobuf import json_format, struct_pb2, timestamp_pb2
@@ -90,22 +90,4 @@ def schema_info_payload(value: datasource_pb2.SchemaInfo) -> dict[str, object]:
         payload["row_count"] = value.row_count
     if value.sheet_names:
         payload["sheet_names"] = list(value.sheet_names)
-    return payload
-
-
-def datasource_record_payload(message: datasource_pb2.DataSourceRecord) -> dict[str, object]:
-    payload: dict[str, object] = {
-        "id": message.id,
-        "name": message.name,
-        "source_type": proto_value_to_enum_name(enums_pb2.DataSourceType, "DATA_SOURCE_TYPE", message.source_type),
-        "config": struct_to_dict(message.config),
-        "created_by": proto_value_to_enum_name(enums_pb2.DataSourceCreatedBy, "DATA_SOURCE_CREATED_BY", message.created_by),
-        "is_hidden": message.is_hidden,
-        "schema_cache": schema_info_payload(message.schema_info) if message.HasField("schema_info") else None,
-    }
-    for field in ("description", "created_by_analysis_id", "output_of_tab_id"):
-        if message.HasField(field):
-            payload[field] = getattr(message, field)
-    if message.HasField("created_at"):
-        payload["created_at"] = message.created_at.ToDatetime(tzinfo=UTC)
     return payload

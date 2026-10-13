@@ -31,14 +31,7 @@ def get_registry(app: FastAPI) -> list[MCPToolDefinition]:
     """Return cached tool registry, building on first call."""
     if not hasattr(app.state, 'mcp_registry'):
         app.state.mcp_registry = build_tool_registry(app)
-    registry = app.state.mcp_registry
-    if not isinstance(registry, list):
-        app.state.mcp_registry = []
-        registry = app.state.mcp_registry
-    elif any(not isinstance(item, MCPToolDefinition) for item in registry):
-        registry = [MCPToolDefinition.coerce(item) for item in registry]
-        app.state.mcp_registry = registry
-    return registry
+    return app.state.mcp_registry
 
 
 def _resolve_tool(app: FastAPI, tool_id: str, args: dict) -> tuple[MCPToolDefinition, bool, list[dict], dict]:
@@ -146,5 +139,5 @@ def capabilities(request: Request, body: CapabilitiesRequest, user: User = Depen
     """Return per-tool schema support status for all or a subset of tools."""
     del user
     registry = get_registry(request.app)
-    tools = registry if not body.tool_ids else [t for t in registry if t['id'] in body.tool_ids]
+    tools = registry if not body.tool_ids else [t for t in registry if t.id in body.tool_ids]
     return [tool.capability_report() for tool in tools]

@@ -43,9 +43,6 @@ class DispatcherHealth:
         self._running = False
         self.registration_changed(False)
 
-    def failed(self, lane: str) -> None:
-        self._progress[lane] = None
-
     def snapshot(self) -> dict[str, object]:
         now = self._clock()
         ages = {lane: now - stamp if stamp is not None else None for lane, stamp in self._progress.items()}

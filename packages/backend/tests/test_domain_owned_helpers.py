@@ -272,7 +272,6 @@ def test_build_run_owns_terminal_event_updates() -> None:
     )
 
     assert BuildRun.terminal_status_for_event(event) == BuildRunStatus.CANCELLED
-    assert BuildRun.terminal_update_values(event) is not None
     assert run.apply_terminal_event(event) is True
     assert run.status == BuildRunStatus.CANCELLED
     assert run.error_message == 'Build cancelled'

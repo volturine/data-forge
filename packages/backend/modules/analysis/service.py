@@ -39,7 +39,6 @@ from backend_core.settings_store import (
 from backend_core.sqlmodel_typing import col, sa
 from dataforge_protocol import enums_pb2
 from modules.analysis import revisions
-from modules.analysis.pipeline_compiler import compile_step
 from modules.analysis.schemas import (
     AnalysisCreateSchema,
     AnalysisGalleryItemSchema,
@@ -51,6 +50,7 @@ from modules.analysis.schemas import (
     ImportAnalysisSchema,
     TabSchema,
 )
+from modules.analysis.step_schemas import normalize_step_config
 from modules.analysis.templates import get_template, list_templates
 from modules.analysis_versions import service as version_service
 
@@ -466,11 +466,9 @@ def _validate_analysis_payload(
     for tab in tabs_payload:
         step_ids: set[str] = set()
         for step in tab.steps:
-            step.config = compile_step(
-                step_id=step.id,
-                step_type=step.type,
-                config=step.config,
-            )
+            if not step.id.strip():
+                raise ValueError('Pipeline step id is required')
+            step.config = normalize_step_config(step.type, step.config)
             if step.id:
                 step_ids.add(step.id)
             for dep_id in step.depends_on:

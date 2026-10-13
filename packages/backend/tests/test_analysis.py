@@ -218,6 +218,35 @@ class TestAnalysisCreate:
         assert 'datasource_ids' not in result['pipeline_definition']
         assert result['pipeline_definition']['tabs'][0]['datasource']['id'] == sample_datasource.id
 
+    def test_validate_analysis_rejects_blank_step_id_before_normalizing_config(self, client, sample_datasource: DataSource):
+        payload = {
+            'name': 'Blank Step ID',
+            'tabs': [
+                {
+                    'id': 'tab1',
+                    'name': 'Source',
+                    'parent_id': None,
+                    'datasource': {
+                        'id': sample_datasource.id,
+                        'analysis_tab_id': None,
+                        'config': {'branch': 'master'},
+                    },
+                    'output': {
+                        'result_id': str(uuid.uuid4()),
+                        'datasource_type': 'iceberg',
+                        'format': 'parquet',
+                        'filename': 'blank_step_id',
+                    },
+                    'steps': [{'id': '   ', 'type': 'select', 'config': {'columns': 'not-a-list'}}],
+                },
+            ],
+        }
+
+        response = client.post('/api/v1/analysis/validate', json=payload)
+
+        assert response.status_code == 400
+        assert response.json()['detail'] == 'Pipeline step id is required'
+
     def test_create_analysis_with_multiple_datasources(self, client, sample_datasources: list[DataSource]):
         datasource_ids = [ds.id for ds in sample_datasources]
 
@@ -1680,7 +1709,7 @@ class TestUpdateStep:
 
     def test_update_step_not_found(self, client, sample_analysis: Analysis):
         tab_id = sample_analysis.pipeline_definition['tabs'][0]['id']
-        payload = {'config': {'n': 10}}
+        payload = {'config': {'columns': 'not-a-list'}}
 
         response = client.put(
             f'/api/v1/analysis/{sample_analysis.id}/tabs/{tab_id}/steps/nonexistent',
@@ -1688,6 +1717,7 @@ class TestUpdateStep:
         )
 
         assert response.status_code == 400
+        assert response.json()['detail'] == 'Step nonexistent not found'
 
     def test_update_step_invalid_type(self, client, sample_analysis: Analysis):
         tab_id = sample_analysis.pipeline_definition['tabs'][0]['id']

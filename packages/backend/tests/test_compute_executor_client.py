@@ -137,13 +137,6 @@ async def test_json_response_serializes_model_and_preserves_headers() -> None:
         assert response.body == b'{"publicValue":"ready","created_at":"2026-09-26T12:00:00"}'
         assert response.headers['ETag'] == '"analysis-1-2"'
 
-        sync_response = executor_client.json_response_sync(
-            payload,
-            headers={'ETag': '"analysis-1-2"'},
-        )
-        assert sync_response.body == response.body
-        assert sync_response.headers['ETag'] == response.headers['ETag']
-
         list_response = await executor_client.json_response([payload])
         assert list_response.body == b'[{"publicValue":"ready","created_at":"2026-09-26T12:00:00"}]'
     finally:

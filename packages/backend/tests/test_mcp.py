@@ -5,11 +5,6 @@ import re
 import pytest
 
 from backend_core.secrets import MASKED_SECRET
-from modules.mcp.decorators import (
-    MCP_TOOL_MARKER,
-    deterministic_tool,
-    get_mcp_tool_meta,
-)
 from modules.mcp.models import MCPHttpMethod, MCPToolDefinition, MCPToolSafety
 from modules.mcp.registry import _build_tool, _openapi_to_json_schema
 from modules.mcp.router import MCP_ROUTE_META, MCPRouter, get_mcp_route_meta
@@ -674,7 +669,7 @@ class TestOpenAPIToJsonSchema:
             'requestBody': {'content': {'application/json': {'schema': {'type': 'object', 'additionalProperties': True}}}},
         }
         tool = _build_tool({'method': 'POST', 'path': '/api/v1/test', 'operation': op}, {})
-        payload = tool['input_schema']['properties']['payload']
+        payload = tool.input_schema['properties']['payload']
         assert payload == {'type': 'object', 'additionalProperties': True}
 
     def test_build_tool_additional_properties_false(self) -> None:
@@ -683,7 +678,7 @@ class TestOpenAPIToJsonSchema:
             'requestBody': {'content': {'application/json': {'schema': {'type': 'object', 'additionalProperties': False}}}},
         }
         tool = _build_tool({'method': 'POST', 'path': '/api/v1/test', 'operation': op}, {})
-        payload = tool['input_schema']['properties']['payload']
+        payload = tool.input_schema['properties']['payload']
         assert payload == {'type': 'object', 'additionalProperties': False}
 
     def test_build_tool_sets_top_level_additional_properties_false(self) -> None:
@@ -699,7 +694,7 @@ class TestOpenAPIToJsonSchema:
             ],
         }
         tool = _build_tool({'method': 'GET', 'path': '/api/v1/test/{id}', 'operation': op}, {})
-        assert tool['input_schema']['additionalProperties'] is False
+        assert tool.input_schema['additionalProperties'] is False
 
     def test_build_tool_includes_arg_metadata(self) -> None:
         op = {
@@ -733,12 +728,12 @@ class TestOpenAPIToJsonSchema:
             },
         }
         tool = _build_tool({'method': 'POST', 'path': '/api/v1/test/{id}', 'operation': op}, {})
-        meta = tool['arg_metadata']
+        meta = tool.arg_metadata
         assert meta['path'][0]['name'] == 'id'
         assert meta['query'][0]['name'] == 'limit'
         assert meta['payload']['required'] is True
         assert meta['payload']['content_type'] == 'application/json'
-        assert 'payload' in tool['input_schema']['required']
+        assert 'payload' in tool.input_schema['required']
 
     def test_build_tool_includes_output_schema_for_json_success_response(self) -> None:
         op = {
@@ -767,7 +762,7 @@ class TestOpenAPIToJsonSchema:
             },
             {},
         )
-        output = tool['output_schema']
+        output = tool.output_schema
         assert output is not None
         assert output['status_code'] == '200'
         assert output['content_type'] == 'application/json'
@@ -789,7 +784,7 @@ class TestOpenAPIToJsonSchema:
             },
         }
         tool = _build_tool({'method': 'GET', 'path': '/api/v1/test', 'operation': op}, {})
-        assert tool['output_schema'] is None
+        assert tool.output_schema is None
 
 
 class TestMCPContractGuardrails:
@@ -840,22 +835,20 @@ class TestMCPContractGuardrails:
         app = client.app
         assert isinstance(app, FastAPI)
         app.state.mcp_registry = [
-            {
-                'id': 'broken_mutating_tool',
-                'method': 'POST',
-                'path': '/api/v1/test/{item_id}',
-                'description': 'Broken for confirm test',
-                'safety': MCPToolSafety.MUTATING.value,
-                'confirm_required': False,
-                'input_schema': {
+            MCPToolDefinition(
+                id='broken_mutating_tool',
+                method=MCPHttpMethod.POST,
+                path='/api/v1/test/{item_id}',
+                description='Broken for confirm test',
+                confirm_required=False,
+                input_schema={
                     'type': 'object',
                     'properties': {},
                     'required': [],
                     'additionalProperties': False,
                 },
-                'arg_metadata': {'path': [], 'query': [], 'payload': None},
-                'tags': [],
-            },
+                arg_metadata={'path': [], 'query': [], 'payload': None},
+            ),
         ]
 
         call_resp = client.post('/api/v1/mcp/call', json={'tool_id': 'broken_mutating_tool', 'args': {}})
@@ -874,53 +867,7 @@ class TestMCPContractGuardrails:
         assert 'Missing required path parameter' in data['errors'][0]['message']
 
 
-class TestDeterministicToolMetadata:
-    def test_decorator_preserves_marker_truthiness(self) -> None:
-        @deterministic_tool
-        def endpoint() -> None:
-            pass
-
-        assert bool(getattr(endpoint, MCP_TOOL_MARKER)) is True
-
-    def test_decorator_attaches_structured_metadata(self) -> None:
-        @deterministic_tool(confirm_required=True)
-        def endpoint(name: str, limit: int = 10) -> None:
-            """Demo endpoint."""
-
-        meta = get_mcp_tool_meta(endpoint)
-        assert isinstance(meta, dict)
-        assert meta['name'] == 'endpoint'
-        assert meta['docstring'] == 'Demo endpoint.'
-        assert meta['confirm_required'] is True
-        assert isinstance(meta['inputs'], list)
-        assert meta['inputs'][0]['name'] == 'name'
-        assert meta['inputs'][0]['required'] is True
-        assert meta['inputs'][1]['name'] == 'limit'
-        assert meta['inputs'][1]['required'] is False
-
-    def test_metadata_lookup_is_wrapper_aware(self) -> None:
-        from functools import wraps
-
-        def wrap(fn):
-            @wraps(fn)
-            def inner(*args, **kwargs):
-                return fn(*args, **kwargs)
-
-            return inner
-
-        @wrap
-        @deterministic_tool
-        def endpoint(value: str) -> None:
-            """Wrapped endpoint."""
-
-        meta = get_mcp_tool_meta(endpoint)
-        assert isinstance(meta, dict)
-        assert meta['name'] == 'endpoint'
-        assert meta['docstring'] == 'Wrapped endpoint.'
-        assert meta['inputs'][0]['name'] == 'value'
-
-
-class TestRouterDecoratorOnboarding:
+class TestRouterOnboarding:
     def test_mcp_defaults_to_off(self) -> None:
         from fastapi import APIRouter, FastAPI
 
@@ -960,17 +907,16 @@ class TestRouterDecoratorOnboarding:
 
         tools = reg.build_tool_registry(app)
         assert len(tools) == 1
-        assert tools[0]['id'] == 'endpoint'
+        assert tools[0].id == 'endpoint'
 
-    def test_deterministic_tool_decorator_onboards_route(self) -> None:
+    def test_mcp_route_onboards_with_docstring(self) -> None:
         from fastapi import APIRouter, FastAPI
 
         from modules.mcp import registry as reg
 
         leaf = MCPRouter(prefix='/demo', tags=['demo'])
 
-        @leaf.get('/decorated')
-        @deterministic_tool
+        @leaf.get('/decorated', mcp=True)
         def endpoint() -> dict[str, str]:
             """Decorated endpoint."""
             return {'ok': 'yes'}
@@ -982,8 +928,8 @@ class TestRouterDecoratorOnboarding:
 
         tools = reg.build_tool_registry(app)
         assert len(tools) == 1
-        assert tools[0]['id'] == 'endpoint'
-        assert tools[0]['description'] == 'Decorated endpoint.'
+        assert tools[0].id == 'endpoint'
+        assert tools[0].description == 'Decorated endpoint.'
 
     def test_confirm_required_override_from_router_decorator(self) -> None:
         from fastapi import APIRouter, FastAPI
@@ -1004,7 +950,7 @@ class TestRouterDecoratorOnboarding:
 
         tools = reg.build_tool_registry(app)
         assert len(tools) == 1
-        assert tools[0]['confirm_required'] is False
+        assert tools[0].confirm_required is False
 
     def test_tool_id_override_from_router_decorator(self) -> None:
         from fastapi import APIRouter, FastAPI
@@ -1024,7 +970,7 @@ class TestRouterDecoratorOnboarding:
 
         tools = reg.build_tool_registry(app)
         assert len(tools) == 1
-        assert tools[0]['id'] == 'stable_custom_tool'
+        assert tools[0].id == 'stable_custom_tool'
 
     def test_description_prefers_docstring_when_operation_text_missing(self, monkeypatch: pytest.MonkeyPatch) -> None:
         from fastapi import FastAPI
@@ -1048,7 +994,7 @@ class TestRouterDecoratorOnboarding:
 
         tools = reg.build_tool_registry(app)
         assert len(tools) == 1
-        assert tools[0]['description'] == 'Docstring text for MCP description.'
+        assert tools[0].description == 'Docstring text for MCP description.'
 
 
 class TestRouterRegistrationOnboarding:
@@ -1138,8 +1084,8 @@ class TestRouterRegistrationOnboarding:
 
         tools = reg.build_tool_registry(app)
         assert len(tools) == 1
-        assert tools[0]['id'] == 'stable_override_name'
-        assert tools[0]['confirm_required'] is False
+        assert tools[0].id == 'stable_override_name'
+        assert tools[0].confirm_required is False
 
     def test_plain_apirouter_route_not_onboarded(self) -> None:
         from fastapi import APIRouter, FastAPI
@@ -1194,7 +1140,7 @@ class TestRouterRegistrationOnboarding:
         app.include_router(v1)
 
         tools = reg.build_tool_registry(app)
-        ids = {tool['id'] for tool in tools}
+        ids = {tool.id for tool in tools}
         assert ids == {'alpha', 'beta'}
 
 
@@ -1215,22 +1161,20 @@ class TestPathParameterReliability:
         app = client.app
         assert isinstance(app, FastAPI)
         app.state.mcp_registry = [
-            {
-                'id': 'broken_tool',
-                'method': 'GET',
-                'path': '/api/v1/test/{item_id}',
-                'description': 'Broken for test',
-                'safety': MCPToolSafety.SAFE.value,
-                'confirm_required': False,
-                'input_schema': {
+            MCPToolDefinition(
+                id='broken_tool',
+                method=MCPHttpMethod.GET,
+                path='/api/v1/test/{item_id}',
+                description='Broken for test',
+                confirm_required=False,
+                input_schema={
                     'type': 'object',
                     'properties': {},
                     'required': [],
                     'additionalProperties': False,
                 },
-                'arg_metadata': {'path': [], 'query': [], 'payload': None},
-                'tags': [],
-            },
+                arg_metadata={'path': [], 'query': [], 'payload': None},
+            ),
         ]
         resp = client.post('/api/v1/mcp/call', json={'tool_id': 'broken_tool', 'args': {}})
         assert resp.status_code == 200
@@ -1568,8 +1512,8 @@ class TestBuildRegistryFailFast:
 
         tools = reg.build_tool_registry(app)
         assert len(tools) == 1
-        assert tools[0]['id'] == 'decorated_endpoint'
-        assert tools[0]['path'] == '/api/v1/mixed/decorated'
+        assert tools[0].id == 'decorated_endpoint'
+        assert tools[0].path == '/api/v1/mixed/decorated'
 
 
 class TestStartupEnforcement:

@@ -1,7 +1,7 @@
 from __future__ import annotations
 
-from dataclasses import dataclass, field
-from typing import Any, Literal, Protocol, runtime_checkable
+from dataclasses import dataclass
+from typing import Any, Protocol, runtime_checkable
 
 import polars as pl
 from pydantic import BaseModel, ConfigDict
@@ -26,73 +26,10 @@ class OperationHandler(Protocol):
         raise NotImplementedError
 
 
-# ---------------------------------------------------------------------------
-# Engine command types — sent from main process to compute subprocess
-# ---------------------------------------------------------------------------
-
-
-@dataclass(frozen=True, slots=True)
-class ShutdownCommand:
-    type: Literal["shutdown"] = "shutdown"
-
-
-@dataclass(frozen=True, slots=True)
-class PreviewCommand:
-    job_id: str
-    datasource_config: dict[str, Any]
-    steps: list[dict[str, Any]]
-    row_limit: int = 1000
-    offset: int = 0
-    additional_datasources: dict[str, dict[str, Any]] = field(default_factory=dict)
-    type: Literal["preview"] = "preview"
-
-
-@dataclass(frozen=True, slots=True)
-class ExportCommand:
-    job_id: str
-    datasource_config: dict[str, Any]
-    steps: list[dict[str, Any]]
-    output_path: str
-    export_format: str = "csv"
-    additional_datasources: dict[str, dict[str, Any]] = field(default_factory=dict)
-    type: Literal["export"] = "export"
-
-
-@dataclass(frozen=True, slots=True)
-class SchemaCommand:
-    job_id: str
-    datasource_config: dict[str, Any]
-    steps: list[dict[str, Any]]
-    additional_datasources: dict[str, dict[str, Any]] = field(default_factory=dict)
-    type: Literal["schema"] = "schema"
-
-
-@dataclass(frozen=True, slots=True)
-class RowCountCommand:
-    job_id: str
-    datasource_config: dict[str, Any]
-    steps: list[dict[str, Any]]
-    additional_datasources: dict[str, dict[str, Any]] = field(default_factory=dict)
-    type: Literal["row_count"] = "row_count"
-
-
-ComputeWorkerCommand = ShutdownCommand | PreviewCommand | ExportCommand | SchemaCommand | RowCountCommand
-
-
-# ---------------------------------------------------------------------------
-# Engine result — sent from compute subprocess back to main process
-# ---------------------------------------------------------------------------
-
-
 @dataclass(slots=True)
 class ComputeWorkerProgressEvent:
     job_id: str
     event: dict[str, Any]
-
-
-@dataclass(frozen=True, slots=True)
-class ShutdownAck:
-    type: Literal["shutdown_ack"] = "shutdown_ack"
 
 
 # ---------------------------------------------------------------------------

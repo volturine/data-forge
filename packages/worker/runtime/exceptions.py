@@ -47,14 +47,6 @@ def step_not_found(step_id: str) -> AppError:
     )
 
 
-def compute_worker_not_found(resource_id: str) -> AppError:
-    return not_found_error(
-        f"Compute worker for resource {resource_id} not found",
-        error_code="ENGINE_NOT_FOUND",
-        details={"resource_id": resource_id},
-    )
-
-
 class DataSourceError(AppError):
     pass
 
@@ -105,12 +97,6 @@ class StaleComputeInputError(ComputeError):
             error_code="STALE_COMPUTE_INPUT",
             details={"datasource_id": datasource_id, "expected_revision": expected_revision, "actual_revision": actual_revision},
         )
-
-
-class ComputeWorkerBusyError(ComputeError):
-    def __init__(self, analysis_id: str | None = None):
-        details = {"analysis_id": analysis_id} if analysis_id is not None else None
-        super().__init__(message="Compute worker has an active job", error_code="ENGINE_BUSY", details=details)
 
 
 class ComputeWorkerShutdownError(ComputeError):

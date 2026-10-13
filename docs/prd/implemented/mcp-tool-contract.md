@@ -1,6 +1,6 @@
 # MCP Tool Contract
 
-> **Status (audited 2026-08-02): Implemented — current MCP route contract.**
+> **Status (audited 2026-10-13): Implemented — current MCP route contract.**
 > **Current truth:** This is a maintainer/reference doc for a shipped capability.
 > **Portfolio:** [PRD index](../README.md)
 
@@ -11,14 +11,14 @@ Maintainer reference for how `/api/v1` routes are exposed as MCP tools, how AI a
 
 ## Overview
 
-The MCP module (`backend/modules/mcp/`) auto-discovers FastAPI routes and exposes them as structured tool definitions to AI agents. The pipeline is:
+The MCP module (`packages/backend/modules/mcp/`) auto-discovers FastAPI routes and exposes them as structured tool definitions to AI agents. The pipeline is:
 
-1. Routes opt in with `@deterministic_tool`
+1. Routes opt in through `MCPRouter` with `mcp=True`
 2. At first request, `build_tool_registry()` reads the OpenAPI schema and builds a tool list
 3. The registry is cached on `app.state.mcp_registry` for the process lifetime
 4. AI agents call tools through `/api/v1/mcp/call`, which validates args, routes the request in-process via httpx ASGI transport, and returns structured results
 
-Routes without `@deterministic_tool` are invisible to MCP. Routes under `/mcp/` and `/ai/chat` are always excluded.
+Routes without `mcp=True` are invisible to MCP. Routes under `/mcp/` and `/ai/chat` are always excluded.
 
 ---
 
@@ -26,7 +26,8 @@ Routes without `@deterministic_tool` are invisible to MCP. Routes under `/mcp/` 
 
 | File | Responsibility |
 |------|----------------|
-| `decorators.py` | `@deterministic_tool` — opt-in marker |
+| `router.py` | `MCPRouter` opt-in options and metadata transfer through nested routers |
+| `models.py` | Typed tool definitions, safety, capabilities, and provider payloads |
 | `registry.py` | OpenAPI → tool definitions, schema resolution, confirm patterns |
 | `validation.py` | JSON Schema validation, default/const application, schema support checks |
 | `executor.py` | In-process route invocation via httpx `ASGITransport` |
@@ -37,11 +38,11 @@ Routes without `@deterministic_tool` are invisible to MCP. Routes under `/mcp/` 
 
 ## Registry Shape
 
-Each tool definition is a dict with this shape:
+The registry holds `MCPToolDefinition` models. The API serializes them with this shape:
 
 ```python
 {
-    'id': 'endpoint_function_name',       # Python function name from @deterministic_tool
+    'id': 'endpoint_function_name',       # Function name, or explicit mcp_tool_id
     'method': 'GET',                       # HTTP method (uppercase)
     'path': '/api/v1/resource/{id}',       # Path template with {param} placeholders
     'description': 'Human-readable text',  # From docstring/summary/description
@@ -231,25 +232,27 @@ If `arg_metadata` is missing or `None`, `_format_fallback_param_details()` falls
 
 ---
 
-## Opting In: The `@deterministic_tool` Decorator
+## Opting In Through `MCPRouter`
 
 To expose a route as an MCP tool:
 
 ```python
-from modules.mcp.decorators import deterministic_tool
+from modules.mcp.router import MCPRouter
 
-@router.get('/{datasource_id}')
-@deterministic_tool
-async def get_datasource(datasource_id: str, session: SessionDep) -> DatasourceResponse:
+router = MCPRouter(prefix='/datasource')
+
+@router.get('/{datasource_id}', mcp=True)
+async def get_datasource(datasource_id: str) -> DataSourceResponse:
     ...
 ```
 
-The decorator sets `fn.__mcp_tool__ = True`. The registry scans all `APIRoute` instances and only includes routes where the endpoint has this attribute.
+`MCPRouter` attaches route metadata that survives FastAPI route copies and nested router inclusion. The registry includes routes with this metadata and derives their input and output schemas from OpenAPI.
 
 ### Rules
 
-- Place `@deterministic_tool` directly above the function, below the `@router` decorator
-- The function **name** becomes the tool `id` — choose stable, descriptive names
+- Set `mcp=True` on the `MCPRouter` route decorator
+- The function **name** becomes the tool `id`; use `mcp_tool_id` for an explicit stable identifier
+- Use `mcp_confirm_required` to override the default confirmation policy when needed
 - The route's OpenAPI description/summary becomes the tool `description`
 - If the route has a Pydantic request body, it appears as `payload` in the schema
 
@@ -259,7 +262,7 @@ The decorator sets `fn.__mcp_tool__ = True`. The registry scans all `APIRoute` i
 
 ### Adding a new tool
 
-1. Add `@deterministic_tool` to the route endpoint function
+1. Register the route through `MCPRouter` with `mcp=True`
 2. Ensure the function name is a stable, descriptive identifier (it becomes the tool `id`)
 3. Write a clear `description` or `summary` on the route — this is what the AI sees
 4. Verify path parameters match `{param}` in the URL template exactly
@@ -278,7 +281,7 @@ The decorator sets `fn.__mcp_tool__ = True`. The registry scans all `APIRoute` i
 
 ### Removing a tool
 
-1. Remove `@deterministic_tool` from the endpoint
+1. Remove `mcp=True` from the route decorator
 2. The tool disappears from the registry on next startup — no migration needed
 3. If it was in `CONFIRM_REQUIRED_PATTERNS`, remove the pattern
 
@@ -286,7 +289,7 @@ The decorator sets `fn.__mcp_tool__ = True`. The registry scans all `APIRoute` i
 
 | Mistake | Symptom | Fix |
 |---------|---------|-----|
-| Forgot `@deterministic_tool` | Tool missing from `/mcp/tools` | Add the decorator |
+| Forgot `mcp=True` | Tool missing from `/mcp/tools` | Enable it on the `MCPRouter` route |
 | Function name changed | AI calls old tool ID, gets 404 | Keep names stable or update prompts |
 | Path param name mismatch | `Missing required path parameter(s)` error | Match `{param}` name to function arg name |
 | Unsupported schema keyword (e.g. `x-vendor-ext`) | `ValueError` at startup | Remove the keyword or add it to `_SUPPORTED_KEYWORDS` |

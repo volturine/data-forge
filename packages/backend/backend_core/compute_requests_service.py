@@ -29,7 +29,7 @@ from backend_core.runtime_work_service import RuntimeWorkKind
 from backend_core.sqlmodel_typing import col, sa
 from backend_core.time import utc_now as _utcnow
 from backend_core.transactions import committed
-from backend_core.transitions import TransitionOutcome, TransitionResult, applied, rejected
+from backend_core.transitions import TransitionOutcome
 from dataforge_protocol import compute_pb2, enums_pb2
 
 _HIGH_PRIORITY_REQUEST_KINDS = frozenset(
@@ -101,14 +101,6 @@ _SHARED_FLIGHT_COMMANDS = {
 
 class ComputeFlightLockBusy(RuntimeError):
     """A matching flight is being staged by another short transaction."""
-
-
-@dataclass(frozen=True)
-class ComputeRequestLease:
-    lease_expires_at: datetime
-    last_renewed_at: datetime
-    lease_generation: int
-    attempts: int
 
 
 @dataclass(frozen=True)
@@ -676,33 +668,30 @@ def _retire_request(session: Session, request: ComputeRequest, *, reason: str, n
     runtime_ipc.notify_compute_response_on_commit(session, request_id=request.id, namespace=request.namespace)
 
 
-def _cancel_request(
+def cancel_disconnected_request(
     session: Session,
     request_id: str,
     *,
     reason: str,
-    allow_running_engine_request: bool,
-    preserve_shared_flight: bool = False,
 ) -> ComputeRequest | None:
+    """Retire abandoned work while preserving shared flights and running mutations without an engine."""
     table = ComputeRequest.metadata.tables[ComputeRequest.__tablename__]
-    active_statuses = [enums_pb2.COMPUTE_REQUEST_STATUS_QUEUED]
-    if allow_running_engine_request:
-        active_statuses.append(enums_pb2.COMPUTE_REQUEST_STATUS_RUNNING)
+    active_statuses = [enums_pb2.COMPUTE_REQUEST_STATUS_QUEUED, enums_pb2.COMPUTE_REQUEST_STATUS_RUNNING]
     statement = select(ComputeRequest).where(table.c.id == request_id).where(table.c.status.in_(active_statuses)).with_for_update()
     request = session.execute(statement).scalars().first()
     if request is None:
         session.rollback()
         return None
 
-    if preserve_shared_flight and _is_shared_flight_request(request):
+    if _is_shared_flight_request(request):
         # A shared read is keyed by the exact resource identity and command.
-        # browser that became the HTTP leader may disappear while another tab
+        # The browser that became the HTTP leader may disappear while another tab
         # is already waiting for the same result. Leave the durable request
         # alive so the worker can publish the result to the cache/followers.
         session.rollback()
         return None
 
-    if request.status == enums_pb2.COMPUTE_REQUEST_STATUS_RUNNING and allow_running_engine_request:
+    if request.status == enums_pb2.COMPUTE_REQUEST_STATUS_RUNNING:
         envelope = command_envelope_for_request(request)
         if _compute_worker_identity_for_command(envelope.command, request_id=request.id) is None:
             # Datasource ingestion/publication is not tied to a killable engine.
@@ -725,34 +714,6 @@ def _cancel_request(
         attempt=request.attempts,
     )
     return request
-
-
-def cancel_queued_request(session: Session, request_id: str, *, reason: str) -> ComputeRequest | None:
-    """Retire a request whose HTTP client went away before execution started."""
-    return _cancel_request(
-        session,
-        request_id,
-        reason=reason,
-        allow_running_engine_request=False,
-    )
-
-
-def cancel_disconnected_request(session: Session, request_id: str, *, reason: str) -> ComputeRequest | None:
-    """Retire abandoned queue work and non-shared running engine requests.
-
-    A running datasource mutation must finish because it may be publishing a
-    new datasource. A shared read is also allowed to finish: another tab may
-    already be waiting on the same exact resource and command.
-    Other engine-backed work can be retired because its worker observes the
-    retired lease and stops that request.
-    """
-    return _cancel_request(
-        session,
-        request_id,
-        reason=reason,
-        allow_running_engine_request=True,
-        preserve_shared_flight=True,
-    )
 
 
 def cancel_active_requests_for_engine(
@@ -1056,73 +1017,6 @@ def stage_exhausted_requests(session: Session, *, namespace: str) -> int:
 
 
 reconcile_expired_requests = committed(stage_exhausted_requests)
-
-
-def renew_request_lease(
-    session: Session,
-    request_id: str,
-    *,
-    worker_id: str,
-    claim_token: str,
-    lease_generation: int,
-) -> TransitionResult[ComputeRequestLease]:
-    lease_now = database_lease_clock(session, _utcnow())
-    table = ComputeRequest.metadata.tables[ComputeRequest.__tablename__]
-    statement = (
-        update(ComputeRequest)
-        .where(table.c.id == request_id)
-        .where(table.c.status == enums_pb2.COMPUTE_REQUEST_STATUS_RUNNING)
-        .where(table.c.lease_owner == worker_id)
-        .where(table.c.claim_token == claim_token)
-        .where(table.c.lease_generation == lease_generation)
-        .where(table.c.lease_expires_at > lease_now)
-        .values(
-            lease_expires_at=lease_now + timedelta(seconds=settings.runtime_work_lease_ttl_seconds),
-            last_renewed_at=lease_now,
-            updated_at=lease_now,
-        )
-    )
-    row = session.execute(
-        statement.returning(
-            table.c.lease_expires_at,
-            table.c.last_renewed_at,
-            table.c.lease_generation,
-            table.c.attempts,
-        )
-    ).one_or_none()
-    if row is None:
-        session.rollback()
-        # Missing and stale leases have the same runtime action. Avoid a
-        # second read on this high-frequency path just to distinguish them.
-        outcome = TransitionOutcome.LEASE_LOST
-        record_lease_transition(
-            kind='compute_request',
-            transition='renew',
-            outcome=outcome,
-            entity_id=request_id,
-            owner_id=worker_id,
-            claim_token=claim_token,
-            generation=lease_generation,
-        )
-        return rejected(outcome)
-    session.commit()
-    renewal = ComputeRequestLease(
-        lease_expires_at=cast(datetime, row[0]),
-        last_renewed_at=cast(datetime, row[1]),
-        lease_generation=int(row[2]),
-        attempts=int(row[3]),
-    )
-    record_lease_transition(
-        kind='compute_request',
-        transition='renew',
-        outcome=TransitionOutcome.APPLIED,
-        entity_id=request_id,
-        owner_id=worker_id,
-        claim_token=claim_token,
-        generation=lease_generation,
-        attempt=renewal.attempts,
-    )
-    return applied(renewal)
 
 
 def renew_request_leases(

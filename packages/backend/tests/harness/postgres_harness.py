@@ -18,7 +18,7 @@ from typing import Literal
 
 import httpx
 
-# psutil is a declared runtime dependency but has no installed type stubs.
+# psutil is a declared test dependency but has no installed type stubs.
 import psutil  # type: ignore[import-untyped]
 import psycopg
 

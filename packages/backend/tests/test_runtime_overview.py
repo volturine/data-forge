@@ -44,11 +44,8 @@ def test_runtime_overview_reports_runtime_state(client, monkeypatch) -> None:
         capacity=1,
         active_jobs=1,
     )
-    run_settings_db(
-        compute_worker_instance_service.upsert_compute_worker_status,
-        worker_id='build-worker-1',
-        namespace='default',
-        status=ComputeWorkerStatusInfo(
+    compute_worker_statuses = [
+        ComputeWorkerStatusInfo(
             analysis_id='',
             resource_id='preview-ds',
             status='healthy',
@@ -69,12 +66,7 @@ def test_runtime_overview_reports_runtime_state(client, monkeypatch) -> None:
             reuse_policy='shared',
             datasource_id='preview-ds',
         ),
-    )
-    run_settings_db(
-        compute_worker_instance_service.upsert_compute_worker_status,
-        worker_id='build-worker-1',
-        namespace='default',
-        status=ComputeWorkerStatusInfo(
+        ComputeWorkerStatusInfo(
             analysis_id='',
             resource_id='build-live',
             status='healthy',
@@ -97,6 +89,12 @@ def test_runtime_overview_reports_runtime_state(client, monkeypatch) -> None:
             current_build_id='build-live',
             current_compute_worker_run_id='run-live',
         ),
+    ]
+    run_settings_db(
+        compute_worker_instance_service.persist_compute_worker_snapshot,
+        worker_id='build-worker-1',
+        namespace='default',
+        statuses=compute_worker_statuses,
     )
 
     queued_id = str(uuid.uuid4())

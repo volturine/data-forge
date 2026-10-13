@@ -12,7 +12,6 @@ from backend_core import http as http_client
 from backend_core.api_execution_budget import run_api_blocking
 from backend_core.websocket import serialize_json
 from modules.mcp.models import MCPToolDefinition
-from modules.mcp.tool_output import format_output_hint
 
 logger = logging.getLogger(__name__)
 
@@ -50,29 +49,11 @@ def _headers(api_key: str) -> dict[str, str]:
     }
 
 
-def _mcp_tool_to_openai(tool: MCPToolDefinition | dict[str, Any]) -> dict[str, Any]:
-    if isinstance(tool, MCPToolDefinition):
-        return tool.openai_tool()
-
-    desc = tool['description']
-    hint = format_output_hint(tool.get('output_schema'))
-    if hint:
-        desc = f'{desc}\n{hint}'
-    return {
-        'type': 'function',
-        'function': {
-            'name': tool['id'],
-            'description': desc,
-            'parameters': tool['input_schema'],
-        },
-    }
-
-
 async def chat_with_tools(
     api_key: str,
     model: str,
     messages: list[dict[str, Any]],
-    tools: Sequence[MCPToolDefinition | dict[str, Any]],
+    tools: Sequence[MCPToolDefinition],
 ) -> dict[str, Any]:
     """Send a chat completion request with tool definitions."""
     logger.debug(
@@ -86,7 +67,7 @@ async def chat_with_tools(
         'messages': messages,
     }
     if tools:
-        payload['tools'] = [_mcp_tool_to_openai(t) for t in tools]
+        payload['tools'] = [tool.openai_tool() for tool in tools]
         payload['tool_choice'] = 'auto'
 
     client = http_client.get_async_client()

@@ -91,11 +91,6 @@ async def json_response(value: object, *, headers: Mapping[str, str] | None = No
     return Response(content=content, media_type='application/json', headers=headers)
 
 
-def json_response_sync(value: object, *, headers: Mapping[str, str] | None = None) -> Response:
-    """Serialize from a synchronous route's worker thread, not the API loop."""
-    return Response(content=_json_response_content(value), media_type='application/json', headers=headers)
-
-
 async def _response_payload(completed) -> dict[str, object]:
     """Decode the protobuf response outside the API event loop."""
     return await _run_compute_serialization(compute_requests_service.response_payload, completed)
@@ -500,15 +495,6 @@ def _cancel_disconnected_request_in_new_session(request_id: str, namespace: str,
         reset_namespace(token)
 
 
-def _cancel_active_requests_for_engine_in_new_session(identity: ComputeWorkerIdentity) -> int:
-    return run_db(
-        compute_requests_service.cancel_active_requests_for_engine,
-        namespace=get_namespace(),
-        identity=identity,
-        reason=_COMPUTE_WORKER_SHUTDOWN_CANCELLATION,
-    )
-
-
 def _resource_config_message(resource_config: dict[str, object]) -> compute_pb2.ComputeWorkerResourceConfig:
     config = compute_pb2.ComputeWorkerResourceConfig()
     for key in ('max_threads', 'max_memory_mb', 'streaming_chunk_size'):
@@ -848,20 +834,6 @@ async def configure_compute_worker(
         command=_lifecycle_command('configure_engine', identity, resource_config),
     )
     return await _validated_response(compute_schemas.ComputeWorkerStatusSchema, completed)
-
-
-async def shutdown_compute_worker(
-    *,
-    identity: ComputeWorkerIdentity,
-) -> None:
-    await run_api_blocking(
-        _cancel_active_requests_for_engine_in_new_session,
-        identity,
-    )
-    await _submit_and_wait(
-        kind=enums_pb2.COMPUTE_REQUEST_KIND_SHUTDOWN_ENGINE,
-        command=_lifecycle_command('shutdown_engine', identity),
-    )
 
 
 def request_compute_worker_shutdown(

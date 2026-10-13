@@ -43,42 +43,19 @@ class SchedulerSettings:
         )
 
 
-@dataclass(frozen=True)
-class EnqueuedScheduleRun:
-    namespace: str
-    schedule_id: str
-    datasource_id: str
-    build_id: str
-
-
-@dataclass(frozen=True)
-class FailedScheduleRun:
-    namespace: str
-    schedule_id: str
-    datasource_id: str
-    error: str
-
-
-@dataclass(frozen=True)
-class SchedulerRunDueResult:
-    handled: bool
-    enqueued: list[EnqueuedScheduleRun]
-    failures: list[FailedScheduleRun]
-
-
-@dataclass(frozen=True)
-class DueScheduleNamespace:
-    namespace: str
-    generation: int
-    wake_ids: tuple[int, ...] = ()
-
-
 class SchedulerClient(Protocol):
     async def register(self, *, worker_id: str, hostname: str, pid: int, capacity: int, retry_seconds: float | None = None) -> None: ...
     async def heartbeat(self, *, worker_id: str, timeout_seconds: float | None = None) -> None: ...
-    async def stop(self, *, worker_id: str, timeout_seconds: float | None = None) -> None: ...
-    async def due_schedule_namespaces(self) -> list[DueScheduleNamespace]: ...
-    async def run_due(self, *, worker_id: str, namespace: str, generation: int, wake_ids: tuple[int, ...] = ()) -> SchedulerRunDueResult: ...
+    async def stop(self, *, worker_id: str) -> None: ...
+    async def due_schedule_namespaces(self) -> list[scheduler_runtime_pb2.SchedulerDueNamespace]: ...
+    async def run_due(
+        self,
+        *,
+        worker_id: str,
+        namespace: str,
+        generation: int,
+        wake_ids: tuple[int, ...] = (),
+    ) -> scheduler_runtime_pb2.SchedulerRunDueResponse: ...
 
 
 class SchedulerApiClient:
@@ -109,11 +86,10 @@ class SchedulerApiClient:
         timeout = self._timeout_seconds if timeout_seconds is None else min(self._timeout_seconds, max(float(timeout_seconds), 0.1))
         await self._call(lambda: self._stub.HeartbeatScheduler(_worker(worker_id), timeout=timeout, metadata=self._metadata()))
 
-    async def stop(self, *, worker_id: str, timeout_seconds: float | None = None) -> None:
-        timeout = self._timeout_seconds if timeout_seconds is None else min(self._timeout_seconds, max(float(timeout_seconds), 0.1))
-        await self._call(lambda: self._stub.StopScheduler(_worker(worker_id), timeout=timeout, metadata=self._metadata()))
+    async def stop(self, *, worker_id: str) -> None:
+        await self._call(lambda: self._stub.StopScheduler(_worker(worker_id), timeout=self._timeout_seconds, metadata=self._metadata()))
 
-    async def due_schedule_namespaces(self) -> list[DueScheduleNamespace]:
+    async def due_schedule_namespaces(self) -> list[scheduler_runtime_pb2.SchedulerDueNamespace]:
         response = await self._call(
             lambda: self._stub.ListDueScheduleNamespaces(
                 common_pb2.EmptyRequest(),
@@ -121,10 +97,17 @@ class SchedulerApiClient:
                 metadata=self._metadata(),
             )
         )
-        return [DueScheduleNamespace(namespace=item.namespace, generation=item.generation, wake_ids=tuple(item.wake_ids)) for item in response.namespaces]
+        return list(response.namespaces)
 
-    async def run_due(self, *, worker_id: str, namespace: str, generation: int, wake_ids: tuple[int, ...] = ()) -> SchedulerRunDueResult:
-        response = await self._call(
+    async def run_due(
+        self,
+        *,
+        worker_id: str,
+        namespace: str,
+        generation: int,
+        wake_ids: tuple[int, ...] = (),
+    ) -> scheduler_runtime_pb2.SchedulerRunDueResponse:
+        return await self._call(
             lambda: self._stub.RunDueSchedules(
                 scheduler_runtime_pb2.SchedulerRunDueRequest(
                     worker_id=worker_id,
@@ -135,17 +118,6 @@ class SchedulerApiClient:
                 timeout=self._timeout_seconds,
                 metadata=self._metadata(),
             )
-        )
-        return SchedulerRunDueResult(
-            handled=response.handled,
-            enqueued=[
-                EnqueuedScheduleRun(namespace=item.namespace, schedule_id=item.schedule_id, datasource_id=item.datasource_id, build_id=item.build_id)
-                for item in response.enqueued
-            ],
-            failures=[
-                FailedScheduleRun(namespace=item.namespace, schedule_id=item.schedule_id, datasource_id=item.datasource_id, error=item.error)
-                for item in response.failures
-            ],
         )
 
     async def close(self) -> None:
@@ -212,7 +184,7 @@ async def scheduler_loop(
                         worker_id=worker_id,
                         namespace=due_namespace.namespace,
                         generation=due_namespace.generation,
-                        wake_ids=due_namespace.wake_ids,
+                        wake_ids=tuple(due_namespace.wake_ids),
                     )
                     health.progress("scheduler")
                     if result.handled:
@@ -230,7 +202,7 @@ async def scheduler_loop(
             await client.stop(worker_id=worker_id)
 
 
-def _log_run_due_result(result: SchedulerRunDueResult) -> None:
+def _log_run_due_result(result: scheduler_runtime_pb2.SchedulerRunDueResponse) -> None:
     for enqueued in result.enqueued:
         logger.info(
             "Scheduler: enqueued schedule %s as build %s (namespace=%s datasource=%s)",
@@ -342,8 +314,8 @@ def _required_positive_int_env(name: str) -> int:
     return value
 
 
-def _worker(worker_id: str, *, namespace: str | None = None) -> common_pb2.RuntimeWorkerRequest:
-    return common_pb2.RuntimeWorkerRequest(worker_id=worker_id, target_namespace=namespace or "")
+def _worker(worker_id: str) -> common_pb2.RuntimeWorkerRequest:
+    return common_pb2.RuntimeWorkerRequest(worker_id=worker_id)
 
 
 if __name__ == "__main__":

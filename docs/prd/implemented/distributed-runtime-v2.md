@@ -623,7 +623,7 @@ The `ProcessManager` remains worker-local in v2. It should not be shared directl
 Responsibilities:
 
 - Build worker owns `ProcessManager`.
-- API worker never calls `manager.get_or_create_engine()` for build execution.
+- API worker never owns build execution or compute-worker containers.
 - API may read engine status from `engine_instances`.
 - Build worker periodically writes engine snapshots to DB and emits engine notifications.
 - Engine cleanup runs in workers, guarded by local ownership and DB state.

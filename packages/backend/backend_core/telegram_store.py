@@ -7,7 +7,7 @@ from sqlmodel import Session
 from backend_core.exceptions import SettingsConfigurationError
 from backend_core.persistence.telegram.models import TelegramListener, TelegramSubscriber
 from backend_core.secrets import decrypt_secret, encrypt_secret, is_encrypted_secret
-from backend_core.sqlmodel_typing import col, sa
+from backend_core.sqlmodel_typing import sa
 from backend_core.telegram_schemas import (
     ListenerCreate,
     ListenerResponse,
@@ -76,23 +76,6 @@ def add_subscriber(session: Session, chat_id: str, title: str, bot_token: str) -
     return SubscriberResponse.model_validate(sub)
 
 
-def deactivate_subscriber(session: Session, subscriber_id: int) -> None:
-    sub = session.get(TelegramSubscriber, subscriber_id)
-    if not sub:
-        return
-    sub.is_active = False
-    for listener in (
-        session.execute(
-            select(TelegramListener).where(sa(TelegramListener.subscriber_id == subscriber_id)),
-        )
-        .scalars()
-        .all()
-    ):
-        session.delete(listener)
-    session.add(sub)
-    session.commit()
-
-
 def delete_subscriber(session: Session, subscriber_id: int) -> None:
     listeners = (
         session.execute(
@@ -148,39 +131,3 @@ def remove_listener(session: Session, listener_id: int) -> None:
         return
     session.delete(listener)
     session.commit()
-
-
-def auto_populate_listeners(session: Session, datasource_id: str) -> list[ListenerResponse]:
-    subs = (
-        session.execute(
-            select(TelegramSubscriber).where(col(TelegramSubscriber.is_active).is_(True)),
-        )
-        .scalars()
-        .all()
-    )
-    results: list[ListenerResponse] = []
-    for sub in subs:
-        data = ListenerCreate(subscriber_id=sub.id, datasource_id=datasource_id)
-        results.append(add_listener(session, data))
-    return results
-
-
-def get_notification_chat_ids(session: Session, datasource_id: str) -> list[tuple[str, str]]:
-    listeners = (
-        session.execute(
-            select(TelegramListener).where(sa(TelegramListener.datasource_id == datasource_id)),
-        )
-        .scalars()
-        .all()
-    )
-    sub_ids = {listener.subscriber_id for listener in listeners}
-    if not sub_ids:
-        return []
-    subs = (
-        session.execute(
-            select(TelegramSubscriber).where(col(TelegramSubscriber.id).in_(sub_ids)).where(col(TelegramSubscriber.is_active).is_(True)),
-        )
-        .scalars()
-        .all()
-    )
-    return [(s.chat_id, _reveal_token(s.bot_token)) for s in subs]

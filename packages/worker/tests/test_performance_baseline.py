@@ -1,11 +1,10 @@
 import json
+import tempfile
 import time
 import uuid
-from unittest.mock import MagicMock, patch
+from pathlib import Path
 
-from runtime import compute_service
-from runtime.compute_manager import ProcessManager
-from runtime.compute_worker import PolarsComputeWorker
+from runtime import polars_compute
 
 
 def _measure(func, *args, **kwargs):
@@ -15,85 +14,54 @@ def _measure(func, *args, **kwargs):
     return result, duration_ms
 
 
-def test_performance_baseline(sample_datasource):
-    analysis_id = f"perf-{uuid.uuid4()}"
-    pipeline = {
-        "analysis_id": analysis_id,
-        "tabs": [
-            {
-                "id": "tab1",
-                "datasource": {
-                    "id": sample_datasource.id,
-                    "analysis_tab_id": None,
-                    "source_type": sample_datasource.source_type,
-                    "config": {**sample_datasource.config, "branch": "master"},
-                },
-                "output": {
-                    "result_id": "out-1",
-                    "format": "parquet",
-                    "filename": "perf_out",
-                },
-                "steps": [],
-            },
-        ],
+def test_direct_polars_execution_baseline(sample_datasource):
+    job_id = f"perf-{uuid.uuid4()}"
+    datasource_config = {
+        "source_type": sample_datasource.source_type,
+        **sample_datasource.config,
+        "branch": "master",
     }
+    steps: list[dict] = []
 
-    manager = ProcessManager(engine_factory=lambda compute_worker_identity, config: PolarsComputeWorker(compute_worker_identity.resource_id, config))
-    internal_client = MagicMock()
-    internal_client.create_compute_worker_run.return_value = "run-1"
-    internal_client.compute_worker_run_state.return_value = {"result_json": {}}
-    try:
-        with patch("runtime.compute_service.client_from_env", return_value=internal_client):
-            preview_result, preview_ms = _measure(
-                compute_service.preview_step,
-                session=None,
-                manager=manager,
-                target_step_id="source",
-                analysis_pipeline=pipeline,
-                row_limit=100,
-                page=1,
-                analysis_id=analysis_id,
-                request_json={
-                    "analysis_id": analysis_id,
-                    "analysis_pipeline": pipeline,
-                    "target_step_id": "source",
-                },
-            )
+    preview_result, preview_ms = _measure(
+        polars_compute.execute_preview,
+        datasource_config,
+        steps,
+        100,
+        0,
+        job_id,
+    )
+    schema_result, schema_ms = _measure(
+        polars_compute.execute_schema,
+        datasource_config,
+        steps,
+        job_id,
+    )
+    with tempfile.TemporaryDirectory() as directory:
+        output_path = Path(directory) / "perf_out.csv"
+        export_result, export_ms = _measure(
+            polars_compute.execute_export,
+            datasource_config,
+            steps,
+            str(output_path),
+            "csv",
+            job_id,
+        )
+        file_bytes = output_path.read_bytes()
 
-            schema_result, schema_ms = _measure(
-                compute_service.get_step_schema,
-                session=None,
-                manager=manager,
-                target_step_id="source",
-                analysis_id=analysis_id,
-                analysis_pipeline=pipeline,
-            )
-
-            export_result, export_ms = _measure(
-                compute_service.download_step,
-                session=None,
-                manager=manager,
-                target_step_id="source",
-                analysis_pipeline=pipeline,
-                export_format="csv",
-                analysis_id=analysis_id,
-            )
-    finally:
-        manager.shutdown_all()
-
-    file_bytes, _name, _content_type = export_result
-
-    assert preview_result.response.total_rows == 5
-    assert schema_result.columns
-    assert file_bytes is not None
+    assert preview_result["row_count"] == 5
+    assert schema_result["columns"]
+    assert export_result["row_count"] == 5
+    assert file_bytes
 
     print(
         json.dumps(
             {
+                "execution_path": "direct_polars_compute",
                 "preview_duration_ms": preview_ms,
                 "schema_duration_ms": schema_ms,
                 "export_duration_ms": export_ms,
-                "preview_rows": preview_result.response.total_rows,
+                "preview_rows": preview_result["row_count"],
             },
         ),
     )

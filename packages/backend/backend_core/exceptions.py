@@ -39,35 +39,11 @@ def datasource_not_found(datasource_id: str) -> AppError:
     )
 
 
-def step_not_found(step_id: str) -> AppError:
-    return not_found_error(
-        f'Step with id {step_id} not found in pipeline',
-        error_code='STEP_NOT_FOUND',
-        details={'step_id': step_id},
-    )
-
-
-def compute_worker_not_found(resource_id: str) -> AppError:
-    return not_found_error(
-        f'Compute worker for resource {resource_id} not found',
-        error_code='ENGINE_NOT_FOUND',
-        details={'resource_id': resource_id},
-    )
-
-
 def compute_worker_run_not_found(run_id: str) -> AppError:
     return not_found_error(
         f'Compute worker run {run_id} not found',
         error_code='ENGINE_RUN_NOT_FOUND',
         details={'run_id': run_id},
-    )
-
-
-def job_not_found(job_id: str) -> AppError:
-    return not_found_error(
-        f'Job {job_id} not found',
-        error_code='JOB_NOT_FOUND',
-        details={'job_id': job_id},
     )
 
 
@@ -126,22 +102,9 @@ class DataSourceSnapshotError(DataSourceError):
         super().__init__(message=message, error_code='DATASOURCE_SNAPSHOT_ERROR', details=details)
 
 
-class DataSourceConnectionError(DataSourceError):
-    def __init__(self, message: str, details: dict | None = None):
-        super().__init__(message=message, error_code='DATASOURCE_CONNECTION_ERROR', details=details)
-
-
 # Pipeline/Compute Exceptions
 class PipelineError(AppError):
     pass
-
-
-class PipelineValidationError(PipelineError):
-    def __init__(self, message: str, step_id: str | None = None, details: dict | None = None):
-        details = details or {}
-        if step_id:
-            details['step_id'] = step_id
-        super().__init__(message=message, error_code='PIPELINE_VALIDATION_ERROR', details=details)
 
 
 class PipelineExecutionError(PipelineError):
@@ -163,12 +126,6 @@ class PipelineExecutionCancelledError(PipelineExecutionError):
 # Compute/Engine Exceptions
 class ComputeError(AppError):
     pass
-
-
-class ComputeWorkerBusyError(ComputeError):
-    def __init__(self, analysis_id: str | None = None):
-        details = {'analysis_id': analysis_id} if analysis_id is not None else None
-        super().__init__(message='Compute worker has an active job', error_code='ENGINE_BUSY', details=details)
 
 
 class ComputeWorkerRunComparisonError(ComputeError):
@@ -196,20 +153,6 @@ class AnalysisValidationError(AnalysisError):
 class AnalysisCycleError(AnalysisError):
     def __init__(self, message: str):
         super().__init__(message=message, error_code='ANALYSIS_CYCLE_ERROR', details={})
-
-
-# File Exceptions
-class FileError(AppError):
-    pass
-
-
-class FileSizeExceededError(FileError):
-    def __init__(self, file_size: int, max_size: int):
-        super().__init__(
-            message=f'File size {file_size} bytes exceeds maximum allowed size {max_size} bytes',
-            error_code='FILE_SIZE_EXCEEDED',
-            details={'file_size': file_size, 'max_size': max_size},
-        )
 
 
 # Schedule Exceptions

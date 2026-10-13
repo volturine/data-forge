@@ -212,14 +212,6 @@ def ensure_bucket_exists(bucket: str | None = None) -> str:
     return resolved
 
 
-def probe_object_store(*, namespace: str | None = None) -> None:
-    """Fail-fast connectivity check: create/head the namespace bucket."""
-    from runtime.namespace import get_namespace, normalize_namespace
-
-    resolved = normalize_namespace(namespace) if namespace is not None else get_namespace()
-    ensure_bucket_exists(namespace_bucket(resolved))
-
-
 def upload_bytes(data: bytes, target_url: str, *, content_type: str | None = None) -> str:
     bucket, key = parse_object_store_url(target_url)
     ensure_bucket_exists(bucket)
@@ -339,13 +331,6 @@ def presigned_put_url(
             ExpiresIn=expires_seconds,
         )
     )
-
-
-def download_bytes(source_url: str) -> bytes:
-    bucket, key = parse_object_store_url(source_url)
-    response = _client().get_object(Bucket=bucket, Key=key)
-    body = response["Body"]
-    return body.read()
 
 
 def download_chunks(source_url: str, *, chunk_size: int) -> Generator[bytes]:

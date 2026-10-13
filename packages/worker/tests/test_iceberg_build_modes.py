@@ -168,7 +168,6 @@ class TestBuildModeWiring:
         manager = MagicMock()
         engine = self._make_engine_mock()
         manager.get_engine.return_value = engine
-        manager.get_or_create_engine.return_value = engine
         manager.acquire_engine.return_value = nullcontext(engine)
         return manager
 
@@ -216,14 +215,9 @@ class TestBuildModeWiring:
             patch("runtime.compute_service.client_from_env", return_value=self._make_internal_client_mock(output_ds_id)),
         ):
             export_data(
-                session=None,
                 manager=self._make_manager_mock(),
                 target_step_id="source",
                 analysis_pipeline=pipeline,
-                request_json={
-                    "analysis_pipeline": pipeline,
-                    "target_step_id": "source",
-                },
                 filename="test_out",
                 iceberg_options={
                     "namespace": "ns",
@@ -263,11 +257,9 @@ class TestBuildModeWiring:
             patch("runtime.compute_service.client_from_env", return_value=internal_client),
         ):
             export_data(
-                session=None,
                 manager=self._make_manager_mock(),
                 target_step_id="source",
                 analysis_pipeline=pipeline,
-                request_json={"analysis_pipeline": pipeline, "target_step_id": "source"},
                 filename="test_out",
                 iceberg_options={"namespace": "ns", "table_name": "tbl", "branch": "master"},
                 result_id=output_ds_id,
@@ -305,14 +297,9 @@ class TestBuildModeWiring:
             patch("runtime.compute_service.client_from_env", return_value=self._make_internal_client_mock(output_ds_id)),
         ):
             export_data(
-                session=None,
                 manager=self._make_manager_mock(),
                 target_step_id="source",
                 analysis_pipeline=pipeline,
-                request_json={
-                    "analysis_pipeline": pipeline,
-                    "target_step_id": "source",
-                },
                 filename="test_out",
                 iceberg_options={
                     "namespace": "ns",
@@ -341,14 +328,9 @@ class TestBuildModeWiring:
             patch("runtime.compute_service.client_from_env", return_value=self._make_internal_client_mock(output_ds_id)),
         ):
             export_data(
-                session=None,
                 manager=self._make_manager_mock(),
                 target_step_id="source",
                 analysis_pipeline=pipeline,
-                request_json={
-                    "analysis_pipeline": pipeline,
-                    "target_step_id": "source",
-                },
                 filename="test_out",
                 iceberg_options={
                     "namespace": "ns",
@@ -375,14 +357,9 @@ class TestBuildModeWiring:
             patch("runtime.compute_service.client_from_env", return_value=self._make_internal_client_mock(output_ds_id)),
         ):
             export_data(
-                session=None,
                 manager=self._make_manager_mock(),
                 target_step_id="source",
                 analysis_pipeline=pipeline,
-                request_json={
-                    "analysis_pipeline": pipeline,
-                    "target_step_id": "source",
-                },
                 filename="test_out",
                 iceberg_options={
                     "namespace": "ns",
@@ -414,14 +391,9 @@ class TestBuildModeWiring:
             patch("runtime.compute_service.client_from_env", return_value=self._make_internal_client_mock(output_ds_id)),
         ):
             export_data(
-                session=None,
                 manager=self._make_manager_mock(),
                 target_step_id="source",
                 analysis_pipeline=pipeline,
-                request_json={
-                    "analysis_pipeline": pipeline,
-                    "target_step_id": "source",
-                },
                 filename="test_out",
                 iceberg_options={
                     "namespace": "ns",
@@ -456,14 +428,9 @@ class TestBuildModeWiring:
             patch("runtime.compute_service.client_from_env", return_value=self._make_internal_client_mock(output_ds_id)),
         ):
             export_data(
-                session=None,
                 manager=self._make_manager_mock(),
                 target_step_id="source",
                 analysis_pipeline=pipeline,
-                request_json={
-                    "analysis_pipeline": pipeline,
-                    "target_step_id": "source",
-                },
                 filename="test_out",
                 iceberg_options={
                     "namespace": "ns",

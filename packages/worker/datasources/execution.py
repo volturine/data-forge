@@ -17,12 +17,11 @@ from polars.datatypes import Array, List, Struct
 from pyiceberg.expressions import AlwaysTrue
 from pyiceberg.table import Table
 
-from dataforge_protocol import datasource_pb2
+from dataforge_protocol import datasource_pb2, enums_pb2
 from datasources.datasource_loading import iter_datasource_batches, load_datasource
 from datasources.schemas import (
     ColumnStats,
     ColumnStatsResponse,
-    DataSourceRecord,
     SchemaDiff,
     SnapshotCompareResponse,
     SnapshotPreview,
@@ -41,6 +40,7 @@ from runtime.object_store import (
     object_store_url,
     upload_bytes,
 )
+from runtime.protocol_mapping import proto_value_to_enum_name, struct_to_dict
 from runtime.worker_runtime_client import BackendWorkerRpcError, DatasourceMetadata, WorkerRuntimeClient
 
 logger = logging.getLogger(__name__)
@@ -398,16 +398,16 @@ def _complete_ingest_run(
     namespace: str,
     run_id: str,
     started: float,
-    record: DataSourceRecord,
+    record: datasource_pb2.DataSourceRecord,
     original_source_type: DataSourceType,
     metadata_path: object | None = None,
 ) -> None:
     result_json: dict[str, object] = {
         "datasource_name": record.name,
-        "storage_type": record.source_type,
+        "storage_type": proto_value_to_enum_name(enums_pb2.DataSourceType, "DATA_SOURCE_TYPE", record.source_type),
         "original_source_type": original_source_type.value,
     }
-    config = record.config if isinstance(record.config, dict) else {}
+    config = struct_to_dict(record.config)
     snapshot_id = config.get("snapshot_id")
     if isinstance(snapshot_id, (str, int)) and str(snapshot_id):
         result_json["snapshot_id"] = str(snapshot_id)
@@ -496,7 +496,7 @@ def ingest_datasource_for_schedule(
     lease_generation: int,
     job_id: str,
     build_id: str,
-) -> DataSourceRecord:
+) -> datasource_pb2.DataSourceRecord:
     from dataforge_protocol import compute_pb2, enums_pb2
     from runtime.compute_utils import await_compute_worker_result
 

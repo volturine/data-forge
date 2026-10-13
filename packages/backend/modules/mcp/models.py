@@ -3,7 +3,7 @@
 from __future__ import annotations
 
 import re
-from typing import Any, cast
+from typing import Any
 
 from pydantic import BaseModel, Field, computed_field
 
@@ -55,38 +55,6 @@ class MCPToolDefinition(BaseModel):
     arg_metadata: dict[str, Any] = Field(default_factory=dict)
     output_schema: dict[str, Any] | None = None
     tags: list[str] = Field(default_factory=list)
-
-    @classmethod
-    def coerce(cls, value: MCPToolDefinition | dict[str, Any]) -> MCPToolDefinition:
-        if isinstance(value, cls):
-            return value
-        method = MCPHttpMethod.require(value.get('method', MCPHttpMethod.GET.value))
-        path_value = value.get('path')
-        path = path_value if isinstance(path_value, str) else ''
-        description_value = value.get('description')
-        description = description_value if isinstance(description_value, str) else ''
-        if not description:
-            tool_id_value = value.get('id')
-            description = tool_id_value if isinstance(tool_id_value, str) else f'{method.value} {path}'.strip()
-        input_schema_value = value.get('input_schema')
-        input_schema = cast(dict[str, Any], input_schema_value) if isinstance(input_schema_value, dict) else {}
-        arg_metadata_value = value.get('arg_metadata')
-        arg_metadata = cast(dict[str, Any], arg_metadata_value) if isinstance(arg_metadata_value, dict) else {}
-        output_schema_value = value.get('output_schema')
-        output_schema = cast(dict[str, Any], output_schema_value) if isinstance(output_schema_value, dict) else None
-        tags_value = value.get('tags')
-        raw_tags = tags_value if isinstance(tags_value, list) else []
-        return cls(
-            id=str(value.get('id', 'tool')),
-            method=method,
-            path=path,
-            description=description,
-            confirm_required=bool(value.get('confirm_required', False)),
-            input_schema=input_schema,
-            arg_metadata=arg_metadata,
-            output_schema=output_schema,
-            tags=[tag for tag in raw_tags if isinstance(tag, str)],
-        )
 
     @computed_field(return_type=MCPToolSafety)
     def safety(self) -> MCPToolSafety:
@@ -162,15 +130,6 @@ class MCPToolDefinition(BaseModel):
                 'parameters': self.input_schema,
             },
         }
-
-    def to_api_dict(self) -> dict[str, Any]:
-        return self.model_dump(mode='json')
-
-    def __getitem__(self, key: str) -> Any:
-        return self.to_api_dict()[key]
-
-    def get(self, key: str, default: Any = None) -> Any:
-        return self.to_api_dict().get(key, default)
 
 
 CONFIRM_REQUIRED_PATTERNS: tuple[tuple[MCPHttpMethod, str], ...] = (

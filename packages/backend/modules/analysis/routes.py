@@ -15,7 +15,6 @@ from backend_core.error_handlers import handle_errors
 from backend_core.validation import AnalysisId, parse_analysis_id
 from dataforge_protocol import compute_pb2, enums_pb2
 from modules.analysis import schemas, service
-from modules.analysis.pipeline_compiler import compile_step
 from modules.analysis.revisions import (
     AnalysisRevisionSnapshot,
     etag as analysis_etag,
@@ -24,7 +23,7 @@ from modules.analysis.revisions import (
     set_response_headers as set_analysis_revision_headers,
     version as analysis_version,
 )
-from modules.analysis.step_schemas import get_step_catalog
+from modules.analysis.step_schemas import get_step_catalog, normalize_step_config
 from modules.auth.dependencies import get_current_user, get_current_user_id
 from modules.auth.models import User
 from modules.compute import executor_client
@@ -442,11 +441,7 @@ async def add_step(
     analysis_id_value = parse_analysis_id(analysis_id)
 
     def add(session: Session):
-        normalized_config = compile_step(
-            step_id='new-step',
-            step_type=data.type,
-            config=data.config,
-        )
+        normalized_config = normalize_step_config(data.type, data.config)
         return service.add_step(
             session,
             analysis_id_value,
@@ -490,27 +485,21 @@ async def update_step(
     def update(session: Session):
         normalized_config = data.config
         if data.type and data.config:
-            normalized_config = compile_step(
-                step_id=step_id,
-                step_type=data.type,
-                config=data.config,
-            )
+            if not step_id.strip():
+                raise ValueError('Pipeline step id is required')
+            normalized_config = normalize_step_config(data.type, data.config)
         elif data.type and not data.config:
             existing = service.get_step(session, analysis_id_value, tab_id, step_id)
-            compile_step(
-                step_id=step_id,
-                step_type=data.type,
-                config=existing.config,
-            )
+            if not step_id.strip():
+                raise ValueError('Pipeline step id is required')
+            normalize_step_config(data.type, existing.config)
         elif data.config and not data.type:
             existing = service.get_step(session, analysis_id_value, tab_id, step_id)
             existing_type = existing.type
             if existing_type:
-                normalized_config = compile_step(
-                    step_id=step_id,
-                    step_type=existing_type,
-                    config=data.config,
-                )
+                if not step_id.strip():
+                    raise ValueError('Pipeline step id is required')
+                normalized_config = normalize_step_config(existing_type, data.config)
         return service.update_step(
             session,
             analysis_id_value,

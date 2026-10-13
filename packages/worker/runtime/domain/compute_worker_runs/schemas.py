@@ -1,9 +1,6 @@
 from __future__ import annotations
 
-import datetime as dt
-from typing import Any, ClassVar, Self
-
-from pydantic import BaseModel, ConfigDict, Field, model_validator
+from typing import ClassVar, Self
 
 from dataforge_protocol import enums_pb2
 from runtime.domain.domain_enums import DomainEnumValue, domain_token
@@ -40,13 +37,6 @@ class ComputeWorkerRunStatus(DomainEnumValue):
     FAILED: ClassVar[Self]
     CANCELLED: ClassVar[Self]
 
-    @property
-    def is_terminal(self) -> bool:
-        return self in {ComputeWorkerRunStatus.SUCCESS, ComputeWorkerRunStatus.FAILED, ComputeWorkerRunStatus.CANCELLED}
-
-    def blocks_transition_to(self, next_status: ComputeWorkerRunStatus) -> bool:
-        return self.is_terminal and next_status != self
-
 
 ComputeWorkerRunStatus.RUNNING = ComputeWorkerRunStatus(
     enums_pb2.COMPUTE_WORKER_RUN_STATUS_RUNNING, domain_token("ComputeWorkerRunStatus", enums_pb2.COMPUTE_WORKER_RUN_STATUS_RUNNING)
@@ -68,10 +58,6 @@ class ComputeWorkerRunExecutionCategory(DomainEnumValue):
     PLAN: ClassVar[Self]
     COMPUTE: ClassVar[Self]
     WRITE: ClassVar[Self]
-
-    @property
-    def is_query_plan(self) -> bool:
-        return self == ComputeWorkerRunExecutionCategory.PLAN
 
     @property
     def default_step_type(self) -> str:
@@ -115,106 +101,3 @@ SchemaDiffStatus.REMOVED = SchemaDiffStatus(enums_pb2.SCHEMA_DIFF_STATUS_REMOVED
 SchemaDiffStatus.TYPE_CHANGED = SchemaDiffStatus(
     enums_pb2.SCHEMA_DIFF_STATUS_TYPE_CHANGED, domain_token("SchemaDiffStatus", enums_pb2.SCHEMA_DIFF_STATUS_TYPE_CHANGED)
 )
-
-
-class ComputeWorkerRunResultSummary(BaseModel):
-    model_config = ConfigDict(extra="allow")
-
-    row_count: int | str | None = None
-    schema_: dict[str, str] | None = Field(default_factory=dict, alias="schema")
-    data: list[dict[str, Any]] | None = None
-    metadata: dict[str, Any] | None = None
-
-
-class ComputeWorkerRunExecutionEntry(BaseModel):
-    key: str
-    label: str
-    category: ComputeWorkerRunExecutionCategory
-    order: int
-    duration_ms: float | None = None
-    share_pct: float | None = None
-    optimized_plan: str | None = None
-    unoptimized_plan: str | None = None
-    metadata: dict[str, Any] | None = None
-
-
-class ComputeWorkerRunBaseSchema(BaseModel):
-    model_config = ConfigDict(from_attributes=True)
-
-    namespace: str
-    analysis_id: str | None = None
-    datasource_id: str
-    kind: ComputeWorkerRunKind
-    status: ComputeWorkerRunStatus
-    request_json: dict[str, Any]
-    result_json: dict[str, Any] | None = None
-    error_message: str | None = None
-    created_at: dt.datetime
-    completed_at: dt.datetime | None = None
-    duration_ms: int | None = None
-    step_timings: dict[str, float] = Field(default_factory=dict)
-    query_plan: str | None = None
-    progress: float = 0.0
-    current_step: str | None = None
-    triggered_by: str | None = None
-    execution_entries: list[ComputeWorkerRunExecutionEntry] = Field(default_factory=list)
-
-
-class ComputeWorkerRunResponseSchema(ComputeWorkerRunBaseSchema):
-    id: str
-
-
-class ColumnDiff(BaseModel):
-    column: str
-    status: SchemaDiffStatus
-    type_a: str | None = None
-    type_b: str | None = None
-
-
-class TimingDiff(BaseModel):
-    step: str
-    ms_a: float | None = None
-    ms_b: float | None = None
-    delta_ms: float | None = None
-    delta_pct: float | None = None
-
-
-class RunSummary(BaseModel):
-    model_config = ConfigDict(from_attributes=True)
-
-    id: str
-    kind: ComputeWorkerRunKind
-    status: ComputeWorkerRunStatus
-    created_at: dt.datetime
-    duration_ms: int | None
-    row_count: int | None = None
-    schema_columns: int = 0
-    triggered_by: str | None = None
-
-    @model_validator(mode="before")
-    @classmethod
-    def extract_result_fields(cls, values: dict) -> dict:  # type: ignore[override]
-        """Pull row_count and schema size from result_json if present."""
-        if not isinstance(values, dict):
-            return values
-        rj = values.get("result_json") or {}
-        if "row_count" not in values or values.get("row_count") is None:
-            rc = rj.get("row_count")
-            if rc is not None:
-                values["row_count"] = int(rc) if not isinstance(rc, int) else rc
-        if values.get("schema_columns", 0) == 0:
-            schema = rj.get("schema")
-            if isinstance(schema, dict):
-                values["schema_columns"] = len(schema)
-        return values
-
-
-class BuildComparisonResponse(BaseModel):
-    run_a: RunSummary
-    run_b: RunSummary
-    row_count_a: int | None = None
-    row_count_b: int | None = None
-    row_count_delta: int | None = None
-    schema_diff: list[ColumnDiff] = Field(default_factory=list)
-    timing_diff: list[TimingDiff] = Field(default_factory=list)
-    total_duration_delta_ms: int | None = None

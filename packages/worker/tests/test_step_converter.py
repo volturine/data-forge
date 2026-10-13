@@ -6,14 +6,13 @@ from dataforge_protocol import enums_pb2
 from operations.step_converter import (
     BackendStep,
     FrontendStep,
-    convert_config_to_params,
     convert_step_format,
 )
 
 
-def test_convert_config_to_params_rejects_unregistered_operations() -> None:
+def test_direct_frontend_step_with_unknown_type_is_rejected() -> None:
     with pytest.raises(ValueError, match="Unknown operation 'typo'"):
-        convert_config_to_params("typo", {})
+        convert_step_format(FrontendStep(id="step-1", type="typo"))
 
 
 def test_convert_step_format_returns_frozen_backend_step_dataclass() -> None:

@@ -3,7 +3,7 @@ from datetime import datetime
 from hashlib import sha256
 from typing import Any
 
-from sqlalchemy import func, text, update
+from sqlalchemy import text, update
 from sqlalchemy.exc import IntegrityError
 from sqlmodel import Session, select
 
@@ -118,76 +118,6 @@ def _apply_compute_worker_status(
         setattr(row, field, value)
     row.last_seen_at = stamp
     row.updated_at = stamp
-
-
-def _upsert_compute_worker_status(
-    session: Session,
-    *,
-    worker_id: str,
-    namespace: str,
-    status: ComputeWorkerStatusInfo,
-    now: datetime | None = None,
-    commit: bool,
-) -> ComputeWorkerInstance:
-    if commit:
-        _lock_engine_snapshot(session, worker_id=worker_id, namespace=namespace)
-    stamp = now or _utcnow()
-    scope = _required_identity_value(status.scope, 'scope')
-    instance_status = _compute_worker_instance_status(status)
-    instance_id = f'{worker_id}:{namespace}:{scope}:{status.resource_id}'
-    row = session.get(ComputeWorkerInstance, instance_id)
-    if row is None:
-        row = ComputeWorkerInstance(
-            id=instance_id,
-            worker_id=worker_id,
-            namespace=namespace,
-            analysis_id=status.analysis_id,
-            compute_worker_scope=scope,
-            compute_worker_reuse_policy=_required_identity_value(status.reuse_policy, 'reuse_policy'),
-            datasource_id=status.datasource_id,
-            build_id=status.build_id,
-            container_id=status.container_id,
-            image_digest=status.image_digest,
-            termination_reason=status.termination_reason,
-            exit_code=status.exit_code,
-            oom_killed=status.oom_killed,
-            supervisor_id=status.supervisor_id,
-            owner_id=status.owner_id,
-            docker_host=status.docker_host,
-            status=instance_status,
-            current_job_id=status.current_job_id,
-            current_build_id=status.current_build_id,
-            current_compute_worker_run_id=status.current_compute_worker_run_id,
-            resource_config_json=copy_json_object(status.resource_config),
-            effective_resources_json=copy_json_object(status.effective_resources),
-            last_activity_at=_read_dt(status.last_activity) or stamp,
-            last_seen_at=stamp,
-            updated_at=stamp,
-        )
-    else:
-        _apply_compute_worker_status(row, status=status, instance_status=instance_status, stamp=stamp)
-    session.add(row)
-    if not commit:
-        return row
-    try:
-        session.commit()
-    except IntegrityError:
-        session.rollback()
-        row = session.get(ComputeWorkerInstance, instance_id)
-        if row is None:
-            raise
-        _apply_compute_worker_status(row, status=status, instance_status=instance_status, stamp=stamp)
-        session.add(row)
-        session.commit()
-    session.refresh(row)
-    return row
-
-
-def upsert_compute_worker_status(
-    session: Session, *, worker_id: str, namespace: str, status: ComputeWorkerStatusInfo, now: datetime | None = None
-) -> ComputeWorkerInstance:
-    """Persist one engine projection for callers that own a single update."""
-    return _upsert_compute_worker_status(session, worker_id=worker_id, namespace=namespace, status=status, now=now, commit=True)
 
 
 def persist_compute_worker_snapshot(
@@ -377,12 +307,6 @@ def list_engine_projection(session: Session, *, namespace: str) -> list[ComputeW
         if row.worker_id < current.worker_id:
             latest[key] = row
     return sorted(latest.values(), key=_row_identity_key)
-
-
-def latest_namespace_update(session: Session, *, namespace: str) -> datetime | None:
-    stmt = select(func.max(ComputeWorkerInstance.updated_at)).where(sa(ComputeWorkerInstance.namespace == namespace))
-    value = session.execute(stmt).scalar_one()
-    return value if isinstance(value, datetime) else None
 
 
 def serialize_compute_worker_instance(row: ComputeWorkerInstance, *, defaults: dict[str, object]) -> dict[str, object]:

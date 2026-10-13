@@ -1,6 +1,7 @@
 """Preserved chat provider, MCP, parsing, and authorization safety contracts."""
 
 import re
+from typing import Any
 from unittest.mock import AsyncMock, patch
 
 import httpx
@@ -10,7 +11,29 @@ from sqlmodel import Session
 from backend_core.database import get_settings_engine
 from backend_core.secrets import encrypt_secret
 from modules.chat.models import ChatSession
+from modules.mcp.models import MCPHttpMethod, MCPToolDefinition
 from tests.http_client import TestClient
+
+
+def _mcp_tool(
+    tool_id: str,
+    method: MCPHttpMethod,
+    path: str,
+    description: str,
+    input_schema: dict[str, Any],
+    *,
+    arg_metadata: dict[str, Any] | None = None,
+    output_schema: dict[str, Any] | None = None,
+) -> MCPToolDefinition:
+    return MCPToolDefinition(
+        id=tool_id,
+        method=method,
+        path=path,
+        description=description,
+        input_schema=input_schema,
+        arg_metadata=arg_metadata or {},
+        output_schema=output_schema,
+    )
 
 
 class TestModelsRoute:
@@ -163,12 +186,12 @@ class TestToolSystemMessage:
         from modules.chat.routes import _build_tool_system_message
 
         tools = [
-            {
-                'id': 'get_item',
-                'method': 'GET',
-                'path': '/api/v1/items/{item_id}',
-                'description': 'Fetch item',
-                'input_schema': {
+            _mcp_tool(
+                'get_item',
+                MCPHttpMethod.GET,
+                '/api/v1/items/{item_id}',
+                'Fetch item',
+                {
                     'type': 'object',
                     'properties': {
                         'item_id': {'type': 'string', 'description': 'Item id'},
@@ -181,7 +204,7 @@ class TestToolSystemMessage:
                     'required': ['item_id'],
                     'additionalProperties': False,
                 },
-                'arg_metadata': {
+                arg_metadata={
                     'path': [
                         {
                             'name': 'item_id',
@@ -204,19 +227,19 @@ class TestToolSystemMessage:
                     ],
                     'payload': None,
                 },
-            },
-            {
-                'id': 'post_item',
-                'method': 'POST',
-                'path': '/api/v1/items',
-                'description': 'Create item',
-                'input_schema': {
+            ),
+            _mcp_tool(
+                'post_item',
+                MCPHttpMethod.POST,
+                '/api/v1/items',
+                'Create item',
+                {
                     'type': 'object',
                     'properties': {'payload': {'type': 'object'}},
                     'required': ['payload'],
                     'additionalProperties': False,
                 },
-                'arg_metadata': {
+                arg_metadata={
                     'path': [],
                     'query': [],
                     'payload': {
@@ -225,7 +248,7 @@ class TestToolSystemMessage:
                         'description': 'Create payload',
                     },
                 },
-            },
+            ),
         ]
 
         msg = _build_tool_system_message(tools)
@@ -244,12 +267,12 @@ class TestToolSystemMessage:
         from modules.chat.routes import _build_tool_system_message
 
         tools = [
-            {
-                'id': 'fallback_tool',
-                'method': 'GET',
-                'path': '/api/v1/fallback',
-                'description': 'Fallback metadata test',
-                'input_schema': {
+            _mcp_tool(
+                'fallback_tool',
+                MCPHttpMethod.GET,
+                '/api/v1/fallback',
+                'Fallback metadata test',
+                {
                     'type': 'object',
                     'properties': {
                         'q': {
@@ -262,8 +285,7 @@ class TestToolSystemMessage:
                     'required': ['q'],
                     'additionalProperties': False,
                 },
-                'arg_metadata': None,
-            },
+            ),
         ]
 
         msg = _build_tool_system_message(tools)
@@ -277,18 +299,18 @@ class TestToolSystemMessage:
         from modules.chat.routes import _build_tool_system_message
 
         tools = [
-            {
-                'id': 'get_item',
-                'method': 'GET',
-                'path': '/api/v1/items/{item_id}',
-                'description': 'Fetch item',
-                'input_schema': {
+            _mcp_tool(
+                'get_item',
+                MCPHttpMethod.GET,
+                '/api/v1/items/{item_id}',
+                'Fetch item',
+                {
                     'type': 'object',
                     'properties': {},
                     'additionalProperties': False,
                 },
-                'arg_metadata': {'path': [], 'query': [], 'payload': None},
-                'output_schema': {
+                arg_metadata={'path': [], 'query': [], 'payload': None},
+                output_schema={
                     'status_code': '200',
                     'content_type': 'application/json',
                     'response_model': 'ItemResponse',
@@ -301,7 +323,7 @@ class TestToolSystemMessage:
                         },
                     },
                 },
-            },
+            ),
         ]
 
         msg = _build_tool_system_message(tools)
@@ -330,30 +352,30 @@ class TestToolSystemMessage:
         assert 'Never send unknown arguments; only use documented parameters.' in msg
 
         for tool in tools:
-            assert f'- {tool["id"]} [{tool["method"]}]:' in msg
+            assert f'- {tool.id} [{tool.method.value}]:' in msg
 
         headers = re.findall(r'^- .+ \[[A-Z]+\]:', msg, flags=re.MULTILINE)
         assert len(headers) == len(tools)
 
-        path_tool = next((t for t in tools if (t.get('arg_metadata', {}).get('path') or [])), None)
+        path_tool = next((t for t in tools if (t.arg_metadata.get('path') or [])), None)
         assert path_tool is not None
-        first_path = path_tool['arg_metadata']['path'][0]
-        assert f'- {path_tool["id"]} [{path_tool["method"]}]' in msg
+        first_path = path_tool.arg_metadata['path'][0]
+        assert f'- {path_tool.id} [{path_tool.method.value}]' in msg
         assert f'- {first_path["name"]} (path,' in msg
 
-        query_tool = next((t for t in tools if (t.get('arg_metadata', {}).get('query') or [])), None)
+        query_tool = next((t for t in tools if (t.arg_metadata.get('query') or [])), None)
         if query_tool is not None:
-            first_query = query_tool['arg_metadata']['query'][0]
-            assert f'- {query_tool["id"]} [{query_tool["method"]}]' in msg
+            first_query = query_tool.arg_metadata['query'][0]
+            assert f'- {query_tool.id} [{query_tool.method.value}]' in msg
             assert f'- {first_query["name"]} (query,' in msg
 
         payload_tool = next(
-            (t for t in tools if t.get('arg_metadata', {}).get('payload') is not None),
+            (t for t in tools if t.arg_metadata.get('payload') is not None),
             None,
         )
         assert payload_tool is not None
-        content_type = payload_tool['arg_metadata']['payload']['content_type']
-        assert f'- {payload_tool["id"]} [{payload_tool["method"]}]' in msg
+        content_type = payload_tool.arg_metadata['payload']['content_type']
+        assert f'- {payload_tool.id} [{payload_tool.method.value}]' in msg
         assert '- payload (body,' in msg
         assert f'content_type: {content_type}' in msg
 
@@ -400,17 +422,18 @@ class TestToolSystemMessage:
 
 class TestOpenRouterToolMapping:
     def test_mcp_tool_to_openai_appends_expected_output_hint(self) -> None:
-        from modules.chat.chat_http import _mcp_tool_to_openai
 
-        tool = {
-            'id': 'get_item',
-            'description': 'Fetch item',
-            'input_schema': {
+        tool = _mcp_tool(
+            'get_item',
+            MCPHttpMethod.GET,
+            '/api/v1/items',
+            'Fetch item',
+            {
                 'type': 'object',
                 'properties': {},
                 'additionalProperties': False,
             },
-            'output_schema': {
+            output_schema={
                 'status_code': '200',
                 'content_type': 'application/json',
                 'response_model': 'ItemResponse',
@@ -423,9 +446,9 @@ class TestOpenRouterToolMapping:
                     },
                 },
             },
-        }
+        )
 
-        mapped = _mcp_tool_to_openai(tool)
+        mapped = tool.openai_tool()
         desc = mapped['function']['description']
         assert 'Fetch item' in desc
         assert 'Expected output:' in desc
@@ -435,20 +458,20 @@ class TestOpenRouterToolMapping:
         assert 'fields: id, name, created_at' in desc
 
     def test_mcp_tool_to_openai_keeps_description_when_no_output_schema(self) -> None:
-        from modules.chat.chat_http import _mcp_tool_to_openai
 
-        tool = {
-            'id': 'get_item',
-            'description': 'Fetch item',
-            'input_schema': {
+        tool = _mcp_tool(
+            'get_item',
+            MCPHttpMethod.GET,
+            '/api/v1/items',
+            'Fetch item',
+            {
                 'type': 'object',
                 'properties': {},
                 'additionalProperties': False,
             },
-            'output_schema': None,
-        }
+        )
 
-        mapped = _mcp_tool_to_openai(tool)
+        mapped = tool.openai_tool()
         assert mapped['function']['description'] == 'Fetch item'
 
 
