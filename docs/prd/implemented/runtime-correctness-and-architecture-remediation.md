@@ -136,7 +136,7 @@ Completed in the concurrency-verification and operational-confidence slice:
 - a shared barrier-based concurrent actor harness coordinates real PostgreSQL sessions without timing sleeps;
 - simultaneous scheduler claimants prove one due schedule is claimed exactly once through `SKIP LOCKED` and fenced lease predicates;
 - claimant transitions use shared typed outcomes, with gRPC handlers explicitly mapping `Applied` and rejected lease outcomes;
-- lease claim, reclaim, renewal, loss, and exhaustion paths emit redacted structured context and transition counters;
+- lease claim, reclaim, renewal, loss, and exhaustion paths emit redacted structured context;
 - forced process exits and restarts cover API, worker manager, scheduler, and an actively claimed dispatcher delivery;
 - `just test-runtime-stability 3` repeats the contention, transition, lease, and crash/restart matrix three times.
 

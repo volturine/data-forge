@@ -7,8 +7,6 @@ from pydantic import BaseModel, ConfigDict, Field, model_validator
 from backend_core.domain.analysis.step_types import (
     STEP_TYPES,
     ChartType,
-    is_step_type,
-    iter_step_types,
 )
 from backend_core.domain.compute.schemas import ExportDestination, ExportFormat
 from backend_core.domain.step_config_enums import (
@@ -48,12 +46,10 @@ from backend_core.domain.step_config_enums import (
 )
 
 __all__ = [
-    'get_config_model',
     'get_step_catalog',
     'normalize_step_config',
     'normalize_step_config_for_protocol',
     'normalize_pipeline_step_configs_for_protocol',
-    'validate_step',
 ]
 
 
@@ -648,7 +644,7 @@ STEP_CATALOG: dict[str, StepCatalogEntry] = {
 def get_step_catalog() -> list[StepCatalogItem]:
     """Return the step type catalog for AI discovery."""
     result: list[StepCatalogItem] = []
-    for typ in iter_step_types(include_plot_aliases=False):
+    for typ in STEP_TYPES.all(include_plot_aliases=False):
         info = STEP_CATALOG[typ]
         config_model = cast(type[BaseModel], info['config'])
         result.append(
@@ -663,19 +659,9 @@ def get_step_catalog() -> list[StepCatalogItem]:
     return result
 
 
-def get_config_model(step_type: str) -> type[BaseModel] | None:
-    """Return the config model for a step type."""
-    if not is_step_type(step_type):
-        return None
-    entry = STEP_CATALOG.get(step_type)
-    if not entry:
-        return None
-    return cast(type[BaseModel], entry['config'])
-
-
 def normalize_step_config(step_type: str, config: dict) -> dict[str, object]:
     """Validate and return the canonical config for a step type."""
-    if not is_step_type(step_type):
+    if not STEP_TYPES.has(step_type):
         raise ValueError(f"Unknown step type '{step_type}'")
     model = cast(type[BaseModel], STEP_CATALOG[step_type]['config'])
     return model.model_validate(config).model_dump(mode='json', by_alias=True)
@@ -697,12 +683,13 @@ def _filter_value_for_protocol(value: object) -> dict[str, object] | None:
 
 def normalize_step_config_for_protocol(step_type: str, config: dict) -> dict[str, object]:
     """Validate an HTTP operation config and serialize its typed protocol fields."""
-    if not is_step_type(step_type):
+    if not STEP_TYPES.has(step_type):
         raise ValueError(f"Unknown step type '{step_type}'")
     model = cast(type[BaseModel], STEP_CATALOG[step_type]['config'])
+    validated_config = model.model_validate(config)
     payload = cast(
         dict[str, object],
-        model.model_validate(config).model_dump(
+        validated_config.model_dump(
             mode='python',
             by_alias=False,
             context={'protocol_enum_numbers': True},
@@ -721,7 +708,7 @@ def normalize_step_config_for_protocol(step_type: str, config: dict) -> dict[str
         payload['value'] = _filter_value_for_protocol(payload['value'])
     elif normalized_type == STEP_TYPES.select.value:
         # SelectConfig.cast_map is intentionally a string map in the wire schema.
-        cast_map = model.model_validate(config).model_dump(mode='json', by_alias=True).get('cast_map')
+        cast_map = validated_config.model_dump(mode='json', by_alias=True).get('cast_map')
         if isinstance(cast_map, dict):
             payload['cast_map'] = cast_map
     return payload
@@ -756,8 +743,3 @@ def normalize_pipeline_step_configs_for_protocol(pipeline: dict[str, object]) ->
         tabs.append(tab)
     normalized['tabs'] = tabs
     return normalized
-
-
-def validate_step(step_type: str, config: dict) -> None:
-    """Validate a step type and its config. Raises ValueError on failure."""
-    normalize_step_config(step_type, config)

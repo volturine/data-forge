@@ -1754,7 +1754,7 @@ async def test_slow_metadata_and_compute_worker_run_rpcs_log_ordered_phase_timin
     if method_name == 'CreateComputeWorkerRun':
         monkeypatch.setattr(backend_grpc_server.compute_worker_run_service, 'create_compute_worker_run_payload', lambda **fields: fields)
         monkeypatch.setattr(
-            backend_grpc_server.compute_worker_run_commands,
+            backend_grpc_server.compute_worker_run_service,
             'create_compute_worker_run',
             lambda _session, _payload: SimpleNamespace(id='phase-test-run'),
         )
@@ -2208,11 +2208,11 @@ async def test_internal_worker_grpc_persists_typed_engine_snapshot(monkeypatch: 
     def queue_notification(session: Any, payload: dict[str, object]) -> None:
         queued_notifications.append((session, payload, session.in_transaction()))
 
-    def reject_direct_notification(_namespace: str) -> None:
+    def reject_direct_notification(_payload: dict[str, object]) -> None:
         pytest.fail('engine snapshot must not use the direct notification connection')
 
     monkeypatch.setattr(compute_worker_instances_service.runtime_ipc, 'notify_runtime_payload_on_commit', queue_notification)
-    monkeypatch.setattr(compute_worker_instances_service.runtime_ipc, 'notify_api_engine', reject_direct_notification)
+    monkeypatch.setattr(compute_worker_instances_service.runtime_ipc, '_send_postgres_message', reject_direct_notification)
 
     response = await WorkerRuntimeServicer().PersistComputeWorkerSnapshot(
         worker_runtime_pb2.WorkerPersistComputeWorkerSnapshotRequest(

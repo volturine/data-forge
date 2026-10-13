@@ -1,6 +1,6 @@
 from datetime import datetime
 
-from pydantic import BaseModel, ConfigDict, Field
+from pydantic import BaseModel, ConfigDict
 
 from modules.auth.models import AuthProviderName, UserStatus
 
@@ -62,9 +62,3 @@ class MessageResponse(BaseModel):
 class OAuthCallbackParams(BaseModel):
     code: str
     state: str | None = None
-
-
-class ErrorResponse(BaseModel):
-    error: str
-    error_code: str
-    details: dict[str, object] = Field(default_factory=dict)

@@ -21,7 +21,6 @@ from backend_core.api_execution_budget import (
     remove_api_blocking_executor,
 )
 from backend_core.compute_response_recovery import ComputeResponseRecovery
-from backend_core.dependencies import RuntimeAvailabilityProbe
 from backend_core.domain.compute.schemas import AnalysisPipelinePayload, DownloadRequest
 from backend_core.domain.compute_requests.models import command_envelope
 from backend_core.exceptions import AppError, ClientDisconnectedError
@@ -138,13 +137,6 @@ async def test_json_response_serializes_model_and_preserves_headers() -> None:
         assert response.body == b'{"publicValue":"ready","created_at":"2026-09-26T12:00:00"}'
         assert response.headers['ETag'] == '"analysis-1-2"'
 
-        sync_response = executor_client.json_response_sync(
-            payload,
-            headers={'ETag': '"analysis-1-2"'},
-        )
-        assert sync_response.body == response.body
-        assert sync_response.headers['ETag'] == response.headers['ETag']
-
         list_response = await executor_client.json_response([payload])
         assert list_response.body == b'[{"publicValue":"ready","created_at":"2026-09-26T12:00:00"}]'
     finally:
@@ -256,7 +248,6 @@ async def test_download_step_initializes_data_plane_off_event_loop(monkeypatch: 
     )
     result = await executor_client.download_step(
         request,
-        runtime_probe=cast(RuntimeAvailabilityProbe, None),
     )
 
     assert result == (b'artifact', 'result.parquet', 'application/octet-stream')
@@ -292,7 +283,6 @@ async def test_slow_terminal_compute_request_logs_http_and_durable_ids(
         result = await executor_client._submit_and_wait(
             kind=enums_pb2.COMPUTE_REQUEST_KIND_PREVIEW,
             command=command,
-            runtime_probe=cast(RuntimeAvailabilityProbe, None),
             http_request=request,
         )
 
@@ -337,7 +327,6 @@ async def test_failed_compute_request_logs_correlation_and_error_code(
         await executor_client._submit_and_wait(
             kind=enums_pb2.COMPUTE_REQUEST_KIND_PREVIEW,
             command=command,
-            runtime_probe=cast(RuntimeAvailabilityProbe, None),
             http_request=request,
         )
 
@@ -404,7 +393,6 @@ async def test_local_recovery_delivers_batched_terminal_state_without_another_db
                 executor_client._submit_and_wait(
                     kind=enums_pb2.COMPUTE_REQUEST_KIND_PREVIEW,
                     command=command,
-                    runtime_probe=cast(RuntimeAvailabilityProbe, None),
                     http_request=request,
                 ),
                 timeout=2.0,
@@ -478,7 +466,6 @@ async def test_shared_flight_wait_skips_per_viewer_disconnect_polling(monkeypatc
         executor_client._submit_and_wait(
             kind=enums_pb2.COMPUTE_REQUEST_KIND_PREVIEW,
             command=command,
-            runtime_probe=cast(RuntimeAvailabilityProbe, None),
             http_request=request,
         )
     )
@@ -531,7 +518,6 @@ async def test_cancelling_a_shared_flight_waiter_does_not_cancel_the_durable_req
         executor_client._submit_and_wait(
             kind=enums_pb2.COMPUTE_REQUEST_KIND_PREVIEW,
             command=command,
-            runtime_probe=cast(RuntimeAvailabilityProbe, None),
             http_request=request,
         )
     )
@@ -563,7 +549,6 @@ async def test_shared_flight_lock_wait_retries_without_blocking_the_event_loop(m
         datasource_ids=(),
         kind=enums_pb2.COMPUTE_REQUEST_KIND_PREVIEW,
         command=compute_pb2.ComputeCommand(),
-        runtime_probe=cast(RuntimeAvailabilityProbe, None),
     )
 
     task = asyncio.create_task(executor_client._stage_shared_request_without_waiting_on_a_database_lock(stage))

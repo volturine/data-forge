@@ -468,12 +468,6 @@ def get_db():
         yield session
 
 
-def get_settings_db():
-    engine_to_use = get_settings_engine()
-    with Session(engine_to_use) as session:
-        yield session
-
-
 def run_db[**P, T](func: Callable[Concatenate[Session, P], T], *args: P.args, **kwargs: P.kwargs) -> T:
     engine_to_use = _get_tenant_engine()
     with Session(engine_to_use) as session:
@@ -601,21 +595,6 @@ def _tenant_tables():
     return [table for table in Analysis.metadata.sorted_tables if table.name in table_names]
 
 
-def _create_shared_tables_postgres() -> None:
-    engine_to_use = get_settings_engine()
-    tables = _shared_tables()
-    metadata = tables[0].metadata if tables else None
-    if metadata is None:
-        return
-    with engine_to_use.begin() as connection:
-        connection.execute(text(f'SET search_path TO {_PUBLIC_SCHEMA}'))
-        metadata.create_all(connection, tables=tables)
-
-
-def _ensure_postgres_schema(connection: Connection, schema: str) -> None:
-    connection.execute(text(f'CREATE SCHEMA IF NOT EXISTS "{schema}"'))
-
-
 def _init_postgres_namespace(namespace: str) -> None:
     from backend_core.migrations import migrate_runtime
 
@@ -733,7 +712,3 @@ async def init_db() -> None:
         _seed_shared_state()
 
     await run_api_blocking(_run_postgres_init_locked, _init_postgres)
-
-
-def supports_distributed_runtime() -> bool:
-    return settings.distributed_runtime_enabled

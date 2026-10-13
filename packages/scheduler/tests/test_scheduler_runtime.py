@@ -9,9 +9,22 @@ import main as scheduler_main
 from scheduler_grpc.health import DispatcherHealth
 
 
+def _due_namespace(
+    namespace: str,
+    generation: int,
+    wake_ids: tuple[int, ...] = (),
+) -> scheduler_main.scheduler_runtime_pb2.SchedulerDueNamespace:
+    return scheduler_main.scheduler_runtime_pb2.SchedulerDueNamespace(namespace=namespace, generation=generation, wake_ids=wake_ids)
+
+
+def _run_due_response() -> scheduler_main.scheduler_runtime_pb2.SchedulerRunDueResponse:
+    return scheduler_main.scheduler_runtime_pb2.SchedulerRunDueResponse(handled=False)
+
+
 class FakeSchedulerClient:
     def __init__(self) -> None:
         self.calls: list[tuple[str, str]] = []
+        self.run_due_requests: list[tuple[str, str, int, tuple[int, ...]]] = []
         self.run_due_calls = 0
 
     async def register(self, *, worker_id: str, hostname: str, pid: int, capacity: int, retry_seconds: float | None = None) -> None:
@@ -23,18 +36,26 @@ class FakeSchedulerClient:
     async def heartbeat(self, *, worker_id: str, timeout_seconds: float | None = None) -> None:
         self.calls.append(("heartbeat", worker_id))
 
-    async def stop(self, *, worker_id: str, timeout_seconds: float | None = None) -> None:
+    async def stop(self, *, worker_id: str) -> None:
         self.calls.append(("stop", worker_id))
 
-    async def due_schedule_namespaces(self) -> list[scheduler_main.DueScheduleNamespace]:
+    async def due_schedule_namespaces(self) -> list[scheduler_main.scheduler_runtime_pb2.SchedulerDueNamespace]:
         self.calls.append(("due_schedule_namespaces", "default"))
-        return [scheduler_main.DueScheduleNamespace(namespace="default", generation=1)]
+        return [_due_namespace("default", generation=1, wake_ids=(8, 9))]
 
-    async def run_due(self, *, worker_id: str, namespace: str, generation: int, wake_ids: tuple[int, ...] = ()) -> scheduler_main.SchedulerRunDueResult:
+    async def run_due(
+        self,
+        *,
+        worker_id: str,
+        namespace: str,
+        generation: int,
+        wake_ids: tuple[int, ...] = (),
+    ) -> scheduler_main.scheduler_runtime_pb2.SchedulerRunDueResponse:
         assert generation == 1
         self.run_due_calls += 1
         self.calls.append(("run_due", f"{worker_id}:{namespace}"))
-        return scheduler_main.SchedulerRunDueResult(handled=False, enqueued=[], failures=[])
+        self.run_due_requests.append((worker_id, namespace, generation, wake_ids))
+        return _run_due_response()
 
 
 @pytest.mark.asyncio
@@ -121,6 +142,7 @@ async def test_scheduler_loop_registers_runs_due_work_and_stops() -> None:
         ("run_due", "scheduler-1:default"),
         ("stop", "scheduler-1"),
     ]
+    assert client.run_due_requests == [("scheduler-1", "default", 1, (8, 9))]
 
 
 @pytest.mark.asyncio
@@ -130,19 +152,26 @@ async def test_scheduler_stops_starting_namespace_work_after_stop_during_rpc() -
     stop_event = asyncio.Event()
 
     class MultiNamespaceClient(FakeSchedulerClient):
-        async def due_schedule_namespaces(self) -> list[scheduler_main.DueScheduleNamespace]:
+        async def due_schedule_namespaces(self) -> list[scheduler_main.scheduler_runtime_pb2.SchedulerDueNamespace]:
             return [
-                scheduler_main.DueScheduleNamespace(namespace="first", generation=1),
-                scheduler_main.DueScheduleNamespace(namespace="second", generation=2),
+                _due_namespace("first", generation=1),
+                _due_namespace("second", generation=2),
             ]
 
-        async def run_due(self, *, worker_id: str, namespace: str, generation: int, wake_ids: tuple[int, ...] = ()) -> scheduler_main.SchedulerRunDueResult:
+        async def run_due(
+            self,
+            *,
+            worker_id: str,
+            namespace: str,
+            generation: int,
+            wake_ids: tuple[int, ...] = (),
+        ) -> scheduler_main.scheduler_runtime_pb2.SchedulerRunDueResponse:
             self.run_due_calls += 1
             self.calls.append(("run_due", f"{worker_id}:{namespace}"))
             if namespace == "first":
                 first_started.set()
                 await asyncio.wait_for(allow_first_to_return.wait(), timeout=5)
-            return scheduler_main.SchedulerRunDueResult(handled=False, enqueued=[], failures=[])
+            return _run_due_response()
 
     client = MultiNamespaceClient()
     loop_task = asyncio.create_task(
@@ -170,7 +199,14 @@ async def test_scheduler_stops_starting_namespace_work_after_stop_during_rpc() -
 @pytest.mark.asyncio
 async def test_scheduler_loop_retries_after_backend_restart() -> None:
     class FlakySchedulerClient(FakeSchedulerClient):
-        async def run_due(self, *, worker_id: str, namespace: str, generation: int, wake_ids: tuple[int, ...] = ()) -> scheduler_main.SchedulerRunDueResult:
+        async def run_due(
+            self,
+            *,
+            worker_id: str,
+            namespace: str,
+            generation: int,
+            wake_ids: tuple[int, ...] = (),
+        ) -> scheduler_main.scheduler_runtime_pb2.SchedulerRunDueResponse:
             assert generation == 1
             if self.run_due_calls == 0:
                 self.run_due_calls += 1
@@ -208,7 +244,14 @@ async def test_stalled_scheduler_dispatch_expires_health_while_heartbeat_continu
     health = DispatcherHealth("scheduler:hung", lanes=("scheduler",), max_age_seconds=45, clock=lambda: now)
 
     class StalledSchedulerClient(FakeSchedulerClient):
-        async def run_due(self, *, worker_id: str, namespace: str, generation: int, wake_ids: tuple[int, ...] = ()) -> scheduler_main.SchedulerRunDueResult:
+        async def run_due(
+            self,
+            *,
+            worker_id: str,
+            namespace: str,
+            generation: int,
+            wake_ids: tuple[int, ...] = (),
+        ) -> scheduler_main.scheduler_runtime_pb2.SchedulerRunDueResponse:
             entered.set()
             await asyncio.wait_for(release.wait(), timeout=5)
             return await super().run_due(worker_id=worker_id, namespace=namespace, generation=generation, wake_ids=wake_ids)

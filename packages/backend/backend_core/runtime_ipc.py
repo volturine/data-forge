@@ -10,13 +10,11 @@ import uuid
 from collections.abc import Awaitable, Callable
 
 import psycopg
-from psycopg import Notify
 from pydantic import BaseModel
 from sqlalchemy import text
 from sqlmodel import Session
 
 from backend_core.api_execution_budget import run_api_blocking
-from backend_core.domain.enums import DataForgeStrEnum
 from backend_core.domain.runtime.events import RuntimePayloadKind
 
 logger = logging.getLogger(__name__)
@@ -31,12 +29,6 @@ type RuntimePayloadHandler = Callable[[dict[str, object]], Awaitable[None]]
 type RuntimeRecovery = Callable[[], Awaitable[None]]
 
 
-class RuntimeListenerKind(DataForgeStrEnum):
-    API = 'api'
-    JOB = 'job'
-
-
-ListenerKind = RuntimeListenerKind | str
 _notify_connection_state: tuple[psycopg.Connection, str] | None = None
 _notify_connection_lock = threading.Lock()
 _notify_connection_io_lock = threading.Lock()
@@ -90,7 +82,7 @@ class RuntimeNotificationListener:
                     delivered = 0
                     async for notify in notifications:
                         try:
-                            payload = json.loads(_notify_payload(notify))
+                            payload = json.loads(notify.payload)
                         except json.JSONDecodeError as exc:
                             logger.debug('Ignoring malformed Postgres runtime notification: %s', exc)
                             self._recovery_requested.set()
@@ -156,8 +148,7 @@ def configure_database_url_provider(provider: Callable[[], str] | None) -> None:
     _close_notify_connection(provider, replace_provider=True)
 
 
-async def start_api_server(listener: ListenerKind = RuntimeListenerKind.API) -> RuntimeNotificationListener:
-    del listener
+async def start_api_server() -> RuntimeNotificationListener:
     server = RuntimeNotificationListener(_psycopg_conninfo())
     try:
         await server.start()
@@ -201,16 +192,7 @@ async def serve_api_notifications(
         listener._serving_task = None
 
 
-def _notify_payload(notify: Notify) -> str:
-    return notify.payload
-
-
-async def stop_api_server(
-    server: RuntimeNotificationListener | None,
-    *,
-    listener: ListenerKind = RuntimeListenerKind.API,
-) -> None:
-    del listener
+async def stop_api_server(server: RuntimeNotificationListener | None) -> None:
     try:
         if server is not None:
             await server.close()
@@ -218,22 +200,11 @@ async def stop_api_server(
         await run_api_blocking(_close_notify_connection)
 
 
-def notify_api_build(namespace: str, build_id: str, latest_sequence: int) -> None:
-    _send_api_message(
-        {'kind': RuntimePayloadKind.BUILD.value, 'namespace': namespace, 'build_id': build_id, 'latest_sequence': latest_sequence},
-        listener=RuntimeListenerKind.API,
-    )
-
-
-def notify_api_engine(namespace: str) -> None:
-    _send_api_message({'kind': RuntimePayloadKind.ENGINE.value, 'namespace': namespace}, listener=RuntimeListenerKind.API)
-
-
 def notify_build_job(namespace: str | None = None) -> None:
     payload: dict[str, object] = {'kind': RuntimePayloadKind.JOB.value}
     if namespace is not None:
         payload['namespace'] = namespace
-    _send_api_message(payload, listener=RuntimeListenerKind.JOB)
+    _send_postgres_message(payload)
 
 
 def notify_compute_request_on_commit(session: Session, *, request_id: str, namespace: str, compute_kind: int) -> None:
@@ -280,7 +251,7 @@ def notify_api_lock(
 ) -> None:
     if isinstance(status_payload, BaseModel):
         status_payload = status_payload.model_dump(mode='json')
-    _send_api_message(
+    _send_postgres_message(
         {
             'kind': 'lock',
             'namespace': namespace,
@@ -289,7 +260,6 @@ def notify_api_lock(
             'status': status_payload,
             'source_process': API_PROCESS_ID,
         },
-        listener=RuntimeListenerKind.API,
     )
 
 
@@ -297,17 +267,6 @@ def notify_runtime_payload(payload: dict[str, object]) -> None:
     kind = RuntimePayloadKind.from_payload(payload)
     if kind is None:
         raise ValueError(f'Unsupported runtime notification payload kind: {payload.get("kind")!r}')
-    api_payload_kinds = {
-        RuntimePayloadKind.BUILD,
-        RuntimePayloadKind.ENGINE,
-        RuntimePayloadKind.COMPUTE_RESPONSE,
-    }
-    listener = RuntimeListenerKind.API if kind in api_payload_kinds else RuntimeListenerKind.JOB
-    _send_api_message(payload, listener=listener)
-
-
-def _send_api_message(payload: dict[str, object], *, listener: ListenerKind) -> None:
-    del listener
     _send_postgres_message(payload)
 
 

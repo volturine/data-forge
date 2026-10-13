@@ -99,10 +99,6 @@ async def _run_blocking[**P, T](lane: _BlockingLane, function: Callable[P, T], *
         raise
 
 
-async def _run_blocking_to_completion[**P, T](lane: _BlockingLane, function: Callable[P, T], *args: P.args, **kwargs: P.kwargs) -> T:
-    return await _run_blocking(lane, function, *args, **kwargs)
-
-
 def _validate_proto(request: Message, method: str) -> None:
     started = time.perf_counter()
     try:
@@ -302,7 +298,7 @@ class ObjectStoreServicer(object_store_pb2_grpc.ObjectStoreServiceServicer):
                     except asyncio.CancelledError:
                         upload = await create_task
                         with contextlib.suppress(Exception):
-                            await _run_blocking_to_completion(_OBJECT_STORE_LANE, upload.abort)
+                            await _run_blocking(_OBJECT_STORE_LANE, upload.abort)
                         raise
                     continue
                 if upload is None:
@@ -311,7 +307,7 @@ class ObjectStoreServicer(object_store_pb2_grpc.ObjectStoreServiceServicer):
                     data = bytes(frame.chunk.data)
                     if len(data) > _OBJECT_TRANSFER_CHUNK_BYTES:
                         await context.abort(grpc.StatusCode.RESOURCE_EXHAUSTED, "Upload chunk exceeds the 8 MiB transfer limit")
-                    await _run_blocking_to_completion(_OBJECT_STORE_LANE, upload.write, data)
+                    await _run_blocking(_OBJECT_STORE_LANE, upload.write, data)
                     continue
                 if kind == "commit":
                     if commit_requested:
@@ -319,34 +315,34 @@ class ObjectStoreServicer(object_store_pb2_grpc.ObjectStoreServiceServicer):
                     commit_requested = True
                     continue
                 if kind == "abort":
-                    await _run_blocking_to_completion(_OBJECT_STORE_LANE, upload.abort)
+                    await _run_blocking(_OBJECT_STORE_LANE, upload.abort)
                     upload = None
                     await context.abort(grpc.StatusCode.CANCELLED, "Upload was aborted by the client")
                 await context.abort(grpc.StatusCode.INVALID_ARGUMENT, "Unknown upload transfer frame")
 
             if upload is None or not commit_requested:
                 await context.abort(grpc.StatusCode.INVALID_ARGUMENT, "Upload stream ended before an explicit commit")
-            url = await _run_blocking_to_completion(_OBJECT_STORE_LANE, upload.commit)
+            url = await _run_blocking(_OBJECT_STORE_LANE, upload.commit)
             upload = None
             return object_store_pb2.ObjectStoreUrl(url=url)
         finally:
             if upload is not None:
                 with contextlib.suppress(Exception):
-                    await _run_blocking_to_completion(_OBJECT_STORE_LANE, upload.abort)
+                    await _run_blocking(_OBJECT_STORE_LANE, upload.abort)
 
     async def DownloadObject(self, request: object_store_pb2.ObjectStoreUrl, context: grpc.aio.ServicerContext):
         await _require_internal_token(context)
         chunks = object_store.download_chunks(request.url, chunk_size=_OBJECT_TRANSFER_CHUNK_BYTES)
         total = 0
         try:
-            while chunk := await _run_blocking_to_completion(_OBJECT_STORE_LANE, lambda: next(chunks, b"")):
+            while chunk := await _run_blocking(_OBJECT_STORE_LANE, lambda: next(chunks, b"")):
                 total += len(chunk)
                 if total > object_store.MAX_TRANSFER_BYTES:
                     await context.abort(grpc.StatusCode.RESOURCE_EXHAUSTED, "Object download exceeds the 2 GiB transfer limit")
                 yield object_store_pb2.ObjectStoreTransferChunk(data=chunk)
         finally:
             with contextlib.suppress(Exception):
-                await _run_blocking_to_completion(_OBJECT_STORE_LANE, chunks.close)
+                await _run_blocking(_OBJECT_STORE_LANE, chunks.close)
 
     async def DeleteObject(self, request: object_store_pb2.ObjectStoreUrl, context: grpc.aio.ServicerContext) -> common_pb2.EmptyRequest:
         await _require_internal_token(context)
@@ -449,7 +445,6 @@ class IcebergServicer(iceberg_pb2_grpc.IcebergServiceServicer):
             response = await _run_blocking(
                 _ICEBERG_LANE,
                 compute_service.list_iceberg_snapshots,
-                None,
                 request.datasource_id,
                 branch,
                 request_namespace=request.namespace,
@@ -500,7 +495,6 @@ class IcebergServicer(iceberg_pb2_grpc.IcebergServiceServicer):
             response = await _run_blocking(
                 _ICEBERG_LANE,
                 compute_service.delete_iceberg_snapshot,
-                None,
                 request.datasource_id,
                 request.snapshot_id,
                 request_namespace=request.namespace,

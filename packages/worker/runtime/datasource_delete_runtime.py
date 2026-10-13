@@ -8,7 +8,7 @@ from collections.abc import Callable
 from dataforge_protocol import compute_pb2, enums_pb2
 from runtime.compute_manager import ProcessManager
 from runtime.config import settings
-from runtime.executors import run_control_in_thread
+from runtime.executors import run_shutdown_in_thread
 from runtime.live_hubs import VersionHub
 from runtime.worker_runtime import RuntimeNamespaceDirectory
 from runtime.worker_runtime_client import WorkerRuntimeClient, async_client_from_env
@@ -94,7 +94,7 @@ async def _wait_for_delete_wakeup_or_recovery(stop_event: asyncio.Event, wake_ve
 async def _run_once(*, manager: ProcessManager, client: WorkerRuntimeClient, namespace: str) -> bool:
     pending_deletes = await client.pending_datasource_deletes_async(namespace=namespace)
     for pending_delete in pending_deletes:
-        if not await run_control_in_thread(
+        if not await run_shutdown_in_thread(
             _stop_idle_datasource_engine,
             pending_delete.datasource_id,
             namespace=pending_delete.namespace,

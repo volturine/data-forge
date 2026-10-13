@@ -1,11 +1,72 @@
 import uuid
+from typing import Any, cast
 from unittest.mock import MagicMock, patch
 
 import pytest
 
 from runtime import compute_service
 from runtime.compute_manager import ProcessManager
-from runtime.compute_worker import PolarsComputeWorker
+from runtime.domain.compute.result import ComputeWorkerResult
+
+
+class _PreviewEngine:
+    def __init__(self, identity, resource_config) -> None:
+        self.analysis_id = identity.resource_id
+        self.resource_config = resource_config or {}
+        self.effective_resources = {"max_threads": 1}
+        self.current_job_id: str | None = None
+        self._alive = False
+        self._result: ComputeWorkerResult | None = None
+        self._capacity_notifier = None
+
+    @property
+    def process_id(self) -> int | None:
+        return None
+
+    @property
+    def last_known_alive(self) -> bool:
+        return self._alive
+
+    def bind_capacity_notifier(self, notifier) -> None:
+        self._capacity_notifier = notifier
+
+    def start(self) -> None:
+        self._alive = True
+
+    def is_process_alive(self) -> bool:
+        return self._alive
+
+    def check_health(self) -> bool:
+        return self._alive
+
+    def preview(self, *_args, **_kwargs) -> str:
+        job_id = "preview-job"
+        self.current_job_id = job_id
+        self._result = ComputeWorkerResult(
+            job_id=job_id,
+            data={
+                "schema": {"value": "Int64"},
+                "row_count": 5,
+                "data": [{"value": value} for value in range(5)],
+                "step_timings": {},
+            },
+            error=None,
+        )
+        return job_id
+
+    def get_result(self, *, timeout: float = 1.0, job_id: str | None = None) -> ComputeWorkerResult | None:
+        result = self._result
+        self._result = None
+        self.current_job_id = None
+        if self._capacity_notifier is not None:
+            self._capacity_notifier()
+        return result
+
+    def get_progress_event(self, *_args, **_kwargs):
+        return None
+
+    def shutdown(self) -> None:
+        self._alive = False
 
 
 def _pipeline(sample_datasource, analysis_id: str) -> dict[str, object]:
@@ -51,12 +112,11 @@ def test_preview_step_persists_compute_worker_run_by_default(sample_datasource, 
     caplog.set_level("WARNING", logger="runtime.compute_service")
     analysis_id = f"preview-log-{uuid.uuid4()}"
     pipeline = _pipeline(sample_datasource, analysis_id)
-    manager = ProcessManager(engine_factory=lambda identity, config: PolarsComputeWorker(identity.resource_id, config))
+    manager = ProcessManager(engine_factory=lambda identity, config: cast(Any, _PreviewEngine(identity, config)))
     internal_client = _internal_client_mock()
     try:
         with patch("runtime.compute_service.client_from_env", return_value=internal_client):
             result = compute_service.preview_step(
-                session=None,
                 manager=manager,
                 target_step_id="source",
                 analysis_pipeline=pipeline,
@@ -93,12 +153,11 @@ def test_preview_step_skips_compute_worker_run_persistence_when_disabled(sample_
     monkeypatch.setattr(compute_service.settings, "persist_preview_runs", False)
     analysis_id = f"preview-no-log-{uuid.uuid4()}"
     pipeline = _pipeline(sample_datasource, analysis_id)
-    manager = ProcessManager(engine_factory=lambda identity, config: PolarsComputeWorker(identity.resource_id, config))
+    manager = ProcessManager(engine_factory=lambda identity, config: cast(Any, _PreviewEngine(identity, config)))
     internal_client = _internal_client_mock()
     try:
         with patch("runtime.compute_service.client_from_env", return_value=internal_client):
             result = compute_service.preview_step(
-                session=None,
                 manager=manager,
                 target_step_id="source",
                 analysis_pipeline=pipeline,
@@ -122,14 +181,13 @@ def test_preview_step_finalizes_run_when_engine_fails(sample_datasource, monkeyp
     pipeline = _pipeline(sample_datasource, analysis_id)
     internal_client = _internal_client_mock()
 
-    manager = ProcessManager(engine_factory=lambda identity, config: PolarsComputeWorker(identity.resource_id, config))
+    manager = ProcessManager(engine_factory=lambda identity, config: cast(Any, _PreviewEngine(identity, config)))
     with (
         patch("runtime.compute_service.client_from_env", return_value=internal_client),
-        patch("runtime.compute_service._acquire_engine", side_effect=RuntimeError("engine failed")),
+        patch.object(manager, "acquire_engine", side_effect=RuntimeError("engine failed")),
         pytest.raises(compute_service.PreviewExecutionError, match="engine failed") as raised,
     ):
         compute_service.preview_step(
-            session=None,
             manager=manager,
             target_step_id="source",
             analysis_pipeline=pipeline,
@@ -157,7 +215,6 @@ def test_hydrate_udfs_loads_code_for_protocol_enum_number(monkeypatch) -> None:
     monkeypatch.setattr(compute_service, "get_namespace", lambda: "default")
 
     hydrated = compute_service._hydrate_udfs(
-        None,
         [
             {
                 "type": "with_columns",
@@ -185,7 +242,6 @@ def test_hydrate_udfs_missing_library_udf_fails(monkeypatch) -> None:
 
     with pytest.raises(ValueError, match="not found"):
         compute_service._hydrate_udfs(
-            None,
             [
                 {
                     "type": "with_columns",
@@ -202,15 +258,14 @@ def test_row_count_records_run_when_engine_acquire_fails(sample_datasource) -> N
     pipeline = _pipeline(sample_datasource, analysis_id)
     internal_client = _internal_client_mock()
     internal_client.compute_worker_run_state.return_value = None
-    manager = ProcessManager(engine_factory=lambda identity, config: PolarsComputeWorker(identity.resource_id, config))
+    manager = ProcessManager(engine_factory=lambda identity, config: cast(Any, _PreviewEngine(identity, config)))
 
     with (
         patch("runtime.compute_service.client_from_env", return_value=internal_client),
-        patch("runtime.compute_service._acquire_engine", side_effect=RuntimeError("Timed out waiting for engine listener")),
+        patch.object(manager, "acquire_engine", side_effect=RuntimeError("Timed out waiting for engine listener")),
         pytest.raises(PipelineExecutionError, match="Timed out waiting for engine listener"),
     ):
         compute_service.get_step_row_count(
-            session=None,
             manager=manager,
             target_step_id="source",
             analysis_id=analysis_id,

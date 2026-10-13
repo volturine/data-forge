@@ -84,7 +84,6 @@ def test_analysis_requests_share_analysis_compute_worker_identity(kind, field_na
             "analysis_id": "analysis-1",
             "tabs": [{"id": "tab-1", "datasource": {"id": "dataset-1"}, "steps": []}],
         },
-        "source",
     )
     assert identity.scope == enums_pb2.COMPUTE_WORKER_SCOPE_ANALYSIS_INTERACTIVE
     assert identity.analysis_id == "analysis-1"

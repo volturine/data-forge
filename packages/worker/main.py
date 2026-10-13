@@ -29,7 +29,7 @@ from runtime.docker_compute_worker import (
     validate_compute_worker_runtime_readiness,
 )
 from runtime.domain.runtime_workers.models import RuntimeWorkerKind
-from runtime.executors import run_control_in_thread
+from runtime.executors import COMPUTE_WORKER_SHUTDOWN_WORKERS, run_control_in_thread
 from runtime.logging import configure_logging
 from runtime.manager_lease import WorkerManagerLease
 from runtime.namespace import get_namespace, reset_namespace, set_namespace_context
@@ -57,7 +57,6 @@ _MIN_RUNTIME_RECOVERY_SECONDS = 5.0
 # Hot-path work uses explicit compute/control pools. Keep asyncio's fallback
 # executor small for startup, shutdown, and occasional lifecycle glue.
 _DEFAULT_EXECUTOR_WORKERS = 4
-_SHUTDOWN_CONTROL_CONCURRENCY = 4
 _COORDINATOR_GENERATION_POLL_SECONDS = 5.0
 _MANAGER_LEASE_CHECK_SECONDS = 1.0
 _MANAGER_LEASE_RETRY_SECONDS = 1.0
@@ -311,28 +310,22 @@ async def _run_worker_manager_runtime(
     # must not prevent shutdown requests from freeing engine capacity.
     active_claim_semaphore = asyncio.Semaphore(compute_request_claim_worker_count())
     shutdown_claim_semaphore = asyncio.Semaphore(1)
-    # One application-wide work budget covers previews, datasource jobs,
-    # lifecycle work, and builds. Every lane can use the full budget when
-    # needed; the shared gate prevents idle queue reservations and overcommit.
-    compute_work_semaphore = asyncio.Semaphore(request_worker_count)
     request_lanes = [
-        (ACTIVE_REQUEST_KINDS, request_worker_count, active_claim_semaphore, compute_work_semaphore),
+        (ACTIVE_REQUEST_KINDS, request_worker_count, active_claim_semaphore),
         (
             COMPUTE_WORKER_SHUTDOWN_REQUEST_KINDS,
-            min(request_worker_count, _SHUTDOWN_CONTROL_CONCURRENCY),
+            min(request_worker_count, COMPUTE_WORKER_SHUTDOWN_WORKERS),
             shutdown_claim_semaphore,
-            None,
         ),
     ]
     request_tasks = []
-    for lane, (allowed_kinds, max_concurrency, claim_semaphore, work_semaphore) in enumerate(request_lanes):
+    for lane, (allowed_kinds, max_concurrency, claim_semaphore) in enumerate(request_lanes):
         lane_name = _DISPATCH_LANES[lane]
 
         async def run_request_lane(
             allowed_kinds=allowed_kinds,
             max_concurrency=max_concurrency,
             claim_semaphore=claim_semaphore,
-            work_semaphore=work_semaphore,
             lane_name=lane_name,
         ) -> None:
             await compute_request_loop(
@@ -343,7 +336,6 @@ async def _run_worker_manager_runtime(
                 claim_semaphore=claim_semaphore,
                 poll_for_work=True,
                 max_concurrency=max_concurrency,
-                work_semaphore=work_semaphore,
                 namespace_directory=compute_namespace_directory,
                 recovery=compute_request_recovery,
                 on_progress=partial(health.progress, lane_name),
@@ -393,7 +385,6 @@ async def _run_worker_manager_runtime(
                 manager=manager,
                 worker_id=worker_id,
                 claim=claim,
-                work_semaphore=compute_work_semaphore,
             )
         finally:
             reset_namespace(token)

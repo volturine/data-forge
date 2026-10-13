@@ -8,7 +8,6 @@ from sqlmodel import Session, select
 from backend_core import compute_requests_service, storage_cleanup_service
 from backend_core.api_execution_budget import run_api_blocking
 from backend_core.database import run_db
-from backend_core.dependencies import RuntimeAvailabilityProbe
 from backend_core.persistence.compute_requests.models import ComputeRequest
 from backend_core.sqlmodel_typing import col
 from dataforge_protocol import enums_pb2
@@ -58,7 +57,6 @@ async def create_preflight(
     *,
     source_path: str,
     selection: Mapping[str, object],
-    runtime_probe: RuntimeAvailabilityProbe,
     delete_source: bool,
 ) -> tuple[str, ExcelPreflight, dict[str, object]]:
     preflight_id = str(uuid.uuid4())
@@ -67,7 +65,6 @@ async def create_preflight(
         source_path=source_path,
         action=enums_pb2.DATASOURCE_PREFLIGHT_ACTION_INITIAL,
         selection=selection,
-        runtime_probe=runtime_probe,
         delete_source=delete_source,
     )
     preflight = await run_api_blocking(run_db, _load_preflight, preflight_id)

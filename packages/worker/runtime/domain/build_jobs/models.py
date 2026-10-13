@@ -14,14 +14,6 @@ class BuildJobStatus(DomainEnumValue):
     FAILED: ClassVar[Self]
     CANCELLED: ClassVar[Self]
 
-    @property
-    def is_active(self) -> bool:
-        return self in {BuildJobStatus.LEASED, BuildJobStatus.RUNNING}
-
-    @property
-    def is_reclaimable(self) -> bool:
-        return self.is_active
-
 
 BuildJobStatus.QUEUED = BuildJobStatus(enums_pb2.BUILD_JOB_STATUS_QUEUED, domain_token("BuildJobStatus", enums_pb2.BUILD_JOB_STATUS_QUEUED))
 BuildJobStatus.LEASED = BuildJobStatus(enums_pb2.BUILD_JOB_STATUS_LEASED, domain_token("BuildJobStatus", enums_pb2.BUILD_JOB_STATUS_LEASED))

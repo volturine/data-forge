@@ -93,10 +93,6 @@ class ComputeWorkerRegistry:
                 continue
             future.set_result(str(version))
 
-    async def publish_snapshot(self, namespace: str, statuses: list[object]) -> None:
-        del statuses
-        await self.publish_namespace(namespace)
-
     async def load_snapshot(
         self,
         namespace: str,

@@ -9,7 +9,7 @@ from uuid import UUID
 
 from google.protobuf import json_format, message, struct_pb2
 
-from backend_core.domain.analysis.step_types import normalize_step_type
+from backend_core.domain.analysis.step_types import STEP_TYPES
 from dataforge_protocol import analysis_pb2, compute_pb2, datasource_pb2, enums_pb2, errors_pb2
 from modules.datasource.schema_protocol import schema_info_payload
 
@@ -249,7 +249,7 @@ def _is_wrapped_step_config(config: Mapping[str, object]) -> bool:
 def _wrap_step_config(step_type: object, config: object) -> object:
     if not isinstance(step_type, str) or not isinstance(config, Mapping):
         return config
-    normalized_step_type = normalize_step_type(step_type)
+    normalized_step_type = STEP_TYPES.normalized(step_type)
     config_fields = analysis_pb2.StepConfig.DESCRIPTOR.fields_by_name
     if _is_wrapped_step_config(cast(Mapping[str, object], config)):
         return dict(config)

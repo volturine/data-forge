@@ -64,25 +64,22 @@ def test_notify_api_lock_includes_process_identity(monkeypatch) -> None:
     sent = []
     monkeypatch.setattr(
         runtime_ipc,
-        '_send_api_message',
-        lambda payload, *, listener: sent.append((payload, listener)),
+        '_send_postgres_message',
+        lambda payload: sent.append(payload),
     )
     status: dict[str, object] = {'type': 'status', 'lock': None}
 
     runtime_ipc.notify_api_lock('default', 'analysis', 'analysis-1', status)
 
     assert sent == [
-        (
-            {
-                'kind': 'lock',
-                'namespace': 'default',
-                'resource_type': 'analysis',
-                'resource_id': 'analysis-1',
-                'status': status,
-                'source_process': runtime_ipc.API_PROCESS_ID,
-            },
-            runtime_ipc.RuntimeListenerKind.API,
-        )
+        {
+            'kind': 'lock',
+            'namespace': 'default',
+            'resource_type': 'analysis',
+            'resource_id': 'analysis-1',
+            'status': status,
+            'source_process': runtime_ipc.API_PROCESS_ID,
+        }
     ]
 
 
@@ -93,8 +90,8 @@ def test_notify_api_lock_converts_pydantic_payload_to_json_value(monkeypatch) ->
     sent = []
     monkeypatch.setattr(
         runtime_ipc,
-        '_send_api_message',
-        lambda payload, *, listener: sent.append((payload, listener)),
+        '_send_postgres_message',
+        lambda payload: sent.append(payload),
     )
     status = LockWebsocketStatusMessage(
         resource_type='analysis',
@@ -105,22 +102,19 @@ def test_notify_api_lock_converts_pydantic_payload_to_json_value(monkeypatch) ->
     runtime_ipc.notify_api_lock('default', 'analysis', 'analysis-1', status)
 
     assert sent == [
-        (
-            {
-                'kind': 'lock',
-                'namespace': 'default',
+        {
+            'kind': 'lock',
+            'namespace': 'default',
+            'resource_type': 'analysis',
+            'resource_id': 'analysis-1',
+            'status': {
+                'type': 'status',
                 'resource_type': 'analysis',
                 'resource_id': 'analysis-1',
-                'status': {
-                    'type': 'status',
-                    'resource_type': 'analysis',
-                    'resource_id': 'analysis-1',
-                    'lock': None,
-                },
-                'source_process': runtime_ipc.API_PROCESS_ID,
+                'lock': None,
             },
-            runtime_ipc.RuntimeListenerKind.API,
-        )
+            'source_process': runtime_ipc.API_PROCESS_ID,
+        }
     ]
 
 

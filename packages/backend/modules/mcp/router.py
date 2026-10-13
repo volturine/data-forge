@@ -11,7 +11,6 @@ from fastapi.routing import APIRoute
 
 MCP_ROUTE_META = '__mcp_route_meta__'
 MCP_ENDPOINT_META = '__mcp_endpoint_meta__'
-MCP_TOOL_META = '__mcp_tool_meta__'
 
 
 def _response_model_name(route: APIRoute) -> str | None:
@@ -19,38 +18,6 @@ def _response_model_name(route: APIRoute) -> str | None:
     if model is None:
         return None
     return getattr(model, '__name__', str(model))
-
-
-def build_inputs(fn: Callable[..., Any]) -> list[dict[str, Any]]:
-    signature = inspect.signature(fn)
-    items: list[dict[str, Any]] = []
-    for p in signature.parameters.values():
-        if p.kind in {inspect.Parameter.VAR_POSITIONAL, inspect.Parameter.VAR_KEYWORD}:
-            continue
-        ann = p.annotation
-        ann_name = None if ann is inspect.Parameter.empty else str(ann)
-        has_default = p.default is not inspect.Parameter.empty
-        items.append(
-            {
-                'name': p.name,
-                'kind': p.kind.name.lower(),
-                'required': not has_default,
-                'default': None if not has_default else p.default,
-                'annotation': ann_name,
-            },
-        )
-    return items
-
-
-def _decorated_tool_meta(endpoint: Callable[..., Any]) -> dict[str, Any] | None:
-    root = inspect.unwrap(endpoint)
-    endpoint_meta = getattr(endpoint, MCP_TOOL_META, None)
-    if isinstance(endpoint_meta, dict):
-        return dict(endpoint_meta)
-    root_meta = getattr(root, MCP_TOOL_META, None)
-    if isinstance(root_meta, dict):
-        return dict(root_meta)
-    return None
 
 
 def set_mcp_endpoint_meta(
@@ -61,16 +28,14 @@ def set_mcp_endpoint_meta(
     mcp_tool_id: str | None,
 ) -> None:
     root = inspect.unwrap(endpoint)
-    decorator_meta = _decorated_tool_meta(endpoint)
-    if not mcp and decorator_meta is None:
+    if not mcp:
         setattr(endpoint, MCP_ENDPOINT_META, None)
         setattr(root, MCP_ENDPOINT_META, None)
         return
 
-    meta = decorator_meta or {
+    meta = {
         'name': getattr(root, '__name__', getattr(endpoint, '__name__', 'tool')),
         'docstring': inspect.getdoc(root) or '',
-        'inputs': build_inputs(root),
     }
     if mcp_tool_id is not None:
         meta['name'] = mcp_tool_id

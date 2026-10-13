@@ -11,7 +11,7 @@ import pytest
 from pyiceberg.exceptions import NoSuchTableError
 from sqlalchemy import create_engine, text
 
-from dataforge_protocol import compute_pb2, enums_pb2
+from dataforge_protocol import compute_pb2, datasource_pb2, enums_pb2
 from runtime import storage_cleanup_runtime as cleanup
 from runtime.compute_manager import ProcessManager
 from runtime.worker_runtime import RuntimeNamespaceDirectory
@@ -456,6 +456,17 @@ def test_reingest_datasource_strips_stale_time_travel_keys(monkeypatch: pytest.M
     from runtime import compute_request_runtime
 
     published_configs = []
+    updated_runs: list[dict[str, object]] = []
+    published_record = datasource_pb2.DataSourceRecord(
+        id="ds-1",
+        name="Current datasource",
+        source_type=enums_pb2.DATA_SOURCE_TYPE_ICEBERG,
+        created_by=enums_pb2.DATA_SOURCE_CREATED_BY_IMPORT,
+        is_hidden=True,
+        description="Reingested source",
+    )
+    published_record.config.update({"branch": "master", "metadata_path": "s3://default/clean/ds-1/master"})
+    published_record.schema_info.columns.add(name="col1", dtype="string", nullable=True)
 
     class ReingestClient:
         def register_datasource_stage(self, **kwargs: object) -> None:
@@ -465,23 +476,11 @@ def test_reingest_datasource_strips_stale_time_travel_keys(monkeypatch: pytest.M
             return "run-ingest-1"
 
         def update_compute_worker_run(self, **_kwargs: object) -> None:
-            pass
+            updated_runs.append(_kwargs)
 
         def publish_datasource_ingest(self, **kwargs: object) -> object:
             published_configs.append(kwargs.get("config"))
-
-            class Rec:
-                name = "ds-1"
-                source_type = "iceberg"
-                config = {}
-
-                def model_dump(self, **kwargs):
-                    return {"id": "ds-1", "name": "ds-1", "source_type": "iceberg", "config": {}}
-
-            return Rec()
-
-        def complete_compute_worker_run(self, **_kwargs: object) -> None:
-            pass
+            return published_record
 
     command = compute_pb2.ComputeCommand()
     command.datasource.ingest.datasource_id = "ds-1"
@@ -524,7 +523,7 @@ def test_reingest_datasource_strips_stale_time_travel_keys(monkeypatch: pytest.M
     monkeypatch.setattr(compute_request_runtime.datasource_execution, "import_staged_parquet_files", import_staged)
     monkeypatch.setattr(compute_request_runtime.datasource_execution, "_set_snapshot_metadata", lambda config, table: None)
 
-    compute_request_runtime._publish_staged_datasource(
+    response = compute_request_runtime._publish_staged_datasource(
         cast(compute_request_runtime.WorkerRuntimeClient, ReingestClient()), _manager(), claimed, command.datasource
     )
 
@@ -535,6 +534,25 @@ def test_reingest_datasource_strips_stale_time_travel_keys(monkeypatch: pytest.M
     assert "time_travel_ui" not in published_config
     assert "ingest" in published_config
     assert import_kwargs[0]["table_path"] == "s3://default/clean/ds-1__claim_previous/master"
+    assert response.WhichOneof("result") == "datasource"
+    assert response.datasource == published_record
+    assert len(updated_runs) == 2
+    assert [(run["namespace"], run["run_id"]) for run in updated_runs] == [
+        ("default", "run-ingest-1"),
+        ("default", "run-ingest-1"),
+    ]
+    progress_fields = cast(dict[str, object], updated_runs[0]["fields"])
+    assert progress_fields == {"current_step": "Importing staged batches", "progress": 0.7}
+    success_fields = cast(dict[str, object], updated_runs[1]["fields"])
+    assert success_fields["status"] == "success"
+    assert success_fields["progress"] == 1.0
+    assert success_fields["result_json"] == {
+        "datasource_name": "Current datasource",
+        "storage_type": "iceberg",
+        "original_source_type": "file",
+        "branch": "master",
+        "metadata_path": "s3://default/clean/ds-1__claim_previous/master",
+    }
 
 
 def test_worker_heartbeat_reports_registration_loss_and_recovery_on_its_thread() -> None:

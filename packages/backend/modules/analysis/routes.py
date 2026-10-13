@@ -8,14 +8,13 @@ from sqlmodel import Session
 
 from backend_core.api_execution_budget import run_api_blocking
 from backend_core.database import run_db
-from backend_core.dependencies import RuntimeAvailabilityProbe, get_optional_lock_owner_id, get_runtime_availability_probe
-from backend_core.domain.analysis.step_types import is_step_type
+from backend_core.dependencies import get_optional_lock_owner_id
+from backend_core.domain.analysis.step_types import STEP_TYPES
 from backend_core.domain.compute import schemas as compute_schemas
 from backend_core.error_handlers import handle_errors
 from backend_core.validation import AnalysisId, parse_analysis_id
 from dataforge_protocol import compute_pb2, enums_pb2
 from modules.analysis import schemas, service
-from modules.analysis.pipeline_compiler import compile_step
 from modules.analysis.revisions import (
     AnalysisRevisionSnapshot,
     etag as analysis_etag,
@@ -24,7 +23,7 @@ from modules.analysis.revisions import (
     set_response_headers as set_analysis_revision_headers,
     version as analysis_version,
 )
-from modules.analysis.step_schemas import get_step_catalog
+from modules.analysis.step_schemas import get_step_catalog, normalize_step_config
 from modules.auth.dependencies import get_current_user, get_current_user_id
 from modules.auth.models import User
 from modules.compute import executor_client
@@ -267,7 +266,6 @@ async def delete_analysis(
     analysis_id: AnalysisId,
     if_match: str | None = Header(default=None, alias='If-Match'),
     owner_id: str | None = Depends(get_optional_lock_owner_id),
-    runtime_probe: RuntimeAvailabilityProbe = Depends(get_runtime_availability_probe),
 ):
     """Delete an analysis and its associated data."""
     analysis_id_value = parse_analysis_id(analysis_id)
@@ -288,7 +286,6 @@ async def delete_analysis(
                     analysis_id=analysis_id_value,
                     resource_id=analysis_id_value,
                 ),
-                runtime_probe=runtime_probe,
             )
 
     await run_api_blocking(run_db, delete_and_queue_shutdown)
@@ -299,7 +296,6 @@ async def delete_analysis(
 async def preview_analysis(
     analysis_id: AnalysisId,
     request: Request,
-    runtime_probe: RuntimeAvailabilityProbe = Depends(get_runtime_availability_probe),
 ):
     """Preview the analysis pipeline and return results with schema, rows, and row count."""
     analysis_payload = None
@@ -365,7 +361,6 @@ async def preview_analysis(
             page=1,
             tab_id=None,
         ),
-        runtime_probe=runtime_probe,
         http_request=request,
     )
 
@@ -410,7 +405,7 @@ class AddStepBody(BaseModel):
     @field_validator('type')
     @classmethod
     def validate_type(cls, value: str) -> str:
-        if not is_step_type(value):
+        if not STEP_TYPES.has(value):
             raise ValueError(f"Unknown step type '{value}'")
         return value
 
@@ -422,7 +417,7 @@ class UpdateStepBody(BaseModel):
     @field_validator('type')
     @classmethod
     def validate_type(cls, value: str | None) -> str | None:
-        if value is not None and not is_step_type(value):
+        if value is not None and not STEP_TYPES.has(value):
             raise ValueError(f"Unknown step type '{value}'")
         return value
 
@@ -446,19 +441,13 @@ async def add_step(
     analysis_id_value = parse_analysis_id(analysis_id)
 
     def add(session: Session):
-        compiled = compile_step(
-            step_id='new-step',
-            step_type=data.type,
-            config=data.config,
-            depends_on=data.depends_on,
-            is_applied=None,
-        )
+        normalized_config = normalize_step_config(data.type, data.config)
         return service.add_step(
             session,
             analysis_id_value,
             tab_id,
             data.type,
-            compiled.config,
+            normalized_config,
             data.position,
             data.depends_on,
         )
@@ -496,33 +485,21 @@ async def update_step(
     def update(session: Session):
         normalized_config = data.config
         if data.type and data.config:
-            normalized_config = compile_step(
-                step_id=step_id,
-                step_type=data.type,
-                config=data.config,
-                depends_on=[],
-                is_applied=None,
-            ).config
+            if not step_id.strip():
+                raise ValueError('Pipeline step id is required')
+            normalized_config = normalize_step_config(data.type, data.config)
         elif data.type and not data.config:
             existing = service.get_step(session, analysis_id_value, tab_id, step_id)
-            compile_step(
-                step_id=step_id,
-                step_type=data.type,
-                config=existing.config,
-                depends_on=[],
-                is_applied=None,
-            )
+            if not step_id.strip():
+                raise ValueError('Pipeline step id is required')
+            normalize_step_config(data.type, existing.config)
         elif data.config and not data.type:
             existing = service.get_step(session, analysis_id_value, tab_id, step_id)
             existing_type = existing.type
             if existing_type:
-                normalized_config = compile_step(
-                    step_id=step_id,
-                    step_type=existing_type,
-                    config=data.config,
-                    depends_on=[],
-                    is_applied=None,
-                ).config
+                if not step_id.strip():
+                    raise ValueError('Pipeline step id is required')
+                normalized_config = normalize_step_config(existing_type, data.config)
         return service.update_step(
             session,
             analysis_id_value,

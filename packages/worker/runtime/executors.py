@@ -21,6 +21,9 @@ logger = logging.getLogger(__name__)
 # engine has a synchronous progress stream to service.
 _CONTROL_WORKERS = min(4, settings.compute_workers)
 _CLEANUP_WORKERS = min(2, settings.compute_workers)
+# Compute-worker shutdowns may wait for a same-RID lifecycle event that an
+# admission release on the control lane finishes. Keep them off that lane.
+COMPUTE_WORKER_SHUTDOWN_WORKERS = 4
 
 COMPUTE_EXECUTOR = ThreadPoolExecutor(
     max_workers=settings.compute_workers,
@@ -37,6 +40,10 @@ CLEANUP_EXECUTOR = ThreadPoolExecutor(
 ENGINE_IO_EXECUTOR = ThreadPoolExecutor(
     max_workers=settings.compute_workers,
     thread_name_prefix="engine-io",
+)
+SHUTDOWN_EXECUTOR = ThreadPoolExecutor(
+    max_workers=COMPUTE_WORKER_SHUTDOWN_WORKERS,
+    thread_name_prefix="compute-worker-shutdown",
 )
 
 
@@ -60,6 +67,7 @@ COMPUTE_LANE = _ExecutorLane(COMPUTE_EXECUTOR, settings.compute_workers * 2)
 CONTROL_LANE = _ExecutorLane(CONTROL_EXECUTOR, _CONTROL_WORKERS * 2)
 CLEANUP_LANE = _ExecutorLane(CLEANUP_EXECUTOR, _CLEANUP_WORKERS * 2)
 ENGINE_IO_LANE = _ExecutorLane(ENGINE_IO_EXECUTOR, settings.compute_workers * 2)
+SHUTDOWN_LANE = _ExecutorLane(SHUTDOWN_EXECUTOR, COMPUTE_WORKER_SHUTDOWN_WORKERS * 2)
 
 
 async def run_compute_in_thread[T](
@@ -75,6 +83,10 @@ async def run_compute_in_thread[T](
 
 async def run_control_in_thread[T](function: Callable[..., T], /, *args: Any, **kwargs: Any) -> T:
     return await _run_in_executor(CONTROL_LANE, "runtime-control", function, True, None, *args, **kwargs)
+
+
+async def run_shutdown_in_thread[T](function: Callable[..., T], /, *args: Any, **kwargs: Any) -> T:
+    return await _run_in_executor(SHUTDOWN_LANE, "compute-worker-shutdown", function, True, None, *args, **kwargs)
 
 
 async def _run_cleanup_in_thread[T](function: Callable[..., T], /, *args: Any, **kwargs: Any) -> T:

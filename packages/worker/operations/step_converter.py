@@ -26,7 +26,6 @@ from google.protobuf import json_format
 from dataforge_protocol import analysis_pb2
 from runtime.domain.analysis.step_types import (
     STEP_TYPES,
-    ChartType,
     chart_type_for_step,
     get_step_type_label,
     is_step_type,
@@ -233,10 +232,6 @@ def step_display_name(step_type: str, config: Mapping[str, object]) -> str:
     return get_step_type_label(step_type)
 
 
-def get_chart_type_for_step(step_type: str) -> ChartType | None:
-    return chart_type_for_step(step_type)
-
-
 def convert_step_format(
     frontend_step: Mapping[str, object] | FrontendStep,
 ) -> BackendStep:
@@ -244,11 +239,13 @@ def convert_step_format(
     parsed = frontend_step if isinstance(frontend_step, FrontendStep) else FrontendStep.from_mapping(frontend_step)
     step_type = parsed.type
     config = parsed.config
-    chart_type = get_chart_type_for_step(step_type)
+    chart_type = chart_type_for_step(step_type)
     if chart_type:
         config = {**config, "chart_type": chart_type}
     normalized_type = normalize_step_type(step_type)
-    raw_params = convert_config_to_params(normalized_type, config)
+    if not is_step_type(normalized_type):
+        raise ValueError(f"Unknown operation '{normalized_type}'")
+    raw_params = dict(config)
 
     # Import after operation modules initialize: datasource operations depend on
     # this converter while the registry owns executable parameter validation.
@@ -268,10 +265,3 @@ def convert_step_format(
         operation=normalized_type,
         params=params,
     )
-
-
-def convert_config_to_params(operation: str, config: dict[str, object]) -> dict[str, object]:
-    """Return canonical protocol config for worker-owned execution validation."""
-    if not is_step_type(operation):
-        raise ValueError(f"Unknown operation '{operation}'")
-    return dict(config)

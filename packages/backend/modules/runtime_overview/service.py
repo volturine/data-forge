@@ -7,7 +7,7 @@ from sqlmodel import Session, select
 
 from backend_core import runtime_workers_service
 from backend_core.config import settings
-from backend_core.database import run_db, supports_distributed_runtime
+from backend_core.database import run_db
 from backend_core.domain.build_jobs.models import BuildJobStatus
 from backend_core.domain.runtime_workers.models import RuntimeWorkerKind
 from backend_core.namespace import reset_namespace, set_namespace_context
@@ -33,7 +33,7 @@ def _age_seconds(value: datetime, *, now: datetime | None = None) -> float:
 
 
 def runtime_mode() -> schemas.RuntimeMode:
-    if supports_distributed_runtime():
+    if settings.distributed_runtime_enabled:
         return 'distributed'
     return 'durable_single_node'
 

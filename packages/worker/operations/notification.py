@@ -7,10 +7,6 @@ from runtime.domain.compute.base import OperationHandler, OperationParams
 from runtime.notification_delivery import encode_staged_deliveries, staged_column_name
 
 
-def get_resolved_telegram_settings() -> dict[str, object]:
-    return {"enabled": True}
-
-
 class NotificationParams(OperationParams):
     model_config = ConfigDict(extra="forbid")
 

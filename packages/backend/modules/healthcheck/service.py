@@ -117,15 +117,8 @@ def list_results(session: Session, datasource_id: str, limit: int = 10) -> list[
     if not datasource:
         return []
     query = select(HealthCheckResult).order_by(col(HealthCheckResult.checked_at).desc(), col(HealthCheckResult.id).asc()).limit(limit)
-    checks = session.execute(
-        select(col(HealthCheck.id)).where(col(HealthCheck.datasource_id) == datasource_id),
-    )
-    check_ids = checks.scalars().all()
-    if not check_ids:
-        return []
-    results = session.execute(
-        query.where(col(HealthCheckResult.healthcheck_id).in_(check_ids)),
-    )
+    check_ids = select(col(HealthCheck.id)).where(col(HealthCheck.datasource_id) == datasource_id)
+    results = session.execute(query.where(col(HealthCheckResult.healthcheck_id).in_(check_ids)))
     return [HealthCheckResultResponse.model_validate(r) for r in results.scalars().all()]
 
 

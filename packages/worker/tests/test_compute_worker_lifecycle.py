@@ -20,7 +20,6 @@ from runtime.compute_manager import (
     ProcessManager,
     _log_engine_acquisition,
 )
-from runtime.compute_worker import PolarsComputeWorker
 from runtime.config import settings
 from runtime.datasource_delete_runtime import _stop_idle_datasource_engine
 from runtime.domain.compute.base import ComputeWorker
@@ -305,22 +304,32 @@ def test_process_manager_does_not_reap_engine_with_request_reservation(monkeypat
         manager.shutdown_all()
 
 
-def test_process_manager_shutdown_stops_real_engine_subprocess() -> None:
+def test_process_manager_shutdown_stops_its_owned_engine() -> None:
     identity = compute_pb2.ComputeWorkerIdentity(
         scope=enums_pb2.COMPUTE_WORKER_SCOPE_ANALYSIS_INTERACTIVE,
         reuse_policy=enums_pb2.COMPUTE_WORKER_REUSE_POLICY_SHARED,
         analysis_id="analysis-shutdown",
         resource_id="analysis-shutdown",
     )
-    manager = ProcessManager(engine_factory=lambda identity, resource_config: PolarsComputeWorker(identity.resource_id, resource_config))
-    engine = manager.spawn_compute_worker(identity).engine
+
+    class ShutdownTrackingEngine(_FakeEngine):
+        shutdown_calls = 0
+
+        def shutdown(self) -> None:
+            self.shutdown_calls += 1
+            super().shutdown()
+
+    engine = ShutdownTrackingEngine(identity.resource_id)
+    manager = ProcessManager(engine_factory=lambda _identity, _resource_config: cast(Any, engine))
     try:
+        manager.spawn_compute_worker(identity)
         assert engine.is_process_alive()
 
         manager.shutdown_compute_worker(identity)
 
         assert manager.get_engine(identity) is None
         assert not engine.is_process_alive()
+        assert engine.shutdown_calls == 1
     finally:
         manager.shutdown_all()
 
@@ -922,8 +931,7 @@ async def test_queued_reuse_admission_owns_its_request_reservation(monkeypatch, 
         with manager._capacity_changed:
             assert len(manager._spawn_waiters) == 1
             manager._capacity_starts = 0
-            manager._engines[key] = ComputeWorkerInfo(engine)
-            manager._engine_identities[key] = identity
+            manager._engines[key] = ComputeWorkerInfo(engine, identity)
             manager._admit_spawn_waiters_locked()
 
         if cancel_after_resolution:
@@ -1929,7 +1937,8 @@ def test_process_manager_can_disable_warm_workers(monkeypatch) -> None:
         manager.shutdown_all()
 
 
-def test_capacity_decisions_never_probe_the_compute_worker_runtime(monkeypatch) -> None:
+@pytest.mark.asyncio
+async def test_capacity_admission_never_probes_the_compute_worker_runtime(monkeypatch) -> None:
     """Capacity scans run under the engines lock, so they must not do engine I/O.
 
     A container inspection or engine RPC can hang for as long as a container
@@ -1950,6 +1959,7 @@ def test_capacity_decisions_never_probe_the_compute_worker_runtime(monkeypatch) 
 
     busy = HangingProbeEngine("analysis-busy")
     manager = ProcessManager(engine_factory=lambda identity, resource_config: cast(Any, busy))
+    waiter: asyncio.Task[bool] | None = None
     try:
         manager.spawn_compute_worker(_analysis_identity("analysis-busy"))
         busy.current_job_id = "job-1"
@@ -1960,12 +1970,24 @@ def test_capacity_decisions_never_probe_the_compute_worker_runtime(monkeypatch) 
         stuck.start()
         assert probe_started.wait(2)
 
-        started = time.monotonic()
-        assert manager.can_admit_spawn() is False
-        assert time.monotonic() - started < 1.0
+        waiter = asyncio.create_task(manager.await_spawn_admission(_analysis_identity("analysis-waiting")))
+        loop = asyncio.get_running_loop()
+        tick = asyncio.Event()
+        loop.call_later(0.01, tick.set)
+        await asyncio.wait_for(tick.wait(), timeout=0.2)
+        assert not waiter.done()
+        with manager._capacity_changed:
+            assert len(manager._spawn_waiters) == 1
+        waiter.cancel()
+        with pytest.raises(asyncio.CancelledError):
+            await waiter
     finally:
+        if waiter is not None and not waiter.done():
+            waiter.cancel()
+            await asyncio.gather(waiter, return_exceptions=True)
         release_probe.set()
         hang_probes.clear()
+        stuck.join(timeout=1)
         manager.shutdown_all()
 
 
@@ -1979,7 +2001,6 @@ def test_busy_engine_is_not_evicted_or_reaped_after_liveness_failure(monkeypatch
         cast(Any, info.engine)._alive = False
         manager._idle_ttl_seconds = 0
 
-        assert manager.can_admit_spawn() is False
         manager._reap_idle_engines_once()
 
         assert manager.get_engine(identity) is info.engine

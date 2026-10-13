@@ -1,10 +1,9 @@
-from datetime import UTC, datetime
+from datetime import datetime
 from typing import Annotated, ClassVar, Literal, Self
 
-from pydantic import BaseModel, ConfigDict, Field, StringConstraints, TypeAdapter, field_validator
+from pydantic import BaseModel, ConfigDict, Field, TypeAdapter, field_validator
 
 from dataforge_protocol import enums_pb2
-from runtime.domain.analysis.step_types import is_step_type
 from runtime.domain.compute_worker_runs.schemas import ComputeWorkerRunKind
 from runtime.domain.domain_enums import DomainEnumValue, domain_token
 
@@ -97,92 +96,6 @@ class ComputeWorkerDefaults(BaseModel):
     max_threads: int  # 0 = auto-detect
     max_memory_mb: int  # 0 = unlimited
     streaming_chunk_size: int  # 0 = auto
-
-
-class AnalysisPipelineDatasourceConfig(BaseModel):
-    model_config = ConfigDict(from_attributes=True, extra="allow")
-
-    branch: Annotated[str, StringConstraints(min_length=1, strip_whitespace=True)]
-
-
-class AnalysisPipelineDatasource(BaseModel):
-    model_config = ConfigDict(from_attributes=True)
-
-    id: Annotated[str, StringConstraints(min_length=1, strip_whitespace=True)]
-    analysis_tab_id: str | None
-    source_type: str | None = None
-    config: AnalysisPipelineDatasourceConfig
-
-
-class AnalysisPipelineTab(BaseModel):
-    model_config = ConfigDict(from_attributes=True)
-
-    id: str
-    name: str | None = None
-    datasource: AnalysisPipelineDatasource
-    output: dict
-    steps: list[dict]
-
-    @field_validator("steps")
-    @classmethod
-    def validate_steps(cls, value: list[dict]) -> list[dict]:
-        if not isinstance(value, list):
-            raise ValueError("Analysis pipeline tab steps must be a list")
-        allowed_keys = {"id", "type", "config", "depends_on", "is_applied"}
-        for index, step in enumerate(value):
-            if not isinstance(step, dict):
-                raise ValueError(f"Analysis pipeline step {index} must be a dict")
-            unknown_keys = sorted(set(step) - allowed_keys)
-            if unknown_keys:
-                raise ValueError(f"Analysis pipeline step {index} has unknown field(s): {', '.join(unknown_keys)}")
-            step_id = step.get("id")
-            if not isinstance(step_id, str) or not step_id.strip():
-                raise ValueError(f"Analysis pipeline step {index} id is required")
-            step_type = step.get("type")
-            if not isinstance(step_type, str) or not step_type.strip():
-                raise ValueError(f"Analysis pipeline step {index} type is required")
-            if not is_step_type(step_type):
-                raise ValueError(f"Analysis pipeline step {index} has unknown type '{step_type}'")
-            config = step.get("config")
-            if config is not None and not isinstance(config, dict):
-                raise ValueError(f"Analysis pipeline step {index} config must be a dict")
-            depends_on = step.get("depends_on")
-            if depends_on is not None and not (isinstance(depends_on, list) and all(isinstance(dep, str) and dep.strip() for dep in depends_on)):
-                raise ValueError(f"Analysis pipeline step {index} depends_on must be a list of step ids")
-            is_applied = step.get("is_applied")
-            if is_applied is not None and not isinstance(is_applied, bool):
-                raise ValueError(f"Analysis pipeline step {index} is_applied must be a boolean")
-        return value
-
-    @field_validator("output")
-    @classmethod
-    def validate_output(cls, value: dict) -> dict:
-        if not isinstance(value, dict):
-            raise ValueError("Analysis pipeline tab output must be a dict")
-        output_id = value.get("result_id")
-        if not isinstance(output_id, str) or not output_id.strip():
-            raise ValueError("Analysis pipeline tab output.result_id is required")
-        filename = value.get("filename")
-        if not isinstance(filename, str) or not filename.strip():
-            raise ValueError("Analysis pipeline tab output.filename is required")
-        export_format = value.get("format")
-        if not isinstance(export_format, str) or not export_format.strip():
-            raise ValueError("Analysis pipeline tab output.format is required")
-        return value
-
-
-class AnalysisPipelinePayload(BaseModel):
-    model_config = ConfigDict(from_attributes=True)
-
-    analysis_id: str
-    tabs: list[AnalysisPipelineTab]
-
-    @field_validator("tabs")
-    @classmethod
-    def validate_tabs(cls, value: list[AnalysisPipelineTab]) -> list[AnalysisPipelineTab]:
-        if not isinstance(value, list) or not value:
-            raise ValueError("analysis_pipeline.tabs must include at least one tab")
-        return value
 
 
 class ComputeWorkerStatusSchema(BaseModel):
@@ -314,14 +227,6 @@ class BuildLifecycleStatus(DomainEnumValue):
     FAILED: ClassVar[Self]
     CANCELLED: ClassVar[Self]
 
-    @property
-    def is_terminal(self) -> bool:
-        return self in {BuildLifecycleStatus.COMPLETED, BuildLifecycleStatus.FAILED, BuildLifecycleStatus.CANCELLED}
-
-    @classmethod
-    def coerce(cls, value: object) -> BuildLifecycleStatus:
-        return cls.read(value, default=cls.QUEUED) or cls.QUEUED
-
 
 BuildLifecycleStatus.QUEUED = BuildLifecycleStatus(
     enums_pb2.BUILD_LIFECYCLE_STATUS_QUEUED,
@@ -365,10 +270,6 @@ class BuildLogLevel(DomainEnumValue):
     WARNING: ClassVar[Self]
     ERROR: ClassVar[Self]
 
-    @classmethod
-    def coerce(cls, value: object) -> BuildLogLevel:
-        return cls.read(value, default=cls.INFO) or cls.INFO
-
 
 BuildLogLevel.INFO = BuildLogLevel(enums_pb2.BUILD_LOG_LEVEL_INFO, domain_token("BuildLogLevel", enums_pb2.BUILD_LOG_LEVEL_INFO))
 BuildLogLevel.WARNING = BuildLogLevel(enums_pb2.BUILD_LOG_LEVEL_WARNING, domain_token("BuildLogLevel", enums_pb2.BUILD_LOG_LEVEL_WARNING))
@@ -383,16 +284,6 @@ class BuildStarter(BaseModel):
     email: str | None = None
     triggered_by: str | None = None
 
-    @classmethod
-    def for_user(cls, user: object | None) -> BuildStarter:
-        if user is None:
-            return cls(triggered_by="user")
-        return cls(user_id=getattr(user, "id", None), display_name=getattr(user, "display_name", None), email=getattr(user, "email", None), triggered_by="user")
-
-    @classmethod
-    def for_schedule(cls, schedule_id: str) -> BuildStarter:
-        return cls(triggered_by=f"schedule:{schedule_id}")
-
     def is_schedule_trigger(self) -> bool:
         return isinstance(self.triggered_by, str) and (self.triggered_by == "schedule" or self.triggered_by.startswith("schedule:"))
 
@@ -403,123 +294,6 @@ class BuildResourceConfigSummary(BaseModel):
     max_threads: int | None = None
     max_memory_mb: int | None = None
     streaming_chunk_size: int | None = None
-
-
-class BuildStepSnapshot(BaseModel):
-    model_config = ConfigDict(from_attributes=True)
-
-    build_step_index: int
-    step_index: int
-    step_id: str
-    step_name: str
-    step_type: str
-    tab_id: str | None = None
-    tab_name: str | None = None
-    state: BuildStepState = BuildStepState.PENDING
-    duration_ms: int | None = None
-    row_count: int | None = None
-    error: str | None = None
-
-
-class BuildQueryPlanSnapshot(BaseModel):
-    model_config = ConfigDict(from_attributes=True)
-
-    tab_id: str | None = None
-    tab_name: str | None = None
-    optimized_plan: str
-    unoptimized_plan: str
-
-
-class BuildResourceSnapshot(BaseModel):
-    model_config = ConfigDict(from_attributes=True)
-
-    sampled_at: datetime
-    cpu_percent: float
-    memory_mb: float
-    memory_limit_mb: float | None = None
-    active_threads: int
-    max_threads: int | None = None
-
-
-class BuildLogEntry(BaseModel):
-    model_config = ConfigDict(from_attributes=True)
-
-    timestamp: datetime
-    level: BuildLogLevel
-    message: str
-    step_name: str | None = None
-    step_id: str | None = None
-    tab_id: str | None = None
-    tab_name: str | None = None
-
-
-class BuildRunSummary(BaseModel):
-    model_config = ConfigDict(from_attributes=True)
-
-    build_id: str
-    analysis_id: str
-    analysis_name: str
-    namespace: str
-    status: BuildLifecycleStatus
-    started_at: datetime
-    starter: BuildStarter
-    resource_config: BuildResourceConfigSummary | None = None
-    progress: float = 0.0
-    elapsed_ms: int = 0
-    estimated_remaining_ms: int | None = None
-    current_step: str | None = None
-    current_step_index: int | None = None
-    total_steps: int = 0
-    current_kind: ComputeWorkerRunKind | None = None
-    current_datasource_id: str | None = None
-    current_tab_id: str | None = None
-    current_tab_name: str | None = None
-    current_output_id: str | None = None
-    current_output_name: str | None = None
-    current_compute_worker_run_id: str | None = None
-    total_tabs: int = 0
-    cancelled_at: datetime | None = None
-    cancelled_by: str | None = None
-    result_json: dict[str, object] | None = None
-
-
-class BuildRunDetail(BuildRunSummary):
-    steps: list[BuildStepSnapshot] = Field(default_factory=list)
-    query_plans: list[BuildQueryPlanSnapshot] = Field(default_factory=list)
-    latest_resources: BuildResourceSnapshot | None = None
-    resources: list[BuildResourceSnapshot] = Field(default_factory=list)
-    logs: list[BuildLogEntry] = Field(default_factory=list)
-    results: list[BuildTabResult] = Field(default_factory=list)
-    duration_ms: int | None = None
-    error: str | None = None
-    request_json: dict[str, object] | None = None
-
-    def cancel_duration_ms(self, *, cancelled_at: datetime) -> int:
-        started_at = self.started_at if self.started_at.tzinfo is not None else self.started_at.replace(tzinfo=UTC)
-        elapsed_from_start = max(int((cancelled_at - started_at).total_seconds() * 1000), 0)
-        return max(self.elapsed_ms, elapsed_from_start)
-
-    def cancelled_event(self, *, cancelled_at: datetime, cancelled_by: str | None, duration_ms: int, emitted_at: datetime) -> BuildCancelledEvent:
-        return BuildCancelledEvent(
-            build_id=self.build_id,
-            analysis_id=self.analysis_id,
-            emitted_at=emitted_at,
-            current_kind=self.current_kind,
-            current_datasource_id=self.current_datasource_id,
-            tab_id=self.current_tab_id,
-            tab_name=self.current_tab_name,
-            current_output_id=self.current_output_id,
-            current_output_name=self.current_output_name,
-            compute_worker_run_id=self.current_compute_worker_run_id,
-            progress=self.progress,
-            elapsed_ms=duration_ms,
-            total_steps=self.total_steps,
-            tabs_built=len(self.results),
-            results=self.results,
-            duration_ms=duration_ms,
-            cancelled_at=cancelled_at,
-            cancelled_by=cancelled_by,
-        )
 
 
 class BuildEventType(DomainEnumValue):
@@ -533,50 +307,6 @@ class BuildEventType(DomainEnumValue):
     COMPLETE: ClassVar[Self]
     FAILED: ClassVar[Self]
     CANCELLED: ClassVar[Self]
-
-    @property
-    def is_terminal(self) -> bool:
-        return self in {BuildEventType.COMPLETE, BuildEventType.FAILED, BuildEventType.CANCELLED}
-
-    @property
-    def step_state(self) -> BuildStepState | None:
-        match self:
-            case BuildEventType.STEP_START:
-                return BuildStepState.RUNNING
-            case BuildEventType.STEP_COMPLETE:
-                return BuildStepState.COMPLETED
-            case BuildEventType.STEP_FAILED:
-                return BuildStepState.FAILED
-            case _:
-                return None
-
-    @property
-    def terminal_build_status(self) -> BuildLifecycleStatus | None:
-        match self:
-            case BuildEventType.COMPLETE:
-                return BuildLifecycleStatus.COMPLETED
-            case BuildEventType.FAILED:
-                return BuildLifecycleStatus.FAILED
-            case BuildEventType.CANCELLED:
-                return BuildLifecycleStatus.CANCELLED
-            case _:
-                return None
-
-    @property
-    def terminal_error_message(self) -> str | None:
-        if self == BuildEventType.CANCELLED:
-            return "Build cancelled"
-        return None
-
-    @property
-    def throttle_seconds(self) -> float | None:
-        if self == BuildEventType.PROGRESS:
-            return 0.1
-        if self == BuildEventType.RESOURCES:
-            return 0.5
-        if self == BuildEventType.LOG:
-            return 0.05
-        return None
 
 
 BuildEventType.PLAN = BuildEventType(enums_pb2.BUILD_EVENT_TYPE_PLAN, domain_token("BuildEventType", enums_pb2.BUILD_EVENT_TYPE_PLAN))
@@ -724,10 +454,3 @@ BuildEvent = Annotated[
 ]
 
 BuildEventAdapter: TypeAdapter[BuildEvent] = TypeAdapter(BuildEvent)
-
-
-class BuildListSnapshotMessage(BaseModel):
-    model_config = ConfigDict(from_attributes=True)
-
-    type: Literal["snapshot"] = "snapshot"
-    builds: list[BuildRunSummary]

@@ -11,8 +11,8 @@ from collections.abc import Callable, Iterator
 from concurrent.futures import Future, ThreadPoolExecutor
 from dataclasses import dataclass, field
 from datetime import UTC, datetime
+from importlib import import_module
 from pathlib import Path
-from typing import TYPE_CHECKING
 
 import grpc
 import requests
@@ -27,9 +27,6 @@ from runtime.object_store import reset_object_store_client
 
 logger = logging.getLogger(__name__)
 
-if TYPE_CHECKING:
-    from runtime.compute_worker import PolarsComputeWorker
-
 COMPUTE_WORKER_PROTOCOL_VERSION = 2
 _COMPUTE_WORKER_TOKEN_METADATA_KEY = "x-compute-worker-token"
 _LEGACY_ENGINE_TOKEN_METADATA_KEY = "x-engine-token"
@@ -39,11 +36,9 @@ _MAX_PROGRESS_EVENTS = 256
 _COMPUTE_WORKER_RPC_WORKERS = 2
 
 
-def _load_compute_engine() -> type[PolarsComputeWorker]:
-    """Load Polars only when a cold worker receives its first compute job."""
-    from runtime.compute_worker import PolarsComputeWorker
-
-    return PolarsComputeWorker
+def _load_polars_compute() -> None:
+    """Load Polars before the worker starts answering health requests."""
+    import_module("runtime.polars_compute")
 
 
 class _EngineJobCancelled(Exception):
@@ -184,7 +179,9 @@ class _EngineJobs:
             )
         except Exception as exc:
             try:
-                error_kind, error_details = _load_compute_engine()._classify_engine_error(exc)
+                from runtime.polars_compute import classify_engine_error
+
+                error_kind, error_details = classify_engine_error(exc)
             except Exception:
                 error_kind, error_details = "execution_error", {}
             error_details = {**error_details, "exception_type": type(exc).__name__}
@@ -327,18 +324,19 @@ def _execute_job(
             step_timings={},
         )
 
+    from runtime import polars_compute
+
     datasource_config = _required_mapping(payload, "datasource_config")
     steps = _required_steps(payload)
     additional_datasources = _optional_mapping(payload, "additional_datasources")
     result_data: dict[str, object]
-    compute_engine = _load_compute_engine()
 
     if kind == "preview":
         row_limit = payload.get("row_limit", 1000)
         offset = payload.get("offset", 0)
         if not isinstance(row_limit, int) or not isinstance(offset, int):
             raise ValueError("row_limit and offset must be integers")
-        result_data = compute_engine.execute_preview(datasource_config, steps, row_limit, offset, job_id, additional_datasources, progress_callback)
+        result_data = polars_compute.execute_preview(datasource_config, steps, row_limit, offset, job_id, additional_datasources, progress_callback)
     elif kind == "export":
         artifact_url = payload.get("artifact_url")
         artifact_upload_url = payload.get("artifact_upload_url")
@@ -355,7 +353,7 @@ def _execute_job(
         descriptor, output_path = tempfile.mkstemp(suffix=export.extension)
         os.close(descriptor)
         try:
-            result_data = compute_engine.execute_export(datasource_config, steps, output_path, export_format, job_id, additional_datasources, progress_callback)
+            result_data = polars_compute.execute_export(datasource_config, steps, output_path, export_format, job_id, additional_datasources, progress_callback)
             with Path(output_path).open("rb") as artifact:
                 response = requests.put(
                     artifact_upload_url,
@@ -368,9 +366,9 @@ def _execute_job(
         finally:
             Path(output_path).unlink(missing_ok=True)
     elif kind == "schema":
-        result_data = compute_engine.execute_schema(datasource_config, steps, job_id, additional_datasources, progress_callback)
+        result_data = polars_compute.execute_schema(datasource_config, steps, job_id, additional_datasources, progress_callback)
     elif kind == "row_count":
-        result_data = compute_engine.execute_row_count(datasource_config, steps, job_id, additional_datasources, progress_callback)
+        result_data = polars_compute.execute_row_count(datasource_config, steps, job_id, additional_datasources, progress_callback)
     else:
         raise ValueError(f"Unsupported engine job kind: {kind}")
 
@@ -728,7 +726,7 @@ def main() -> None:
     # Polars imports can hold the GIL while native modules initialize. Finish
     # them before gRPC accepts health/control RPCs so a cold engine cannot be
     # mistaken for a dead one while its first job imports the compute stack.
-    _load_compute_engine()
+    _load_polars_compute()
     run_compute_worker_server(
         host=read_env("COMPUTE_WORKER_RPC_HOST", "0.0.0.0", legacy_names=("ENGINE_RPC_HOST",)),
         port=read_int("COMPUTE_WORKER_RPC_PORT", 50053, min_value=1, max_value=65535, legacy_names=("ENGINE_RPC_PORT",)),

@@ -1,6 +1,6 @@
 import json
 from dataclasses import dataclass
-from unittest.mock import MagicMock, patch
+from unittest.mock import patch
 
 import polars as pl
 import pyarrow as pa  # type: ignore[import-untyped]
@@ -11,7 +11,6 @@ from operations.notification import NotificationHandler, NotificationParams
 from operations.template_placeholders import render_template_placeholders
 from runtime.compute_service import _prepare_pipeline_notifications
 from runtime.notification_delivery import (
-    NotificationDelivery,
     extract_staged_deliveries,
     render_template,
     staged_column_name,
@@ -191,16 +190,3 @@ class TestPreparePipelineNotifications:
 class TestRenderTemplate:
     def test_replaces_context_values(self) -> None:
         assert render_template("{{name}} is {{status}}", {"name": "Build", "status": "ready"}) == "Build is ready"
-
-
-class TestNotificationDelivery:
-    def test_delegates_explicit_email_and_telegram_commands(self) -> None:
-        client = MagicMock()
-        service = NotificationDelivery(client)
-
-        with patch("runtime.notification_delivery.get_namespace", return_value="default"):
-            service.send_email(to="a@example.com", subject="Subject", body="Body")
-            service.send_telegram(chat_id="123", message="Message", bot_token="token")
-
-        client.send_email.assert_called_once()
-        client.send_telegram.assert_called_once()

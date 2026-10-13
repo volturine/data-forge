@@ -33,7 +33,7 @@ from runtime.domain.compute import schemas as compute_schemas
 from runtime.domain.compute_requests.live import ComputeRequestWake, request_hub
 from runtime.domain.domain_enums import domain_token
 from runtime.exceptions import AppError, StaleComputeInputError, status_for_app_error
-from runtime.executors import run_compute_in_thread, run_control_in_thread
+from runtime.executors import run_compute_in_thread, run_control_in_thread, run_shutdown_in_thread
 from runtime.json_values import dict_to_struct
 from runtime.namespace import reset_namespace, set_namespace_context
 from runtime.object_store import object_store_url, upload_bytes
@@ -59,9 +59,8 @@ def _safe_engine_error_message(value: object) -> str:
     return message[:300]
 
 
-# ``COMPUTE_WORKERS`` is the one public execution budget. The shared semaphore
-# is acquired only after worker admission, so cold-worker waiters do not hold
-# execution capacity away from work that can run now.
+# ``COMPUTE_WORKERS`` is enforced by ProcessManager admission. Per-RID slots
+# serialize requests that reuse an existing compute worker.
 _COMPUTE_WORKERS = max(1, settings.compute_workers)
 # One dispatcher fills bounded async work slots instead of making every slot
 # independently poll and scan namespaces.
@@ -72,9 +71,8 @@ _COMPUTE_REQUEST_RECOVERY_SECONDS = max(
 # Spread lease RPCs while keeping disconnected engine work bounded to ten seconds.
 _COMPUTE_REQUEST_LEASE_RENEWAL_MAX_SECONDS = 10.0
 _COMPUTE_WORKER_CAPACITY_RACE_TIMEOUT_SECONDS = 2.0
-# Claims are short database transactions. Allow a small batch to refill the
-# shared execution budget without turning every parked execution slot into a
-# concurrent database poller.
+# Claims are short database transactions. A small refill batch avoids turning
+# every parked execution slot into a concurrent database poller.
 _COMPUTE_REQUEST_CLAIM_MAX_WORKERS = min(_COMPUTE_WORKERS, 4)
 _TERMINAL_RPC_TIMEOUT_SECONDS = 15.0
 _TERMINAL_PUBLISH_BACKOFF_SECONDS = (0.25, 0.5, 1.0, 2.0, 4.0, 8.0)
@@ -247,7 +245,6 @@ async def compute_request_loop(
     claim_semaphore: asyncio.Semaphore | None = None,
     poll_for_work: bool = True,
     max_concurrency: int | None = None,
-    work_semaphore: asyncio.Semaphore | None = None,
     namespace_directory: RuntimeNamespaceDirectory,
     recovery: NamespaceRecovery | None = None,
     on_progress: Callable[[], None] | None = None,
@@ -304,7 +301,6 @@ async def compute_request_loop(
                 allowed_kinds=allowed_kinds,
                 namespace=namespace,
                 claim_semaphore=claim_semaphore,
-                work_semaphore=work_semaphore,
             )
         except Exception as exc:
             logger.warning("Compute request loop iteration failed; will retry: %s", exc)
@@ -416,7 +412,6 @@ async def _run_once(
     allowed_kinds: frozenset[enums_pb2.ComputeRequestKind] = ALL_REQUEST_KINDS,
     namespace: str,
     claim_semaphore: asyncio.Semaphore | None = None,
-    work_semaphore: asyncio.Semaphore | None = None,
 ) -> bool:
     async def claim_once() -> ClaimedComputeRequest | None:
         if claim_semaphore is None:
@@ -435,7 +430,13 @@ async def _run_once(
     claimed = await claim_once()
     if claimed is None:
         return False
-    identity = _compute_worker_identity_for_claimed(claimed)
+    try:
+        identity = _compute_worker_identity_for_claimed(claimed)
+    except ValueError as exc:
+        # A malformed command cannot become valid on retry. Fail it now rather
+        # than letting the lease expire until the attempt budget is exhausted.
+        await run_control_in_thread(_reject_malformed_request, claimed, exc)
+        return True
     logger.debug(
         "Compute request claimed request_id=%s lease_generation=%s coordinator_generation=%s kind=%s namespace=%s resource_id=%s command_hash=%s",
         claimed.id,
@@ -447,7 +448,7 @@ async def _run_once(
         claimed.command_hash or "-",
     )
     try:
-        await _execute_request(claimed, manager, work_semaphore=work_semaphore)
+        await _execute_request(claimed, manager)
     except ComputeRequestLeaseLost as exc:
         logger.warning(
             "Compute request lease was lost before execution completed request_id=%s namespace=%s reason=%s",
@@ -461,15 +462,14 @@ async def _run_once(
 async def _execute_request(
     claimed: ClaimedComputeRequest,
     manager: ProcessManager,
-    *,
-    work_semaphore: asyncio.Semaphore | None = None,
 ) -> None:
-    """Admit worker capacity before taking a shared execution permit.
+    """Admit worker capacity before taking a compute-pool thread.
 
     Capacity wait is a real queue: the request sits with **no compute-pool
-    thread or execution permit** until a slot is free or the engine already
-    exists for reuse. Exact duplicate commands share one durable request and
-    completed response in Postgres before they reach this gate.
+    thread** until a slot is free or the engine already exists for reuse. The
+    exact-RID job slot serializes work on a reused engine before execution.
+    Exact duplicate commands share one durable request and completed response
+    in Postgres before they reach this gate.
     """
     identity = _compute_worker_identity_for_claimed(claimed)
     renewal_stop = asyncio.Event()
@@ -496,8 +496,6 @@ async def _execute_request(
             request_reserved = False
             engine_job_task: asyncio.Task[None] | None = None
             engine_job_acquired = False
-            work_permit_task: asyncio.Task[bool] | None = None
-            work_permit_acquired = False
             admission_task: asyncio.Task[bool] | None = None
             execution = None
             retry_after_capacity_race = False
@@ -518,8 +516,8 @@ async def _execute_request(
                         priority=_engine_admission_priority(claimed.kind, identity),
                     )
 
-                # Gate: do not take an execution permit or compute thread until
-                # the manager has admitted the exact worker identity.
+                # Do not take a compute thread until the manager has admitted
+                # the exact worker identity and its per-RID slot.
                 async def acquire_admission(admit=admission) -> bool:
                     nonlocal owns_admission, request_reserved
                     owns_admission = await admit()
@@ -582,31 +580,11 @@ async def _execute_request(
                     await engine_job_task
                     engine_job_acquired = True
 
-                if work_semaphore is not None:
-                    work_permit_started = loop.time()
-
-                    async def acquire_work_permit() -> bool:
-                        nonlocal work_permit_acquired
-                        work_permit_acquired = await work_semaphore.acquire()
-                        return work_permit_acquired
-
-                    work_permit_task = asyncio.create_task(acquire_work_permit())
-                    work_permit_done, _work_permit_pending = await asyncio.wait(
-                        {work_permit_task, renewal},
-                        return_when=asyncio.FIRST_COMPLETED,
-                    )
-                    if renewal in work_permit_done:
-                        await renewal
-                        raise RuntimeError(f"Compute request {claimed.id} lease renewal stopped unexpectedly")
-                    work_permit_acquired = await work_permit_task
-                    work_permit_wait_ms = (loop.time() - work_permit_started) * 1000
-                else:
-                    work_permit_wait_ms = 0.0
-                if manager_wait_ms >= 250 or work_permit_wait_ms >= 250:
-                    log_admission = logger.warning if max(manager_wait_ms, work_permit_wait_ms) >= 5000 else logger.info
+                if manager_wait_ms >= 250:
+                    log_admission = logger.warning if manager_wait_ms >= 5000 else logger.info
                     log_admission(
                         "Compute request admitted request_id=%s lease_generation=%s coordinator_generation=%s worker_id=%s "
-                        "kind=%s namespace=%s resource_id=%s command_hash=%s manager_wait_ms=%.1f work_permit_wait_ms=%.1f",
+                        "kind=%s namespace=%s resource_id=%s command_hash=%s manager_wait_ms=%.1f",
                         claimed.id,
                         claimed.lease_generation,
                         os.environ.get("RUNTIME_COORDINATOR_GENERATION", "-"),
@@ -616,7 +594,6 @@ async def _execute_request(
                         identity.resource_id if identity is not None else "-",
                         claimed.command_hash or "-",
                         manager_wait_ms,
-                        work_permit_wait_ms,
                     )
 
                 async def run_execution() -> None:
@@ -628,7 +605,10 @@ async def _execute_request(
                         ):
                             terminal_published.set()
 
-                    await run_compute_in_thread(execute_and_record_terminal, claimed, manager)
+                    # Shutdown must run even when every compute thread is busy, and
+                    # must not occupy the control threads that release admissions.
+                    executor = run_shutdown_in_thread if claimed.kind in COMPUTE_WORKER_SHUTDOWN_REQUEST_KINDS else run_compute_in_thread
+                    await executor(execute_and_record_terminal, claimed, manager)
 
                 execution = asyncio.create_task(run_execution())
                 execution_done, _execution_pending = await asyncio.wait({execution, renewal}, return_when=asyncio.FIRST_COMPLETED)
@@ -640,8 +620,7 @@ async def _execute_request(
                             # Direct lifecycle work may have claimed the slot
                             # between reuse admission and execution. Rejoin the
                             # FIFO queue after releasing this admission and
-                            # execution permit. Capacity waiters must not hold
-                            # running-work capacity while parked.
+                            # RID slot.
                             retry_after_capacity_race = True
                     else:
                         # Durable completion is authoritative if renewal and
@@ -669,7 +648,7 @@ async def _execute_request(
                                     job_id=claimed.id,
                                 )
                             with contextlib.suppress(Exception):
-                                await run_control_in_thread(
+                                await run_shutdown_in_thread(
                                     manager.shutdown_compute_worker_after_request_lease_loss,
                                     identity,
                                     namespace=claimed.namespace,
@@ -681,15 +660,9 @@ async def _execute_request(
                 if execution is not None and not execution.done():
                     execution.cancel()
                     # run_compute_in_thread does not finish cancellation until
-                    # the underlying thread has stopped. Keep its admission
-                    # and execution permit until that happens.
+                    # the underlying thread has stopped. Keep its manager
+                    # admission and RID slot until that happens.
                     await asyncio.gather(execution, return_exceptions=True)
-                if work_permit_task is not None:
-                    if not work_permit_task.done():
-                        work_permit_task.cancel()
-                    await asyncio.gather(work_permit_task, return_exceptions=True)
-                    if work_semaphore is not None and work_permit_acquired:
-                        work_semaphore.release()
                 if admission_task is not None and not admission_task.done():
                     admission_task.cancel()
                 if admission_task is not None:
@@ -794,26 +767,6 @@ def _datasource_result_from_payload(kind: enums_pb2.ComputeRequestKind, payload:
     result = datasource_pb2.DatasourceResult()
     if "error" in payload:
         result.error.CopyFrom(json_format.ParseDict(payload, datasource_pb2.DatasourceErrorResult()))
-        return result
-    if kind in {
-        enums_pb2.COMPUTE_REQUEST_KIND_CREATE_FILE_DATASOURCE,
-        enums_pb2.COMPUTE_REQUEST_KIND_CREATE_DATABASE_DATASOURCE,
-        enums_pb2.COMPUTE_REQUEST_KIND_CREATE_ICEBERG_DATASOURCE,
-        enums_pb2.COMPUTE_REQUEST_KIND_INGEST_DATASOURCE,
-    }:
-        proto_payload = dict(payload)
-        schema_cache = proto_payload.pop("schema_cache", None)
-        if isinstance(schema_cache, dict):
-            proto_payload["schema_info"] = schema_cache
-        if "source_type" in proto_payload:
-            from runtime.protocol_mapping import enum_to_proto_value
-
-            proto_payload["source_type"] = enum_to_proto_value("DATA_SOURCE_TYPE", str(proto_payload["source_type"]))
-        if "created_by" in proto_payload:
-            from runtime.protocol_mapping import enum_to_proto_value
-
-            proto_payload["created_by"] = enum_to_proto_value("DATA_SOURCE_CREATED_BY", str(proto_payload["created_by"]))
-        result.datasource.CopyFrom(json_format.ParseDict(proto_payload, datasource_pb2.DataSourceRecord()))
         return result
     if kind == enums_pb2.COMPUTE_REQUEST_KIND_DATASOURCE_SCHEMA:
         result.schema.CopyFrom(json_format.ParseDict(payload, datasource_pb2.SchemaInfo()))
@@ -1065,7 +1018,9 @@ def _publish_staged_datasource(
             original_source_type=source_type,
             metadata_path=published_table_path,
         )
-        return _datasource_result_from_payload(claimed.kind, record.model_dump(mode="json"))
+        result = datasource_pb2.DatasourceResult()
+        result.datasource.CopyFrom(record)
+        return result
     except BackendWorkerRpcError as exc:
         datasource_execution._fail_ingest_run(client, namespace=claimed.namespace, run_id=run_id, started=started, exc=exc)
         if exc.error_code == "FAILED_PRECONDITION":
@@ -1208,10 +1163,9 @@ def _execute_request_sync(
         if claimed.kind == enums_pb2.COMPUTE_REQUEST_KIND_PREVIEW:
             preview_request = cast(compute_pb2.StepPreviewCommand, _compute_command_from_claimed(claimed, "preview"))
             analysis_pipeline = analysis_pipeline_to_execution_payload(preview_request.analysis_pipeline)
-            request_json = _step_preview_request_json(preview_request)
+            request_json = _step_request_json(preview_request)
             preview_started = time.monotonic()
             preview_outcome = service.preview_step(
-                session=None,
                 manager=manager,
                 target_step_id=preview_request.target_step_id,
                 analysis_pipeline=analysis_pipeline,
@@ -1219,7 +1173,7 @@ def _execute_request_sync(
                 page=preview_request.page,
                 analysis_id=preview_request.analysis_id if preview_request.HasField("analysis_id") else None,
                 compute_worker_identity=preview_request.engine_identity if preview_request.HasField("engine_identity") else None,
-                resource_config=_resource_config_from_preview_command(preview_request),
+                resource_config=_resource_config_from_command(preview_request),
                 tab_id=preview_request.tab_id if preview_request.HasField("tab_id") else None,
                 request_json=request_json,
                 request_id=claimed.id,
@@ -1251,7 +1205,6 @@ def _execute_request_sync(
             if not schema_request.HasField("analysis_id"):
                 raise ValueError("analysis_id is required")
             schema_response = service.get_step_schema(
-                session=None,
                 manager=manager,
                 target_step_id=schema_request.target_step_id,
                 analysis_id=schema_request.analysis_id,
@@ -1265,7 +1218,6 @@ def _execute_request_sync(
                 raise ValueError("analysis_id is required")
             request_json = _step_request_json(row_count_request)
             row_count_response = service.get_step_row_count(
-                session=None,
                 manager=manager,
                 target_step_id=row_count_request.target_step_id,
                 analysis_id=row_count_request.analysis_id,
@@ -1277,7 +1229,6 @@ def _execute_request_sync(
         elif claimed.kind == enums_pb2.COMPUTE_REQUEST_KIND_DOWNLOAD:
             download_request = cast(compute_pb2.DownloadCommand, _compute_command_from_claimed(claimed, "download"))
             file_bytes, filename, content_type = service.download_step(
-                session=None,
                 manager=manager,
                 target_step_id=download_request.target_step_id,
                 analysis_pipeline=analysis_pipeline_to_execution_payload(download_request.analysis_pipeline),
@@ -1295,9 +1246,7 @@ def _execute_request_sync(
             )
         elif claimed.kind == enums_pb2.COMPUTE_REQUEST_KIND_EXPORT:
             export_request = cast(compute_pb2.ExportCommand, _compute_command_from_claimed(claimed, "export"))
-            request_json = _export_request_json(export_request)
             export_operation_result = service.export_data(
-                session=None,
                 manager=manager,
                 target_step_id=export_request.target_step_id,
                 analysis_pipeline=analysis_pipeline_to_execution_payload(export_request.analysis_pipeline),
@@ -1305,7 +1254,6 @@ def _execute_request_sync(
                 iceberg_options=_message_to_service_payload(export_request.iceberg_options) if export_request.HasField("iceberg_options") else None,
                 analysis_id=export_request.analysis_id if export_request.HasField("analysis_id") else None,
                 tab_id=export_request.tab_id if export_request.HasField("tab_id") else None,
-                request_json=request_json,
                 result_id=export_request.result_id if export_request.HasField("result_id") else None,
             )
             export_result = compute_pb2.ExportResult(
@@ -1323,7 +1271,7 @@ def _execute_request_sync(
         elif claimed.kind == enums_pb2.COMPUTE_REQUEST_KIND_SPAWN_ENGINE:
             command = _lifecycle_command_from_claimed(claimed, "spawn_engine")
             identity = command.engine_identity
-            resource_config = _resource_config_from_lifecycle_command(command)
+            resource_config = _resource_config_from_command(command)
             manager.spawn_compute_worker(
                 identity,
                 resource_config=resource_config,
@@ -1333,7 +1281,7 @@ def _execute_request_sync(
         elif claimed.kind == enums_pb2.COMPUTE_REQUEST_KIND_CONFIGURE_ENGINE:
             command = _lifecycle_command_from_claimed(claimed, "configure_engine")
             identity = command.engine_identity
-            resource_config = _resource_config_from_lifecycle_command(command)
+            resource_config = _resource_config_from_command(command)
             if resource_config is None:
                 raise ValueError("resource_config is required")
             manager.restart_engine_with_config(identity, resource_config)
@@ -1394,17 +1342,19 @@ def _execute_request_sync(
         client.close()
 
 
-def _stateless_compute_worker_identity_for_command(
-    command: message.Message,
-    *,
-    target_step_id: str,
-    tab_id: str | None,
-) -> compute_pb2.ComputeWorkerIdentity:
+_STATELESS_COMMAND_FIELDS = {
+    enums_pb2.COMPUTE_REQUEST_KIND_SCHEMA: "schema",
+    enums_pb2.COMPUTE_REQUEST_KIND_ROW_COUNT: "row_count",
+    enums_pb2.COMPUTE_REQUEST_KIND_DOWNLOAD: "download",
+    enums_pb2.COMPUTE_REQUEST_KIND_EXPORT: "export",
+}
+
+
+def _stateless_compute_worker_identity_for_command(command: message.Message) -> compute_pb2.ComputeWorkerIdentity:
     pipeline = getattr(command, "analysis_pipeline", None)
     if pipeline is None:
-        raise ValueError("stateless compute command is missing analysis_pipeline")
-    analysis_pipeline = analysis_pipeline_to_execution_payload(pipeline)
-    return service.default_stateless_compute_worker_identity(analysis_pipeline, target_step_id, tab_id)
+        raise ValueError("Malformed compute request: stateless compute command is missing analysis_pipeline")
+    return service.default_stateless_compute_worker_identity(analysis_pipeline_to_execution_payload(pipeline))
 
 
 def _compute_worker_identity_for_claimed(claimed: ClaimedComputeRequest) -> compute_pb2.ComputeWorkerIdentity | None:
@@ -1440,49 +1390,9 @@ def _compute_worker_identity_for_claimed(claimed: ClaimedComputeRequest) -> comp
         preview = cast(compute_pb2.StepPreviewCommand, _compute_command_from_claimed(claimed, "preview"))
         if preview.HasField("engine_identity"):
             return preview.engine_identity
-        if preview.HasField("analysis_id") and preview.analysis_id:
-            return _stateless_compute_worker_identity_for_command(
-                preview,
-                target_step_id=preview.target_step_id,
-                tab_id=preview.tab_id if preview.HasField("tab_id") else None,
-            )
-        return None
-    if kind == enums_pb2.COMPUTE_REQUEST_KIND_SCHEMA:
-        schema = cast(compute_pb2.StepSchemaCommand, _compute_command_from_claimed(claimed, "schema"))
-        if schema.HasField("analysis_id") and schema.analysis_id:
-            return _stateless_compute_worker_identity_for_command(
-                schema,
-                target_step_id=schema.target_step_id,
-                tab_id=schema.tab_id if schema.HasField("tab_id") else None,
-            )
-        return None
-    if kind == enums_pb2.COMPUTE_REQUEST_KIND_ROW_COUNT:
-        row_count = cast(compute_pb2.StepRowCountCommand, _compute_command_from_claimed(claimed, "row_count"))
-        if row_count.HasField("analysis_id") and row_count.analysis_id:
-            return _stateless_compute_worker_identity_for_command(
-                row_count,
-                target_step_id=row_count.target_step_id,
-                tab_id=row_count.tab_id if row_count.HasField("tab_id") else None,
-            )
-        return None
-    if kind == enums_pb2.COMPUTE_REQUEST_KIND_DOWNLOAD:
-        download = cast(compute_pb2.DownloadCommand, _compute_command_from_claimed(claimed, "download"))
-        if download.HasField("analysis_id") and download.analysis_id:
-            return _stateless_compute_worker_identity_for_command(
-                download,
-                target_step_id=download.target_step_id,
-                tab_id=download.tab_id if download.HasField("tab_id") else None,
-            )
-        return None
-    if kind == enums_pb2.COMPUTE_REQUEST_KIND_EXPORT:
-        export = cast(compute_pb2.ExportCommand, _compute_command_from_claimed(claimed, "export"))
-        if export.HasField("analysis_id") and export.analysis_id:
-            return _stateless_compute_worker_identity_for_command(
-                export,
-                target_step_id=export.target_step_id,
-                tab_id=export.tab_id if export.HasField("tab_id") else None,
-            )
-        return None
+        return _stateless_compute_worker_identity_for_command(preview)
+    if kind in _STATELESS_COMMAND_FIELDS:
+        return _stateless_compute_worker_identity_for_command(_compute_command_from_claimed(claimed, _STATELESS_COMMAND_FIELDS[kind]))
     return None
 
 
@@ -1519,40 +1429,13 @@ def _step_request_json(command: message.Message) -> dict[str, object]:
     return request_json
 
 
-def _step_preview_request_json(command: compute_pb2.StepPreviewCommand) -> dict[str, object]:
-    return _step_request_json(command)
-
-
-def _export_request_json(command: compute_pb2.ExportCommand) -> dict[str, object]:
-    return _step_request_json(command)
-
-
-def _resource_config_from_preview_command(command: compute_pb2.StepPreviewCommand) -> dict[str, object] | None:
+def _resource_config_from_command(
+    command: compute_pb2.StepPreviewCommand | compute_pb2.ComputeWorkerLifecycleCommand,
+) -> dict[str, object] | None:
     if not command.HasField("resource_config"):
         return None
     config = command.resource_config
-    result: dict[str, object] = {}
-    if config.HasField("max_threads"):
-        result["max_threads"] = config.max_threads
-    if config.HasField("max_memory_mb"):
-        result["max_memory_mb"] = config.max_memory_mb
-    if config.HasField("streaming_chunk_size"):
-        result["streaming_chunk_size"] = config.streaming_chunk_size
-    return result
-
-
-def _resource_config_from_lifecycle_command(command: compute_pb2.ComputeWorkerLifecycleCommand) -> dict[str, object] | None:
-    if not command.HasField("resource_config"):
-        return None
-    config = command.resource_config
-    result: dict[str, object] = {}
-    if config.HasField("max_threads"):
-        result["max_threads"] = config.max_threads
-    if config.HasField("max_memory_mb"):
-        result["max_memory_mb"] = config.max_memory_mb
-    if config.HasField("streaming_chunk_size"):
-        result["streaming_chunk_size"] = config.streaming_chunk_size
-    return result
+    return {field: getattr(config, field) for field in ("max_threads", "max_memory_mb", "streaming_chunk_size") if config.HasField(field)}
 
 
 def _write_artifact(request_id: str, filename: str, content: bytes) -> str:
@@ -1642,36 +1525,6 @@ def _compute_worker_status_result(value: compute_schemas.ComputeWorkerStatusSche
     return compute_pb2.ComputeResponse(engine_status=result)
 
 
-def _complete_claimed_request(claimed: ClaimedComputeRequest, *, response: compute_pb2.ComputeResponse) -> None:
-    client = worker_runtime_client()
-    try:
-        _complete_request(client, claimed, response=response)
-    finally:
-        client.close()
-
-
-def _fail_claimed_request(
-    claimed: ClaimedComputeRequest,
-    *,
-    error_message: str,
-    error: compute_pb2.ComputeErrorResult,
-) -> None:
-    client = worker_runtime_client()
-    try:
-        try:
-            _fail_request_with_retry(
-                client,
-                claimed,
-                error_message=error_message,
-                error=error,
-            )
-        except BackendWorkerRpcError as publish_exc:
-            if publish_exc.status_code != 412:
-                raise
-    finally:
-        client.close()
-
-
 def _complete_request_once(
     client: WorkerRuntimeClient,
     claimed: ClaimedComputeRequest,
@@ -1734,6 +1587,18 @@ def _complete_request(
                 exc,
             )
             time.sleep(delay)
+
+
+def _reject_malformed_request(claimed: ClaimedComputeRequest, exc: ValueError) -> None:
+    client = worker_runtime_client()
+    try:
+        _fail_request_with_retry(client, claimed, error_message=_error_message(exc), error=_error_result(exc))
+    except BackendWorkerRpcError as publish_exc:
+        if publish_exc.status_code != 412:
+            raise
+    finally:
+        client.close()
+    logger.info("Compute request %s rejected as malformed: %s", claimed.id, exc)
 
 
 def _fail_request_with_retry(

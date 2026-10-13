@@ -28,11 +28,7 @@ from modules.scheduler.commands import create_schedule, delete_schedule, update_
 from modules.scheduler.service import (
     claim_due_schedules,
     enqueue_schedule_run,
-    get_build_order,
-    get_due_schedules,
-    is_schedule_target_eligible,
     list_schedules,
-    mark_schedule_run,
     reconcile_schedule_run,
     should_run,
 )
@@ -386,45 +382,7 @@ class TestScheduleCrud:
         assert created.datasource_id == raw.id
 
 
-class TestScheduleEligibility:
-    def test_eligible_for_analysis_output(self, output_datasource: DataSource):
-        assert is_schedule_target_eligible(output_datasource) is True
-
-    def test_eligible_for_reingestable_raw_iceberg(self, sample_csv_file):
-        raw = DataSource(
-            id=str(uuid.uuid4()),
-            name='Raw Iceberg',
-            source_type='iceberg',
-            config={
-                'metadata_path': '/tmp/path',
-                'branch': 'master',
-                'source': {
-                    'source_type': 'file',
-                    'file_path': str(sample_csv_file),
-                    'file_type': 'csv',
-                    'options': {},
-                },
-            },
-            created_by='import',
-            created_at=datetime.now(UTC),
-        )
-        assert is_schedule_target_eligible(raw) is True
-
-    def test_eligible_for_non_reingestable_raw(self):
-        datasource = DataSource(
-            id=str(uuid.uuid4()),
-            name='Raw Iceberg',
-            source_type='iceberg',
-            config={
-                'metadata_path': '/tmp/path',
-                'branch': 'master',
-                'source': {'source_type': 's3'},
-            },
-            created_by='import',
-            created_at=datetime.now(UTC),
-        )
-        assert is_schedule_target_eligible(datasource) is True
-
+class TestScheduleValidation:
     def test_create_schedule_rejected_for_nonexistent_datasource(self, test_db_session: Session):
         """Schedules must be rejected when datasource does not exist."""
         payload = ScheduleCreate(
@@ -449,34 +407,31 @@ class TestScheduleEligibility:
 
 
 # ---------------------------------------------------------------------------
-# get_due_schedules()
+# claim_due_schedules() eligibility
 # ---------------------------------------------------------------------------
 
 
-class TestGetDueSchedules:
+class TestClaimDueScheduleEligibility:
     def test_no_schedules(self, test_db_session: Session):
-        result = get_due_schedules(test_db_session)
-        assert result == []
+        claimed = claim_due_schedules(test_db_session, worker_id='test-scheduler')
+        assert claimed == []
 
     def test_disabled_schedules_excluded(self, test_db_session: Session, output_datasource: DataSource):
-        """Disabled schedules should not appear even if due."""
         schedule = Schedule(
             id=str(uuid.uuid4()),
             datasource_id=output_datasource.id,
             cron_expression='* * * * *',
             enabled=False,
-            last_run=None,
             next_run=None,
             created_at=datetime.now(UTC),
         )
         test_db_session.add(schedule)
         test_db_session.commit()
 
-        result = get_due_schedules(test_db_session)
-        assert len(result) == 0
+        claimed = claim_due_schedules(test_db_session, worker_id='test-scheduler')
+        assert claimed == []
 
-    def test_due_schedule_returned(self, test_db_session: Session, output_datasource: DataSource):
-        """Enabled schedule with no last_run should be due."""
+    def test_due_schedule_without_next_run_is_claimed(self, test_db_session: Session, output_datasource: DataSource):
         schedule = Schedule(
             id=str(uuid.uuid4()),
             datasource_id=output_datasource.id,
@@ -489,42 +444,42 @@ class TestGetDueSchedules:
         test_db_session.add(schedule)
         test_db_session.commit()
 
-        result = get_due_schedules(test_db_session)
-        assert len(result) == 1
-        assert result[0].datasource_id == output_datasource.id
+        claimed = claim_due_schedules(test_db_session, worker_id='test-scheduler')
+        assert [item.id for item in claimed] == [schedule.id]
+        assert claimed[0].lease_owner == 'test-scheduler'
 
-    def test_not_due_schedule_excluded(self, test_db_session: Session, output_datasource: DataSource):
-        """Schedule that just ran should not be due."""
+    def test_recent_annual_run_is_not_claimed(self, test_db_session: Session, output_datasource: DataSource):
+        now = datetime.now(UTC)
         schedule = Schedule(
             id=str(uuid.uuid4()),
             datasource_id=output_datasource.id,
-            cron_expression='0 0 * * *',  # daily
+            cron_expression='0 0 1 1 *',
             enabled=True,
-            last_run=datetime.now(UTC),
+            last_run=now,
             next_run=None,
-            created_at=datetime.now(UTC),
+            created_at=now,
         )
         test_db_session.add(schedule)
         test_db_session.commit()
 
-        result = get_due_schedules(test_db_session)
-        assert len(result) == 0
+        claimed = claim_due_schedules(test_db_session, worker_id='test-scheduler')
+        assert claimed == []
 
-    def test_future_next_run_is_excluded(self, test_db_session: Session, output_datasource: DataSource):
+    def test_future_next_run_is_not_claimed(self, test_db_session: Session, output_datasource: DataSource):
+        now = datetime.now(UTC)
         schedule = Schedule(
             id=str(uuid.uuid4()),
             datasource_id=output_datasource.id,
             cron_expression='0 0 * * *',
             enabled=True,
-            next_run=datetime.now(UTC) + timedelta(days=1),
-            created_at=datetime.now(UTC),
+            next_run=now + timedelta(days=1),
+            created_at=now,
         )
         test_db_session.add(schedule)
         test_db_session.commit()
 
-        result = get_due_schedules(test_db_session)
-
-        assert result == []
+        claimed = claim_due_schedules(test_db_session, worker_id='test-scheduler')
+        assert claimed == []
 
     def test_dependency_schedule_uses_last_triggered_at(self, test_db_session: Session, output_datasource: DataSource):
         upstream = create_schedule(
@@ -546,17 +501,20 @@ class TestGetDueSchedules:
         test_db_session.add(upstream_row)
         test_db_session.commit()
 
-        due = get_due_schedules(test_db_session)
-        assert downstream.id in {schedule.id for schedule in due}
+        claimed = claim_due_schedules(test_db_session, worker_id='test-scheduler')
+        assert [item.id for item in claimed] == [downstream.id]
 
         downstream_row = test_db_session.get(Schedule, downstream.id)
         assert downstream_row is not None
         downstream_row.last_triggered_at = datetime.now(UTC).replace(tzinfo=None)
+        downstream_row.lease_owner = None
+        downstream_row.claim_token = None
+        downstream_row.lease_expires_at = None
         test_db_session.add(downstream_row)
         test_db_session.commit()
 
-        due = get_due_schedules(test_db_session)
-        assert downstream.id not in {schedule.id for schedule in due}
+        claimed = claim_due_schedules(test_db_session, worker_id='test-scheduler')
+        assert claimed == []
 
     def test_datasource_trigger_uses_latest_completion_not_latest_creation(
         self,
@@ -600,38 +558,13 @@ class TestGetDueSchedules:
         test_db_session.add(schedule)
         test_db_session.commit()
 
-        due = get_due_schedules(test_db_session)
-
-        assert schedule.id in {item.id for item in due}
+        claimed = claim_due_schedules(test_db_session, worker_id='test-scheduler')
+        assert [item.id for item in claimed] == [schedule.id]
 
 
 # ---------------------------------------------------------------------------
-# mark_schedule_run()
+# Schedule claiming and leases
 # ---------------------------------------------------------------------------
-
-
-class TestMarkScheduleRun:
-    def test_updates_last_run_and_next_run(self, test_db_session: Session, output_datasource: DataSource):
-        created = create_schedule(
-            test_db_session,
-            ScheduleCreate(datasource_id=output_datasource.id, cron_expression='0 * * * *'),
-        )
-        assert created.last_run is None
-
-        mark_schedule_run(test_db_session, created.id)
-
-        schedule = test_db_session.get(Schedule, created.id)
-        assert schedule is not None
-        assert schedule.last_run is not None
-        assert schedule.next_run is not None
-        # last_run should be very recent (within last 5 seconds)
-        last_run = schedule.last_run if schedule.last_run.tzinfo is not None else schedule.last_run.replace(tzinfo=UTC)
-        now = datetime.now(UTC)
-        assert (now - last_run).total_seconds() < 5
-
-    def test_nonexistent_schedule_no_error(self, test_db_session: Session):
-        """Marking a nonexistent schedule should not raise."""
-        mark_schedule_run(test_db_session, 'nonexistent')
 
 
 class TestScheduleClaiming:
@@ -907,117 +840,8 @@ class TestScheduleClaiming:
 
 
 # ---------------------------------------------------------------------------
-# get_build_order() — topological sort
+# Schedule execution
 # ---------------------------------------------------------------------------
-
-
-class TestGetBuildOrder:
-    def test_single_analysis(self, test_db_session: Session, sample_analysis: Analysis):
-        order = get_build_order(test_db_session, sample_analysis.id)
-        assert sample_analysis.id in order
-
-    def test_independent_analyses(self, test_db_session: Session, sample_analyses: list[Analysis]):
-        """Independent analyses should all appear in the order."""
-        order = get_build_order(test_db_session, sample_analyses[0].id)
-        for a in sample_analyses:
-            assert a.id in order
-
-    def test_dependent_analyses_order(self, test_db_session: Session, sample_csv_file):
-        """Upstream analysis should come before downstream in build order."""
-        # Create upstream analysis with output datasource
-        upstream_id = str(uuid.uuid4())
-        ds_id = str(uuid.uuid4())
-        now = datetime.now(UTC)
-
-        # Upstream datasource
-        upstream_ds = DataSource(
-            id=ds_id,
-            name='Upstream Output',
-            source_type='file',
-            config={
-                'file_path': str(sample_csv_file),
-                'file_type': 'csv',
-                'options': {},
-            },
-            created_at=now,
-            created_by_analysis_id=upstream_id,
-        )
-        test_db_session.add(upstream_ds)
-
-        upstream = Analysis(
-            id=upstream_id,
-            name='Upstream',
-            description='',
-            pipeline_definition={
-                'tabs': [
-                    {
-                        'id': 'tab-upstream',
-                        'name': 'Upstream',
-                        'parent_id': None,
-                        'datasource': {
-                            'id': ds_id,
-                            'analysis_tab_id': None,
-                            'config': {'branch': 'master'},
-                        },
-                        'output': {
-                            'result_id': str(uuid.uuid4()),
-                            'datasource_type': 'iceberg',
-                            'format': 'parquet',
-                            'filename': 'scheduled_source',
-                        },
-                        'steps': [],
-                    },
-                ],
-            },
-            status=AnalysisStatus.DRAFT,
-            created_at=now,
-            updated_at=now,
-        )
-        test_db_session.add(upstream)
-
-        # Downstream analysis that depends on upstream's datasource
-        downstream_id = str(uuid.uuid4())
-        downstream = Analysis(
-            id=downstream_id,
-            name='Downstream',
-            description='',
-            pipeline_definition={
-                'tabs': [
-                    {
-                        'id': 'tab-downstream',
-                        'name': 'Downstream',
-                        'parent_id': None,
-                        'datasource': {
-                            'id': ds_id,
-                            'analysis_tab_id': None,
-                            'config': {'branch': 'master'},
-                        },
-                        'output': {
-                            'result_id': str(uuid.uuid4()),
-                            'datasource_type': 'iceberg',
-                            'format': 'parquet',
-                            'filename': 'scheduled_source',
-                        },
-                        'steps': [],
-                    },
-                ],
-            },
-            status=AnalysisStatus.DRAFT,
-            created_at=now,
-            updated_at=now,
-        )
-        test_db_session.add(downstream)
-        test_db_session.commit()
-
-        # Link downstream to the datasource created by upstream
-        link = AnalysisDataSource(analysis_id=downstream_id, datasource_id=ds_id)
-        test_db_session.add(link)
-        test_db_session.commit()
-
-        order = get_build_order(test_db_session, downstream_id)
-        upstream_idx = order.index(upstream_id) if upstream_id in order else -1
-        downstream_idx = order.index(downstream_id) if downstream_id in order else -1
-        assert upstream_idx < downstream_idx, 'Upstream must come before downstream'
 
 
 class TestEnqueueScheduleRun:
@@ -1232,6 +1056,11 @@ class TestScheduleReconciliation:
             test_db_session,
             ScheduleCreate(datasource_id=output_datasource.id, cron_expression='0 * * * *'),
         )
+        schedule_row = test_db_session.get(Schedule, schedule.id)
+        assert schedule_row is not None
+        schedule_row.next_run = None
+        test_db_session.add(schedule_row)
+        test_db_session.commit()
         build = build_run_service.create_build_run(
             test_db_session,
             build_id=str(uuid.uuid4()),
@@ -1255,6 +1084,7 @@ class TestScheduleReconciliation:
         assert updated is not None
         assert updated.last_run is not None
         assert updated.last_success_at is not None
+        assert updated.next_run is not None
         assert updated.last_successful_build_id == build.id
         assert updated.lease_owner is None
 
@@ -1294,91 +1124,3 @@ class TestScheduleReconciliation:
         assert updated.last_failure_at is not None
         assert updated.last_successful_build_id is None
         assert updated.lease_owner is None
-
-
-# ---------------------------------------------------------------------------
-# Bug fixes
-# ---------------------------------------------------------------------------
-
-
-class TestSkippedScheduleDoesNotAdvanceLastRun:
-    """Bug 5: skipping a schedule due to unmet dependency must not call mark_schedule_run."""
-
-    def test_skipped_schedule_last_run_unchanged(self, test_db_session: Session, output_datasource: DataSource) -> None:
-        """A schedule skipped for unmet dependency keeps last_run=None."""
-        created = create_schedule(
-            test_db_session,
-            ScheduleCreate(datasource_id=output_datasource.id, cron_expression='0 * * * *'),
-        )
-        assert created.last_run is None
-
-        row = test_db_session.get(Schedule, created.id)
-        assert row is not None
-        assert row.last_run is None
-
-
-class TestGetBuildOrderNoDuplicateInDegree:
-    """Bug 6: in_degree must not be double-incremented when two datasources from the
-    same upstream analysis link to the same downstream analysis.
-    """
-
-    def test_two_datasources_same_upstream_no_double_in_degree(self, test_db_session: Session, sample_csv_file) -> None:
-        """Downstream linked to two datasources both created by the same upstream.
-        Before the fix, each datasource link incremented in_degree unconditionally,
-        raising it to 2 and stalling BFS so downstream never appeared in the order.
-        After the fix, the set-based dedup prevents the second increment.
-        """
-        upstream_id = str(uuid.uuid4())
-        ds_a_id = str(uuid.uuid4())
-        ds_b_id = str(uuid.uuid4())
-        now = datetime.now(UTC)
-
-        for ds_id in (ds_a_id, ds_b_id):
-            ds = DataSource(
-                id=ds_id,
-                name=f'Output {ds_id[:8]}',
-                source_type='file',
-                config={
-                    'file_path': str(sample_csv_file),
-                    'file_type': 'csv',
-                    'options': {},
-                },
-                created_at=now,
-                created_by_analysis_id=upstream_id,
-            )
-            test_db_session.add(ds)
-
-        upstream = Analysis(
-            id=upstream_id,
-            name='Upstream',
-            description='',
-            pipeline_definition={'tabs': []},
-            status=AnalysisStatus.DRAFT,
-            created_at=now,
-            updated_at=now,
-        )
-        test_db_session.add(upstream)
-
-        downstream_id = str(uuid.uuid4())
-        downstream = Analysis(
-            id=downstream_id,
-            name='Downstream',
-            description='',
-            pipeline_definition={'tabs': []},
-            status=AnalysisStatus.DRAFT,
-            created_at=now,
-            updated_at=now,
-        )
-        test_db_session.add(downstream)
-        test_db_session.commit()
-
-        link_a = AnalysisDataSource(analysis_id=downstream_id, datasource_id=ds_a_id)
-        link_b = AnalysisDataSource(analysis_id=downstream_id, datasource_id=ds_b_id)
-        test_db_session.add(link_a)
-        test_db_session.add(link_b)
-        test_db_session.commit()
-
-        order = get_build_order(test_db_session, downstream_id)
-        assert downstream_id in order
-        assert upstream_id in order
-        assert order.index(upstream_id) < order.index(downstream_id)

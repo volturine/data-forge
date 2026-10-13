@@ -135,10 +135,6 @@ def validate_password(password: str) -> None:
         raise ValueError('Password must contain at least one digit')
 
 
-def _send_smtp_message(host: str, port: int, smtp_user: str, password: str, msg: EmailMessage) -> None:
-    send_smtp_message(host, port, smtp_user, password, msg)
-
-
 def _normalize_default_user_email(email: str) -> str:
     normalized = email.strip().lower()
     if normalized:
@@ -689,7 +685,7 @@ async def send_verification_email(user_email: str, token: str) -> bool:
     msg.set_content(f'Please verify your email by opening this link: {verify_url}')
 
     try:
-        await run_api_blocking(_send_smtp_message, host, port, smtp_user, password, msg)
+        await run_api_blocking(send_smtp_message, host, port, smtp_user, password, msg)
     except Exception:
         logger.error('Failed to send verification email', exc_info=True)
         raise
@@ -754,7 +750,7 @@ async def send_password_reset_email(user_email: str, token: str) -> bool:
     msg['Subject'] = 'Reset your password'
     msg.set_content(f'Use this link to reset your password: {reset_url}')
     try:
-        await run_api_blocking(_send_smtp_message, host, port, smtp_user, password, msg)
+        await run_api_blocking(send_smtp_message, host, port, smtp_user, password, msg)
     except Exception:
         logger.error('Failed to send password reset email', exc_info=True)
         raise

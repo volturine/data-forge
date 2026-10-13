@@ -1,8 +1,6 @@
 import json
 import logging
 from collections.abc import Sequence
-from dataclasses import dataclass
-from typing import Protocol
 
 import httpx
 
@@ -156,72 +154,6 @@ class OpenRouterClient(AIClient):
             return {'ok': False, 'detail': str(exc)}
 
 
-class AIClientBuilder(Protocol):
-    def __call__(
-        self,
-        *,
-        endpoint_url: str | None,
-        api_key: str | None,
-        organization_id: str | None,
-    ) -> AIClient: ...
-
-
-@dataclass(frozen=True, slots=True)
-class AIClientProviderDefinition:
-    provider: enums_pb2.AIProvider
-    aliases: tuple[str, ...]
-    build: AIClientBuilder
-
-    @classmethod
-    def require(cls, provider: str | enums_pb2.AIProvider) -> AIClientProviderDefinition:
-        normalized = require_ai_provider(provider)
-        for definition in AI_CLIENT_PROVIDER_DEFINITIONS.values():
-            if normalized == definition.provider:
-                return definition
-        if isinstance(provider, str):
-            alias = provider.strip().lower()
-            for definition in AI_CLIENT_PROVIDER_DEFINITIONS.values():
-                if alias in definition.aliases:
-                    return definition
-        raise ValueError(f'Unknown AI provider: {provider}')
-
-
-def build_ollama_client(*, endpoint_url: str | None, api_key: str | None, organization_id: str | None) -> AIClient:
-    del api_key, organization_id
-    from backend_core.settings_projection import get_resolved_ollama_settings
-
-    resolved = get_resolved_ollama_settings()
-    return OllamaClient(endpoint_url or resolved['endpoint_url'] or settings.ollama_base_url)
-
-
-def build_openrouter_client(*, endpoint_url: str | None, api_key: str | None, organization_id: str | None) -> AIClient:
-    del endpoint_url, organization_id
-    from backend_core.settings_projection import get_resolved_openrouter_key
-
-    resolved_key = api_key or get_resolved_openrouter_key()
-    if not resolved_key:
-        raise ValueError('OPENROUTER_API_KEY not configured')
-    return OpenRouterClient(resolved_key)
-
-
-AI_CLIENT_PROVIDER_DEFINITIONS: dict[enums_pb2.AIProvider, AIClientProviderDefinition] = {
-    enums_pb2.AI_PROVIDER_OLLAMA: AIClientProviderDefinition(
-        provider=enums_pb2.AI_PROVIDER_OLLAMA,
-        aliases=(),
-        build=build_ollama_client,
-    ),
-    enums_pb2.AI_PROVIDER_OPENROUTER: AIClientProviderDefinition(
-        provider=enums_pb2.AI_PROVIDER_OPENROUTER,
-        aliases=(),
-        build=build_openrouter_client,
-    ),
-}
-
-
-def resolve_ai_provider(provider: str | enums_pb2.AIProvider) -> enums_pb2.AIProvider:
-    return AIClientProviderDefinition.require(provider).provider
-
-
 def get_ai_client(
     provider: str | enums_pb2.AIProvider,
     *,
@@ -229,12 +161,18 @@ def get_ai_client(
     api_key: str | None = None,
     organization_id: str | None = None,
 ) -> AIClient:
-    definition = AIClientProviderDefinition.require(provider)
-    return definition.build(
-        endpoint_url=endpoint_url,
-        api_key=api_key,
-        organization_id=organization_id,
-    )
+    provider = require_ai_provider(provider)
+    if provider == enums_pb2.AI_PROVIDER_OLLAMA:
+        from backend_core.settings_projection import get_resolved_ollama_settings
+
+        resolved = get_resolved_ollama_settings()
+        return OllamaClient(endpoint_url or resolved['endpoint_url'] or settings.ollama_base_url)
+    from backend_core.settings_projection import get_resolved_openrouter_key
+
+    resolved_key = api_key or get_resolved_openrouter_key()
+    if not resolved_key:
+        raise ValueError('OPENROUTER_API_KEY not configured')
+    return OpenRouterClient(resolved_key)
 
 
 def parse_request_options(raw: str | dict | None) -> dict | None:

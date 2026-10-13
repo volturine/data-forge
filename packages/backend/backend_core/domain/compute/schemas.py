@@ -15,7 +15,7 @@ from pydantic import (
     model_validator,
 )
 
-from backend_core.domain.analysis.step_types import is_step_type
+from backend_core.domain.analysis.step_types import STEP_TYPES
 from backend_core.domain.api_enums import ApiEnumValue, api_token
 from backend_core.domain.compute_worker_runs.schemas import ComputeWorkerRunKind
 from dataforge_protocol import compute_pb2, enums_pb2
@@ -153,7 +153,7 @@ class AnalysisPipelineTab(BaseModel):
             step_type = step.get('type')
             if not isinstance(step_type, str) or not step_type.strip():
                 raise ValueError(f'Analysis pipeline step {index} type is required')
-            if not is_step_type(step_type):
+            if not STEP_TYPES.has(step_type):
                 raise ValueError(f"Analysis pipeline step {index} has unknown type '{step_type}'")
             config = step.get('config')
             if config is not None and not isinstance(config, dict):
@@ -186,7 +186,7 @@ class AnalysisPipelineTab(BaseModel):
 class AnalysisPipelinePayload(BaseModel):
     model_config = ConfigDict(from_attributes=True)
 
-    analysis_id: str
+    analysis_id: str = Field(min_length=1)
     tabs: list[AnalysisPipelineTab]
 
     @field_validator('tabs')
@@ -474,6 +474,13 @@ class ExportRequest(BaseModel):
     iceberg_options: IcebergExportOptions | None = None
     result_id: str | None = None
 
+    @model_validator(mode='after')
+    def default_analysis_id(self) -> Self:
+        # The worker owns the engine by the pipeline's analysis RID.
+        if not self.analysis_id:
+            self.analysis_id = self.analysis_pipeline.analysis_id
+        return self
+
     @field_validator('result_id')
     @classmethod
     def validate_result_id(cls, value: str | None, info):
@@ -508,6 +515,13 @@ class DownloadRequest(BaseModel):
     tab_id: str | None = None
     format: ExportFormat = ExportFormat.CSV
     filename: str = 'download'
+
+    @model_validator(mode='after')
+    def default_analysis_id(self) -> Self:
+        # The worker owns the engine by the pipeline's analysis RID.
+        if not self.analysis_id:
+            self.analysis_id = self.analysis_pipeline.analysis_id
+        return self
 
 
 class StepSchemaRequest(BaseModel):
@@ -617,10 +631,7 @@ class BuildRequest(BaseModel):
     tab_id: str
 
     def pipeline_payload(self) -> dict[str, object]:
-        pipeline = self.analysis_pipeline.model_dump(mode='json')
-        if not isinstance(pipeline, dict):
-            raise ValueError('analysis_pipeline is required')
-        return {**pipeline, 'tab_id': self.tab_id}
+        return {**self.analysis_pipeline.model_dump(mode='json'), 'tab_id': self.tab_id}
 
     def is_schedule_ingest_request(self) -> bool:
         if len(self.analysis_pipeline.tabs) != 1:

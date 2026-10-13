@@ -26,7 +26,6 @@ from backend_core.persistence.compute_requests.models import ComputeRequest, Com
 from backend_core.persistence.compute_worker_runs.models import ComputeWorkerRun
 from backend_core.persistence.datasource.models import DataSource
 from backend_core.persistence.runtime_events.models import RuntimeOutboxEvent
-from backend_core.transitions import TransitionOutcome
 from dataforge_protocol import compute_pb2, datasource_pb2, enums_pb2, errors_pb2
 from modules.analysis.step_schemas import normalize_step_config_for_protocol
 
@@ -671,15 +670,22 @@ def test_request_dependency_index_includes_join_and_union_sources() -> None:
     }
 
 
-def test_cancel_queued_request_retires_abandoned_work(test_db_session) -> None:
+@pytest.mark.parametrize('running', [False, True])
+@pytest.mark.parametrize('kind', [enums_pb2.COMPUTE_REQUEST_KIND_DOWNLOAD, enums_pb2.COMPUTE_REQUEST_KIND_EXPORT])
+def test_cancel_disconnected_request_retires_non_shared_engine_work(test_db_session, kind, running) -> None:
+    payload = _preview_payload()
+    payload.pop('analysis_id')
+    payload.update({'format': 'csv', 'filename': 'result.csv', 'destination': 'download'})
     request = _create_request(
         test_db_session,
         namespace='default',
-        kind=enums_pb2.COMPUTE_REQUEST_KIND_PREVIEW,
-        request_json=_preview_payload(),
+        kind=kind,
+        request_json=payload,
     )
+    if running:
+        assert compute_requests_service.claim_next_request(test_db_session, worker_id='worker-test') is not None
 
-    cancelled = compute_requests_service.cancel_queued_request(
+    cancelled = compute_requests_service.cancel_disconnected_request(
         test_db_session,
         request.id,
         reason='client disconnected',
@@ -701,27 +707,7 @@ def test_empty_claim_does_not_refresh_namespace_work_marker(test_db_session, mon
     assert compute_requests_service.claim_next_request(test_db_session, worker_id='worker-test') is None
 
 
-def test_cancel_queued_request_does_not_take_over_running_work(test_db_session) -> None:
-    request = _create_request(
-        test_db_session,
-        namespace='default',
-        kind=enums_pb2.COMPUTE_REQUEST_KIND_PREVIEW,
-        request_json=_preview_payload(),
-    )
-    compute_requests_service.claim_next_request(test_db_session, worker_id='worker-test')
-
-    cancelled = compute_requests_service.cancel_queued_request(
-        test_db_session,
-        request.id,
-        reason='client disconnected',
-    )
-
-    assert cancelled is None
-    active = compute_requests_service.get_request(test_db_session, request.id)
-    assert active is not None
-    assert active.status == enums_pb2.COMPUTE_REQUEST_STATUS_RUNNING
-
-
+@pytest.mark.parametrize('running', [False, True])
 @pytest.mark.parametrize(
     'kind',
     [
@@ -730,7 +716,7 @@ def test_cancel_queued_request_does_not_take_over_running_work(test_db_session) 
         enums_pb2.COMPUTE_REQUEST_KIND_ROW_COUNT,
     ],
 )
-def test_cancel_disconnected_request_preserves_running_shared_analysis_reads(test_db_session, kind) -> None:
+def test_cancel_disconnected_request_preserves_shared_analysis_reads(test_db_session, kind, running) -> None:
     command = command_from_payload(kind, _preview_payload()) if kind == enums_pb2.COMPUTE_REQUEST_KIND_PREVIEW else _analysis_read_command(kind)
     request, created = compute_requests_service.stage_shared_flight_request(
         test_db_session,
@@ -740,8 +726,10 @@ def test_cancel_disconnected_request_preserves_running_shared_analysis_reads(tes
     )
     assert created is True
     test_db_session.commit()
-    claimed = compute_requests_service.claim_next_request(test_db_session, worker_id='worker-test')
-    assert claimed is not None
+    claimed = None
+    if running:
+        claimed = compute_requests_service.claim_next_request(test_db_session, worker_id='worker-test')
+        assert claimed is not None
 
     cancelled = compute_requests_service.cancel_disconnected_request(
         test_db_session,
@@ -752,9 +740,10 @@ def test_cancel_disconnected_request_preserves_running_shared_analysis_reads(tes
     assert cancelled is None
     active = compute_requests_service.get_request(test_db_session, request.id)
     assert active is not None
-    assert active.status == enums_pb2.COMPUTE_REQUEST_STATUS_RUNNING
-    assert active.lease_owner == 'worker-test'
-    assert active.claim_token == claimed.claim_token
+    assert active.status == (enums_pb2.COMPUTE_REQUEST_STATUS_RUNNING if running else enums_pb2.COMPUTE_REQUEST_STATUS_QUEUED)
+    if claimed is not None:
+        assert active.lease_owner == 'worker-test'
+        assert active.claim_token == claimed.claim_token
 
 
 def test_cancel_active_requests_for_engine_retires_only_matching_work(test_db_session) -> None:
@@ -1913,18 +1902,16 @@ def test_reclaimed_request_rejects_stale_completion(test_db_session) -> None:
     assert stored_run.status == ComputeWorkerRunStatus.RUNNING.value
     assert stored_run.result_json == {}
 
-    renewed = compute_requests_service.renew_request_lease(
+    renewed_ids = compute_requests_service.renew_request_leases(
         test_db_session,
-        request.id,
+        [compute_requests_service.ComputeRequestLeaseClaim(request_id=request.id, claim_token=claimed.claim_token, lease_generation=claimed.lease_generation)],
         worker_id='worker-2',
-        claim_token=claimed.claim_token,
-        lease_generation=claimed.lease_generation,
     )
-    assert renewed.outcome is TransitionOutcome.APPLIED
-    assert renewed.value is not None
-    assert renewed.value.last_renewed_at is not None
-    assert renewed.value.lease_expires_at is not None
-    assert abs((renewed.value.lease_expires_at - renewed.value.last_renewed_at).total_seconds() - settings.runtime_work_lease_ttl_seconds) < 0.01
+    assert renewed_ids == {request.id}
+    test_db_session.refresh(claimed)
+    assert claimed.last_renewed_at is not None
+    assert claimed.lease_expires_at is not None
+    assert abs((claimed.lease_expires_at - claimed.last_renewed_at).total_seconds() - settings.runtime_work_lease_ttl_seconds) < 0.01
 
 
 def test_compute_request_lease_batch_renews_valid_claims_only(test_db_session) -> None:

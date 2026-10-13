@@ -35,7 +35,7 @@ def test_cold_compute_worker_server_import_does_not_load_polars_compute_runtime(
         [
             sys.executable,
             "-c",
-            "import sys; import runtime.compute_worker_server; assert 'runtime.compute_worker' not in sys.modules; assert 'polars' not in sys.modules",
+            "import sys; import runtime.compute_worker_server; assert 'runtime.polars_compute' not in sys.modules; assert 'polars' not in sys.modules",
         ],
         cwd=Path(__file__).parents[1],
         capture_output=True,
@@ -48,7 +48,7 @@ def test_cold_compute_worker_server_import_does_not_load_polars_compute_runtime(
 
 def test_engine_main_loads_compute_runtime_before_starting_grpc(monkeypatch) -> None:
     events: list[str] = []
-    monkeypatch.setattr(compute_worker_server, "_load_compute_engine", lambda: events.append("compute-loaded"))
+    monkeypatch.setattr(compute_worker_server, "_load_polars_compute", lambda: events.append("compute-loaded"))
     monkeypatch.setattr(compute_worker_server, "run_compute_worker_server", lambda **_kwargs: events.append("grpc-started"))
 
     compute_worker_server.main()
@@ -136,12 +136,9 @@ def test_export_stages_artifact_in_object_store(monkeypatch, tmp_path) -> None:
         staged.update(url=url, content_type=headers["Content-Type"], data=data.read(), timeout=timeout)
         return Response()
 
-    class ComputeWorker:
-        @staticmethod
-        def execute_export(datasource, steps, output_path, export_format, job_id, additional, progress):
-            return execute_export(datasource, steps, output_path, export_format, job_id, additional, progress)
+    from runtime import polars_compute
 
-    monkeypatch.setattr(compute_worker_server, "_load_compute_engine", lambda: ComputeWorker)
+    monkeypatch.setattr(polars_compute, "execute_export", execute_export)
     monkeypatch.setattr(compute_worker_server.requests, "put", put)
 
     result = compute_worker_server._execute_job(

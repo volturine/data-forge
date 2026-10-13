@@ -46,7 +46,7 @@ def test_preview_analysis_uses_pipeline_payload(client, sample_datasource: DataS
         ],
     }
 
-    def fake_preview_step(request, *, runtime_probe, http_request):
+    def fake_preview_step(request, *, http_request):
         return MagicMock(
             column_types={'name': 'String'},
             data=[{'name': 'Alice'}],

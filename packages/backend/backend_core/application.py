@@ -7,7 +7,7 @@ import sys
 import threading
 import time
 import traceback
-from collections.abc import AsyncIterator, Awaitable, Callable, MutableMapping
+from collections.abc import AsyncIterator, Callable
 from concurrent.futures import Future, ThreadPoolExecutor
 from contextlib import AsyncExitStack, asynccontextmanager
 from pathlib import Path
@@ -20,6 +20,7 @@ from fastapi.middleware.cors import CORSMiddleware
 from fastapi.responses import FileResponse, JSONResponse
 from sqlmodel import Session, text
 from starlette.requests import ClientDisconnect
+from starlette.types import ASGIApp, Message, Receive, Scope, Send
 
 from api import include_api_routes
 from backend_core import runtime_ipc
@@ -61,7 +62,6 @@ from backend_core.logging import (
 )
 from backend_core.namespace import normalize_namespace, reset_namespace, set_namespace_context
 from backend_core.namespaces_service import register_namespace
-from backend_core.runtime_ipc import RuntimeListenerKind
 from backend_core.runtime_notifications import handle_runtime_payload, recover_runtime_notifications, refresh_build_projections, refresh_lock_projections
 from backend_core.settings_store import seed_settings_from_env
 from modules.udf import service as udf_service
@@ -305,10 +305,6 @@ class EventLoopBlockWatchdog:
             )
 
 
-async def _run_namespace_middleware[T](function, *args, **kwargs) -> T:
-    return await run_api_blocking(function, *args, **kwargs)
-
-
 frontend_build_dir = ROOT / 'packages' / 'frontend' / 'build'
 
 # The API image also serves the prerendered SPA.  Keep the small, immutable
@@ -546,8 +542,8 @@ async def _start_api_lifespan(app: FastAPI, cleanup: AsyncExitStack) -> None:
     event_loop_watchdog = EventLoopBlockWatchdog()
     event_loop_watchdog.start()
     cleanup.callback(event_loop_watchdog.stop)
-    ipc_server = await runtime_ipc.start_api_server(listener=RuntimeListenerKind.API)
-    cleanup.push_async_callback(runtime_ipc.stop_api_server, ipc_server, listener=RuntimeListenerKind.API)
+    ipc_server = await runtime_ipc.start_api_server()
+    cleanup.push_async_callback(runtime_ipc.stop_api_server, ipc_server)
 
     background_tasks: list[asyncio.Task[None]] = []
 
@@ -602,11 +598,6 @@ app.add_exception_handler(Exception, generic_error_handler)
 # Namespaces already known to this process; avoids a DB roundtrip per request.
 _KNOWN_NAMESPACES: set[str] = set()
 
-_ASGIScope = MutableMapping[str, Any]
-_ASGIReceive = Callable[[], Awaitable[dict[str, Any]]]
-_ASGISend = Callable[[dict[str, Any]], Awaitable[None]]
-_ASGIApp = Callable[[_ASGIScope, _ASGIReceive, _ASGISend], Awaitable[None]]
-
 
 def _namespace_registered(session: Session, name: str) -> bool:
     if name == settings.default_namespace:
@@ -629,7 +620,7 @@ def _has_valid_session(request: Request) -> bool:
     return run_settings_db(_check)
 
 
-def _scope_header(scope: _ASGIScope, name: bytes) -> str | None:
+def _scope_header(scope: Scope, name: bytes) -> str | None:
     for header_name, header_value in scope.get('headers', []):
         if header_name.lower() == name:
             return header_value.decode('latin-1')
@@ -639,10 +630,10 @@ def _scope_header(scope: _ASGIScope, name: bytes) -> str | None:
 class NamespaceMiddleware:
     """Select a tenant without allocating a Starlette BaseHTTPMiddleware task."""
 
-    def __init__(self, app: _ASGIApp) -> None:
+    def __init__(self, app: ASGIApp) -> None:
         self.app = app
 
-    async def __call__(self, scope: _ASGIScope, receive: _ASGIReceive, send: _ASGISend) -> None:
+    async def __call__(self, scope: Scope, receive: Receive, send: Send) -> None:
         if scope.get('type') != 'http':
             await self.app(scope, receive, send)
             return
@@ -668,21 +659,21 @@ class NamespaceMiddleware:
         try:
             if not auth_settings.auth_required:
                 if not (is_health_request and namespace_header is None):
-                    await _run_namespace_middleware(run_settings_db, register_namespace, raw)
+                    await run_api_blocking(run_settings_db, register_namespace, raw)
                 await self.app(scope, receive, send)
                 return
             normalized = normalize_namespace(raw)
             known = normalized == settings.default_namespace or normalized in _KNOWN_NAMESPACES
             if not known:
-                known = await _run_namespace_middleware(run_settings_db, _namespace_registered, normalized)
+                known = await run_api_blocking(run_settings_db, _namespace_registered, normalized)
                 if known:
                     _KNOWN_NAMESPACES.add(normalized)
             request = Request(scope, receive)
-            if not known and not await _run_namespace_middleware(_has_valid_session, request):
+            if not known and not await run_api_blocking(_has_valid_session, request):
                 await JSONResponse(status_code=403, content={'detail': f'Unknown namespace: {normalized}'})(scope, receive, send)
                 return
             if not known:
-                await _run_namespace_middleware(run_settings_db, register_namespace, raw)
+                await run_api_blocking(run_settings_db, register_namespace, raw)
                 _KNOWN_NAMESPACES.add(normalized)
             await self.app(scope, receive, send)
         finally:
@@ -713,10 +704,10 @@ app.add_middleware(
 class SecurityHeadersMiddleware:
     """Add response headers without the task-heavy BaseHTTPMiddleware adapter."""
 
-    def __init__(self, app: _ASGIApp) -> None:
+    def __init__(self, app: ASGIApp) -> None:
         self.app = app
 
-    async def __call__(self, scope: _ASGIScope, receive: _ASGIReceive, send: _ASGISend) -> None:
+    async def __call__(self, scope: Scope, receive: Receive, send: Send) -> None:
         if scope.get('type') != 'http':
             await self.app(scope, receive, send)
             return
@@ -731,7 +722,7 @@ class SecurityHeadersMiddleware:
         if not settings.debug:
             values[b'strict-transport-security'] = b'max-age=63072000; includeSubDomains'
 
-        async def send_with_headers(message: dict[str, Any]) -> None:
+        async def send_with_headers(message: Message) -> None:
             if message.get('type') != 'http.response.start':
                 await send(message)
                 return

@@ -3,7 +3,6 @@
 from __future__ import annotations
 
 import asyncio
-import base64
 import contextvars
 import hashlib
 import logging
@@ -33,7 +32,6 @@ from dataforge_protocol import (
 )
 from runtime.domain.compute.base import ComputeWorkerStatusInfo
 from runtime.protocol_mapping import (
-    datasource_record_payload as _datasource_record_payload,
     datetime_to_timestamp,
     dict_to_struct,
     enum_to_proto_value,
@@ -57,6 +55,12 @@ _channel_lock = threading.Lock()
 _channels: dict[str, grpc.Channel] = {}
 _COMPUTE_LEASE_BATCH_WINDOW_SECONDS = 0.025
 _COMPUTE_LEASE_BATCH_MAX_ITEMS = 256
+
+
+def _validated_datasource_record(record: datasource_pb2.DataSourceRecord) -> datasource_pb2.DataSourceRecord:
+    proto_value_to_enum_name(enums_pb2.DataSourceType, "DATA_SOURCE_TYPE", record.source_type)
+    proto_value_to_enum_name(enums_pb2.DataSourceCreatedBy, "DATA_SOURCE_CREATED_BY", record.created_by)
+    return record
 
 
 @dataclass
@@ -241,15 +245,12 @@ class StartedBuildRun:
     analysis_pipeline: analysis_pb2.AnalysisPipelinePayload
     tab_id: str | None
     starter_json: dict[str, object]
-    resource_config_json: dict[str, object] | None
     current_kind: str | None
     current_datasource_id: str | None
     current_tab_id: str | None
     current_tab_name: str | None
     current_output_id: str | None
     current_output_name: str | None
-    started_at: datetime
-    total_tabs: int
 
 
 @dataclass(frozen=True)
@@ -357,6 +358,97 @@ class StorageCleanupClaim:
             claim_token=self.claim_token,
             lease_generation=self.lease_generation,
         )
+
+
+def _claimed_build_job_from_proto(job: worker_runtime_pb2.WorkerClaimedBuildJob) -> ClaimedBuildJob:
+    lease_expires_at = optional_timestamp_to_datetime(job, "lease_expires_at")
+    if lease_expires_at is None:
+        raise ValueError(f"Claimed build job {job.job_id} has no lease expiry")
+    if lease_expires_at.tzinfo is None:
+        lease_expires_at = lease_expires_at.replace(tzinfo=UTC)
+    lease_ttl_seconds, lease_deadline = _claim_lease_timing(lease_expires_at, job.lease_ttl_seconds)
+    return ClaimedBuildJob(
+        job_id=job.job_id,
+        build_id=job.build_id,
+        namespace=job.namespace,
+        claim_token=job.claim_token,
+        lease_generation=job.lease_generation,
+        lease_expires_at=lease_expires_at,
+        attempt=job.attempt,
+        lease_ttl_seconds=lease_ttl_seconds,
+        lease_deadline_monotonic=lease_deadline,
+    )
+
+
+def _claimed_compute_request_from_proto(
+    claim: worker_runtime_pb2.WorkerClaimedComputeRequest,
+    worker_id: str,
+) -> ClaimedComputeRequest:
+    command = claim.command
+    lease_expires_at = optional_timestamp_to_datetime(claim, "lease_expires_at")
+    if lease_expires_at is None:
+        raise ValueError(f"Claimed compute request {claim.id} has no lease expiry")
+    if lease_expires_at.tzinfo is None:
+        lease_expires_at = lease_expires_at.replace(tzinfo=UTC)
+    lease_ttl_seconds, lease_deadline = _claim_lease_timing(lease_expires_at, claim.lease_ttl_seconds)
+    return ClaimedComputeRequest(
+        id=claim.id,
+        namespace=claim.namespace,
+        kind=command.kind,
+        command_envelope=command,
+        worker_id=worker_id,
+        claim_token=claim.claim_token,
+        lease_generation=claim.lease_generation,
+        lease_expires_at=lease_expires_at,
+        attempt=claim.attempt,
+        lease_ttl_seconds=lease_ttl_seconds,
+        lease_deadline_monotonic=lease_deadline,
+        command_hash=hashlib.sha256(command.command.SerializeToString(deterministic=True)).hexdigest(),
+    )
+
+
+def _storage_cleanup_claim_from_proto(row: worker_runtime_pb2.WorkerStorageCleanupClaim) -> StorageCleanupClaim:
+    return StorageCleanupClaim(
+        namespace=row.claim.namespace,
+        event_id=row.claim.event_id,
+        claim_token=row.claim.claim_token,
+        lease_generation=row.claim.lease_generation,
+        resource_id=row.resource_id,
+        url=row.url,
+        is_prefix=row.is_prefix,
+        catalog_identifier=row.catalog_identifier if row.HasField("catalog_identifier") else None,
+        catalog_type=row.catalog_type if row.HasField("catalog_type") else None,
+        catalog_uri=row.catalog_uri if row.HasField("catalog_uri") else None,
+        warehouse=row.warehouse if row.HasField("warehouse") else None,
+        catalog_namespace=row.catalog_namespace if row.HasField("catalog_namespace") else None,
+        catalog_table=row.catalog_table if row.HasField("catalog_table") else None,
+        catalog_family_prefix=row.catalog_family_prefix if row.HasField("catalog_family_prefix") else None,
+    )
+
+
+def _persist_build_event_request(
+    *,
+    namespace: str,
+    build_id: str,
+    job_id: str,
+    worker_id: str,
+    claim_token: str,
+    lease_generation: int,
+    event: dict[str, object],
+    resource_config_json: dict[str, object] | None,
+) -> worker_runtime_pb2.WorkerPersistBuildEventRequest:
+    request = worker_runtime_pb2.WorkerPersistBuildEventRequest(
+        namespace=namespace,
+        build_id=build_id,
+        job_id=job_id,
+        worker_id=worker_id,
+        claim_token=claim_token,
+        lease_generation=lease_generation,
+        build_event=_build_event_proto(namespace, event),
+    )
+    if resource_config_json is not None:
+        request.build_resource_config.CopyFrom(_build_resource_config_proto(resource_config_json))
+    return request
 
 
 @dataclass(frozen=True)
@@ -624,23 +716,7 @@ class WorkerRuntimeClient:
         )
         if not response.HasField("job"):
             return None
-        lease_expires_at = optional_timestamp_to_datetime(response.job, "lease_expires_at")
-        if lease_expires_at is None:
-            raise ValueError(f"Claimed build job {response.job.job_id} has no lease expiry")
-        if lease_expires_at.tzinfo is None:
-            lease_expires_at = lease_expires_at.replace(tzinfo=UTC)
-        lease_ttl_seconds, lease_deadline = _claim_lease_timing(lease_expires_at, response.job.lease_ttl_seconds)
-        return ClaimedBuildJob(
-            job_id=response.job.job_id,
-            build_id=response.job.build_id,
-            namespace=response.job.namespace,
-            claim_token=response.job.claim_token,
-            lease_generation=response.job.lease_generation,
-            lease_expires_at=lease_expires_at,
-            attempt=response.job.attempt,
-            lease_ttl_seconds=lease_ttl_seconds,
-            lease_deadline_monotonic=lease_deadline,
-        )
+        return _claimed_build_job_from_proto(response.job)
 
     async def claim_build_job_async(self, *, worker_id: str, namespace: str) -> ClaimedBuildJob | None:
         request = common_pb2.RuntimeWorkerRequest(worker_id=worker_id, protocol_version=2, target_namespace=namespace)
@@ -651,24 +727,7 @@ class WorkerRuntimeClient:
         )
         if not response.HasField("job"):
             return None
-        job = response.job
-        lease_expires_at = optional_timestamp_to_datetime(job, "lease_expires_at")
-        if lease_expires_at is None:
-            raise ValueError(f"Claimed build job {job.job_id} has no lease expiry")
-        if lease_expires_at.tzinfo is None:
-            lease_expires_at = lease_expires_at.replace(tzinfo=UTC)
-        lease_ttl_seconds, lease_deadline = _claim_lease_timing(lease_expires_at, job.lease_ttl_seconds)
-        return ClaimedBuildJob(
-            job_id=job.job_id,
-            build_id=job.build_id,
-            namespace=job.namespace,
-            claim_token=job.claim_token,
-            lease_generation=job.lease_generation,
-            lease_expires_at=lease_expires_at,
-            attempt=job.attempt,
-            lease_ttl_seconds=lease_ttl_seconds,
-            lease_deadline_monotonic=lease_deadline,
-        )
+        return _claimed_build_job_from_proto(response.job)
 
     def renew_build_job_lease(
         self,
@@ -752,27 +811,7 @@ class WorkerRuntimeClient:
         )
         if not response.HasField("request"):
             return None
-        command = response.request.command
-        lease_expires_at = optional_timestamp_to_datetime(response.request, "lease_expires_at")
-        if lease_expires_at is None:
-            raise ValueError(f"Claimed compute request {response.request.id} has no lease expiry")
-        if lease_expires_at.tzinfo is None:
-            lease_expires_at = lease_expires_at.replace(tzinfo=UTC)
-        lease_ttl_seconds, lease_deadline = _claim_lease_timing(lease_expires_at, response.request.lease_ttl_seconds)
-        return ClaimedComputeRequest(
-            id=response.request.id,
-            namespace=response.request.namespace,
-            kind=command.kind,
-            command_envelope=command,
-            worker_id=worker_id,
-            claim_token=response.request.claim_token,
-            lease_generation=response.request.lease_generation,
-            lease_expires_at=lease_expires_at,
-            attempt=response.request.attempt,
-            lease_ttl_seconds=lease_ttl_seconds,
-            lease_deadline_monotonic=lease_deadline,
-            command_hash=hashlib.sha256(command.command.SerializeToString(deterministic=True)).hexdigest(),
-        )
+        return _claimed_compute_request_from_proto(response.request, worker_id)
 
     async def claim_compute_request_async(
         self,
@@ -794,28 +833,7 @@ class WorkerRuntimeClient:
         )
         if not response.HasField("request"):
             return None
-        claim = response.request
-        command = claim.command
-        lease_expires_at = optional_timestamp_to_datetime(claim, "lease_expires_at")
-        if lease_expires_at is None:
-            raise ValueError(f"Claimed compute request {claim.id} has no lease expiry")
-        if lease_expires_at.tzinfo is None:
-            lease_expires_at = lease_expires_at.replace(tzinfo=UTC)
-        lease_ttl_seconds, lease_deadline = _claim_lease_timing(lease_expires_at, claim.lease_ttl_seconds)
-        return ClaimedComputeRequest(
-            id=claim.id,
-            namespace=claim.namespace,
-            kind=command.kind,
-            command_envelope=command,
-            worker_id=worker_id,
-            claim_token=claim.claim_token,
-            lease_generation=claim.lease_generation,
-            lease_expires_at=lease_expires_at,
-            attempt=claim.attempt,
-            lease_ttl_seconds=lease_ttl_seconds,
-            lease_deadline_monotonic=lease_deadline,
-            command_hash=hashlib.sha256(command.command.SerializeToString(deterministic=True)).hexdigest(),
-        )
+        return _claimed_compute_request_from_proto(response.request, worker_id)
 
     async def renew_compute_request_lease(
         self,
@@ -1039,25 +1057,7 @@ class WorkerRuntimeClient:
                 metadata=self._metadata(),
             )
         )
-        return [
-            StorageCleanupClaim(
-                namespace=row.claim.namespace,
-                event_id=row.claim.event_id,
-                claim_token=row.claim.claim_token,
-                lease_generation=row.claim.lease_generation,
-                resource_id=row.resource_id,
-                url=row.url,
-                is_prefix=row.is_prefix,
-                catalog_identifier=row.catalog_identifier if row.HasField("catalog_identifier") else None,
-                catalog_type=row.catalog_type if row.HasField("catalog_type") else None,
-                catalog_uri=row.catalog_uri if row.HasField("catalog_uri") else None,
-                warehouse=row.warehouse if row.HasField("warehouse") else None,
-                catalog_namespace=row.catalog_namespace if row.HasField("catalog_namespace") else None,
-                catalog_table=row.catalog_table if row.HasField("catalog_table") else None,
-                catalog_family_prefix=row.catalog_family_prefix if row.HasField("catalog_family_prefix") else None,
-            )
-            for row in response.cleanups
-        ]
+        return [_storage_cleanup_claim_from_proto(row) for row in response.cleanups]
 
     async def claim_storage_cleanups_async(self, *, namespace: str, limit: int = 1) -> list[StorageCleanupClaim]:
         request = worker_runtime_pb2.WorkerClaimStorageCleanupRequest(namespace=namespace, limit=limit)
@@ -1066,25 +1066,7 @@ class WorkerRuntimeClient:
             worker_stub.ClaimStorageCleanup(request, timeout=self._control_timeout(), metadata=self._metadata()),
             operation="ClaimStorageCleanup",
         )
-        return [
-            StorageCleanupClaim(
-                namespace=row.claim.namespace,
-                event_id=row.claim.event_id,
-                claim_token=row.claim.claim_token,
-                lease_generation=row.claim.lease_generation,
-                resource_id=row.resource_id,
-                url=row.url,
-                is_prefix=row.is_prefix,
-                catalog_identifier=row.catalog_identifier if row.HasField("catalog_identifier") else None,
-                catalog_type=row.catalog_type if row.HasField("catalog_type") else None,
-                catalog_uri=row.catalog_uri if row.HasField("catalog_uri") else None,
-                warehouse=row.warehouse if row.HasField("warehouse") else None,
-                catalog_namespace=row.catalog_namespace if row.HasField("catalog_namespace") else None,
-                catalog_table=row.catalog_table if row.HasField("catalog_table") else None,
-                catalog_family_prefix=row.catalog_family_prefix if row.HasField("catalog_family_prefix") else None,
-            )
-            for row in response.cleanups
-        ]
+        return [_storage_cleanup_claim_from_proto(row) for row in response.cleanups]
 
     def authorize_storage_cleanup(self, claim: StorageCleanupClaim) -> bool:
         response = self._call(lambda: self._stub.AuthorizeStorageCleanup(claim.protocol_claim(), timeout=self._control_timeout(), metadata=self._metadata()))
@@ -1131,8 +1113,7 @@ class WorkerRuntimeClient:
         lease_generation: int,
         owner_id: str | None = None,
         schema_info: datasource_pb2.SchemaInfo | None = None,
-    ):
-        from datasources.schemas import DataSourceRecord
+    ) -> datasource_pb2.DataSourceRecord:
 
         request = worker_runtime_pb2.WorkerPublishDatasourceCreateRequest(
             namespace=namespace,
@@ -1152,7 +1133,7 @@ class WorkerRuntimeClient:
         if schema_info is not None:
             request.schema_info.CopyFrom(schema_info)
         response = self._call(lambda: self._stub.PublishDatasourceCreate(request, timeout=self._timeout_seconds, metadata=self._metadata()))
-        return DataSourceRecord.model_validate(_datasource_record_payload(response.datasource))
+        return _validated_datasource_record(response.datasource)
 
     def publish_datasource_ingest(
         self,
@@ -1168,8 +1149,7 @@ class WorkerRuntimeClient:
         compute_request_id: str | None = None,
         job_id: str | None = None,
         build_id: str | None = None,
-    ):
-        from datasources.schemas import DataSourceRecord
+    ) -> datasource_pb2.DataSourceRecord:
 
         request = worker_runtime_pb2.WorkerPublishDatasourceIngestRequest(
             namespace=namespace,
@@ -1189,7 +1169,7 @@ class WorkerRuntimeClient:
         if build_id is not None:
             request.build_id = build_id
         response = self._call(lambda: self._stub.PublishDatasourceIngest(request, timeout=self._timeout_seconds, metadata=self._metadata()))
-        return DataSourceRecord.model_validate(_datasource_record_payload(response.datasource))
+        return _validated_datasource_record(response.datasource)
 
     def publish_datasource_schema_cache(
         self,
@@ -1393,7 +1373,7 @@ class WorkerRuntimeClient:
             for check in response.checks
         ]
 
-    def record_healthcheck_results(self, *, namespace: str, results: list[Mapping[str, object]]) -> int:
+    def record_healthcheck_results(self, *, namespace: str, results: list[Mapping[str, object]]) -> None:
         request = worker_runtime_pb2.WorkerRecordHealthCheckResultsRequest(
             namespace=namespace,
             results=[
@@ -1407,7 +1387,7 @@ class WorkerRuntimeClient:
                 for result in results
             ],
         )
-        return int(self._call(lambda: self._stub.RecordHealthCheckResults(request, timeout=self._timeout_seconds, metadata=self._metadata())).count)
+        self._call(lambda: self._stub.RecordHealthCheckResults(request, timeout=self._timeout_seconds, metadata=self._metadata()))
 
     def create_compute_worker_run(
         self,
@@ -1477,8 +1457,8 @@ class WorkerRuntimeClient:
         run_id: str,
         fields: dict[str, object],
         merge_result_json: bool = True,
-    ) -> str:
-        response = self._call(
+    ) -> None:
+        self._call(
             lambda: self._stub.UpdateComputeWorkerRun(
                 worker_runtime_pb2.WorkerUpdateComputeWorkerRunRequest(
                     namespace=namespace,
@@ -1490,7 +1470,6 @@ class WorkerRuntimeClient:
                 metadata=self._metadata(),
             )
         )
-        return response.id
 
     def compute_worker_run_state(self, *, namespace: str, run_id: str) -> dict[str, object] | None:
         response = self._call(
@@ -1598,32 +1577,6 @@ class WorkerRuntimeClient:
         )
         return bool(response.value)
 
-    def release_build_worker_jobs(self, *, worker_id: str, namespace: str) -> int:
-        request = common_pb2.RuntimeWorkerRequest(worker_id=worker_id, protocol_version=2, target_namespace=namespace)
-        return int(self._call(lambda: self._stub.ReleaseBuildWorkerJobs(request, timeout=self._control_timeout(), metadata=self._metadata())).count)
-
-    def queued_build_job_count(self, *, namespace: str) -> int:
-        return int(
-            self._call(
-                lambda: self._stub.GetQueuedBuildJobCount(
-                    common_pb2.EmptyRequest(namespace=namespace),
-                    timeout=self._control_timeout(),
-                    metadata=self._metadata(),
-                )
-            ).count
-        )
-
-    def reconcile_expired_build_jobs(self, *, namespace: str) -> int:
-        return int(
-            self._call(
-                lambda: self._stub.ReconcileExpiredBuildJobs(
-                    common_pb2.EmptyRequest(namespace=namespace),
-                    timeout=self._control_timeout(),
-                    metadata=self._metadata(),
-                )
-            ).count
-        )
-
     async def reconcile_expired_build_jobs_async(self, *, namespace: str) -> int:
         worker_stub, _coordinator_stub = self._async_stubs()
         response = await self._call_async(
@@ -1636,17 +1589,6 @@ class WorkerRuntimeClient:
         )
         return int(response.count)
 
-    def reconcile_expired_compute_requests(self, *, namespace: str) -> int:
-        return int(
-            self._call(
-                lambda: self._stub.ReconcileExpiredComputeRequests(
-                    common_pb2.EmptyRequest(namespace=namespace),
-                    timeout=self._control_timeout(),
-                    metadata=self._metadata(),
-                )
-            ).count
-        )
-
     async def reconcile_expired_compute_requests_async(self, *, namespace: str) -> int:
         worker_stub, _coordinator_stub = self._async_stubs()
         response = await self._call_async(
@@ -1658,20 +1600,6 @@ class WorkerRuntimeClient:
             operation="ReconcileExpiredComputeRequests",
         )
         return int(response.count)
-
-    def idle_build_worker_pids(self) -> set[int]:
-        response = self._call(lambda: self._stub.GetIdleBuildWorkerPids(common_pb2.EmptyRequest(), timeout=self._control_timeout(), metadata=self._metadata()))
-        return set(response.pids)
-
-    def pending_runtime_work_namespaces(self, *, work_kinds: tuple[str, ...] = ()) -> list[str]:
-        response = self._call(
-            lambda: self._stub.ListPendingRuntimeWorkNamespaces(
-                worker_runtime_pb2.WorkerPendingRuntimeWorkNamespacesRequest(kinds=work_kinds),
-                timeout=self._control_timeout(),
-                metadata=self._metadata(),
-            )
-        )
-        return list(response.namespaces)
 
     async def pending_runtime_work_namespaces_async(self, *, work_kinds: tuple[str, ...] = ()) -> list[str]:
         worker_stub, _coordinator_stub = self._async_stubs()
@@ -1697,17 +1625,16 @@ class WorkerRuntimeClient:
         event: dict[str, object],
         resource_config_json: dict[str, object] | None = None,
     ) -> int | None:
-        request = worker_runtime_pb2.WorkerPersistBuildEventRequest(
+        request = _persist_build_event_request(
             namespace=namespace,
             build_id=build_id,
             job_id=job_id,
             worker_id=worker_id,
             claim_token=claim_token,
             lease_generation=lease_generation,
-            build_event=_build_event_proto(namespace, event),
+            event=event,
+            resource_config_json=resource_config_json,
         )
-        if resource_config_json is not None:
-            request.build_resource_config.CopyFrom(_build_resource_config_proto(resource_config_json))
         # Event publication is intentionally not retried here: a successful
         # transaction followed by a lost response must not append the same
         # event twice. The surrounding build path turns an unavailable event
@@ -1727,17 +1654,16 @@ class WorkerRuntimeClient:
         event: dict[str, object],
         resource_config_json: dict[str, object] | None = None,
     ) -> int | None:
-        request = worker_runtime_pb2.WorkerPersistBuildEventRequest(
+        request = _persist_build_event_request(
             namespace=namespace,
             build_id=build_id,
             job_id=job_id,
             worker_id=worker_id,
             claim_token=claim_token,
             lease_generation=lease_generation,
-            build_event=_build_event_proto(namespace, event),
+            event=event,
+            resource_config_json=resource_config_json,
         )
-        if resource_config_json is not None:
-            request.build_resource_config.CopyFrom(_build_resource_config_proto(resource_config_json))
         worker_stub, _coordinator_stub = self._async_stubs()
         response = await self._call_async(
             worker_stub.PersistBuildEvent(request, timeout=self._control_timeout(), metadata=self._metadata()),
@@ -1788,8 +1714,8 @@ class WorkerRuntimeClient:
         )
         return _started_build_run_from_response(response)
 
-    def persist_compute_worker_snapshot(self, *, worker_id: str, namespace: str, statuses: Sequence[ComputeWorkerStatusInfo]) -> int:
-        response = self._call(
+    def persist_compute_worker_snapshot(self, *, worker_id: str, namespace: str, statuses: Sequence[ComputeWorkerStatusInfo]) -> None:
+        self._call(
             lambda: self._stub.PersistComputeWorkerSnapshot(
                 worker_runtime_pb2.WorkerPersistComputeWorkerSnapshotRequest(
                     worker_id=worker_id,
@@ -1800,7 +1726,6 @@ class WorkerRuntimeClient:
                 metadata=self._metadata(),
             )
         )
-        return int(response.count)
 
     def pending_datasource_deletes(self, *, namespace: str) -> list[PendingDatasourceDelete]:
         response = self._call(
@@ -1842,54 +1767,6 @@ class WorkerRuntimeClient:
             operation="FinalizeDatasourceDelete",
         )
         return bool(response.deleted)
-
-    def telegram_enabled(self) -> bool:
-        response = self._call(lambda: self._stub.GetTelegramSettings(common_pb2.EmptyRequest(), timeout=self._timeout_seconds, metadata=self._metadata()))
-        return response.enabled
-
-    def send_email(
-        self,
-        *,
-        namespace: str,
-        to: str,
-        subject: str,
-        body: str,
-        attachments: list[Mapping[str, object]] | None = None,
-    ) -> bool:
-        response = self._call(
-            lambda: self._stub.SendEmail(
-                worker_runtime_pb2.WorkerSendEmailRequest(
-                    namespace=namespace,
-                    to=to,
-                    subject=subject,
-                    body=body,
-                    attachments=_serialize_attachments(attachments or []),
-                ),
-                timeout=self._timeout_seconds,
-                metadata=self._metadata(),
-            )
-        )
-        return response.value
-
-    def send_telegram(
-        self,
-        *,
-        namespace: str,
-        chat_id: str,
-        message: str,
-        bot_token: str | None = None,
-        attachments: list[Mapping[str, object]] | None = None,
-    ) -> bool:
-        request = worker_runtime_pb2.WorkerSendTelegramRequest(
-            namespace=namespace,
-            chat_id=chat_id,
-            message=message,
-            attachments=_serialize_attachments(attachments or []),
-        )
-        if bot_token is not None:
-            request.bot_token = bot_token
-        response = self._call(lambda: self._stub.SendTelegram(request, timeout=self._timeout_seconds, metadata=self._metadata()))
-        return response.value
 
     def generate_ai(
         self,
@@ -2175,32 +2052,9 @@ def _notification_delivery_proto(delivery: Mapping[str, object]) -> worker_runti
     raise ValueError(f"Unsupported notification delivery method: {method!r}")
 
 
-def _serialize_attachments(attachments: list[Mapping[str, object]]) -> list[common_pb2.NotificationAttachment]:
-    serialized: list[common_pb2.NotificationAttachment] = []
-    for attachment in attachments:
-        content = attachment.get("content")
-        if not isinstance(content, bytes):
-            raise RuntimeError(f"Notification attachment content must be bytes: {attachment!r}")
-        serialized.append(
-            common_pb2.NotificationAttachment(
-                filename=_required_mapping_str(attachment, "filename"),
-                content_base64=base64.b64encode(content).decode("ascii"),
-                content_type=str(attachment.get("content_type") or "text/plain"),
-            )
-        )
-    return serialized
-
-
 def _required_mapping_str(payload: Mapping[str, object], key: str) -> str:
     value = payload.get(key)
     if not isinstance(value, str) or not value:
-        raise RuntimeError(f"Payload missing string {key}: {payload!r}")
-    return value
-
-
-def _mapping_str(payload: Mapping[str, object], key: str) -> str:
-    value = payload.get(key)
-    if not isinstance(value, str):
         raise RuntimeError(f"Payload missing string {key}: {payload!r}")
     return value
 
@@ -2502,14 +2356,6 @@ def _build_resource_config_proto(payload: Mapping[str, object]) -> compute_pb2.B
     return config
 
 
-def _build_resource_config_payload(config: compute_pb2.BuildResourceConfigSummary) -> dict[str, object]:
-    payload: dict[str, object] = {}
-    for key in ("max_threads", "max_memory_mb", "streaming_chunk_size"):
-        if config.HasField(key):
-            payload[key] = getattr(config, key)
-    return payload
-
-
 def _build_starter_payload(starter: compute_pb2.BuildStarter) -> dict[str, object]:
     payload: dict[str, object] = {}
     for key in ("user_id", "display_name", "email", "triggered_by"):
@@ -2530,15 +2376,12 @@ def _started_build_run_from_response(response: Any) -> StartedBuildRun | None:
         analysis_pipeline=run.analysis_pipeline,
         tab_id=_optional_str(run, "tab_id"),
         starter_json=_build_starter_payload(run.build_starter),
-        resource_config_json=_build_resource_config_payload(run.build_resource_config) if run.HasField("build_resource_config") else None,
         current_kind=_optional_proto_enum_name(run, "current_kind", enums_pb2.ComputeWorkerRunKind, "COMPUTE_WORKER_RUN_KIND"),
         current_datasource_id=_optional_str(run, "current_datasource_id"),
         current_tab_id=_optional_str(run, "current_tab_id"),
         current_tab_name=_optional_str(run, "current_tab_name"),
         current_output_id=_optional_str(run, "current_output_id"),
         current_output_name=_optional_str(run, "current_output_name"),
-        started_at=optional_timestamp_to_datetime(run, "started_at") or datetime.min,
-        total_tabs=run.total_tabs,
     )
 
 

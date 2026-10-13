@@ -15,8 +15,8 @@ from backend_core.auth_exceptions import OAuthError
 from backend_core.database import run_settings_db
 from backend_core.error_handlers import handle_errors
 from backend_core.proxy import client_ip, request_scheme
-from modules.auth import commands, service as auth_service
-from modules.auth.dependencies import get_current_user
+from modules.auth import commands
+from modules.auth.dependencies import get_current_user, resolve_session_token
 from modules.auth.models import (
     AuthProviderName,
     User,
@@ -37,6 +37,7 @@ from modules.auth.service import (
     ensure_default_user,
     get_user_providers,
     send_password_reset_email,
+    send_verification_email,
     validate_session,
 )
 
@@ -46,10 +47,6 @@ router = APIRouter(prefix='/auth', tags=['auth'])
 async def _run_auth_db[**P, T](function: Callable[Concatenate[Session, P], T], *args: P.args, **kwargs: P.kwargs) -> T:
     work = partial(run_settings_db, function, *args, **kwargs)
     return await run_api_blocking(work)
-
-
-async def send_verification_email(user_email: str, token: str) -> bool:
-    return await auth_service.send_verification_email(user_email, token)
 
 
 _OAUTH_STATE_MAX_AGE_SECONDS = 600
@@ -144,10 +141,6 @@ def _request_device_info(request: Request) -> str | None:
     return None
 
 
-def _request_ip_address(request: Request) -> str | None:
-    return client_ip(request)
-
-
 def _register_user(
     session: Session,
     *,
@@ -227,7 +220,7 @@ async def register(
         display_name=body.display_name,
         email_verified=not needs_verification,
         device_info=_request_device_info(request),
-        ip_address=_request_ip_address(request),
+        ip_address=client_ip(request),
     )
     if verification_token is not None:
         await send_verification_email(user_public.email, verification_token)
@@ -248,7 +241,7 @@ async def login(
         email=body.email,
         password=body.password,
         device_info=_request_device_info(request),
-        ip_address=_request_ip_address(request),
+        ip_address=client_ip(request),
     )
     _set_session_cookie(response, session_token, secure=request_scheme(request) == 'https')
     return user
@@ -257,7 +250,7 @@ async def login(
 @router.post('/logout')
 @handle_errors(operation='logout')
 async def logout(request: Request, response: Response) -> dict[str, bool]:
-    token = request.cookies.get('session_token') or request.headers.get('X-Session-Token')
+    token = resolve_session_token(request)
     if token:
         await run_api_blocking(run_settings_db, commands.revoke_session, token)
     _clear_session_cookie(response)
@@ -346,7 +339,7 @@ def _update_profile(session: Session, token: str | None, body: UpdateProfileRequ
 @router.get('/me', response_model=UserPublic)
 @handle_errors(operation='get current user')
 async def me(request: Request) -> UserPublic:
-    token = request.cookies.get('session_token') or request.headers.get('X-Session-Token')
+    token = resolve_session_token(request)
     return await run_bootstrap_settings_db(_resolve_me, token)
 
 
@@ -356,7 +349,7 @@ async def update_profile_route(
     request: Request,
     body: UpdateProfileRequest,
 ) -> UserPublic:
-    token = request.cookies.get('session_token') or request.headers.get('X-Session-Token')
+    token = resolve_session_token(request)
     return await _run_auth_db(_update_profile, token, body)
 
 
@@ -383,7 +376,7 @@ async def revoke_all_sessions_route(
     response: Response,
     current_user: User = Depends(get_current_user),
 ) -> dict[str, bool]:
-    current_token = request.cookies.get('session_token') or request.headers.get('X-Session-Token')
+    current_token = resolve_session_token(request)
     await run_api_blocking(
         run_settings_db,
         commands.revoke_all_user_sessions,
@@ -475,7 +468,7 @@ async def github_oauth_callback(
         display_name=str(gh_user.get('name') or gh_user.get('login') or email.split('@')[0]),
         avatar_url=gh_user.get('avatar_url') if isinstance(gh_user.get('avatar_url'), str) else None,
         device_info=_request_device_info(request),
-        ip_address=_request_ip_address(request),
+        ip_address=client_ip(request),
     )
     _set_session_cookie(response, result, secure=request_scheme(request) == 'https')
     return response

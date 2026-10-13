@@ -436,7 +436,10 @@ async def test_sse_retention_gap_is_explicit(client: TestClient, test_user) -> N
     response = await stream(runtime.id, request, user=test_user)
     event = await anext(response.body_iterator)
     assert b'"type":"history_gap"' in event
-    assert session_store.history(runtime.id)[2] is True
+    history, cursor, gap = session_store.history(runtime.id)
+    assert cursor == 506
+    assert history[-1]['type'] == 'done'
+    assert gap is True
     await response.body_iterator.aclose()
 
 

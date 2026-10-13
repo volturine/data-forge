@@ -2,10 +2,8 @@
 
 import pytest
 
-from backend_core.application import app
 from backend_core.exceptions import AppError, UdfValidationError
 from backend_core.persistence.udfs.models import Udf
-from modules.auth.dependencies import get_optional_user
 from modules.udf.schemas import (
     UdfCreateSchema,
     UdfImportItemSchema,
@@ -437,8 +435,7 @@ class TestUdfAPI:
         assert result['name'] == 'api_test'
         assert result['description'] == 'API test UDF'
 
-    def test_create_udf_sets_owner_id_when_optional_user_present(self, client, test_db_session, test_user, monkeypatch):
-        monkeypatch.setitem(app.dependency_overrides, get_optional_user, lambda: test_user)
+    def test_create_udf_sets_owner_id_for_authenticated_user(self, client, test_db_session, test_user):
         udf_data = {
             'name': 'api_owned',
             'description': 'Owned API test UDF',

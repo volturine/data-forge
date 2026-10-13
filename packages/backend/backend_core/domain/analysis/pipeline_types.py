@@ -139,8 +139,3 @@ class PipelineDefinition:
         if not tab:
             raise ValueError(f'Tab {tab_id} not found')
         return tab
-
-
-def parse_pipeline(raw: dict[str, Any]) -> PipelineDefinition:
-    """Parse a raw JSON dict (from DB) into a PipelineDefinition."""
-    return PipelineDefinition.from_dict(raw)

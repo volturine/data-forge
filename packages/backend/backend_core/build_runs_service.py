@@ -5,7 +5,7 @@ from datetime import UTC, datetime
 from typing import Any, cast
 
 from google.protobuf import json_format, timestamp_pb2
-from sqlalchemy import desc, func, or_, select, update
+from sqlalchemy import desc, or_, select, update
 from sqlmodel import Session
 
 from backend_core import runtime_ipc, runtime_outbox_service, runtime_work_service
@@ -275,16 +275,6 @@ def has_active_build_for_datasource(session: Session, *, namespace: str, datasou
     return session.execute(statement).first() is not None
 
 
-def get_build_run_by_compute_worker_run(session: Session, compute_worker_run_id: str) -> BuildRun | None:
-    stmt = (
-        select(BuildRun)
-        .where(sa(BuildRun.current_compute_worker_run_id == compute_worker_run_id))
-        .order_by(desc(sa(BuildRun.updated_at)), sa(BuildRun.id))
-        .limit(1)
-    )
-    return session.execute(stmt).scalars().first()
-
-
 def list_build_runs(
     session: Session,
     *,
@@ -385,27 +375,6 @@ def _cas_update_build_run(
         return None
     session.refresh(fresh)
     return fresh
-
-
-def guarded_terminal_update(session: Session, *, build_id: str, event: compute_schemas.BuildEvent) -> BuildRun | None:
-    session.expire_all()
-    run = session.get(BuildRun, build_id)
-    if run is None:
-        raise ValueError(f'Build run {build_id} not found')
-    if run.status in _TERMINAL_STATUSES:
-        return None
-    expected_status = run.status
-    values = BuildRun.terminal_update_values(event)
-    if values is None:
-        return None
-    values['version'] = run.version + 1
-    updated = _cas_update_build_run(session, run=run, values=values, expected_status=expected_status)
-    if updated is None:
-        return None
-    terminal_status = BuildRun.terminal_status_for_event(event)
-    if updated.status in _TERMINAL_STATUSES and updated.status != expected_status and updated.status != terminal_status:
-        return None
-    return updated
 
 
 def mark_build_running(session: Session, build_id: str, *, execution_generation: int, now: datetime | None = None) -> BuildRun | None:
@@ -645,12 +614,6 @@ def get_latest_sequence(session: Session, build_id: str) -> int:
     return max(next_sequence - 1, 0) if isinstance(next_sequence, int) else 0
 
 
-def latest_namespace_update(session: Session, *, namespace: str) -> datetime | None:
-    stmt = select(func.max(BuildRun.updated_at)).where(sa(BuildRun.namespace == namespace))
-    updated = session.execute(stmt).scalar_one()
-    return updated if isinstance(updated, datetime) else None
-
-
 def serialize_event_row(row: BuildEvent) -> dict[str, object]:
     event = compute_schemas.BuildEventAdapter.validate_python(row.payload_json)
     payload = json_format.MessageToDict(
@@ -822,25 +785,3 @@ def build_summary(build_run: BuildRun) -> compute_schemas.BuildRunSummary:
         cancelled_by=build_run.cancelled_by,
         result_json=copy_json_dict(build_run.result_json) if isinstance(build_run.result_json, dict) else None,
     )
-
-
-def mark_running_builds_orphaned(session: Session, *, now: datetime | None = None) -> int:
-    raw_marker = now or _utcnow()
-    marker = raw_marker if raw_marker.tzinfo is not None else raw_marker.replace(tzinfo=UTC)
-    stmt = select(BuildRun).where(sa(BuildRun.status == BuildRunStatus.RUNNING)).with_for_update()
-    runs = list(session.execute(stmt).scalars().all())
-    if not runs:
-        return 0
-    for run in runs:
-        started_at = marker if run.started_at is None else (run.started_at if run.started_at.tzinfo is not None else run.started_at.replace(tzinfo=UTC))
-        run.status = BuildRunStatus.ORPHANED
-        run.completed_at = marker
-        run.updated_at = marker
-        run.estimated_remaining_ms = None
-        run.duration_ms = max(int((marker - started_at).total_seconds() * 1000), 0)
-        run.elapsed_ms = run.duration_ms
-        run.error_message = 'Build orphaned during startup recovery'
-        run.version += 1
-        session.add(run)
-    session.commit()
-    return len(runs)

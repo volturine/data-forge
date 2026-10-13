@@ -1,20 +1,11 @@
-from collections.abc import Callable
-from dataclasses import dataclass
-
 from pydantic import BaseModel
 
-from backend_core.ai_clients import ai_provider_name, get_ai_client, openrouter_base_url, resolve_ai_provider
+from backend_core.ai_clients import ai_provider_name, get_ai_client, openrouter_base_url, require_ai_provider
 from backend_core.error_handlers import handle_errors
 from dataforge_protocol import enums_pb2
 from modules.mcp.router import MCPRouter
 
 router = MCPRouter(prefix='/ai', tags=['ai'])
-
-
-@dataclass(frozen=True, slots=True)
-class AIProviderStatusDefinition:
-    provider: enums_pb2.AIProvider
-    resolve_status: Callable[[], AIProviderStatus]
 
 
 class AIModelResponse(BaseModel):
@@ -65,16 +56,10 @@ def resolve_ollama_status() -> AIProviderStatus:
     )
 
 
-AI_PROVIDER_STATUS_DEFINITIONS: tuple[AIProviderStatusDefinition, ...] = (
-    AIProviderStatusDefinition(enums_pb2.AI_PROVIDER_OPENROUTER, resolve_openrouter_status),
-    AIProviderStatusDefinition(enums_pb2.AI_PROVIDER_OLLAMA, resolve_ollama_status),
-)
-
-
 @router.post('/providers', response_model=list[AIProviderStatus], mcp=True)
 @handle_errors(operation='list ai providers')
 def list_providers() -> list[AIProviderStatus]:
-    return [definition.resolve_status() for definition in AI_PROVIDER_STATUS_DEFINITIONS]
+    return [resolve_openrouter_status(), resolve_ollama_status()]
 
 
 @router.post('/models', response_model=list[AIModelResponse], mcp=True)
@@ -86,7 +71,7 @@ def list_models(body: AIProviderRequest) -> list[AIModelResponse]:
     or provider='openrouter' with an api_key for cloud models.
     """
     client = get_ai_client(
-        resolve_ai_provider(body.provider),
+        require_ai_provider(body.provider),
         endpoint_url=body.endpoint_url,
         api_key=body.api_key,
         organization_id=body.organization_id,
@@ -110,7 +95,7 @@ def test_connection(body: AIProviderRequest) -> AIConnectionResponse:
     provider/endpoint_url/api_key settings before using AI features.
     """
     client = get_ai_client(
-        resolve_ai_provider(body.provider),
+        require_ai_provider(body.provider),
         endpoint_url=body.endpoint_url,
         api_key=body.api_key,
         organization_id=body.organization_id,

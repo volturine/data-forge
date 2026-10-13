@@ -76,7 +76,7 @@ def test_list_iceberg_snapshots_uses_worker_database_url(
     monkeypatch.setattr(compute_service, "get_namespace", lambda: pytest.fail("snapshot lookup must not depend on ContextVar namespace"))
 
     with pytest.raises(RuntimeError, match="stop before catalog access"):
-        compute_service.list_iceberg_snapshots(session=None, datasource_id="ds-1", request_namespace="analytics")
+        compute_service.list_iceberg_snapshots(datasource_id="ds-1", request_namespace="analytics")
 
     assert captured["uri"] == worker_database_url
     assert metadata_namespaces == ["analytics"]
@@ -102,7 +102,7 @@ def test_delete_iceberg_snapshot_uses_worker_database_url(
     monkeypatch.setattr(compute_service, "get_namespace", lambda: pytest.fail("snapshot deletion must not depend on ContextVar namespace"))
 
     with pytest.raises(RuntimeError, match="stop before catalog access"):
-        compute_service.delete_iceberg_snapshot(session=None, datasource_id="ds-1", snapshot_id="1", request_namespace="analytics")
+        compute_service.delete_iceberg_snapshot(datasource_id="ds-1", snapshot_id="1", request_namespace="analytics")
 
     assert captured["uri"] == worker_database_url
     assert metadata_namespaces == ["analytics"]

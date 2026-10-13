@@ -31,7 +31,7 @@ The root [README](../../README.md) is the human-facing project overview. [AGENTS
 - [Engine Lifecycle Alignment](implemented/engine-lifecycle-alignment.md) — superseded design
 - [Hot-Path Ownership Map](implemented/hot-path-ownership-map.md) — current product-path ownership contract
 - [Hot-Path Profiling Record](implemented/hot-path-request-map.md) — direct timing, request, and occupancy evidence
-- [MCP Tool Contract](implemented/mcp-tool-contract.md)
+- [MCP Tool Contract](implemented/mcp-tool-contract.md) — typed registry and `MCPRouter` onboarding
 - [New Analysis Creation Flow](implemented/new-analysis-creation-flow.md)
 - [Performance Stability Gate](implemented/performance-stability-gate.md) — current repeated-run safeguards and evidence
 - [Performance Regression Investigation](implemented/performance-regression-investigation.md) — optimized 410.93s baseline and clean RustFS warning gate

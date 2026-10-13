@@ -11,10 +11,7 @@ from backend_core.telegram_schemas import ListenerCreate
 from backend_core.telegram_store import (
     add_listener,
     add_subscriber,
-    auto_populate_listeners,
-    deactivate_subscriber,
     delete_subscriber,
-    get_notification_chat_ids,
     get_subscriber_by_chat,
     list_listeners,
     list_subscribers,
@@ -36,7 +33,11 @@ class TestAddSubscriber:
 
     def test_reactivates_existing(self, test_db_session: Session) -> None:
         sub = add_subscriber(test_db_session, '222', 'Bob', 'tok-A')
-        deactivate_subscriber(test_db_session, sub.id)
+        stored = test_db_session.get(TelegramSubscriber, sub.id)
+        assert stored is not None
+        stored.is_active = False
+        test_db_session.add(stored)
+        test_db_session.commit()
         reactivated = add_subscriber(test_db_session, '222', 'Bob Updated', 'tok-A')
         assert reactivated.id == sub.id
         assert reactivated.is_active is True
@@ -67,18 +68,6 @@ class TestListSubscribers:
         subs = list_subscribers(test_db_session, bot_token='tok-1')
         assert len(subs) == 1
         assert subs[0].chat_id == '1'
-
-
-class TestDeactivateSubscriber:
-    def test_deactivates(self, test_db_session: Session) -> None:
-        sub = add_subscriber(test_db_session, '444', 'Dave', 'tok-C')
-        deactivate_subscriber(test_db_session, sub.id)
-        refreshed = test_db_session.get(TelegramSubscriber, sub.id)
-        assert refreshed is not None
-        assert refreshed.is_active is False
-
-    def test_missing_id_no_error(self, test_db_session: Session) -> None:
-        deactivate_subscriber(test_db_session, 99999)  # should not raise
 
 
 class TestDeleteSubscriber:
@@ -122,30 +111,6 @@ class TestListeners:
 
     def test_remove_missing_no_error(self, test_db_session: Session) -> None:
         remove_listener(test_db_session, 99999)  # should not raise
-
-
-class TestAutoPopulateListeners:
-    def test_creates_for_active_subscribers(self, test_db_session: Session) -> None:
-        s1 = add_subscriber(test_db_session, '20', 'A', 'tok')
-        s2 = add_subscriber(test_db_session, '21', 'B', 'tok')
-        deactivate_subscriber(test_db_session, s2.id)
-        results = auto_populate_listeners(test_db_session, 'ds-auto')
-        assert len(results) == 1
-        assert results[0].subscriber_id == s1.id
-
-
-class TestGetNotificationChatIds:
-    def test_returns_active_only(self, test_db_session: Session) -> None:
-        s1 = add_subscriber(test_db_session, '30', 'A', 'tok')
-        s2 = add_subscriber(test_db_session, '31', 'B', 'tok')
-        add_listener(test_db_session, ListenerCreate(subscriber_id=s1.id, datasource_id='ds-X'))
-        add_listener(test_db_session, ListenerCreate(subscriber_id=s2.id, datasource_id='ds-X'))
-        deactivate_subscriber(test_db_session, s2.id)
-        ids = get_notification_chat_ids(test_db_session, 'ds-X')
-        assert ids == [('30', 'tok')]
-
-    def test_empty_when_no_listeners(self, test_db_session: Session) -> None:
-        assert get_notification_chat_ids(test_db_session, 'ds-none') == []
 
 
 # ---------------------------------------------------------------------------
@@ -253,6 +218,31 @@ class TestTelegramUpdateHandling:
         assert len(subscribers) == 1
         assert subscribers[0].id == first_id
         assert len(messages) == 2
+
+    @pytest.mark.asyncio
+    async def test_unsubscribe_replay_and_resubscribe_preserve_subscriber_identity(self, test_db_session: Session, monkeypatch) -> None:
+        from modules.telegram.bot import handle_update
+
+        monkeypatch.setattr('modules.telegram.bot.require_generation', lambda _session, _generation: None)
+        subscriber = add_subscriber(test_db_session, '42', 'Test', 'tok-test')
+        listener = add_listener(test_db_session, ListenerCreate(subscriber_id=subscriber.id, datasource_id='ds-test'))
+        update: dict[str, object] = {'message': {'text': '/unsubscribe', 'chat': {'id': 42, 'first_name': 'Test'}}}
+        async with httpx.AsyncClient(transport=httpx.MockTransport(lambda _request: httpx.Response(200, json={'ok': True}))) as client:
+            await handle_update(client, token='tok-test', update=update, generation=7)
+            await handle_update(client, token='tok-test', update=update, generation=7)
+            test_db_session.expire_all()
+            stored = get_subscriber_by_chat(test_db_session, '42', 'tok-test')
+            assert stored is not None
+            assert stored.id == subscriber.id
+            assert stored.is_active is False
+            assert [row.id for row in list_listeners(test_db_session, subscriber_id=subscriber.id)] == [listener.id]
+            await handle_update(client, token='tok-test', update={'message': {'text': '/subscribe', 'chat': {'id': 42}}}, generation=7)
+
+        test_db_session.expire_all()
+        restored = get_subscriber_by_chat(test_db_session, '42', 'tok-test')
+        assert restored is not None
+        assert restored.id == subscriber.id
+        assert restored.is_active is True
 
     @pytest.mark.asyncio
     async def test_failed_reply_propagates_for_offset_retry(self) -> None:

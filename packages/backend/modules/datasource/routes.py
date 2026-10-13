@@ -13,10 +13,6 @@ from backend_core.api_execution_budget import run_api_blocking
 from backend_core.config import settings
 from backend_core.data_plane_client import WorkerDataPlaneClient, client_from_settings
 from backend_core.database import run_db
-from backend_core.dependencies import (
-    RuntimeAvailabilityProbe,
-    get_runtime_availability_probe,
-)
 from backend_core.domain.datasource.models import DataSourceCreatedBy
 from backend_core.domain.datasource.source_types import DataSourceFileType, DataSourceType
 from backend_core.error_handlers import handle_errors
@@ -199,16 +195,8 @@ async def _stage_upload_to_object_store(file: UploadFile, target_name: str) -> s
     return target_url
 
 
-async def _delete_managed_object(source_path: str) -> None:
-    data_plane = await run_api_blocking(client_from_settings)
-    classification = await run_api_blocking(data_plane.classify_object_url, source_path)
-    if classification.is_managed:
-        await run_api_blocking(data_plane.delete_object, source_path)
-
-
 async def _create_uploaded_datasource(
     *,
-    runtime_probe: RuntimeAvailabilityProbe,
     name: str,
     description: str | None,
     file_path: str,
@@ -219,7 +207,6 @@ async def _create_uploaded_datasource(
     """Join durable creation on HTTP cancellation; database intents own source retirement."""
     creation = asyncio.create_task(
         create_remote_file_datasource(
-            runtime_probe=runtime_probe,
             name=name,
             description=description,
             file_path=file_path,
@@ -295,7 +282,6 @@ async def upload_file(
     skip_rows: int = Form(0),
     encoding: str = Form('utf8'),
     user: User | None = Depends(get_current_user),
-    runtime_probe: RuntimeAvailabilityProbe = Depends(get_runtime_availability_probe),
 ):
     if not file.filename:
         raise HTTPException(status_code=400, detail='No filename provided')
@@ -333,7 +319,6 @@ async def upload_file(
     try:
         owner_id = user.id if user else None
         datasource = await _create_uploaded_datasource(
-            runtime_probe=runtime_probe,
             name=name,
             description=description,
             file_path=str(file_path),
@@ -359,7 +344,6 @@ async def upload_bulk(
     skip_rows: int = Form(0),
     encoding: str = Form('utf8'),
     user: User | None = Depends(get_current_user),
-    runtime_probe: RuntimeAvailabilityProbe = Depends(get_runtime_availability_probe),
 ):
     if not files:
         raise HTTPException(status_code=400, detail='No files provided')
@@ -431,7 +415,6 @@ async def upload_bulk(
         try:
             owner_id = user.id if user else None
             datasource = await _create_uploaded_datasource(
-                runtime_probe=runtime_probe,
                 name=name,
                 description=None,
                 file_path=file_path,
@@ -474,7 +457,6 @@ async def preflight_excel(
     table_name: str | None = Form(None),
     named_range: str | None = Form(None),
     cell_range: str | None = Form(None),
-    runtime_probe: RuntimeAvailabilityProbe = Depends(get_runtime_availability_probe),
 ):
     if not file.filename:
         raise HTTPException(status_code=400, detail='No filename provided')
@@ -511,7 +493,6 @@ async def preflight_excel(
                 'named_range': named_range,
                 'cell_range': cell_range,
             },
-            runtime_probe=runtime_probe,
             delete_source=True,
         )
     except asyncio.CancelledError:
@@ -543,7 +524,6 @@ async def preflight_excel(
 @handle_errors(operation='preflight excel path', value_error_status=400)
 async def preflight_excel_path(
     payload: schemas.ExcelPreflightPathRequest,
-    runtime_probe: RuntimeAvailabilityProbe = Depends(get_runtime_availability_probe),
 ):
     data_plane = await run_api_blocking(client_from_settings)
     if not await run_api_blocking(data_plane.object_exists, payload.file_path):
@@ -564,7 +544,6 @@ async def preflight_excel_path(
             'named_range': payload.named_range,
             'cell_range': payload.cell_range,
         },
-        runtime_probe=runtime_probe,
         delete_source=False,
     )
     target_sheet = payload.sheet_name or (preflight.sheets[0] if preflight.sheets else None)
@@ -602,7 +581,6 @@ async def preflight_preview(
     table_name: str | None = None,
     named_range: str | None = None,
     cell_range: str | None = None,
-    runtime_probe: RuntimeAvailabilityProbe = Depends(get_runtime_availability_probe),
 ):
     preflight = await get_preflight(parse_preflight_id(preflight_id))
     if not preflight:
@@ -623,7 +601,6 @@ async def preflight_preview(
             'named_range': named_range,
             'cell_range': cell_range,
         },
-        runtime_probe=runtime_probe,
         delete_source=False,
     )
     result_sheet, result_start_row, result_start_col, result_end_col, result_end_row, rows = preview_result(result)
@@ -653,7 +630,6 @@ async def confirm_excel(
     named_range: str | None = Form(None),
     cell_range: str | None = Form(None),
     user: User | None = Depends(get_current_user),
-    runtime_probe: RuntimeAvailabilityProbe = Depends(get_runtime_availability_probe),
 ):
     preflight = await get_preflight(parse_preflight_id(preflight_id))
     if not preflight:
@@ -680,7 +656,6 @@ async def confirm_excel(
                 'named_range': named_range,
                 'cell_range': cell_range,
             },
-            runtime_probe=runtime_probe,
             delete_source=False,
         )
         resolved_sheet, resolved_start_row, resolved_start_col, resolved_end_col, resolved_end_row = resolved_selection(resolved)
@@ -697,7 +672,6 @@ async def confirm_excel(
                 resolved_end_col,
             )
         datasource = await create_remote_file_datasource(
-            runtime_probe=runtime_probe,
             name=name,
             description=description,
             file_path=target_path,
@@ -730,7 +704,6 @@ async def confirm_excel(
 async def connect_datasource(
     datasource: schemas.DataSourceCreate,
     user: User | None = Depends(get_current_user),
-    runtime_probe: RuntimeAvailabilityProbe = Depends(get_runtime_availability_probe),
 ):
     """Connect a new datasource (database, Iceberg, or analysis type).
 
@@ -747,7 +720,6 @@ async def connect_datasource(
     if source_type == DataSourceType.FILE:
         file_config = await run_api_blocking(schemas.FileDataSourceConfig.model_validate, datasource.config)
         result = await create_remote_file_datasource(
-            runtime_probe=runtime_probe,
             name=datasource.name,
             description=datasource.description,
             file_path=file_config.file_path,
@@ -769,7 +741,6 @@ async def connect_datasource(
     if source_type == DataSourceType.DATABASE:
         db_config = await run_api_blocking(schemas.DatabaseDataSourceConfig.model_validate, datasource.config)
         result = await create_remote_database_datasource(
-            runtime_probe=runtime_probe,
             name=datasource.name,
             description=datasource.description,
             connection_string=db_config.connection_string,
@@ -781,7 +752,6 @@ async def connect_datasource(
     if source_type == DataSourceType.ICEBERG:
         iceberg_config = await run_api_blocking(schemas.IcebergDataSourceConfig.model_validate, datasource.config)
         result = await create_remote_iceberg_datasource(
-            runtime_probe=runtime_probe,
             name=datasource.name,
             description=datasource.description,
             source=iceberg_config.source,
@@ -932,7 +902,6 @@ async def get_datasource_schema(
     datasource_id: DataSourceId,
     sheet_name: str | None = None,
     refresh: bool = False,
-    runtime_probe: RuntimeAvailabilityProbe = Depends(get_runtime_availability_probe),
 ):
     """Get the column schema of a datasource (column names, types, nullability).
 
@@ -948,7 +917,6 @@ async def get_datasource_schema(
         if datasource.source_type == DataSourceType.ICEBERG and source_type is not None and source_type.supports_external_ingestion:
             await ingest_remote_datasource(
                 datasource_id=datasource_id_value,
-                runtime_probe=runtime_probe,
             )
     schema = None
     if sheet_name is None:
@@ -958,7 +926,6 @@ async def get_datasource_schema(
             datasource_id=datasource_id_value,
             sheet_name=sheet_name,
             refresh=False,
-            runtime_probe=runtime_probe,
         )
     schema = await run_api_blocking(run_db, service.attach_column_descriptions, datasource_id_value, schema)
     response = await run_api_blocking(schemas.SchemaInfo.model_validate, schema_info_response_payload(schema))
@@ -970,7 +937,6 @@ async def get_datasource_schema(
 async def update_datasource_column_metadata(
     datasource_id: DataSourceId,
     payload: schemas.BatchColumnDescriptionUpdate,
-    runtime_probe: RuntimeAvailabilityProbe = Depends(get_runtime_availability_probe),
 ):
     """Update one or more datasource column descriptions and return the active schema."""
     datasource_id_value = parse_datasource_id(datasource_id)
@@ -981,7 +947,6 @@ async def update_datasource_column_metadata(
             datasource_id=datasource_id_value,
             sheet_name=None,
             refresh=False,
-            runtime_probe=runtime_probe,
         )
     schema = await run_api_blocking(run_db, service.update_column_descriptions, datasource_id_value, payload, schema)
     response = await run_api_blocking(schemas.SchemaInfo.model_validate, schema_info_response_payload(schema))
@@ -997,7 +962,6 @@ async def update_datasource_column_metadata(
 async def compare_snapshots(
     datasource_id: DataSourceId,
     payload: schemas.SnapshotCompareRequest,
-    runtime_probe: RuntimeAvailabilityProbe = Depends(get_runtime_availability_probe),
 ):
     """Compare two Iceberg snapshots of a datasource.
 
@@ -1011,7 +975,6 @@ async def compare_snapshots(
         snapshot_a=payload.snapshot_a,
         snapshot_b=payload.snapshot_b,
         row_limit=payload.row_limit,
-        runtime_probe=runtime_probe,
     )
     return await json_response(response)
 
@@ -1021,7 +984,6 @@ async def _handle_column_stats(
     column_name: str,
     sample: bool,
     payload: schemas.ColumnStatsRequest | None,
-    runtime_probe: RuntimeAvailabilityProbe,
 ):
     datasource_id_value = parse_datasource_id(datasource_id)
     await run_api_blocking(run_db, _require_active_datasource, datasource_id_value)
@@ -1035,7 +997,6 @@ async def _handle_column_stats(
         use_sample=sample,
         sample_size=10000,
         datasource_config=config if isinstance(config, dict) else None,
-        runtime_probe=runtime_probe,
     )
 
 
@@ -1049,13 +1010,12 @@ async def get_column_stats(
     datasource_id: DataSourceId,
     column_name: str,
     sample: bool = True,
-    runtime_probe: RuntimeAvailabilityProbe = Depends(get_runtime_availability_probe),
 ):
     """Get statistics for a single column: count, nulls, unique values, min/max, mean, histogram.
 
     Set sample=false for exact stats (slower on large datasets).
     """
-    response = await _handle_column_stats(datasource_id, column_name, sample, None, runtime_probe)
+    response = await _handle_column_stats(datasource_id, column_name, sample, None)
     return await json_response(response)
 
 
@@ -1070,10 +1030,9 @@ async def get_column_stats_with_config(
     column_name: str,
     payload: schemas.ColumnStatsRequest,
     sample: bool = True,
-    runtime_probe: RuntimeAvailabilityProbe = Depends(get_runtime_availability_probe),
 ):
     """Get column statistics with custom datasource config (e.g., different branch or snapshot)."""
-    response = await _handle_column_stats(datasource_id, column_name, sample, payload, runtime_probe)
+    response = await _handle_column_stats(datasource_id, column_name, sample, payload)
     return await json_response(response)
 
 
@@ -1082,7 +1041,6 @@ async def get_column_stats_with_config(
 async def update_datasource(
     datasource_id: DataSourceId,
     update: schemas.DataSourceUpdate,
-    runtime_probe: RuntimeAvailabilityProbe = Depends(get_runtime_availability_probe),
 ):
     """Update a datasource's name or config. Use GET /datasource/{id} to see current values."""
     datasource_id_value = parse_datasource_id(datasource_id)
@@ -1112,7 +1070,6 @@ async def update_datasource(
         source_path=source_path,
         action=enums_pb2.DATASOURCE_PREFLIGHT_ACTION_RESOLVE_SELECTION,
         selection=selection,
-        runtime_probe=runtime_probe,
         delete_source=False,
         datasource_id=datasource_id_value,
     )
@@ -1130,14 +1087,12 @@ async def update_datasource(
 @handle_errors(operation='ingest datasource')
 async def ingest_datasource(
     datasource_id: DataSourceId,
-    runtime_probe: RuntimeAvailabilityProbe = Depends(get_runtime_availability_probe),
 ):
     """Ingest an external datasource again from source. Useful after upstream data changes."""
     datasource_id_value = parse_datasource_id(datasource_id)
     await run_api_blocking(run_db, _require_active_datasource, datasource_id_value)
     response = await ingest_remote_datasource(
         datasource_id=datasource_id_value,
-        runtime_probe=runtime_probe,
     )
     return await json_response(response)
 

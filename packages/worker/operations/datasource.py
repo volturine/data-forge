@@ -1,9 +1,7 @@
-import asyncio
 import contextvars
 import hashlib
 import json
 from collections import deque
-from collections.abc import Callable
 from threading import Lock
 
 import polars as pl
@@ -13,6 +11,16 @@ from datasources.datasource_loading import load_datasource as load_datasource_fr
 from operations.step_converter import convert_step_format
 from runtime.domain.compute.base import OperationHandler, OperationParams
 from runtime.domain.datasource.source_types import DataSourceLoadType, DataSourceType, IcebergReader
+
+_SOURCE_TYPES = frozenset(
+    {
+        DataSourceType.FILE.value,
+        DataSourceType.DATABASE.value,
+        DataSourceLoadType.DUCKDB.value,
+        DataSourceType.ICEBERG.value,
+        DataSourceType.ANALYSIS.value,
+    }
+)
 
 
 class DatasourceParams(OperationParams):
@@ -48,8 +56,6 @@ class DatasourceParams(OperationParams):
 
 
 class DatasourceHandler(OperationHandler):
-    SOURCE_LOADERS: dict[str, Callable[[DatasourceHandler, DatasourceParams], pl.LazyFrame]] = {}
-
     def __call__(
         self,
         lf: pl.LazyFrame,
@@ -57,31 +63,13 @@ class DatasourceHandler(OperationHandler):
         **_,
     ) -> pl.LazyFrame:
         validated = DatasourceParams.model_validate(params)
-        loader = self.SOURCE_LOADERS.get(validated.source_type.value)
-        if not loader:
-            allowed = ", ".join(sorted(self.SOURCE_LOADERS))
+        source_type = validated.source_type.value
+        if source_type not in _SOURCE_TYPES:
+            allowed = ", ".join(sorted(_SOURCE_TYPES))
             raise ValueError(f"Unsupported source type: {validated.source_type}. Allowed: {allowed}")
-        return loader(self, validated)
-
-    async def call_async(
-        self,
-        lf: pl.LazyFrame,
-        params: dict,
-        **_,
-    ) -> pl.LazyFrame:
-        return await asyncio.to_thread(self.__call__, lf, params)
-
-    def _load_file(self, config: DatasourceParams) -> pl.LazyFrame:
-        return load_datasource_frame(config.model_dump(mode="json"))
-
-    def _load_database(self, config: DatasourceParams) -> pl.LazyFrame:
-        return load_datasource_frame(config.model_dump(mode="json"))
-
-    def _load_duckdb(self, config: DatasourceParams) -> pl.LazyFrame:
-        return load_datasource_frame(config.model_dump(mode="json"))
-
-    def _load_iceberg(self, config: DatasourceParams) -> pl.LazyFrame:
-        return load_datasource_frame(config.model_dump(mode="json"))
+        if source_type == DataSourceType.ANALYSIS.value:
+            return self._load_analysis(validated)
+        return load_datasource_frame(validated.model_dump(mode="json"))
 
     def _load_analysis(self, config: DatasourceParams) -> pl.LazyFrame:
         pipeline = config.analysis_pipeline
@@ -274,11 +262,10 @@ def _build_tab_pipeline(
         raise ValueError("Analysis tab steps must be a list")
 
     from runtime.compute_utils import apply_steps
+    from runtime.polars_compute import apply_step
 
     steps = apply_steps(steps)
     additional = _collect_analysis_sources(steps, pipeline, cache)
-
-    from runtime.compute_worker import PolarsComputeWorker
 
     for step in steps:
         step_id = step.get("id") or "step"
@@ -286,7 +273,7 @@ def _build_tab_pipeline(
         right_source_raw = backend_step.params.get("right_source")
         right_source_id = right_source_raw if isinstance(right_source_raw, str) else None
         right_lf = cache.get(right_source_id) if right_source_id is not None else None
-        base_frame = PolarsComputeWorker._apply_step(
+        base_frame = apply_step(
             base_frame,
             backend_step,
             step_id=str(step_id),
@@ -377,15 +364,6 @@ def _collect_analysis_sources(
             additional[str(source_id)] = load_datasource(next_config)
 
     return additional
-
-
-DatasourceHandler.SOURCE_LOADERS = {
-    DataSourceType.FILE.value: DatasourceHandler._load_file,
-    DataSourceType.DATABASE.value: DatasourceHandler._load_database,
-    DataSourceLoadType.DUCKDB.value: DatasourceHandler._load_duckdb,
-    DataSourceType.ICEBERG.value: DatasourceHandler._load_iceberg,
-    DataSourceType.ANALYSIS.value: DatasourceHandler._load_analysis,
-}
 
 
 def load_datasource(config: dict) -> pl.LazyFrame:

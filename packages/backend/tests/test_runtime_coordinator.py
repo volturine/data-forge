@@ -349,6 +349,7 @@ async def test_coordinator_retains_generation_and_lease_until_actor_work_settles
 async def test_cancellation_during_grpc_shutdown_still_settles_actors_before_release(monkeypatch) -> None:
     active_generation: int | None = 73
     lease_released = False
+    listener_stopped = False
     grpc_shutdown_started = threading.Event()
     finish_grpc_shutdown = threading.Event()
     actor_stopped = threading.Event()
@@ -369,8 +370,9 @@ async def test_cancellation_during_grpc_shutdown_still_settles_actors_before_rel
             grpc_shutdown_started.set()
             await asyncio.to_thread(finish_grpc_shutdown.wait)
 
-    async def stop_listener(_listener, *, listener) -> None:
-        assert listener is runtime_coordinator.RuntimeListenerKind.JOB
+    async def stop_listener(_listener) -> None:
+        nonlocal listener_stopped
+        listener_stopped = True
 
     monkeypatch.setattr(runtime_coordinator, 'set_active_runtime_coordinator_generation', set_generation)
     monkeypatch.setattr(runtime_coordinator.runtime_ipc, 'stop_api_server', stop_listener)
@@ -410,6 +412,7 @@ async def test_cancellation_during_grpc_shutdown_still_settles_actors_before_rel
         assert actor_stopped.is_set()
         assert active_generation is None
         assert lease_released
+        assert listener_stopped
     finally:
         finish_grpc_shutdown.set()
         if not shutdown.done():
@@ -421,6 +424,7 @@ async def test_cancellation_during_grpc_shutdown_still_settles_actors_before_rel
 async def test_failed_endpoint_shutdown_joins_actors_and_retains_lease(monkeypatch) -> None:
     active_generation: int | None = 89
     lease_released = False
+    listener_stopped = False
     actor_stopped = threading.Event()
 
     def set_generation(generation: int | None) -> None:
@@ -436,8 +440,9 @@ async def test_failed_endpoint_shutdown_joins_actors_and_retains_lease(monkeypat
         async def stop(self, *, grace: float) -> None:
             raise RuntimeError('gRPC endpoint did not stop')
 
-    async def stop_listener(_listener, *, listener) -> None:
-        assert listener is runtime_coordinator.RuntimeListenerKind.JOB
+    async def stop_listener(_listener) -> None:
+        nonlocal listener_stopped
+        listener_stopped = True
 
     monkeypatch.setattr(runtime_coordinator, 'set_active_runtime_coordinator_generation', set_generation)
     monkeypatch.setattr(runtime_coordinator.runtime_ipc, 'stop_api_server', stop_listener)
@@ -467,6 +472,7 @@ async def test_failed_endpoint_shutdown_joins_actors_and_retains_lease(monkeypat
     assert actor_stopped.is_set()
     assert active_generation == 89
     assert not lease_released
+    assert listener_stopped
 
 
 @pytest.mark.asyncio

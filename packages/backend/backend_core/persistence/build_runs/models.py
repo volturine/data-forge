@@ -1,5 +1,4 @@
 import datetime as dt
-from typing import Any
 
 from sqlalchemy import JSON, BigInteger, Column, DateTime, Float, ForeignKey, Index, Integer, String, UniqueConstraint
 from sqlmodel import Field, SQLModel
@@ -87,49 +86,6 @@ class BuildRun(SQLModel, table=True):  # type: ignore[call-arg, assignment]
             return BuildRunStatus.FAILED
         if isinstance(event, compute_schemas.BuildCancelledEvent):
             return BuildRunStatus.CANCELLED
-        return None
-
-    @staticmethod
-    def terminal_update_values(event: compute_schemas.BuildEvent) -> dict[str, Any] | None:
-        if isinstance(event, compute_schemas.BuildCompleteEvent):
-            return {
-                'status': BuildRunStatus.COMPLETED,
-                'progress': event.progress,
-                'elapsed_ms': event.elapsed_ms,
-                'total_steps': event.total_steps,
-                'duration_ms': event.duration_ms,
-                'error_message': None,
-                'cancelled_at': None,
-                'cancelled_by': None,
-                'completed_at': event.emitted_at,
-                'updated_at': event.emitted_at,
-            }
-        if isinstance(event, compute_schemas.BuildFailedEvent):
-            return {
-                'status': BuildRunStatus.FAILED,
-                'progress': event.progress,
-                'elapsed_ms': event.elapsed_ms,
-                'total_steps': event.total_steps,
-                'duration_ms': event.duration_ms,
-                'error_message': event.error,
-                'cancelled_at': None,
-                'cancelled_by': None,
-                'completed_at': event.emitted_at,
-                'updated_at': event.emitted_at,
-            }
-        if isinstance(event, compute_schemas.BuildCancelledEvent):
-            return {
-                'status': BuildRunStatus.CANCELLED,
-                'progress': event.progress,
-                'elapsed_ms': event.elapsed_ms,
-                'total_steps': event.total_steps,
-                'duration_ms': event.duration_ms,
-                'error_message': 'Build cancelled',
-                'cancelled_at': event.cancelled_at,
-                'cancelled_by': event.cancelled_by,
-                'completed_at': event.emitted_at,
-                'updated_at': event.emitted_at,
-            }
         return None
 
     id: str = Field(sa_column=Column(String, primary_key=True))

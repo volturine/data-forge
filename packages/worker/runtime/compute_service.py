@@ -51,7 +51,7 @@ from runtime.exceptions import (
     PipelineValidationError,
     datasource_not_found,
 )
-from runtime.executors import run_compute_in_thread, run_control_in_thread, run_engine_io_in_thread
+from runtime.executors import run_compute_in_thread, run_engine_io_in_thread, run_shutdown_in_thread
 from runtime.healthchecks import (
     HealthCheckResult as _HealthCheckEvalResult,
     load_lazy_frame as _load_healthcheck_lazy,
@@ -190,17 +190,11 @@ class _ComputeWorkerRunFailureUpdateKwargs(TypedDict, total=False):
     current_step: str | None
 
 
-def _datasource_name(session: object | None, datasource_id: str | None) -> str | None:
-    del session
+def _datasource_name(datasource_id: str | None) -> str | None:
     if not datasource_id:
         return None
     metadata = client_from_env().datasource_metadata(namespace=get_namespace(), datasource_id=datasource_id)
     return metadata.name if metadata.found else None
-
-
-@dataclass(frozen=True)
-class _ComputeWorkerRunRef:
-    id: str
 
 
 @dataclass(frozen=True, slots=True)
@@ -225,7 +219,6 @@ class ExportDatasourceResult:
     datasource_name: str
     result_meta: dict
     source_datasource_id: str
-    compute_worker_run_id: str | None = None
     source_datasource_name: str | None = None
     read_duration_ms: float | None = None
     write_duration_ms: float | None = None
@@ -488,7 +481,6 @@ def _sync_iceberg_schema(table: IcebergTable, new_schema: pa.Schema) -> bool:
 
 
 def _upsert_output_datasource(
-    session: object | None,
     result_id: str,
     name: str,
     source_type: str,
@@ -502,18 +494,11 @@ def _upsert_output_datasource(
     build_result_json: dict[str, object] | None = None,
     notification_deliveries: list[dict[str, object]] | None = None,
 ) -> DatasourceMetadata:
-    """Create or update the output datasource for an export.
-
-    If ``result_id`` points to an existing row, update it in-place.
-    Otherwise create a brand-new ``DataSource``. Returns the DB object and leaves
-    commit ownership to the caller so build completion can batch this write with
-    the accompanying build-run update.
-    """
+    """Publish an exported datasource through the worker runtime client."""
     try:
         uuid.UUID(result_id)
     except ValueError, AttributeError:
         raise ValueError(f"result_id must be a valid UUID, got: {result_id!r}") from None
-    del session
     return client_from_env().upsert_output_datasource(
         namespace=get_namespace(),
         result_id=result_id,
@@ -738,7 +723,6 @@ def _json_field(value: object) -> object:
 
 
 def _create_compute_worker_run(
-    session: object | None,
     *,
     analysis_id: str | None,
     datasource_id: str,
@@ -750,8 +734,7 @@ def _create_compute_worker_run(
     progress: float = 0.0,
     triggered_by: str | None = None,
     idempotency_key: str | None = None,
-) -> _ComputeWorkerRunRef:
-    del session
+) -> str:
     run_id = client_from_env().create_compute_worker_run(
         namespace=get_namespace(),
         analysis_id=analysis_id,
@@ -765,17 +748,15 @@ def _create_compute_worker_run(
         triggered_by=triggered_by,
         idempotency_key=idempotency_key,
     )
-    return _ComputeWorkerRunRef(id=run_id)
+    return run_id
 
 
 def _update_compute_worker_run(
-    session: object | None,
     run_id: str,
     *,
     merge_result_json: bool = True,
     **fields: object,
 ) -> None:
-    del session
     client_from_env().update_compute_worker_run(
         namespace=get_namespace(),
         run_id=run_id,
@@ -937,16 +918,14 @@ def _log_entry(
     }
 
 
-def _load_compute_worker_run_result_json(session: object | None, run_id: str) -> dict[str, object]:
-    del session
+def _load_compute_worker_run_result_json(run_id: str) -> dict[str, object]:
     state = client_from_env().compute_worker_run_state(namespace=get_namespace(), run_id=run_id)
     if state is None:
         return {}
     return copy_json_dict(state.get("result_json"))
 
 
-def _raise_if_compute_worker_run_cancelled(session: object | None, run_id: str) -> None:
-    del session
+def _raise_if_compute_worker_run_cancelled(run_id: str) -> None:
     state = client_from_env().compute_worker_run_state(namespace=get_namespace(), run_id=run_id)
     if state is None or state.get("status") != ComputeWorkerRunStatus.CANCELLED.value:
         return
@@ -959,39 +938,13 @@ def _raise_if_compute_worker_run_cancelled(session: object | None, run_id: str) 
     )
 
 
-def _cancel_started_compute_worker_run_if_build_cancelled(build: RuntimeBuild, *, run_id: str) -> None:
-    if build.status != compute_schemas.BuildLifecycleStatus.CANCELLED:
-        return
-    client_from_env().update_compute_worker_run(
-        namespace=get_namespace(),
-        run_id=run_id,
-        fields={
-            "status": ComputeWorkerRunStatus.CANCELLED.value,
-            "error_message": f"Cancelled by {build.cancelled_by}" if build.cancelled_by else "Cancelled",
-            "completed_at": datetime.now(UTC).isoformat(),
-            "result_json": {
-                "cancelled_at": datetime.now(UTC).isoformat(),
-                "cancelled_by": build.cancelled_by,
-            },
-        },
-        merge_result_json=True,
-    )
-
-
 def _parse_cancelled_at(value: str | None) -> datetime | None:
     if value is None:
         return None
     return datetime.fromisoformat(value)
 
 
-def _read_build_cancel_metadata(run) -> tuple[str | None, str | None]:
-    cancelled_at = run.cancelled_at.isoformat() if isinstance(run.cancelled_at, datetime) else None
-    cancelled_by = run.cancelled_by if isinstance(run.cancelled_by, str) else None
-    return cancelled_at, cancelled_by
-
-
-def _raise_if_build_cancelled(session: object | None, build_id: str) -> None:
-    del session
+def _raise_if_build_cancelled(build_id: str) -> None:
     cancelled, cancelled_at, cancelled_by = client_from_env().build_cancel_status(namespace=get_namespace(), build_id=build_id)
     if not cancelled:
         return
@@ -1061,7 +1014,6 @@ def _build_failed_compute_worker_run_finalization(
 
 
 def _finalize_failed_compute_worker_run(
-    session: object | None,
     *,
     run_id: str,
     existing_result: dict[str, object] | None,
@@ -1109,7 +1061,6 @@ def _finalize_failed_compute_worker_run(
         current_step=current_step,
     )
     _update_compute_worker_run(
-        session,
         finalization.run_id,
         merge_result_json=finalization.merge_result_json,
         **finalization.fields,
@@ -1297,7 +1248,6 @@ def _ensure_request_branch(request_payload: dict, branch: str) -> dict:
 
 
 def _get_additional_datasources(
-    session: object | None,
     steps: list[dict],
     analysis_pipeline: dict,
 ) -> dict[str, dict]:
@@ -1322,7 +1272,6 @@ def _get_additional_datasources(
             if source_id in additional:
                 continue
             config_override = _resolve_step_source_config(
-                session=session,
                 source_id=source_id,
                 step_config=config if isinstance(config, dict) else {},
                 analysis_pipeline=analysis_pipeline,
@@ -1348,8 +1297,7 @@ def _library_udf_expression(expr: object) -> bool:
     return WithColumnsExprType.read(expr.get("type")) == WithColumnsExprType.UDF
 
 
-def _hydrate_udfs(session: object | None, steps: list[dict]) -> list[dict]:
-    del session
+def _hydrate_udfs(steps: list[dict]) -> list[dict]:
     udf_ids: list[str] = []
     for step in steps:
         config = step.get("config", {})
@@ -1430,7 +1378,6 @@ def _pipeline_datasource_payload(pipeline: dict, datasource_id: str) -> dict | N
 
 
 def _resolve_pipeline_datasource_config(
-    session: object | None,
     pipeline: dict,
     datasource: dict,
 ) -> dict:
@@ -1475,7 +1422,6 @@ def _resolve_pipeline_datasource_config(
     source_type = datasource.get("source_type")
     if isinstance(source_type, str) and source_type.strip():
         return {"source_type": source_type, **overrides}
-    del session
     metadata = client_from_env().datasource_metadata(namespace=get_namespace(), datasource_id=datasource_id)
     if not metadata.found or metadata.source_type is None or metadata.config is None:
         raise ValueError(f"analysis_pipeline missing datasource config for {datasource_id}")
@@ -1488,7 +1434,6 @@ def _resolve_pipeline_datasource_config(
 
 def _resolve_step_source_config(
     *,
-    session: object | None,
     source_id: str,
     step_config: dict,
     analysis_pipeline: dict,
@@ -1505,10 +1450,10 @@ def _resolve_step_source_config(
         }
     embedded = _step_source_payload(step_config, source_id)
     if isinstance(embedded, dict):
-        return _resolve_pipeline_datasource_config(session, analysis_pipeline, embedded)
+        return _resolve_pipeline_datasource_config(analysis_pipeline, embedded)
     payload = _pipeline_datasource_payload(analysis_pipeline, source_id)
     if isinstance(payload, dict):
-        return _resolve_pipeline_datasource_config(session, analysis_pipeline, payload)
+        return _resolve_pipeline_datasource_config(analysis_pipeline, payload)
     from runtime.worker_runtime_client import frozen_datasource_metadata
 
     metadata = frozen_datasource_metadata(get_namespace(), source_id)
@@ -1545,46 +1490,27 @@ def _select_pipeline_tab(pipeline: dict, tab_id: str | None, target_step_id: str
     return selected
 
 
-def default_stateless_compute_worker_identity(
-    analysis_pipeline: dict,
-    target_step_id: str,
-    tab_id: str | None = None,
-) -> compute_pb2.ComputeWorkerIdentity:
-    """Return the shared engine identity for a pipeline operation.
+def default_stateless_compute_worker_identity(analysis_pipeline: dict) -> compute_pb2.ComputeWorkerIdentity:
+    """Return the shared engine identity owned by the pipeline's analysis RID.
 
-    An analysis RID owns one shared preview worker across its transforms. A
-    datasource-only preview supplies an explicit datasource identity from the
-    API, so the fallback is only used for a pipeline that has no analysis RID.
-    Keep this selection identical to the backend identity normalization so
-    admission and execution refer to the same engine key.
+    Datasource previews carry an explicit datasource identity from the API, so
+    every other pipeline operation must name its analysis RID. Keep this
+    selection identical to the backend identity normalization so admission and
+    execution refer to the same engine key.
     """
     analysis_id = analysis_pipeline.get("analysis_id")
-    if isinstance(analysis_id, str) and analysis_id:
-        return compute_pb2.ComputeWorkerIdentity(
-            scope=enums_pb2.COMPUTE_WORKER_SCOPE_ANALYSIS_INTERACTIVE,
-            reuse_policy=enums_pb2.COMPUTE_WORKER_REUSE_POLICY_SHARED,
-            analysis_id=analysis_id,
-            resource_id=analysis_id,
-        )
-
-    selected = _select_pipeline_tab(analysis_pipeline, tab_id, target_step_id)
-    datasource = selected.get("datasource")
-    if not isinstance(datasource, dict):
-        raise ValueError("analysis_pipeline tab datasource must be a dict")
-    datasource_id = datasource.get("id")
-    if not isinstance(datasource_id, str) or not datasource_id:
-        raise ValueError("analysis_pipeline tab missing datasource.id")
+    if not isinstance(analysis_id, str) or not analysis_id:
+        raise ValueError("Malformed compute request: analysis_pipeline.analysis_id is required")
     return compute_pb2.ComputeWorkerIdentity(
-        scope=enums_pb2.COMPUTE_WORKER_SCOPE_DATASOURCE_PREVIEW,
+        scope=enums_pb2.COMPUTE_WORKER_SCOPE_ANALYSIS_INTERACTIVE,
         reuse_policy=enums_pb2.COMPUTE_WORKER_REUSE_POLICY_SHARED,
-        datasource_id=datasource_id,
-        resource_id=datasource_id,
+        analysis_id=analysis_id,
+        resource_id=analysis_id,
     )
 
 
 def _resolve_pipeline_request(
     pipeline: dict,
-    session: object | None,
     tab_id: str | None,
     target_step_id: str,
 ) -> dict:
@@ -1601,7 +1527,7 @@ def _resolve_pipeline_request(
     if not isinstance(steps, list):
         raise ValueError("analysis_pipeline tab steps must be a list")
 
-    merged = _resolve_pipeline_datasource_config(session, pipeline, datasource)
+    merged = _resolve_pipeline_datasource_config(pipeline, datasource)
     analysis_id = pipeline.get("analysis_id")
     analysis_id = str(analysis_id) if analysis_id is not None else None
     if (
@@ -1622,18 +1548,11 @@ def _resolve_pipeline_request(
     }
 
 
-def _acquire_engine(manager: ProcessManager, identity: compute_pb2.ComputeWorkerIdentity, resource_config: dict | None = None):
-    return manager.acquire_engine(identity, resource_config=resource_config)
-
-
 def _resolve_export_compute_worker_identity(
     *,
     compute_worker_identity: compute_pb2.ComputeWorkerIdentity | None,
-    analysis_id: str | None,
     build_id: str | None,
     analysis_pipeline: dict,
-    target_step_id: str,
-    tab_id: str | None,
 ) -> compute_pb2.ComputeWorkerIdentity:
     if compute_worker_identity is not None:
         return compute_worker_identity
@@ -1644,13 +1563,10 @@ def _resolve_export_compute_worker_identity(
             build_id=build_id,
             resource_id=build_id,
         )
-    if analysis_id:
-        return default_stateless_compute_worker_identity(analysis_pipeline, target_step_id, tab_id)
-    raise ValueError("Export requires analysis_id or engine identity")
+    return default_stateless_compute_worker_identity(analysis_pipeline)
 
 
 def preview_step(
-    session: object,
     manager: ProcessManager,
     target_step_id: str,
     analysis_pipeline: dict,
@@ -1668,10 +1584,9 @@ def preview_step(
     """Preview the result of executing pipeline up to a specific step with pagination."""
     from runtime.domain.compute.schemas import StepPreviewResponse
 
-    requested_target_step_id = target_step_id
     started_at = datetime.now(UTC)
     started_perf = time.perf_counter()
-    resolved = _resolve_pipeline_request(analysis_pipeline, session, tab_id, target_step_id)
+    resolved = _resolve_pipeline_request(analysis_pipeline, tab_id, target_step_id)
     datasource_id = resolved["datasource_id"]
     steps = resolved["steps"]
     target_step_id = resolved["target_step_id"]
@@ -1706,16 +1621,12 @@ def preview_step(
     else:
         step_index = find_step_index(steps, target_step_id)
         preview_steps = steps[: step_index + 1]
-        preview_steps = _hydrate_udfs(session, preview_steps)
+        preview_steps = _hydrate_udfs(preview_steps)
 
-    resolved_compute_worker_identity = compute_worker_identity or default_stateless_compute_worker_identity(
-        analysis_pipeline,
-        requested_target_step_id,
-        tab_id,
-    )
+    resolved_compute_worker_identity = compute_worker_identity or default_stateless_compute_worker_identity(analysis_pipeline)
     request_namespace = get_namespace()
     persist_preview_runs = settings.persist_preview_runs
-    run_response = None
+    run_id = None
     initial_run_result: dict[str, object] | None = None
     if persist_preview_runs:
         initial_run_result = _initial_live_run_result(
@@ -1725,8 +1636,7 @@ def preview_step(
             total_tabs=1,
             resource_config=resource_config if isinstance(resource_config, dict) else None,
         )
-        run_response = _create_compute_worker_run(
-            session,
+        run_id = _create_compute_worker_run(
             analysis_id=run_analysis_id,
             datasource_id=datasource_id,
             kind="preview",
@@ -1739,7 +1649,7 @@ def preview_step(
             idempotency_key=request_id,
         )
 
-    additional_datasources = _get_additional_datasources(session, preview_steps, analysis_pipeline)
+    additional_datasources = _get_additional_datasources(preview_steps, analysis_pipeline)
 
     # Calculate offset for pagination
     offset = (page - 1) * row_limit
@@ -1750,7 +1660,7 @@ def preview_step(
     def execute_preview() -> dict[str, object]:
         nonlocal engine, preview_resource_summary
         phase_started = time.perf_counter()
-        with _acquire_engine(manager, resolved_compute_worker_identity, resource_config=resource_config) as acquired_engine:
+        with manager.acquire_engine(resolved_compute_worker_identity, resource_config=resource_config) as acquired_engine:
             execution_phases["engine_acquire_ms"] = (time.perf_counter() - phase_started) * 1000
             engine = acquired_engine
             preview_resource_summary = _resource_summary(acquired_engine)
@@ -1808,7 +1718,7 @@ def preview_step(
         completed_at = datetime.now(UTC)
         duration_ms = int((time.perf_counter() - started_perf) * 1000)
         execution_entries = _build_compute_worker_run_execution_entries(result_data, duration_ms=duration_ms)
-        if run_response is not None:
+        if run_id is not None:
             assert initial_run_result is not None
             result_json = _build_canonical_compute_worker_run_result(
                 existing_result=initial_run_result,
@@ -1841,7 +1751,7 @@ def preview_step(
             if isinstance(query_plan, str):
                 finalization_fields["query_plan"] = query_plan
             compute_worker_run_finalization = ComputeWorkerRunFinalization(
-                run_id=run_response.id,
+                run_id=run_id,
                 fields=finalization_fields,
                 merge_result_json=False,
             )
@@ -1866,10 +1776,10 @@ def preview_step(
             result_data if isinstance(result_data, dict) else None,
             duration_ms=duration_ms,
         )
-        if run_response is not None:
+        if run_id is not None:
             assert initial_run_result is not None
             finalization = _build_failed_compute_worker_run_finalization(
-                run_id=run_response.id,
+                run_id=run_id,
                 existing_result=initial_run_result,
                 execution_entries=execution_entries,
                 error=exc,
@@ -1913,7 +1823,6 @@ def preview_step(
 
 
 def get_step_schema(
-    session: object,
     manager: ProcessManager,
     target_step_id: str,
     analysis_id: str,
@@ -1923,8 +1832,7 @@ def get_step_schema(
     """Get the output schema of a pipeline step without returning data."""
     from runtime.domain.compute.schemas import StepSchemaResponse
 
-    requested_target_step_id = target_step_id
-    resolved = _resolve_pipeline_request(analysis_pipeline, session, tab_id, target_step_id)
+    resolved = _resolve_pipeline_request(analysis_pipeline, tab_id, target_step_id)
     datasource_id = resolved["datasource_id"]
     steps = resolved["steps"]
     target_step_id = resolved["target_step_id"]
@@ -1950,13 +1858,12 @@ def get_step_schema(
     else:
         step_index = find_step_index(steps, target_step_id)
         schema_steps = steps[: step_index + 1]
-        schema_steps = _hydrate_udfs(session, schema_steps)
+        schema_steps = _hydrate_udfs(schema_steps)
 
-    with _acquire_engine(
-        manager,
-        default_stateless_compute_worker_identity(analysis_pipeline, requested_target_step_id, tab_id),
+    with manager.acquire_engine(
+        default_stateless_compute_worker_identity(analysis_pipeline),
     ) as engine:
-        additional_datasources = _get_additional_datasources(session, schema_steps, analysis_pipeline)
+        additional_datasources = _get_additional_datasources(schema_steps, analysis_pipeline)
 
         # Use the new schema command that doesn't collect full data
         job_id = engine.get_schema(
@@ -1995,7 +1902,6 @@ def _reported_row_count_error(exc: Exception) -> Exception:
 
 
 def get_step_row_count(
-    session: object,
     manager: ProcessManager,
     target_step_id: str,
     analysis_id: str,
@@ -2007,11 +1913,10 @@ def get_step_row_count(
     """Get the row count of a pipeline step without collecting full data."""
     from runtime.domain.compute.schemas import StepRowCountResponse
 
-    requested_target_step_id = target_step_id
     started_at = datetime.now(UTC)
     started_perf = time.perf_counter()
 
-    resolved = _resolve_pipeline_request(analysis_pipeline, session, tab_id, target_step_id)
+    resolved = _resolve_pipeline_request(analysis_pipeline, tab_id, target_step_id)
     datasource_id = resolved["datasource_id"]
     steps = resolved["steps"]
     target_step_id = resolved["target_step_id"]
@@ -2043,10 +1948,9 @@ def get_step_row_count(
     else:
         step_index = find_step_index(steps, target_step_id)
         count_steps = steps[: step_index + 1]
-        count_steps = _hydrate_udfs(session, count_steps)
+        count_steps = _hydrate_udfs(count_steps)
 
-    run_response = _create_compute_worker_run(
-        session,
+    run_id = _create_compute_worker_run(
         analysis_id=analysis_id_value,
         datasource_id=datasource_id,
         kind="row_count",
@@ -2068,11 +1972,10 @@ def get_step_row_count(
     query_plan: str | None = None
     result_data: dict | None = None
     try:
-        with _acquire_engine(
-            manager,
-            default_stateless_compute_worker_identity(analysis_pipeline, requested_target_step_id, tab_id),
+        with manager.acquire_engine(
+            default_stateless_compute_worker_identity(analysis_pipeline),
         ) as engine:
-            additional_datasources = _get_additional_datasources(session, count_steps, analysis_pipeline)
+            additional_datasources = _get_additional_datasources(count_steps, analysis_pipeline)
 
             job_id = engine.get_row_count(
                 datasource_config=config,
@@ -2096,7 +1999,7 @@ def get_step_row_count(
         duration_ms = int((time.perf_counter() - started_perf) * 1000)
         execution_entries = _build_compute_worker_run_execution_entries(result_data, duration_ms=duration_ms)
         result_json = _build_canonical_compute_worker_run_result(
-            existing_result=_load_compute_worker_run_result_json(session, run_response.id),
+            existing_result=_load_compute_worker_run_result_json(run_id),
             summary_meta={"row_count": row_count},
             execution_entries=execution_entries,
             current_tab_id=tab_id,
@@ -2119,8 +2022,7 @@ def get_step_row_count(
             ],
         )
         _update_compute_worker_run(
-            session,
-            run_response.id,
+            run_id,
             merge_result_json=False,
             status=ComputeRunStatus.SUCCESS,
             result_json=result_json,
@@ -2136,7 +2038,7 @@ def get_step_row_count(
         return StepRowCountResponse(step_id=target_step_id, row_count=row_count)
     except Exception as exc:
         try:
-            _raise_if_compute_worker_run_cancelled(session, run_response.id)
+            _raise_if_compute_worker_run_cancelled(run_id)
         except BuildCancelledError as cancel_exc:
             raise cancel_exc from exc
 
@@ -2145,9 +2047,8 @@ def get_step_row_count(
         duration_ms = int((time.perf_counter() - started_perf) * 1000)
         execution_entries = _build_compute_worker_run_execution_entries(result_data if isinstance(result_data, dict) else None, duration_ms=duration_ms)
         _finalize_failed_compute_worker_run(
-            session,
-            run_id=run_response.id,
-            existing_result=_load_compute_worker_run_result_json(session, run_response.id),
+            run_id=run_id,
+            existing_result=_load_compute_worker_run_result_json(run_id),
             execution_entries=execution_entries,
             error=reported,
             completed_at=completed_at,
@@ -2172,7 +2073,6 @@ def get_step_row_count(
 
 
 def export_data(
-    session: object | None,
     manager: ProcessManager,
     target_step_id: str,
     analysis_pipeline: dict,
@@ -2180,14 +2080,10 @@ def export_data(
     iceberg_options: dict | None = None,
     analysis_id: str | None = None,
     tab_id: str | None = None,
-    request_json: dict | None = None,
-    triggered_by: str | None = None,
     result_id: str | None = None,
     build_mode: str = "full",
     job_started: Callable[[dict[str, object]], None] | None = None,
     build_stage_event: Callable[[dict[str, object]], None] | None = None,
-    resources: list[dict[str, object]] | None = None,
-    resources_fn: Callable[[], list[dict[str, object]]] | None = None,
     compute_worker_identity: compute_pb2.ComputeWorkerIdentity | None = None,
     build_id: str | None = None,
     publication_claim: ClaimedBuildJob | None = None,
@@ -2205,8 +2101,7 @@ def export_data(
 
     started_perf = time.perf_counter()
 
-    requested_target_step_id = target_step_id
-    resolved = _resolve_pipeline_request(analysis_pipeline, session, tab_id, target_step_id)
+    resolved = _resolve_pipeline_request(analysis_pipeline, tab_id, target_step_id)
     datasource_id = resolved["datasource_id"]
     steps = resolved["steps"]
     target_step_id = resolved["target_step_id"]
@@ -2225,8 +2120,6 @@ def export_data(
     existing_output_metadata = client_from_env().datasource_metadata(namespace=get_namespace(), datasource_id=result_id)
     output_hidden = existing_output_metadata.is_hidden if existing_output_metadata.found else True
 
-    if request_json is None:
-        raise ValueError("Export requires request_json")
     steps = apply_steps(steps)
 
     if target_step_id == "source":
@@ -2234,30 +2127,24 @@ def export_data(
     else:
         step_index = find_step_index(steps, target_step_id)
         export_steps = steps[: step_index + 1]
-    export_steps = _hydrate_udfs(session, export_steps)
+    export_steps = _hydrate_udfs(export_steps)
 
     resolved_compute_worker_identity = _resolve_export_compute_worker_identity(
         compute_worker_identity=compute_worker_identity,
-        analysis_id=analysis_id_value,
         build_id=build_id,
         analysis_pipeline=analysis_pipeline,
-        target_step_id=requested_target_step_id,
-        tab_id=tab_id,
     )
 
-    additional_datasources = _get_additional_datasources(session, export_steps, analysis_pipeline)
-    source_datasource_name = _datasource_name(session, datasource_id)
+    additional_datasources = _get_additional_datasources(export_steps, analysis_pipeline)
+    source_datasource_name = _datasource_name(datasource_id)
 
     tmp_output = _secure_temp_path(suffix=".parquet")
-    step_timings: dict = {}
-    query_plan: str | None = None
     result_data: dict | None = None
     initial_output_name = iceberg_options.get("table_name", filename) if isinstance(iceberg_options, dict) else filename
     tab_name = _tab_name_from_pipeline(analysis_pipeline, tab_id)
-    run_response = None
 
     try:
-        with _acquire_engine(manager, resolved_compute_worker_identity) as engine:
+        with manager.acquire_engine(resolved_compute_worker_identity) as engine:
             job_id = engine.export(
                 datasource_config=datasource_config,
                 steps=export_steps,
@@ -2272,23 +2159,17 @@ def export_data(
                     "steps": export_steps,
                     "tab_id": tab_id,
                 }
-                if run_response is not None:
-                    job_payload["compute_worker_run_id"] = run_response.id
                 job_started(job_payload)
 
             result_data = await_compute_worker_result(engine, job_id=job_id)
-        step_timings = result_data.get("step_timings", {}) if isinstance(result_data, dict) else {}
-        query_plan = result_data.get("query_plan") if isinstance(result_data, dict) else None
         _raise_engine_failure(
             result_data,
             operation="export",
             datasource_id=datasource_id,
             failure_prefix="Export",
         )
-        if run_response is not None:
-            _raise_if_compute_worker_run_cancelled(session, run_response.id)
         if build_id is not None:
-            _raise_if_build_cancelled(session, build_id)
+            _raise_if_build_cancelled(build_id)
 
         data = result_data.get("data", {})
         row_count = data.get("row_count", 0)
@@ -2299,7 +2180,6 @@ def export_data(
         if staged_result is not None:
             data = strip_staged_preview(data)
 
-        completed_at = datetime.now(UTC)
         duration_ms = int((time.perf_counter() - started_perf) * 1000)
         timeout_warning_ms = _output_timeout_warning_ms(analysis_pipeline, tab_id)
         duration_exceeded = _duration_exceeded_warning(duration_ms=duration_ms, timeout_warning_ms=timeout_warning_ms)
@@ -2556,7 +2436,6 @@ def export_data(
         )
         notification_deliveries.extend(staged_notification_deliveries)
         target_ds = _upsert_output_datasource(
-            session=session,
             result_id=result_id,
             name=datasource_name,
             source_type=DataSourceType.ICEBERG,
@@ -2579,7 +2458,6 @@ def export_data(
             datasource_name=datasource_name,
             result_meta=result_meta,
             source_datasource_id=datasource_id,
-            compute_worker_run_id=run_response.id if run_response is not None else None,
             source_datasource_name=source_datasource_name,
             read_duration_ms=float(read_duration_ms) if isinstance(read_duration_ms, (int, float)) else None,
             write_duration_ms=write_duration_ms,
@@ -2588,13 +2466,10 @@ def export_data(
         raise
     except Exception as exc:
         try:
-            if run_response is not None:
-                _raise_if_compute_worker_run_cancelled(session, run_response.id)
             if build_id is not None:
-                _raise_if_build_cancelled(session, build_id)
+                _raise_if_build_cancelled(build_id)
         except BuildCancelledError as cancel_exc:
             raise cancel_exc from exc
-        completed_at = datetime.now(UTC)
         duration_ms = int((time.perf_counter() - started_perf) * 1000)
         if build_id is not None:
             failed_summary = {
@@ -2617,45 +2492,6 @@ def export_data(
                 lease_generation=publication_claim.lease_generation,
                 result_json=failed_summary,
             )
-        elif run_response is not None:
-            execution_entries = _build_compute_worker_run_execution_entries(result_data, duration_ms=duration_ms)
-            _finalize_failed_compute_worker_run(
-                session,
-                run_id=run_response.id,
-                existing_result=_load_compute_worker_run_result_json(session, run_response.id),
-                execution_entries=execution_entries,
-                error=exc,
-                completed_at=completed_at,
-                duration_ms=duration_ms,
-                step_timings=step_timings,
-                query_plan=query_plan,
-                summary_meta={
-                    "source_datasource_id": datasource_id,
-                    "source_datasource_name": source_datasource_name,
-                },
-                current_output_id=result_id,
-                current_output_name=initial_output_name if isinstance(initial_output_name, str) else filename,
-                current_tab_id=tab_id,
-                current_tab_name=tab_name,
-                total_steps=len(export_steps) + 2,
-                total_tabs=1,
-                resource_config=_resource_summary(engine),
-                resources=resources_fn() if resources_fn is not None else resources,
-                result_entry=_result_entry(
-                    tab_id=tab_id,
-                    tab_name=tab_name,
-                    status=BuildTabStatus.FAILED,
-                    output_id=result_id,
-                    output_name=initial_output_name if isinstance(initial_output_name, str) else filename,
-                    error=str(exc),
-                ),
-                log_entry=_log_entry(
-                    message=str(exc),
-                    level="error",
-                    tab_id=tab_id,
-                    tab_name=tab_name,
-                ),
-            )
         raise
     finally:
         if os.path.exists(tmp_output):
@@ -2663,7 +2499,6 @@ def export_data(
 
 
 def download_step(
-    session: object,
     manager: ProcessManager,
     target_step_id: str,
     analysis_pipeline: dict,
@@ -2675,11 +2510,10 @@ def download_step(
     """Download the result of a pipeline step in a specific format."""
     from runtime.export_formats import get_export_format
 
-    requested_target_step_id = target_step_id
     started_at = datetime.now(UTC)
     started_perf = time.perf_counter()
 
-    resolved = _resolve_pipeline_request(analysis_pipeline, session, tab_id, target_step_id)
+    resolved = _resolve_pipeline_request(analysis_pipeline, tab_id, target_step_id)
     datasource_id = resolved["datasource_id"]
     steps = resolved["steps"]
     target_step_id = resolved["target_step_id"]
@@ -2716,13 +2550,9 @@ def download_step(
     else:
         step_index = find_step_index(steps, target_step_id)
         download_steps = steps[: step_index + 1]
-        download_steps = _hydrate_udfs(session, download_steps)
+        download_steps = _hydrate_udfs(download_steps)
 
-    resolved_compute_worker_identity = default_stateless_compute_worker_identity(
-        analysis_pipeline,
-        requested_target_step_id,
-        tab_id,
-    )
+    resolved_compute_worker_identity = default_stateless_compute_worker_identity(analysis_pipeline)
     branch = _resolve_branch_value(datasource_config)
     tab_name = _tab_name_from_pipeline(analysis_pipeline, tab_id)
     request_payload = _ensure_request_branch(
@@ -2739,21 +2569,20 @@ def download_step(
         branch,
     )
 
-    additional_datasources = _get_additional_datasources(session, download_steps, analysis_pipeline)
+    additional_datasources = _get_additional_datasources(download_steps, analysis_pipeline)
 
     export_fmt = get_export_format(export_format)
     ext = export_fmt.extension
     content_type = export_fmt.content_type
 
     tmp_output = _secure_temp_path(suffix=ext)
-    run_response = None
+    run_id = None
     step_timings: dict = {}
     query_plan: str | None = None
     result_data: dict | None = None
     try:
-        with _acquire_engine(manager, resolved_compute_worker_identity) as engine:
-            run_response = _create_compute_worker_run(
-                session,
+        with manager.acquire_engine(resolved_compute_worker_identity) as engine:
+            run_id = _create_compute_worker_run(
                 analysis_id=analysis_id_value,
                 datasource_id=datasource_id,
                 kind="download",
@@ -2813,7 +2642,7 @@ def download_step(
             write_duration_ms=write_duration_ms,
         )
         result_json = _build_canonical_compute_worker_run_result(
-            existing_result=_load_compute_worker_run_result_json(session, run_response.id),
+            existing_result=_load_compute_worker_run_result_json(run_id),
             summary_meta={"filename": f"{filename}{ext}", "format": export_format},
             execution_entries=execution_entries,
             current_tab_id=tab_id,
@@ -2837,8 +2666,7 @@ def download_step(
             ],
         )
         _update_compute_worker_run(
-            session,
-            run_response.id,
+            run_id,
             merge_result_json=False,
             status=ComputeRunStatus.SUCCESS,
             result_json=result_json,
@@ -2852,15 +2680,14 @@ def download_step(
 
         return file_bytes, f"{filename}{ext}", content_type
     except Exception as exc:
-        if run_response is None:
+        if run_id is None:
             raise
         completed_at = datetime.now(UTC)
         duration_ms = int((time.perf_counter() - started_perf) * 1000)
         execution_entries = _build_compute_worker_run_execution_entries(result_data, duration_ms=duration_ms)
         _finalize_failed_compute_worker_run(
-            session,
-            run_id=run_response.id,
-            existing_result=_load_compute_worker_run_result_json(session, run_response.id),
+            run_id=run_id,
+            existing_result=_load_compute_worker_run_result_json(run_id),
             execution_entries=execution_entries,
             error=exc,
             completed_at=completed_at,
@@ -3227,13 +3054,11 @@ def _start_stream_tasks(
 
 
 async def run_analysis_build_stream(
-    session: object | None,
     manager: ProcessManager,
     pipeline: dict | None,
     *,
     build: RuntimeBuild,
     emitter: BuildEmitter | None,
-    triggered_by: str | None = None,
     publication_claim: ClaimedBuildJob | None = None,
     worker_id: str | None = None,
 ) -> dict:
@@ -3245,7 +3070,6 @@ async def run_analysis_build_stream(
     analysis_id_value = str(analysis_id) if analysis_id is not None else ""
     total_steps = _count_total_build_steps(execution_tabs)
     build.total_steps = total_steps
-    build.total_tabs = len(execution_tabs)
     started_perf = time.perf_counter()
 
     await _emit_build_event(
@@ -3464,19 +3288,15 @@ async def run_analysis_build_stream(
                         current_build_id=build.build_id,
                         current_compute_worker_run_id=run_id,
                     )
-                    _cancel_started_compute_worker_run_if_build_cancelled(build, run_id=run_id)
-                    if build.status == compute_schemas.BuildLifecycleStatus.CANCELLED:
-                        current_cancellation.cancel()
-                        current_cancellation.raise_if_cancelled()
 
                 async def emit_run_started() -> None:
                     payload: dict[str, object] = {
                         "type": "progress",
-                        "progress": build.progress,
-                        "elapsed_ms": build.elapsed_ms,
-                        "estimated_remaining_ms": build.estimated_remaining_ms,
-                        "current_step": build.current_step,
-                        "current_step_index": build.current_step_index,
+                        "progress": 0.0,
+                        "elapsed_ms": 0,
+                        "estimated_remaining_ms": None,
+                        "current_step": None,
+                        "current_step_index": None,
                         "total_steps": total_steps,
                         "tab_id": current_tab_id,
                         "tab_name": current_tab_name,
@@ -3665,19 +3485,7 @@ async def run_analysis_build_stream(
                 current_cancellation: _BuildJobCancellation = cancellation,
             ) -> ExportDatasourceResult:
                 current_cancellation.raise_if_cancelled()
-                request_json = {
-                    "analysis_pipeline": pipeline,
-                    "analysis_id": analysis_id_value,
-                    "tab_id": current_tab_id,
-                    "target_step_id": current_target_step_id,
-                    "format": "parquet",
-                    "filename": current_filename,
-                    "destination": "datasource",
-                    "result_id": current_result_id,
-                    "iceberg_options": current_iceberg_options,
-                }
-                result = export_data(
-                    session=session,
+                return export_data(
                     manager=manager,
                     target_step_id=current_target_step_id,
                     analysis_pipeline=pipeline,
@@ -3685,20 +3493,15 @@ async def run_analysis_build_stream(
                     iceberg_options=current_iceberg_options,
                     analysis_id=analysis_id_value,
                     tab_id=current_tab_id,
-                    triggered_by=triggered_by,
-                    request_json=request_json,
                     result_id=current_result_id,
                     build_mode=current_build_mode,
                     job_started=handle_job_started,
                     build_stage_event=handle_stage_event,
-                    resources_fn=lambda: [item.model_dump(mode="json") for item in build.resources],
                     compute_worker_identity=build_identity,
                     build_id=build.build_id,
                     publication_claim=publication_claim,
                     worker_id=worker_id,
                 )
-                build.current_compute_worker_run_id = result.compute_worker_run_id
-                return result
 
             export_result = await run_compute_in_thread(
                 run_export_job,
@@ -3853,7 +3656,7 @@ async def run_analysis_build_stream(
                 current_output_id=base.current_output_id,
                 current_output_name=base.current_output_name,
                 compute_worker_run_id=base.compute_worker_run_id,
-                progress=build.progress,
+                progress=0.0,
                 elapsed_ms=elapsed_ms,
                 total_steps=total_steps,
                 tabs_built=tabs_built,
@@ -3877,7 +3680,7 @@ async def run_analysis_build_stream(
                 current_output_id=base.current_output_id,
                 current_output_name=base.current_output_name,
                 compute_worker_run_id=base.compute_worker_run_id,
-                progress=build.progress,
+                progress=0.0,
                 elapsed_ms=elapsed_ms,
                 total_steps=total_steps,
                 tabs_built=tabs_built,
@@ -3908,7 +3711,7 @@ async def run_analysis_build_stream(
             ),
         )
     with contextlib.suppress(Exception):
-        await run_control_in_thread(
+        await run_shutdown_in_thread(
             manager.shutdown_compute_worker,
             compute_pb2.ComputeWorkerIdentity(
                 scope=enums_pb2.COMPUTE_WORKER_SCOPE_BUILD,
@@ -3925,7 +3728,6 @@ async def run_analysis_build_stream(
 
 
 def list_iceberg_snapshots(
-    session: object,
     datasource_id: str,
     branch: str | None = None,
     *,
@@ -3933,7 +3735,6 @@ def list_iceberg_snapshots(
 ):
     from runtime.domain.compute.schemas import IcebergSnapshotInfo, IcebergSnapshotsResponse
 
-    del session
     datasource = client_from_env().datasource_metadata(namespace=request_namespace, datasource_id=datasource_id)
 
     if not datasource.found or datasource.config is None:
@@ -3996,10 +3797,9 @@ def list_iceberg_snapshots(
     )
 
 
-def delete_iceberg_snapshot(session: object, datasource_id: str, snapshot_id: str, *, request_namespace: str):
+def delete_iceberg_snapshot(datasource_id: str, snapshot_id: str, *, request_namespace: str):
     from runtime.domain.compute.schemas import IcebergSnapshotDeleteResponse
 
-    del session
     datasource = client_from_env().datasource_metadata(namespace=request_namespace, datasource_id=datasource_id)
 
     if not datasource.found or datasource.config is None:

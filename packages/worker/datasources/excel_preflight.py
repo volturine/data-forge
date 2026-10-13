@@ -9,7 +9,7 @@ from typing import Any
 from urllib.parse import urlparse
 
 from openpyxl import load_workbook
-from openpyxl.utils.cell import get_column_letter, range_boundaries
+from openpyxl.utils.cell import range_boundaries
 
 from runtime.object_store import download_file, is_object_store_url
 
@@ -130,17 +130,6 @@ def _detect_end_row(sheet: Any, start_row: int, start_col: int, end_col: int) ->
     return max(start_row, max_row - 1)
 
 
-def _normalize_headers(values: tuple[object | None, ...]) -> list[str]:
-    names: list[str] = []
-    counts: dict[str, int] = {}
-    for index, value in enumerate(values):
-        base = str(value).strip() if value is not None else f"column_{index + 1}"
-        count = counts.get(base, 0)
-        names.append(base if count == 0 else f"{base}_{count}")
-        counts[base] = count + 1
-    return names
-
-
 def _preview(
     path: Path,
     *,
@@ -216,25 +205,34 @@ def execute_preflight(
     cell_range: str | None,
 ) -> dict[str, object]:
     with _local_workbook(source_path) as path:
-        if action == "initial":
-            sheets, tables, named_ranges = _read_metadata(path)
-            target_sheet = sheet_name or (sheets[0] if sheets else None)
+        if action not in {"initial", "preview", "resolve_selection"}:
+            raise ValueError(f"Unsupported Excel preflight action: {action}")
+
+        metadata = _read_metadata(path) if action == "initial" else None
+        if metadata is None:
+            target_sheet = sheet_name or ""
+        else:
+            sheets, tables, named_ranges = metadata
+            target_sheet = sheet_name or (sheets[0] if sheets else "")
             if not target_sheet:
                 raise ValueError("No sheets found in file")
-            result = _preview(
-                path,
-                sheet_name=target_sheet,
-                start_row=start_row,
-                start_col=start_col,
-                end_col=end_col,
-                end_row=end_row,
-                table_name=table_name,
-                named_range=named_range,
-                cell_range=cell_range,
-            )
+
+        result = _preview(
+            path,
+            sheet_name=target_sheet,
+            start_row=start_row,
+            start_col=start_col,
+            end_col=end_col,
+            end_row=end_row,
+            table_name=table_name,
+            named_range=named_range,
+            cell_range=cell_range,
+        )
+        result["preflight_id"] = preflight_id
+
+        if action == "initial":
             result.update(
                 {
-                    "preflight_id": preflight_id,
                     "sheets": sheets,
                     "tables": {name: {"columns": columns} for name, columns in tables.items()},
                     "named_ranges": named_ranges,
@@ -243,38 +241,6 @@ def execute_preflight(
                 }
             )
             return result
-        if action == "preview":
-            result = _preview(
-                path,
-                sheet_name=sheet_name or "",
-                start_row=start_row,
-                start_col=start_col,
-                end_col=end_col,
-                end_row=end_row,
-                table_name=table_name,
-                named_range=named_range,
-                cell_range=cell_range,
-            )
-            result["preflight_id"] = preflight_id
-            return result
         if action == "resolve_selection":
-            result = _preview(
-                path,
-                sheet_name=sheet_name or "",
-                start_row=start_row,
-                start_col=start_col,
-                end_col=end_col,
-                end_row=end_row,
-                table_name=table_name,
-                named_range=named_range,
-                cell_range=cell_range,
-            )
-            result["preflight_id"] = preflight_id
             return {key: result[key] for key in ("preflight_id", "sheet_name", "start_row", "start_col", "end_col", "detected_end_row")}
-        raise ValueError(f"Unsupported Excel preflight action: {action}")
-
-
-def format_cell_range(sheet_name: str, start_row: int, start_col: int, end_row: int, end_col: int) -> str:
-    start_cell = f"{get_column_letter(start_col + 1)}{start_row + 1}"
-    end_cell = f"{get_column_letter(end_col + 1)}{end_row + 1}"
-    return f"{sheet_name}!{start_cell}:{end_cell}"
+        return result

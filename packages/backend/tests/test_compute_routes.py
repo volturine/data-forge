@@ -13,7 +13,6 @@ from backend_core import (
     compute_worker_runs_service as compute_worker_run_service,
     database,
     datasource_delete_service,
-    dependencies,
     websocket as websocket_core,
 )
 from backend_core.api_execution_budget import (
@@ -21,13 +20,10 @@ from backend_core.api_execution_budget import (
     install_api_blocking_executor,
     remove_api_blocking_executor,
 )
-from backend_core.application import app
-from backend_core.dependencies import get_manager, get_runtime_availability_probe
 from backend_core.domain.compute import schemas as compute_schemas
 from backend_core.domain.compute_worker_runs.schemas import ComputeWorkerRunKind, ComputeWorkerRunStatus
 from backend_core.domain.datasource.models import DataSourceCreatedBy
 from backend_core.domain.datasource.source_types import DataSourceType
-from backend_core.domain.runtime_workers.models import RuntimeWorkerKind
 from backend_core.exceptions import AppError
 from backend_core.namespace import get_namespace, reset_namespace, set_namespace_context
 from backend_core.persistence.build_jobs.models import BuildJob
@@ -191,21 +187,18 @@ async def test_engine_shutdown_creates_uses_and_closes_session_in_its_db_thread(
             assert threading.get_ident() == self.owner
             operations.append(('close', threading.get_ident(), get_namespace()))
 
-    def request_shutdown(session, *, identity, runtime_probe):
+    def request_shutdown(session, *, identity):
         assert threading.get_ident() == session.owner
         assert identity.resource_id == 'analysis-1'
         operations.append(('queue', threading.get_ident(), get_namespace()))
 
     monkeypatch.setattr(database, 'Session', OwnedSession)
     monkeypatch.setattr(database, '_get_tenant_engine', lambda: object())
-    monkeypatch.setattr(compute_routes, '_override_manager', lambda _request: None)
     monkeypatch.setattr(executor_client, 'request_compute_worker_shutdown', request_shutdown)
     namespace_token = set_namespace_context('shutdown-test')
     try:
         await compute_routes._shutdown_compute_worker_identity(
             compute_pb2.ComputeWorkerIdentity(resource_id='analysis-1'),
-            cast(Any, object()),
-            _AvailableRuntimeProbe(),
         )
     finally:
         reset_namespace(namespace_token)
@@ -240,7 +233,6 @@ def test_validated_compute_request_stages_on_one_thread(monkeypatch) -> None:
             datasource_ids=(),
             kind=stub,
             command=stub,
-            runtime_probe=stub,
         )
     )
 
@@ -272,113 +264,9 @@ def test_validated_direct_datasource_request_checks_deletion_fence(monkeypatch) 
         datasource_ids=('datasource-2', 'datasource-1', 'datasource-1'),
         kind=stub,
         command=stub,
-        runtime_probe=stub,
     )
 
     assert calls == ['datasource-1:True', 'datasource-2:True', 'submit']
-
-
-class _StubEngine:
-    current_job_id = None
-
-    @staticmethod
-    def is_process_alive() -> bool:
-        return False
-
-
-class _StubManager:
-    def __init__(self) -> None:
-        self.shutdown_calls: list[str] = []
-        self.spawn_calls: list[tuple[str, dict | None]] = []
-        self.restart_calls: list[tuple[str, dict]] = []
-
-    @staticmethod
-    def _identity_key(identity) -> str:
-        return f'{identity.scope}:{identity.resource_id}'
-
-    def get_engine(self, identity):
-        return _StubEngine() if self._identity_key(identity).endswith(':build-1') else None
-
-    def get_compute_worker_status(self, identity) -> dict[str, object]:
-        status: dict[str, object] = {
-            'resource_id': identity.resource_id,
-            'status': 'healthy',
-            'scope': 'datasource_preview' if identity.HasField('datasource_id') else 'build' if identity.HasField('build_id') else 'analysis_interactive',
-            'reuse_policy': 'exclusive' if identity.HasField('build_id') else 'shared',
-            'datasource_id': identity.datasource_id if identity.HasField('datasource_id') else None,
-            'build_id': identity.build_id if identity.HasField('build_id') else None,
-        }
-        if identity.HasField('analysis_id'):
-            status['analysis_id'] = identity.analysis_id
-        return status
-
-    def spawn_compute_worker(self, identity, resource_config: dict | None = None) -> None:
-        self.spawn_calls.append((self._identity_key(identity), resource_config))
-
-    def restart_engine_with_config(self, identity, resource_config: dict) -> None:
-        self.restart_calls.append((self._identity_key(identity), resource_config))
-
-    def shutdown_compute_worker(self, identity) -> None:
-        self.shutdown_calls.append(self._identity_key(identity))
-
-
-@pytest.mark.asyncio
-async def test_override_engine_lifecycle_runs_outside_event_loop(monkeypatch) -> None:
-    loop_thread = threading.get_ident()
-    operation_threads: list[int] = []
-
-    class Manager:
-        def spawn_compute_worker(self, *_args, **_kwargs) -> None:
-            operation_threads.append(threading.get_ident())
-
-        def get_compute_worker_status(self, _identity):
-            operation_threads.append(threading.get_ident())
-            return 'status'
-
-        def restart_engine_with_config(self, *_args, **_kwargs) -> None:
-            operation_threads.append(threading.get_ident())
-
-        def get_engine(self, _identity):
-            operation_threads.append(threading.get_ident())
-            return _StubEngine()
-
-        def shutdown_compute_worker(self, _identity) -> None:
-            operation_threads.append(threading.get_ident())
-
-    manager = Manager()
-    monkeypatch.setattr(compute_routes, '_override_manager', lambda _request: manager)
-    identity = compute_pb2.ComputeWorkerIdentity(
-        scope=enums_pb2.COMPUTE_WORKER_SCOPE_ANALYSIS_INTERACTIVE,
-        reuse_policy=enums_pb2.COMPUTE_WORKER_REUSE_POLICY_SHARED,
-        analysis_id='analysis-1',
-        resource_id='analysis-1',
-    )
-
-    status = await compute_routes._spawn_compute_worker_identity(
-        identity,
-        cast(Any, None),
-        None,
-        cast(Any, None),
-    )
-    assert status == 'status'
-
-    await compute_routes._configure_compute_worker_identity(
-        identity,
-        compute_schemas.ComputeWorkerResourceConfig(max_threads=4),
-        cast(Any, None),
-        cast(Any, None),
-    )
-    await compute_routes._shutdown_compute_worker_identity(identity, cast(Any, None), cast(Any, None))
-
-    assert operation_threads
-    assert all(thread_id != loop_thread for thread_id in operation_threads)
-
-
-class _AvailableRuntimeProbe:
-    @staticmethod
-    def available(*, kind) -> bool:
-        del kind
-        return True
 
 
 def test_compute_queue_rejects_pipeline_after_source_delete_requested(test_db_session, sample_datasource) -> None:
@@ -409,60 +297,82 @@ def test_compute_queue_rejects_pipeline_after_source_delete_requested(test_db_se
         executor_client._require_active_pipeline_datasources(test_db_session, request.analysis_pipeline)
 
 
-def test_persisted_runtime_availability_probe_uses_an_isolated_session_per_check(monkeypatch) -> None:
-    calls: list[tuple[object, tuple[object, ...], dict[str, object]]] = []
+def _status_for_identity(identity: compute_pb2.ComputeWorkerIdentity) -> compute_schemas.ComputeWorkerStatusSchema:
+    if identity.HasField('datasource_id'):
+        scope = compute_schemas.ComputeWorkerScope.DATASOURCE_PREVIEW
+        reuse_policy = compute_schemas.ComputeWorkerReusePolicy.SHARED
+        datasource_id = identity.datasource_id
+        analysis_id = None
+        build_id = None
+    elif identity.HasField('build_id'):
+        scope = compute_schemas.ComputeWorkerScope.BUILD
+        reuse_policy = compute_schemas.ComputeWorkerReusePolicy.EXCLUSIVE
+        datasource_id = None
+        analysis_id = None
+        build_id = identity.build_id
+    else:
+        scope = compute_schemas.ComputeWorkerScope.ANALYSIS_INTERACTIVE
+        reuse_policy = compute_schemas.ComputeWorkerReusePolicy.SHARED
+        datasource_id = None
+        analysis_id = identity.analysis_id
+        build_id = None
+    return compute_schemas.ComputeWorkerStatusSchema(
+        analysis_id=analysis_id,
+        resource_id=identity.resource_id,
+        status=compute_schemas.ComputeWorkerStatus.HEALTHY,
+        scope=scope,
+        reuse_policy=reuse_policy,
+        datasource_id=datasource_id,
+        build_id=build_id,
+    )
 
-    def fake_run_settings_db(func, *args, **kwargs):
-        calls.append((func, args, kwargs))
-        return True
 
-    monkeypatch.setattr(dependencies, 'run_settings_db', fake_run_settings_db)
-    probe = dependencies.PersistedRuntimeAvailabilityProbe(heartbeat_seconds=7.0)
+def test_spawn_compute_worker_queues_datasource_preview_identity(client, monkeypatch) -> None:
+    calls: list[tuple[compute_pb2.ComputeWorkerIdentity, dict[str, object] | None]] = []
 
-    assert probe.available(kind=RuntimeWorkerKind.BUILD_WORKER) is True
-    assert probe.available(kind=RuntimeWorkerKind.SCHEDULER) is True
-    assert calls == [
-        (
-            dependencies.runtime_workers_service.worker_available,
-            (),
-            {'kind': RuntimeWorkerKind.BUILD_WORKER, 'heartbeat_seconds': 7.0},
-        ),
-        (
-            dependencies.runtime_workers_service.worker_available,
-            (),
-            {'kind': RuntimeWorkerKind.SCHEDULER, 'heartbeat_seconds': 7.0},
-        ),
-    ]
+    async def spawn(*, identity, resource_config):
+        calls.append((identity, resource_config))
+        return _status_for_identity(identity)
 
-
-def test_spawn_compute_worker_accepts_datasource_preview_identity(client) -> None:
-    manager = _StubManager()
-    app.dependency_overrides[get_manager] = lambda: manager
-    try:
-        response = client.post('/api/v1/compute/compute-worker/spawn/datasource-preview/datasource-1')
-    finally:
-        app.dependency_overrides.pop(get_manager, None)
+    monkeypatch.setattr(executor_client, 'spawn_compute_worker', spawn)
+    response = client.post('/api/v1/compute/compute-worker/spawn/datasource-preview/datasource-1')
 
     assert response.status_code == 200
+    assert response.json()['status'] == 'healthy'
     assert response.json()['analysis_id'] is None
     assert response.json()['resource_id'] == 'datasource-1'
     assert response.json()['scope'] == 'datasource_preview'
+    assert response.json()['reuse_policy'] == 'shared'
     assert response.json()['datasource_id'] == 'datasource-1'
-    assert manager.spawn_calls == [('1:datasource-1', None)]
+    assert len(calls) == 1
+    identity, resource_config = calls[0]
+    assert identity.scope == enums_pb2.COMPUTE_WORKER_SCOPE_DATASOURCE_PREVIEW
+    assert identity.reuse_policy == enums_pb2.COMPUTE_WORKER_REUSE_POLICY_SHARED
+    assert identity.datasource_id == identity.resource_id == 'datasource-1'
+    assert resource_config is None
 
 
-def test_spawn_compute_worker_retains_analysis_identity(client) -> None:
-    manager = _StubManager()
-    app.dependency_overrides[get_manager] = lambda: manager
-    try:
-        response = client.post('/api/v1/compute/compute-worker/spawn/analysis/analysis-1')
-    finally:
-        app.dependency_overrides.pop(get_manager, None)
+def test_spawn_compute_worker_queues_analysis_identity(client, monkeypatch) -> None:
+    calls: list[tuple[compute_pb2.ComputeWorkerIdentity, dict[str, object] | None]] = []
+
+    async def spawn(*, identity, resource_config):
+        calls.append((identity, resource_config))
+        return _status_for_identity(identity)
+
+    monkeypatch.setattr(executor_client, 'spawn_compute_worker', spawn)
+    response = client.post('/api/v1/compute/compute-worker/spawn/analysis/analysis-1')
 
     assert response.status_code == 200
+    assert response.json()['status'] == 'healthy'
     assert response.json()['analysis_id'] == 'analysis-1'
     assert response.json()['resource_id'] == 'analysis-1'
     assert response.json()['scope'] == 'analysis_interactive'
+    assert response.json()['reuse_policy'] == 'shared'
+    identity, resource_config = calls[0]
+    assert identity.scope == enums_pb2.COMPUTE_WORKER_SCOPE_ANALYSIS_INTERACTIVE
+    assert identity.reuse_policy == enums_pb2.COMPUTE_WORKER_REUSE_POLICY_SHARED
+    assert identity.analysis_id == identity.resource_id == 'analysis-1'
+    assert resource_config is None
 
 
 def test_legacy_engine_lifecycle_route_is_removed(client) -> None:
@@ -471,76 +381,102 @@ def test_legacy_engine_lifecycle_route_is_removed(client) -> None:
     assert response.status_code in {404, 405}
 
 
-def test_configure_compute_worker_accepts_datasource_preview_identity(client) -> None:
-    manager = _StubManager()
-    app.dependency_overrides[get_manager] = lambda: manager
-    try:
-        response = client.post(
-            '/api/v1/compute/compute-worker/configure/datasource-preview/datasource-1',
-            json={'max_threads': 4},
-        )
-    finally:
-        app.dependency_overrides.pop(get_manager, None)
+def test_configure_compute_worker_queues_datasource_identity_and_resource_config(client, monkeypatch) -> None:
+    calls: list[tuple[compute_pb2.ComputeWorkerIdentity, dict[str, object]]] = []
+
+    async def configure(*, identity, resource_config):
+        calls.append((identity, resource_config))
+        return _status_for_identity(identity)
+
+    monkeypatch.setattr(executor_client, 'configure_compute_worker', configure)
+    response = client.post(
+        '/api/v1/compute/compute-worker/configure/datasource-preview/datasource-1',
+        json={'max_threads': 4},
+    )
 
     assert response.status_code == 200
+    assert response.json()['status'] == 'healthy'
     assert response.json()['resource_id'] == 'datasource-1'
-    assert manager.restart_calls == [('1:datasource-1', {'max_threads': 4, 'max_memory_mb': None, 'streaming_chunk_size': None})]
+    assert response.json()['scope'] == 'datasource_preview'
+    identity, resource_config = calls[0]
+    assert identity.scope == enums_pb2.COMPUTE_WORKER_SCOPE_DATASOURCE_PREVIEW
+    assert identity.reuse_policy == enums_pb2.COMPUTE_WORKER_REUSE_POLICY_SHARED
+    assert identity.datasource_id == identity.resource_id == 'datasource-1'
+    assert resource_config == {'max_threads': 4, 'max_memory_mb': None, 'streaming_chunk_size': None}
 
 
-def test_shutdown_compute_worker_accepts_build_identity(client) -> None:
-    manager = _StubManager()
-    app.dependency_overrides[get_manager] = lambda: manager
-    try:
-        response = client.delete('/api/v1/compute/compute-worker/build/build-1')
-    finally:
-        app.dependency_overrides.pop(get_manager, None)
+@pytest.mark.parametrize(
+    ('path', 'scope', 'reuse_policy', 'identity_field', 'resource_id'),
+    [
+        (
+            '/api/v1/compute/compute-worker/analysis/analysis-1',
+            enums_pb2.COMPUTE_WORKER_SCOPE_ANALYSIS_INTERACTIVE,
+            enums_pb2.COMPUTE_WORKER_REUSE_POLICY_SHARED,
+            'analysis_id',
+            'analysis-1',
+        ),
+        (
+            '/api/v1/compute/compute-worker/datasource-preview/datasource-1',
+            enums_pb2.COMPUTE_WORKER_SCOPE_DATASOURCE_PREVIEW,
+            enums_pb2.COMPUTE_WORKER_REUSE_POLICY_SHARED,
+            'datasource_id',
+            'datasource-1',
+        ),
+        (
+            '/api/v1/compute/compute-worker/build/build-1',
+            enums_pb2.COMPUTE_WORKER_SCOPE_BUILD,
+            enums_pb2.COMPUTE_WORKER_REUSE_POLICY_EXCLUSIVE,
+            'build_id',
+            'build-1',
+        ),
+    ],
+)
+def test_shutdown_compute_worker_queues_exact_identity(
+    client,
+    monkeypatch,
+    path: str,
+    scope: int,
+    reuse_policy: int,
+    identity_field: str,
+    resource_id: str,
+) -> None:
+    shutdown_calls: list[compute_pb2.ComputeWorkerIdentity] = []
+
+    def request_shutdown(session, *, identity) -> None:
+        del session
+        shutdown_calls.append(identity)
+
+    monkeypatch.setattr(executor_client, 'request_compute_worker_shutdown', request_shutdown)
+    response = client.delete(path)
 
     assert response.status_code == 204
-    assert manager.shutdown_calls == ['3:build-1']
+    assert len(shutdown_calls) == 1
+    identity = shutdown_calls[0]
+    assert identity.scope == scope
+    assert identity.reuse_policy == reuse_policy
+    assert identity.resource_id == getattr(identity, identity_field) == resource_id
 
 
-def test_shutdown_compute_worker_cancels_active_job_then_shuts_down(client) -> None:
-    """Busy engines cancel the job first; shutdown must not return 409."""
+def test_shutdown_compute_worker_queues_unregistered_build_identity(client, monkeypatch) -> None:
+    shutdown_calls: list[compute_pb2.ComputeWorkerIdentity] = []
 
-    class _BusyEngine:
-        current_job_id = 'job-active'
+    def request_shutdown(session, *, identity) -> None:
+        del session
+        shutdown_calls.append(identity)
 
-        @staticmethod
-        def is_process_alive() -> bool:
-            return True
-
-    class _BusyManager(_StubManager):
-        def get_engine(self, identity):
-            return _BusyEngine() if self._identity_key(identity).endswith(':build-1') else None
-
-    manager = _BusyManager()
-    app.dependency_overrides[get_manager] = lambda: manager
-    try:
-        response = client.delete('/api/v1/compute/compute-worker/build/build-1')
-    finally:
-        app.dependency_overrides.pop(get_manager, None)
+    monkeypatch.setattr(executor_client, 'request_compute_worker_shutdown', request_shutdown)
+    response = client.delete('/api/v1/compute/compute-worker/build/missing')
 
     assert response.status_code == 204
-    assert manager.shutdown_calls == ['3:build-1']
-
-
-def test_shutdown_compute_worker_returns_not_found_for_unknown_identity(client) -> None:
-    manager = _StubManager()
-    app.dependency_overrides[get_manager] = lambda: manager
-    try:
-        response = client.delete('/api/v1/compute/compute-worker/build/missing')
-    finally:
-        app.dependency_overrides.pop(get_manager, None)
-
-    assert response.status_code == 404
-    assert manager.shutdown_calls == []
+    assert len(shutdown_calls) == 1
+    assert shutdown_calls[0].build_id == shutdown_calls[0].resource_id == 'missing'
 
 
 def test_shutdown_compute_worker_queues_worker_shutdown_without_waiting(client, monkeypatch) -> None:
     shutdown_calls: list[compute_pb2.ComputeWorkerIdentity] = []
 
-    def request_shutdown(session, *, identity, runtime_probe) -> None:
-        del session, runtime_probe
+    def request_shutdown(session, *, identity) -> None:
+        del session
         shutdown_calls.append(identity)
 
     monkeypatch.setattr(executor_client, 'request_compute_worker_shutdown', request_shutdown)
@@ -593,7 +529,6 @@ def test_start_build_recreates_deleted_output_placeholder(client, test_db_sessio
 
     monkeypatch.setattr(compute_routes.runtime_ipc, 'notify_build_job', notify_build_job)
     monkeypatch.setattr(compute_routes, 'run_api_blocking', track_api_blocking)
-    app.dependency_overrides[get_runtime_availability_probe] = _AvailableRuntimeProbe
     test_db_session.add(
         DataSource(
             id='source-1',
@@ -604,42 +539,39 @@ def test_start_build_recreates_deleted_output_placeholder(client, test_db_sessio
         )
     )
     test_db_session.commit()
-    try:
-        response = client.post(
-            '/api/v1/compute/builds',
-            json={
-                'analysis_pipeline': {
-                    'analysis_id': 'analysis-1',
-                    'tabs': [
-                        {
-                            'id': 'tab-1',
-                            'name': 'Source 1',
-                            'datasource': {
-                                'id': 'source-1',
-                                'analysis_tab_id': None,
-                                'source_type': 'iceberg',
-                                'config': {'branch': 'master'},
+    response = client.post(
+        '/api/v1/compute/builds',
+        json={
+            'analysis_pipeline': {
+                'analysis_id': 'analysis-1',
+                'tabs': [
+                    {
+                        'id': 'tab-1',
+                        'name': 'Source 1',
+                        'datasource': {
+                            'id': 'source-1',
+                            'analysis_tab_id': None,
+                            'source_type': 'iceberg',
+                            'config': {'branch': 'master'},
+                        },
+                        'output': {
+                            'result_id': '11111111-1111-4111-8111-111111111111',
+                            'format': 'parquet',
+                            'filename': 'source_1',
+                            'build_mode': 'full',
+                            'iceberg': {
+                                'namespace': 'outputs',
+                                'table_name': 'source_1',
+                                'branch': 'master',
                             },
-                            'output': {
-                                'result_id': '11111111-1111-4111-8111-111111111111',
-                                'format': 'parquet',
-                                'filename': 'source_1',
-                                'build_mode': 'full',
-                                'iceberg': {
-                                    'namespace': 'outputs',
-                                    'table_name': 'source_1',
-                                    'branch': 'master',
-                                },
-                            },
-                            'steps': [],
-                        }
-                    ],
-                },
-                'tab_id': 'tab-1',
+                        },
+                        'steps': [],
+                    }
+                ],
             },
-        )
-    finally:
-        app.dependency_overrides.pop(get_runtime_availability_probe, None)
+            'tab_id': 'tab-1',
+        },
+    )
 
     assert response.status_code == 200
     build_id = response.json()['build_id']

@@ -401,15 +401,6 @@ class WorkerDataPlaneClient:
     def _metadata(self) -> tuple[tuple[str, str], ...]:
         return ((_TOKEN_METADATA_KEY, self._token),)
 
-    def close(self) -> None:
-        """Release the client. The channel is process-shared and stays open."""
-
-    def __enter__(self) -> WorkerDataPlaneClient:
-        return self
-
-    def __exit__(self, exc_type: object, exc_value: object, traceback: object) -> None:
-        self.close()
-
     def _call(self, fn: Callable[[], _T]) -> _T:
         try:
             return fn()

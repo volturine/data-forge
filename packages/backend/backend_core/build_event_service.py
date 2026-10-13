@@ -7,15 +7,10 @@ from typing import Any
 from sqlmodel import Session
 
 from backend_core import build_runs_service as build_run_service
-from backend_core.domain.build_runs.live import BuildNotification, hub as build_hub
 from backend_core.domain.compute import schemas as compute_schemas
 
 logger = logging.getLogger(__name__)
 _SLOW_EVENT_SERIALIZATION_SECONDS = 0.1
-
-
-async def publish_build_notification(namespace: str, build_id: str, latest_sequence: int) -> None:
-    await build_hub.publish(BuildNotification(namespace=namespace, build_id=build_id, latest_sequence=latest_sequence))
 
 
 def persist_build_event(

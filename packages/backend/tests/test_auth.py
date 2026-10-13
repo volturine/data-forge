@@ -30,7 +30,7 @@ from backend_core.persistence.datasource.models import DataSource
 from backend_core.persistence.udfs.models import Udf
 from backend_core.sqlmodel_typing import sa
 from modules.auth import commands as auth_commands, routes as auth_routes
-from modules.auth.dependencies import get_current_user, get_optional_user
+from modules.auth.dependencies import _resolve_user, get_current_user
 from modules.auth.models import (
     AuthProvider,
     AuthProviderName,
@@ -56,7 +56,6 @@ from modules.auth.service import (
     hash_password,
     revoke_all_sessions,
     revoke_session,
-    send_verification_email,
     unlink_provider,
     update_profile,
     validate_password,
@@ -971,7 +970,7 @@ class TestAuthRoutes:
 
         @app.get('/optional')
         async def optional(
-            user: User | None = Depends(get_optional_user),
+            user: User | None = Depends(_resolve_user),
         ) -> dict[str, str | None]:
             return {'email': user.email if user else None}
 
@@ -999,7 +998,7 @@ class TestAuthRoutes:
 
         @app.get('/optional')
         async def optional(
-            user: User | None = Depends(get_optional_user),
+            user: User | None = Depends(_resolve_user),
         ) -> dict[str, str | None]:
             return {'email': user.email if user else None}
 
@@ -1695,7 +1694,7 @@ class TestAuthRoutes:
             sent.append((email, token))
             return True
 
-        monkeypatch.setattr('modules.auth.service.send_verification_email', fake_send)
+        monkeypatch.setattr('modules.auth.routes.send_verification_email', fake_send)
         auth_client.cookies.set('session_token', user_session.id)
 
         response = auth_client.post('/api/v1/auth/resend-verification')
@@ -1718,12 +1717,11 @@ class TestAuthRoutes:
             'Resend Limit User',
         )
         user_session = create_session(auth_db_session, user.id, 'pytest-agent', '127.0.0.1')
-        monkeypatch.setattr('modules.auth.service.send_verification_email', send_verification_email)
 
         async def fake_send(*_args) -> bool:
             return True
 
-        monkeypatch.setattr('modules.auth.service.send_verification_email', fake_send)
+        monkeypatch.setattr('modules.auth.routes.send_verification_email', fake_send)
         auth_client.cookies.set('session_token', user_session.id)
 
         first = auth_client.post('/api/v1/auth/resend-verification')

@@ -3,7 +3,6 @@ from __future__ import annotations
 import asyncio
 import threading
 from io import BytesIO
-from typing import cast
 
 import pytest
 from fastapi import HTTPException, UploadFile
@@ -106,7 +105,6 @@ async def test_cancelled_upload_joins_creation_and_leaves_source_to_durable_clea
 ) -> None:
     creation_started = asyncio.Event()
     finish_creation = asyncio.Event()
-    deleted: list[str] = []
     source_path = 's3://analytics/uploads/staged.csv'
 
     async def create_datasource(**_kwargs):
@@ -116,14 +114,9 @@ async def test_cancelled_upload_joins_creation_and_leaves_source_to_durable_clea
             raise RuntimeError('durable datasource creation failed')
         return object()
 
-    async def delete_object(path: str) -> None:
-        deleted.append(path)
-
     monkeypatch.setattr(routes, 'create_remote_file_datasource', create_datasource)
-    monkeypatch.setattr(routes, '_delete_managed_object', delete_object)
     creation = asyncio.create_task(
         routes._create_uploaded_datasource(
-            runtime_probe=cast(routes.RuntimeAvailabilityProbe, object()),
             name='staged',
             description=None,
             file_path=source_path,
@@ -142,29 +135,21 @@ async def test_cancelled_upload_joins_creation_and_leaves_source_to_durable_clea
     with pytest.raises(asyncio.CancelledError):
         await creation
 
-    assert deleted == []
-
 
 @pytest.mark.asyncio
-async def test_failed_response_after_datasource_publication_never_deletes_referenced_upload(monkeypatch: pytest.MonkeyPatch) -> None:
+async def test_failed_datasource_creation_returns_server_error(monkeypatch: pytest.MonkeyPatch) -> None:
     source_path = 's3://analytics/uploads/published.csv'
-    published_paths: set[str] = set()
-    deleted: list[str] = []
+    staged_paths: list[str] = []
 
     async def stage_upload(_file, _target_name: str) -> str:
+        staged_paths.append(source_path)
         return source_path
 
-    async def publish_then_lose_response(**_kwargs):
-        published_paths.add(source_path)
-        raise RuntimeError('completion response was lost after publication')
-
-    async def delete_object(path: str) -> None:
-        deleted.append(path)
-        published_paths.discard(path)
+    async def fail_creation(**_kwargs):
+        raise RuntimeError('datasource creation failed')
 
     monkeypatch.setattr(routes, '_stage_upload_to_object_store', stage_upload)
-    monkeypatch.setattr(routes, 'create_remote_file_datasource', publish_then_lose_response)
-    monkeypatch.setattr(routes, '_delete_managed_object', delete_object)
+    monkeypatch.setattr(routes, 'create_remote_file_datasource', fail_creation)
 
     with pytest.raises(HTTPException) as raised:
         await routes.upload_file(
@@ -176,9 +161,7 @@ async def test_failed_response_after_datasource_publication_never_deletes_refere
             skip_rows=0,
             encoding='utf8',
             user=None,
-            runtime_probe=cast(routes.RuntimeAvailabilityProbe, object()),
         )
 
     assert raised.value.status_code == 500
-    assert published_paths == {source_path}
-    assert deleted == []
+    assert staged_paths == [source_path]

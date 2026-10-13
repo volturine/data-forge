@@ -11,7 +11,7 @@ from pydantic import (
     model_validator,
 )
 
-from backend_core.domain.analysis.step_types import is_step_type
+from backend_core.domain.analysis.step_types import STEP_TYPES
 from modules.export.models import CodeExportFormat
 
 
@@ -27,7 +27,7 @@ class PipelineStepSchema(BaseModel):
     @field_validator('type')
     @classmethod
     def validate_type(cls, value: str) -> str:
-        if not is_step_type(value):
+        if not STEP_TYPES.has(value):
             raise ValueError(f"Unknown step type '{value}'")
         return value
 

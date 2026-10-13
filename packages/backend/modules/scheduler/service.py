@@ -1,6 +1,5 @@
 import logging
 import uuid
-from collections import deque
 from collections.abc import Collection, Iterator, Sequence
 from datetime import UTC, datetime, timedelta
 from typing import Any
@@ -32,7 +31,7 @@ from backend_core.exceptions import (
 )
 from backend_core.lease_observability import record_lease_transition
 from backend_core.namespace import get_namespace
-from backend_core.persistence.analysis.models import Analysis, AnalysisDataSource
+from backend_core.persistence.analysis.models import Analysis
 from backend_core.persistence.build_jobs.models import BuildJob
 from backend_core.persistence.build_runs.models import BuildRun
 from backend_core.persistence.datasource.models import DataSource
@@ -80,7 +79,6 @@ def _mark_schedule_failure(
     session: Session,
     *,
     schedule: Schedule,
-    error: str,
     claim_token: str,
     lease_generation: int,
     now: datetime | None = None,
@@ -103,7 +101,6 @@ def mark_schedule_enqueue_failed(
     session: Session,
     schedule_id: str,
     *,
-    error: str,
     claim_token: str,
     lease_generation: int,
 ) -> Schedule | None:
@@ -113,13 +110,12 @@ def mark_schedule_enqueue_failed(
     return _mark_schedule_failure(
         session,
         schedule=schedule,
-        error=error,
         claim_token=claim_token,
         lease_generation=lease_generation,
     )
 
 
-def build_analysis_pipeline_payload(session: Session, analysis: Analysis, datasource_id: str | None = None) -> dict[str, Any]:
+def build_analysis_pipeline_payload(session: Session, analysis: Analysis) -> dict[str, Any]:
     pipeline = analysis.pipeline_definition
     tabs = pipeline.get('tabs', []) if isinstance(pipeline, dict) else []
     if not isinstance(tabs, list) or not tabs:
@@ -207,21 +203,6 @@ def build_analysis_pipeline_payload(session: Session, analysis: Analysis, dataso
             if datasource_model is not None:
                 source_type = datasource_model.source_type
                 merged_config = {'branch': branch, **datasource_model.config, **config}
-        if datasource_id and str(datasource_id) != str(output_id) and str(datasource_id) != str(tab_datasource_id):
-            next_tabs.append(
-                {
-                    **tab,
-                    'datasource': {
-                        **datasource,
-                        'id': tab_datasource_id,
-                        'analysis_tab_id': analysis_tab_id,
-                        'source_type': source_type,
-                        'config': merged_config,
-                    },
-                    'steps': [enrich_step(step) for step in tab.get('steps', []) if isinstance(step, dict)],
-                }
-            )
-            continue
         next_tabs.append(
             {
                 **tab,
@@ -252,7 +233,7 @@ def _build_analysis_request(session: Session, schedule: Schedule, analysis_id: s
     if target_tab is None:
         raise ValueError(f'No tab found in analysis {analysis_id} that produces datasource {schedule.datasource_id}')
 
-    pipeline_payload = build_analysis_pipeline_payload(session, analysis, datasource_id=schedule.datasource_id)
+    pipeline_payload = build_analysis_pipeline_payload(session, analysis)
     request = compute_schemas.BuildRequest.model_validate(
         {
             'analysis_pipeline': pipeline_payload,
@@ -369,11 +350,6 @@ def _enqueue_schedule_analysis_build(
     build_job_service.stage_job(session, build_id=build_id, namespace=namespace)
     runtime_outbox_service.enqueue_build_job_notification(session)
     return run
-
-
-def is_schedule_target_eligible(datasource: DataSource) -> bool:
-    """Schedules can target any existing datasource."""
-    return datasource is not None
 
 
 def _resolve_schedule_target(session: Session, datasource_id: str) -> tuple[DataSourceTargetKind, str | None, str | None]:
@@ -598,57 +574,6 @@ def stage_delete_schedule(session: Session, schedule_id: str) -> None:
     runtime_work_service.mark_schedule_pending(session, namespace=get_namespace())
 
 
-def get_build_order(session: Session, analysis_id: str) -> list[str]:
-    """Compute topological build order for analyses based on datasource dependencies.
-
-    Returns list of analysis IDs in dependency order (upstream first).
-    """
-    graph: dict[str, set[str]] = {}
-    in_degree: dict[str, int] = {}
-
-    analyses = session.execute(select(Analysis)).scalars().all()
-    for analysis in analyses:
-        if analysis.id not in graph:
-            graph[analysis.id] = set()
-            in_degree[analysis.id] = 0
-
-    deps = (
-        session.execute(
-            select(AnalysisDataSource).where(col(AnalysisDataSource.analysis_id).in_(list(graph.keys()))),
-        )
-        .scalars()
-        .all()
-    )
-    dep_ds_ids = [dep.datasource_id for dep in deps]
-    datasources_by_id: dict[str, DataSource] = {}
-    if dep_ds_ids:
-        ds_rows = session.execute(select(DataSource).where(col(DataSource.id).in_(dep_ds_ids))).scalars().all()
-        datasources_by_id = {str(ds.id): ds for ds in ds_rows}
-    for dep in deps:
-        datasource = datasources_by_id.get(dep.datasource_id)
-        if not datasource or not datasource.created_by_analysis_id:
-            continue
-        upstream = datasource.created_by_analysis_id
-        if upstream not in graph or dep.analysis_id not in graph:
-            continue
-        edges = graph.setdefault(upstream, set())
-        is_new = dep.analysis_id not in edges
-        edges.add(dep.analysis_id)
-        if is_new:
-            in_degree[dep.analysis_id] = in_degree.get(dep.analysis_id, 0) + 1
-
-    queue = deque(sorted(aid for aid, degree in in_degree.items() if degree == 0))
-    ordered: list[str] = []
-    while queue:
-        node = queue.popleft()
-        ordered.append(node)
-        for neighbor in sorted(graph.get(node, set())):
-            in_degree[neighbor] -= 1
-            if in_degree[neighbor] == 0:
-                queue.append(neighbor)
-    return ordered
-
-
 def should_run(cron_expr: str, last_run: datetime | None) -> bool:
     if not cron_expr:
         return False
@@ -689,14 +614,6 @@ def _schedule_candidate_batches(session: Session, statement: Select[Schedule]) -
         yield schedules
         if len(schedules) < _SCHEDULE_CANDIDATE_BATCH_SIZE:
             return
-
-
-def get_due_schedules(session: Session) -> list[Schedule]:
-    """Evaluate eligibility using bounded, ordered database candidate batches."""
-    now = _naive_utc(_utcnow())
-    return [
-        schedule for batch in _schedule_candidate_batches(session, _schedule_candidate_query(now)) for schedule in _due_schedule_candidates(session, batch, now)
-    ]
 
 
 def _due_schedule_candidates(session: Session, schedules: Sequence[Schedule], now: datetime) -> list[Schedule]:
@@ -920,23 +837,6 @@ def claim_due_schedules(
     return [rows_by_id[schedule_id] for schedule_id in claimed_ids]
 
 
-def mark_schedule_run(session: Session, schedule_id: str) -> None:
-    """Update last_run to now and recompute next_run after a successful build."""
-    schedule = session.get(Schedule, schedule_id)
-    if not schedule:
-        return
-    now = _utcnow().replace(tzinfo=None)
-    schedule.last_run = now
-    schedule.last_success_at = now
-    schedule.next_run = Schedule.compute_next_run(schedule.cron_expression)
-    schedule.lease_owner = None
-    schedule.claim_token = None
-    schedule.lease_expires_at = None
-    session.add(schedule)
-    runtime_work_service.mark_schedule_pending(session, namespace=get_namespace())
-    session.commit()
-
-
 def _tab_reading_datasource(tabs: list[Any], datasource_id: str) -> dict[str, Any] | None:
     """Return the first tab that reads datasource_id as an external source."""
     for tab in tabs:
@@ -979,7 +879,7 @@ def _build_reader_analysis_request(
     tab_id = target.get('id')
     if not isinstance(tab_id, str) or not tab_id:
         raise ValueError(f'Analysis {analysis.id} tab reading {schedule.datasource_id} has no id')
-    payload = build_analysis_pipeline_payload(session, analysis, datasource_id=schedule.datasource_id)
+    payload = build_analysis_pipeline_payload(session, analysis)
     request = compute_schemas.BuildRequest.model_validate({'analysis_pipeline': payload, 'tab_id': tab_id})
     raw_output = target.get('output')
     output = raw_output if isinstance(raw_output, dict) else {}

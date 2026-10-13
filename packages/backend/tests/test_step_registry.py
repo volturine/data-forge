@@ -2,7 +2,7 @@ from __future__ import annotations
 
 from pathlib import Path
 
-from backend_core.domain.analysis.step_types import iter_step_types
+from backend_core.domain.analysis.step_types import STEP_TYPES
 from modules.analysis.step_schemas import STEP_CATALOG
 
 FRONTEND_PROTOCOL_ANALYSIS = (
@@ -11,7 +11,7 @@ FRONTEND_PROTOCOL_ANALYSIS = (
 
 
 def test_step_catalog_matches_public_step_types() -> None:
-    assert set(STEP_CATALOG) == set(iter_step_types(include_plot_aliases=True))
+    assert set(STEP_CATALOG) == set(STEP_TYPES.all(include_plot_aliases=True))
 
 
 def test_generated_frontend_protocol_exports_catalog_configs() -> None:

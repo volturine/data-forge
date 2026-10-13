@@ -7,9 +7,9 @@ import json
 import logging
 import re
 import time
-from collections.abc import AsyncIterator, Callable, Sequence
+from collections.abc import AsyncIterator, Sequence
 from dataclasses import dataclass
-from typing import TYPE_CHECKING, Any
+from typing import TYPE_CHECKING, Any, cast
 
 import httpx
 from fastapi import APIRouter, Depends, FastAPI, HTTPException, Request
@@ -17,7 +17,7 @@ from fastapi.responses import StreamingResponse
 from pydantic import BaseModel, ConfigDict
 from sqlalchemy.exc import SQLAlchemyError
 
-from backend_core.ai_clients import AIError, ai_provider_name, get_ai_client, resolve_ai_provider
+from backend_core.ai_clients import AIError, ai_provider_name, get_ai_client, require_ai_provider
 from backend_core.api_execution_budget import run_api_blocking
 from backend_core.database import RuntimeCoordinatorFenced
 from backend_core.error_handlers import handle_errors
@@ -55,11 +55,7 @@ def _require_owned_session(session_id: str, user: User) -> ChatSession:
 
 async def _require_owned_session_async(session_id: str, user: User) -> ChatSession:
     """Load a chat session without running its synchronous DB fallback on the loop."""
-    return await _run_chat_db(_require_owned_session, session_id, user)
-
-
-async def _run_chat_db[**P, T](function: Callable[P, T], *args: P.args, **kwargs: P.kwargs) -> T:
-    return await run_api_blocking(function, *args, **kwargs)
+    return await run_api_blocking(_require_owned_session, session_id, user)
 
 
 @dataclass(frozen=True, slots=True)
@@ -71,14 +67,13 @@ class ChatProviderDefinition:
 
     @classmethod
     def require(cls, provider: str | enums_pb2.AIProvider) -> ChatProviderDefinition:
-        normalized = resolve_ai_provider(provider)
+        normalized = require_ai_provider(provider)
         return CHAT_PROVIDER_DEFINITIONS[normalized]
 
     async def list_models(self, body: ChatModelsRequest) -> list[dict]:
         if self.provider == enums_pb2.AI_PROVIDER_OPENROUTER:
-            if not body.api_key:
-                raise HTTPException(status_code=400, detail='API key is required')
-            return await list_models(body.api_key)
+            # The route validates the key according to this provider's capability before dispatch.
+            return await list_models(cast(str, body.api_key))
         client = get_ai_client(
             self.provider,
             endpoint_url=body.endpoint_url,
@@ -262,7 +257,7 @@ def _format_fallback_param_details(schema: dict) -> list[str]:
     return [_format_param_details(name, prop, name in required, 'arg', prop.get('description', '')) for name, prop in props.items()]
 
 
-def _build_tool_system_message(tools: Sequence[MCPToolDefinition | dict[str, Any]]) -> str:
+def _build_tool_system_message(tools: Sequence[MCPToolDefinition]) -> str:
     """Build a system message describing available tools and how to call them."""
     lines = [
         'You have access to the following tools. To call a tool, output EXACTLY this format on its own line:',
@@ -282,9 +277,8 @@ def _build_tool_system_message(tools: Sequence[MCPToolDefinition | dict[str, Any
         'Available tools:',
     ]
     for t in tools:
-        desc = t.get('description', '')
-        schema = t['input_schema']
-        meta = t.get('arg_metadata', {}) or {}
+        schema = t.input_schema
+        meta = t.arg_metadata or {}
         path_meta = meta.get('path') or []
         query_meta = meta.get('query') or []
         payload_meta = meta.get('payload')
@@ -329,9 +323,9 @@ def _build_tool_system_message(tools: Sequence[MCPToolDefinition | dict[str, Any
             param_parts = _format_fallback_param_details(schema)
 
         params_str = '\n'.join(param_parts) if param_parts else '    (no parameters)'
-        lines.append(f'- {t["id"]} [{t["method"]}]: {desc}')
+        lines.append(f'- {t.id} [{t.method.value}]: {t.description}')
         lines.append(f'  Parameters:\n{params_str}')
-        hint = format_output_hint(t.get('output_schema'))
+        hint = format_output_hint(t.output_schema)
         if hint:
             lines.append(f'  {hint}')
     return '\n'.join(lines)
@@ -593,7 +587,6 @@ async def _run_agent_turn(
     logger.info('chat turn start session=%s user_len=%d', session.id, len(user_content))
 
     try:
-        registry = [MCPToolDefinition.coerce(item) for item in registry]
         if tool_ids:
             id_set = set(tool_ids)
             registry = [tool for tool in registry if tool.id in id_set]
@@ -811,7 +804,7 @@ async def send_message(request: Request, body: MessageRequest, user: User = Depe
     await _require_owned_session_async(body.session_id, user)
     session_token = request.headers.get('X-Session-Token') or request.cookies.get('session_token') or ''
     try:
-        await _run_chat_db(
+        await run_api_blocking(
             chat_turn_store.enqueue,
             session_id=body.session_id,
             user_id=user.id,
@@ -834,7 +827,7 @@ async def send_message(request: Request, body: MessageRequest, user: User = Depe
 async def stop_generation(session_id: str, user: User = Depends(get_current_user)) -> dict:
     """Cancel the running agent turn for a session."""
     await _require_owned_session_async(session_id, user)
-    await _run_chat_db(chat_turn_store.request_stop, session_id=session_id, user_id=user.id)
+    await run_api_blocking(chat_turn_store.request_stop, session_id=session_id, user_id=user.id)
     return {'status': 'stopped', 'session_id': session_id}
 
 
@@ -849,7 +842,7 @@ class ConfirmRequest(BaseModel):
 async def confirm_tool(session_id: str, body: ConfirmRequest, user: User = Depends(get_current_user)) -> dict:
     """Confirm or deny a pending tool execution."""
     await _require_owned_session_async(session_id, user)
-    await _run_chat_db(chat_turn_store.confirm, session_id=session_id, user_id=user.id, approved=body.approved)
+    await run_api_blocking(chat_turn_store.confirm, session_id=session_id, user_id=user.id, approved=body.approved)
     return {'status': 'resolved', 'approved': body.approved}
 
 
@@ -858,7 +851,7 @@ async def confirm_tool(session_id: str, body: ConfirmRequest, user: User = Depen
 async def get_history(session_id: str, user: User = Depends(get_current_user)) -> dict:
     """Return the full event history for a session."""
     await _require_owned_session_async(session_id, user)
-    history, cursor, gap = await _run_chat_db(session_store.history, session_id)
+    history, cursor, gap = await run_api_blocking(session_store.history, session_id)
     return {'session_id': session_id, 'history': history, 'last_event_id': cursor, 'history_gap': gap}
 
 
@@ -886,7 +879,7 @@ async def stream(
         try:
             while True:
                 version = chat_stream_recovery.version(session_id)
-                rows, latest, oldest = await _run_chat_db(
+                rows, latest, oldest = await run_api_blocking(
                     chat_turn_store.read_events,
                     session_id=session_id,
                     after=cursor,
