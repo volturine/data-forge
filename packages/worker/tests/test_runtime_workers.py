@@ -765,7 +765,7 @@ async def test_cancelled_build_only_stops_its_exclusive_engine(monkeypatch) -> N
         raise asyncio.CancelledError
 
     monkeypatch.setattr(build_execution, "_run_queued_build_job", cancelled_job)
-    monkeypatch.setattr(build_execution, "run_control_in_thread", run_control_in_thread)
+    monkeypatch.setattr(build_execution, "run_shutdown_in_thread", run_control_in_thread)
 
     with pytest.raises(asyncio.CancelledError):
         await build_execution.run_queued_build_job(manager=cast(Any, Manager()), worker_id="worker-1", claim=claim)

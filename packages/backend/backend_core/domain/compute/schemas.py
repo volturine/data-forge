@@ -186,7 +186,7 @@ class AnalysisPipelineTab(BaseModel):
 class AnalysisPipelinePayload(BaseModel):
     model_config = ConfigDict(from_attributes=True)
 
-    analysis_id: str
+    analysis_id: str = Field(min_length=1)
     tabs: list[AnalysisPipelineTab]
 
     @field_validator('tabs')
@@ -474,6 +474,13 @@ class ExportRequest(BaseModel):
     iceberg_options: IcebergExportOptions | None = None
     result_id: str | None = None
 
+    @model_validator(mode='after')
+    def default_analysis_id(self) -> Self:
+        # The worker owns the engine by the pipeline's analysis RID.
+        if not self.analysis_id:
+            self.analysis_id = self.analysis_pipeline.analysis_id
+        return self
+
     @field_validator('result_id')
     @classmethod
     def validate_result_id(cls, value: str | None, info):
@@ -508,6 +515,13 @@ class DownloadRequest(BaseModel):
     tab_id: str | None = None
     format: ExportFormat = ExportFormat.CSV
     filename: str = 'download'
+
+    @model_validator(mode='after')
+    def default_analysis_id(self) -> Self:
+        # The worker owns the engine by the pipeline's analysis RID.
+        if not self.analysis_id:
+            self.analysis_id = self.analysis_pipeline.analysis_id
+        return self
 
 
 class StepSchemaRequest(BaseModel):

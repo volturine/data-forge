@@ -14,7 +14,7 @@ from runtime.compute_manager import COMPUTE_WORKER_ADMISSION_PRIORITY_LIFECYCLE,
 from runtime.domain.compute import schemas
 from runtime.domain.compute_worker_runs.schemas import ComputeWorkerRunKind
 from runtime.domain.datasource.models import DataSourceTargetKind
-from runtime.executors import run_compute_in_thread, run_control_in_thread
+from runtime.executors import run_compute_in_thread, run_control_in_thread, run_shutdown_in_thread
 from runtime.namespace import reset_namespace, set_namespace_context
 from runtime.worker_runtime_client import BuildJobLeaseLost, ClaimedBuildJob, WorkerRuntimeClient, async_client_from_env, client_from_env
 
@@ -425,7 +425,7 @@ async def _cancel_build_engine(manager: ProcessManager, claim: ClaimedBuildJob) 
         resource_id=claim.build_id,
     )
     with contextlib.suppress(Exception):
-        await run_control_in_thread(manager.shutdown_compute_worker, identity, namespace=claim.namespace)
+        await run_shutdown_in_thread(manager.shutdown_compute_worker, identity, namespace=claim.namespace)
 
 
 async def run_queued_build_job(

@@ -49,10 +49,7 @@ def test_download_and_export_admission_use_pipeline_identity_without_duplicate_i
     getattr(command, field_name).CopyFrom(request)
 
     identity = compute_request_runtime._compute_worker_identity_for_claimed(_claimed(kind, command))
-    pipeline_identity = compute_service.default_stateless_compute_worker_identity(
-        analysis_pipeline_to_execution_payload(request.analysis_pipeline),
-        request.target_step_id,
-    )
+    pipeline_identity = compute_service.default_stateless_compute_worker_identity(analysis_pipeline_to_execution_payload(request.analysis_pipeline))
 
     assert identity == pipeline_identity
     assert identity.scope == enums_pb2.COMPUTE_WORKER_SCOPE_ANALYSIS_INTERACTIVE
@@ -160,16 +157,14 @@ async def test_pipeline_only_download_admission_cancels_its_exact_job_on_lease_l
     monkeypatch.setattr(compute_request_runtime, "_renew_compute_lease", renew_lease)
     monkeypatch.setattr(compute_request_runtime, "run_compute_in_thread", run_compute_in_thread)
     monkeypatch.setattr(compute_request_runtime, "run_control_in_thread", run_control_in_thread)
+    monkeypatch.setattr(compute_request_runtime, "run_shutdown_in_thread", run_control_in_thread)
 
     download = compute_pb2.DownloadCommand(target_step_id="source", analysis_pipeline=_pipeline())
     claimed = _claimed(
         enums_pb2.COMPUTE_REQUEST_KIND_DOWNLOAD,
         compute_pb2.ComputeCommand(download=download),
     )
-    expected_identity = compute_service.default_stateless_compute_worker_identity(
-        analysis_pipeline_to_execution_payload(download.analysis_pipeline),
-        download.target_step_id,
-    )
+    expected_identity = compute_service.default_stateless_compute_worker_identity(analysis_pipeline_to_execution_payload(download.analysis_pipeline))
 
     task = asyncio.create_task(compute_request_runtime._execute_request(claimed, cast(Any, Manager())))
     await asyncio.wait_for(execution_started.wait(), timeout=1)

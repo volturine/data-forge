@@ -33,7 +33,7 @@ from runtime.domain.compute import schemas as compute_schemas
 from runtime.domain.compute_requests.live import ComputeRequestWake, request_hub
 from runtime.domain.domain_enums import domain_token
 from runtime.exceptions import AppError, StaleComputeInputError, status_for_app_error
-from runtime.executors import run_compute_in_thread, run_control_in_thread
+from runtime.executors import run_compute_in_thread, run_control_in_thread, run_shutdown_in_thread
 from runtime.json_values import dict_to_struct
 from runtime.namespace import reset_namespace, set_namespace_context
 from runtime.object_store import object_store_url, upload_bytes
@@ -430,7 +430,13 @@ async def _run_once(
     claimed = await claim_once()
     if claimed is None:
         return False
-    identity = _compute_worker_identity_for_claimed(claimed)
+    try:
+        identity = _compute_worker_identity_for_claimed(claimed)
+    except ValueError as exc:
+        # A malformed command cannot become valid on retry. Fail it now rather
+        # than letting the lease expire until the attempt budget is exhausted.
+        await run_control_in_thread(_reject_malformed_request, claimed, exc)
+        return True
     logger.debug(
         "Compute request claimed request_id=%s lease_generation=%s coordinator_generation=%s kind=%s namespace=%s resource_id=%s command_hash=%s",
         claimed.id,
@@ -599,8 +605,9 @@ async def _execute_request(
                         ):
                             terminal_published.set()
 
-                    # Shutdown must run even when every compute thread is busy.
-                    executor = run_control_in_thread if claimed.kind in COMPUTE_WORKER_SHUTDOWN_REQUEST_KINDS else run_compute_in_thread
+                    # Shutdown must run even when every compute thread is busy, and
+                    # must not occupy the control threads that release admissions.
+                    executor = run_shutdown_in_thread if claimed.kind in COMPUTE_WORKER_SHUTDOWN_REQUEST_KINDS else run_compute_in_thread
                     await executor(execute_and_record_terminal, claimed, manager)
 
                 execution = asyncio.create_task(run_execution())
@@ -641,7 +648,7 @@ async def _execute_request(
                                     job_id=claimed.id,
                                 )
                             with contextlib.suppress(Exception):
-                                await run_control_in_thread(
+                                await run_shutdown_in_thread(
                                     manager.shutdown_compute_worker_after_request_lease_loss,
                                     identity,
                                     namespace=claimed.namespace,
@@ -1335,17 +1342,19 @@ def _execute_request_sync(
         client.close()
 
 
-def _stateless_compute_worker_identity_for_command(
-    command: message.Message,
-    *,
-    target_step_id: str,
-    tab_id: str | None,
-) -> compute_pb2.ComputeWorkerIdentity:
+_STATELESS_COMMAND_FIELDS = {
+    enums_pb2.COMPUTE_REQUEST_KIND_SCHEMA: "schema",
+    enums_pb2.COMPUTE_REQUEST_KIND_ROW_COUNT: "row_count",
+    enums_pb2.COMPUTE_REQUEST_KIND_DOWNLOAD: "download",
+    enums_pb2.COMPUTE_REQUEST_KIND_EXPORT: "export",
+}
+
+
+def _stateless_compute_worker_identity_for_command(command: message.Message) -> compute_pb2.ComputeWorkerIdentity:
     pipeline = getattr(command, "analysis_pipeline", None)
     if pipeline is None:
-        raise ValueError("stateless compute command is missing analysis_pipeline")
-    analysis_pipeline = analysis_pipeline_to_execution_payload(pipeline)
-    return service.default_stateless_compute_worker_identity(analysis_pipeline, target_step_id, tab_id)
+        raise ValueError("Malformed compute request: stateless compute command is missing analysis_pipeline")
+    return service.default_stateless_compute_worker_identity(analysis_pipeline_to_execution_payload(pipeline))
 
 
 def _compute_worker_identity_for_claimed(claimed: ClaimedComputeRequest) -> compute_pb2.ComputeWorkerIdentity | None:
@@ -1381,43 +1390,9 @@ def _compute_worker_identity_for_claimed(claimed: ClaimedComputeRequest) -> comp
         preview = cast(compute_pb2.StepPreviewCommand, _compute_command_from_claimed(claimed, "preview"))
         if preview.HasField("engine_identity"):
             return preview.engine_identity
-        return _stateless_compute_worker_identity_for_command(
-            preview,
-            target_step_id=preview.target_step_id,
-            tab_id=preview.tab_id if preview.HasField("tab_id") else None,
-        )
-    if kind == enums_pb2.COMPUTE_REQUEST_KIND_SCHEMA:
-        schema = cast(compute_pb2.StepSchemaCommand, _compute_command_from_claimed(claimed, "schema"))
-        if schema.HasField("analysis_id") and schema.analysis_id:
-            return _stateless_compute_worker_identity_for_command(
-                schema,
-                target_step_id=schema.target_step_id,
-                tab_id=schema.tab_id if schema.HasField("tab_id") else None,
-            )
-        return None
-    if kind == enums_pb2.COMPUTE_REQUEST_KIND_ROW_COUNT:
-        row_count = cast(compute_pb2.StepRowCountCommand, _compute_command_from_claimed(claimed, "row_count"))
-        if row_count.HasField("analysis_id") and row_count.analysis_id:
-            return _stateless_compute_worker_identity_for_command(
-                row_count,
-                target_step_id=row_count.target_step_id,
-                tab_id=row_count.tab_id if row_count.HasField("tab_id") else None,
-            )
-        return None
-    if kind == enums_pb2.COMPUTE_REQUEST_KIND_DOWNLOAD:
-        download = cast(compute_pb2.DownloadCommand, _compute_command_from_claimed(claimed, "download"))
-        return _stateless_compute_worker_identity_for_command(
-            download,
-            target_step_id=download.target_step_id,
-            tab_id=download.tab_id if download.HasField("tab_id") else None,
-        )
-    if kind == enums_pb2.COMPUTE_REQUEST_KIND_EXPORT:
-        export = cast(compute_pb2.ExportCommand, _compute_command_from_claimed(claimed, "export"))
-        return _stateless_compute_worker_identity_for_command(
-            export,
-            target_step_id=export.target_step_id,
-            tab_id=export.tab_id if export.HasField("tab_id") else None,
-        )
+        return _stateless_compute_worker_identity_for_command(preview)
+    if kind in _STATELESS_COMMAND_FIELDS:
+        return _stateless_compute_worker_identity_for_command(_compute_command_from_claimed(claimed, _STATELESS_COMMAND_FIELDS[kind]))
     return None
 
 
@@ -1612,6 +1587,18 @@ def _complete_request(
                 exc,
             )
             time.sleep(delay)
+
+
+def _reject_malformed_request(claimed: ClaimedComputeRequest, exc: ValueError) -> None:
+    client = worker_runtime_client()
+    try:
+        _fail_request_with_retry(client, claimed, error_message=_error_message(exc), error=_error_result(exc))
+    except BackendWorkerRpcError as publish_exc:
+        if publish_exc.status_code != 412:
+            raise
+    finally:
+        client.close()
+    logger.info("Compute request %s rejected as malformed: %s", claimed.id, exc)
 
 
 def _fail_request_with_retry(

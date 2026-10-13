@@ -29,7 +29,7 @@ from runtime.docker_compute_worker import (
     validate_compute_worker_runtime_readiness,
 )
 from runtime.domain.runtime_workers.models import RuntimeWorkerKind
-from runtime.executors import run_control_in_thread
+from runtime.executors import COMPUTE_WORKER_SHUTDOWN_WORKERS, run_control_in_thread
 from runtime.logging import configure_logging
 from runtime.manager_lease import WorkerManagerLease
 from runtime.namespace import get_namespace, reset_namespace, set_namespace_context
@@ -57,7 +57,6 @@ _MIN_RUNTIME_RECOVERY_SECONDS = 5.0
 # Hot-path work uses explicit compute/control pools. Keep asyncio's fallback
 # executor small for startup, shutdown, and occasional lifecycle glue.
 _DEFAULT_EXECUTOR_WORKERS = 4
-_SHUTDOWN_CONTROL_CONCURRENCY = 4
 _COORDINATOR_GENERATION_POLL_SECONDS = 5.0
 _MANAGER_LEASE_CHECK_SECONDS = 1.0
 _MANAGER_LEASE_RETRY_SECONDS = 1.0
@@ -315,7 +314,7 @@ async def _run_worker_manager_runtime(
         (ACTIVE_REQUEST_KINDS, request_worker_count, active_claim_semaphore),
         (
             COMPUTE_WORKER_SHUTDOWN_REQUEST_KINDS,
-            min(request_worker_count, _SHUTDOWN_CONTROL_CONCURRENCY),
+            min(request_worker_count, COMPUTE_WORKER_SHUTDOWN_WORKERS),
             shutdown_claim_semaphore,
         ),
     ]

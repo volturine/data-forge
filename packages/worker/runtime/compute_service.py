@@ -51,7 +51,7 @@ from runtime.exceptions import (
     PipelineValidationError,
     datasource_not_found,
 )
-from runtime.executors import run_compute_in_thread, run_control_in_thread, run_engine_io_in_thread
+from runtime.executors import run_compute_in_thread, run_engine_io_in_thread, run_shutdown_in_thread
 from runtime.healthchecks import (
     HealthCheckResult as _HealthCheckEvalResult,
     load_lazy_frame as _load_healthcheck_lazy,
@@ -1490,40 +1490,22 @@ def _select_pipeline_tab(pipeline: dict, tab_id: str | None, target_step_id: str
     return selected
 
 
-def default_stateless_compute_worker_identity(
-    analysis_pipeline: dict,
-    target_step_id: str,
-    tab_id: str | None = None,
-) -> compute_pb2.ComputeWorkerIdentity:
-    """Return the shared engine identity for a pipeline operation.
+def default_stateless_compute_worker_identity(analysis_pipeline: dict) -> compute_pb2.ComputeWorkerIdentity:
+    """Return the shared engine identity owned by the pipeline's analysis RID.
 
-    An analysis RID owns one shared preview worker across its transforms. A
-    datasource-only preview supplies an explicit datasource identity from the
-    API, so the fallback is only used for a pipeline that has no analysis RID.
-    Keep this selection identical to the backend identity normalization so
-    admission and execution refer to the same engine key.
+    Datasource previews carry an explicit datasource identity from the API, so
+    every other pipeline operation must name its analysis RID. Keep this
+    selection identical to the backend identity normalization so admission and
+    execution refer to the same engine key.
     """
     analysis_id = analysis_pipeline.get("analysis_id")
-    if isinstance(analysis_id, str) and analysis_id:
-        return compute_pb2.ComputeWorkerIdentity(
-            scope=enums_pb2.COMPUTE_WORKER_SCOPE_ANALYSIS_INTERACTIVE,
-            reuse_policy=enums_pb2.COMPUTE_WORKER_REUSE_POLICY_SHARED,
-            analysis_id=analysis_id,
-            resource_id=analysis_id,
-        )
-
-    selected = _select_pipeline_tab(analysis_pipeline, tab_id, target_step_id)
-    datasource = selected.get("datasource")
-    if not isinstance(datasource, dict):
-        raise ValueError("analysis_pipeline tab datasource must be a dict")
-    datasource_id = datasource.get("id")
-    if not isinstance(datasource_id, str) or not datasource_id:
-        raise ValueError("analysis_pipeline tab missing datasource.id")
+    if not isinstance(analysis_id, str) or not analysis_id:
+        raise ValueError("Malformed compute request: analysis_pipeline.analysis_id is required")
     return compute_pb2.ComputeWorkerIdentity(
-        scope=enums_pb2.COMPUTE_WORKER_SCOPE_DATASOURCE_PREVIEW,
+        scope=enums_pb2.COMPUTE_WORKER_SCOPE_ANALYSIS_INTERACTIVE,
         reuse_policy=enums_pb2.COMPUTE_WORKER_REUSE_POLICY_SHARED,
-        datasource_id=datasource_id,
-        resource_id=datasource_id,
+        analysis_id=analysis_id,
+        resource_id=analysis_id,
     )
 
 
@@ -1569,11 +1551,8 @@ def _resolve_pipeline_request(
 def _resolve_export_compute_worker_identity(
     *,
     compute_worker_identity: compute_pb2.ComputeWorkerIdentity | None,
-    analysis_id: str | None,
     build_id: str | None,
     analysis_pipeline: dict,
-    target_step_id: str,
-    tab_id: str | None,
 ) -> compute_pb2.ComputeWorkerIdentity:
     if compute_worker_identity is not None:
         return compute_worker_identity
@@ -1584,9 +1563,7 @@ def _resolve_export_compute_worker_identity(
             build_id=build_id,
             resource_id=build_id,
         )
-    if analysis_id:
-        return default_stateless_compute_worker_identity(analysis_pipeline, target_step_id, tab_id)
-    raise ValueError("Export requires analysis_id or engine identity")
+    return default_stateless_compute_worker_identity(analysis_pipeline)
 
 
 def preview_step(
@@ -1607,7 +1584,6 @@ def preview_step(
     """Preview the result of executing pipeline up to a specific step with pagination."""
     from runtime.domain.compute.schemas import StepPreviewResponse
 
-    requested_target_step_id = target_step_id
     started_at = datetime.now(UTC)
     started_perf = time.perf_counter()
     resolved = _resolve_pipeline_request(analysis_pipeline, tab_id, target_step_id)
@@ -1647,11 +1623,7 @@ def preview_step(
         preview_steps = steps[: step_index + 1]
         preview_steps = _hydrate_udfs(preview_steps)
 
-    resolved_compute_worker_identity = compute_worker_identity or default_stateless_compute_worker_identity(
-        analysis_pipeline,
-        requested_target_step_id,
-        tab_id,
-    )
+    resolved_compute_worker_identity = compute_worker_identity or default_stateless_compute_worker_identity(analysis_pipeline)
     request_namespace = get_namespace()
     persist_preview_runs = settings.persist_preview_runs
     run_id = None
@@ -1860,7 +1832,6 @@ def get_step_schema(
     """Get the output schema of a pipeline step without returning data."""
     from runtime.domain.compute.schemas import StepSchemaResponse
 
-    requested_target_step_id = target_step_id
     resolved = _resolve_pipeline_request(analysis_pipeline, tab_id, target_step_id)
     datasource_id = resolved["datasource_id"]
     steps = resolved["steps"]
@@ -1890,7 +1861,7 @@ def get_step_schema(
         schema_steps = _hydrate_udfs(schema_steps)
 
     with manager.acquire_engine(
-        default_stateless_compute_worker_identity(analysis_pipeline, requested_target_step_id, tab_id),
+        default_stateless_compute_worker_identity(analysis_pipeline),
     ) as engine:
         additional_datasources = _get_additional_datasources(schema_steps, analysis_pipeline)
 
@@ -1942,7 +1913,6 @@ def get_step_row_count(
     """Get the row count of a pipeline step without collecting full data."""
     from runtime.domain.compute.schemas import StepRowCountResponse
 
-    requested_target_step_id = target_step_id
     started_at = datetime.now(UTC)
     started_perf = time.perf_counter()
 
@@ -2003,7 +1973,7 @@ def get_step_row_count(
     result_data: dict | None = None
     try:
         with manager.acquire_engine(
-            default_stateless_compute_worker_identity(analysis_pipeline, requested_target_step_id, tab_id),
+            default_stateless_compute_worker_identity(analysis_pipeline),
         ) as engine:
             additional_datasources = _get_additional_datasources(count_steps, analysis_pipeline)
 
@@ -2131,7 +2101,6 @@ def export_data(
 
     started_perf = time.perf_counter()
 
-    requested_target_step_id = target_step_id
     resolved = _resolve_pipeline_request(analysis_pipeline, tab_id, target_step_id)
     datasource_id = resolved["datasource_id"]
     steps = resolved["steps"]
@@ -2162,11 +2131,8 @@ def export_data(
 
     resolved_compute_worker_identity = _resolve_export_compute_worker_identity(
         compute_worker_identity=compute_worker_identity,
-        analysis_id=analysis_id_value,
         build_id=build_id,
         analysis_pipeline=analysis_pipeline,
-        target_step_id=requested_target_step_id,
-        tab_id=tab_id,
     )
 
     additional_datasources = _get_additional_datasources(export_steps, analysis_pipeline)
@@ -2544,7 +2510,6 @@ def download_step(
     """Download the result of a pipeline step in a specific format."""
     from runtime.export_formats import get_export_format
 
-    requested_target_step_id = target_step_id
     started_at = datetime.now(UTC)
     started_perf = time.perf_counter()
 
@@ -2587,11 +2552,7 @@ def download_step(
         download_steps = steps[: step_index + 1]
         download_steps = _hydrate_udfs(download_steps)
 
-    resolved_compute_worker_identity = default_stateless_compute_worker_identity(
-        analysis_pipeline,
-        requested_target_step_id,
-        tab_id,
-    )
+    resolved_compute_worker_identity = default_stateless_compute_worker_identity(analysis_pipeline)
     branch = _resolve_branch_value(datasource_config)
     tab_name = _tab_name_from_pipeline(analysis_pipeline, tab_id)
     request_payload = _ensure_request_branch(
@@ -3750,7 +3711,7 @@ async def run_analysis_build_stream(
             ),
         )
     with contextlib.suppress(Exception):
-        await run_control_in_thread(
+        await run_shutdown_in_thread(
             manager.shutdown_compute_worker,
             compute_pb2.ComputeWorkerIdentity(
                 scope=enums_pb2.COMPUTE_WORKER_SCOPE_BUILD,

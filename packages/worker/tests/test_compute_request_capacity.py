@@ -229,18 +229,18 @@ async def test_request_and_build_jobs_share_manager_capacity_and_shutdown_bypass
     manager = _manager(tracker)
     real_execute_sync = compute_request_runtime._execute_request_sync
     real_run_compute = compute_request_runtime.run_compute_in_thread
-    real_run_control = compute_request_runtime.run_control_in_thread
+    real_run_shutdown = compute_request_runtime.run_shutdown_in_thread
     compute_submissions: list[str] = []
-    control_submissions: list[str] = []
+    shutdown_submissions: list[str] = []
 
     async def track_request_submission(function, *args, **kwargs):
         compute_submissions.append(cast(compute_request_runtime.ClaimedComputeRequest, args[0]).id)
         return await real_run_compute(function, *args, **kwargs)
 
-    async def track_control_submission(function, *args, **kwargs):
+    async def track_shutdown_submission(function, *args, **kwargs):
         if getattr(function, "__name__", None) == "execute_and_record_terminal":
-            control_submissions.append(cast(compute_request_runtime.ClaimedComputeRequest, args[0]).id)
-        return await real_run_control(function, *args, **kwargs)
+            shutdown_submissions.append(cast(compute_request_runtime.ClaimedComputeRequest, args[0]).id)
+        return await real_run_shutdown(function, *args, **kwargs)
 
     def execute_sync(claim, process_manager, terminal_publication_started=None) -> bool:
         if claim.kind == enums_pb2.COMPUTE_REQUEST_KIND_SHUTDOWN_ENGINE:
@@ -254,7 +254,7 @@ async def test_request_and_build_jobs_share_manager_capacity_and_shutdown_bypass
     monkeypatch.setattr(compute_request_runtime, "_renew_compute_lease", _keep_lease_alive)
     monkeypatch.setattr(compute_request_runtime, "_execute_request_sync", execute_sync)
     monkeypatch.setattr(compute_request_runtime, "run_compute_in_thread", track_request_submission)
-    monkeypatch.setattr(compute_request_runtime, "run_control_in_thread", track_control_submission)
+    monkeypatch.setattr(compute_request_runtime, "run_shutdown_in_thread", track_shutdown_submission)
     completed: list[compute_pb2.ComputeResponse] = []
 
     class Client:
@@ -333,7 +333,7 @@ async def test_request_and_build_jobs_share_manager_capacity_and_shutdown_bypass
         await asyncio.wait_for(tasks[-1], timeout=3)
         assert completed and completed[-1].WhichOneof("response") == "ack"
         assert shutdown_claim.id not in compute_submissions
-        assert control_submissions == [shutdown_claim.id]
+        assert shutdown_submissions == [shutdown_claim.id]
         assert tracker.peak_active == 2
 
         tracker.release(request_a.id)
