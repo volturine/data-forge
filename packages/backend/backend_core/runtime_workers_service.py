@@ -8,6 +8,11 @@ from backend_core.persistence.runtime_workers.models import RuntimeWorker
 from backend_core.sqlmodel_typing import col, sa
 from backend_core.time import utc_now as _utcnow
 
+# A registration silent this long belongs to a process that died without a
+# graceful stop; its leases expired long ago. A paused process that resumes
+# finds its heartbeat rejected and re-registers.
+_ABANDONED_AFTER = timedelta(minutes=5)
+
 
 def register_worker(
     session: Session, *, worker_id: str, kind: RuntimeWorkerKind, hostname: str, pid: int, capacity: int, active_jobs: int = 0, now: datetime | None = None
@@ -36,6 +41,14 @@ def register_worker(
         worker.updated_at = stamp
         worker.stopped_at = None
     session.add(worker)
+    session.execute(
+        update(RuntimeWorker)
+        .where(sa(RuntimeWorker.kind == kind))
+        .where(sa(RuntimeWorker.id != worker_id))
+        .where(col(RuntimeWorker.stopped_at).is_(None))
+        .where(sa(RuntimeWorker.last_heartbeat_at < stamp - _ABANDONED_AFTER))
+        .values(stopped_at=RuntimeWorker.last_heartbeat_at, active_jobs=0, updated_at=stamp)
+    )
     session.commit()
     session.refresh(worker)
     return worker
@@ -46,9 +59,9 @@ def heartbeat_worker(session: Session, *, worker_id: str, active_jobs: int | Non
     values: dict[str, object] = {'last_heartbeat_at': stamp, 'updated_at': stamp}
     if active_jobs is not None:
         values['active_jobs'] = active_jobs
-    result = session.execute(update(RuntimeWorker).where(sa(RuntimeWorker.id == worker_id)).values(**values))
+    result = session.execute(update(RuntimeWorker).where(sa(RuntimeWorker.id == worker_id)).where(col(RuntimeWorker.stopped_at).is_(None)).values(**values))
     if getattr(result, 'rowcount', None) != 1:
-        raise ValueError(f'Runtime worker {worker_id} not found')
+        raise ValueError(f'Runtime worker {worker_id} is not registered')
     session.commit()
 
 

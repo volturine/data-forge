@@ -1,6 +1,7 @@
 from datetime import UTC, datetime, timedelta
 
 import pytest
+from sqlmodel import select
 
 from backend_core import runtime_workers_service as runtime_worker_service
 from backend_core.database import run_settings_db
@@ -69,3 +70,40 @@ def test_heartbeat_worker_updates_jobs_and_rejects_unknown_worker() -> None:
 
     with pytest.raises(ValueError, match='missing-worker'):
         run_settings_db(lambda session: runtime_worker_service.heartbeat_worker(session, worker_id='missing-worker', now=now))
+
+
+def _register(worker_id: str, kind: RuntimeWorkerKind, now: datetime) -> RuntimeWorker:
+    return run_settings_db(
+        lambda session: runtime_worker_service.register_worker(session, worker_id=worker_id, kind=kind, hostname='host', pid=1, capacity=1, now=now)
+    )
+
+
+def test_registration_marks_abandoned_same_kind_workers_stopped() -> None:
+    now = datetime.now(UTC)
+    abandoned_at = now - timedelta(minutes=10)
+    _register('abandoned-manager', RuntimeWorkerKind.COORDINATOR, abandoned_at)
+    _register('standby-manager', RuntimeWorkerKind.COORDINATOR, now - timedelta(seconds=30))
+    _register('abandoned-scheduler', RuntimeWorkerKind.SCHEDULER, abandoned_at)
+
+    _register('new-manager', RuntimeWorkerKind.COORDINATOR, now)
+
+    rows = run_settings_db(lambda session: {row.id: row for row in session.exec(select(RuntimeWorker)).all()})
+    assert rows['abandoned-manager'].stopped_at is not None
+    assert rows['abandoned-manager'].stopped_at.replace(tzinfo=UTC) == abandoned_at
+    assert rows['standby-manager'].stopped_at is None
+    assert rows['abandoned-scheduler'].stopped_at is None
+    assert rows['new-manager'].stopped_at is None
+
+
+def test_stopped_worker_heartbeat_is_rejected_until_it_registers_again() -> None:
+    now = datetime.now(UTC)
+    _register('paused-manager', RuntimeWorkerKind.COORDINATOR, now - timedelta(minutes=10))
+    _register('active-manager', RuntimeWorkerKind.COORDINATOR, now)
+
+    with pytest.raises(ValueError, match='paused-manager is not registered'):
+        run_settings_db(lambda session: runtime_worker_service.heartbeat_worker(session, worker_id='paused-manager', now=now))
+
+    _register('paused-manager', RuntimeWorkerKind.COORDINATOR, now)
+    run_settings_db(lambda session: runtime_worker_service.heartbeat_worker(session, worker_id='paused-manager', now=now))
+    worker = run_settings_db(lambda session: session.get(RuntimeWorker, 'paused-manager'))
+    assert worker is not None and worker.stopped_at is None
