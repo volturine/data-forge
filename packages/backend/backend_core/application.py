@@ -385,6 +385,10 @@ async def _provision_default_namespace_credentials() -> None:
             await asyncio.sleep(2.0)
 
 
+def event_loop_lag_log_level(lag_seconds: float, warning_seconds: float) -> int:
+    return logging.WARNING if lag_seconds >= warning_seconds else logging.INFO
+
+
 async def event_loop_lag_loop(
     stop_event: asyncio.Event,
     *,
@@ -397,21 +401,28 @@ async def event_loop_lag_loop(
     interval = max(float(interval_seconds), 0.05)
     warning = max(float(warning_seconds), interval)
     while not stop_event.is_set():
-        if watchdog is not None:
-            watchdog.tick()
-        started = loop.time()
-        with contextlib.suppress(TimeoutError):
-            await asyncio.wait_for(stop_event.wait(), timeout=interval)
-            return
-        lag = max(0.0, loop.time() - started - interval)
-        if lag >= _EVENT_LOOP_LAG_INFO_SECONDS:
-            logger.log(
-                logging.WARNING if lag >= warning else logging.INFO,
-                'API event loop lag detected pid=%s lag_ms=%.1f interval_ms=%.1f',
-                os.getpid(),
-                lag * 1000,
-                interval * 1000,
-            )
+        try:
+            if watchdog is not None:
+                watchdog.tick()
+            started = loop.time()
+            with contextlib.suppress(TimeoutError):
+                await asyncio.wait_for(stop_event.wait(), timeout=interval)
+                return
+            lag = max(0.0, loop.time() - started - interval)
+            if lag >= _EVENT_LOOP_LAG_INFO_SECONDS:
+                logger.log(
+                    event_loop_lag_log_level(lag, warning),
+                    'API event loop lag detected pid=%s lag_ms=%.1f interval_ms=%.1f',
+                    os.getpid(),
+                    lag * 1000,
+                    interval * 1000,
+                )
+        except Exception:
+            # Diagnostics must never silently disappear after one unusual task
+            # state (for example a task finishing between all_tasks() and
+            # get_stack()); the next interval produces a fresh signal.
+            logger.exception('API event-loop lag monitor iteration failed')
+            await asyncio.sleep(interval)
 
 
 @asynccontextmanager

@@ -178,9 +178,14 @@ class _EngineJobs:
                 error_details={},
             )
         except Exception as exc:
-            from runtime.polars_compute import classify_engine_error
+            # The job must always complete; a classification failure must not
+            # leave the caller waiting for its own timeout.
+            try:
+                from runtime.polars_compute import classify_engine_error
 
-            error_kind, error_details = classify_engine_error(exc)
+                error_kind, error_details = classify_engine_error(exc)
+            except Exception:
+                error_kind, error_details = "execution_error", {}
             error_details = {**error_details, "exception_type": type(exc).__name__}
             logger.exception("Engine job %s failed", state.job_id)
             result = ComputeWorkerResult(

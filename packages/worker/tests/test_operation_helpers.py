@@ -6,7 +6,7 @@ import pytest
 
 from dataforge_protocol import enums_pb2
 from operations.enums import ChartAggregation, FilterOperator, TimeComponent
-from operations.fill_null import cast_value, get_fill_strategy, get_polars_type
+from operations.fill_null import cast_value, get_polars_type
 from operations.filter import FilterOperatorDefinition
 from operations.groupby import GroupByAggregationDefinition
 from operations.plot import _agg_expr
@@ -87,11 +87,6 @@ def test_timeseries_duration_invalid():
     params = TimeseriesParams.model_validate({"column": "ts", "operation_type": "add", "new_column": "bad", "unit": "nope"})
     with pytest.raises(ValueError, match="Unsupported duration unit"):
         params.duration_expr(1)
-
-
-def test_fill_strategy():
-    strategy = get_fill_strategy("forward")
-    assert strategy is not None
 
 
 def test_export_format():

@@ -670,8 +670,9 @@ class RequestLoggingMiddleware:
             return
         try:
             future = _REQUEST_LOG_EXECUTOR.submit(self._log_request, *args, **kwargs)
-        except RuntimeError:
-            # The executor refuses new work during interpreter shutdown.
+        except Exception:
+            # Request logging must never fail the request or leak its slot
+            # (the executor also refuses new work during interpreter shutdown).
             _REQUEST_LOG_PENDING_SLOTS.release()
             _logger.debug('Request log preparation could not be queued; dropping one request log', exc_info=True)
             return

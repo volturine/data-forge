@@ -1737,7 +1737,10 @@ def export_data(
             previous_metadata_path = previous_config.get("metadata_path") if isinstance(previous_config, dict) else None
             if isinstance(previous_metadata_path, str):
                 keep.add(previous_metadata_path.rstrip("/"))
-            prune_superseded_revisions(table_path, keep_urls=frozenset(keep))
+            try:
+                prune_superseded_revisions(table_path, keep_urls=frozenset(keep))
+            except Exception as exc:
+                logger.warning("Revision GC failed for %s: %s", table_path, exc)
 
         current_snapshot = iceberg_table.current_snapshot()
         snapshot_id = str(current_snapshot.snapshot_id) if current_snapshot else None

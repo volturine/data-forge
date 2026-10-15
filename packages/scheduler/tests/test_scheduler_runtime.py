@@ -3,6 +3,7 @@ from __future__ import annotations
 import asyncio
 import os
 
+import grpc
 import pytest
 
 import main as scheduler_main
@@ -280,3 +281,48 @@ async def test_stalled_scheduler_dispatch_expires_health_while_heartbeat_continu
         stop_event.set()
         release.set()
         await task
+
+
+class _RpcError(grpc.RpcError):
+    def __init__(self, code: grpc.StatusCode) -> None:
+        self._code = code
+
+    def code(self) -> grpc.StatusCode:
+        return self._code
+
+    def details(self) -> str:
+        return "UNAVAILABLE mentioned in details only"
+
+
+def _client_with_register_failures(codes: list[grpc.StatusCode]) -> tuple[scheduler_main.SchedulerApiClient, list[int]]:
+    client = scheduler_main.SchedulerApiClient(target="scheduler-test:1", token="token")
+    attempts: list[int] = []
+
+    class Stub:
+        async def RegisterScheduler(self, request: object, *, timeout: float, metadata: object) -> object:
+            attempts.append(len(attempts))
+            if codes:
+                raise _RpcError(codes.pop(0))
+            return object()
+
+    client._stub = Stub()  # type: ignore[assignment]
+    return client, attempts
+
+
+@pytest.mark.asyncio
+async def test_registration_retries_only_unavailable_status(monkeypatch: pytest.MonkeyPatch) -> None:
+    async def no_sleep(_seconds: float) -> None:
+        return None
+
+    monkeypatch.setattr(scheduler_main.asyncio, "sleep", no_sleep)
+
+    client, attempts = _client_with_register_failures([grpc.StatusCode.UNAVAILABLE, grpc.StatusCode.UNAVAILABLE])
+    await client.register(worker_id="w", hostname="h", pid=1, capacity=1, retry_seconds=30)
+    assert len(attempts) == 3
+    await client.close()
+
+    client, attempts = _client_with_register_failures([grpc.StatusCode.INTERNAL])
+    with pytest.raises(RuntimeError, match="Backend scheduler gRPC failed with INTERNAL"):
+        await client.register(worker_id="w", hostname="h", pid=1, capacity=1, retry_seconds=30)
+    assert len(attempts) == 1
+    await client.close()
