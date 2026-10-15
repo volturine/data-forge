@@ -197,9 +197,6 @@ class TestMCPConfirm:
         assert action is not None
         assert action.token_hash != token
         assert 'sensitive-test-value' not in action.args_encrypted
-        entry = PendingStore().get(token, owner_id=test_user.id)
-        assert entry is not None
-        assert entry.args == args
 
         with ThreadPoolExecutor(max_workers=2) as executor:
             results = list(executor.map(lambda _: PendingStore().pop(token, owner_id=test_user.id), range(2)))
@@ -209,7 +206,10 @@ class TestMCPConfirm:
         assert consumed[0].args == args
 
     def test_confirm_executes_pending_action(self, client: TestClient, test_user) -> None:
-        from modules.mcp.pending import PendingStore
+        from hashlib import sha256
+
+        from backend_core.database import run_settings_db
+        from backend_core.persistence.mcp_pending.models import McpPendingAction
 
         response = client.get('/api/v1/mcp/tools')
         tools = response.json()
@@ -222,8 +222,9 @@ class TestMCPConfirm:
 
         call_resp = client.post('/api/v1/mcp/call', json={'tool_id': post_tool['id'], 'args': {}})
         token = call_resp.json()['token']
-        pending = PendingStore().get(token, owner_id=test_user.id)
+        pending = run_settings_db(lambda session: session.get(McpPendingAction, sha256(token.encode()).hexdigest()))
         assert pending is not None
+        assert pending.owner_id == test_user.id
         assert pending.namespace == 'default'
 
         confirm_resp = client.post('/api/v1/mcp/confirm', json={'token': token})
@@ -259,8 +260,6 @@ class TestMCPConfirm:
         return next((t for t in tools if t['method'] == 'POST' and not t['input_schema'].get('required')), None)
 
     def test_pending_token_is_bound_to_creating_user(self, client: TestClient, test_user) -> None:
-        import uuid
-
         from modules.mcp.pending import PendingStore, pending_store
 
         post_tool = self._post_tool_without_required_args(client)
@@ -270,11 +269,9 @@ class TestMCPConfirm:
         call_resp = client.post('/api/v1/mcp/call', json={'tool_id': post_tool['id'], 'args': {}})
         token = call_resp.json()['token']
 
-        assert pending_store.get(token, owner_id=test_user.id) is not None
-        assert pending_store.get(token, owner_id=uuid.uuid4().hex) is None
         assert pending_store.pop(token, owner_id='someone-else') is None
         assert PendingStore().pop(token, owner_id=test_user.id) is not None
-        assert pending_store.get(token, owner_id=test_user.id) is None
+        assert pending_store.pop(token, owner_id=test_user.id) is None
 
     def test_confirm_rejects_token_presented_by_other_user(self, client: TestClient, test_user) -> None:
         import uuid

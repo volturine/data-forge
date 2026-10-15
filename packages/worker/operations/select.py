@@ -14,12 +14,7 @@ class SelectParams(OperationParams):
 
 
 class SelectHandler(OperationHandler):
-    def __call__(
-        self,
-        lf: pl.LazyFrame,
-        params: dict,
-        **_,
-    ) -> pl.LazyFrame:
+    def __call__(self, lf: pl.LazyFrame, params: dict, **_) -> pl.LazyFrame:
         validated = SelectParams.model_validate(params)
         missing = sorted(set(validated.cast_map) - set(validated.columns))
         if missing:

@@ -78,30 +78,29 @@ async def run_compute_in_thread[T](
     expected_cancel_errors: tuple[type[Exception], ...] = (),
     **kwargs: Any,
 ) -> T:
-    return await _run_in_executor(COMPUTE_LANE, "compute-work", function, True, cancel_work, *args, expected_cancel_errors=expected_cancel_errors, **kwargs)
+    return await _run_in_executor(COMPUTE_LANE, "compute-work", function, cancel_work, *args, expected_cancel_errors=expected_cancel_errors, **kwargs)
 
 
 async def run_control_in_thread[T](function: Callable[..., T], /, *args: Any, **kwargs: Any) -> T:
-    return await _run_in_executor(CONTROL_LANE, "runtime-control", function, True, None, *args, **kwargs)
+    return await _run_in_executor(CONTROL_LANE, "runtime-control", function, None, *args, **kwargs)
 
 
 async def run_shutdown_in_thread[T](function: Callable[..., T], /, *args: Any, **kwargs: Any) -> T:
-    return await _run_in_executor(SHUTDOWN_LANE, "compute-worker-shutdown", function, True, None, *args, **kwargs)
+    return await _run_in_executor(SHUTDOWN_LANE, "compute-worker-shutdown", function, None, *args, **kwargs)
 
 
-async def _run_cleanup_in_thread[T](function: Callable[..., T], /, *args: Any, **kwargs: Any) -> T:
-    return await _run_in_executor(CLEANUP_LANE, "runtime-cleanup", function, True, None, *args, **kwargs)
+async def run_cleanup_in_thread[T](function: Callable[..., T], /, *args: Any, **kwargs: Any) -> T:
+    return await _run_in_executor(CLEANUP_LANE, "runtime-cleanup", function, None, *args, **kwargs)
 
 
 async def run_engine_io_in_thread[T](function: Callable[..., T], /, *args: Any, **kwargs: Any) -> T:
-    return await _run_in_executor(ENGINE_IO_LANE, "engine-io", function, True, None, *args, **kwargs)
+    return await _run_in_executor(ENGINE_IO_LANE, "engine-io", function, None, *args, **kwargs)
 
 
 async def _run_in_executor[T](
     lane: _ExecutorLane,
     executor_name: str,
     function: Callable[..., T],
-    diagnose_queue: bool,
     cancel_work: Callable[[], object] | None,
     /,
     *args: Any,
@@ -121,7 +120,7 @@ async def _run_in_executor[T](
             return context.run(call)
         finally:
             queue_ms = (started_at - submitted_at) * 1000
-            if diagnose_queue and queue_ms >= 100:
+            if queue_ms >= 100:
                 logger.warning(
                     "Runtime executor queue delay executor=%s operation=%s queue_ms=%.1f",
                     executor_name,
@@ -164,7 +163,7 @@ async def _settle_cancelled_work[T](
 ) -> None:
     if cancel_work is not None:
         try:
-            await _run_cleanup_in_thread(cancel_work)
+            await run_cleanup_in_thread(cancel_work)
         except Exception:
             logger.warning("Runtime compute cancellation callback failed", exc_info=True)
     try:

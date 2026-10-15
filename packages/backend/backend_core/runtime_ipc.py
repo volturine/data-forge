@@ -24,6 +24,8 @@ logger = logging.getLogger(__name__)
 API_PROCESS_ID = uuid.uuid4().hex
 
 _CHANNEL = 'runtime_events'
+CHAT_TURN_WAKE_KIND = 'chat_turn'
+CHAT_EVENT_WAKE_KIND = 'chat_event'
 _database_url_provider: Callable[[], str] | None = None
 type RuntimePayloadHandler = Callable[[dict[str, object]], Awaitable[None]]
 type RuntimeRecovery = Callable[[], Awaitable[None]]
@@ -145,7 +147,10 @@ def _psycopg_conninfo() -> str:
 
 
 def configure_database_url_provider(provider: Callable[[], str] | None) -> None:
-    _close_notify_connection(provider, replace_provider=True)
+    global _database_url_provider
+    with _notify_connection_io_lock:
+        _database_url_provider = provider
+        _reset_notify_connection()
 
 
 async def start_api_server() -> RuntimeNotificationListener:
@@ -227,13 +232,18 @@ def notify_compute_response_on_commit(session: Session, *, request_id: str, name
 
 
 def notify_runtime_payload_on_commit(session: Session, payload: dict[str, object]) -> None:
+    if RuntimePayloadKind.from_payload(payload) is None:
+        raise ValueError(f'Unsupported runtime notification payload kind: {payload.get("kind")!r}')
+    notify_on_commit(session, payload)
+
+
+def notify_on_commit(session: Session, payload: dict[str, object]) -> None:
     """Queue a small notification in the caller's transaction.
 
     PostgreSQL delivers it only after commit, so a durable state change and its
-    wake become visible atomically without opening a second connection.
+    wake become visible atomically without opening a second connection. Other
+    dialects (SQLite unit tests) have no NOTIFY and skip it.
     """
-    if RuntimePayloadKind.from_payload(payload) is None:
-        raise ValueError(f'Unsupported runtime notification payload kind: {payload.get("kind")!r}')
     bind = session.get_bind()
     if getattr(getattr(bind, 'dialect', None), 'name', None) != 'postgresql':
         return
@@ -294,16 +304,9 @@ def _reset_notify_connection() -> None:
         _notify_connection_state = None
 
 
-def _close_notify_connection(
-    provider: Callable[[], str] | None = None,
-    *,
-    replace_provider: bool = False,
-) -> None:
-    """Serialize publisher shutdown/configuration against in-flight sends."""
-    global _database_url_provider
+def _close_notify_connection() -> None:
+    """Serialize publisher shutdown against in-flight sends."""
     with _notify_connection_io_lock:
-        if replace_provider:
-            _database_url_provider = provider
         _reset_notify_connection()
 
 

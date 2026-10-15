@@ -14,7 +14,7 @@ from fastapi import FastAPI, Request
 from fastapi.responses import Response, StreamingResponse
 
 from backend_core import logging as backend_logging
-from backend_core.logging import DatabaseLogKind, DatabaseLogWriter, RequestLoggingMiddleware, RequestTimingMiddleware, redact_logged_body
+from backend_core.logging import DatabaseLogWriter, RequestLoggingMiddleware, RequestTimingMiddleware, redact_logged_body
 from tests.http_client import TestClient
 
 
@@ -52,12 +52,6 @@ class TestLoggingRedaction:
     def test_leaves_non_form_non_json_body_unchanged_on_sensitive_path(self) -> None:
         body = 'plain text without pairs'
         assert redact_logged_body('/api/v1/auth/login', body) == body
-
-
-def test_database_log_kind_marks_control_messages() -> None:
-    assert DatabaseLogKind.FLUSH.is_control is True
-    assert DatabaseLogKind.STOP.is_control is True
-    assert DatabaseLogKind.REQUEST.is_control is False
 
 
 def test_configure_logging_queues_console_writes_off_request_threads(monkeypatch) -> None:
@@ -102,7 +96,7 @@ def test_configure_logging_queues_console_writes_off_request_threads(monkeypatch
 
 def test_queue_handler_defers_message_and_traceback_formatting_to_listener_thread() -> None:
     log_queue: queue.Queue[logging.LogRecord] = queue.Queue()
-    queue_handler = backend_logging._DeferredFormattingQueueHandler(log_queue)
+    queue_handler = backend_logging._BoundedFormattingQueueHandler(log_queue)
     formatting_threads: list[int] = []
     finished = threading.Event()
     producer_thread = threading.get_ident()
@@ -161,7 +155,7 @@ def test_slow_logging_consumer_cannot_grow_outer_queue() -> None:
         queue_handler.emit(logging.LogRecord('test', logging.INFO, __file__, index, 'message %s', (index,), None))
 
     assert log_queue.qsize() == 2
-    assert queue_handler.dropped == 8
+    assert queue_handler.take_drop_report() == 8
 
 
 def test_bounded_log_queue_reports_overflow_from_listener_thread() -> None:

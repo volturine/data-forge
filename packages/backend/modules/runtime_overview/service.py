@@ -1,7 +1,7 @@
 from __future__ import annotations
 
 import socket
-from datetime import UTC, datetime
+from datetime import UTC
 
 from sqlmodel import Session, select
 
@@ -10,7 +10,7 @@ from backend_core.config import settings
 from backend_core.database import run_db
 from backend_core.domain.build_jobs.models import BuildJobStatus
 from backend_core.domain.runtime_workers.models import RuntimeWorkerKind
-from backend_core.namespace import reset_namespace, set_namespace_context
+from backend_core.namespace import namespace_scope
 from backend_core.namespaces_service import list_runtime_namespaces
 from backend_core.persistence.build_jobs.models import BuildJob
 from backend_core.persistence.compute_worker_instances.models import ComputeWorkerInstance
@@ -19,17 +19,6 @@ from backend_core.sqlmodel_typing import sa
 from backend_core.time import utc_now as _utcnow
 
 from . import schemas
-
-
-def _as_utc(value: datetime) -> datetime:
-    if value.tzinfo is not None:
-        return value.astimezone(UTC)
-    return value.replace(tzinfo=UTC)
-
-
-def _age_seconds(value: datetime, *, now: datetime | None = None) -> float:
-    stamp = now or _utcnow()
-    return max((stamp - _as_utc(value)).total_seconds(), 0.0)
 
 
 def runtime_mode() -> schemas.RuntimeMode:
@@ -50,7 +39,6 @@ def api_process(worker_id: str | None) -> schemas.ApiProcessSummary:
 def list_worker_summaries(session: Session) -> list[schemas.RuntimeWorkerSummary]:
     now = _utcnow()
     stmt = select(RuntimeWorker).order_by(sa(RuntimeWorker.kind), sa(RuntimeWorker.started_at), sa(RuntimeWorker.id))
-    rows = list(session.execute(stmt).scalars().all())
     return [
         schemas.RuntimeWorkerSummary(
             id=row.id,
@@ -64,7 +52,7 @@ def list_worker_summaries(session: Session) -> list[schemas.RuntimeWorkerSummary
             heartbeat_age_seconds=row.heartbeat_age_seconds(now=now),
             stopped_at=row.stopped_at,
         )
-        for row in rows
+        for row in session.execute(stmt).scalars().all()
     ]
 
 
@@ -75,37 +63,34 @@ def list_compute_worker_summaries(session: Session) -> list[schemas.ComputeWorke
         ComputeWorkerInstance.compute_worker_scope,
         ComputeWorkerInstance.id,
     )
-    rows = list(session.execute(stmt).scalars().all())
-    items: list[schemas.ComputeWorkerInstanceSummary] = []
-    for row in rows:
-        items.append(
-            schemas.ComputeWorkerInstanceSummary(
-                id=row.id,
-                worker_id=row.worker_id,
-                namespace=row.namespace,
-                analysis_id=row.analysis_id,
-                resource_id=_engine_resource_id(row),
-                container_id=row.container_id,
-                image_digest=row.image_digest,
-                termination_reason=row.termination_reason,
-                exit_code=row.exit_code,
-                oom_killed=row.oom_killed,
-                supervisor_id=row.supervisor_id,
-                owner_id=row.owner_id,
-                docker_host=row.docker_host,
-                status=row.status,
-                current_job_id=row.current_job_id,
-                current_build_id=row.current_build_id,
-                current_compute_worker_run_id=row.current_compute_worker_run_id,
-                last_activity_at=row.last_activity_at,
-                last_seen_at=row.last_seen_at,
-                scope=schemas.ComputeWorkerScope.require(row.compute_worker_scope),
-                reuse_policy=schemas.ComputeWorkerReusePolicy.require(row.compute_worker_reuse_policy),
-                datasource_id=row.datasource_id,
-                build_id=row.build_id,
-            )
+    return [
+        schemas.ComputeWorkerInstanceSummary(
+            id=row.id,
+            worker_id=row.worker_id,
+            namespace=row.namespace,
+            analysis_id=row.analysis_id,
+            resource_id=_engine_resource_id(row),
+            container_id=row.container_id,
+            image_digest=row.image_digest,
+            termination_reason=row.termination_reason,
+            exit_code=row.exit_code,
+            oom_killed=row.oom_killed,
+            supervisor_id=row.supervisor_id,
+            owner_id=row.owner_id,
+            docker_host=row.docker_host,
+            status=row.status,
+            current_job_id=row.current_job_id,
+            current_build_id=row.current_build_id,
+            current_compute_worker_run_id=row.current_compute_worker_run_id,
+            last_activity_at=row.last_activity_at,
+            last_seen_at=row.last_seen_at,
+            scope=schemas.ComputeWorkerScope.require(row.compute_worker_scope),
+            reuse_policy=schemas.ComputeWorkerReusePolicy.require(row.compute_worker_reuse_policy),
+            datasource_id=row.datasource_id,
+            build_id=row.build_id,
         )
-    return items
+        for row in session.execute(stmt).scalars().all()
+    ]
 
 
 def _engine_resource_id(row: ComputeWorkerInstance) -> str:
@@ -117,19 +102,9 @@ def _engine_resource_id(row: ComputeWorkerInstance) -> str:
 
 
 def queue_summary(session: Session) -> schemas.QueueSummary:
-    names = [
-        settings.default_namespace,
-        *[name for name in list_runtime_namespaces(session) if name != settings.default_namespace],
-    ]
-    seen: set[str] = set()
-    items: list[schemas.QueueNamespaceSummary] = []
-    for namespace in names:
-        if namespace in seen:
-            continue
-        seen.add(namespace)
-        items.append(_queue_namespace_summary(session, namespace))
-    totals = _queue_totals(items)
-    return schemas.QueueSummary(namespaces=items, totals=totals)
+    names = dict.fromkeys([settings.default_namespace, *list_runtime_namespaces(session)])
+    items = [_queue_namespace_summary(session, namespace) for namespace in names]
+    return schemas.QueueSummary(namespaces=items, totals=_queue_totals(items))
 
 
 def _queue_namespace_summary(session: Session, namespace: str) -> schemas.QueueNamespaceSummary:
@@ -137,15 +112,12 @@ def _queue_namespace_summary(session: Session, namespace: str) -> schemas.QueueN
         session,
         kind=RuntimeWorkerKind.BUILD_WORKER,
     )
-    token = set_namespace_context(namespace)
-    try:
+    with namespace_scope(namespace):
         return run_db(
             _read_queue_namespace_summary,
             namespace=namespace,
             reclaimable_worker_ids=reclaimable_worker_ids,
         )
-    finally:
-        reset_namespace(token)
 
 
 def _read_queue_namespace_summary(
@@ -176,8 +148,10 @@ def _queue_totals(
     items: list[schemas.QueueNamespaceSummary],
 ) -> schemas.QueueTotalsSummary:
     oldest = min((item.oldest_queued_at for item in items if item.oldest_queued_at is not None), default=None)
-    now = _utcnow()
-    age = None if oldest is None else _age_seconds(oldest, now=now)
+    age = None
+    if oldest is not None:
+        oldest_utc = oldest.replace(tzinfo=UTC) if oldest.tzinfo is None else oldest.astimezone(UTC)
+        age = max((_utcnow() - oldest_utc).total_seconds(), 0.0)
     return schemas.QueueTotalsSummary(
         queued=sum(item.queued for item in items),
         running=sum(item.running for item in items),

@@ -12,11 +12,6 @@ class DownloadParams(OperationParams):
 
 
 class DownloadHandler(OperationHandler):
-    def __call__(
-        self,
-        lf: pl.LazyFrame,
-        params: dict,
-        **_,
-    ) -> pl.LazyFrame:
+    def __call__(self, lf: pl.LazyFrame, params: dict, **_) -> pl.LazyFrame:
         DownloadParams.model_validate(params)
         return lf

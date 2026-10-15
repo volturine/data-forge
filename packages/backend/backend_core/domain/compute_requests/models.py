@@ -92,6 +92,10 @@ def status_from_proto(value: int) -> enums_pb2.ComputeRequestStatus:
     return _validate_proto_enum(enums_pb2.ComputeRequestStatus, 'COMPUTE_REQUEST_STATUS', value)
 
 
+def _required_proto_enum(enum_descriptor: Any, payload: dict[str, object], key: str) -> Any:
+    return _enum_number_from_token(enum_descriptor, payload.get(key), field_name=key)
+
+
 def _required_payload_str(payload: dict[str, object], key: str) -> str:
     value = payload.get(key)
     if not isinstance(value, str) or not value.strip():
@@ -171,15 +175,6 @@ def _required_payload_dict(payload: dict[str, object], key: str) -> dict[str, ob
     return cast(dict[str, object], value)
 
 
-def _optional_payload_dict(payload: dict[str, object], key: str) -> dict[str, object] | None:
-    value = payload.get(key)
-    if value is None:
-        return None
-    if not isinstance(value, dict):
-        raise ValueError(f'{key} must be an object')
-    return cast(dict[str, object], value)
-
-
 def _enum_name_from_token(enum_descriptor: Any, value: object) -> object:
     if not isinstance(value, str) or value in enum_descriptor.values_by_name:
         return value
@@ -238,21 +233,15 @@ def _restore_int64(payload: dict[str, object], key: str) -> None:
         payload[key] = int(value)
 
 
-def _is_wrapped_step_config(config: Mapping[str, object]) -> bool:
-    if len(config) != 1:
-        return False
-    key = next(iter(config))
-    value = config[key]
-    return key in analysis_pb2.StepConfig.DESCRIPTOR.fields_by_name and isinstance(value, Mapping)
-
-
 def _wrap_step_config(step_type: object, config: object) -> object:
     if not isinstance(step_type, str) or not isinstance(config, Mapping):
         return config
     normalized_step_type = STEP_TYPES.normalized(step_type)
     config_fields = analysis_pb2.StepConfig.DESCRIPTOR.fields_by_name
-    if _is_wrapped_step_config(cast(Mapping[str, object], config)):
-        return dict(config)
+    if len(config) == 1:
+        key, value = next(iter(config.items()))
+        if key in config_fields and isinstance(value, Mapping):
+            return dict(config)
     if normalized_step_type not in config_fields:
         return dict(config)
     return {normalized_step_type: dict(config)}
@@ -360,10 +349,6 @@ def _required_int(payload: dict[str, object], key: str) -> int:
     return value
 
 
-def _required_proto_enum(enum_descriptor: Any, payload: dict[str, object], key: str) -> Any:
-    return _enum_number_from_token(enum_descriptor, payload.get(key), field_name=key)
-
-
 def _set_optional_string(message_value: message.Message, field_name: str, value: str | None) -> None:
     if value is not None:
         setattr(message_value, field_name, value)
@@ -429,8 +414,10 @@ def _export_command(payload: dict[str, object]) -> compute_pb2.ExportCommand:
     _set_optional_string(command, 'analysis_id', _optional_str(payload, 'analysis_id'))
     _set_optional_string(command, 'tab_id', _optional_str(payload, 'tab_id'))
     _set_optional_string(command, 'result_id', _optional_str(payload, 'result_id'))
-    iceberg_options = _optional_payload_dict(payload, 'iceberg_options')
+    iceberg_options = payload.get('iceberg_options')
     if iceberg_options is not None:
+        if not isinstance(iceberg_options, dict):
+            raise ValueError('iceberg_options must be an object')
         command.iceberg_options.CopyFrom(_parse_proto_message(compute_pb2.IcebergExportOptions, iceberg_options))
     return command
 
@@ -512,7 +499,7 @@ def command_envelope(
     return envelope
 
 
-def _datasource_result(kind: enums_pb2.ComputeRequestKind, payload: dict[str, object]) -> datasource_pb2.DatasourceResult:
+def datasource_result_from_payload(kind: enums_pb2.ComputeRequestKind, payload: dict[str, object]) -> datasource_pb2.DatasourceResult:
     result = datasource_pb2.DatasourceResult()
     if 'error' in payload:
         result.error.CopyFrom(_parse_proto_message(datasource_pb2.DatasourceErrorResult, payload))
@@ -534,10 +521,6 @@ def _datasource_result(kind: enums_pb2.ComputeRequestKind, payload: dict[str, ob
     else:
         raise ValueError(f'Unsupported datasource response kind: {compute_request_kind_name(kind)}')
     return result
-
-
-def datasource_result_from_payload(kind: enums_pb2.ComputeRequestKind, payload: dict[str, object]) -> datasource_pb2.DatasourceResult:
-    return _datasource_result(kind, payload)
 
 
 def _datasource_record_payload_for_proto(payload: dict[str, object]) -> dict[str, object]:
@@ -626,7 +609,7 @@ def _response_from_payload(kind: enums_pb2.ComputeRequestKind, payload: dict[str
         enums_pb2.COMPUTE_REQUEST_KIND_DATASOURCE_COLUMN_STATS,
         enums_pb2.COMPUTE_REQUEST_KIND_COMPARE_ICEBERG_SNAPSHOTS,
     }:
-        response.datasource.CopyFrom(_datasource_result(kind, payload))
+        response.datasource.CopyFrom(datasource_result_from_payload(kind, payload))
     else:
         raise ValueError(f'Unsupported compute response kind: {compute_request_kind_name(kind)}')
     return response

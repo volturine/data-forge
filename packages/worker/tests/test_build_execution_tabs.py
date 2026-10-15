@@ -14,7 +14,7 @@ def _pipeline(tab_specs: list[dict], tab_id: str | None = "tab-2") -> dict:
 def test_build_executes_only_the_selected_tab():
     pipeline = _pipeline([{"id": "tab-1"}, {"id": "tab-2"}], tab_id="tab-2")
 
-    assert compute_service._build_execution_tabs(pipeline) == [{"id": "tab-2", "name": "tab-2"}]
+    assert compute_service._build_execution_tab(pipeline) == {"id": "tab-2", "name": "tab-2"}
 
 
 def test_build_does_not_include_upstream_tabs():
@@ -26,23 +26,21 @@ def test_build_does_not_include_upstream_tabs():
         tab_id="tab-2",
     )
 
-    executed = compute_service._build_execution_tabs(pipeline)
-
-    assert [tab["id"] for tab in executed] == ["tab-2"]
+    assert compute_service._build_execution_tab(pipeline)["id"] == "tab-2"
 
 
 def test_build_without_tab_id_raises():
     pipeline = _pipeline([{"id": "tab-1"}], tab_id=None)
 
     with pytest.raises(ValueError, match="missing tab_id"):
-        compute_service._build_execution_tabs(pipeline)
+        compute_service._build_execution_tab(pipeline)
 
 
 def test_build_with_unknown_tab_id_raises():
     pipeline = _pipeline([{"id": "tab-1"}], tab_id="missing")
 
     with pytest.raises(ValueError, match="missing tab missing"):
-        compute_service._build_execution_tabs(pipeline)
+        compute_service._build_execution_tab(pipeline)
 
 
 def test_count_total_build_steps():
@@ -52,4 +50,4 @@ def test_count_total_build_steps():
     )
 
     # Per tab: read + steps + write. tab-2: 2 + 2.
-    assert compute_service._count_total_build_steps(pipeline["tabs"]) == 4
+    assert compute_service._count_total_build_steps(pipeline["tabs"][0]) == 4

@@ -31,27 +31,16 @@ _STRING_METHODS: dict[StringTransformMethod, Callable[[pl.Expr], pl.Expr]] = {
 }
 
 
-def get_string_method(
-    name: StringTransformMethod | str,
-) -> Callable[[pl.Expr], pl.Expr] | None:
-    method = StringTransformMethod.read(name)
-    return _STRING_METHODS.get(method) if method is not None else None
-
-
 class StringTransformHandler(OperationHandler):
-    def __call__(
-        self,
-        lf: pl.LazyFrame,
-        params: dict,
-        **_,
-    ) -> pl.LazyFrame:
+    def __call__(self, lf: pl.LazyFrame, params: dict, **_) -> pl.LazyFrame:
         validated = StringTransformParams.model_validate(params)
         target = validated.new_column or validated.column
         if not target:
             raise ValueError("string_transform requires new_column parameter")
 
         base = pl.col(validated.column)
-        method = get_string_method(validated.method)
+        method_name = StringTransformMethod.read(validated.method)
+        method = _STRING_METHODS.get(method_name) if method_name is not None else None
         if method:
             return lf.with_columns(method(base).alias(target))
 

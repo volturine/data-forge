@@ -22,8 +22,9 @@ class OperationEnumValue(int):
         cls._value_by_number = {}
         cls._value_by_token = {}
 
-    def __new__(cls, number: int, token: str) -> Self:
+    def __new__(cls, number: int) -> Self:
         value = cast(Self, int.__new__(cls, number))
+        token = domain_token(cls.__name__, number)
         cls._token_by_number[number] = token
         cls._number_by_token[token] = number
         cls._value_by_number[number] = value
@@ -45,43 +46,28 @@ class OperationEnumValue(int):
         return int(self)
 
     @classmethod
-    def values(cls) -> list[str]:
-        return list(cls._value_by_token)
-
-    @classmethod
-    def members(cls) -> list[Self]:
-        return list(cls._value_by_token.values())
-
-    @classmethod
-    def parse(cls, value: Self | str | int | None) -> Self | None:
-        if value is None:
-            return None
-        return cls.require(value)
-
-    @classmethod
-    def require(cls, value: Self | str | int) -> Self:
+    def _lookup(cls, value: object) -> Self | None:
         if isinstance(value, cls):
             return value
         if isinstance(value, str):
-            try:
-                return cls._value_by_token[value]
-            except KeyError:
-                pass
+            return cls._value_by_token.get(value)
         if isinstance(value, int):
-            try:
-                return cls._value_by_number[value]
-            except KeyError:
-                pass
-        raise ValueError(f"Unsupported {cls.__name__}: {value!r}")
+            return cls._value_by_number.get(value)
+        return None
+
+    @classmethod
+    def require(cls, value: Self | str | int) -> Self:
+        if (member := cls._lookup(value)) is None:
+            raise ValueError(f"Unsupported {cls.__name__}: {value!r}")
+        return member
 
     @classmethod
     def read(cls, value: object, *, default: Self | None = None) -> Self | None:
-        try:
-            return cls.require(cast(Self | str | int, value))
-        except ValueError:
-            if value is None or default is not None:
-                return default
-            raise
+        if (member := cls._lookup(value)) is not None:
+            return member
+        if value is None or default is not None:
+            return default
+        return cls.require(cast(Self | str | int, value))
 
     def __str__(self) -> str:
         return self.value
@@ -169,25 +155,21 @@ class FilterValueType(OperationEnumValue):
         return str(value)
 
 
-FilterValueType.STRING = FilterValueType(enums_pb2.FILTER_VALUE_TYPE_STRING, domain_token("FilterValueType", enums_pb2.FILTER_VALUE_TYPE_STRING))
-FilterValueType.NUMBER = FilterValueType(enums_pb2.FILTER_VALUE_TYPE_NUMBER, domain_token("FilterValueType", enums_pb2.FILTER_VALUE_TYPE_NUMBER))
-FilterValueType.DATE = FilterValueType(enums_pb2.FILTER_VALUE_TYPE_DATE, domain_token("FilterValueType", enums_pb2.FILTER_VALUE_TYPE_DATE))
-FilterValueType.DATETIME = FilterValueType(enums_pb2.FILTER_VALUE_TYPE_DATETIME, domain_token("FilterValueType", enums_pb2.FILTER_VALUE_TYPE_DATETIME))
-FilterValueType.COLUMN = FilterValueType(enums_pb2.FILTER_VALUE_TYPE_COLUMN, domain_token("FilterValueType", enums_pb2.FILTER_VALUE_TYPE_COLUMN))
-FilterValueType.BOOLEAN = FilterValueType(enums_pb2.FILTER_VALUE_TYPE_BOOLEAN, domain_token("FilterValueType", enums_pb2.FILTER_VALUE_TYPE_BOOLEAN))
+FilterValueType.STRING = FilterValueType(enums_pb2.FILTER_VALUE_TYPE_STRING)
+FilterValueType.NUMBER = FilterValueType(enums_pb2.FILTER_VALUE_TYPE_NUMBER)
+FilterValueType.DATE = FilterValueType(enums_pb2.FILTER_VALUE_TYPE_DATE)
+FilterValueType.DATETIME = FilterValueType(enums_pb2.FILTER_VALUE_TYPE_DATETIME)
+FilterValueType.COLUMN = FilterValueType(enums_pb2.FILTER_VALUE_TYPE_COLUMN)
+FilterValueType.BOOLEAN = FilterValueType(enums_pb2.FILTER_VALUE_TYPE_BOOLEAN)
 
 
 class FilterLogic(OperationEnumValue):
     AND: ClassVar[Self]
     OR: ClassVar[Self]
 
-    @property
-    def expression_combiner(self) -> str:
-        return "all" if self == FilterLogic.AND else "any"
 
-
-FilterLogic.AND = FilterLogic(enums_pb2.FILTER_LOGIC_AND, domain_token("FilterLogic", enums_pb2.FILTER_LOGIC_AND))
-FilterLogic.OR = FilterLogic(enums_pb2.FILTER_LOGIC_OR, domain_token("FilterLogic", enums_pb2.FILTER_LOGIC_OR))
+FilterLogic.AND = FilterLogic(enums_pb2.FILTER_LOGIC_AND)
+FilterLogic.OR = FilterLogic(enums_pb2.FILTER_LOGIC_OR)
 
 
 class CastMapType(OperationEnumValue):
@@ -200,13 +182,13 @@ class CastMapType(OperationEnumValue):
     DATETIME: ClassVar[Self]
 
 
-CastMapType.INT64 = CastMapType(enums_pb2.CAST_MAP_TYPE_INT64, domain_token("CastMapType", enums_pb2.CAST_MAP_TYPE_INT64))
-CastMapType.FLOAT64 = CastMapType(enums_pb2.CAST_MAP_TYPE_FLOAT64, domain_token("CastMapType", enums_pb2.CAST_MAP_TYPE_FLOAT64))
-CastMapType.BOOLEAN = CastMapType(enums_pb2.CAST_MAP_TYPE_BOOLEAN, domain_token("CastMapType", enums_pb2.CAST_MAP_TYPE_BOOLEAN))
-CastMapType.STRING = CastMapType(enums_pb2.CAST_MAP_TYPE_STRING, domain_token("CastMapType", enums_pb2.CAST_MAP_TYPE_STRING))
-CastMapType.UTF8 = CastMapType(enums_pb2.CAST_MAP_TYPE_UTF8, domain_token("CastMapType", enums_pb2.CAST_MAP_TYPE_UTF8))
-CastMapType.DATE = CastMapType(enums_pb2.CAST_MAP_TYPE_DATE, domain_token("CastMapType", enums_pb2.CAST_MAP_TYPE_DATE))
-CastMapType.DATETIME = CastMapType(enums_pb2.CAST_MAP_TYPE_DATETIME, domain_token("CastMapType", enums_pb2.CAST_MAP_TYPE_DATETIME))
+CastMapType.INT64 = CastMapType(enums_pb2.CAST_MAP_TYPE_INT64)
+CastMapType.FLOAT64 = CastMapType(enums_pb2.CAST_MAP_TYPE_FLOAT64)
+CastMapType.BOOLEAN = CastMapType(enums_pb2.CAST_MAP_TYPE_BOOLEAN)
+CastMapType.STRING = CastMapType(enums_pb2.CAST_MAP_TYPE_STRING)
+CastMapType.UTF8 = CastMapType(enums_pb2.CAST_MAP_TYPE_UTF8)
+CastMapType.DATE = CastMapType(enums_pb2.CAST_MAP_TYPE_DATE)
+CastMapType.DATETIME = CastMapType(enums_pb2.CAST_MAP_TYPE_DATETIME)
 
 
 class FilterOperator(OperationEnumValue):
@@ -265,22 +247,22 @@ class FilterOperator(OperationEnumValue):
         return None
 
 
-FilterOperator.EQUAL = FilterOperator(enums_pb2.FILTER_OPERATOR_EQUAL, domain_token("FilterOperator", enums_pb2.FILTER_OPERATOR_EQUAL))
-FilterOperator.DOUBLE_EQUAL = FilterOperator(enums_pb2.FILTER_OPERATOR_DOUBLE_EQUAL, domain_token("FilterOperator", enums_pb2.FILTER_OPERATOR_DOUBLE_EQUAL))
-FilterOperator.NOT_EQUAL = FilterOperator(enums_pb2.FILTER_OPERATOR_NOT_EQUAL, domain_token("FilterOperator", enums_pb2.FILTER_OPERATOR_NOT_EQUAL))
-FilterOperator.GREATER_THAN = FilterOperator(enums_pb2.FILTER_OPERATOR_GREATER_THAN, domain_token("FilterOperator", enums_pb2.FILTER_OPERATOR_GREATER_THAN))
-FilterOperator.LESS_THAN = FilterOperator(enums_pb2.FILTER_OPERATOR_LESS_THAN, domain_token("FilterOperator", enums_pb2.FILTER_OPERATOR_LESS_THAN))
-FilterOperator.GREATER_EQUAL = FilterOperator(enums_pb2.FILTER_OPERATOR_GREATER_EQUAL, domain_token("FilterOperator", enums_pb2.FILTER_OPERATOR_GREATER_EQUAL))
-FilterOperator.LESS_EQUAL = FilterOperator(enums_pb2.FILTER_OPERATOR_LESS_EQUAL, domain_token("FilterOperator", enums_pb2.FILTER_OPERATOR_LESS_EQUAL))
-FilterOperator.CONTAINS = FilterOperator(enums_pb2.FILTER_OPERATOR_CONTAINS, domain_token("FilterOperator", enums_pb2.FILTER_OPERATOR_CONTAINS))
-FilterOperator.NOT_CONTAINS = FilterOperator(enums_pb2.FILTER_OPERATOR_NOT_CONTAINS, domain_token("FilterOperator", enums_pb2.FILTER_OPERATOR_NOT_CONTAINS))
-FilterOperator.STARTS_WITH = FilterOperator(enums_pb2.FILTER_OPERATOR_STARTS_WITH, domain_token("FilterOperator", enums_pb2.FILTER_OPERATOR_STARTS_WITH))
-FilterOperator.ENDS_WITH = FilterOperator(enums_pb2.FILTER_OPERATOR_ENDS_WITH, domain_token("FilterOperator", enums_pb2.FILTER_OPERATOR_ENDS_WITH))
-FilterOperator.REGEX = FilterOperator(enums_pb2.FILTER_OPERATOR_REGEX, domain_token("FilterOperator", enums_pb2.FILTER_OPERATOR_REGEX))
-FilterOperator.IS_NULL = FilterOperator(enums_pb2.FILTER_OPERATOR_IS_NULL, domain_token("FilterOperator", enums_pb2.FILTER_OPERATOR_IS_NULL))
-FilterOperator.IS_NOT_NULL = FilterOperator(enums_pb2.FILTER_OPERATOR_IS_NOT_NULL, domain_token("FilterOperator", enums_pb2.FILTER_OPERATOR_IS_NOT_NULL))
-FilterOperator.IN = FilterOperator(enums_pb2.FILTER_OPERATOR_IN, domain_token("FilterOperator", enums_pb2.FILTER_OPERATOR_IN))
-FilterOperator.NOT_IN = FilterOperator(enums_pb2.FILTER_OPERATOR_NOT_IN, domain_token("FilterOperator", enums_pb2.FILTER_OPERATOR_NOT_IN))
+FilterOperator.EQUAL = FilterOperator(enums_pb2.FILTER_OPERATOR_EQUAL)
+FilterOperator.DOUBLE_EQUAL = FilterOperator(enums_pb2.FILTER_OPERATOR_DOUBLE_EQUAL)
+FilterOperator.NOT_EQUAL = FilterOperator(enums_pb2.FILTER_OPERATOR_NOT_EQUAL)
+FilterOperator.GREATER_THAN = FilterOperator(enums_pb2.FILTER_OPERATOR_GREATER_THAN)
+FilterOperator.LESS_THAN = FilterOperator(enums_pb2.FILTER_OPERATOR_LESS_THAN)
+FilterOperator.GREATER_EQUAL = FilterOperator(enums_pb2.FILTER_OPERATOR_GREATER_EQUAL)
+FilterOperator.LESS_EQUAL = FilterOperator(enums_pb2.FILTER_OPERATOR_LESS_EQUAL)
+FilterOperator.CONTAINS = FilterOperator(enums_pb2.FILTER_OPERATOR_CONTAINS)
+FilterOperator.NOT_CONTAINS = FilterOperator(enums_pb2.FILTER_OPERATOR_NOT_CONTAINS)
+FilterOperator.STARTS_WITH = FilterOperator(enums_pb2.FILTER_OPERATOR_STARTS_WITH)
+FilterOperator.ENDS_WITH = FilterOperator(enums_pb2.FILTER_OPERATOR_ENDS_WITH)
+FilterOperator.REGEX = FilterOperator(enums_pb2.FILTER_OPERATOR_REGEX)
+FilterOperator.IS_NULL = FilterOperator(enums_pb2.FILTER_OPERATOR_IS_NULL)
+FilterOperator.IS_NOT_NULL = FilterOperator(enums_pb2.FILTER_OPERATOR_IS_NOT_NULL)
+FilterOperator.IN = FilterOperator(enums_pb2.FILTER_OPERATOR_IN)
+FilterOperator.NOT_IN = FilterOperator(enums_pb2.FILTER_OPERATOR_NOT_IN)
 
 
 class StringTransformMethod(OperationEnumValue):
@@ -298,42 +280,18 @@ class StringTransformMethod(OperationEnumValue):
     SPLIT_TAKE: ClassVar[Self]
 
 
-StringTransformMethod.UPPERCASE = StringTransformMethod(
-    enums_pb2.STRING_TRANSFORM_METHOD_UPPERCASE, domain_token("StringTransformMethod", enums_pb2.STRING_TRANSFORM_METHOD_UPPERCASE)
-)
-StringTransformMethod.LOWERCASE = StringTransformMethod(
-    enums_pb2.STRING_TRANSFORM_METHOD_LOWERCASE, domain_token("StringTransformMethod", enums_pb2.STRING_TRANSFORM_METHOD_LOWERCASE)
-)
-StringTransformMethod.TITLE = StringTransformMethod(
-    enums_pb2.STRING_TRANSFORM_METHOD_TITLE, domain_token("StringTransformMethod", enums_pb2.STRING_TRANSFORM_METHOD_TITLE)
-)
-StringTransformMethod.STRIP = StringTransformMethod(
-    enums_pb2.STRING_TRANSFORM_METHOD_STRIP, domain_token("StringTransformMethod", enums_pb2.STRING_TRANSFORM_METHOD_STRIP)
-)
-StringTransformMethod.LSTRIP = StringTransformMethod(
-    enums_pb2.STRING_TRANSFORM_METHOD_LSTRIP, domain_token("StringTransformMethod", enums_pb2.STRING_TRANSFORM_METHOD_LSTRIP)
-)
-StringTransformMethod.RSTRIP = StringTransformMethod(
-    enums_pb2.STRING_TRANSFORM_METHOD_RSTRIP, domain_token("StringTransformMethod", enums_pb2.STRING_TRANSFORM_METHOD_RSTRIP)
-)
-StringTransformMethod.LENGTH = StringTransformMethod(
-    enums_pb2.STRING_TRANSFORM_METHOD_LENGTH, domain_token("StringTransformMethod", enums_pb2.STRING_TRANSFORM_METHOD_LENGTH)
-)
-StringTransformMethod.SLICE = StringTransformMethod(
-    enums_pb2.STRING_TRANSFORM_METHOD_SLICE, domain_token("StringTransformMethod", enums_pb2.STRING_TRANSFORM_METHOD_SLICE)
-)
-StringTransformMethod.REPLACE = StringTransformMethod(
-    enums_pb2.STRING_TRANSFORM_METHOD_REPLACE, domain_token("StringTransformMethod", enums_pb2.STRING_TRANSFORM_METHOD_REPLACE)
-)
-StringTransformMethod.EXTRACT = StringTransformMethod(
-    enums_pb2.STRING_TRANSFORM_METHOD_EXTRACT, domain_token("StringTransformMethod", enums_pb2.STRING_TRANSFORM_METHOD_EXTRACT)
-)
-StringTransformMethod.SPLIT = StringTransformMethod(
-    enums_pb2.STRING_TRANSFORM_METHOD_SPLIT, domain_token("StringTransformMethod", enums_pb2.STRING_TRANSFORM_METHOD_SPLIT)
-)
-StringTransformMethod.SPLIT_TAKE = StringTransformMethod(
-    enums_pb2.STRING_TRANSFORM_METHOD_SPLIT_TAKE, domain_token("StringTransformMethod", enums_pb2.STRING_TRANSFORM_METHOD_SPLIT_TAKE)
-)
+StringTransformMethod.UPPERCASE = StringTransformMethod(enums_pb2.STRING_TRANSFORM_METHOD_UPPERCASE)
+StringTransformMethod.LOWERCASE = StringTransformMethod(enums_pb2.STRING_TRANSFORM_METHOD_LOWERCASE)
+StringTransformMethod.TITLE = StringTransformMethod(enums_pb2.STRING_TRANSFORM_METHOD_TITLE)
+StringTransformMethod.STRIP = StringTransformMethod(enums_pb2.STRING_TRANSFORM_METHOD_STRIP)
+StringTransformMethod.LSTRIP = StringTransformMethod(enums_pb2.STRING_TRANSFORM_METHOD_LSTRIP)
+StringTransformMethod.RSTRIP = StringTransformMethod(enums_pb2.STRING_TRANSFORM_METHOD_RSTRIP)
+StringTransformMethod.LENGTH = StringTransformMethod(enums_pb2.STRING_TRANSFORM_METHOD_LENGTH)
+StringTransformMethod.SLICE = StringTransformMethod(enums_pb2.STRING_TRANSFORM_METHOD_SLICE)
+StringTransformMethod.REPLACE = StringTransformMethod(enums_pb2.STRING_TRANSFORM_METHOD_REPLACE)
+StringTransformMethod.EXTRACT = StringTransformMethod(enums_pb2.STRING_TRANSFORM_METHOD_EXTRACT)
+StringTransformMethod.SPLIT = StringTransformMethod(enums_pb2.STRING_TRANSFORM_METHOD_SPLIT)
+StringTransformMethod.SPLIT_TAKE = StringTransformMethod(enums_pb2.STRING_TRANSFORM_METHOD_SPLIT_TAKE)
 
 
 class TimeseriesOperationType(OperationEnumValue):
@@ -347,30 +305,14 @@ class TimeseriesOperationType(OperationEnumValue):
     ROUND: ClassVar[Self]
 
 
-TimeseriesOperationType.EXTRACT = TimeseriesOperationType(
-    enums_pb2.TIMESERIES_OPERATION_TYPE_EXTRACT, domain_token("TimeseriesOperationType", enums_pb2.TIMESERIES_OPERATION_TYPE_EXTRACT)
-)
-TimeseriesOperationType.TIMESTAMP = TimeseriesOperationType(
-    enums_pb2.TIMESERIES_OPERATION_TYPE_TIMESTAMP, domain_token("TimeseriesOperationType", enums_pb2.TIMESERIES_OPERATION_TYPE_TIMESTAMP)
-)
-TimeseriesOperationType.ADD = TimeseriesOperationType(
-    enums_pb2.TIMESERIES_OPERATION_TYPE_ADD, domain_token("TimeseriesOperationType", enums_pb2.TIMESERIES_OPERATION_TYPE_ADD)
-)
-TimeseriesOperationType.SUBTRACT = TimeseriesOperationType(
-    enums_pb2.TIMESERIES_OPERATION_TYPE_SUBTRACT, domain_token("TimeseriesOperationType", enums_pb2.TIMESERIES_OPERATION_TYPE_SUBTRACT)
-)
-TimeseriesOperationType.OFFSET = TimeseriesOperationType(
-    enums_pb2.TIMESERIES_OPERATION_TYPE_OFFSET, domain_token("TimeseriesOperationType", enums_pb2.TIMESERIES_OPERATION_TYPE_OFFSET)
-)
-TimeseriesOperationType.DIFF = TimeseriesOperationType(
-    enums_pb2.TIMESERIES_OPERATION_TYPE_DIFF, domain_token("TimeseriesOperationType", enums_pb2.TIMESERIES_OPERATION_TYPE_DIFF)
-)
-TimeseriesOperationType.TRUNCATE = TimeseriesOperationType(
-    enums_pb2.TIMESERIES_OPERATION_TYPE_TRUNCATE, domain_token("TimeseriesOperationType", enums_pb2.TIMESERIES_OPERATION_TYPE_TRUNCATE)
-)
-TimeseriesOperationType.ROUND = TimeseriesOperationType(
-    enums_pb2.TIMESERIES_OPERATION_TYPE_ROUND, domain_token("TimeseriesOperationType", enums_pb2.TIMESERIES_OPERATION_TYPE_ROUND)
-)
+TimeseriesOperationType.EXTRACT = TimeseriesOperationType(enums_pb2.TIMESERIES_OPERATION_TYPE_EXTRACT)
+TimeseriesOperationType.TIMESTAMP = TimeseriesOperationType(enums_pb2.TIMESERIES_OPERATION_TYPE_TIMESTAMP)
+TimeseriesOperationType.ADD = TimeseriesOperationType(enums_pb2.TIMESERIES_OPERATION_TYPE_ADD)
+TimeseriesOperationType.SUBTRACT = TimeseriesOperationType(enums_pb2.TIMESERIES_OPERATION_TYPE_SUBTRACT)
+TimeseriesOperationType.OFFSET = TimeseriesOperationType(enums_pb2.TIMESERIES_OPERATION_TYPE_OFFSET)
+TimeseriesOperationType.DIFF = TimeseriesOperationType(enums_pb2.TIMESERIES_OPERATION_TYPE_DIFF)
+TimeseriesOperationType.TRUNCATE = TimeseriesOperationType(enums_pb2.TIMESERIES_OPERATION_TYPE_TRUNCATE)
+TimeseriesOperationType.ROUND = TimeseriesOperationType(enums_pb2.TIMESERIES_OPERATION_TYPE_ROUND)
 
 
 class TimeComponent(OperationEnumValue):
@@ -391,15 +333,15 @@ class TimeComponent(OperationEnumValue):
         return self.value
 
 
-TimeComponent.YEAR = TimeComponent(enums_pb2.TIME_COMPONENT_YEAR, domain_token("TimeComponent", enums_pb2.TIME_COMPONENT_YEAR))
-TimeComponent.MONTH = TimeComponent(enums_pb2.TIME_COMPONENT_MONTH, domain_token("TimeComponent", enums_pb2.TIME_COMPONENT_MONTH))
-TimeComponent.DAY = TimeComponent(enums_pb2.TIME_COMPONENT_DAY, domain_token("TimeComponent", enums_pb2.TIME_COMPONENT_DAY))
-TimeComponent.HOUR = TimeComponent(enums_pb2.TIME_COMPONENT_HOUR, domain_token("TimeComponent", enums_pb2.TIME_COMPONENT_HOUR))
-TimeComponent.MINUTE = TimeComponent(enums_pb2.TIME_COMPONENT_MINUTE, domain_token("TimeComponent", enums_pb2.TIME_COMPONENT_MINUTE))
-TimeComponent.SECOND = TimeComponent(enums_pb2.TIME_COMPONENT_SECOND, domain_token("TimeComponent", enums_pb2.TIME_COMPONENT_SECOND))
-TimeComponent.QUARTER = TimeComponent(enums_pb2.TIME_COMPONENT_QUARTER, domain_token("TimeComponent", enums_pb2.TIME_COMPONENT_QUARTER))
-TimeComponent.WEEK = TimeComponent(enums_pb2.TIME_COMPONENT_WEEK, domain_token("TimeComponent", enums_pb2.TIME_COMPONENT_WEEK))
-TimeComponent.DAYOFWEEK = TimeComponent(enums_pb2.TIME_COMPONENT_DAYOFWEEK, domain_token("TimeComponent", enums_pb2.TIME_COMPONENT_DAYOFWEEK))
+TimeComponent.YEAR = TimeComponent(enums_pb2.TIME_COMPONENT_YEAR)
+TimeComponent.MONTH = TimeComponent(enums_pb2.TIME_COMPONENT_MONTH)
+TimeComponent.DAY = TimeComponent(enums_pb2.TIME_COMPONENT_DAY)
+TimeComponent.HOUR = TimeComponent(enums_pb2.TIME_COMPONENT_HOUR)
+TimeComponent.MINUTE = TimeComponent(enums_pb2.TIME_COMPONENT_MINUTE)
+TimeComponent.SECOND = TimeComponent(enums_pb2.TIME_COMPONENT_SECOND)
+TimeComponent.QUARTER = TimeComponent(enums_pb2.TIME_COMPONENT_QUARTER)
+TimeComponent.WEEK = TimeComponent(enums_pb2.TIME_COMPONENT_WEEK)
+TimeComponent.DAYOFWEEK = TimeComponent(enums_pb2.TIME_COMPONENT_DAYOFWEEK)
 
 
 class DurationUnit(OperationEnumValue):
@@ -431,15 +373,15 @@ class DurationUnit(OperationEnumValue):
         raise ValueError(f"Unsupported duration unit: {self.value}")
 
 
-DurationUnit.SECONDS = DurationUnit(enums_pb2.DURATION_UNIT_SECONDS, domain_token("DurationUnit", enums_pb2.DURATION_UNIT_SECONDS))
-DurationUnit.MINUTES = DurationUnit(enums_pb2.DURATION_UNIT_MINUTES, domain_token("DurationUnit", enums_pb2.DURATION_UNIT_MINUTES))
-DurationUnit.HOURS = DurationUnit(enums_pb2.DURATION_UNIT_HOURS, domain_token("DurationUnit", enums_pb2.DURATION_UNIT_HOURS))
-DurationUnit.DAYS = DurationUnit(enums_pb2.DURATION_UNIT_DAYS, domain_token("DurationUnit", enums_pb2.DURATION_UNIT_DAYS))
-DurationUnit.WEEKS = DurationUnit(enums_pb2.DURATION_UNIT_WEEKS, domain_token("DurationUnit", enums_pb2.DURATION_UNIT_WEEKS))
-DurationUnit.MONTHS = DurationUnit(enums_pb2.DURATION_UNIT_MONTHS, domain_token("DurationUnit", enums_pb2.DURATION_UNIT_MONTHS))
-DurationUnit.NANOSECONDS = DurationUnit(enums_pb2.DURATION_UNIT_NANOSECONDS, domain_token("DurationUnit", enums_pb2.DURATION_UNIT_NANOSECONDS))
-DurationUnit.MICROSECONDS = DurationUnit(enums_pb2.DURATION_UNIT_MICROSECONDS, domain_token("DurationUnit", enums_pb2.DURATION_UNIT_MICROSECONDS))
-DurationUnit.MILLISECONDS = DurationUnit(enums_pb2.DURATION_UNIT_MILLISECONDS, domain_token("DurationUnit", enums_pb2.DURATION_UNIT_MILLISECONDS))
+DurationUnit.SECONDS = DurationUnit(enums_pb2.DURATION_UNIT_SECONDS)
+DurationUnit.MINUTES = DurationUnit(enums_pb2.DURATION_UNIT_MINUTES)
+DurationUnit.HOURS = DurationUnit(enums_pb2.DURATION_UNIT_HOURS)
+DurationUnit.DAYS = DurationUnit(enums_pb2.DURATION_UNIT_DAYS)
+DurationUnit.WEEKS = DurationUnit(enums_pb2.DURATION_UNIT_WEEKS)
+DurationUnit.MONTHS = DurationUnit(enums_pb2.DURATION_UNIT_MONTHS)
+DurationUnit.NANOSECONDS = DurationUnit(enums_pb2.DURATION_UNIT_NANOSECONDS)
+DurationUnit.MICROSECONDS = DurationUnit(enums_pb2.DURATION_UNIT_MICROSECONDS)
+DurationUnit.MILLISECONDS = DurationUnit(enums_pb2.DURATION_UNIT_MILLISECONDS)
 
 
 class TimeDirection(OperationEnumValue):
@@ -447,8 +389,8 @@ class TimeDirection(OperationEnumValue):
     SUBTRACT: ClassVar[Self]
 
 
-TimeDirection.ADD = TimeDirection(enums_pb2.TIME_DIRECTION_ADD, domain_token("TimeDirection", enums_pb2.TIME_DIRECTION_ADD))
-TimeDirection.SUBTRACT = TimeDirection(enums_pb2.TIME_DIRECTION_SUBTRACT, domain_token("TimeDirection", enums_pb2.TIME_DIRECTION_SUBTRACT))
+TimeDirection.ADD = TimeDirection(enums_pb2.TIME_DIRECTION_ADD)
+TimeDirection.SUBTRACT = TimeDirection(enums_pb2.TIME_DIRECTION_SUBTRACT)
 
 
 class WithColumnsExprType(OperationEnumValue):
@@ -457,13 +399,9 @@ class WithColumnsExprType(OperationEnumValue):
     UDF: ClassVar[Self]
 
 
-WithColumnsExprType.LITERAL = WithColumnsExprType(
-    enums_pb2.WITH_COLUMNS_EXPR_TYPE_LITERAL, domain_token("WithColumnsExprType", enums_pb2.WITH_COLUMNS_EXPR_TYPE_LITERAL)
-)
-WithColumnsExprType.COLUMN = WithColumnsExprType(
-    enums_pb2.WITH_COLUMNS_EXPR_TYPE_COLUMN, domain_token("WithColumnsExprType", enums_pb2.WITH_COLUMNS_EXPR_TYPE_COLUMN)
-)
-WithColumnsExprType.UDF = WithColumnsExprType(enums_pb2.WITH_COLUMNS_EXPR_TYPE_UDF, domain_token("WithColumnsExprType", enums_pb2.WITH_COLUMNS_EXPR_TYPE_UDF))
+WithColumnsExprType.LITERAL = WithColumnsExprType(enums_pb2.WITH_COLUMNS_EXPR_TYPE_LITERAL)
+WithColumnsExprType.COLUMN = WithColumnsExprType(enums_pb2.WITH_COLUMNS_EXPR_TYPE_COLUMN)
+WithColumnsExprType.UDF = WithColumnsExprType(enums_pb2.WITH_COLUMNS_EXPR_TYPE_UDF)
 
 
 class NotificationMethod(OperationEnumValue):
@@ -471,10 +409,8 @@ class NotificationMethod(OperationEnumValue):
     TELEGRAM: ClassVar[Self]
 
 
-NotificationMethod.EMAIL = NotificationMethod(enums_pb2.NOTIFICATION_METHOD_EMAIL, domain_token("NotificationMethod", enums_pb2.NOTIFICATION_METHOD_EMAIL))
-NotificationMethod.TELEGRAM = NotificationMethod(
-    enums_pb2.NOTIFICATION_METHOD_TELEGRAM, domain_token("NotificationMethod", enums_pb2.NOTIFICATION_METHOD_TELEGRAM)
-)
+NotificationMethod.EMAIL = NotificationMethod(enums_pb2.NOTIFICATION_METHOD_EMAIL)
+NotificationMethod.TELEGRAM = NotificationMethod(enums_pb2.NOTIFICATION_METHOD_TELEGRAM)
 
 
 class JoinHow(OperationEnumValue):
@@ -491,21 +427,15 @@ class JoinHow(OperationEnumValue):
         return cast(Literal["inner", "left", "right", "cross"], self.value)
 
     @property
-    def sql_join_type(self) -> Literal["INNER JOIN", "LEFT JOIN", "RIGHT JOIN", "FULL OUTER JOIN", "CROSS JOIN"]:
-        if self == JoinHow.OUTER:
-            return "FULL OUTER JOIN"
-        return cast(Literal["INNER JOIN", "LEFT JOIN", "RIGHT JOIN", "CROSS JOIN"], f"{self.value.upper()} JOIN")
-
-    @property
     def requires_join_keys(self) -> bool:
         return self != JoinHow.CROSS
 
 
-JoinHow.INNER = JoinHow(enums_pb2.JOIN_HOW_INNER, domain_token("JoinHow", enums_pb2.JOIN_HOW_INNER))
-JoinHow.LEFT = JoinHow(enums_pb2.JOIN_HOW_LEFT, domain_token("JoinHow", enums_pb2.JOIN_HOW_LEFT))
-JoinHow.RIGHT = JoinHow(enums_pb2.JOIN_HOW_RIGHT, domain_token("JoinHow", enums_pb2.JOIN_HOW_RIGHT))
-JoinHow.OUTER = JoinHow(enums_pb2.JOIN_HOW_OUTER, domain_token("JoinHow", enums_pb2.JOIN_HOW_OUTER))
-JoinHow.CROSS = JoinHow(enums_pb2.JOIN_HOW_CROSS, domain_token("JoinHow", enums_pb2.JOIN_HOW_CROSS))
+JoinHow.INNER = JoinHow(enums_pb2.JOIN_HOW_INNER)
+JoinHow.LEFT = JoinHow(enums_pb2.JOIN_HOW_LEFT)
+JoinHow.RIGHT = JoinHow(enums_pb2.JOIN_HOW_RIGHT)
+JoinHow.OUTER = JoinHow(enums_pb2.JOIN_HOW_OUTER)
+JoinHow.CROSS = JoinHow(enums_pb2.JOIN_HOW_CROSS)
 
 
 class GroupByAggregationFunction(OperationEnumValue):
@@ -525,85 +455,19 @@ class GroupByAggregationFunction(OperationEnumValue):
     def default_alias(self, column: str) -> str:
         return f"{column}_{self.value}"
 
-    def render_polars_export(self, column_expr: str, alias_expr: str) -> str:
-        if self == GroupByAggregationFunction.COLLECT_LIST:
-            return f"{column_expr}.implode().alias({alias_expr})"
-        if self == GroupByAggregationFunction.COLLECT_SET:
-            return f"{column_expr}.implode().list.unique().alias({alias_expr})"
-        return f"{column_expr}.{self.polars_method_name}().alias({alias_expr})"
 
-    def render_sql_export(self, column_expr: str, alias_expr: str) -> str | None:
-        match self:
-            case GroupByAggregationFunction.MEDIAN:
-                return f"PERCENTILE_CONT(0.5) WITHIN GROUP (ORDER BY {column_expr}) AS {alias_expr}"
-            case GroupByAggregationFunction.N_UNIQUE:
-                return f"COUNT(DISTINCT {column_expr}) AS {alias_expr}"
-            case GroupByAggregationFunction.COLLECT_LIST:
-                return f"ARRAY_AGG({column_expr}) AS {alias_expr}"
-            case GroupByAggregationFunction.COLLECT_SET:
-                return f"ARRAY_AGG(DISTINCT {column_expr}) AS {alias_expr}"
-            case _:
-                if (sql_function := self.sql_function_name) is None:
-                    return None
-                return f"{sql_function}({column_expr}) AS {alias_expr}"
-
-    @property
-    def polars_method_name(self) -> str:
-        match self:
-            case GroupByAggregationFunction.COLLECT_LIST | GroupByAggregationFunction.COLLECT_SET:
-                raise ValueError(f"GroupBy aggregation {self.value} does not define a Polars method name")
-            case _:
-                return self.value
-
-    @property
-    def sql_function_name(self) -> str | None:
-        match self:
-            case GroupByAggregationFunction.MEAN:
-                return "AVG"
-            case GroupByAggregationFunction.STD:
-                return "STDDEV_POP"
-            case GroupByAggregationFunction.SUM | GroupByAggregationFunction.COUNT | GroupByAggregationFunction.MIN | GroupByAggregationFunction.MAX:
-                return self.value.upper()
-            case _:
-                return None
-
-
-GroupByAggregationFunction.SUM = GroupByAggregationFunction(
-    enums_pb2.GROUP_BY_AGGREGATION_FUNCTION_SUM, domain_token("GroupByAggregationFunction", enums_pb2.GROUP_BY_AGGREGATION_FUNCTION_SUM)
-)
-GroupByAggregationFunction.MEAN = GroupByAggregationFunction(
-    enums_pb2.GROUP_BY_AGGREGATION_FUNCTION_MEAN, domain_token("GroupByAggregationFunction", enums_pb2.GROUP_BY_AGGREGATION_FUNCTION_MEAN)
-)
-GroupByAggregationFunction.COUNT = GroupByAggregationFunction(
-    enums_pb2.GROUP_BY_AGGREGATION_FUNCTION_COUNT, domain_token("GroupByAggregationFunction", enums_pb2.GROUP_BY_AGGREGATION_FUNCTION_COUNT)
-)
-GroupByAggregationFunction.MIN = GroupByAggregationFunction(
-    enums_pb2.GROUP_BY_AGGREGATION_FUNCTION_MIN, domain_token("GroupByAggregationFunction", enums_pb2.GROUP_BY_AGGREGATION_FUNCTION_MIN)
-)
-GroupByAggregationFunction.MAX = GroupByAggregationFunction(
-    enums_pb2.GROUP_BY_AGGREGATION_FUNCTION_MAX, domain_token("GroupByAggregationFunction", enums_pb2.GROUP_BY_AGGREGATION_FUNCTION_MAX)
-)
-GroupByAggregationFunction.FIRST = GroupByAggregationFunction(
-    enums_pb2.GROUP_BY_AGGREGATION_FUNCTION_FIRST, domain_token("GroupByAggregationFunction", enums_pb2.GROUP_BY_AGGREGATION_FUNCTION_FIRST)
-)
-GroupByAggregationFunction.LAST = GroupByAggregationFunction(
-    enums_pb2.GROUP_BY_AGGREGATION_FUNCTION_LAST, domain_token("GroupByAggregationFunction", enums_pb2.GROUP_BY_AGGREGATION_FUNCTION_LAST)
-)
-GroupByAggregationFunction.MEDIAN = GroupByAggregationFunction(
-    enums_pb2.GROUP_BY_AGGREGATION_FUNCTION_MEDIAN, domain_token("GroupByAggregationFunction", enums_pb2.GROUP_BY_AGGREGATION_FUNCTION_MEDIAN)
-)
-GroupByAggregationFunction.STD = GroupByAggregationFunction(
-    enums_pb2.GROUP_BY_AGGREGATION_FUNCTION_STD, domain_token("GroupByAggregationFunction", enums_pb2.GROUP_BY_AGGREGATION_FUNCTION_STD)
-)
-GroupByAggregationFunction.N_UNIQUE = GroupByAggregationFunction(
-    enums_pb2.GROUP_BY_AGGREGATION_FUNCTION_N_UNIQUE, domain_token("GroupByAggregationFunction", enums_pb2.GROUP_BY_AGGREGATION_FUNCTION_N_UNIQUE)
-)
-GroupByAggregationFunction.COLLECT_LIST = GroupByAggregationFunction(
-    enums_pb2.GROUP_BY_AGGREGATION_FUNCTION_COLLECT_LIST, domain_token("GroupByAggregationFunction", enums_pb2.GROUP_BY_AGGREGATION_FUNCTION_COLLECT_LIST)
-)
-GroupByAggregationFunction.COLLECT_SET = GroupByAggregationFunction(
-    enums_pb2.GROUP_BY_AGGREGATION_FUNCTION_COLLECT_SET, domain_token("GroupByAggregationFunction", enums_pb2.GROUP_BY_AGGREGATION_FUNCTION_COLLECT_SET)
-)
+GroupByAggregationFunction.SUM = GroupByAggregationFunction(enums_pb2.GROUP_BY_AGGREGATION_FUNCTION_SUM)
+GroupByAggregationFunction.MEAN = GroupByAggregationFunction(enums_pb2.GROUP_BY_AGGREGATION_FUNCTION_MEAN)
+GroupByAggregationFunction.COUNT = GroupByAggregationFunction(enums_pb2.GROUP_BY_AGGREGATION_FUNCTION_COUNT)
+GroupByAggregationFunction.MIN = GroupByAggregationFunction(enums_pb2.GROUP_BY_AGGREGATION_FUNCTION_MIN)
+GroupByAggregationFunction.MAX = GroupByAggregationFunction(enums_pb2.GROUP_BY_AGGREGATION_FUNCTION_MAX)
+GroupByAggregationFunction.FIRST = GroupByAggregationFunction(enums_pb2.GROUP_BY_AGGREGATION_FUNCTION_FIRST)
+GroupByAggregationFunction.LAST = GroupByAggregationFunction(enums_pb2.GROUP_BY_AGGREGATION_FUNCTION_LAST)
+GroupByAggregationFunction.MEDIAN = GroupByAggregationFunction(enums_pb2.GROUP_BY_AGGREGATION_FUNCTION_MEDIAN)
+GroupByAggregationFunction.STD = GroupByAggregationFunction(enums_pb2.GROUP_BY_AGGREGATION_FUNCTION_STD)
+GroupByAggregationFunction.N_UNIQUE = GroupByAggregationFunction(enums_pb2.GROUP_BY_AGGREGATION_FUNCTION_N_UNIQUE)
+GroupByAggregationFunction.COLLECT_LIST = GroupByAggregationFunction(enums_pb2.GROUP_BY_AGGREGATION_FUNCTION_COLLECT_LIST)
+GroupByAggregationFunction.COLLECT_SET = GroupByAggregationFunction(enums_pb2.GROUP_BY_AGGREGATION_FUNCTION_COLLECT_SET)
 
 
 class ChartAggregation(OperationEnumValue):
@@ -618,17 +482,15 @@ class ChartAggregation(OperationEnumValue):
     UNIQUE_COUNT: ClassVar[Self]
 
 
-ChartAggregation.SUM = ChartAggregation(enums_pb2.CHART_AGGREGATION_SUM, domain_token("ChartAggregation", enums_pb2.CHART_AGGREGATION_SUM))
-ChartAggregation.MEAN = ChartAggregation(enums_pb2.CHART_AGGREGATION_MEAN, domain_token("ChartAggregation", enums_pb2.CHART_AGGREGATION_MEAN))
-ChartAggregation.COUNT = ChartAggregation(enums_pb2.CHART_AGGREGATION_COUNT, domain_token("ChartAggregation", enums_pb2.CHART_AGGREGATION_COUNT))
-ChartAggregation.MIN = ChartAggregation(enums_pb2.CHART_AGGREGATION_MIN, domain_token("ChartAggregation", enums_pb2.CHART_AGGREGATION_MIN))
-ChartAggregation.MAX = ChartAggregation(enums_pb2.CHART_AGGREGATION_MAX, domain_token("ChartAggregation", enums_pb2.CHART_AGGREGATION_MAX))
-ChartAggregation.MEDIAN = ChartAggregation(enums_pb2.CHART_AGGREGATION_MEDIAN, domain_token("ChartAggregation", enums_pb2.CHART_AGGREGATION_MEDIAN))
-ChartAggregation.STD = ChartAggregation(enums_pb2.CHART_AGGREGATION_STD, domain_token("ChartAggregation", enums_pb2.CHART_AGGREGATION_STD))
-ChartAggregation.VARIANCE = ChartAggregation(enums_pb2.CHART_AGGREGATION_VARIANCE, domain_token("ChartAggregation", enums_pb2.CHART_AGGREGATION_VARIANCE))
-ChartAggregation.UNIQUE_COUNT = ChartAggregation(
-    enums_pb2.CHART_AGGREGATION_UNIQUE_COUNT, domain_token("ChartAggregation", enums_pb2.CHART_AGGREGATION_UNIQUE_COUNT)
-)
+ChartAggregation.SUM = ChartAggregation(enums_pb2.CHART_AGGREGATION_SUM)
+ChartAggregation.MEAN = ChartAggregation(enums_pb2.CHART_AGGREGATION_MEAN)
+ChartAggregation.COUNT = ChartAggregation(enums_pb2.CHART_AGGREGATION_COUNT)
+ChartAggregation.MIN = ChartAggregation(enums_pb2.CHART_AGGREGATION_MIN)
+ChartAggregation.MAX = ChartAggregation(enums_pb2.CHART_AGGREGATION_MAX)
+ChartAggregation.MEDIAN = ChartAggregation(enums_pb2.CHART_AGGREGATION_MEDIAN)
+ChartAggregation.STD = ChartAggregation(enums_pb2.CHART_AGGREGATION_STD)
+ChartAggregation.VARIANCE = ChartAggregation(enums_pb2.CHART_AGGREGATION_VARIANCE)
+ChartAggregation.UNIQUE_COUNT = ChartAggregation(enums_pb2.CHART_AGGREGATION_UNIQUE_COUNT)
 
 
 class OverlayChartType(OperationEnumValue):
@@ -638,10 +500,10 @@ class OverlayChartType(OperationEnumValue):
     SCATTER: ClassVar[Self]
 
 
-OverlayChartType.LINE = OverlayChartType(enums_pb2.OVERLAY_CHART_TYPE_LINE, domain_token("OverlayChartType", enums_pb2.OVERLAY_CHART_TYPE_LINE))
-OverlayChartType.AREA = OverlayChartType(enums_pb2.OVERLAY_CHART_TYPE_AREA, domain_token("OverlayChartType", enums_pb2.OVERLAY_CHART_TYPE_AREA))
-OverlayChartType.BAR = OverlayChartType(enums_pb2.OVERLAY_CHART_TYPE_BAR, domain_token("OverlayChartType", enums_pb2.OVERLAY_CHART_TYPE_BAR))
-OverlayChartType.SCATTER = OverlayChartType(enums_pb2.OVERLAY_CHART_TYPE_SCATTER, domain_token("OverlayChartType", enums_pb2.OVERLAY_CHART_TYPE_SCATTER))
+OverlayChartType.LINE = OverlayChartType(enums_pb2.OVERLAY_CHART_TYPE_LINE)
+OverlayChartType.AREA = OverlayChartType(enums_pb2.OVERLAY_CHART_TYPE_AREA)
+OverlayChartType.BAR = OverlayChartType(enums_pb2.OVERLAY_CHART_TYPE_BAR)
+OverlayChartType.SCATTER = OverlayChartType(enums_pb2.OVERLAY_CHART_TYPE_SCATTER)
 
 
 class YAxisPosition(OperationEnumValue):
@@ -649,8 +511,8 @@ class YAxisPosition(OperationEnumValue):
     RIGHT: ClassVar[Self]
 
 
-YAxisPosition.LEFT = YAxisPosition(enums_pb2.Y_AXIS_POSITION_LEFT, domain_token("YAxisPosition", enums_pb2.Y_AXIS_POSITION_LEFT))
-YAxisPosition.RIGHT = YAxisPosition(enums_pb2.Y_AXIS_POSITION_RIGHT, domain_token("YAxisPosition", enums_pb2.Y_AXIS_POSITION_RIGHT))
+YAxisPosition.LEFT = YAxisPosition(enums_pb2.Y_AXIS_POSITION_LEFT)
+YAxisPosition.RIGHT = YAxisPosition(enums_pb2.Y_AXIS_POSITION_RIGHT)
 
 
 class ReferenceAxis(OperationEnumValue):
@@ -658,8 +520,8 @@ class ReferenceAxis(OperationEnumValue):
     Y: ClassVar[Self]
 
 
-ReferenceAxis.X = ReferenceAxis(enums_pb2.REFERENCE_AXIS_X, domain_token("ReferenceAxis", enums_pb2.REFERENCE_AXIS_X))
-ReferenceAxis.Y = ReferenceAxis(enums_pb2.REFERENCE_AXIS_Y, domain_token("ReferenceAxis", enums_pb2.REFERENCE_AXIS_Y))
+ReferenceAxis.X = ReferenceAxis(enums_pb2.REFERENCE_AXIS_X)
+ReferenceAxis.Y = ReferenceAxis(enums_pb2.REFERENCE_AXIS_Y)
 
 
 class SortDirection(OperationEnumValue):
@@ -667,8 +529,8 @@ class SortDirection(OperationEnumValue):
     DESC: ClassVar[Self]
 
 
-SortDirection.ASC = SortDirection(enums_pb2.SORT_DIRECTION_ASC, domain_token("SortDirection", enums_pb2.SORT_DIRECTION_ASC))
-SortDirection.DESC = SortDirection(enums_pb2.SORT_DIRECTION_DESC, domain_token("SortDirection", enums_pb2.SORT_DIRECTION_DESC))
+SortDirection.ASC = SortDirection(enums_pb2.SORT_DIRECTION_ASC)
+SortDirection.DESC = SortDirection(enums_pb2.SORT_DIRECTION_DESC)
 
 
 class GroupSortBy(OperationEnumValue):
@@ -677,9 +539,9 @@ class GroupSortBy(OperationEnumValue):
     CUSTOM: ClassVar[Self]
 
 
-GroupSortBy.NAME = GroupSortBy(enums_pb2.GROUP_SORT_BY_NAME, domain_token("GroupSortBy", enums_pb2.GROUP_SORT_BY_NAME))
-GroupSortBy.VALUE = GroupSortBy(enums_pb2.GROUP_SORT_BY_VALUE, domain_token("GroupSortBy", enums_pb2.GROUP_SORT_BY_VALUE))
-GroupSortBy.CUSTOM = GroupSortBy(enums_pb2.GROUP_SORT_BY_CUSTOM, domain_token("GroupSortBy", enums_pb2.GROUP_SORT_BY_CUSTOM))
+GroupSortBy.NAME = GroupSortBy(enums_pb2.GROUP_SORT_BY_NAME)
+GroupSortBy.VALUE = GroupSortBy(enums_pb2.GROUP_SORT_BY_VALUE)
+GroupSortBy.CUSTOM = GroupSortBy(enums_pb2.GROUP_SORT_BY_CUSTOM)
 
 
 class SortBy(OperationEnumValue):
@@ -688,9 +550,9 @@ class SortBy(OperationEnumValue):
     CUSTOM: ClassVar[Self]
 
 
-SortBy.X = SortBy(enums_pb2.SORT_BY_X, domain_token("SortBy", enums_pb2.SORT_BY_X))
-SortBy.Y = SortBy(enums_pb2.SORT_BY_Y, domain_token("SortBy", enums_pb2.SORT_BY_Y))
-SortBy.CUSTOM = SortBy(enums_pb2.SORT_BY_CUSTOM, domain_token("SortBy", enums_pb2.SORT_BY_CUSTOM))
+SortBy.X = SortBy(enums_pb2.SORT_BY_X)
+SortBy.Y = SortBy(enums_pb2.SORT_BY_Y)
+SortBy.CUSTOM = SortBy(enums_pb2.SORT_BY_CUSTOM)
 
 
 class StackMode(OperationEnumValue):
@@ -699,9 +561,9 @@ class StackMode(OperationEnumValue):
     STACKED_100: ClassVar[Self]
 
 
-StackMode.GROUPED = StackMode(enums_pb2.STACK_MODE_GROUPED, domain_token("StackMode", enums_pb2.STACK_MODE_GROUPED))
-StackMode.STACKED = StackMode(enums_pb2.STACK_MODE_STACKED, domain_token("StackMode", enums_pb2.STACK_MODE_STACKED))
-StackMode.STACKED_100 = StackMode(enums_pb2.STACK_MODE_STACKED_100, domain_token("StackMode", enums_pb2.STACK_MODE_STACKED_100))
+StackMode.GROUPED = StackMode(enums_pb2.STACK_MODE_GROUPED)
+StackMode.STACKED = StackMode(enums_pb2.STACK_MODE_STACKED)
+StackMode.STACKED_100 = StackMode(enums_pb2.STACK_MODE_STACKED_100)
 
 
 class DateBucket(OperationEnumValue):
@@ -714,13 +576,13 @@ class DateBucket(OperationEnumValue):
     HOUR: ClassVar[Self]
 
 
-DateBucket.EXACT = DateBucket(enums_pb2.DATE_BUCKET_EXACT, domain_token("DateBucket", enums_pb2.DATE_BUCKET_EXACT))
-DateBucket.YEAR = DateBucket(enums_pb2.DATE_BUCKET_YEAR, domain_token("DateBucket", enums_pb2.DATE_BUCKET_YEAR))
-DateBucket.QUARTER = DateBucket(enums_pb2.DATE_BUCKET_QUARTER, domain_token("DateBucket", enums_pb2.DATE_BUCKET_QUARTER))
-DateBucket.MONTH = DateBucket(enums_pb2.DATE_BUCKET_MONTH, domain_token("DateBucket", enums_pb2.DATE_BUCKET_MONTH))
-DateBucket.WEEK = DateBucket(enums_pb2.DATE_BUCKET_WEEK, domain_token("DateBucket", enums_pb2.DATE_BUCKET_WEEK))
-DateBucket.DAY = DateBucket(enums_pb2.DATE_BUCKET_DAY, domain_token("DateBucket", enums_pb2.DATE_BUCKET_DAY))
-DateBucket.HOUR = DateBucket(enums_pb2.DATE_BUCKET_HOUR, domain_token("DateBucket", enums_pb2.DATE_BUCKET_HOUR))
+DateBucket.EXACT = DateBucket(enums_pb2.DATE_BUCKET_EXACT)
+DateBucket.YEAR = DateBucket(enums_pb2.DATE_BUCKET_YEAR)
+DateBucket.QUARTER = DateBucket(enums_pb2.DATE_BUCKET_QUARTER)
+DateBucket.MONTH = DateBucket(enums_pb2.DATE_BUCKET_MONTH)
+DateBucket.WEEK = DateBucket(enums_pb2.DATE_BUCKET_WEEK)
+DateBucket.DAY = DateBucket(enums_pb2.DATE_BUCKET_DAY)
+DateBucket.HOUR = DateBucket(enums_pb2.DATE_BUCKET_HOUR)
 
 
 class DateOrdinal(OperationEnumValue):
@@ -729,9 +591,9 @@ class DateOrdinal(OperationEnumValue):
     QUARTER_OF_YEAR: ClassVar[Self]
 
 
-DateOrdinal.DAY_OF_WEEK = DateOrdinal(enums_pb2.DATE_ORDINAL_DAY_OF_WEEK, domain_token("DateOrdinal", enums_pb2.DATE_ORDINAL_DAY_OF_WEEK))
-DateOrdinal.MONTH_OF_YEAR = DateOrdinal(enums_pb2.DATE_ORDINAL_MONTH_OF_YEAR, domain_token("DateOrdinal", enums_pb2.DATE_ORDINAL_MONTH_OF_YEAR))
-DateOrdinal.QUARTER_OF_YEAR = DateOrdinal(enums_pb2.DATE_ORDINAL_QUARTER_OF_YEAR, domain_token("DateOrdinal", enums_pb2.DATE_ORDINAL_QUARTER_OF_YEAR))
+DateOrdinal.DAY_OF_WEEK = DateOrdinal(enums_pb2.DATE_ORDINAL_DAY_OF_WEEK)
+DateOrdinal.MONTH_OF_YEAR = DateOrdinal(enums_pb2.DATE_ORDINAL_MONTH_OF_YEAR)
+DateOrdinal.QUARTER_OF_YEAR = DateOrdinal(enums_pb2.DATE_ORDINAL_QUARTER_OF_YEAR)
 
 
 class AxisScale(OperationEnumValue):
@@ -739,8 +601,8 @@ class AxisScale(OperationEnumValue):
     LOG: ClassVar[Self]
 
 
-AxisScale.LINEAR = AxisScale(enums_pb2.AXIS_SCALE_LINEAR, domain_token("AxisScale", enums_pb2.AXIS_SCALE_LINEAR))
-AxisScale.LOG = AxisScale(enums_pb2.AXIS_SCALE_LOG, domain_token("AxisScale", enums_pb2.AXIS_SCALE_LOG))
+AxisScale.LINEAR = AxisScale(enums_pb2.AXIS_SCALE_LINEAR)
+AxisScale.LOG = AxisScale(enums_pb2.AXIS_SCALE_LOG)
 
 
 class DisplayUnits(OperationEnumValue):
@@ -751,11 +613,11 @@ class DisplayUnits(OperationEnumValue):
     PERCENT: ClassVar[Self]
 
 
-DisplayUnits.NONE = DisplayUnits(enums_pb2.DISPLAY_UNITS_NONE, domain_token("DisplayUnits", enums_pb2.DISPLAY_UNITS_NONE))
-DisplayUnits.THOUSANDS = DisplayUnits(enums_pb2.DISPLAY_UNITS_THOUSANDS, domain_token("DisplayUnits", enums_pb2.DISPLAY_UNITS_THOUSANDS))
-DisplayUnits.MILLIONS = DisplayUnits(enums_pb2.DISPLAY_UNITS_MILLIONS, domain_token("DisplayUnits", enums_pb2.DISPLAY_UNITS_MILLIONS))
-DisplayUnits.BILLIONS = DisplayUnits(enums_pb2.DISPLAY_UNITS_BILLIONS, domain_token("DisplayUnits", enums_pb2.DISPLAY_UNITS_BILLIONS))
-DisplayUnits.PERCENT = DisplayUnits(enums_pb2.DISPLAY_UNITS_PERCENT, domain_token("DisplayUnits", enums_pb2.DISPLAY_UNITS_PERCENT))
+DisplayUnits.NONE = DisplayUnits(enums_pb2.DISPLAY_UNITS_NONE)
+DisplayUnits.THOUSANDS = DisplayUnits(enums_pb2.DISPLAY_UNITS_THOUSANDS)
+DisplayUnits.MILLIONS = DisplayUnits(enums_pb2.DISPLAY_UNITS_MILLIONS)
+DisplayUnits.BILLIONS = DisplayUnits(enums_pb2.DISPLAY_UNITS_BILLIONS)
+DisplayUnits.PERCENT = DisplayUnits(enums_pb2.DISPLAY_UNITS_PERCENT)
 
 
 class LegendPosition(OperationEnumValue):
@@ -766,11 +628,11 @@ class LegendPosition(OperationEnumValue):
     NONE: ClassVar[Self]
 
 
-LegendPosition.TOP = LegendPosition(enums_pb2.LEGEND_POSITION_TOP, domain_token("LegendPosition", enums_pb2.LEGEND_POSITION_TOP))
-LegendPosition.BOTTOM = LegendPosition(enums_pb2.LEGEND_POSITION_BOTTOM, domain_token("LegendPosition", enums_pb2.LEGEND_POSITION_BOTTOM))
-LegendPosition.LEFT = LegendPosition(enums_pb2.LEGEND_POSITION_LEFT, domain_token("LegendPosition", enums_pb2.LEGEND_POSITION_LEFT))
-LegendPosition.RIGHT = LegendPosition(enums_pb2.LEGEND_POSITION_RIGHT, domain_token("LegendPosition", enums_pb2.LEGEND_POSITION_RIGHT))
-LegendPosition.NONE = LegendPosition(enums_pb2.LEGEND_POSITION_NONE, domain_token("LegendPosition", enums_pb2.LEGEND_POSITION_NONE))
+LegendPosition.TOP = LegendPosition(enums_pb2.LEGEND_POSITION_TOP)
+LegendPosition.BOTTOM = LegendPosition(enums_pb2.LEGEND_POSITION_BOTTOM)
+LegendPosition.LEFT = LegendPosition(enums_pb2.LEGEND_POSITION_LEFT)
+LegendPosition.RIGHT = LegendPosition(enums_pb2.LEGEND_POSITION_RIGHT)
+LegendPosition.NONE = LegendPosition(enums_pb2.LEGEND_POSITION_NONE)
 
 
 class ChartHeight(OperationEnumValue):
@@ -780,10 +642,10 @@ class ChartHeight(OperationEnumValue):
     XLARGE: ClassVar[Self]
 
 
-ChartHeight.SMALL = ChartHeight(enums_pb2.CHART_HEIGHT_SMALL, domain_token("ChartHeight", enums_pb2.CHART_HEIGHT_SMALL))
-ChartHeight.MEDIUM = ChartHeight(enums_pb2.CHART_HEIGHT_MEDIUM, domain_token("ChartHeight", enums_pb2.CHART_HEIGHT_MEDIUM))
-ChartHeight.LARGE = ChartHeight(enums_pb2.CHART_HEIGHT_LARGE, domain_token("ChartHeight", enums_pb2.CHART_HEIGHT_LARGE))
-ChartHeight.XLARGE = ChartHeight(enums_pb2.CHART_HEIGHT_XLARGE, domain_token("ChartHeight", enums_pb2.CHART_HEIGHT_XLARGE))
+ChartHeight.SMALL = ChartHeight(enums_pb2.CHART_HEIGHT_SMALL)
+ChartHeight.MEDIUM = ChartHeight(enums_pb2.CHART_HEIGHT_MEDIUM)
+ChartHeight.LARGE = ChartHeight(enums_pb2.CHART_HEIGHT_LARGE)
+ChartHeight.XLARGE = ChartHeight(enums_pb2.CHART_HEIGHT_XLARGE)
 
 
 class ChartWidth(OperationEnumValue):
@@ -792,9 +654,9 @@ class ChartWidth(OperationEnumValue):
     FULL: ClassVar[Self]
 
 
-ChartWidth.NORMAL = ChartWidth(enums_pb2.CHART_WIDTH_NORMAL, domain_token("ChartWidth", enums_pb2.CHART_WIDTH_NORMAL))
-ChartWidth.WIDE = ChartWidth(enums_pb2.CHART_WIDTH_WIDE, domain_token("ChartWidth", enums_pb2.CHART_WIDTH_WIDE))
-ChartWidth.FULL = ChartWidth(enums_pb2.CHART_WIDTH_FULL, domain_token("ChartWidth", enums_pb2.CHART_WIDTH_FULL))
+ChartWidth.NORMAL = ChartWidth(enums_pb2.CHART_WIDTH_NORMAL)
+ChartWidth.WIDE = ChartWidth(enums_pb2.CHART_WIDTH_WIDE)
+ChartWidth.FULL = ChartWidth(enums_pb2.CHART_WIDTH_FULL)
 
 
 class RecipientSource(OperationEnumValue):
@@ -802,8 +664,8 @@ class RecipientSource(OperationEnumValue):
     COLUMN: ClassVar[Self]
 
 
-RecipientSource.MANUAL = RecipientSource(enums_pb2.RECIPIENT_SOURCE_MANUAL, domain_token("RecipientSource", enums_pb2.RECIPIENT_SOURCE_MANUAL))
-RecipientSource.COLUMN = RecipientSource(enums_pb2.RECIPIENT_SOURCE_COLUMN, domain_token("RecipientSource", enums_pb2.RECIPIENT_SOURCE_COLUMN))
+RecipientSource.MANUAL = RecipientSource(enums_pb2.RECIPIENT_SOURCE_MANUAL)
+RecipientSource.COLUMN = RecipientSource(enums_pb2.RECIPIENT_SOURCE_COLUMN)
 
 
 class DeduplicateKeep(OperationEnumValue):
@@ -817,10 +679,10 @@ class DeduplicateKeep(OperationEnumValue):
         return cast(Literal["first", "last", "any", "none"], self.value)
 
 
-DeduplicateKeep.FIRST = DeduplicateKeep(enums_pb2.DEDUPLICATE_KEEP_FIRST, domain_token("DeduplicateKeep", enums_pb2.DEDUPLICATE_KEEP_FIRST))
-DeduplicateKeep.LAST = DeduplicateKeep(enums_pb2.DEDUPLICATE_KEEP_LAST, domain_token("DeduplicateKeep", enums_pb2.DEDUPLICATE_KEEP_LAST))
-DeduplicateKeep.ANY = DeduplicateKeep(enums_pb2.DEDUPLICATE_KEEP_ANY, domain_token("DeduplicateKeep", enums_pb2.DEDUPLICATE_KEEP_ANY))
-DeduplicateKeep.NONE = DeduplicateKeep(enums_pb2.DEDUPLICATE_KEEP_NONE, domain_token("DeduplicateKeep", enums_pb2.DEDUPLICATE_KEEP_NONE))
+DeduplicateKeep.FIRST = DeduplicateKeep(enums_pb2.DEDUPLICATE_KEEP_FIRST)
+DeduplicateKeep.LAST = DeduplicateKeep(enums_pb2.DEDUPLICATE_KEEP_LAST)
+DeduplicateKeep.ANY = DeduplicateKeep(enums_pb2.DEDUPLICATE_KEEP_ANY)
+DeduplicateKeep.NONE = DeduplicateKeep(enums_pb2.DEDUPLICATE_KEEP_NONE)
 
 
 class PivotAggregateFunction(OperationEnumValue):
@@ -840,30 +702,14 @@ class PivotAggregateFunction(OperationEnumValue):
         return cast(Literal["first", "last", "sum", "mean", "median", "min", "max"], self.value)
 
 
-PivotAggregateFunction.FIRST = PivotAggregateFunction(
-    enums_pb2.PIVOT_AGGREGATE_FUNCTION_FIRST, domain_token("PivotAggregateFunction", enums_pb2.PIVOT_AGGREGATE_FUNCTION_FIRST)
-)
-PivotAggregateFunction.LAST = PivotAggregateFunction(
-    enums_pb2.PIVOT_AGGREGATE_FUNCTION_LAST, domain_token("PivotAggregateFunction", enums_pb2.PIVOT_AGGREGATE_FUNCTION_LAST)
-)
-PivotAggregateFunction.SUM = PivotAggregateFunction(
-    enums_pb2.PIVOT_AGGREGATE_FUNCTION_SUM, domain_token("PivotAggregateFunction", enums_pb2.PIVOT_AGGREGATE_FUNCTION_SUM)
-)
-PivotAggregateFunction.MEAN = PivotAggregateFunction(
-    enums_pb2.PIVOT_AGGREGATE_FUNCTION_MEAN, domain_token("PivotAggregateFunction", enums_pb2.PIVOT_AGGREGATE_FUNCTION_MEAN)
-)
-PivotAggregateFunction.MEDIAN = PivotAggregateFunction(
-    enums_pb2.PIVOT_AGGREGATE_FUNCTION_MEDIAN, domain_token("PivotAggregateFunction", enums_pb2.PIVOT_AGGREGATE_FUNCTION_MEDIAN)
-)
-PivotAggregateFunction.MIN = PivotAggregateFunction(
-    enums_pb2.PIVOT_AGGREGATE_FUNCTION_MIN, domain_token("PivotAggregateFunction", enums_pb2.PIVOT_AGGREGATE_FUNCTION_MIN)
-)
-PivotAggregateFunction.MAX = PivotAggregateFunction(
-    enums_pb2.PIVOT_AGGREGATE_FUNCTION_MAX, domain_token("PivotAggregateFunction", enums_pb2.PIVOT_AGGREGATE_FUNCTION_MAX)
-)
-PivotAggregateFunction.COUNT = PivotAggregateFunction(
-    enums_pb2.PIVOT_AGGREGATE_FUNCTION_COUNT, domain_token("PivotAggregateFunction", enums_pb2.PIVOT_AGGREGATE_FUNCTION_COUNT)
-)
+PivotAggregateFunction.FIRST = PivotAggregateFunction(enums_pb2.PIVOT_AGGREGATE_FUNCTION_FIRST)
+PivotAggregateFunction.LAST = PivotAggregateFunction(enums_pb2.PIVOT_AGGREGATE_FUNCTION_LAST)
+PivotAggregateFunction.SUM = PivotAggregateFunction(enums_pb2.PIVOT_AGGREGATE_FUNCTION_SUM)
+PivotAggregateFunction.MEAN = PivotAggregateFunction(enums_pb2.PIVOT_AGGREGATE_FUNCTION_MEAN)
+PivotAggregateFunction.MEDIAN = PivotAggregateFunction(enums_pb2.PIVOT_AGGREGATE_FUNCTION_MEDIAN)
+PivotAggregateFunction.MIN = PivotAggregateFunction(enums_pb2.PIVOT_AGGREGATE_FUNCTION_MIN)
+PivotAggregateFunction.MAX = PivotAggregateFunction(enums_pb2.PIVOT_AGGREGATE_FUNCTION_MAX)
+PivotAggregateFunction.COUNT = PivotAggregateFunction(enums_pb2.PIVOT_AGGREGATE_FUNCTION_COUNT)
 
 
 class FillNullStrategy(OperationEnumValue):
@@ -884,10 +730,10 @@ class FillNullStrategy(OperationEnumValue):
         return self == FillNullStrategy.DROP_ROWS
 
 
-FillNullStrategy.FORWARD = FillNullStrategy(enums_pb2.FILL_NULL_STRATEGY_FORWARD, domain_token("FillNullStrategy", enums_pb2.FILL_NULL_STRATEGY_FORWARD))
-FillNullStrategy.BACKWARD = FillNullStrategy(enums_pb2.FILL_NULL_STRATEGY_BACKWARD, domain_token("FillNullStrategy", enums_pb2.FILL_NULL_STRATEGY_BACKWARD))
-FillNullStrategy.MEAN = FillNullStrategy(enums_pb2.FILL_NULL_STRATEGY_MEAN, domain_token("FillNullStrategy", enums_pb2.FILL_NULL_STRATEGY_MEAN))
-FillNullStrategy.MEDIAN = FillNullStrategy(enums_pb2.FILL_NULL_STRATEGY_MEDIAN, domain_token("FillNullStrategy", enums_pb2.FILL_NULL_STRATEGY_MEDIAN))
-FillNullStrategy.ZERO = FillNullStrategy(enums_pb2.FILL_NULL_STRATEGY_ZERO, domain_token("FillNullStrategy", enums_pb2.FILL_NULL_STRATEGY_ZERO))
-FillNullStrategy.LITERAL = FillNullStrategy(enums_pb2.FILL_NULL_STRATEGY_LITERAL, domain_token("FillNullStrategy", enums_pb2.FILL_NULL_STRATEGY_LITERAL))
-FillNullStrategy.DROP_ROWS = FillNullStrategy(enums_pb2.FILL_NULL_STRATEGY_DROP_ROWS, domain_token("FillNullStrategy", enums_pb2.FILL_NULL_STRATEGY_DROP_ROWS))
+FillNullStrategy.FORWARD = FillNullStrategy(enums_pb2.FILL_NULL_STRATEGY_FORWARD)
+FillNullStrategy.BACKWARD = FillNullStrategy(enums_pb2.FILL_NULL_STRATEGY_BACKWARD)
+FillNullStrategy.MEAN = FillNullStrategy(enums_pb2.FILL_NULL_STRATEGY_MEAN)
+FillNullStrategy.MEDIAN = FillNullStrategy(enums_pb2.FILL_NULL_STRATEGY_MEDIAN)
+FillNullStrategy.ZERO = FillNullStrategy(enums_pb2.FILL_NULL_STRATEGY_ZERO)
+FillNullStrategy.LITERAL = FillNullStrategy(enums_pb2.FILL_NULL_STRATEGY_LITERAL)
+FillNullStrategy.DROP_ROWS = FillNullStrategy(enums_pb2.FILL_NULL_STRATEGY_DROP_ROWS)

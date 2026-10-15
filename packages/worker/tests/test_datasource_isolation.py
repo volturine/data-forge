@@ -140,7 +140,7 @@ def test_staging_streams_multiple_parquet_batches_without_whole_source_collectio
 
     monkeypatch.setattr(execution, "MultipartObjectUpload", Upload)
     monkeypatch.setattr(execution, "iter_datasource_batches", batches)
-    monkeypatch.setattr(execution, "load_datasource", lambda *_args: pytest.fail("Whole source loaded"))
+    monkeypatch.setattr(execution, "load_datasource_frame", lambda *_args: pytest.fail("Whole source loaded"))
     monkeypatch.setattr(execution, "upload_bytes", lambda data, url, **_kwargs: saved_manifests.append((data, url)))
     result = execution.stage_datasource_to_object_store(
         {"source_type": "file"},
@@ -173,7 +173,7 @@ def test_empty_datasource_writes_schema_manifest_without_zero_row_parquet(monkey
         yield from ()
 
     monkeypatch.setattr(execution, "iter_datasource_batches", no_batches)
-    monkeypatch.setattr(execution, "load_datasource", lambda *_args: pl.DataFrame(schema={"empty": pl.String}).lazy())
+    monkeypatch.setattr(execution, "load_datasource_frame", lambda *_args: pl.DataFrame(schema={"empty": pl.String}).lazy())
     monkeypatch.setattr(execution, "upload_bytes", lambda data, url, **_kwargs: saved_manifests.append((json.loads(data), url)))
 
     manifest = execution.stage_datasource_to_object_store(
@@ -322,8 +322,8 @@ def test_scheduled_ingest_uses_the_same_manifest_commit_path_as_manual_ingest(mo
             return None
 
     table = type("Table", (), {"current_snapshot": lambda _self: None, "metadata_location": None})()
-    monkeypatch.setattr(execution, "_require_metadata", lambda *_args, **_kwargs: metadata)
-    monkeypatch.setattr(execution, "_external_source", lambda _metadata: ({"source_type": "file"}, DataSourceType.FILE))
+    monkeypatch.setattr(execution, "require_metadata", lambda *_args, **_kwargs: metadata)
+    monkeypatch.setattr(execution, "external_source", lambda _metadata: ({"source_type": "file"}, DataSourceType.FILE))
     monkeypatch.setattr(
         execution, "import_staged_parquet_files", lambda received, **kwargs: (calls.append(("import", received, kwargs)), (table, kwargs["table_path"]))[1]
     )
@@ -374,7 +374,7 @@ def test_completed_ingest_run_keeps_the_same_proto_summary_fields() -> None:
         def update_compute_worker_run(self, **kwargs):
             updates.append(kwargs)
 
-    execution._complete_ingest_run(
+    execution.complete_ingest_run(
         Client(),
         namespace="default",
         run_id="run-1",
@@ -454,7 +454,7 @@ def test_schedule_ingest_rejects_datasource_without_external_source(monkeypatch)
         revision=3,
         created_by="import",
     )
-    monkeypatch.setattr(execution, "_require_metadata", lambda *_args, **_kwargs: metadata)
+    monkeypatch.setattr(execution, "require_metadata", lambda *_args, **_kwargs: metadata)
 
     with pytest.raises(DataSourceValidationError, match="no external source"):
         execution.ingest_datasource_for_schedule(

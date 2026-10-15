@@ -4,7 +4,7 @@ from dataclasses import dataclass
 from email.message import EmailMessage
 
 from backend_core import http as http_client
-from backend_core.settings_projection import get_resolved_smtp, get_resolved_telegram_settings, get_resolved_telegram_token
+from backend_core.settings_projection import get_resolved_smtp, get_resolved_telegram_settings
 from backend_core.smtp import send_smtp_message
 
 EMAIL_DELIVERY_KIND = 'email_delivery'
@@ -86,7 +86,7 @@ def _deliver_telegram(payload: dict[str, object], progress: DeliveryProgress) ->
     if not resolved['enabled']:
         raise ValueError('Telegram is not enabled')
     payload_token = payload.get('bot_token')
-    token = payload_token if isinstance(payload_token, str) and payload_token else str(resolved['token']) or get_resolved_telegram_token()
+    token = payload_token if isinstance(payload_token, str) and payload_token else str(resolved['token'])
     if not token:
         raise ValueError('Telegram bot token is not configured')
     chat_id = _required_text(payload, 'chat_id')
@@ -95,7 +95,6 @@ def _deliver_telegram(payload: dict[str, object], progress: DeliveryProgress) ->
         if 'message' not in progress.completed_parts:
             _telegram_post(
                 f'{base}/sendMessage',
-                token,
                 json={'chat_id': chat_id, 'text': _required_text(payload, 'message'), 'parse_mode': 'HTML'},
                 timeout=20,
             )
@@ -106,7 +105,6 @@ def _deliver_telegram(payload: dict[str, object], progress: DeliveryProgress) ->
                 continue
             _telegram_post(
                 f'{base}/sendDocument',
-                token,
                 data={'chat_id': chat_id},
                 files={'document': (attachment['filename'], base64.b64decode(attachment['content_base64']), attachment['content_type'])},
                 timeout=30,
@@ -121,6 +119,6 @@ def _record_completed_part(progress: DeliveryProgress, part_key: str) -> None:
         raise RuntimeError('Telegram delivery claim expired before progress could be recorded')
 
 
-def _telegram_post(url: str, token: str, **kwargs: object) -> None:
+def _telegram_post(url: str, **kwargs: object) -> None:
     response = http_client.post(url, **kwargs)
     response.raise_for_status()

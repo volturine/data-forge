@@ -2,11 +2,12 @@ from __future__ import annotations
 
 import asyncio
 import contextlib
+import dataclasses
 import logging
 import threading
 import time
 from collections import deque
-from collections.abc import Callable, Iterator
+from collections.abc import Callable, Iterator, Mapping
 from dataclasses import dataclass
 from datetime import UTC, datetime
 
@@ -107,18 +108,6 @@ class _EngineJobSlot:
     references: int = 0
 
 
-def _compute_worker_identity_analysis_id(identity: ComputeWorkerIdentity) -> str | None:
-    return identity.analysis_id if identity.HasField("analysis_id") else None
-
-
-def _compute_worker_identity_datasource_id(identity: ComputeWorkerIdentity) -> str | None:
-    return identity.datasource_id if identity.HasField("datasource_id") else None
-
-
-def _compute_worker_identity_build_id(identity: ComputeWorkerIdentity) -> str | None:
-    return identity.build_id if identity.HasField("build_id") else None
-
-
 def _engine_scope_value(identity: ComputeWorkerIdentity) -> str:
     if identity.scope == enums_pb2.COMPUTE_WORKER_SCOPE_DATASOURCE_PREVIEW:
         return "datasource_preview"
@@ -137,23 +126,30 @@ def _engine_reuse_policy_value(identity: ComputeWorkerIdentity) -> str:
     raise ValueError("engine identity reuse policy is unspecified")
 
 
+_ACQUISITION_PHASES = (
+    "warm_health_ms",
+    "warm_candidate_shutdown_wait_ms",
+    "warm_bind_ms",
+    "cold_start_ms",
+    "lifecycle_wait_ms",
+    "prior_engine_shutdown_ms",
+    "idle_eviction_shutdown_ms",
+    "process_alive_check_ms",
+    "snapshot_publication_ms",
+)
+
+
 def _log_engine_acquisition(
     identity: ComputeWorkerIdentity,
     *,
     namespace: str,
     source: str,
     acquisition_ms: float,
-    warm_health_ms: float = 0.0,
-    warm_candidate_shutdown_wait_ms: float = 0.0,
-    warm_bind_ms: float = 0.0,
-    cold_start_ms: float = 0.0,
+    phase_ms: Mapping[str, float] | None = None,
     warm_candidate_rejected: bool = False,
-    lifecycle_wait_ms: float = 0.0,
-    prior_engine_shutdown_ms: float = 0.0,
-    idle_eviction_shutdown_ms: float = 0.0,
-    process_alive_check_ms: float = 0.0,
-    snapshot_publication_ms: float = 0.0,
 ) -> None:
+    """Log one acquisition with every phase in ``_ACQUISITION_PHASES`` (missing phases are 0)."""
+    phases = {name: (phase_ms or {}).get(name, 0.0) for name in _ACQUISITION_PHASES}
     try:
         scope = _engine_scope_value(identity)
     except ValueError:
@@ -172,16 +168,16 @@ def _log_engine_acquisition(
         identity.resource_id,
         source,
         acquisition_ms,
-        warm_health_ms,
-        warm_candidate_shutdown_wait_ms,
-        warm_bind_ms,
-        cold_start_ms,
+        phases["warm_health_ms"],
+        phases["warm_candidate_shutdown_wait_ms"],
+        phases["warm_bind_ms"],
+        phases["cold_start_ms"],
         warm_candidate_rejected,
-        lifecycle_wait_ms,
-        prior_engine_shutdown_ms,
-        idle_eviction_shutdown_ms,
-        process_alive_check_ms,
-        snapshot_publication_ms,
+        phases["lifecycle_wait_ms"],
+        phases["prior_engine_shutdown_ms"],
+        phases["idle_eviction_shutdown_ms"],
+        phases["process_alive_check_ms"],
+        phases["snapshot_publication_ms"],
     )
 
 
@@ -488,11 +484,10 @@ class ProcessManager:
             with self._capacity_changed:
                 if self._closed:
                     raise RuntimeError("Process manager is shut down")
-                if key in self._engine_events or self._spawn_admissions.get(key) or any(waiter.key == key for waiter in self._spawn_waiters):
-                    future: asyncio.Future[bool] = loop.create_future()
-                    self._capacity_waiters.append((loop, future))
-                else:
+                if not self._identity_busy_locked(key):
                     return
+                future: asyncio.Future[bool] = loop.create_future()
+                self._capacity_waiters.append((loop, future))
             try:
                 await future
             finally:
@@ -665,12 +660,9 @@ class ProcessManager:
                     self._admit_spawn_waiters_locked()
                 if eviction_event is not None:
                     self._finish_engine_event(evicted[0], eviction_event)
-        elif eviction_event is not None and admission.evicted is not None:
+        elif evicted is not None and eviction_event is not None:
             # The live eviction was restored above; only finish the identity event.
-            with self._capacity_changed:
-                self._stopping_engines.pop(id(admission.evicted[1].engine), None)
-                self._capacity_reserved_stops.discard(id(admission.evicted[1].engine))
-            self._finish_engine_event(admission.evicted[0], eviction_event)
+            self._finish_engine_event(evicted[0], eviction_event)
         self.notify_capacity_changed()
         return True
 
@@ -992,16 +984,8 @@ class ProcessManager:
         capacity_start_held = False
         warm_claim_held = False
         cold_start_held = False
-        warm_health_ms = 0.0
-        warm_candidate_shutdown_wait_ms = 0.0
-        warm_bind_ms = 0.0
-        cold_start_ms = 0.0
+        phase_ms = dict.fromkeys(_ACQUISITION_PHASES, 0.0)
         warm_candidate_rejected = False
-        lifecycle_wait_ms = 0.0
-        prior_engine_shutdown_ms = 0.0
-        idle_eviction_shutdown_ms = 0.0
-        process_alive_check_ms = 0.0
-        snapshot_publication_ms = 0.0
 
         while True:
             with self._engines_lock:
@@ -1053,7 +1037,7 @@ class ProcessManager:
             if wait_event is not None:
                 wait_started = time.perf_counter()
                 wait_event.wait()
-                lifecycle_wait_ms += (time.perf_counter() - wait_started) * 1000
+                phase_ms["lifecycle_wait_ms"] += (time.perf_counter() - wait_started) * 1000
                 wait_event = None
 
         if reused_info is not None:
@@ -1064,14 +1048,13 @@ class ProcessManager:
                 try:
                     self._emit_snapshot_for_namespaces(changed_namespaces)
                 finally:
-                    snapshot_publication_ms = (time.perf_counter() - snapshot_started) * 1000
+                    phase_ms["snapshot_publication_ms"] = (time.perf_counter() - snapshot_started) * 1000
             _log_engine_acquisition(
                 identity,
                 namespace=namespace,
                 source="existing",
                 acquisition_ms=(time.perf_counter() - acquisition_started) * 1000,
-                lifecycle_wait_ms=lifecycle_wait_ms,
-                snapshot_publication_ms=snapshot_publication_ms,
+                phase_ms=phase_ms,
             )
             return reused_info
 
@@ -1086,19 +1069,15 @@ class ProcessManager:
                     shutdown_target.shutdown()
                 finally:
                     self._untrack_stopping_engine(shutdown_target)
-                    prior_engine_shutdown_ms += (time.perf_counter() - shutdown_started) * 1000
+                    phase_ms["prior_engine_shutdown_ms"] += (time.perf_counter() - shutdown_started) * 1000
 
             # Non-blocking admission: running engines only count. If full, raise
             # ComputeWorkerCapacityFull so the caller parks outside the runner pool.
+            claimed_admission = admission
             if admission is not None:
                 # Every admitted identity owns one active-start ticket. It was
                 # marked claimed before installing the lifecycle event, so
                 # request cancellation cannot release it mid-start.
-                capacity_start_held = True
-                warm_claim_held = admission.warm_claim
-                cold_start_held = admission.cold_start
-                evict_info = admission.evicted
-                eviction_event = admission.eviction_event
                 with self._capacity_changed:
                     admissions = self._spawn_admissions.get(qualified_key)
                     if admissions and admissions[0] is admission:
@@ -1106,14 +1085,19 @@ class ProcessManager:
                         if not admissions:
                             self._spawn_admissions.pop(qualified_key, None)
                         admission_consumed = True
-            elif shutdown_target is not None:
-                # The dead/config-changed identity already holds a replacement
-                # ticket. Reclaiming a second ticket here can reject the
+            elif shutdown_target is None:
+                # A dead/config-changed identity already holds a replacement
+                # ticket. Reclaiming a second ticket there can reject the
                 # restart at full capacity and leak the first reservation.
-                evict_info = None
-                eviction_event = None
-            else:
-                evict_info, capacity_start_held, eviction_event, warm_claim_held, cold_start_held = self._try_claim_capacity_slot(qualified_key)
+                claimed_admission = self._try_claim_capacity_slot(qualified_key)
+            evict_info = None
+            eviction_event = None
+            if claimed_admission is not None:
+                capacity_start_held = True
+                warm_claim_held = claimed_admission.warm_claim
+                cold_start_held = claimed_admission.cold_start
+                evict_info = claimed_admission.evicted
+                eviction_event = claimed_admission.eviction_event
             if not capacity_start_held:
                 logger.info(
                     "Compute worker capacity (%s) in use; deferring spawn for %s (queue, not runner)",
@@ -1130,7 +1114,7 @@ class ProcessManager:
                     self._untrack_stopping_engine(idle_engine_info.engine)
                     if eviction_event is not None:
                         self._finish_engine_event(evict_info[0], eviction_event)
-                    idle_eviction_shutdown_ms += (time.perf_counter() - shutdown_started) * 1000
+                    phase_ms["idle_eviction_shutdown_ms"] += (time.perf_counter() - shutdown_started) * 1000
                 changed_namespaces.add(evict_info[0].namespace)
 
             # Health checks are engine RPCs: pop under the lock, probe outside it.
@@ -1160,12 +1144,12 @@ class ProcessManager:
                 except Exception:
                     healthy = False
                 finally:
-                    warm_health_ms += (time.perf_counter() - health_started) * 1000
+                    phase_ms["warm_health_ms"] += (time.perf_counter() - health_started) * 1000
                 if healthy:
                     warm_worker = candidate
                 else:
                     warm_candidate_rejected = True
-                    warm_candidate_shutdown_wait_ms += self._queue_rejected_warm_worker(candidate, qualified_key)
+                    phase_ms["warm_candidate_shutdown_wait_ms"] += self._queue_rejected_warm_worker(candidate, qualified_key)
 
             if warm_worker is not None:
                 engine = warm_worker
@@ -1173,7 +1157,7 @@ class ProcessManager:
                 if callable(bind_id):
                     bind_started = time.perf_counter()
                     bind_id(identity, resource_config=normalized_config, namespace=namespace)
-                    warm_bind_ms = (time.perf_counter() - bind_started) * 1000
+                    phase_ms["warm_bind_ms"] = (time.perf_counter() - bind_started) * 1000
                 bind_cap = getattr(engine, "bind_capacity_notifier", None)
                 if callable(bind_cap):
                     bind_cap(self.notify_capacity_changed)
@@ -1188,10 +1172,10 @@ class ProcessManager:
                     self._track_starting_engine(engine)
                     engine.start()
                 finally:
-                    cold_start_ms = (time.perf_counter() - cold_start_started) * 1000
+                    phase_ms["cold_start_ms"] = (time.perf_counter() - cold_start_started) * 1000
             process_check_started = time.perf_counter()
             process_alive = engine.is_process_alive()
-            process_alive_check_ms = (time.perf_counter() - process_check_started) * 1000
+            phase_ms["process_alive_check_ms"] = (time.perf_counter() - process_check_started) * 1000
             if not process_alive:
                 engine.shutdown()
                 raise RuntimeError(f"Failed to start engine for {qualified_key}")
@@ -1257,22 +1241,14 @@ class ProcessManager:
         try:
             self._emit_snapshot_for_namespaces(changed_namespaces)
         finally:
-            snapshot_publication_ms = (time.perf_counter() - snapshot_started) * 1000
+            phase_ms["snapshot_publication_ms"] = (time.perf_counter() - snapshot_started) * 1000
         _log_engine_acquisition(
             identity,
             namespace=namespace,
             source="warm" if warm_worker is not None else "cold",
             acquisition_ms=(time.perf_counter() - acquisition_started) * 1000,
-            warm_health_ms=warm_health_ms,
-            warm_candidate_shutdown_wait_ms=warm_candidate_shutdown_wait_ms,
-            warm_bind_ms=warm_bind_ms,
-            cold_start_ms=cold_start_ms,
             warm_candidate_rejected=warm_candidate_rejected,
-            lifecycle_wait_ms=lifecycle_wait_ms,
-            prior_engine_shutdown_ms=prior_engine_shutdown_ms,
-            idle_eviction_shutdown_ms=idle_eviction_shutdown_ms,
-            process_alive_check_ms=process_alive_check_ms,
-            snapshot_publication_ms=snapshot_publication_ms,
+            phase_ms=phase_ms,
         )
         return spawned_info
 
@@ -1318,56 +1294,31 @@ class ProcessManager:
     def _warm_worker_available_locked(self) -> bool:
         return len(self._warm_workers) > self._warm_worker_claims
 
-    def _try_claim_capacity_slot(
-        self,
-        qualified_key: ComputeWorkerIdentityKey,
-    ) -> tuple[tuple[ComputeWorkerIdentityKey, ComputeWorkerInfo] | None, bool, threading.Event | None, bool, bool]:
-        """Non-blocking claim: eviction, ticket, event, warm claim, cold-start token.
+    def _try_claim_capacity_slot(self, qualified_key: ComputeWorkerIdentityKey) -> _CapacityAdmission | None:
+        """Non-blocking claim of an active-start ticket, evicting an idle engine if needed.
 
-        Does not park the caller. On failure returns (None, False, None) so runners
+        Does not park the caller. Returns ``None`` when no slot is free so runners
         can exit and the async queue can wait without holding a worker thread.
         """
         with self._capacity_changed:
             if self._closed:
                 raise RuntimeError("Process manager is shut down")
             if self._spawn_waiters:
-                return None, False, None, False, False
-            used = self._capacity_used_locked()
-            capacity = settings.compute_workers
-            if used < capacity:
-                warm_claim = self._warm_worker_available_locked()
-                cold_start = not warm_claim
-                if cold_start:
-                    self._cold_starts += 1
-                self._capacity_starts += 1
-                if warm_claim:
-                    self._warm_worker_claims += 1
-                self._capacity_changed.notify_all()
-                return None, True, None, warm_claim, cold_start
-            idle_key, idle_info = self._find_idle_engine_locked()
-            if idle_key is not None and idle_info is not None:
-                warm_claim = self._warm_worker_available_locked()
-                cold_start = not warm_claim
-                if cold_start:
-                    self._cold_starts += 1
+                return None
+            admission = self._reserve_capacity_locked()
+            if admission is None:
+                return None
+            if admission.evicted is not None:
+                idle_key = admission.evicted[0]
                 logger.info(
                     "Compute worker capacity reached (%s), evicting idle engine %s in namespace %s to spawn %s",
-                    capacity,
+                    settings.compute_workers,
                     idle_key.resource_id,
                     idle_key.namespace,
                     qualified_key,
                 )
-                del self._engines[idle_key]
-                eviction_event = threading.Event()
-                self._engine_events[idle_key] = eviction_event
-                self._stopping_engines[id(idle_info.engine)] = idle_info.engine
-                self._capacity_reserved_stops.add(id(idle_info.engine))
-                self._capacity_starts += 1
-                if warm_claim:
-                    self._warm_worker_claims += 1
-                self._capacity_changed.notify_all()
-                return (idle_key, idle_info), True, eviction_event, warm_claim, cold_start
-            return None, False, None, False, False
+            self._capacity_changed.notify_all()
+            return admission
 
     @contextlib.contextmanager
     def acquire_engine(self, identity: ComputeWorkerIdentity, resource_config: dict | None = None) -> Iterator[ComputeWorker]:
@@ -1389,12 +1340,6 @@ class ProcessManager:
         # Keep the old identity's capacity reserved until its replacement has
         # been installed. spawn_compute_worker owns that transfer atomically.
         return self.spawn_compute_worker(identity, resource_config=resource_config)
-
-    def get_engine(self, identity: ComputeWorkerIdentity, *, namespace: str | None = None) -> ComputeWorker | None:
-        qualified_key = self._key(identity, namespace=namespace)
-        with self._engines_lock:
-            info = self._engines.get(qualified_key)
-            return info.engine if info else None
 
     def get_engine_info(self, identity: ComputeWorkerIdentity, *, namespace: str | None = None) -> ComputeWorkerInfo | None:
         qualified_key = self._key(identity, namespace=namespace)
@@ -1433,65 +1378,55 @@ class ProcessManager:
         qualified_key = self._key(identity)
         with self._engines_lock:
             info = self._engines.get(qualified_key)
+            persisted_identity = identity if info is None else info.identity
+            build_id = persisted_identity.build_id if persisted_identity.HasField("build_id") else None
+            stopped = ComputeWorkerStatusInfo(
+                analysis_id=persisted_identity.analysis_id if persisted_identity.HasField("analysis_id") else "",
+                resource_id=persisted_identity.resource_id,
+                status=ComputeWorkerStatus.TERMINATED,
+                container_id=None,
+                image_digest=None,
+                lifecycle_status="stopped",
+                termination_reason=None,
+                exit_code=None,
+                oom_killed=None,
+                supervisor_id=self._supervisor_id,
+                owner_id=None,
+                last_activity=None,
+                current_job_id=None,
+                resource_config=None,
+                effective_resources=None,
+                defaults=defaults,
+                scope=_engine_scope_value(persisted_identity),
+                reuse_policy=_engine_reuse_policy_value(persisted_identity),
+                datasource_id=persisted_identity.datasource_id if persisted_identity.HasField("datasource_id") else None,
+                build_id=build_id,
+                current_build_id=build_id,
+                current_compute_worker_run_id=None,
+            )
             if info is None:
-                persisted_identity = identity
-                return ComputeWorkerStatusInfo(
-                    analysis_id=_compute_worker_identity_analysis_id(persisted_identity) or "",
-                    resource_id=persisted_identity.resource_id,
-                    status=ComputeWorkerStatus.TERMINATED,
-                    container_id=None,
-                    image_digest=None,
-                    lifecycle_status="stopped",
-                    termination_reason=None,
-                    exit_code=None,
-                    oom_killed=None,
-                    supervisor_id=self._supervisor_id,
-                    owner_id=None,
-                    last_activity=None,
-                    current_job_id=None,
-                    resource_config=None,
-                    effective_resources=None,
-                    defaults=defaults,
-                    scope=_engine_scope_value(persisted_identity),
-                    reuse_policy=_engine_reuse_policy_value(persisted_identity),
-                    datasource_id=_compute_worker_identity_datasource_id(persisted_identity),
-                    build_id=_compute_worker_identity_build_id(persisted_identity),
-                    current_build_id=_compute_worker_identity_build_id(persisted_identity),
-                    current_compute_worker_run_id=None,
-                )
+                return stopped
 
             # Status is a read of tracked state, not a probe: snapshots cover
             # every engine in the namespace and run inline on engine lifecycle
             # changes. The heartbeat loop owns liveness and marks an engine dead
             # as soon as it stops answering.
-            persisted_identity = info.identity
             engine = info.engine
-            is_alive = engine.last_known_alive
-            resource_config = (self._normalize_config(engine.resource_config) or None) if engine.resource_config else None
-            effective_resources = engine.effective_resources or None
-
-            return ComputeWorkerStatusInfo(
-                analysis_id=_compute_worker_identity_analysis_id(persisted_identity) or "",
-                resource_id=persisted_identity.resource_id,
-                status=ComputeWorkerStatus.HEALTHY if is_alive else ComputeWorkerStatus.TERMINATED,
+            return dataclasses.replace(
+                stopped,
+                status=ComputeWorkerStatus.HEALTHY if engine.last_known_alive else ComputeWorkerStatus.TERMINATED,
                 container_id=getattr(engine, "container_id", None),
                 image_digest=getattr(engine, "image_digest", None),
                 lifecycle_status=getattr(engine, "lifecycle_status", "running" if engine.current_job_id else "idle"),
                 termination_reason=getattr(engine, "termination_reason", None),
                 exit_code=getattr(engine, "exit_code", None),
                 oom_killed=getattr(engine, "oom_killed", None),
-                supervisor_id=self._supervisor_id,
-                owner_id=_compute_worker_identity_build_id(persisted_identity) or self._supervisor_id,
+                owner_id=build_id or self._supervisor_id,
                 last_activity=info.last_activity.isoformat(),
                 current_job_id=engine.current_job_id,
-                resource_config=resource_config,
-                effective_resources=effective_resources,
-                defaults=defaults,
-                scope=_engine_scope_value(persisted_identity),
-                reuse_policy=_engine_reuse_policy_value(persisted_identity),
-                datasource_id=_compute_worker_identity_datasource_id(persisted_identity),
-                build_id=_compute_worker_identity_build_id(persisted_identity),
-                current_build_id=info.current_build_id or _compute_worker_identity_build_id(persisted_identity),
+                resource_config=(self._normalize_config(engine.resource_config) or None) if engine.resource_config else None,
+                effective_resources=engine.effective_resources or None,
+                current_build_id=info.current_build_id or build_id,
                 current_compute_worker_run_id=info.current_compute_worker_run_id,
                 docker_host=getattr(engine, "docker_host", None),
             )
@@ -1700,7 +1635,6 @@ class ProcessManager:
             if new_engine is not None:
                 with contextlib.suppress(Exception):
                     new_engine.shutdown()
-            if new_engine is not None:
                 self._untrack_starting_engine(new_engine)
             return None
 

@@ -8,7 +8,6 @@ from typing import Any, Final
 from sqlalchemy import desc, or_, select, text
 from sqlmodel import Session
 
-from backend_core.compute_worker_runs_utils import normalize_step_timings
 from backend_core.domain.compute import schemas as compute_schemas
 from backend_core.domain.compute.schemas import BuildLogLevel, BuildStepState
 from backend_core.domain.compute_worker_runs.schemas import (
@@ -65,6 +64,18 @@ class _UnsetType:
 
 
 _UNSET: Final = _UnsetType()
+
+
+def normalize_step_timings(values: dict | None) -> dict[str, float]:
+    if not values:
+        return {}
+    normalized: dict[str, float] = {}
+    for key, value in values.items():
+        try:
+            normalized[str(key)] = float(value)
+        except TypeError, ValueError:
+            continue
+    return normalized
 
 
 def _latest_completed_step_name(result_json: dict[str, Any]) -> str | None:
@@ -139,9 +150,6 @@ def stage_cancel_compute_worker_run(session: Session, run_id: str, *, cancelled_
     return compute_schemas.CancelBuildResponse(
         id=run_id, build_id=None, compute_worker_run_id=run_id, status='cancelled', duration_ms=duration_ms, cancelled_at=now, cancelled_by=cancelled_by
     )
-
-
-cancel_compute_worker_run = committed(stage_cancel_compute_worker_run)
 
 
 def _serialize_run(run: ComputeWorkerRun) -> ComputeWorkerRunResponseSchema:
@@ -249,7 +257,7 @@ def stage_update_compute_worker_run(
 
     current_status = run.status_kind()
     if current_status.is_terminal:
-        requested_status = ComputeWorkerRunStatus.require(status) if isinstance(status, (ComputeWorkerRunStatus, str)) else None
+        requested_status = None if isinstance(status, _UnsetType) else ComputeWorkerRunStatus.require(status)
         rejected = requested_status is not None and requested_status != current_status
         if rejected:
             logger.warning('Rejected terminal status transition from %s to %s for run %s', current_status, requested_status, run_id)
@@ -260,45 +268,39 @@ def stage_update_compute_worker_run(
         return serialized
 
     if not isinstance(analysis_id, _UnsetType):
-        run.analysis_id = analysis_id if analysis_id is None or isinstance(analysis_id, str) else run.analysis_id
-    if not isinstance(datasource_id, _UnsetType) and isinstance(datasource_id, str):
+        run.analysis_id = analysis_id
+    if not isinstance(datasource_id, _UnsetType):
         run.datasource_id = datasource_id
     if not isinstance(kind, _UnsetType):
-        run.kind = ComputeWorkerRunKind.require(kind).value if isinstance(kind, (ComputeWorkerRunKind, str)) else run.kind
+        run.kind = ComputeWorkerRunKind.require(kind).value
     if not isinstance(status, _UnsetType):
-        new_status = ComputeWorkerRunStatus.require(status) if isinstance(status, (ComputeWorkerRunStatus, str)) else None
-        if new_status is not None:
-            run.status = new_status.value
-    if not isinstance(request_json, _UnsetType) and isinstance(request_json, dict):
+        run.status = ComputeWorkerRunStatus.require(status).value
+    if not isinstance(request_json, _UnsetType):
         run.request_json = request_json
     if not isinstance(result_json, _UnsetType):
-        if result_json is None:
-            run.result_json = None
-        elif isinstance(result_json, dict):
-            base = copy_json_dict(run.result_json) if merge_result_json and isinstance(run.result_json, dict) else {}
-            base.update(result_json)
-            run.result_json = base
+        base = copy_json_dict(run.result_json) if merge_result_json and isinstance(run.result_json, dict) else {}
+        run.result_json = None if result_json is None else {**base, **result_json}
     if not isinstance(error_message, _UnsetType):
-        run.error_message = error_message if error_message is None or isinstance(error_message, str) else run.error_message
+        run.error_message = error_message
     if not isinstance(completed_at, _UnsetType):
-        run.completed_at = completed_at if completed_at is None or isinstance(completed_at, datetime) else run.completed_at
+        run.completed_at = completed_at
     if not isinstance(duration_ms, _UnsetType):
-        run.duration_ms = duration_ms if duration_ms is None or isinstance(duration_ms, int) else run.duration_ms
+        run.duration_ms = duration_ms
     if not isinstance(step_timings, _UnsetType):
-        run.step_timings = normalize_step_timings(step_timings if isinstance(step_timings, dict) else None)
+        run.step_timings = normalize_step_timings(step_timings)
     if not isinstance(query_plan, _UnsetType):
-        run.query_plan = query_plan if query_plan is None or isinstance(query_plan, str) else run.query_plan
-    if not isinstance(progress, _UnsetType) and isinstance(progress, (int, float)):
+        run.query_plan = query_plan
+    if not isinstance(progress, _UnsetType):
         run.progress = float(progress)
     if not isinstance(current_step, _UnsetType):
-        run.current_step = current_step if current_step is None or isinstance(current_step, str) else run.current_step
+        run.current_step = current_step
     if not isinstance(triggered_by, _UnsetType):
-        run.triggered_by = triggered_by if triggered_by is None or isinstance(triggered_by, str) else run.triggered_by
+        run.triggered_by = triggered_by
     if not isinstance(execution_entries, _UnsetType):
         next_result_json = copy_json_dict(run.result_json) if isinstance(run.result_json, dict) else {}
         if execution_entries is None:
             next_result_json.pop('execution_entries', None)
-        elif isinstance(execution_entries, list):
+        else:
             next_result_json['execution_entries'] = [
                 ComputeWorkerRunExecutionEntry.model_validate(entry).model_dump(mode='json') for entry in execution_entries
             ]
@@ -413,16 +415,13 @@ def list_compute_worker_runs(
 
 def compare_compute_worker_runs(session: Session, run_a_id: str, run_b_id: str, datasource_id: str | None = None) -> BuildComparisonResponse:
     """Compare two compute worker runs side-by-side: schema diff, row count delta, timing delta."""
-    run_a = session.get(ComputeWorkerRun, run_a_id)
-    run_b = session.get(ComputeWorkerRun, run_b_id)
     namespace = get_namespace()
-    if run_a is not None and run_a.namespace != namespace:
-        run_a = None
-    if run_b is not None and run_b.namespace != namespace:
-        run_b = None
-    if not run_a or not run_b:
-        missing = run_a_id if not run_a else run_b_id
-        raise compute_worker_run_not_found(missing)
+    run_a = session.get(ComputeWorkerRun, run_a_id)
+    if run_a is None or run_a.namespace != namespace:
+        raise compute_worker_run_not_found(run_a_id)
+    run_b = session.get(ComputeWorkerRun, run_b_id)
+    if run_b is None or run_b.namespace != namespace:
+        raise compute_worker_run_not_found(run_b_id)
     if run_a.datasource_id != run_b.datasource_id:
         raise ComputeWorkerRunComparisonError('Compute worker runs must belong to the same datasource', run_a_id=run_a_id, run_b_id=run_b_id)
     if datasource_id and (run_a.datasource_id != datasource_id or run_b.datasource_id != datasource_id):
@@ -430,39 +429,19 @@ def compare_compute_worker_runs(session: Session, run_a_id: str, run_b_id: str, 
 
     result_a = _load_result_summary(run_a.result_json)
     result_b = _load_result_summary(run_b.result_json)
-
-    # Row counts
-    rc_a = _safe_int(result_a.row_count)
-    rc_b = _safe_int(result_b.row_count)
-    rc_delta = (rc_b - rc_a) if rc_a is not None and rc_b is not None else None
-
-    # Schema diff
-    schema_a: dict[str, str] = result_a.schema_ or {}
-    schema_b: dict[str, str] = result_b.schema_ or {}
-    schema_diff = _compute_schema_diff(schema_a, schema_b)
-
-    # Timing diff
-    timings_a = normalize_step_timings(run_a.step_timings)
-    timings_b = normalize_step_timings(run_b.step_timings)
-    timing_diff = _compute_timing_diff(timings_a, timings_b)
-
-    # Total duration delta
-    dur_a = run_a.duration_ms
-    dur_b = run_b.duration_ms
-    dur_delta = (dur_b - dur_a) if dur_a is not None and dur_b is not None else None
-
-    summary_a = RunSummary.model_validate(run_a.model_dump())
-    summary_b = RunSummary.model_validate(run_b.model_dump())
-
+    row_count_a = _safe_int(result_a.row_count)
+    row_count_b = _safe_int(result_b.row_count)
+    duration_a = run_a.duration_ms
+    duration_b = run_b.duration_ms
     return BuildComparisonResponse(
-        run_a=summary_a,
-        run_b=summary_b,
-        row_count_a=rc_a,
-        row_count_b=rc_b,
-        row_count_delta=rc_delta,
-        schema_diff=schema_diff,
-        timing_diff=timing_diff,
-        total_duration_delta_ms=dur_delta,
+        run_a=RunSummary.model_validate(run_a.model_dump()),
+        run_b=RunSummary.model_validate(run_b.model_dump()),
+        row_count_a=row_count_a,
+        row_count_b=row_count_b,
+        row_count_delta=row_count_b - row_count_a if row_count_a is not None and row_count_b is not None else None,
+        schema_diff=_compute_schema_diff(result_a.schema_ or {}, result_b.schema_ or {}),
+        timing_diff=_compute_timing_diff(normalize_step_timings(run_a.step_timings), normalize_step_timings(run_b.step_timings)),
+        total_duration_delta_ms=duration_b - duration_a if duration_a is not None and duration_b is not None else None,
     )
 
 
@@ -602,13 +581,12 @@ def _duration_trend(durations: list[float]) -> DurationTrend:
 
     older_label = _format_duration_ms_short(older_avg)
     recent_label = _format_duration_ms_short(recent_avg)
-    abs_pct = abs(change_pct)
-    if direction == 'decreasing':
-        summary = f'Recent {len(recent)} builds average {recent_label} (duration decreasing {abs_pct:.0f}% vs previous {len(older)}, avg {older_label}).'
-    elif direction == 'increasing':
-        summary = f'Recent {len(recent)} builds average {recent_label} (duration increasing {abs_pct:.0f}% vs previous {len(older)}, avg {older_label}).'
-    else:
+    if direction == 'stable':
         summary = f'Recent {len(recent)} builds average {recent_label}, about the same as the previous {len(older)} (avg {older_label}, {change_pct:+.0f}%).'
+    else:
+        summary = (
+            f'Recent {len(recent)} builds average {recent_label} (duration {direction} {abs(change_pct):.0f}% vs previous {len(older)}, avg {older_label}).'
+        )
 
     return DurationTrend(
         direction=direction,
@@ -623,7 +601,8 @@ def _duration_trend(durations: list[float]) -> DurationTrend:
     )
 
 
-def _duration_stats_response(runs: list[DurationStatsRun], durations: list[float]) -> DurationStatsResponse:
+def _duration_stats_response(runs: list[DurationStatsRun]) -> DurationStatsResponse:
+    durations = [float(run.duration_ms) for run in runs if run.duration_ms is not None]
     sorted_durations = sorted(durations)
     p50 = _percentile(sorted_durations, 0.5)
     p95 = _percentile(sorted_durations, 0.95)
@@ -657,62 +636,23 @@ def duration_stats(
         if analysis_id is not None:
             build_stmt = build_stmt.where(sa(BuildRun.analysis_id == analysis_id))
         if datasource_id is not None:
-            build_stmt = build_stmt.where(
-                or_(
-                    sa(BuildRun.current_datasource_id == datasource_id),
-                    sa(BuildRun.current_output_id == datasource_id),
-                )
-            )
-        build_stmt = build_stmt.where(
-            col(BuildRun.status).in_(
-                [
-                    BuildRunStatus.COMPLETED,
-                    BuildRunStatus.FAILED,
-                    BuildRunStatus.CANCELLED,
-                ]
-            )
-        )
+            build_stmt = build_stmt.where(or_(sa(BuildRun.current_datasource_id == datasource_id), sa(BuildRun.current_output_id == datasource_id)))
+        build_stmt = build_stmt.where(col(BuildRun.status).in_([BuildRunStatus.COMPLETED, BuildRunStatus.FAILED, BuildRunStatus.CANCELLED]))
         build_stmt = build_stmt.order_by(desc(sa(BuildRun.started_at)), sa(BuildRun.id)).limit(capped)
-        build_rows = list(session.execute(build_stmt).scalars().all())
-        chronological_builds = list(reversed(build_rows))
-        build_runs = [
-            DurationStatsRun(
-                id=row.id,
-                started_at=row.started_at,
-                duration_ms=row.duration_ms,
-                status=str(row.status),
-            )
-            for row in chronological_builds
-        ]
-        build_durations = [float(row.duration_ms) for row in chronological_builds if row.duration_ms is not None]
-        return _duration_stats_response(build_runs, build_durations)
+        build_rows = reversed(session.execute(build_stmt).scalars().all())
+        return _duration_stats_response(
+            [DurationStatsRun(id=row.id, started_at=row.started_at, duration_ms=row.duration_ms, status=str(row.status)) for row in build_rows]
+        )
 
-    engine_stmt = select(ComputeWorkerRun).where(sa(ComputeWorkerRun.namespace == get_namespace()))
+    stmt = select(ComputeWorkerRun).where(sa(ComputeWorkerRun.namespace == get_namespace()))
     if analysis_id is not None:
-        engine_stmt = engine_stmt.where(sa(ComputeWorkerRun.analysis_id == analysis_id))
+        stmt = stmt.where(sa(ComputeWorkerRun.analysis_id == analysis_id))
     if datasource_id is not None:
-        engine_stmt = engine_stmt.where(sa(ComputeWorkerRun.datasource_id == datasource_id))
-    engine_stmt = engine_stmt.where(sa(ComputeWorkerRun.kind == coerced_kind.value))
-    engine_stmt = engine_stmt.where(
-        col(ComputeWorkerRun.status).in_(
-            [
-                ComputeWorkerRunStatus.SUCCESS,
-                ComputeWorkerRunStatus.FAILED,
-                ComputeWorkerRunStatus.CANCELLED,
-            ]
-        )
+        stmt = stmt.where(sa(ComputeWorkerRun.datasource_id == datasource_id))
+    stmt = stmt.where(sa(ComputeWorkerRun.kind == coerced_kind.value))
+    stmt = stmt.where(col(ComputeWorkerRun.status).in_([ComputeWorkerRunStatus.SUCCESS, ComputeWorkerRunStatus.FAILED, ComputeWorkerRunStatus.CANCELLED]))
+    stmt = stmt.order_by(desc(sa(ComputeWorkerRun.created_at)), sa(ComputeWorkerRun.id)).limit(capped)
+    rows = reversed(session.execute(stmt).scalars().all())
+    return _duration_stats_response(
+        [DurationStatsRun(id=row.id, started_at=row.created_at, duration_ms=row.duration_ms, status=str(row.status)) for row in rows]
     )
-    engine_stmt = engine_stmt.order_by(desc(sa(ComputeWorkerRun.created_at)), sa(ComputeWorkerRun.id)).limit(capped)
-    engine_rows = list(session.execute(engine_stmt).scalars().all())
-    chronological_engines = list(reversed(engine_rows))
-    compute_worker_runs = [
-        DurationStatsRun(
-            id=row.id,
-            started_at=row.created_at,
-            duration_ms=row.duration_ms,
-            status=str(row.status),
-        )
-        for row in chronological_engines
-    ]
-    engine_durations = [float(row.duration_ms) for row in chronological_engines if row.duration_ms is not None]
-    return _duration_stats_response(compute_worker_runs, engine_durations)

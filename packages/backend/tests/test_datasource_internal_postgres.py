@@ -72,7 +72,7 @@ def test_list_internal_postgres_tables_materializes_onboarding_metadata_once(tes
             name='legacy-analysis-source',
             source_type='database',
             config={
-                'connection_string': service.internal_postgres_connection_string(),
+                'connection_string': service.InternalPostgresOnboarding.connection_string(),
                 'query': 'SELECT * FROM "default"."analyses"',
             },
             created_by='import',
@@ -103,7 +103,7 @@ def test_internal_postgres_display_names_strip_internal_namespace_storage_prefix
             'metadata_path': '/tmp/namespace-public',
             'source': {
                 'source_type': 'database',
-                'connection_string': service.internal_postgres_connection_string(),
+                'connection_string': service.InternalPostgresOnboarding.connection_string(),
                 'query': 'SELECT * FROM "df$tenant$public"."users"',
             },
         },
@@ -118,7 +118,7 @@ def test_internal_postgres_display_names_strip_internal_namespace_storage_prefix
             'metadata_path': '/tmp/default-namespace',
             'source': {
                 'source_type': 'database',
-                'connection_string': service.internal_postgres_connection_string(),
+                'connection_string': service.InternalPostgresOnboarding.connection_string(),
                 'query': 'SELECT * FROM "default"."users"',
             },
         },

@@ -60,45 +60,31 @@ _SUPPORTED_KEYWORDS = {
 def _check_schema_node(schema: Any, path: str, issues: list[str]) -> None:
     if not isinstance(schema, dict):
         return
-    for key in schema:
-        if key not in _SUPPORTED_KEYWORDS:
-            issues.append(f'{path}.{key}' if path else key)
+
+    def child(suffix: str) -> str:
+        return f'{path}.{suffix}' if path else suffix
+
+    issues.extend(child(key) for key in schema if key not in _SUPPORTED_KEYWORDS)
     schema_type = schema.get('type')
     if isinstance(schema_type, str) and schema_type not in _SUPPORTED_TYPES:
-        issues.append(f'{path}.type={schema_type}' if path else f'type={schema_type}')
+        issues.append(child(f'type={schema_type}'))
     for keyword in ('anyOf', 'oneOf', 'allOf'):
         for i, sub in enumerate(schema.get(keyword, [])):
-            _check_schema_node(sub, f'{path}.{keyword}[{i}]' if path else f'{keyword}[{i}]', issues)
-    for sub in (
-        schema.get('not'),
-        schema.get('if'),
-        schema.get('then'),
-        schema.get('else'),
-    ):
-        if isinstance(sub, dict):
-            label = next(k for k in ('not', 'if', 'then', 'else') if schema.get(k) is sub)
-            _check_schema_node(sub, f'{path}.{label}' if path else label, issues)
-    for prop, sub in schema.get('properties', {}).items():
-        _check_schema_node(sub, f'{path}.properties.{prop}' if path else f'properties.{prop}', issues)
-    for prop, sub in schema.get('patternProperties', {}).items():
-        _check_schema_node(
-            sub,
-            f'{path}.patternProperties.{prop}' if path else f'patternProperties.{prop}',
-            issues,
-        )
-    ap = schema.get('additionalProperties')
-    if isinstance(ap, dict):
-        _check_schema_node(
-            ap,
-            f'{path}.additionalProperties' if path else 'additionalProperties',
-            issues,
-        )
+            _check_schema_node(sub, child(f'{keyword}[{i}]'), issues)
+    for keyword in ('not', 'if', 'then', 'else'):
+        if isinstance(schema.get(keyword), dict):
+            _check_schema_node(schema[keyword], child(keyword), issues)
+    for keyword in ('properties', 'patternProperties'):
+        for prop, sub in schema.get(keyword, {}).items():
+            _check_schema_node(sub, child(f'{keyword}.{prop}'), issues)
+    if isinstance(schema.get('additionalProperties'), dict):
+        _check_schema_node(schema['additionalProperties'], child('additionalProperties'), issues)
     items = schema.get('items')
     if isinstance(items, dict):
-        _check_schema_node(items, f'{path}.items' if path else 'items', issues)
+        _check_schema_node(items, child('items'), issues)
     elif isinstance(items, list):
         for i, sub in enumerate(items):
-            _check_schema_node(sub, f'{path}.items[{i}]' if path else f'items[{i}]', issues)
+            _check_schema_node(sub, child(f'items[{i}]'), issues)
 
 
 def check_schema_supported(schema: dict) -> list[str]:
@@ -108,27 +94,19 @@ def check_schema_supported(schema: dict) -> list[str]:
     return issues
 
 
-def _format_error_path(error: jsonschema.ValidationError) -> str:
-    parts = [str(p) for p in error.absolute_path]
-    return '.'.join(parts) if parts else '$'
+_ERROR_HINTS: dict[Any, str] = {
+    None: 'Check input against schema.',
+    'required': 'Provide all required fields.',
+    'additionalProperties': 'Remove unknown fields or use documented parameter names.',
+    'enum': 'Use one of the documented enum values.',
+    'type': 'Use the documented JSON type for this field.',
+    **dict.fromkeys(('minLength', 'maxLength', 'minimum', 'maximum', 'pattern', 'format'), 'Check schema constraints for this field.'),
+}
 
 
 def _build_error_message(error: jsonschema.ValidationError) -> str:
-    message = error.message
-    key = error.validator
-    if key is None:
-        return f'{message}. Check input against schema.'
-    if key == 'required':
-        return f'{message}. Provide all required fields.'
-    if key == 'additionalProperties':
-        return f'{message}. Remove unknown fields or use documented parameter names.'
-    if key == 'enum':
-        return f'{message}. Use one of the documented enum values.'
-    if key == 'type':
-        return f'{message}. Use the documented JSON type for this field.'
-    if key in {'minLength', 'maxLength', 'minimum', 'maximum', 'pattern', 'format'}:
-        return f'{message}. Check schema constraints for this field.'
-    return message
+    hint = _ERROR_HINTS.get(error.validator)
+    return f'{error.message}. {hint}' if hint else error.message
 
 
 def apply_defaults(schema: dict, data: dict) -> dict:
@@ -160,7 +138,7 @@ def validate_args(schema: dict, args: dict) -> tuple[bool, list[dict[str, Any]],
     if raw:
         errors = [
             {
-                'path': _format_error_path(e),
+                'path': '.'.join(str(p) for p in e.absolute_path) or '$',
                 'message': _build_error_message(e),
                 'validator': e.validator or 'unknown',
             }

@@ -2,7 +2,7 @@ from __future__ import annotations
 
 from typing import ClassVar, Self
 
-from backend_core.domain.api_enums import ApiEnumValue, api_token
+from backend_core.domain.api_enums import ApiEnumValue
 from dataforge_protocol import enums_pb2
 
 
@@ -14,16 +14,8 @@ class RuntimeWorkerKind(ApiEnumValue):
     COORDINATOR: ClassVar[Self]
 
 
-RuntimeWorkerKind.API = RuntimeWorkerKind(enums_pb2.RUNTIME_WORKER_KIND_API, api_token('RuntimeWorkerKind', enums_pb2.RUNTIME_WORKER_KIND_API))
-RuntimeWorkerKind.BUILD_MANAGER = RuntimeWorkerKind(
-    enums_pb2.RUNTIME_WORKER_KIND_BUILD_MANAGER, api_token('RuntimeWorkerKind', enums_pb2.RUNTIME_WORKER_KIND_BUILD_MANAGER)
-)
-RuntimeWorkerKind.BUILD_WORKER = RuntimeWorkerKind(
-    enums_pb2.RUNTIME_WORKER_KIND_BUILD_WORKER, api_token('RuntimeWorkerKind', enums_pb2.RUNTIME_WORKER_KIND_BUILD_WORKER)
-)
-RuntimeWorkerKind.SCHEDULER = RuntimeWorkerKind(
-    enums_pb2.RUNTIME_WORKER_KIND_SCHEDULER, api_token('RuntimeWorkerKind', enums_pb2.RUNTIME_WORKER_KIND_SCHEDULER)
-)
-RuntimeWorkerKind.COORDINATOR = RuntimeWorkerKind(
-    enums_pb2.RUNTIME_WORKER_KIND_COORDINATOR, api_token('RuntimeWorkerKind', enums_pb2.RUNTIME_WORKER_KIND_COORDINATOR)
-)
+RuntimeWorkerKind.API = RuntimeWorkerKind(enums_pb2.RUNTIME_WORKER_KIND_API)
+RuntimeWorkerKind.BUILD_MANAGER = RuntimeWorkerKind(enums_pb2.RUNTIME_WORKER_KIND_BUILD_MANAGER)
+RuntimeWorkerKind.BUILD_WORKER = RuntimeWorkerKind(enums_pb2.RUNTIME_WORKER_KIND_BUILD_WORKER)
+RuntimeWorkerKind.SCHEDULER = RuntimeWorkerKind(enums_pb2.RUNTIME_WORKER_KIND_SCHEDULER)
+RuntimeWorkerKind.COORDINATOR = RuntimeWorkerKind(enums_pb2.RUNTIME_WORKER_KIND_COORDINATOR)

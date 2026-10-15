@@ -150,7 +150,9 @@ def test_stage_shared_flight_request_reuses_one_durable_active_flight(test_db_se
     assert created is True
     assert wake_writes == [('default', runtime_work_service.RuntimeWorkKind.COMPUTE)]
     test_db_session.commit()
-    monkeypatch.setattr(compute_requests_service, '_try_lock_flight', lambda *_args: pytest.fail('active followers must bypass the flight advisory lock'))
+    monkeypatch.setattr(
+        compute_requests_service, '_try_advisory_xact_lock', lambda *_args: pytest.fail('active followers must bypass the flight advisory lock')
+    )
 
     follower, created = compute_requests_service.stage_shared_flight_request(
         test_db_session,
@@ -191,7 +193,9 @@ def test_stage_shared_flight_request_reuses_completed_durable_response(test_db_s
         response_envelope=response,
     )
     assert completed is not None
-    monkeypatch.setattr(compute_requests_service, '_try_lock_flight', lambda *_args: pytest.fail('cached followers must bypass the flight advisory lock'))
+    monkeypatch.setattr(
+        compute_requests_service, '_try_advisory_xact_lock', lambda *_args: pytest.fail('cached followers must bypass the flight advisory lock')
+    )
 
     cached, created = compute_requests_service.stage_shared_flight_request(
         test_db_session,

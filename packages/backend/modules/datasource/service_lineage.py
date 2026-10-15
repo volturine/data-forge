@@ -49,9 +49,7 @@ def build_lineage(
     analysis_map = {analysis.id: analysis for analysis in analyses}
 
     if branch is not None:
-        branch = branch.strip()
-        if not branch:
-            branch = None
+        branch = branch.strip() or None
 
     if target_datasource_id:
         target = datasource_map.get(target_datasource_id)
@@ -64,17 +62,9 @@ def build_lineage(
 
     ds_to_consumers: dict[str, set[str]] = {}
     for dep in deps:
-        consumers = ds_to_consumers.setdefault(dep.datasource_id, set())
-        consumers.add(dep.analysis_id)
+        ds_to_consumers.setdefault(dep.datasource_id, set()).add(dep.analysis_id)
 
-    internal_ids: set[str] = set()
-    for ds in datasources:
-        producer = ds.created_by_analysis_id
-        if not producer:
-            continue
-        consumers = ds_to_consumers.get(ds.id, set())
-        if producer in consumers:
-            internal_ids.add(ds.id)
+    internal_ids = {ds.id for ds in datasources if ds.created_by_analysis_id and ds.created_by_analysis_id in ds_to_consumers.get(ds.id, set())}
 
     nodes: dict[str, LineageNode] = {}
     edges: list[LineageEdge] = []
@@ -96,25 +86,20 @@ def build_lineage(
     def datasource_branch(ds: DataSource) -> str | None:
         if target_datasource_id and ds.id == target_datasource_id and branch is not None:
             return branch
-        if not isinstance(ds.config, dict):
-            return None
-        value = ds.config.get('branch')
-        if value is None:
-            return None
-        return str(value)
+        value = ds.config.get('branch') if isinstance(ds.config, dict) else None
+        return None if value is None else str(value)
 
     def add_datasource_node(ds: DataSource) -> str:
         node_id = datasource_key(ds.id)
         if node_id in nodes:
             return node_id
-        node_branch = datasource_branch(ds)
         nodes[node_id] = {
             'id': node_id,
             'type': LineageNodeType.DATASOURCE,
             'node_kind': classify_datasource(ds),
             'name': ds.name,
             'source_type': ds.source_type,
-            'branch': node_branch,
+            'branch': datasource_branch(ds),
             'status': None,
         }
         return node_id
@@ -173,21 +158,16 @@ def build_lineage(
         if target_node_id not in nodes:
             return {'nodes': [], 'edges': []}
 
-        include_internal_edges = include_internals
         lineage_types = {LineageEdgeType.USES, LineageEdgeType.PRODUCES}
-        if include_internal_edges:
+        if include_internals:
             lineage_types.update({LineageEdgeType.CHAINS, LineageEdgeType.CONSUMES_INTERNAL})
 
         forward_adj: dict[str, set[str]] = {}
         reverse_adj: dict[str, set[str]] = {}
         for edge in edges:
-            edge_type = edge['type']
-            if edge_type not in lineage_types:
-                continue
-            source = edge['from']
-            target = edge['to']
-            forward_adj.setdefault(source, set()).add(target)
-            reverse_adj.setdefault(target, set()).add(source)
+            if edge['type'] in lineage_types:
+                forward_adj.setdefault(edge['from'], set()).add(edge['to'])
+                reverse_adj.setdefault(edge['to'], set()).add(edge['from'])
 
         reachable: set[str] = {target_node_id}
         queue: deque[str] = deque([target_node_id])

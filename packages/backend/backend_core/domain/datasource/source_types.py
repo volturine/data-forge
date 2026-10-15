@@ -3,7 +3,7 @@ from __future__ import annotations
 from pathlib import Path
 from typing import ClassVar, Self
 
-from backend_core.domain.api_enums import ApiEnumValue, api_token
+from backend_core.domain.api_enums import ApiEnumValue
 from dataforge_protocol import enums_pb2
 
 
@@ -17,13 +17,9 @@ class DataSourceCategory(ApiEnumValue):
         return self == DataSourceCategory.FILE
 
 
-DataSourceCategory.FILE = DataSourceCategory(enums_pb2.DATA_SOURCE_CATEGORY_FILE, api_token('DataSourceCategory', enums_pb2.DATA_SOURCE_CATEGORY_FILE))
-DataSourceCategory.DATABASE = DataSourceCategory(
-    enums_pb2.DATA_SOURCE_CATEGORY_DATABASE, api_token('DataSourceCategory', enums_pb2.DATA_SOURCE_CATEGORY_DATABASE)
-)
-DataSourceCategory.ANALYSIS = DataSourceCategory(
-    enums_pb2.DATA_SOURCE_CATEGORY_ANALYSIS, api_token('DataSourceCategory', enums_pb2.DATA_SOURCE_CATEGORY_ANALYSIS)
-)
+DataSourceCategory.FILE = DataSourceCategory(enums_pb2.DATA_SOURCE_CATEGORY_FILE)
+DataSourceCategory.DATABASE = DataSourceCategory(enums_pb2.DATA_SOURCE_CATEGORY_DATABASE)
+DataSourceCategory.ANALYSIS = DataSourceCategory(enums_pb2.DATA_SOURCE_CATEGORY_ANALYSIS)
 
 
 class DataSourceFileType(ApiEnumValue):
@@ -68,10 +64,6 @@ class DataSourceFileType(ApiEnumValue):
     def uses_csv_options(self) -> bool:
         return self == DataSourceFileType.CSV
 
-    @property
-    def requires_regular_file(self) -> bool:
-        return self != DataSourceFileType.PARQUET
-
     def matches_magic_number(self, header: bytes) -> bool:
         match self:
             case DataSourceFileType.PARQUET:
@@ -81,20 +73,12 @@ class DataSourceFileType(ApiEnumValue):
             case _:
                 return True
 
-    def validate_local_path(self, path: Path) -> None:
-        if self.requires_regular_file and not path.is_file():
-            raise ValueError(f'Path must be a file for type: {self.value}')
-        if self == DataSourceFileType.PARQUET and not (path.is_file() or path.is_dir()):
-            raise ValueError('Parquet path must be a file or directory')
 
-
-DataSourceFileType.CSV = DataSourceFileType(enums_pb2.DATA_SOURCE_FILE_TYPE_CSV, api_token('DataSourceFileType', enums_pb2.DATA_SOURCE_FILE_TYPE_CSV))
-DataSourceFileType.PARQUET = DataSourceFileType(
-    enums_pb2.DATA_SOURCE_FILE_TYPE_PARQUET, api_token('DataSourceFileType', enums_pb2.DATA_SOURCE_FILE_TYPE_PARQUET)
-)
-DataSourceFileType.JSON = DataSourceFileType(enums_pb2.DATA_SOURCE_FILE_TYPE_JSON, api_token('DataSourceFileType', enums_pb2.DATA_SOURCE_FILE_TYPE_JSON))
-DataSourceFileType.NDJSON = DataSourceFileType(enums_pb2.DATA_SOURCE_FILE_TYPE_NDJSON, api_token('DataSourceFileType', enums_pb2.DATA_SOURCE_FILE_TYPE_NDJSON))
-DataSourceFileType.EXCEL = DataSourceFileType(enums_pb2.DATA_SOURCE_FILE_TYPE_EXCEL, api_token('DataSourceFileType', enums_pb2.DATA_SOURCE_FILE_TYPE_EXCEL))
+DataSourceFileType.CSV = DataSourceFileType(enums_pb2.DATA_SOURCE_FILE_TYPE_CSV)
+DataSourceFileType.PARQUET = DataSourceFileType(enums_pb2.DATA_SOURCE_FILE_TYPE_PARQUET)
+DataSourceFileType.JSON = DataSourceFileType(enums_pb2.DATA_SOURCE_FILE_TYPE_JSON)
+DataSourceFileType.NDJSON = DataSourceFileType(enums_pb2.DATA_SOURCE_FILE_TYPE_NDJSON)
+DataSourceFileType.EXCEL = DataSourceFileType(enums_pb2.DATA_SOURCE_FILE_TYPE_EXCEL)
 
 
 class DataSourceType(ApiEnumValue):
@@ -128,20 +112,12 @@ class DataSourceType(ApiEnumValue):
             return 'Direct creation of schedule datasources is not supported.'
         return None
 
-    @property
-    def ingestion_error_message(self) -> str:
-        if self == DataSourceType.DATABASE:
-            return 'Failed to query database datasource'
-        if self == DataSourceType.FILE:
-            return 'Failed to read file datasource'
-        raise ValueError(f'Datasource type {self.value} does not define an ingestion error message')
 
-
-DataSourceType.FILE = DataSourceType(enums_pb2.DATA_SOURCE_TYPE_FILE, api_token('DataSourceType', enums_pb2.DATA_SOURCE_TYPE_FILE))
-DataSourceType.DATABASE = DataSourceType(enums_pb2.DATA_SOURCE_TYPE_DATABASE, api_token('DataSourceType', enums_pb2.DATA_SOURCE_TYPE_DATABASE))
-DataSourceType.ICEBERG = DataSourceType(enums_pb2.DATA_SOURCE_TYPE_ICEBERG, api_token('DataSourceType', enums_pb2.DATA_SOURCE_TYPE_ICEBERG))
-DataSourceType.ANALYSIS = DataSourceType(enums_pb2.DATA_SOURCE_TYPE_ANALYSIS, api_token('DataSourceType', enums_pb2.DATA_SOURCE_TYPE_ANALYSIS))
-DataSourceType.SCHEDULE = DataSourceType(enums_pb2.DATA_SOURCE_TYPE_SCHEDULE, api_token('DataSourceType', enums_pb2.DATA_SOURCE_TYPE_SCHEDULE))
+DataSourceType.FILE = DataSourceType(enums_pb2.DATA_SOURCE_TYPE_FILE)
+DataSourceType.DATABASE = DataSourceType(enums_pb2.DATA_SOURCE_TYPE_DATABASE)
+DataSourceType.ICEBERG = DataSourceType(enums_pb2.DATA_SOURCE_TYPE_ICEBERG)
+DataSourceType.ANALYSIS = DataSourceType(enums_pb2.DATA_SOURCE_TYPE_ANALYSIS)
+DataSourceType.SCHEDULE = DataSourceType(enums_pb2.DATA_SOURCE_TYPE_SCHEDULE)
 
 
 class DataSourceLoadType(ApiEnumValue):
@@ -151,14 +127,10 @@ class DataSourceLoadType(ApiEnumValue):
     ICEBERG: ClassVar[Self]
 
 
-DataSourceLoadType.FILE = DataSourceLoadType(enums_pb2.DATA_SOURCE_LOAD_TYPE_FILE, api_token('DataSourceLoadType', enums_pb2.DATA_SOURCE_LOAD_TYPE_FILE))
-DataSourceLoadType.DATABASE = DataSourceLoadType(
-    enums_pb2.DATA_SOURCE_LOAD_TYPE_DATABASE, api_token('DataSourceLoadType', enums_pb2.DATA_SOURCE_LOAD_TYPE_DATABASE)
-)
-DataSourceLoadType.DUCKDB = DataSourceLoadType(enums_pb2.DATA_SOURCE_LOAD_TYPE_DUCKDB, api_token('DataSourceLoadType', enums_pb2.DATA_SOURCE_LOAD_TYPE_DUCKDB))
-DataSourceLoadType.ICEBERG = DataSourceLoadType(
-    enums_pb2.DATA_SOURCE_LOAD_TYPE_ICEBERG, api_token('DataSourceLoadType', enums_pb2.DATA_SOURCE_LOAD_TYPE_ICEBERG)
-)
+DataSourceLoadType.FILE = DataSourceLoadType(enums_pb2.DATA_SOURCE_LOAD_TYPE_FILE)
+DataSourceLoadType.DATABASE = DataSourceLoadType(enums_pb2.DATA_SOURCE_LOAD_TYPE_DATABASE)
+DataSourceLoadType.DUCKDB = DataSourceLoadType(enums_pb2.DATA_SOURCE_LOAD_TYPE_DUCKDB)
+DataSourceLoadType.ICEBERG = DataSourceLoadType(enums_pb2.DATA_SOURCE_LOAD_TYPE_ICEBERG)
 
 
 class IcebergReader(ApiEnumValue):
@@ -166,5 +138,5 @@ class IcebergReader(ApiEnumValue):
     PYICEBERG: ClassVar[Self]
 
 
-IcebergReader.NATIVE = IcebergReader(enums_pb2.ICEBERG_READER_NATIVE, api_token('IcebergReader', enums_pb2.ICEBERG_READER_NATIVE))
-IcebergReader.PYICEBERG = IcebergReader(enums_pb2.ICEBERG_READER_PYICEBERG, api_token('IcebergReader', enums_pb2.ICEBERG_READER_PYICEBERG))
+IcebergReader.NATIVE = IcebergReader(enums_pb2.ICEBERG_READER_NATIVE)
+IcebergReader.PYICEBERG = IcebergReader(enums_pb2.ICEBERG_READER_PYICEBERG)

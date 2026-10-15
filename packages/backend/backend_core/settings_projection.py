@@ -33,10 +33,10 @@ class ResolvedSettingsSnapshot:
             smtp_host=row.smtp_host,
             smtp_port=row.smtp_port,
             smtp_user=row.smtp_user,
-            smtp_password=_read_secret(row, 'smtp_password'),
+            smtp_password=read_stored_secret(row, 'smtp_password'),
             telegram_bot_enabled=row.telegram_bot_enabled,
-            telegram_bot_token=_read_secret(row, 'telegram_bot_token'),
-            openrouter_api_key=_read_secret(row, 'openrouter_api_key'),
+            telegram_bot_token=read_stored_secret(row, 'telegram_bot_token'),
+            openrouter_api_key=read_stored_secret(row, 'openrouter_api_key'),
             openrouter_default_model=row.openrouter_default_model,
             ollama_endpoint_url=row.ollama_endpoint_url or DEFAULT_OLLAMA_ENDPOINT_URL,
             ollama_default_model=row.ollama_default_model or DEFAULT_OLLAMA_MODEL,
@@ -68,7 +68,7 @@ class ResolvedSettingsSnapshot:
         return self.openrouter_default_model if self.exists else ''
 
 
-def _read_secret(row: AppSettings, field: str) -> str:
+def read_stored_secret(row: AppSettings, field: str) -> str:
     stored = str(getattr(row, field, '') or '')
     if not stored:
         return ''
@@ -92,11 +92,6 @@ def _get_resolved_snapshot() -> ResolvedSettingsSnapshot:
 
 def get_resolved_smtp() -> dict[str, object]:
     return _get_resolved_snapshot().smtp_settings()
-
-
-def get_resolved_telegram_token() -> str:
-    resolved = get_resolved_telegram_settings()
-    return str(resolved['token'])
 
 
 def get_resolved_telegram_settings() -> dict[str, object]:

@@ -11,6 +11,7 @@ from backend_core.sqlmodel_typing import col
 from modules.udf.schemas import (
     UdfCloneSchema,
     UdfCreateSchema,
+    UdfImportItemSchema,
     UdfImportSchema,
     UdfInputSchema,
     UdfResponseSchema,
@@ -45,7 +46,7 @@ def _get_udf_model(session: Session, udf_id: str) -> Udf:
     return udf
 
 
-def _new_udf(data: UdfCreateSchema, owner_id: str | None = None) -> Udf:
+def _new_udf(data: UdfCreateSchema | UdfImportItemSchema, owner_id: str | None = None) -> Udf:
     _validate_code(data.code)
     now = datetime.now(UTC)
     return Udf(
@@ -145,14 +146,11 @@ def clone_udf(session: Session, udf_id: str, data: UdfCloneSchema) -> UdfRespons
 
 
 def match_udfs(session: Session, dtypes: list[str]) -> list[UdfResponseSchema]:
-    dtype_key = ','.join(dtypes)
-    return list_udfs(session, dtype_key=dtype_key)
+    return list_udfs(session, dtype_key=','.join(dtypes))
 
 
 def export_udfs(session: Session) -> list[UdfResponseSchema]:
-    result = session.execute(select(Udf))
-    udfs = result.scalars().all()
-    return [UdfResponseSchema.model_validate(u) for u in udfs]
+    return [UdfResponseSchema.model_validate(u) for u in session.execute(select(Udf)).scalars()]
 
 
 def import_udfs(session: Session, payload: UdfImportSchema) -> list[UdfResponseSchema]:
@@ -177,18 +175,7 @@ def import_udfs(session: Session, payload: UdfImportSchema) -> list[UdfResponseS
             udf.updated_at = datetime.now(UTC)
             imported.append(udf)
         else:
-            now = datetime.now(UTC)
-            new_udf = Udf(
-                id=str(uuid.uuid4()),
-                name=item.name,
-                description=item.description,
-                signature=item.signature.model_dump(),
-                code=item.code,
-                tags=item.tags,
-                source=item.source or 'user',
-                created_at=now,
-                updated_at=now,
-            )
+            new_udf = _new_udf(item)
             session.add(new_udf)
             imported.append(new_udf)
 
@@ -198,18 +185,10 @@ def import_udfs(session: Session, payload: UdfImportSchema) -> list[UdfResponseS
     return [UdfResponseSchema.model_validate(udf) for udf in imported]
 
 
-def _lock_default_seed(session: Session) -> None:
-    """Serialize default UDF seeding across API worker processes."""
-    if session.get_bind().dialect.name != 'postgresql':
-        return
-    session.execute(
-        text('SELECT pg_advisory_xact_lock(:lock_id)'),
-        {'lock_id': _DEFAULT_SEED_LOCK_ID},
-    )
-
-
 def seed_defaults(session: Session) -> list[UdfResponseSchema]:
-    _lock_default_seed(session)
+    # Serialize default UDF seeding across API worker processes.
+    if session.get_bind().dialect.name == 'postgresql':
+        session.execute(text('SELECT pg_advisory_xact_lock(:lock_id)'), {'lock_id': _DEFAULT_SEED_LOCK_ID})
 
     defaults = [
         UdfCreateSchema(

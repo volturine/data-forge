@@ -2,7 +2,7 @@ from __future__ import annotations
 
 from typing import ClassVar, Self
 
-from backend_core.domain.api_enums import ApiEnumValue, api_token
+from backend_core.domain.api_enums import ApiEnumValue
 from backend_core.domain.compute.schemas import ComputeWorkerStatus
 from dataforge_protocol import enums_pb2
 
@@ -40,21 +40,9 @@ class ComputeWorkerInstanceStatus(ApiEnumValue):
         return cls.STOPPED
 
 
-ComputeWorkerInstanceStatus.STARTING = ComputeWorkerInstanceStatus(
-    enums_pb2.COMPUTE_WORKER_INSTANCE_STATUS_STARTING, api_token('ComputeWorkerInstanceStatus', enums_pb2.COMPUTE_WORKER_INSTANCE_STATUS_STARTING)
-)
-ComputeWorkerInstanceStatus.IDLE = ComputeWorkerInstanceStatus(
-    enums_pb2.COMPUTE_WORKER_INSTANCE_STATUS_IDLE, api_token('ComputeWorkerInstanceStatus', enums_pb2.COMPUTE_WORKER_INSTANCE_STATUS_IDLE)
-)
-ComputeWorkerInstanceStatus.RUNNING = ComputeWorkerInstanceStatus(
-    enums_pb2.COMPUTE_WORKER_INSTANCE_STATUS_RUNNING, api_token('ComputeWorkerInstanceStatus', enums_pb2.COMPUTE_WORKER_INSTANCE_STATUS_RUNNING)
-)
-ComputeWorkerInstanceStatus.STOPPING = ComputeWorkerInstanceStatus(
-    enums_pb2.COMPUTE_WORKER_INSTANCE_STATUS_STOPPING, api_token('ComputeWorkerInstanceStatus', enums_pb2.COMPUTE_WORKER_INSTANCE_STATUS_STOPPING)
-)
-ComputeWorkerInstanceStatus.STOPPED = ComputeWorkerInstanceStatus(
-    enums_pb2.COMPUTE_WORKER_INSTANCE_STATUS_STOPPED, api_token('ComputeWorkerInstanceStatus', enums_pb2.COMPUTE_WORKER_INSTANCE_STATUS_STOPPED)
-)
-ComputeWorkerInstanceStatus.FAILED = ComputeWorkerInstanceStatus(
-    enums_pb2.COMPUTE_WORKER_INSTANCE_STATUS_FAILED, api_token('ComputeWorkerInstanceStatus', enums_pb2.COMPUTE_WORKER_INSTANCE_STATUS_FAILED)
-)
+ComputeWorkerInstanceStatus.STARTING = ComputeWorkerInstanceStatus(enums_pb2.COMPUTE_WORKER_INSTANCE_STATUS_STARTING)
+ComputeWorkerInstanceStatus.IDLE = ComputeWorkerInstanceStatus(enums_pb2.COMPUTE_WORKER_INSTANCE_STATUS_IDLE)
+ComputeWorkerInstanceStatus.RUNNING = ComputeWorkerInstanceStatus(enums_pb2.COMPUTE_WORKER_INSTANCE_STATUS_RUNNING)
+ComputeWorkerInstanceStatus.STOPPING = ComputeWorkerInstanceStatus(enums_pb2.COMPUTE_WORKER_INSTANCE_STATUS_STOPPING)
+ComputeWorkerInstanceStatus.STOPPED = ComputeWorkerInstanceStatus(enums_pb2.COMPUTE_WORKER_INSTANCE_STATUS_STOPPED)
+ComputeWorkerInstanceStatus.FAILED = ComputeWorkerInstanceStatus(enums_pb2.COMPUTE_WORKER_INSTANCE_STATUS_FAILED)

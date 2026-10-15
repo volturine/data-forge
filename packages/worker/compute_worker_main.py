@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import contextlib
 import json
 import os
 from pathlib import Path
@@ -15,17 +16,19 @@ def _load_bootstrap_if_present() -> None:
             legacy_names=("ENGINE_BOOTSTRAP_PATH",),
         )
     )
-    if not path.exists():
-        return
     try:
         payload = json.loads(path.read_text(encoding="utf-8"))
-        if isinstance(payload, dict):
-            for key, value in payload.items():
-                if isinstance(key, str) and isinstance(value, str):
-                    os.environ[key] = value
+    except FileNotFoundError:
+        return
+    if not isinstance(payload, dict):
+        raise ValueError(f"Compute worker bootstrap document {path} must be a JSON object")
+    for key, value in payload.items():
+        if isinstance(value, str):
+            os.environ[key] = value
+    # The document lives on a container tmpfs; a read-only or root-owned mount
+    # must not stop the engine from starting with the credentials it loaded.
+    with contextlib.suppress(OSError):
         path.unlink(missing_ok=True)
-    except Exception:
-        pass
 
 
 def main() -> None:

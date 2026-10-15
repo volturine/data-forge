@@ -4,7 +4,7 @@ import threading
 import pytest
 
 from backend_core.notification_delivery import EMAIL_DELIVERY_KIND
-from backend_core.runtime_integration_delivery import IntegrationDeliveryDispatcher, wake
+from backend_core.runtime_integration_delivery import IntegrationDeliveryDispatcher
 from backend_core.runtime_outbox_dispatcher import RuntimeOutboxDispatcher
 from backend_core.runtime_outbox_service import OutboxClaim
 
@@ -145,12 +145,3 @@ async def test_failed_delivery_is_finalized_for_durable_retry() -> None:
 
     assert await dispatcher.dispatch_namespace('default') == 0
     assert finalized == ['provider unavailable']
-
-
-def test_wake_interface_publishes_namespace_to_delivery_lanes() -> None:
-    from backend_core.runtime_outbox_dispatcher import OUTBOX_WAKE_HUB
-
-    last_seen = OUTBOX_WAKE_HUB.version()
-    wake('wake-test')
-
-    assert OUTBOX_WAKE_HUB.payloads_since(last_seen) == ['wake-test']

@@ -5,7 +5,7 @@ from pydantic import BaseModel, ConfigDict, Field, TypeAdapter, field_validator
 
 from dataforge_protocol import enums_pb2
 from runtime.domain.compute_worker_runs.schemas import ComputeWorkerRunKind
-from runtime.domain.domain_enums import DomainEnumValue, domain_token
+from runtime.domain.domain_enums import DomainEnumValue
 
 
 class ComputeWorkerStatus(DomainEnumValue):
@@ -13,12 +13,8 @@ class ComputeWorkerStatus(DomainEnumValue):
     TERMINATED: ClassVar[Self]
 
 
-ComputeWorkerStatus.HEALTHY = ComputeWorkerStatus(
-    enums_pb2.COMPUTE_WORKER_STATUS_HEALTHY, domain_token("ComputeWorkerStatus", enums_pb2.COMPUTE_WORKER_STATUS_HEALTHY)
-)
-ComputeWorkerStatus.TERMINATED = ComputeWorkerStatus(
-    enums_pb2.COMPUTE_WORKER_STATUS_TERMINATED, domain_token("ComputeWorkerStatus", enums_pb2.COMPUTE_WORKER_STATUS_TERMINATED)
-)
+ComputeWorkerStatus.HEALTHY = ComputeWorkerStatus(enums_pb2.COMPUTE_WORKER_STATUS_HEALTHY)
+ComputeWorkerStatus.TERMINATED = ComputeWorkerStatus(enums_pb2.COMPUTE_WORKER_STATUS_TERMINATED)
 
 
 class ComputeWorkerScope(DomainEnumValue):
@@ -27,13 +23,9 @@ class ComputeWorkerScope(DomainEnumValue):
     BUILD: ClassVar[Self]
 
 
-ComputeWorkerScope.DATASOURCE_PREVIEW = ComputeWorkerScope(
-    enums_pb2.COMPUTE_WORKER_SCOPE_DATASOURCE_PREVIEW, domain_token("ComputeWorkerScope", enums_pb2.COMPUTE_WORKER_SCOPE_DATASOURCE_PREVIEW)
-)
-ComputeWorkerScope.ANALYSIS_INTERACTIVE = ComputeWorkerScope(
-    enums_pb2.COMPUTE_WORKER_SCOPE_ANALYSIS_INTERACTIVE, domain_token("ComputeWorkerScope", enums_pb2.COMPUTE_WORKER_SCOPE_ANALYSIS_INTERACTIVE)
-)
-ComputeWorkerScope.BUILD = ComputeWorkerScope(enums_pb2.COMPUTE_WORKER_SCOPE_BUILD, domain_token("ComputeWorkerScope", enums_pb2.COMPUTE_WORKER_SCOPE_BUILD))
+ComputeWorkerScope.DATASOURCE_PREVIEW = ComputeWorkerScope(enums_pb2.COMPUTE_WORKER_SCOPE_DATASOURCE_PREVIEW)
+ComputeWorkerScope.ANALYSIS_INTERACTIVE = ComputeWorkerScope(enums_pb2.COMPUTE_WORKER_SCOPE_ANALYSIS_INTERACTIVE)
+ComputeWorkerScope.BUILD = ComputeWorkerScope(enums_pb2.COMPUTE_WORKER_SCOPE_BUILD)
 
 
 class ComputeWorkerReusePolicy(DomainEnumValue):
@@ -41,12 +33,8 @@ class ComputeWorkerReusePolicy(DomainEnumValue):
     EXCLUSIVE: ClassVar[Self]
 
 
-ComputeWorkerReusePolicy.SHARED = ComputeWorkerReusePolicy(
-    enums_pb2.COMPUTE_WORKER_REUSE_POLICY_SHARED, domain_token("ComputeWorkerReusePolicy", enums_pb2.COMPUTE_WORKER_REUSE_POLICY_SHARED)
-)
-ComputeWorkerReusePolicy.EXCLUSIVE = ComputeWorkerReusePolicy(
-    enums_pb2.COMPUTE_WORKER_REUSE_POLICY_EXCLUSIVE, domain_token("ComputeWorkerReusePolicy", enums_pb2.COMPUTE_WORKER_REUSE_POLICY_EXCLUSIVE)
-)
+ComputeWorkerReusePolicy.SHARED = ComputeWorkerReusePolicy(enums_pb2.COMPUTE_WORKER_REUSE_POLICY_SHARED)
+ComputeWorkerReusePolicy.EXCLUSIVE = ComputeWorkerReusePolicy(enums_pb2.COMPUTE_WORKER_REUSE_POLICY_EXCLUSIVE)
 
 
 class ComputeWorkerResourceConfig(BaseModel):
@@ -187,8 +175,8 @@ class BuildStatus(DomainEnumValue):
         return cls.read(value, default=cls.SUCCESS) or cls.SUCCESS
 
 
-BuildStatus.SUCCESS = BuildStatus(enums_pb2.BUILD_STATUS_SUCCESS, domain_token("BuildStatus", enums_pb2.BUILD_STATUS_SUCCESS))
-BuildStatus.WARNING = BuildStatus(enums_pb2.BUILD_STATUS_WARNING, domain_token("BuildStatus", enums_pb2.BUILD_STATUS_WARNING))
+BuildStatus.SUCCESS = BuildStatus(enums_pb2.BUILD_STATUS_SUCCESS)
+BuildStatus.WARNING = BuildStatus(enums_pb2.BUILD_STATUS_WARNING)
 
 
 class BuildTabStatus(DomainEnumValue):
@@ -196,8 +184,8 @@ class BuildTabStatus(DomainEnumValue):
     FAILED: ClassVar[Self]
 
 
-BuildTabStatus.SUCCESS = BuildTabStatus(enums_pb2.BUILD_TAB_STATUS_SUCCESS, domain_token("BuildTabStatus", enums_pb2.BUILD_TAB_STATUS_SUCCESS))
-BuildTabStatus.FAILED = BuildTabStatus(enums_pb2.BUILD_TAB_STATUS_FAILED, domain_token("BuildTabStatus", enums_pb2.BUILD_TAB_STATUS_FAILED))
+BuildTabStatus.SUCCESS = BuildTabStatus(enums_pb2.BUILD_TAB_STATUS_SUCCESS)
+BuildTabStatus.FAILED = BuildTabStatus(enums_pb2.BUILD_TAB_STATUS_FAILED)
 
 
 class ComputeRunStatus(DomainEnumValue):
@@ -205,8 +193,8 @@ class ComputeRunStatus(DomainEnumValue):
     FAILED: ClassVar[Self]
 
 
-ComputeRunStatus.SUCCESS = ComputeRunStatus(enums_pb2.COMPUTE_RUN_STATUS_SUCCESS, domain_token("ComputeRunStatus", enums_pb2.COMPUTE_RUN_STATUS_SUCCESS))
-ComputeRunStatus.FAILED = ComputeRunStatus(enums_pb2.COMPUTE_RUN_STATUS_FAILED, domain_token("ComputeRunStatus", enums_pb2.COMPUTE_RUN_STATUS_FAILED))
+ComputeRunStatus.SUCCESS = ComputeRunStatus(enums_pb2.COMPUTE_RUN_STATUS_SUCCESS)
+ComputeRunStatus.FAILED = ComputeRunStatus(enums_pb2.COMPUTE_RUN_STATUS_FAILED)
 
 
 class BuildTabResult(BaseModel):
@@ -220,36 +208,6 @@ class BuildTabResult(BaseModel):
     error: str | None = None
 
 
-class BuildLifecycleStatus(DomainEnumValue):
-    QUEUED: ClassVar[Self]
-    RUNNING: ClassVar[Self]
-    COMPLETED: ClassVar[Self]
-    FAILED: ClassVar[Self]
-    CANCELLED: ClassVar[Self]
-
-
-BuildLifecycleStatus.QUEUED = BuildLifecycleStatus(
-    enums_pb2.BUILD_LIFECYCLE_STATUS_QUEUED,
-    domain_token("BuildLifecycleStatus", enums_pb2.BUILD_LIFECYCLE_STATUS_QUEUED),
-)
-BuildLifecycleStatus.RUNNING = BuildLifecycleStatus(
-    enums_pb2.BUILD_LIFECYCLE_STATUS_RUNNING,
-    domain_token("BuildLifecycleStatus", enums_pb2.BUILD_LIFECYCLE_STATUS_RUNNING),
-)
-BuildLifecycleStatus.COMPLETED = BuildLifecycleStatus(
-    enums_pb2.BUILD_LIFECYCLE_STATUS_COMPLETED,
-    domain_token("BuildLifecycleStatus", enums_pb2.BUILD_LIFECYCLE_STATUS_COMPLETED),
-)
-BuildLifecycleStatus.FAILED = BuildLifecycleStatus(
-    enums_pb2.BUILD_LIFECYCLE_STATUS_FAILED,
-    domain_token("BuildLifecycleStatus", enums_pb2.BUILD_LIFECYCLE_STATUS_FAILED),
-)
-BuildLifecycleStatus.CANCELLED = BuildLifecycleStatus(
-    enums_pb2.BUILD_LIFECYCLE_STATUS_CANCELLED,
-    domain_token("BuildLifecycleStatus", enums_pb2.BUILD_LIFECYCLE_STATUS_CANCELLED),
-)
-
-
 class BuildStepState(DomainEnumValue):
     PENDING: ClassVar[Self]
     RUNNING: ClassVar[Self]
@@ -258,11 +216,11 @@ class BuildStepState(DomainEnumValue):
     SKIPPED: ClassVar[Self]
 
 
-BuildStepState.PENDING = BuildStepState(enums_pb2.BUILD_STEP_STATE_PENDING, domain_token("BuildStepState", enums_pb2.BUILD_STEP_STATE_PENDING))
-BuildStepState.RUNNING = BuildStepState(enums_pb2.BUILD_STEP_STATE_RUNNING, domain_token("BuildStepState", enums_pb2.BUILD_STEP_STATE_RUNNING))
-BuildStepState.COMPLETED = BuildStepState(enums_pb2.BUILD_STEP_STATE_COMPLETED, domain_token("BuildStepState", enums_pb2.BUILD_STEP_STATE_COMPLETED))
-BuildStepState.FAILED = BuildStepState(enums_pb2.BUILD_STEP_STATE_FAILED, domain_token("BuildStepState", enums_pb2.BUILD_STEP_STATE_FAILED))
-BuildStepState.SKIPPED = BuildStepState(enums_pb2.BUILD_STEP_STATE_SKIPPED, domain_token("BuildStepState", enums_pb2.BUILD_STEP_STATE_SKIPPED))
+BuildStepState.PENDING = BuildStepState(enums_pb2.BUILD_STEP_STATE_PENDING)
+BuildStepState.RUNNING = BuildStepState(enums_pb2.BUILD_STEP_STATE_RUNNING)
+BuildStepState.COMPLETED = BuildStepState(enums_pb2.BUILD_STEP_STATE_COMPLETED)
+BuildStepState.FAILED = BuildStepState(enums_pb2.BUILD_STEP_STATE_FAILED)
+BuildStepState.SKIPPED = BuildStepState(enums_pb2.BUILD_STEP_STATE_SKIPPED)
 
 
 class BuildLogLevel(DomainEnumValue):
@@ -271,9 +229,9 @@ class BuildLogLevel(DomainEnumValue):
     ERROR: ClassVar[Self]
 
 
-BuildLogLevel.INFO = BuildLogLevel(enums_pb2.BUILD_LOG_LEVEL_INFO, domain_token("BuildLogLevel", enums_pb2.BUILD_LOG_LEVEL_INFO))
-BuildLogLevel.WARNING = BuildLogLevel(enums_pb2.BUILD_LOG_LEVEL_WARNING, domain_token("BuildLogLevel", enums_pb2.BUILD_LOG_LEVEL_WARNING))
-BuildLogLevel.ERROR = BuildLogLevel(enums_pb2.BUILD_LOG_LEVEL_ERROR, domain_token("BuildLogLevel", enums_pb2.BUILD_LOG_LEVEL_ERROR))
+BuildLogLevel.INFO = BuildLogLevel(enums_pb2.BUILD_LOG_LEVEL_INFO)
+BuildLogLevel.WARNING = BuildLogLevel(enums_pb2.BUILD_LOG_LEVEL_WARNING)
+BuildLogLevel.ERROR = BuildLogLevel(enums_pb2.BUILD_LOG_LEVEL_ERROR)
 
 
 class BuildStarter(BaseModel):
@@ -309,18 +267,16 @@ class BuildEventType(DomainEnumValue):
     CANCELLED: ClassVar[Self]
 
 
-BuildEventType.PLAN = BuildEventType(enums_pb2.BUILD_EVENT_TYPE_PLAN, domain_token("BuildEventType", enums_pb2.BUILD_EVENT_TYPE_PLAN))
-BuildEventType.STEP_START = BuildEventType(enums_pb2.BUILD_EVENT_TYPE_STEP_START, domain_token("BuildEventType", enums_pb2.BUILD_EVENT_TYPE_STEP_START))
-BuildEventType.STEP_COMPLETE = BuildEventType(
-    enums_pb2.BUILD_EVENT_TYPE_STEP_COMPLETE, domain_token("BuildEventType", enums_pb2.BUILD_EVENT_TYPE_STEP_COMPLETE)
-)
-BuildEventType.STEP_FAILED = BuildEventType(enums_pb2.BUILD_EVENT_TYPE_STEP_FAILED, domain_token("BuildEventType", enums_pb2.BUILD_EVENT_TYPE_STEP_FAILED))
-BuildEventType.PROGRESS = BuildEventType(enums_pb2.BUILD_EVENT_TYPE_PROGRESS, domain_token("BuildEventType", enums_pb2.BUILD_EVENT_TYPE_PROGRESS))
-BuildEventType.RESOURCES = BuildEventType(enums_pb2.BUILD_EVENT_TYPE_RESOURCES, domain_token("BuildEventType", enums_pb2.BUILD_EVENT_TYPE_RESOURCES))
-BuildEventType.LOG = BuildEventType(enums_pb2.BUILD_EVENT_TYPE_LOG, domain_token("BuildEventType", enums_pb2.BUILD_EVENT_TYPE_LOG))
-BuildEventType.COMPLETE = BuildEventType(enums_pb2.BUILD_EVENT_TYPE_COMPLETE, domain_token("BuildEventType", enums_pb2.BUILD_EVENT_TYPE_COMPLETE))
-BuildEventType.FAILED = BuildEventType(enums_pb2.BUILD_EVENT_TYPE_FAILED, domain_token("BuildEventType", enums_pb2.BUILD_EVENT_TYPE_FAILED))
-BuildEventType.CANCELLED = BuildEventType(enums_pb2.BUILD_EVENT_TYPE_CANCELLED, domain_token("BuildEventType", enums_pb2.BUILD_EVENT_TYPE_CANCELLED))
+BuildEventType.PLAN = BuildEventType(enums_pb2.BUILD_EVENT_TYPE_PLAN)
+BuildEventType.STEP_START = BuildEventType(enums_pb2.BUILD_EVENT_TYPE_STEP_START)
+BuildEventType.STEP_COMPLETE = BuildEventType(enums_pb2.BUILD_EVENT_TYPE_STEP_COMPLETE)
+BuildEventType.STEP_FAILED = BuildEventType(enums_pb2.BUILD_EVENT_TYPE_STEP_FAILED)
+BuildEventType.PROGRESS = BuildEventType(enums_pb2.BUILD_EVENT_TYPE_PROGRESS)
+BuildEventType.RESOURCES = BuildEventType(enums_pb2.BUILD_EVENT_TYPE_RESOURCES)
+BuildEventType.LOG = BuildEventType(enums_pb2.BUILD_EVENT_TYPE_LOG)
+BuildEventType.COMPLETE = BuildEventType(enums_pb2.BUILD_EVENT_TYPE_COMPLETE)
+BuildEventType.FAILED = BuildEventType(enums_pb2.BUILD_EVENT_TYPE_FAILED)
+BuildEventType.CANCELLED = BuildEventType(enums_pb2.BUILD_EVENT_TYPE_CANCELLED)
 
 
 class BuildStreamEvent(BaseModel):

@@ -151,26 +151,22 @@ class ChatModelsRequest(BaseModel):
     organization_id: str | None = None
 
 
-def _infer_patch(tool_id: str, method: str, path: str, result: dict) -> dict | None:
+_PATCH_ACTIONS = {'GET': 'refresh', 'POST': 'created', 'PUT': 'updated', 'PATCH': 'updated', 'DELETE': 'deleted'}
+
+
+def _infer_patch(method: str, path: str, result: dict) -> dict | None:
     """Infer a ui_patch event from tool method/path and response body."""
     if not result.get('ok'):
         return None
     # Path is /api/v1/{resource}/... — resource is always parts[2]
     parts = [p for p in path.split('/') if p]
-    resource = parts[2] if len(parts) > 2 else 'unknown'
-    action_map = {
-        'GET': 'refresh',
-        'POST': 'created',
-        'PUT': 'updated',
-        'PATCH': 'updated',
-        'DELETE': 'deleted',
-    }
-    action = action_map.get(method, 'refresh')
     body = result.get('body')
-    record_id = None
-    if isinstance(body, dict):
-        record_id = body.get('id')
-    return {'resource': resource, 'action': action, 'id': record_id, 'data': body}
+    return {
+        'resource': parts[2] if len(parts) > 2 else 'unknown',
+        'action': _PATCH_ACTIONS.get(method, 'refresh'),
+        'id': body.get('id') if isinstance(body, dict) else None,
+        'data': body,
+    }
 
 
 async def _resume_checkpointed_tool(
@@ -192,40 +188,18 @@ async def _resume_checkpointed_tool(
     args = call.get('args')
     if not isinstance(args, dict):
         raise RuntimeError('Checkpointed chat tool arguments are malformed')
-    tc = {'id': call.get('id', tool_id)}
     remaining_calls = checkpoint.get('remaining_calls', [])
     if not isinstance(remaining_calls, list):
         raise RuntimeError('Checkpointed chat continuation is malformed')
     if method != tool.method.value or path != tool.path:
         raise RuntimeError('Checkpointed chat tool definition changed')
 
+    call = {'id': call.get('id', tool_id), 'tool_id': tool_id, 'method': method, 'path': path, 'args': args}
     if checkpoint.get('phase') == 'awaiting_confirmation' and not await session.wait_for_confirm():
-        await _push_tool_error(session, tc, tool_id, method, path, args, 'User denied tool execution')
+        await _push_tool_error(session, call['id'], tool_id, method, path, args, 'User denied tool execution')
         await session.set_checkpoint({'phase': 'provider_request'})
-        await _execute_tool_calls(session, app, registry, remaining_calls, tool_context)
-        return
-
-    await session.set_checkpoint({'phase': 'tool_running', 'tool_call': call})
-    await session.push_event({'type': 'tool_start', 'tool_id': tool_id, 'method': method, 'path': path})
-    try:
-        result = await call_tool(app, method, path, args, tool_context)
-    except ValueError as exc:
-        await _push_tool_error(session, tc, tool_id, method, path, args, str(exc))
-        await session.set_checkpoint({'phase': 'provider_request'})
-        await _execute_tool_calls(session, app, registry, remaining_calls, tool_context)
-        return
-    patch = _infer_patch(tool_id, method, path, result)
-    await session.push_event({'type': 'tool_result', 'tool_id': tool_id, 'result': result})
-    if patch:
-        await session.push_event({'type': 'ui_patch', **patch})
-    await session.append_message(
-        {
-            'role': 'tool',
-            'tool_call_id': call.get('id', tool_id),
-            'content': await serialize_json(result.get('body', '')),
-        }
-    )
-    await session.set_checkpoint({'phase': 'provider_request'})
+    else:
+        await _run_tool(session, app, call, remaining_calls, tool_context)
     await _execute_tool_calls(session, app, registry, remaining_calls, tool_context)
 
 
@@ -251,12 +225,6 @@ def _format_param_details(name: str, schema: dict, required: bool, location: str
     return '\n'.join(parts)
 
 
-def _format_fallback_param_details(schema: dict) -> list[str]:
-    props = schema.get('properties', {})
-    required = set(schema.get('required', []))
-    return [_format_param_details(name, prop, name in required, 'arg', prop.get('description', '')) for name, prop in props.items()]
-
-
 def _build_tool_system_message(tools: Sequence[MCPToolDefinition]) -> str:
     """Build a system message describing available tools and how to call them."""
     lines = [
@@ -279,48 +247,36 @@ def _build_tool_system_message(tools: Sequence[MCPToolDefinition]) -> str:
     for t in tools:
         schema = t.input_schema
         meta = t.arg_metadata or {}
-        path_meta = meta.get('path') or []
-        query_meta = meta.get('query') or []
+        param_parts = [
+            _format_param_details(
+                item.get('name', ''),
+                item.get('schema', {}),
+                bool(item.get('required', location == 'path')),
+                location,
+                item.get('description', ''),
+            )
+            for location in ('path', 'query')
+            for item in meta.get(location) or []
+        ]
         payload_meta = meta.get('payload')
-
-        param_parts: list[str] = []
-        for item in path_meta:
-            param_parts.append(
-                _format_param_details(
-                    item.get('name', ''),
-                    item.get('schema', {}),
-                    bool(item.get('required', True)),
-                    'path',
-                    item.get('description', ''),
-                ),
-            )
-        for item in query_meta:
-            param_parts.append(
-                _format_param_details(
-                    item.get('name', ''),
-                    item.get('schema', {}),
-                    bool(item.get('required', False)),
-                    'query',
-                    item.get('description', ''),
-                ),
-            )
         if payload_meta is not None:
-            payload_schema = schema.get('properties', {}).get('payload', {})
-            payload_desc = payload_meta.get('description', '')
             param_parts.append(
                 _format_param_details(
                     'payload',
-                    payload_schema,
+                    schema.get('properties', {}).get('payload', {}),
                     bool(payload_meta.get('required', False)),
                     'body',
-                    payload_desc,
+                    payload_meta.get('description', ''),
                 ),
             )
             if payload_meta.get('content_type'):
                 param_parts.append(f'      content_type: {payload_meta["content_type"]}')
 
         if not param_parts:
-            param_parts = _format_fallback_param_details(schema)
+            required = set(schema.get('required', []))
+            param_parts = [
+                _format_param_details(name, prop, name in required, 'arg', prop.get('description', '')) for name, prop in schema.get('properties', {}).items()
+            ]
 
         params_str = '\n'.join(param_parts) if param_parts else '    (no parameters)'
         lines.append(f'- {t.id} [{t.method.value}]: {t.description}')
@@ -333,7 +289,7 @@ def _build_tool_system_message(tools: Sequence[MCPToolDefinition]) -> str:
 
 async def _push_tool_error(
     session: TurnRuntime,
-    tc: dict,
+    call_id: str,
     tool_id: str,
     method: str,
     path: str,
@@ -351,13 +307,7 @@ async def _push_tool_error(
             'errors': [{'path': '$', 'message': message}],
         },
     )
-    await session.append_message(
-        {
-            'role': 'tool',
-            'tool_call_id': tc.get('id', tool_id),
-            'content': json.dumps({'status': 'error', 'message': message}),
-        },
-    )
+    await session.append_message({'role': 'tool', 'tool_call_id': call_id, 'content': json.dumps({'status': 'error', 'message': message})})
 
 
 def _try_parse_json(text: str) -> list[dict] | None:
@@ -385,22 +335,44 @@ def _parse_text_tool_calls(content: str) -> tuple[str, list[dict]]:
     calls_data = _try_parse_json(match.group(1))
     if calls_data is None:
         return content, []
-    tool_calls = []
-    for i, call in enumerate(calls_data):
-        if not isinstance(call, dict) or 'name' not in call:
-            continue
-        tool_calls.append(
-            {
-                'id': f'text_call_{i}',
-                'type': 'function',
-                'function': {
-                    'name': call['name'],
-                    'arguments': json.dumps(call.get('arguments', {})),
-                },
-            },
-        )
+    tool_calls = [
+        {
+            'id': f'text_call_{i}',
+            'type': 'function',
+            'function': {'name': call['name'], 'arguments': json.dumps(call.get('arguments', {}))},
+        }
+        for i, call in enumerate(calls_data)
+        if isinstance(call, dict) and 'name' in call
+    ]
     cleaned = re.sub(r'TOOLCALL>.*', '', content, flags=re.DOTALL).strip()
     return cleaned, tool_calls
+
+
+async def _run_tool(
+    session: TurnRuntime,
+    app: FastAPI,
+    call: dict[str, Any],
+    remaining_calls: list[dict[str, Any]],
+    tool_context: dict[str, Any] | None,
+) -> None:
+    """Execute one approved tool call and record its result for the provider."""
+    tool_id, method, path = call['tool_id'], call['method'], call['path']
+    await session.set_checkpoint({'phase': 'tool_running', 'remaining_calls': remaining_calls, 'tool_call': call})
+    await session.push_event({'type': 'tool_start', 'tool_id': tool_id, 'method': method, 'path': path})
+    started = time.monotonic()
+    try:
+        result = await call_tool(app, method, path, call['args'], tool_context)
+    except ValueError as exc:
+        await _push_tool_error(session, call['id'], tool_id, method, path, call['args'], str(exc))
+        await session.set_checkpoint({'phase': 'provider_request'})
+        return
+    duration_ms = round((time.monotonic() - started) * 1000)
+    await session.push_event({'type': 'tool_result', 'tool_id': tool_id, 'result': result, 'duration_ms': duration_ms})
+    patch = _infer_patch(method, path, result)
+    if patch:
+        await session.push_event({'type': 'ui_patch', **patch})
+    await session.append_message({'role': 'tool', 'tool_call_id': call['id'], 'content': await serialize_json(result.get('body', ''))})
+    await session.set_checkpoint({'phase': 'provider_request'})
 
 
 async def _execute_tool_calls(
@@ -414,12 +386,13 @@ async def _execute_tool_calls(
         remaining_calls = tool_calls[call_index + 1 :]
         fn = tc.get('function', {})
         tool_id = fn.get('name', '')
+        call_id = tc.get('id', tool_id)
         raw_args = fn.get('arguments', '{}')
 
         tool = next((t for t in all_tools if t.id == tool_id), None)
         if tool is None:
             logger.warning('Unknown tool_id session=%s tool=%s', session.id, tool_id)
-            await _push_tool_error(session, tc, tool_id, '', '', {}, f"Unknown tool '{tool_id}'")
+            await _push_tool_error(session, call_id, tool_id, '', '', {}, f"Unknown tool '{tool_id}'")
             continue
 
         method = tool.method.value
@@ -428,140 +401,31 @@ async def _execute_tool_calls(
         try:
             args = await run_api_blocking(json.loads, raw_args) if isinstance(raw_args, str) else raw_args
         except json.JSONDecodeError as exc:
-            logger.warning(
-                'Malformed tool args session=%s tool=%s: %s',
-                session.id,
-                tool_id,
-                exc,
-            )
-            await _push_tool_error(
-                session,
-                tc,
-                tool_id,
-                method,
-                path,
-                {},
-                f'Malformed arguments: {exc}',
-            )
+            logger.warning('Malformed tool args session=%s tool=%s: %s', session.id, tool_id, exc)
+            await _push_tool_error(session, call_id, tool_id, method, path, {}, f'Malformed arguments: {exc}')
             continue
 
-        await session.push_event(
-            {
-                'type': 'tool_call',
-                'tool_id': tool_id,
-                'method': method,
-                'path': path,
-                'args': args,
-            }
-        )
+        await session.push_event({'type': 'tool_call', 'tool_id': tool_id, 'method': method, 'path': path, 'args': args})
 
         valid, errors, normalized = await run_api_blocking(tool.validate_arguments, args)
         if not valid:
-            await session.push_event(
-                {
-                    'type': 'tool_error',
-                    'tool_id': tool_id,
-                    'method': method,
-                    'path': path,
-                    'args': args,
-                    'errors': errors,
-                },
-            )
-            await session.append_message(
-                {
-                    'role': 'tool',
-                    'tool_call_id': tc.get('id', tool_id),
-                    'content': json.dumps({'status': 'validation_error', 'errors': errors}),
-                },
-            )
+            await session.push_event({'type': 'tool_error', 'tool_id': tool_id, 'method': method, 'path': path, 'args': args, 'errors': errors})
+            await session.append_message({'role': 'tool', 'tool_call_id': call_id, 'content': json.dumps({'status': 'validation_error', 'errors': errors})})
             continue
 
+        call = {'id': call_id, 'tool_id': tool_id, 'method': method, 'path': path, 'args': normalized}
         if tool.confirm_required:
-            pending_call = {
-                'id': tc.get('id', tool_id),
-                'tool_id': tool_id,
-                'method': method,
-                'path': path,
-                'args': normalized,
-            }
             await session.set_checkpoint(
-                {'phase': 'awaiting_confirmation', 'tool_call': pending_call, 'remaining_calls': remaining_calls},
+                {'phase': 'awaiting_confirmation', 'tool_call': call, 'remaining_calls': remaining_calls},
                 status='awaiting_confirmation',
             )
-            await session.push_event(
-                {
-                    'type': 'tool_confirm',
-                    'tool_id': tool_id,
-                    'method': method,
-                    'path': path,
-                    'args': normalized,
-                },
-            )
-            approved = await session.wait_for_confirm()
-            if not approved:
-                await _push_tool_error(
-                    session,
-                    tc,
-                    tool_id,
-                    method,
-                    path,
-                    normalized,
-                    'User denied tool execution',
-                )
+            await session.push_event({'type': 'tool_confirm', 'tool_id': tool_id, 'method': method, 'path': path, 'args': normalized})
+            if not await session.wait_for_confirm():
+                await _push_tool_error(session, call_id, tool_id, method, path, normalized, 'User denied tool execution')
                 await session.set_checkpoint({'phase': 'provider_request'})
                 continue
 
-        await session.set_checkpoint(
-            {
-                'phase': 'tool_running',
-                'remaining_calls': remaining_calls,
-                'tool_call': {
-                    'id': tc.get('id', tool_id),
-                    'tool_id': tool_id,
-                    'method': method,
-                    'path': path,
-                    'args': normalized,
-                },
-            }
-        )
-        await session.push_event(
-            {
-                'type': 'tool_start',
-                'tool_id': tool_id,
-                'method': method,
-                'path': path,
-            }
-        )
-        t0 = time.monotonic()
-        try:
-            result = await call_tool(app, method, path, normalized, tool_context)
-        except ValueError as exc:
-            await _push_tool_error(session, tc, tool_id, method, path, normalized, str(exc))
-            await session.set_checkpoint({'phase': 'provider_request'})
-            continue
-        duration_ms = round((time.monotonic() - t0) * 1000)
-        patch = _infer_patch(tool_id, method, path, result)
-
-        await session.push_event(
-            {
-                'type': 'tool_result',
-                'tool_id': tool_id,
-                'result': result,
-                'duration_ms': duration_ms,
-            }
-        )
-        if patch:
-            await session.push_event({'type': 'ui_patch', **patch})
-
-        tool_result_str = await serialize_json(result.get('body', ''))
-        await session.append_message(
-            {
-                'role': 'tool',
-                'tool_call_id': tc.get('id', tool_id),
-                'content': tool_result_str,
-            },
-        )
-        await session.set_checkpoint({'phase': 'provider_request'})
+        await _run_tool(session, app, call, remaining_calls, tool_context)
 
 
 async def _run_agent_turn(
@@ -597,30 +461,19 @@ async def _run_agent_turn(
             prompt_lines: list[str] = []
             for history_msg in session.messages:
                 role = str(history_msg.get('role', 'user')).lower()
-                if role not in {'system', 'user', 'assistant'}:
-                    continue
                 content = str(history_msg.get('content') or '')
-                if not content:
-                    continue
-                prompt_lines.append(f'{role}: {content}')
-            prompt_lines.append('assistant:')
-            prompt = '\n'.join(prompt_lines)
+                if role in {'system', 'user', 'assistant'} and content:
+                    prompt_lines.append(f'{role}: {content}')
+            prompt = '\n'.join([*prompt_lines, 'assistant:'])
             client = get_ai_client(provider.provider, api_key=api_key or None)
             await session.set_checkpoint({'phase': 'provider_request'})
-            assistant_content = await session.run_sync_provider(
-                client.generate,
-                prompt,
-                model=session.model,
-                options=None,
-            )
+            assistant_content = await session.run_sync_provider(client.generate, prompt, model=session.model, options=None)
             await session.append_message({'role': 'assistant', 'content': assistant_content})
             await session.push_event({'type': 'message', 'role': 'assistant', 'content': assistant_content})
             await session.finish('completed')
             return
 
-        safe_tools = [t for t in registry if t.safety == MCPToolSafety.SAFE]
-        mutating_tools = [t for t in registry if t.safety == MCPToolSafety.MUTATING]
-        all_tools = safe_tools + mutating_tools
+        all_tools = [t for t in registry if t.safety == MCPToolSafety.SAFE] + [t for t in registry if t.safety == MCPToolSafety.MUTATING]
 
         tool_system_msg = {'role': 'system', 'content': _build_tool_system_message(all_tools)} if all_tools else None
         use_text_format = session.use_text_format
@@ -636,12 +489,7 @@ async def _run_agent_turn(
                 insert_idx = 1 if api_messages and api_messages[0].get('role') == 'system' else 0
                 api_messages.insert(insert_idx, tool_system_msg)
 
-            response = await chat_with_tools(
-                api_key or '',
-                session.model,
-                api_messages,
-                all_tools,
-            )
+            response = await chat_with_tools(api_key or '', session.model, api_messages, all_tools)
             choice = response.get('choices', [{}])[0]
             raw = choice.get('message', {})
             finish = choice.get('finish_reason', '')
@@ -687,13 +535,7 @@ async def _run_agent_turn(
             await session.append_message(msg)
 
             if assistant_content:
-                await session.push_event(
-                    {
-                        'type': 'message',
-                        'role': 'assistant',
-                        'content': assistant_content,
-                    }
-                )
+                await session.push_event({'type': 'message', 'role': 'assistant', 'content': assistant_content})
 
             if not tool_calls:
                 break
@@ -706,12 +548,8 @@ async def _run_agent_turn(
         return
     except ChatClaimRevoked, RuntimeCoordinatorFenced, SQLAlchemyError:
         raise
-    except ChatHttpError as exc:
-        logger.error('Chat HTTP error session=%s: %s', session.id, exc)
-        session.failed = True
-        await session.push_event({'type': 'error', 'content': f'AI provider error: {exc}'})
-    except AIError as exc:
-        logger.error('AI client error session=%s: %s', session.id, exc)
+    except (ChatHttpError, AIError) as exc:
+        logger.error('AI provider error session=%s: %s', session.id, exc)
         session.failed = True
         await session.push_event({'type': 'error', 'content': f'AI provider error: {exc}'})
     except asyncio.CancelledError:
@@ -737,13 +575,7 @@ async def _run_agent_turn(
         session.failed = True
         await session.push_event({'type': 'error', 'content': 'Internal error'})
     finally:
-        elapsed = time.monotonic() - turn_start
-        logger.info(
-            'chat turn end session=%s elapsed=%.2fs tools=%d',
-            session.id,
-            elapsed,
-            tool_count,
-        )
+        logger.info('chat turn end session=%s elapsed=%.2fs tools=%d', session.id, time.monotonic() - turn_start, tool_count)
     status = 'interrupted' if session.owner_stopping else 'failed' if session.failed or session.stop_requested else 'completed'
     await session.finish(status)
 

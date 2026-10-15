@@ -266,29 +266,18 @@ def _reconcile_host_containers(
         if container_id in keep_container_ids:
             continue
         container_labels = container.get("Labels") or {}
-        container_generation = container_labels.get(_COORDINATOR_GENERATION_LABEL) if isinstance(container_labels, dict) else None
-        if coordinator_generation is not None and container_generation != str(coordinator_generation):
-            if not remove_running and container.get("State") not in {"dead", "exited"}:
-                continue
-            if coordinator_guard is not None:
-                coordinator_guard()
-            try:
-                _remove_reconciled_container(client, host, container_id)
-                removed += 1
-            except Exception:
-                logger.warning(
-                    "Failed to remove stale-generation compute worker container %s (generation=%s current=%s)",
-                    container_id[:12],
-                    container_generation or "missing",
-                    coordinator_generation,
-                    exc_info=True,
-                )
-            continue
+        if not isinstance(container_labels, dict):
+            container_labels = {}
+        container_generation = container_labels.get(_COORDINATOR_GENERATION_LABEL)
+        stale_generation = coordinator_generation is not None and container_generation != str(coordinator_generation)
         state = container.get("State")
-        if not remove_running and state not in {"dead", "exited"}:
+        running = state not in {"dead", "exited"}
+        if not remove_running and running:
             continue
-        if remove_running and state not in {"dead", "exited"} and running_grace_seconds > 0:
-            created_at_raw = container_labels.get("io.dataforge.created-at") if isinstance(container_labels, dict) else None
+        # A running container of the current generation may have been created
+        # after the manager snapshot; keep it until the startup grace expires.
+        if not stale_generation and running and running_grace_seconds > 0:
+            created_at_raw = container_labels.get("io.dataforge.created-at")
             try:
                 created_at = datetime.fromisoformat(str(created_at_raw)) if created_at_raw else None
             except ValueError:
@@ -301,10 +290,13 @@ def _reconcile_host_containers(
             _remove_reconciled_container(client, host, container_id)
             removed += 1
         except Exception:
+            # One undeletable container must not stop the sweep of the others.
             logger.warning(
-                "Failed to remove reconciled compute worker container %s (state=%s)",
+                "Failed to remove reconciled compute worker container %s (state=%s generation=%s current=%s)",
                 container_id[:12],
                 state,
+                container_generation or "missing",
+                coordinator_generation,
                 exc_info=True,
             )
     return removed
@@ -414,7 +406,14 @@ def _container_security_kwargs(*, host: DockerHostSpec, resources: dict[str, int
     return kwargs
 
 
-# Credential bootstrap is passed in-memory via gRPC Initialize RPC, eliminating exec_run.
+def _compute_worker_environment(*, init_timeout_seconds: int) -> dict[str, str]:
+    return {
+        "COMPUTE_WORKER_RPC_HOST": "0.0.0.0",
+        "COMPUTE_WORKER_RPC_PORT": str(settings.compute_worker_rpc_port),
+        "COMPUTE_WORKER_HEARTBEAT_TIMEOUT_SECONDS": str(settings.compute_worker_heartbeat_interval_seconds * 6),
+        "COMPUTE_WORKER_INIT_TIMEOUT_SECONDS": str(init_timeout_seconds),
+        "APP_VERSION": _COMPUTE_WORKER_APPLICATION_VERSION,
+    }
 
 
 class DockerComputeWorker(ComputeWorker):
@@ -646,19 +645,12 @@ class DockerComputeWorker(ComputeWorker):
                 "io.dataforge.owner": self.identity.build_id if self.identity.HasField("build_id") else self._supervisor_id,
                 "io.dataforge.protocol-version": str(COMPUTE_WORKER_PROTOCOL_VERSION),
             }
-            environment = {
-                "COMPUTE_WORKER_RPC_HOST": "0.0.0.0",
-                "COMPUTE_WORKER_RPC_PORT": str(settings.compute_worker_rpc_port),
-                "COMPUTE_WORKER_HEARTBEAT_TIMEOUT_SECONDS": str(settings.compute_worker_heartbeat_interval_seconds * 6),
-                # Orphan guard: if the worker dies between container start and
-                # initialization, the compute worker stops itself instead of leaking.
-                "COMPUTE_WORKER_INIT_TIMEOUT_SECONDS": str(max(120, settings.compute_worker_start_timeout_seconds * 2)),
-                "APP_VERSION": _COMPUTE_WORKER_APPLICATION_VERSION,
-            }
             startup_phases = self._launch_with_failover(
                 name=lambda: _container_name(identity=self.identity, namespace=self._namespace),
                 labels=labels,
-                environment=environment,
+                # Orphan guard: if the worker dies between container start and
+                # initialization, the compute worker stops itself instead of leaking.
+                environment=_compute_worker_environment(init_timeout_seconds=max(120, settings.compute_worker_start_timeout_seconds * 2)),
                 ready=lambda resources: self._initialize(resources=resources, credentials=credentials),
             )
             startup_phases = {"credentials_ms": credentials_ms, **startup_phases}
@@ -699,18 +691,11 @@ class DockerComputeWorker(ComputeWorker):
                 "io.dataforge.owner": self._supervisor_id,
                 "io.dataforge.protocol-version": str(COMPUTE_WORKER_PROTOCOL_VERSION),
             }
-            environment = {
-                "COMPUTE_WORKER_RPC_HOST": "0.0.0.0",
-                "COMPUTE_WORKER_RPC_PORT": str(settings.compute_worker_rpc_port),
-                "COMPUTE_WORKER_HEARTBEAT_TIMEOUT_SECONDS": str(settings.compute_worker_heartbeat_interval_seconds * 6),
-                # Warm workers stay uninitialized until assigned; no deadline.
-                "COMPUTE_WORKER_INIT_TIMEOUT_SECONDS": "0",
-                "APP_VERSION": _COMPUTE_WORKER_APPLICATION_VERSION,
-            }
             self._launch_with_failover(
                 name=lambda: f"dataforge-compute-worker-warm-{worker_id}",
                 labels=labels,
-                environment=environment,
+                # Warm workers stay uninitialized until assigned; no deadline.
+                environment=_compute_worker_environment(init_timeout_seconds=0),
                 ready=None,
             )
             self._alive = True
@@ -1371,23 +1356,10 @@ class DockerComputeWorker(ComputeWorker):
             if not self._remove_container(container):
                 self._detach_local_handles()
                 return
-            if self._channel is not None:
-                self._channel.close()
-            if self._client is not None:
-                self._client.close()
+            # The container is gone, so its placement slot is free again.
             self._release_placement()
-            self._channel = None
-            self._client = None
-            self._container = None
-            self._container_id = None
-            self._stub = None
-            self._rpc_target = None
-            self._alive = False
-            self._active_job_ids.clear()
             transfers = list(self._artifact_transfers.values())
-            self._artifact_transfers.clear()
-            # Drop job pointer after clearing active set so waiters can reclaim capacity.
-            self._publish_current_job_id(None)
+            self._detach_local_handles()
         for _local_path, artifact_url in transfers:
             with contextlib.suppress(Exception):
                 delete_object(artifact_url)

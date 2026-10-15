@@ -37,7 +37,7 @@ from backend_core.persistence.build_runs.models import BuildRun
 from backend_core.persistence.datasource.models import DataSource
 from backend_core.persistence.scheduler.models import Schedule
 from backend_core.sqlmodel_typing import col
-from backend_core.time import utc_now as _utcnow
+from backend_core.time import naive_utc, utc_now as _utcnow
 from backend_core.transitions import TransitionOutcome
 from modules.analysis.step_schemas import normalize_pipeline_step_configs_for_protocol
 
@@ -59,10 +59,6 @@ def _build_request_json(request: compute_schemas.BuildRequest) -> dict[str, obje
     }
 
 
-def _naive_utc(value: datetime) -> datetime:
-    return value.replace(tzinfo=None) if value.tzinfo is not None else value
-
-
 def _wake_build_worker(namespace: str) -> None:
     """Wake the worker after a schedule transaction commits.
 
@@ -75,28 +71,6 @@ def _wake_build_worker(namespace: str) -> None:
         logger.warning('Direct scheduled-build wake failed namespace=%s; durable outbox will recover it', namespace, exc_info=True)
 
 
-def _mark_schedule_failure(
-    session: Session,
-    *,
-    schedule: Schedule,
-    claim_token: str,
-    lease_generation: int,
-    now: datetime | None = None,
-) -> Schedule:
-    stamp = now or _utcnow()
-    if schedule.claim_token != claim_token or schedule.lease_generation != lease_generation:
-        raise ValueError(f'Schedule {schedule.id} claim was replaced')
-    schedule.last_failure_at = stamp
-    schedule.lease_owner = None
-    schedule.claim_token = None
-    schedule.lease_expires_at = None
-    session.add(schedule)
-    runtime_work_service.mark_schedule_pending(session, namespace=get_namespace())
-    session.commit()
-    session.refresh(schedule)
-    return schedule
-
-
 def mark_schedule_enqueue_failed(
     session: Session,
     schedule_id: str,
@@ -107,12 +81,17 @@ def mark_schedule_enqueue_failed(
     schedule = session.execute(select(Schedule).where(col(Schedule.id) == schedule_id).with_for_update()).scalar_one_or_none()
     if schedule is None:
         return None
-    return _mark_schedule_failure(
-        session,
-        schedule=schedule,
-        claim_token=claim_token,
-        lease_generation=lease_generation,
-    )
+    if schedule.claim_token != claim_token or schedule.lease_generation != lease_generation:
+        raise ValueError(f'Schedule {schedule.id} claim was replaced')
+    schedule.last_failure_at = _utcnow()
+    schedule.lease_owner = None
+    schedule.claim_token = None
+    schedule.lease_expires_at = None
+    session.add(schedule)
+    runtime_work_service.mark_schedule_pending(session, namespace=get_namespace())
+    session.commit()
+    session.refresh(schedule)
+    return schedule
 
 
 def build_analysis_pipeline_payload(session: Session, analysis: Analysis) -> dict[str, Any]:
@@ -269,48 +248,25 @@ def _build_ingest_request(schedule: Schedule) -> compute_schemas.BuildRequest:
     return compute_schemas.BuildRequest.model_validate({'analysis_pipeline': pipeline, 'tab_id': schedule.id})
 
 
-def _enqueue_schedule_ingest_build(
-    session: Session,
-    *,
-    schedule: Schedule,
-    target_kind: str,
-    namespace: str,
-    now: datetime,
-) -> build_run_service.BuildRun:
-    build_id = str(uuid.uuid4())
+def _enqueue_schedule_ingest_build(session: Session, *, schedule: Schedule, namespace: str, now: datetime) -> build_run_service.BuildRun:
     datasource = session.get(DataSource, schedule.datasource_id)
     datasource_name = datasource.name if datasource is not None and datasource.name else schedule.datasource_id
     analysis_name = f'Schedule ingest {datasource_name}'
-    request = _build_ingest_request(schedule)
-    datasource_ids = build_datasource_dependencies.external_datasource_ids(request.analysis_pipeline)
-    build_datasource_dependencies.lock_active_datasources(session, namespace=namespace, datasource_ids=datasource_ids)
-    run = build_run_service.stage_build_run(
+    return _enqueue_schedule_build(
         session,
-        build_id=build_id,
+        schedule=schedule,
         namespace=namespace,
-        schedule_id=schedule.id,
         analysis_id=schedule.id,
         analysis_name=analysis_name,
-        request_json=_build_request_json(request),
-        starter_json=compute_schemas.BuildStarter.for_schedule(schedule.id).model_dump(mode='json'),
-        status=BuildRunStatus.QUEUED,
-        current_kind=target_kind,
-        current_datasource_id=schedule.datasource_id,
-        current_tab_id=schedule.id,
-        current_tab_name='Scheduled ingest',
-        current_output_id=schedule.datasource_id,
-        current_output_name=analysis_name,
-        total_tabs=1,
-        datasource_ids=datasource_ids,
-        created_at=now,
-        started_at=now,
+        tab_id=schedule.id,
+        tab_name='Scheduled ingest',
+        request=_build_ingest_request(schedule),
+        now=now,
+        output_name=analysis_name,
     )
-    build_job_service.stage_job(session, build_id=build_id, namespace=namespace)
-    runtime_outbox_service.enqueue_build_job_notification(session)
-    return run
 
 
-def _enqueue_schedule_analysis_build(
+def _enqueue_schedule_build(
     session: Session,
     *,
     schedule: Schedule,
@@ -322,6 +278,7 @@ def _enqueue_schedule_analysis_build(
     request: compute_schemas.BuildRequest,
     now: datetime,
     output_id: str | None = None,
+    output_name: str | None = None,
 ) -> build_run_service.BuildRun:
     build_id = str(uuid.uuid4())
     datasource_ids = build_datasource_dependencies.external_datasource_ids(request.analysis_pipeline)
@@ -341,7 +298,7 @@ def _enqueue_schedule_analysis_build(
         current_tab_id=tab_id,
         current_tab_name=tab_name,
         current_output_id=output_id or schedule.datasource_id,
-        current_output_name=tab_name,
+        current_output_name=output_name or tab_name,
         total_tabs=len(request.analysis_pipeline.tabs),
         datasource_ids=datasource_ids,
         created_at=now,
@@ -409,26 +366,8 @@ def _build_schedule_response(
 def enrich_schedule_response(session: Session, schedule: Schedule) -> ScheduleResponse:
     """Enrich schedule with resolved analysis/tab info from datasource provenance."""
     datasource = session.get(DataSource, schedule.datasource_id)
-    analysis = None
-    if datasource and datasource.created_by_analysis_id:
-        analysis = session.get(Analysis, datasource.created_by_analysis_id)
+    analysis = session.get(Analysis, datasource.created_by_analysis_id) if datasource and datasource.created_by_analysis_id else None
     return _build_schedule_response(schedule, datasource, analysis)
-
-
-def _enrich_schedule_response_batch(
-    schedules: Sequence[Schedule],
-    ds_map: dict[str, DataSource],
-    analysis_map: dict[str, Analysis],
-) -> list[ScheduleResponse]:
-    """Enrich schedules using preloaded datasource and analysis maps."""
-    responses: list[ScheduleResponse] = []
-    for schedule in schedules:
-        datasource = ds_map.get(schedule.datasource_id)
-        analysis = None
-        if datasource and datasource.created_by_analysis_id:
-            analysis = analysis_map.get(datasource.created_by_analysis_id)
-        responses.append(_build_schedule_response(schedule, datasource, analysis))
-    return responses
 
 
 def list_schedules(
@@ -474,7 +413,19 @@ def list_schedules(
         analyses = session.execute(select(Analysis).where(col(Analysis.id).in_(list(analysis_ids)))).scalars().all()
         analysis_map = {str(analysis.id): analysis for analysis in analyses}
 
-    return _enrich_schedule_response_batch(schedules, ds_map, analysis_map)
+    responses: list[ScheduleResponse] = []
+    for schedule in schedules:
+        datasource = ds_map.get(schedule.datasource_id)
+        analysis = analysis_map.get(datasource.created_by_analysis_id) if datasource and datasource.created_by_analysis_id else None
+        responses.append(_build_schedule_response(schedule, datasource, analysis))
+    return responses
+
+
+def _validate_schedule_references(session: Session, depends_on: str | None, trigger_on_datasource_id: str | None) -> None:
+    if depends_on and not session.get(Schedule, depends_on):
+        raise ScheduleValidationError('Dependency schedule not found', details={'depends_on': depends_on})
+    if trigger_on_datasource_id and not session.get(DataSource, trigger_on_datasource_id):
+        raise datasource_not_found(trigger_on_datasource_id)
 
 
 def stage_create_schedule(session: Session, payload: ScheduleCreate) -> Schedule:
@@ -482,7 +433,6 @@ def stage_create_schedule(session: Session, payload: ScheduleCreate) -> Schedule
 
     analysis_id and tab_id are resolved from datasource provenance at execution time.
     """
-    # Validate datasource exists
     datasource = session.get(DataSource, payload.datasource_id)
     if not datasource:
         raise datasource_not_found(payload.datasource_id)
@@ -491,21 +441,7 @@ def stage_create_schedule(session: Session, payload: ScheduleCreate) -> Schedule
             'Datasource has no analysis provenance',
             details={'datasource_id': payload.datasource_id},
         )
-
-    # Validate dependency if provided
-    if payload.depends_on:
-        dep_schedule = session.get(Schedule, payload.depends_on)
-        if not dep_schedule:
-            raise ScheduleValidationError(
-                'Dependency schedule not found',
-                details={'depends_on': payload.depends_on},
-            )
-
-    # Validate trigger datasource if provided
-    if payload.trigger_on_datasource_id:
-        trigger_ds = session.get(DataSource, payload.trigger_on_datasource_id)
-        if not trigger_ds:
-            raise datasource_not_found(payload.trigger_on_datasource_id)
+    _validate_schedule_references(session, payload.depends_on, payload.trigger_on_datasource_id)
 
     next_run = Schedule.compute_next_run(payload.cron_expression)
     record = Schedule(
@@ -531,26 +467,9 @@ def stage_update_schedule(session: Session, schedule_id: str, payload: ScheduleU
     if not schedule:
         raise schedule_not_found(schedule_id)
 
-    # Validate new datasource if provided
-    if payload.datasource_id:
-        datasource = session.get(DataSource, payload.datasource_id)
-        if not datasource:
-            raise datasource_not_found(payload.datasource_id)
-
-    # Validate dependency if provided
-    if payload.depends_on:
-        dep_schedule = session.get(Schedule, payload.depends_on)
-        if not dep_schedule:
-            raise ScheduleValidationError(
-                'Dependency schedule not found',
-                details={'depends_on': payload.depends_on},
-            )
-
-    # Validate trigger datasource if provided
-    if payload.trigger_on_datasource_id:
-        trigger_ds = session.get(DataSource, payload.trigger_on_datasource_id)
-        if not trigger_ds:
-            raise datasource_not_found(payload.trigger_on_datasource_id)
+    if payload.datasource_id and not session.get(DataSource, payload.datasource_id):
+        raise datasource_not_found(payload.datasource_id)
+    _validate_schedule_references(session, payload.depends_on, payload.trigger_on_datasource_id)
 
     update_data = payload.model_dump(exclude_unset=True)
     for key, value in update_data.items():
@@ -579,11 +498,8 @@ def should_run(cron_expr: str, last_run: datetime | None) -> bool:
         return False
     if last_run is None:
         return True
-    naive_last = last_run.replace(tzinfo=None) if last_run.tzinfo else last_run
-    cron = croniter.croniter(cron_expr, naive_last)
-    next_run = cron.get_next(datetime)
-    now = datetime.now(UTC).replace(tzinfo=None)
-    return next_run <= now
+    next_run = croniter.croniter(cron_expr, naive_utc(last_run)).get_next(datetime)
+    return next_run <= datetime.now(UTC).replace(tzinfo=None)
 
 
 def _schedule_candidate_query(now: datetime) -> Select[Schedule]:
@@ -610,7 +526,7 @@ def _schedule_candidate_batches(session: Session, statement: Select[Schedule]) -
         if not schedules:
             return
         last = schedules[-1]
-        cursor = (_naive_utc(last.next_run) if last.next_run is not None else datetime.min, _naive_utc(last.created_at), last.id)
+        cursor = (naive_utc(last.next_run) if last.next_run is not None else datetime.min, naive_utc(last.created_at), last.id)
         yield schedules
         if len(schedules) < _SCHEDULE_CANDIDATE_BATCH_SIZE:
             return
@@ -651,7 +567,7 @@ def _due_schedule_candidates(session: Session, schedules: Sequence[Schedule], no
                     continue
                 key = str(datasource_id)
                 previous = latest_completed_at.get(key)
-                if previous is None or _naive_utc(completed_at) > _naive_utc(previous):
+                if previous is None or naive_utc(completed_at) > naive_utc(previous):
                     latest_completed_at[key] = completed_at
 
     due: list[Schedule] = []
@@ -660,19 +576,19 @@ def _due_schedule_candidates(session: Session, schedules: Sequence[Schedule], no
             continue
         if sched.depends_on:
             completed = dependency_success.get(sched.depends_on)
-            if completed is not None and (sched.last_triggered_at is None or _naive_utc(completed) > _naive_utc(sched.last_triggered_at)):
+            if completed is not None and (sched.last_triggered_at is None or naive_utc(completed) > naive_utc(sched.last_triggered_at)):
                 due.append(sched)
                 continue
         if sched.trigger_on_datasource_id:
             completed = latest_completed_at.get(sched.trigger_on_datasource_id)
             reference = sched.last_triggered_at or sched.last_run
-            if completed is not None and (reference is None or _naive_utc(completed) > _naive_utc(reference)):
+            if completed is not None and (reference is None or naive_utc(completed) > naive_utc(reference)):
                 due.append(sched)
                 continue
         if sched.depends_on or sched.trigger_on_datasource_id:
             continue
         reference = sched.last_triggered_at or sched.last_run
-        next_run = sched.next_run.replace(tzinfo=None) if sched.next_run and sched.next_run.tzinfo else sched.next_run
+        next_run = naive_utc(sched.next_run) if sched.next_run else None
         if next_run is not None and next_run <= now:
             due.append(sched)
             continue
@@ -681,14 +597,18 @@ def _due_schedule_candidates(session: Session, schedules: Sequence[Schedule], no
     return due
 
 
-def _next_schedule_namespace_due_at(session: Session) -> datetime | None:
-    now = _utcnow()
-    active_build = (
+def _has_active_schedule_build():
+    return (
         select(col(BuildRun.id))
         .where(col(BuildRun.schedule_id) == col(Schedule.id))
         .where(col(BuildRun.status).in_((BuildRunStatus.QUEUED, BuildRunStatus.RUNNING)))
         .exists()
     )
+
+
+def _next_schedule_namespace_due_at(session: Session) -> datetime | None:
+    now = _utcnow()
+    active_build = _has_active_schedule_build()
     eligible_cron = col(Schedule.enabled).is_(True) & col(Schedule.depends_on).is_(None) & col(Schedule.trigger_on_datasource_id).is_(None) & ~active_build
     next_cron = session.execute(
         select(func.min(col(Schedule.next_run)))
@@ -728,11 +648,11 @@ def _next_schedule_namespace_due_at(session: Session) -> datetime | None:
             continue
         schedule.next_run = next_run
         session.add(schedule)
-        candidates.append(max(now, next_run, key=_naive_utc))
+        candidates.append(max(now, next_run, key=naive_utc))
 
     if not candidates:
         return None
-    due_at = min(candidates, key=_naive_utc)
+    due_at = min(candidates, key=naive_utc)
     return due_at.replace(tzinfo=UTC) if due_at.tzinfo is None else due_at.astimezone(UTC)
 
 
@@ -757,20 +677,14 @@ def claim_due_schedules(
     now: datetime | None = None,
 ) -> list[Schedule]:
     stamp = now or _utcnow()
-    naive_stamp = _naive_utc(stamp)
+    naive_stamp = naive_utc(stamp)
     table = Schedule.metadata.tables[Schedule.__tablename__]
     reclaimable = set(reclaimable_owner_ids or ())
     if limit < 1:
         return []
-    active_build = (
-        select(col(BuildRun.id))
-        .where(col(BuildRun.schedule_id) == col(Schedule.id))
-        .where(col(BuildRun.status).in_((BuildRunStatus.QUEUED, BuildRunStatus.RUNNING)))
-        .exists()
-    )
     base = (
         _schedule_candidate_query(naive_stamp)
-        .where(~active_build)
+        .where(~_has_active_schedule_build())
         .where(
             or_(
                 table.c.lease_owner.is_(None),
@@ -905,13 +819,13 @@ def enqueue_schedule_run(
         raise ValueError(f'Schedule {schedule_id} already has an in-flight build')
 
     stamp = _utcnow()
-    naive_stamp = _naive_utc(stamp)
+    naive_stamp = naive_utc(stamp)
     if (
         schedule.lease_owner != worker_id
         or schedule.claim_token != claim_token
         or schedule.lease_generation != lease_generation
         or schedule.lease_expires_at is None
-        or _naive_utc(schedule.lease_expires_at) <= naive_stamp
+        or naive_utc(schedule.lease_expires_at) <= naive_stamp
     ):
         raise ValueError(f'Schedule {schedule_id} claim is stale')
 
@@ -923,12 +837,12 @@ def enqueue_schedule_run(
     if target_kind in {DataSourceTargetKind.RAW, DataSourceTargetKind.DATASOURCE}:
         readers = _analyses_reading_datasource(session, schedule.datasource_id)
         if readers:
-            first_run_id: str | None = None
+            run_ids: list[str] = []
             for analysis in readers:
                 request, reader_analysis_id, reader_name, reader_tab_id, reader_tab_name, output_id = _build_reader_analysis_request(
                     session, schedule, analysis
                 )
-                run = _enqueue_schedule_analysis_build(
+                run = _enqueue_schedule_build(
                     session,
                     schedule=schedule,
                     namespace=namespace,
@@ -940,49 +854,33 @@ def enqueue_schedule_run(
                     now=stamp,
                     output_id=output_id,
                 )
-                if first_run_id is None:
-                    first_run_id = run.id
-            session.add(schedule)
-            session.commit()
-            _wake_build_worker(namespace)
-            build_job_hub.publish()
-            if first_run_id is None:
-                raise ValueError(f'Schedule {schedule_id} did not enqueue an analysis build')
-            return first_run_id
-        if target_kind == DataSourceTargetKind.DATASOURCE:
+                run_ids.append(run.id)
+            run_id = run_ids[0]
+        elif target_kind == DataSourceTargetKind.DATASOURCE:
             raise ValueError(f'Datasource {schedule.datasource_id} has no analysis reading it and cannot be re-ingested. Schedule an analysis output instead.')
-        run = _enqueue_schedule_ingest_build(
+        else:
+            run_id = _enqueue_schedule_ingest_build(session, schedule=schedule, namespace=namespace, now=stamp).id
+    else:
+        if analysis_id is None:
+            raise ValueError(f'Analysis provenance missing for schedule {schedule_id}')
+        request, resolved_analysis_id, analysis_name, tab_id, tab_name = _build_analysis_request(session, schedule, analysis_id)
+        run_id = _enqueue_schedule_build(
             session,
             schedule=schedule,
-            target_kind=ComputeWorkerRunKind.BUILD.value,
             namespace=namespace,
+            analysis_id=resolved_analysis_id,
+            analysis_name=analysis_name,
+            tab_id=tab_id,
+            tab_name=tab_name,
+            request=request,
             now=stamp,
-        )
-        session.add(schedule)
-        session.commit()
-        _wake_build_worker(namespace)
-        build_job_hub.publish()
-        return run.id
+        ).id
 
-    if analysis_id is None:
-        raise ValueError(f'Analysis provenance missing for schedule {schedule_id}')
-    request, resolved_analysis_id, analysis_name, tab_id, tab_name = _build_analysis_request(session, schedule, analysis_id)
-    run = _enqueue_schedule_analysis_build(
-        session,
-        schedule=schedule,
-        namespace=namespace,
-        analysis_id=resolved_analysis_id,
-        analysis_name=analysis_name,
-        tab_id=tab_id,
-        tab_name=tab_name,
-        request=request,
-        now=stamp,
-    )
     session.add(schedule)
     session.commit()
     _wake_build_worker(namespace)
     build_job_hub.publish()
-    return run.id
+    return run_id
 
 
 def apply_schedule_run_reconciliation(session: Session, *, build_id: str) -> Schedule | None:
@@ -998,13 +896,13 @@ def apply_schedule_run_reconciliation(session: Session, *, build_id: str) -> Sch
         return None
 
     completed = run.completed_at or run.updated_at
-    stamp = completed.replace(tzinfo=None) if completed.tzinfo is not None else completed
+    stamp = naive_utc(completed)
     if schedule.last_triggered_at is not None and run.created_at < schedule.last_triggered_at:
         return None
     already_applied = (
         schedule.last_successful_build_id == run.id
         if run.status == BuildRunStatus.COMPLETED
-        else schedule.last_failure_at is not None and _naive_utc(schedule.last_failure_at) >= stamp
+        else schedule.last_failure_at is not None and naive_utc(schedule.last_failure_at) >= stamp
     )
     if schedule.lease_owner is None and already_applied:
         return None

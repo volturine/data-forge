@@ -2,15 +2,15 @@ import hashlib
 import uuid
 from collections.abc import Callable, Collection, Sequence
 from dataclasses import dataclass
-from datetime import UTC, datetime, timedelta
+from datetime import datetime, timedelta
 from typing import Any, TypedDict, cast
 
-from sqlalchemy import and_, case, func, or_, select, text, update
+from sqlalchemy import and_, case, or_, select, text, update
 from sqlalchemy.orm import load_only
 from sqlmodel import Session
 
 from backend_core import compute_worker_runs_service, runtime_ipc, runtime_work_service
-from backend_core.claiming import CLAIM_DELIVERY_LEASE_SECONDS, claim_by_lease_owner, database_lease_clock, with_for_update_skip_locked
+from backend_core.claiming import CLAIM_DELIVERY_LEASE_SECONDS, claim_by_lease_owner, database_lease_clock, database_now, with_for_update_skip_locked
 from backend_core.config import settings
 from backend_core.domain.compute_requests.models import (
     command_envelope,
@@ -149,15 +149,6 @@ class _ComputeWorkerRunFinalizationFields(TypedDict, total=False):
     triggered_by: str | None
 
 
-def _database_now(session: Session) -> datetime:
-    value = session.execute(select(func.current_timestamp())).scalar_one()
-    if not isinstance(value, datetime):
-        raise TypeError('Database CURRENT_TIMESTAMP did not return a datetime')
-    if value.tzinfo is None:
-        return value.replace(tzinfo=UTC)
-    return value.astimezone(UTC)
-
-
 def _request_priority_clause(table):
     return case(
         *[(table.c.kind == kind, 0) for kind in _HIGH_PRIORITY_REQUEST_KINDS],
@@ -209,17 +200,21 @@ def _snapshot_input_revisions(session: Session, command: compute_pb2.ComputeComm
         command.input_revisions.add(datasource_id=datasource_id, revision=revision)
 
 
-def _flight_lock_key(namespace: str, flight_key: str) -> int:
-    return int.from_bytes(hashlib.sha256(f'dataforge:compute-flight:{namespace}:{flight_key}'.encode()).digest()[:8], 'big', signed=True)
+def _advisory_key(name: str) -> int:
+    return int.from_bytes(hashlib.sha256(name.encode()).digest()[:8], 'big', signed=True)
+
+
+def _try_advisory_xact_lock(session: Session, key: int) -> bool:
+    if getattr(getattr(session.get_bind(), 'dialect', None), 'name', None) != 'postgresql':
+        return True
+    return bool(session.execute(text('SELECT pg_try_advisory_xact_lock(:key)'), {'key': key}).scalar_one())
 
 
 def _engine_claim_lock_key(request: ComputeRequest) -> int | None:
     identity = _engine_claim_identity(request)
     if identity is None:
         return None
-    namespace, scope, reuse_policy, resource_id = identity
-    key = f'{namespace}:{scope}:{reuse_policy}:{resource_id}'
-    return int.from_bytes(hashlib.sha256(f'dataforge:compute-engine-claim:{key}'.encode()).digest()[:8], 'big', signed=True)
+    return _advisory_key('dataforge:compute-engine-claim:' + ':'.join(str(part) for part in identity))
 
 
 def _engine_claim_identity(request: ComputeRequest) -> tuple[str, int, int, str] | None:
@@ -228,23 +223,9 @@ def _engine_claim_identity(request: ComputeRequest) -> tuple[str, int, int, str]
     return request.namespace, request.compute_worker_scope, request.compute_worker_reuse_policy, request.compute_worker_resource_id
 
 
-def _try_lock_flight(session: Session, namespace: str, flight_key: str) -> bool:
-    bind = session.get_bind()
-    if getattr(getattr(bind, 'dialect', None), 'name', None) != 'postgresql':
-        return True
-    acquired = session.execute(
-        text('SELECT pg_try_advisory_xact_lock(:key)'),
-        {'key': _flight_lock_key(namespace, flight_key)},
-    ).scalar_one()
-    return bool(acquired)
-
-
 def _lock_engine_claim(session: Session, request: ComputeRequest) -> bool:
     lock_key = _engine_claim_lock_key(request)
-    if lock_key is None or getattr(getattr(session.get_bind(), 'dialect', None), 'name', None) != 'postgresql':
-        return True
-    acquired = session.execute(text('SELECT pg_try_advisory_xact_lock(:key)'), {'key': lock_key}).scalar_one()
-    return bool(acquired)
+    return lock_key is None or _try_advisory_xact_lock(session, lock_key)
 
 
 def _reusable_flight(session: Session, namespace: str, flight_key: str, *, now: datetime) -> ComputeRequest | None:
@@ -354,15 +335,17 @@ def _stage_request(
         # while deletion retains an exclusive fence.
         validate()
 
-    if command.WhichOneof('command') == 'datasource' and command.datasource.WhichOneof('command') == 'preflight':
-        preflight = command.datasource.preflight
-        if preflight.action != enums_pb2.DATASOURCE_PREFLIGHT_ACTION_INITIAL and not preflight.HasField('datasource_id'):
-            parent = session.get(ComputeRequest, preflight.preflight_id, with_for_update=True, populate_existing=True)
-            if parent is None or parent.kind != enums_pb2.COMPUTE_REQUEST_KIND_DATASOURCE_PREFLIGHT:
-                raise ValueError('Excel preflight source has been retired')
-            original = command_envelope_for_request(parent).command.datasource.preflight
-            if parent.status != enums_pb2.COMPUTE_REQUEST_STATUS_COMPLETED or original.source_path != preflight.source_path:
-                raise ValueError('Excel preflight source is not available for this command')
+    from backend_core import storage_cleanup_service
+
+    datasource_command = command.datasource.WhichOneof('command') if command.WhichOneof('command') == 'datasource' else None
+    preflight = command.datasource.preflight
+    if datasource_command == 'preflight' and preflight.action != enums_pb2.DATASOURCE_PREFLIGHT_ACTION_INITIAL and not preflight.HasField('datasource_id'):
+        parent = session.get(ComputeRequest, preflight.preflight_id, with_for_update=True, populate_existing=True)
+        if parent is None or parent.kind != enums_pb2.COMPUTE_REQUEST_KIND_DATASOURCE_PREFLIGHT:
+            raise ValueError('Excel preflight source has been retired')
+        original = command_envelope_for_request(parent).command.datasource.preflight
+        if parent.status != enums_pb2.COMPUTE_REQUEST_STATUS_COMPLETED or original.source_path != preflight.source_path:
+            raise ValueError('Excel preflight source is not available for this command')
 
     _snapshot_input_revisions(session, command)
     datasource_ids = _datasource_ids_for_command(command)
@@ -375,7 +358,7 @@ def _stage_request(
         # PostgreSQL advisory transaction locking serializes only equal keys;
         # misses recheck under the lock before creation. Active and cached
         # followers use the lock-free lookup above.
-        if not _try_lock_flight(session, namespace, flight_key):
+        if not _try_advisory_xact_lock(session, _advisory_key(f'dataforge:compute-flight:{namespace}:{flight_key}')):
             # Never park an API database connection behind another viewer of
             # the same preview. The HTTP layer retries after closing this
             # short transaction, leaving the connection available to other
@@ -389,13 +372,10 @@ def _stage_request(
             return existing, False
 
     request_id = request_id or str(uuid.uuid4())
-    if command.WhichOneof('command') == 'datasource':
-        from backend_core import storage_cleanup_service
-
-        if command.datasource.WhichOneof('command') == 'create_file':
-            storage_cleanup_service.transfer_preflight_source(session, source_path=command.datasource.create_file.file_path, request_id=request_id)
-        if command.datasource.WhichOneof('command') == 'preflight':
-            storage_cleanup_service.validate_source_enqueue(session, source_path=command.datasource.preflight.source_path)
+    if datasource_command == 'create_file':
+        storage_cleanup_service.transfer_preflight_source(session, source_path=command.datasource.create_file.file_path, request_id=request_id)
+    if datasource_command == 'preflight':
+        storage_cleanup_service.validate_source_enqueue(session, source_path=preflight.source_path)
     envelope = command_envelope(
         kind=kind,
         command=command,
@@ -416,13 +396,9 @@ def _stage_request(
         updated_at=now,
     )
     session.add(request)
-    if command.WhichOneof('command') == 'datasource' and command.datasource.WhichOneof('command') == 'preflight':
-        preflight = command.datasource.preflight
+    if datasource_command == 'preflight':
         request.artifact_path = preflight.source_path
         if preflight.action == enums_pb2.DATASOURCE_PREFLIGHT_ACTION_INITIAL and preflight.delete_source:
-            from backend_core import storage_cleanup_service
-
-            request.artifact_path = preflight.source_path
             request.artifact_name = 'preflight-source'
             request.artifact_content_type = 'application/vnd.dataforge.preflight-source'
             storage_cleanup_service.register_preflight_source(
@@ -432,7 +408,7 @@ def _stage_request(
                 source_path=preflight.source_path,
                 available_at=now + storage_cleanup_service.PREFLIGHT_TTL,
             )
-    if command.WhichOneof('command') == 'datasource' and command.datasource.WhichOneof('command') == 'create_file':
+    if datasource_command == 'create_file':
         request.artifact_path = command.datasource.create_file.file_path
     session.flush()
     session.add_all(ComputeRequestDatasource(request_id=request.id, datasource_id=datasource_id) for datasource_id in datasource_ids)
@@ -596,20 +572,9 @@ def _compute_worker_identity_for_command(command: compute_pb2.ComputeCommand, *,
     command_name = command.WhichOneof('command')
     if command_name in {'spawn_engine', 'configure_engine', 'shutdown_engine'}:
         return getattr(command, command_name).engine_identity
-    if command_name == 'preview':
-        preview = command.preview
-        if preview.HasField('engine_identity'):
-            return preview.engine_identity
-        analysis_id = preview.analysis_pipeline.analysis_id or preview.analysis_id
-        if analysis_id:
-            return compute_pb2.ComputeWorkerIdentity(
-                scope=enums_pb2.COMPUTE_WORKER_SCOPE_ANALYSIS_INTERACTIVE,
-                reuse_policy=enums_pb2.COMPUTE_WORKER_REUSE_POLICY_SHARED,
-                analysis_id=analysis_id,
-                resource_id=analysis_id,
-            )
-        return None
-    if command_name in {'schema', 'row_count', 'download', 'export'}:
+    if command_name == 'preview' and command.preview.HasField('engine_identity'):
+        return command.preview.engine_identity
+    if command_name in {'preview', 'schema', 'row_count', 'download', 'export'}:
         interactive = getattr(command, command_name)
         analysis_id = interactive.analysis_pipeline.analysis_id or interactive.analysis_id
         if analysis_id:
@@ -646,26 +611,48 @@ def _cache_completed_flight(request: ComputeRequest) -> bool:
     return not command.datasource.schema.refresh
 
 
-def _retire_request(session: Session, request: ComputeRequest, *, reason: str, now: datetime) -> None:
-    request.status = enums_pb2.COMPUTE_REQUEST_STATUS_FAILED
-    request.error_message = reason
-    request.response_envelope = response_envelope(
-        kind=kind_from_proto(request.kind),
-        request_id=request.id,
-        status=enums_pb2.COMPUTE_REQUEST_STATUS_FAILED,
-        payload={'error': reason},
-        error_message=reason,
-    ).SerializeToString()
-    request.completed_at = now
-    request.updated_at = now
+def _publish_terminal(
+    session: Session,
+    request: ComputeRequest,
+    *,
+    status: enums_pb2.ComputeRequestStatus,
+    serialized_response: bytes,
+    error_message: str | None,
+    completed_at: datetime,
+    cache_result: bool = False,
+) -> None:
+    """Release the lease, settle the shared flight, and notify waiters on commit."""
+    request.status = status
+    request.response_envelope = serialized_response
+    request.error_message = error_message
+    request.completed_at = completed_at
+    request.updated_at = completed_at
     request.lease_owner = None
     request.claim_token = None
     request.lease_expires_at = None
     request.claimed_at = None
     request.last_renewed_at = None
     session.add(request)
-    _finish_flight(session, request, cache_result=False, completed_at=now)
+    _finish_flight(session, request, cache_result=cache_result, completed_at=completed_at)
     runtime_ipc.notify_compute_response_on_commit(session, request_id=request.id, namespace=request.namespace)
+
+
+def _retire_request(session: Session, request: ComputeRequest, *, reason: str, now: datetime, payload: dict[str, object] | None) -> None:
+    envelope = response_envelope(
+        kind=kind_from_proto(request.kind),
+        request_id=request.id,
+        status=enums_pb2.COMPUTE_REQUEST_STATUS_FAILED,
+        payload=payload,
+        error_message=reason,
+    )
+    _publish_terminal(
+        session,
+        request,
+        status=enums_pb2.COMPUTE_REQUEST_STATUS_FAILED,
+        serialized_response=envelope.SerializeToString(),
+        error_message=reason,
+        completed_at=now,
+    )
 
 
 def cancel_disconnected_request(
@@ -700,7 +687,7 @@ def cancel_disconnected_request(
             session.rollback()
             return None
 
-    _retire_request(session, request, reason=reason, now=_utcnow())
+    _retire_request(session, request, reason=reason, now=_utcnow(), payload={'error': reason})
     session.commit()
     session.refresh(request)
     record_lease_transition(
@@ -752,9 +739,8 @@ def cancel_active_requests_for_engine(
     )
     requests = list(session.execute(statement).scalars().all())
     now = _utcnow()
-    cancelled = 0
     for request in requests:
-        _retire_request(session, request, reason=reason, now=now)
+        _retire_request(session, request, reason=reason, now=now, payload={'error': reason})
         record_lease_transition(
             kind='compute_request',
             transition='cancel',
@@ -765,12 +751,11 @@ def cancel_active_requests_for_engine(
             generation=request.lease_generation,
             attempt=request.attempts,
         )
-        cancelled += 1
-    if cancelled:
+    if requests:
         session.commit()
     else:
         session.rollback()
-    return cancelled
+    return len(requests)
 
 
 def _datasource_ids_for_command(command: compute_pb2.ComputeCommand) -> set[str]:
@@ -840,7 +825,7 @@ def claim_next_request(
     )
     blocked_engine_identities: set[tuple[str, int, int, str]] = set()
     while True:
-        now = _database_now(session)
+        now = database_now(session)
         queued_clause = table.c.status == enums_pb2.COMPUTE_REQUEST_STATUS_QUEUED
         reclaimable_clause = and_(
             table.c.status == enums_pb2.COMPUTE_REQUEST_STATUS_RUNNING,
@@ -966,7 +951,7 @@ def stage_exhausted_requests(session: Session, *, namespace: str) -> int:
     exhausted leases and refreshes the durable namespace wake marker together,
     avoiding a queue scan and marker write for every empty claim lane.
     """
-    now = _database_now(session)
+    now = database_now(session)
     table = ComputeRequest.metadata.tables[ComputeRequest.__tablename__]
     statement = (
         select(ComputeRequest)
@@ -981,26 +966,7 @@ def stage_exhausted_requests(session: Session, *, namespace: str) -> int:
     for request in requests:
         owner_id = request.lease_owner or 'unowned'
         claim_token = request.claim_token or ''
-        error_message = f'Compute request exhausted {request.max_attempts} execution attempts'
-        request.status = enums_pb2.COMPUTE_REQUEST_STATUS_FAILED
-        request.response_envelope = response_envelope(
-            kind=kind_from_proto(request.kind),
-            request_id=request.id,
-            status=enums_pb2.COMPUTE_REQUEST_STATUS_FAILED,
-            payload=None,
-            error_message=error_message,
-        ).SerializeToString()
-        request.error_message = error_message
-        request.completed_at = now
-        request.updated_at = now
-        request.lease_owner = None
-        request.claim_token = None
-        request.lease_expires_at = None
-        request.claimed_at = None
-        request.last_renewed_at = None
-        session.add(request)
-        _finish_flight(session, request, cache_result=False, completed_at=now)
-        runtime_ipc.notify_compute_response_on_commit(session, request_id=request.id, namespace=request.namespace)
+        _retire_request(session, request, reason=f'Compute request exhausted {request.max_attempts} execution attempts', now=now, payload=None)
         record_lease_transition(
             kind='compute_request',
             transition='exhaust',
@@ -1129,7 +1095,7 @@ def _active_request_claim(
     for_update: bool,
     include_command_envelope: bool,
 ) -> ComputeRequest | None:
-    now = _database_now(session)
+    now = database_now(session)
     lease_now = database_lease_clock(session, now)
     table = ComputeRequest.metadata.tables[ComputeRequest.__tablename__]
     selected_columns: list[Any] = [
@@ -1226,10 +1192,79 @@ def mark_request_completed(
     artifact_content_type: str | None = None,
     compute_worker_run_finalization: ComputeWorkerRunFinalization | None = None,
 ) -> ComputeRequest | None:
+    return _finish_claimed_request(
+        session,
+        request_id,
+        status=enums_pb2.COMPUTE_REQUEST_STATUS_COMPLETED,
+        response_envelope=response_envelope,
+        worker_id=worker_id,
+        claim_token=claim_token,
+        lease_generation=lease_generation,
+        error_message=None,
+        artifacts=(artifact_path, artifact_name, artifact_content_type),
+        finalization=compute_worker_run_finalization,
+    )
+
+
+def mark_request_failed(
+    session: Session,
+    request_id: str,
+    *,
+    error_message: str,
+    response_envelope: compute_pb2.ComputeResponseEnvelope,
+    worker_id: str,
+    claim_token: str,
+    lease_generation: int,
+    compute_worker_run_finalization: ComputeWorkerRunFinalization | None = None,
+) -> ComputeRequest | None:
+    return _finish_claimed_request(
+        session,
+        request_id,
+        status=enums_pb2.COMPUTE_REQUEST_STATUS_FAILED,
+        response_envelope=response_envelope,
+        worker_id=worker_id,
+        claim_token=claim_token,
+        lease_generation=lease_generation,
+        error_message=error_message,
+        artifacts=None,
+        finalization=compute_worker_run_finalization,
+    )
+
+
+def _finish_claimed_request(
+    session: Session,
+    request_id: str,
+    *,
+    status: enums_pb2.ComputeRequestStatus,
+    response_envelope: compute_pb2.ComputeResponseEnvelope,
+    worker_id: str,
+    claim_token: str,
+    lease_generation: int,
+    error_message: str | None,
+    artifacts: tuple[str | None, str | None, str | None] | None,
+    finalization: ComputeWorkerRunFinalization | None,
+) -> ComputeRequest | None:
+    """Publish a worker's terminal result; ``artifacts`` is ``None`` when failure keeps staged artifacts."""
+    completed = status == enums_pb2.COMPUTE_REQUEST_STATUS_COMPLETED
+    artifact_path, artifact_name, artifact_content_type = artifacts or (None, None, None)
     # Serialize the potentially large preview payload before opening a DB
     # transaction or locking the durable request row.
     serialized_response = response_envelope.SerializeToString()
-    include_command_envelope = response_envelope.kind == enums_pb2.COMPUTE_REQUEST_KIND_DATASOURCE_SCHEMA
+    include_command_envelope = completed and response_envelope.kind == enums_pb2.COMPUTE_REQUEST_KIND_DATASOURCE_SCHEMA
+
+    def acknowledge_retry() -> ComputeRequest | None:
+        session.rollback()
+        return _matching_terminal_request(
+            session,
+            request_id,
+            status=status,
+            response_envelope=response_envelope,
+            error_message=error_message,
+            artifact_path=artifact_path,
+            artifact_name=artifact_name,
+            artifact_content_type=artifact_content_type,
+        )
+
     request = get_active_request_claim(
         session,
         request_id,
@@ -1239,22 +1274,13 @@ def mark_request_completed(
         include_command_envelope=include_command_envelope,
     )
     if request is None:
-        session.rollback()
-        return _matching_terminal_request(
-            session,
-            request_id,
-            status=enums_pb2.COMPUTE_REQUEST_STATUS_COMPLETED,
-            response_envelope=response_envelope,
-            artifact_path=artifact_path,
-            artifact_name=artifact_name,
-            artifact_content_type=artifact_content_type,
-        )
-    _validate_response_envelope(request, response_envelope, enums_pb2.COMPUTE_REQUEST_STATUS_COMPLETED)
+        return acknowledge_retry()
+    _validate_response_envelope(request, response_envelope, status)
     _stage_compute_worker_run_finalization(
         session,
         request,
-        compute_worker_run_finalization,
-        expected_status=ComputeWorkerRunStatus.SUCCESS,
+        finalization,
+        expected_status=ComputeWorkerRunStatus.SUCCESS if completed else ComputeWorkerRunStatus.FAILED,
     )
     # Compute worker run finalization and payload serialization can be expensive. Keep
     # the request row unlocked during that work, then revalidate under lock at
@@ -1269,107 +1295,20 @@ def mark_request_completed(
         include_command_envelope=include_command_envelope,
     )
     if request is None:
-        session.rollback()
-        return _matching_terminal_request(
-            session,
-            request_id,
-            status=enums_pb2.COMPUTE_REQUEST_STATUS_COMPLETED,
-            response_envelope=response_envelope,
-            artifact_path=artifact_path,
-            artifact_name=artifact_name,
-            artifact_content_type=artifact_content_type,
-        )
-    request.status = enums_pb2.COMPUTE_REQUEST_STATUS_COMPLETED
-    request.response_envelope = serialized_response
-    request.error_message = None
-    request.artifact_path = artifact_path
-    request.artifact_name = artifact_name
-    request.artifact_content_type = artifact_content_type
-    request.completed_at = _utcnow()
-    request.updated_at = request.completed_at
-    request.lease_owner = None
-    request.claim_token = None
-    request.lease_expires_at = None
-    request.claimed_at = None
-    request.last_renewed_at = None
-    session.add(request)
-    _finish_flight(
+        return acknowledge_retry()
+    if artifacts is not None:
+        request.artifact_path = artifact_path
+        request.artifact_name = artifact_name
+        request.artifact_content_type = artifact_content_type
+    _publish_terminal(
         session,
         request,
-        cache_result=_cache_completed_flight(request),
-        completed_at=request.completed_at,
+        status=status,
+        serialized_response=serialized_response,
+        error_message=error_message,
+        completed_at=_utcnow(),
+        cache_result=completed and _cache_completed_flight(request),
     )
-    runtime_ipc.notify_compute_response_on_commit(session, request_id=request.id, namespace=request.namespace)
-    session.commit()
-    return request
-
-
-def mark_request_failed(
-    session: Session,
-    request_id: str,
-    *,
-    error_message: str,
-    response_envelope: compute_pb2.ComputeResponseEnvelope,
-    worker_id: str,
-    claim_token: str,
-    lease_generation: int,
-    compute_worker_run_finalization: ComputeWorkerRunFinalization | None = None,
-) -> ComputeRequest | None:
-    serialized_response = response_envelope.SerializeToString()
-    request = get_active_request_claim(
-        session,
-        request_id,
-        worker_id=worker_id,
-        claim_token=claim_token,
-        lease_generation=lease_generation,
-    )
-    if request is None:
-        session.rollback()
-        return _matching_terminal_request(
-            session,
-            request_id,
-            status=enums_pb2.COMPUTE_REQUEST_STATUS_FAILED,
-            response_envelope=response_envelope,
-            error_message=error_message,
-        )
-    _validate_response_envelope(request, response_envelope, enums_pb2.COMPUTE_REQUEST_STATUS_FAILED)
-    _stage_compute_worker_run_finalization(
-        session,
-        request,
-        compute_worker_run_finalization,
-        expected_status=ComputeWorkerRunStatus.FAILED,
-    )
-    # Do not hold the request row lock through compute-worker-run finalization. The
-    # final lock below revalidates the exact claim before publishing failure.
-    request = lock_active_request_claim(
-        session,
-        request_id,
-        worker_id=worker_id,
-        claim_token=claim_token,
-        lease_generation=lease_generation,
-    )
-    if request is None:
-        session.rollback()
-        return _matching_terminal_request(
-            session,
-            request_id,
-            status=enums_pb2.COMPUTE_REQUEST_STATUS_FAILED,
-            response_envelope=response_envelope,
-            error_message=error_message,
-        )
-    request.status = enums_pb2.COMPUTE_REQUEST_STATUS_FAILED
-    request.error_message = error_message
-    request.response_envelope = serialized_response
-    request.completed_at = _utcnow()
-    request.updated_at = request.completed_at
-    request.lease_owner = None
-    request.claim_token = None
-    request.lease_expires_at = None
-    request.claimed_at = None
-    request.last_renewed_at = None
-    session.add(request)
-    _finish_flight(session, request, cache_result=False, completed_at=request.completed_at)
-    runtime_ipc.notify_compute_response_on_commit(session, request_id=request.id, namespace=request.namespace)
     session.commit()
     return request
 

@@ -12,11 +12,6 @@ class TopKParams(OperationParams):
 
 
 class TopKHandler(OperationHandler):
-    def __call__(
-        self,
-        lf: pl.LazyFrame,
-        params: dict,
-        **_,
-    ) -> pl.LazyFrame:
+    def __call__(self, lf: pl.LazyFrame, params: dict, **_) -> pl.LazyFrame:
         validated = TopKParams.model_validate(params)
         return lf.sort(validated.column, descending=validated.descending, maintain_order=True).head(validated.k)

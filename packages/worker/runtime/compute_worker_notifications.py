@@ -6,14 +6,10 @@ from collections.abc import Callable
 from threading import Condition, Thread
 
 from runtime.domain.compute.base import ComputeWorkerStatusInfo
-from runtime.worker_runtime_client import WorkerRuntimeClient, client_from_env
+from runtime.worker_runtime_client import client_from_env
 
 logger = logging.getLogger(__name__)
 _SLOW_SNAPSHOT_PUBLISH_SECONDS = 1.0
-
-
-def worker_runtime_client() -> WorkerRuntimeClient:
-    return client_from_env()
 
 
 def persist_compute_worker_snapshot(
@@ -22,7 +18,7 @@ def persist_compute_worker_snapshot(
     namespace: str,
     statuses: list[ComputeWorkerStatusInfo],
 ) -> None:
-    with worker_runtime_client() as client:
+    with client_from_env() as client:
         client.persist_compute_worker_snapshot(
             worker_id=worker_id,
             namespace=namespace,

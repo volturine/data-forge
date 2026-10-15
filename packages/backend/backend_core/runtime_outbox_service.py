@@ -1,14 +1,13 @@
-import json
 import uuid
 from collections.abc import Sequence
 from dataclasses import dataclass
-from datetime import UTC, datetime, timedelta
+from datetime import UTC, timedelta
 
-from sqlalchemy import delete, func, or_, select, text
+from sqlalchemy import delete, or_, select
 from sqlmodel import Session
 
 from backend_core import notification_delivery, runtime_ipc, runtime_work_service
-from backend_core.claiming import with_for_update_skip_locked
+from backend_core.claiming import database_now, with_for_update_skip_locked
 from backend_core.config import settings
 from backend_core.domain.runtime.events import RuntimePayloadKind
 from backend_core.namespace import get_namespace
@@ -61,10 +60,8 @@ _OUTBOX_DUE_QUERY = """
     WHERE next_attempt_at > statement_timestamp()
 """
 OUTBOX_WAKE_KIND = 'runtime_outbox_wakeup'
-_RUNTIME_EVENTS_CHANNEL = 'runtime_events'
-_EXTERNAL_DELIVERY_KINDS = notification_delivery.EXTERNAL_DELIVERY_KINDS
 STORAGE_CLEANUP_KIND = 'storage_cleanup'
-_ISOLATED_DELIVERY_KINDS = _EXTERNAL_DELIVERY_KINDS | {STORAGE_CLEANUP_KIND}
+_ISOLATED_DELIVERY_KINDS = notification_delivery.EXTERNAL_DELIVERY_KINDS | {STORAGE_CLEANUP_KIND}
 
 
 @dataclass(frozen=True, slots=True)
@@ -83,61 +80,40 @@ def _redact_payload_secrets(message: str, payload: dict[str, object]) -> str:
     return redact_secrets_in_text(message, *secrets)
 
 
-def _database_now(session: Session, *, wall_clock: bool = False) -> datetime:
-    clock = func.clock_timestamp() if wall_clock and session.get_bind().dialect.name == 'postgresql' else func.current_timestamp()
-    value = session.execute(select(clock)).scalar_one()
-    if not isinstance(value, datetime):
-        raise TypeError('Database CURRENT_TIMESTAMP did not return a datetime')
-    if value.tzinfo is None:
-        return value.replace(tzinfo=UTC)
-    return value.astimezone(UTC)
+def _enqueue_event(session: Session, *, kind: str, payload: dict[str, object], namespace: str) -> RuntimeOutboxEvent:
+    now = database_now(session)
+    event = RuntimeOutboxEvent(
+        id=str(uuid.uuid4()),
+        kind=kind,
+        status=RuntimeOutboxStatus.PENDING,
+        payload_json=dict(payload),
+        attempts=0,
+        available_at=now,
+        created_at=now,
+        updated_at=now,
+    )
+    session.add(event)
+    session.flush()
+    # Persist a recovery hint in the same transaction as the outbox event.
+    runtime_work_service.append_wake(session, namespace=namespace, kind=RuntimeWorkKind.OUTBOX)
+    _notify_dispatcher(session, namespace=namespace)
+    return event
 
 
 def enqueue_runtime_event(session: Session, payload: dict[str, object]) -> RuntimeOutboxEvent:
     kind = RuntimePayloadKind.from_payload(payload)
     if kind is None:
         raise ValueError(f'Unsupported runtime outbox payload kind: {payload.get("kind")!r}')
-    now = _database_now(session)
-    event = RuntimeOutboxEvent(
-        id=str(uuid.uuid4()),
-        kind=kind.value,
-        status=RuntimeOutboxStatus.PENDING,
-        payload_json=dict(payload),
-        attempts=0,
-        available_at=now,
-        created_at=now,
-        updated_at=now,
-    )
-    session.add(event)
-    session.flush()
     payload_namespace = payload.get('namespace')
     namespace = payload_namespace if isinstance(payload_namespace, str) and payload_namespace else get_namespace()
-    _mark_namespace_pending(session, namespace=namespace)
-    _notify_dispatcher(session, namespace=namespace)
-    return event
+    return _enqueue_event(session, kind=kind.value, payload=payload, namespace=namespace)
 
 
 def enqueue_notification_delivery(session: Session, payload: dict[str, object]) -> RuntimeOutboxEvent:
     kind = payload.get('kind')
-    if kind not in _EXTERNAL_DELIVERY_KINDS:
+    if kind not in notification_delivery.EXTERNAL_DELIVERY_KINDS:
         raise ValueError(f'Unsupported notification delivery kind: {kind!r}')
-    now = _database_now(session)
-    event = RuntimeOutboxEvent(
-        id=str(uuid.uuid4()),
-        kind=str(kind),
-        status=RuntimeOutboxStatus.PENDING,
-        payload_json=dict(payload),
-        attempts=0,
-        available_at=now,
-        created_at=now,
-        updated_at=now,
-    )
-    session.add(event)
-    session.flush()
-    namespace = get_namespace()
-    _mark_namespace_pending(session, namespace=namespace)
-    _notify_dispatcher(session, namespace=namespace)
-    return event
+    return _enqueue_event(session, kind=str(kind), payload=payload, namespace=get_namespace())
 
 
 def _notify_dispatcher(session: Session, *, namespace: str) -> None:
@@ -150,19 +126,7 @@ def _notify_dispatcher(session: Session, *, namespace: str) -> None:
     SQLite-backed unit tests do not have PostgreSQL NOTIFY and simply use the
     direct request-path dispatchers.
     """
-    bind = session.get_bind()
-    if getattr(getattr(bind, 'dialect', None), 'name', None) != 'postgresql':
-        return
-    payload = json.dumps({'kind': OUTBOX_WAKE_KIND, 'namespace': namespace})
-    session.execute(
-        text('SELECT pg_notify(:channel, :payload)'),
-        {'channel': _RUNTIME_EVENTS_CHANNEL, 'payload': payload},
-    )
-
-
-def _mark_namespace_pending(session: Session, *, namespace: str) -> None:
-    """Persist a recovery hint in the same transaction as the outbox event."""
-    runtime_work_service.append_wake(session, namespace=namespace, kind=RuntimeWorkKind.OUTBOX)
+    runtime_ipc.notify_on_commit(session, {'kind': OUTBOX_WAKE_KIND, 'namespace': namespace})
 
 
 def list_pending_outbox_namespaces(session: Session) -> list[str]:
@@ -262,7 +226,7 @@ def _clear_namespace_pending_if_idle(session: Session) -> None:
 
 def claim_external_deliveries(session: Session, *, kind: str, limit: int = 1) -> list[OutboxClaim]:
     """Claim work for one provider lane; the caller closes the session before sending."""
-    if kind not in _EXTERNAL_DELIVERY_KINDS:
+    if kind not in notification_delivery.EXTERNAL_DELIVERY_KINDS:
         raise ValueError(f'Unsupported external delivery kind: {kind!r}')
     return _claim_next_events(session, limit=limit, event_kinds=(kind,))
 
@@ -306,7 +270,7 @@ def record_external_delivery_part(session: Session, claim: OutboxClaim, *, part_
         raise ValueError('Telegram delivery part key is invalid')
 
     event = session.get(RuntimeOutboxEvent, claim.event_id, with_for_update=True, populate_existing=True)
-    now = _database_now(session, wall_clock=True)
+    now = database_now(session, wall_clock=True)
     if (
         event is None
         or event.kind != notification_delivery.TELEGRAM_DELIVERY_KIND
@@ -337,7 +301,7 @@ def _claim_next_events(
 ) -> list[OutboxClaim]:
     if limit < 1:
         return []
-    now = _database_now(session)
+    now = database_now(session)
     table = RuntimeOutboxEvent.metadata.tables[RuntimeOutboxEvent.__tablename__]
     base = (
         select(RuntimeOutboxEvent)
@@ -385,7 +349,9 @@ def _claim_next_events(
                 lease_generation=event.lease_generation,
                 event_kind=event.kind,
                 payload=dict(event.payload_json),
-                already_delivered=(event.kind in _EXTERNAL_DELIVERY_KINDS and session.get(NotificationDeliveryReceipt, event.id) is not None),
+                already_delivered=(
+                    event.kind in notification_delivery.EXTERNAL_DELIVERY_KINDS and session.get(NotificationDeliveryReceipt, event.id) is not None
+                ),
                 completed_parts=frozenset(completed_parts_by_event.get(event.id, ())),
             )
         )
@@ -403,7 +369,7 @@ def _finalize_claims(
     if not outcomes:
         return 0, 0
 
-    now = _database_now(session)
+    now = database_now(session)
     table = RuntimeOutboxEvent.metadata.tables[RuntimeOutboxEvent.__tablename__]
     claims_by_id = {claim.event_id: (claim, error) for claim, error in outcomes}
     statement = select(RuntimeOutboxEvent).where(table.c.id.in_(claims_by_id)).where(table.c.status == RuntimeOutboxStatus.DISPATCHING).with_for_update()
@@ -416,7 +382,7 @@ def _finalize_claims(
             continue
         if error is None and event.kind not in _ISOLATED_DELIVERY_KINDS:
             runtime_ipc.notify_runtime_payload_on_commit(session, {**event.payload_json, 'event_id': event.id})
-        if record_external_receipt and error is None and event.kind in _EXTERNAL_DELIVERY_KINDS:
+        if record_external_receipt and error is None and event.kind in notification_delivery.EXTERNAL_DELIVERY_KINDS:
             receipt = session.get(NotificationDeliveryReceipt, event.id)
             if receipt is None:
                 session.add(NotificationDeliveryReceipt(event_id=event.id, kind=event.kind, delivered_at=now))

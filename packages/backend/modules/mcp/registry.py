@@ -12,35 +12,15 @@ from modules.mcp.router import get_mcp_route_meta
 from modules.mcp.tool_output import format_output_hint, top_level_output_fields
 
 
-def _route_openapi_operation(route: APIRoute, schema: dict[str, Any], effective_path: str | None = None) -> tuple[str, dict[str, Any]] | None:
-    lookup_path = effective_path or route.path
-    path_item = schema.get('paths', {}).get(lookup_path)
+def _route_openapi_operation(route: APIRoute, schema: dict[str, Any], path: str) -> tuple[str, dict[str, Any]] | None:
+    path_item = schema.get('paths', {}).get(path)
     if not isinstance(path_item, dict):
         return None
     allowed_methods = route.methods or set()
-    for method in path_item:
-        method_upper = method.upper()
-        if method_upper not in allowed_methods:
-            continue
-        op = path_item.get(method)
-        if not isinstance(op, dict):
-            continue
-        return method_upper, op
+    for method, op in path_item.items():
+        if method.upper() in allowed_methods and isinstance(op, dict):
+            return method.upper(), op
     return None
-
-
-def _description(op: dict[str, Any], meta: dict[str, Any], method: MCPHttpMethod, path: str) -> str:
-    text = op.get('description') or op.get('summary') or meta.get('docstring')
-    if isinstance(text, str) and text.strip():
-        return text
-    return f'{method} {path}'
-
-
-def _confirm_required(method: MCPHttpMethod, path: str, meta: dict[str, Any]) -> bool:
-    value = meta.get('confirm_required')
-    if isinstance(value, bool):
-        return value
-    return method.requires_confirmation_for_path(path)
 
 
 def _tag_list(route: APIRoute, op: dict[str, Any]) -> list[str]:
@@ -84,15 +64,6 @@ def _output_schema(op: dict[str, Any], meta: dict[str, Any], components: dict) -
     responses = op.get('responses')
     if not isinstance(responses, dict):
         return None
-
-    def pick_mime(content: dict) -> str | None:
-        if isinstance(content.get('application/json'), dict):
-            return 'application/json'
-        return next(
-            (m for m, item in content.items() if isinstance(m, str) and isinstance(item, dict)),
-            None,
-        )
-
     success = sorted(
         [(code, r) for code, r in responses.items() if isinstance(code, str) and code.startswith('2') and code != 'default' and isinstance(r, dict)],
         key=lambda pair: int(pair[0]) if pair[0].isdigit() else 999,
@@ -101,7 +72,10 @@ def _output_schema(op: dict[str, Any], meta: dict[str, Any], components: dict) -
         content = response.get('content')
         if not isinstance(content, dict):
             continue
-        mime = pick_mime(content)
+        if isinstance(content.get('application/json'), dict):
+            mime: str | None = 'application/json'
+        else:
+            mime = next((m for m, item in content.items() if isinstance(m, str) and isinstance(item, dict)), None)
         if mime is None:
             continue
         schema = _openapi_to_json_schema(content[mime].get('schema'), components)
@@ -128,7 +102,11 @@ def _build_tool(route_data: dict, components: dict) -> MCPToolDefinition:
     onboard = route_data.get('meta', {})
     route = route_data.get('route')
 
-    description = _description(op, onboard, method, path)
+    text = op.get('description') or op.get('summary') or onboard.get('docstring')
+    description = text if isinstance(text, str) and text.strip() else f'{method} {path}'
+    confirm_required = onboard.get('confirm_required')
+    if not isinstance(confirm_required, bool):
+        confirm_required = method.requires_confirmation_for_path(path)
 
     properties: dict[str, Any] = {}
     required: list[str] = []
@@ -154,25 +132,13 @@ def _build_tool(route_data: dict, components: dict) -> MCPToolDefinition:
             'description': param.get('description', ''),
             'schema': schema,
         }
-        if p_in == 'path':
-            path_params.append(item)
-        if p_in == 'query':
-            query_params.append(item)
+        (path_params if p_in == 'path' else query_params).append(item)
 
-    body_content = op.get('requestBody', {}).get('content', {})
-    body_schema: dict | None = None
-    body_mime: str | None = None
-    for mime in (
-        'application/json',
-        'multipart/form-data',
-        'application/x-www-form-urlencoded',
-    ):
-        if mime in body_content:
-            raw = body_content[mime].get('schema', {})
-            body_schema = _openapi_to_json_schema(raw, components)
-            body_mime = mime
-            break
-    body_required = bool(op.get('requestBody', {}).get('required', False))
+    request_body = op.get('requestBody', {})
+    body_content = request_body.get('content', {})
+    body_mime = next((mime for mime in ('application/json', 'multipart/form-data', 'application/x-www-form-urlencoded') if mime in body_content), None)
+    body_schema = _openapi_to_json_schema(body_content[body_mime].get('schema', {}), components) if body_mime is not None else None
+    body_required = bool(request_body.get('required', False))
     if body_schema:
         properties['payload'] = body_schema
         if body_required and 'payload' not in required:
@@ -188,17 +154,12 @@ def _build_tool(route_data: dict, components: dict) -> MCPToolDefinition:
 
     tool_id = route_data.get('name') or f'{method.value.lower()}_{path.replace("/", "_").replace("{", "").replace("}", "").strip("_")}'
 
-    tags = op.get('tags', [])
-    if isinstance(route, APIRoute):
-        tags = _tag_list(route, op)
-    output_schema = _output_schema(op, onboard, components)
-
     return MCPToolDefinition(
         id=tool_id,
         method=method,
         path=path,
         description=description,
-        confirm_required=_confirm_required(method, path, onboard),
+        confirm_required=confirm_required,
         input_schema=tool_schema,
         arg_metadata={
             'path': path_params,
@@ -206,62 +167,41 @@ def _build_tool(route_data: dict, components: dict) -> MCPToolDefinition:
             'payload': {
                 'required': body_required,
                 'content_type': body_mime,
-                'description': op.get('requestBody', {}).get('description', ''),
+                'description': request_body.get('description', ''),
             }
             if body_schema is not None
             else None,
         },
-        output_schema=output_schema,
-        tags=tags,
+        output_schema=_output_schema(op, onboard, components),
+        tags=_tag_list(route, op) if isinstance(route, APIRoute) else op.get('tags', []),
     )
-
-
-def _marked_routes(app: FastAPI) -> list[dict[str, Any]]:
-    """Return metadata for routes onboarded via MCP route registration."""
-    marked: list[dict[str, Any]] = []
-    for route_context in iter_route_contexts(list(app.routes)):
-        route = route_context.original_route
-        if not isinstance(route, APIRoute):
-            continue
-        effective_path = route_context.path or route.path
-        route_meta = get_mcp_route_meta(route)
-        if not isinstance(route_meta, dict):
-            continue
-        meta = dict(route_meta)
-        # Routes in this codebase are single-method; MCP exposes one tool per route.
-        method = next(
-            (candidate for raw in (route.methods or set()) if (candidate := MCPHttpMethod.from_route_method(raw)) is not None),
-            None,
-        )
-        if method is None:
-            continue
-        endpoint = route.endpoint
-        fallback = endpoint.__name__ if hasattr(endpoint, '__name__') else route.name
-        name = meta.get('name') or fallback
-        marked.append({'route': route, 'method': method.value, 'name': name, 'meta': meta, 'effective_path': effective_path})
-    return marked
 
 
 def build_tool_registry(app: FastAPI) -> list[MCPToolDefinition]:
     """Extract MCPRouter mcp=True onboarded routes as MCP tool definitions."""
-    marked = _marked_routes(app)
     schema = app.openapi()
     components = schema.get('components', {})
     tools: list[MCPToolDefinition] = []
-    for item in marked:
-        route = item['route']
-        effective_path = item.get('effective_path', route.path)
-        op_item = _route_openapi_operation(route, schema, effective_path)
-        if op_item is None:
+    for route_context in iter_route_contexts(list(app.routes)):
+        route = route_context.original_route
+        if not isinstance(route, APIRoute):
             continue
-        method, op = op_item
+        meta = get_mcp_route_meta(route)
+        # Routes in this codebase are single-method; MCP exposes one tool per route.
+        if meta is None or not any(MCPHttpMethod.from_route_method(raw) is not None for raw in route.methods or set()):
+            continue
+        path = route_context.path or route.path
+        operation = _route_openapi_operation(route, schema, path)
+        if operation is None:
+            continue
+        method, op = operation
         tool = _build_tool(
             {
                 'method': method,
-                'path': effective_path,
+                'path': path,
                 'operation': op,
-                'name': item['name'],
-                'meta': item['meta'],
+                'name': meta.get('name') or getattr(route.endpoint, '__name__', route.name),
+                'meta': dict(meta),
                 'route': route,
             },
             components,

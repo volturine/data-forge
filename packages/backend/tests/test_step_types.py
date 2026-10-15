@@ -21,8 +21,5 @@ def test_chart_alias_helpers_are_explicit() -> None:
 
 
 def test_chart_step_normalization() -> None:
-    assert STEP_TYPES.is_chart_step_type('chart')
-    assert STEP_TYPES.is_chart_step_type('plot_bar')
-    assert not STEP_TYPES.is_chart_step_type('filter')
     assert STEP_TYPES.normalized('plot_bar') == 'chart'
     assert STEP_TYPES.normalized('filter') == 'filter'

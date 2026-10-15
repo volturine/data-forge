@@ -10,11 +10,6 @@ class RenameParams(OperationParams):
 
 
 class RenameHandler(OperationHandler):
-    def __call__(
-        self,
-        lf: pl.LazyFrame,
-        params: dict,
-        **_,
-    ) -> pl.LazyFrame:
+    def __call__(self, lf: pl.LazyFrame, params: dict, **_) -> pl.LazyFrame:
         validated = RenameParams.model_validate(params)
         return lf.rename(validated.column_mapping)

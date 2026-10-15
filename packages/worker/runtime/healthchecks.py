@@ -5,9 +5,12 @@ from typing import cast
 
 import polars as pl
 
+from dataforge_protocol import worker_runtime_pb2
 from runtime.domain.compute.schemas import BuildStatus
 from runtime.domain.healthcheck_models import HealthCheckType
+from runtime.json_values import dict_to_struct
 from runtime.namespace import get_namespace
+from runtime.protocol_mapping import datetime_to_timestamp
 from runtime.worker_runtime_client import HealthCheckSpec, client_from_env
 
 
@@ -245,13 +248,13 @@ def persist_results(results: list[HealthCheckResult]) -> None:
         client.record_healthcheck_results(
             namespace=get_namespace(),
             results=[
-                {
-                    "healthcheck_id": result.healthcheck_id,
-                    "passed": result.passed,
-                    "message": result.message,
-                    "details": result.details,
-                    "checked_at": result.checked_at.isoformat(),
-                }
+                worker_runtime_pb2.WorkerHealthCheckResultPayload(
+                    healthcheck_id=result.healthcheck_id,
+                    passed=result.passed,
+                    message=result.message,
+                    details=dict_to_struct(result.details),
+                    checked_at=datetime_to_timestamp(result.checked_at),
+                )
                 for result in results
             ],
         )

@@ -3,7 +3,7 @@ from __future__ import annotations
 from typing import ClassVar, Self
 
 from dataforge_protocol import enums_pb2
-from runtime.domain.domain_enums import DomainEnumValue, domain_token
+from runtime.domain.domain_enums import DomainEnumValue
 
 
 class RuntimePayloadKind(DomainEnumValue):
@@ -25,16 +25,9 @@ class RuntimePayloadKind(DomainEnumValue):
             return None
 
 
-RuntimePayloadKind.BUILD = RuntimePayloadKind(enums_pb2.RUNTIME_PAYLOAD_KIND_BUILD, domain_token("RuntimePayloadKind", enums_pb2.RUNTIME_PAYLOAD_KIND_BUILD))
-RuntimePayloadKind.ENGINE = RuntimePayloadKind(enums_pb2.RUNTIME_PAYLOAD_KIND_ENGINE, domain_token("RuntimePayloadKind", enums_pb2.RUNTIME_PAYLOAD_KIND_ENGINE))
-RuntimePayloadKind.JOB = RuntimePayloadKind(enums_pb2.RUNTIME_PAYLOAD_KIND_JOB, domain_token("RuntimePayloadKind", enums_pb2.RUNTIME_PAYLOAD_KIND_JOB))
-RuntimePayloadKind.COMPUTE_REQUEST = RuntimePayloadKind(
-    enums_pb2.RUNTIME_PAYLOAD_KIND_COMPUTE_REQUEST, domain_token("RuntimePayloadKind", enums_pb2.RUNTIME_PAYLOAD_KIND_COMPUTE_REQUEST)
-)
-RuntimePayloadKind.COMPUTE_RESPONSE = RuntimePayloadKind(
-    enums_pb2.RUNTIME_PAYLOAD_KIND_COMPUTE_RESPONSE, domain_token("RuntimePayloadKind", enums_pb2.RUNTIME_PAYLOAD_KIND_COMPUTE_RESPONSE)
-)
-RuntimePayloadKind.DATASOURCE_DELETE = RuntimePayloadKind(
-    enums_pb2.RUNTIME_PAYLOAD_KIND_DATASOURCE_DELETE,
-    domain_token("RuntimePayloadKind", enums_pb2.RUNTIME_PAYLOAD_KIND_DATASOURCE_DELETE),
-)
+RuntimePayloadKind.BUILD = RuntimePayloadKind(enums_pb2.RUNTIME_PAYLOAD_KIND_BUILD)
+RuntimePayloadKind.ENGINE = RuntimePayloadKind(enums_pb2.RUNTIME_PAYLOAD_KIND_ENGINE)
+RuntimePayloadKind.JOB = RuntimePayloadKind(enums_pb2.RUNTIME_PAYLOAD_KIND_JOB)
+RuntimePayloadKind.COMPUTE_REQUEST = RuntimePayloadKind(enums_pb2.RUNTIME_PAYLOAD_KIND_COMPUTE_REQUEST)
+RuntimePayloadKind.COMPUTE_RESPONSE = RuntimePayloadKind(enums_pb2.RUNTIME_PAYLOAD_KIND_COMPUTE_RESPONSE)
+RuntimePayloadKind.DATASOURCE_DELETE = RuntimePayloadKind(enums_pb2.RUNTIME_PAYLOAD_KIND_DATASOURCE_DELETE)

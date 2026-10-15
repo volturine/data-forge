@@ -1,3 +1,4 @@
+import inspect
 from typing import Any
 
 from fastapi import APIRouter, Depends
@@ -51,8 +52,6 @@ def _dependant_has_auth(dependant: Any) -> bool:
 
 def _source_mentions_auth(call: Any) -> bool:
     try:
-        import inspect
-
         source = inspect.getsource(call)
     except OSError, TypeError:
         return False
@@ -146,13 +145,5 @@ _V1_ROUTER_DEFINITIONS: tuple[tuple[APIRouter, bool], ...] = (
     (scheduler_router, False),
 )
 
-
-def _include_v1_routers(parent: APIRouter) -> None:
-    for module_router, authenticated in _V1_ROUTER_DEFINITIONS:
-        if authenticated:
-            parent.include_router(module_router, dependencies=[Depends(get_current_user)])
-        else:
-            parent.include_router(module_router)
-
-
-_include_v1_routers(router)
+for module_router, authenticated in _V1_ROUTER_DEFINITIONS:
+    router.include_router(module_router, dependencies=[Depends(get_current_user)] if authenticated else None)

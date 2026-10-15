@@ -19,13 +19,10 @@ class TimeseriesParams(OperationParams):
     direction: TimeDirection | None = None
     column2: str | None = None
 
-    def require_component(self) -> TimeComponent:
+    def extractor_name(self) -> str:
         if self.component is None:
             raise ValueError("timeseries extract requires component parameter")
-        return self.component
-
-    def extractor_name(self) -> str:
-        return self.require_component().extractor_name
+        return self.component.extractor_name
 
     def require_duration_unit(self) -> DurationUnit:
         if self.unit is None:
@@ -49,17 +46,9 @@ class TimeseriesParams(OperationParams):
             return pl.duration(weeks=value)
         raise ValueError(f"Unsupported duration unit: {duration_unit.value}")
 
-    def every_token(self) -> str:
-        return self.require_duration_unit().every_token
-
 
 class TimeseriesHandler(OperationHandler):
-    def __call__(
-        self,
-        lf: pl.LazyFrame,
-        params: dict,
-        **_,
-    ) -> pl.LazyFrame:
+    def __call__(self, lf: pl.LazyFrame, params: dict, **_) -> pl.LazyFrame:
         validated = TimeseriesParams.model_validate(params)
 
         if validated.operation_type == TimeseriesOperationType.EXTRACT:
@@ -123,6 +112,6 @@ class TimeseriesHandler(OperationHandler):
             TimeseriesOperationType.ROUND,
         }:
             method = getattr(pl.col(validated.column).dt, validated.operation_type.value)
-            return lf.with_columns(method(validated.every_token()).alias(validated.new_column))
+            return lf.with_columns(method(validated.require_duration_unit().every_token).alias(validated.new_column))
 
         raise ValueError(f"Unsupported timeseries operation: {validated.operation_type}")

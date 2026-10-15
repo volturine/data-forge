@@ -19,11 +19,6 @@ def _expires_at(now: datetime, ttl_seconds: int | None) -> datetime:
     return now + timedelta(seconds=ttl)
 
 
-def _reset_session_after_conflict(session: Session) -> None:
-    session.rollback()
-    session.expire_all()
-
-
 def _status(lock: ResourceLock, now: datetime | None = None) -> LockStatusResponse:
     current = ResourceLock.as_utc(now or _utcnow())
     return LockStatusResponse(
@@ -101,7 +96,8 @@ def acquire_lock(
             try:
                 session.commit()
             except IntegrityError, StaleDataError:
-                _reset_session_after_conflict(session)
+                session.rollback()
+                session.expire_all()
                 continue
             session.refresh(lock)
             return _status(lock, now)
@@ -123,7 +119,8 @@ def acquire_lock(
         )
         result = cast(CursorResult[Any], session.execute(statement))
         if result.rowcount != 1:
-            _reset_session_after_conflict(session)
+            session.rollback()
+            session.expire_all()
             continue
         session.commit()
         session.expire_all()

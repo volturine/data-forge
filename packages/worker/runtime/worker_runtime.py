@@ -58,10 +58,7 @@ class RuntimeNamespaceDirectory:
     async def _refresh_locked(self) -> None:
         now = asyncio.get_running_loop().time()
         if now >= self._next_refresh:
-            if self._work_kinds:
-                namespaces = await self._client.pending_runtime_work_namespaces_async(work_kinds=self._work_kinds)
-            else:
-                namespaces = await self._client.pending_runtime_work_namespaces_async()
+            namespaces = await self._client.pending_runtime_work_namespaces_async(work_kinds=self._work_kinds)
             self._namespaces = list(dict.fromkeys(namespace for namespace in namespaces if namespace))
             self._cursor = self._cursor % len(self._namespaces) if self._namespaces else 0
             self._next_refresh = now + self._refresh_seconds
@@ -238,10 +235,7 @@ async def build_worker_loop(
                 set(active_tasks),
                 timeout=_BUILD_SHUTDOWN_GRACE_SECONDS,
             )
-            finished_builds: set[asyncio.Task[None]] = set()
-            for task in active_tasks:
-                if task.done():
-                    finished_builds.add(task)
+            finished_builds = {task for task in active_tasks if task.done()}
             if finished_builds:
                 await collect_finished(finished_builds)
 

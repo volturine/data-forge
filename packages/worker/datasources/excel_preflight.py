@@ -41,7 +41,7 @@ def _read_metadata(path: Path) -> tuple[list[str], dict[str, list[str]], list[st
         workbook.close()
 
 
-def _resolve_bounds(
+def resolve_excel_bounds(
     workbook: Any,
     *,
     sheet_name: str,
@@ -146,7 +146,7 @@ def _preview(
     try:
         if sheet_name not in workbook.sheetnames:
             raise ValueError(f"Sheet not found: {sheet_name}")
-        bounds = _resolve_bounds(
+        bounds = resolve_excel_bounds(
             workbook,
             sheet_name=sheet_name,
             start_row=start_row,

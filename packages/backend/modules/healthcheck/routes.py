@@ -57,8 +57,7 @@ async def list_results(datasource_id: str, limit: int = 10):
         uuid.UUID(parsed_id)
     except ValueError as exc:
         raise InvalidIdError(message='Invalid UUID', details={'value': parsed_id}) from exc
-    items = await run_api_blocking(run_db, service.list_results, parsed_id, limit)
-    return items
+    return await run_api_blocking(run_db, service.list_results, parsed_id, limit)
 
 
 @router.get('/results/all', response_model=list[schemas.HealthCheckResultResponse], mcp=True)
@@ -77,11 +76,7 @@ async def create_healthcheck(payload: schemas.HealthCheckCreate):
     column_range, column_count, null_percentage, duplicate_percentage), and config (varies by check_type).
     Use GET /datasource to find datasource IDs.
     """
-    return await run_api_blocking(
-        run_db,
-        service.create_healthcheck,
-        payload,
-    )
+    return await run_api_blocking(run_db, service.create_healthcheck, payload)
 
 
 @router.put('/{healthcheck_id}', response_model=schemas.HealthCheckResponse, mcp=True)

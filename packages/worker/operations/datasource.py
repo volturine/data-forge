@@ -7,7 +7,7 @@ from threading import Lock
 import polars as pl
 from pydantic import ConfigDict
 
-from datasources.datasource_loading import load_datasource as load_datasource_frame
+from datasources.datasource_loading import load_datasource_frame
 from operations.step_converter import convert_step_format
 from runtime.domain.compute.base import OperationHandler, OperationParams
 from runtime.domain.datasource.source_types import DataSourceLoadType, DataSourceType, IcebergReader
@@ -56,27 +56,17 @@ class DatasourceParams(OperationParams):
 
 
 class DatasourceHandler(OperationHandler):
-    def __call__(
-        self,
-        lf: pl.LazyFrame,
-        params: dict,
-        **_,
-    ) -> pl.LazyFrame:
+    def __call__(self, lf: pl.LazyFrame, params: dict, **_) -> pl.LazyFrame:
         validated = DatasourceParams.model_validate(params)
         source_type = validated.source_type.value
         if source_type not in _SOURCE_TYPES:
             allowed = ", ".join(sorted(_SOURCE_TYPES))
             raise ValueError(f"Unsupported source type: {validated.source_type}. Allowed: {allowed}")
-        if source_type == DataSourceType.ANALYSIS.value:
-            return self._load_analysis(validated)
-        return load_datasource_frame(validated.model_dump(mode="json"))
-
-    def _load_analysis(self, config: DatasourceParams) -> pl.LazyFrame:
-        pipeline = config.analysis_pipeline
-        if isinstance(pipeline, dict):
-            pipeline_id = pipeline.get("analysis_id")
-            if pipeline_id:
-                return _load_analysis_pipeline(pipeline, str(pipeline_id), config.analysis_tab_id)
+        if source_type != DataSourceType.ANALYSIS.value:
+            return load_datasource_frame(validated.model_dump(mode="json"))
+        pipeline = validated.analysis_pipeline
+        if isinstance(pipeline, dict) and pipeline.get("analysis_id"):
+            return _load_analysis_pipeline(pipeline, str(pipeline["analysis_id"]), validated.analysis_tab_id)
         raise ValueError("analysis_pipeline is required for analysis datasource loading")
 
 
@@ -90,12 +80,8 @@ _ANALYSIS_CACHE_LOCK = Lock()
 _ANALYSIS_CACHE_MAX = 20
 
 
-def _get_analysis_stack() -> tuple[tuple[str, str | None], ...]:
-    return _analysis_stack_var.get()
-
-
 def _load_analysis_pipeline(pipeline: dict, analysis_id: str, tab_id: str | None) -> pl.LazyFrame:
-    stack = _get_analysis_stack()
+    stack = _analysis_stack_var.get()
     stack_key = (analysis_id, tab_id)
     if stack_key in stack:
         raise ValueError("Analysis pipeline contains a circular reference")
@@ -146,7 +132,7 @@ def _resolve_pipeline_datasource(pipeline: dict, datasource: dict) -> dict:
     return {"source_type": source_type.value, **config}
 
 
-def _step_source_payload(step_config: dict, source_id: str) -> dict | None:
+def step_source_payload(step_config: dict, source_id: str) -> dict | None:
     direct = step_config.get("right_source_datasource")
     if isinstance(direct, dict) and direct.get("id") == source_id:
         return direct
@@ -190,14 +176,6 @@ def _resolve_analysis_tab(tabs: list[dict], analysis_tab_id: str | None) -> dict
 def _resolve_tab_chain(tabs: list[dict], target_tab_id: str) -> list[dict]:
     output_to_tab: dict[str, dict] = {}
     tab_input: dict[str, str] = {}
-    output_map: dict[str, str] = {}
-    for tab in tabs:
-        tab_id = tab.get("id")
-        output = tab.get("output") if isinstance(tab, dict) else None
-        output_id = output.get("result_id") if isinstance(output, dict) else None
-        if not tab_id or not output_id:
-            continue
-        output_map[str(tab_id)] = str(output_id)
     for tab in tabs:
         tid = tab.get("id")
         output = tab.get("output") if isinstance(tab, dict) else None
@@ -355,7 +333,7 @@ def _collect_analysis_sources(
                     "analysis_pipeline": pipeline,
                 }
             else:
-                raw = _step_source_payload(config, str(source_id))
+                raw = step_source_payload(config, str(source_id))
                 if not isinstance(raw, dict):
                     raise ValueError(f"Analysis pipeline missing datasource config for {source_id}")
                 next_config = _resolve_pipeline_datasource(pipeline, raw)

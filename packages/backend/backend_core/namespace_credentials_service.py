@@ -8,6 +8,7 @@ import secrets as crypto_secrets
 import tempfile
 import time
 import uuid
+from contextlib import nullcontext
 from urllib.parse import urlparse
 
 import aiohttp
@@ -66,13 +67,9 @@ def _policy_document(namespace: str, role: str) -> dict:
     }
 
 
-def _generate_access_key(namespace: str, role: str) -> str:
-    return f'dfg-{namespace}-{role}-{crypto_secrets.token_hex(4)}'
-
-
 async def _create_role_identity(admin, namespace: str, role: str) -> tuple[str, str]:
     started = time.perf_counter()
-    access_key = _generate_access_key(namespace, role)
+    access_key = f'dfg-{namespace}-{role}-{crypto_secrets.token_hex(4)}'
     secret_key = crypto_secrets.token_urlsafe(32)
     policy_name = f'namespace-{namespace}-{role}'
     # The admin client reads the policy from disk, and several API processes can
@@ -119,37 +116,29 @@ def provision_namespace_engine_credentials(
     released before object-store RPCs so slow network calls do not occupy a
     pooled connection or hold a transaction open.
     """
-    if not namespace_lock_held and session.get_bind().dialect.name == 'postgresql':
-        with namespace_provision_lock(namespace):
-            _provision_namespace_engine_credentials(session, namespace)
-        return
-    _provision_namespace_engine_credentials(session, namespace)
-
-
-def _provision_namespace_engine_credentials(session: Session, namespace: str) -> None:
-    existing = session.exec(select(NamespaceEngineCredential).where(NamespaceEngineCredential.namespace == namespace)).all()
-    existing_roles = {row.role for row in existing}
-    missing_roles = [role for role in _ENGINE_CREDENTIAL_ROLES if role not in existing_roles]
-    session.rollback()
-    if not missing_roles:
-        return
-
-    try:
-        identities = asyncio.run(_provision_roles(namespace, missing_roles))
-    except Exception as exc:
+    lock = namespace_provision_lock(namespace) if not namespace_lock_held and session.get_bind().dialect.name == 'postgresql' else nullcontext()
+    with lock:
+        existing = session.exec(select(NamespaceEngineCredential).where(NamespaceEngineCredential.namespace == namespace)).all()
+        existing_roles = {row.role for row in existing}
+        missing_roles = [role for role in _ENGINE_CREDENTIAL_ROLES if role not in existing_roles]
         session.rollback()
-        raise NamespaceCredentialError(f'Failed to provision engine credentials for namespace {namespace!r}') from exc
-    for role, (access_key, secret_key) in identities.items():
-        session.add(
-            NamespaceEngineCredential(
-                id=str(uuid.uuid4()),
-                namespace=namespace,
-                role=role,
-                access_key=access_key,
-                secret_key_encrypted=encrypt_secret(secret_key),
+        if not missing_roles:
+            return
+        try:
+            identities = asyncio.run(_provision_roles(namespace, missing_roles))
+        except Exception as exc:
+            raise NamespaceCredentialError(f'Failed to provision engine credentials for namespace {namespace!r}') from exc
+        for role, (access_key, secret_key) in identities.items():
+            session.add(
+                NamespaceEngineCredential(
+                    id=str(uuid.uuid4()),
+                    namespace=namespace,
+                    role=role,
+                    access_key=access_key,
+                    secret_key_encrypted=encrypt_secret(secret_key),
+                )
             )
-        )
-    session.commit()
+        session.commit()
 
 
 def resolve_namespace_engine_credentials(session: Session, namespace: str, role: str) -> tuple[str, str]:

@@ -189,12 +189,12 @@ class TestUpdateSettings:
     """PUT /v1/settings — upserts the singleton row."""
 
     def test_ai_provider_update_does_not_reconfigure_telegram_runtime(self, client: TestClient, monkeypatch) -> None:
-        from backend_core import settings_store
+        from backend_core import settings_projection
 
         def unexpected_telegram_lookup():
             raise AssertionError('AI-only settings updates must not load Telegram settings')
 
-        monkeypatch.setattr(settings_store, 'get_resolved_telegram_settings', unexpected_telegram_lookup)
+        monkeypatch.setattr(settings_projection, 'get_resolved_telegram_settings', unexpected_telegram_lookup)
 
         response = client.put('/api/v1/settings', json={'openrouter_default_model': 'e2e-model'})
 
@@ -256,10 +256,10 @@ class TestUpdateSettings:
         assert resp.json()['public_idb_debug'] is True
 
     def test_preserves_masked_secrets_on_partial_update(self, client: TestClient, monkeypatch) -> None:
-        from backend_core.settings_store import (
+        from backend_core.settings_projection import (
             get_resolved_openrouter_key,
             get_resolved_smtp,
-            get_resolved_telegram_token,
+            get_resolved_telegram_settings,
         )
 
         monkeypatch.setenv('SETTINGS_ENCRYPTION_KEY', 'test-key')
@@ -288,14 +288,14 @@ class TestUpdateSettings:
         )
         assert resp.status_code == 200
         assert get_resolved_smtp()['password'] == 'pw'
-        assert get_resolved_telegram_token() == 'bot999:xyz'
+        assert get_resolved_telegram_settings()['token'] == 'bot999:xyz'
         assert get_resolved_openrouter_key() == 'sk-live'
 
     def test_get_populates_empty_openrouter_key_then_keeps_a_profile_key(self, client: TestClient, monkeypatch) -> None:
         from backend_core.config import settings as app_settings
         from backend_core.database import run_settings_db
         from backend_core.persistence.settings.models import AppSettings
-        from backend_core.settings_store import get_resolved_openrouter_key
+        from backend_core.settings_projection import get_resolved_openrouter_key
 
         monkeypatch.setenv('SETTINGS_ENCRYPTION_KEY', 'test-key')
         monkeypatch.setattr(app_settings, 'openrouter_api_key', 'sk-or-env', raising=False)
@@ -1094,7 +1094,7 @@ class TestSeedSettingsFromEnv:
 
         monkeypatch.setattr(database, 'settings_engine', engine, raising=False)
 
-        from backend_core.settings_store import get_resolved_telegram_settings
+        from backend_core.settings_projection import get_resolved_telegram_settings
 
         resolved = get_resolved_telegram_settings()
         assert resolved['enabled'] is True
@@ -1170,8 +1170,8 @@ class TestSettingsRuntimeReads:
             set_settings_engine_override,
         )
         from backend_core.persistence.settings.models import AppSettings
+        from backend_core.settings_projection import get_resolved_smtp
         from backend_core.settings_schemas import SettingsUpdate
-        from backend_core.settings_store import get_resolved_smtp
 
         monkeypatch.setenv('SETTINGS_ENCRYPTION_KEY', 'test-key')
         notifications: list[dict[str, object]] = []
@@ -1290,11 +1290,8 @@ class TestSettingsRuntimeReads:
             clear_settings_engine_override,
             set_settings_engine_override,
         )
-        from backend_core.settings_store import (
-            get_resolved_default_model,
-            get_resolved_openrouter_key,
-            seed_settings_from_env,
-        )
+        from backend_core.settings_projection import get_resolved_default_model, get_resolved_openrouter_key
+        from backend_core.settings_store import seed_settings_from_env
 
         monkeypatch.setenv('SETTINGS_ENCRYPTION_KEY', 'test-key')
         monkeypatch.setattr(app_settings, 'settings_encryption_key', 'test-key', raising=False)
@@ -1319,7 +1316,7 @@ class TestSettingsRuntimeReads:
         from backend_core.config import settings as app_settings
         from backend_core.database import clear_settings_engine_override, set_settings_engine_override
         from backend_core.persistence.settings.models import AppSettings
-        from backend_core.settings_store import get_resolved_openrouter_key
+        from backend_core.settings_projection import get_resolved_openrouter_key
 
         monkeypatch.setenv('SETTINGS_ENCRYPTION_KEY', 'test-key')
         monkeypatch.setattr(app_settings, 'settings_encryption_key', 'test-key', raising=False)
@@ -1344,7 +1341,7 @@ class TestSettingsRuntimeReads:
         from backend_core.database import clear_settings_engine_override, set_settings_engine_override
         from backend_core.persistence.settings.models import AppSettings
         from backend_core.secrets import encrypt_secret
-        from backend_core.settings_store import get_resolved_openrouter_key
+        from backend_core.settings_projection import get_resolved_openrouter_key
 
         monkeypatch.setenv('SETTINGS_ENCRYPTION_KEY', 'test-key')
         monkeypatch.setattr(app_settings, 'settings_encryption_key', 'test-key', raising=False)

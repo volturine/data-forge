@@ -19,6 +19,7 @@ from backend_core.persistence.datasource.models import DataSource, DataSourceCol
 from backend_core.secrets import MASKED_SECRET
 from backend_core.sqlmodel_typing import col, sa
 from dataforge_protocol import datasource_pb2
+from modules.datasource.publication_service import attach_column_descriptions
 from modules.datasource.schema_protocol import schema_info_proto
 from modules.datasource.schemas import (
     BatchColumnDescriptionUpdate,
@@ -190,33 +191,6 @@ class InternalPostgresOnboarding:
         return InternalPostgresTable(schema_name=schema_name, table_name=table_name, is_onboarded=False)
 
 
-def internal_postgres_connection_string() -> str:
-    return InternalPostgresOnboarding.connection_string()
-
-
-def _canonical_internal_postgres_name(datasource: DataSource) -> str | None:
-    query, connection_string = datasource.query_and_connection()
-    if connection_string != internal_postgres_connection_string():
-        return None
-    source = InternalPostgresOnboarding.query_schema_and_table(query)
-    if source is None:
-        return None
-    schema_name, table_name = source
-    canonical = InternalPostgresOnboarding.datasource_name_for(schema_name, table_name)
-    if datasource.name != canonical:
-        return None
-    return canonical
-
-
-def _apply_display_name[DatasourceResponseT: (DataSourceResponse, DataSourceListItem)](
-    response: DatasourceResponseT, datasource: DataSource
-) -> DatasourceResponseT:
-    canonical = _canonical_internal_postgres_name(datasource)
-    if canonical is not None:
-        response.name = canonical
-    return response
-
-
 _SECRET_CONFIG_KEYS = ('connection_string', 'catalog_uri')
 
 
@@ -234,6 +208,16 @@ def _masked_config(config: dict) -> dict:
     return masked
 
 
+_PROTECTED_SNAPSHOT_KEYS = (
+    'snapshot_id',
+    'snapshot_timestamp_ms',
+    'current_snapshot_id',
+    'current_snapshot_timestamp_ms',
+    'time_travel_snapshot_id',
+    'time_travel_snapshot_timestamp_ms',
+    'time_travel_ui',
+)
+_EXCEL_BOUND_KEYS = ('sheet_name', 'start_row', 'start_col', 'end_col', 'end_row', 'table_name', 'named_range', 'cell_range')
 _SNAPSHOT_TIMESTAMP_KEYS = ('current_snapshot_timestamp_ms', 'snapshot_timestamp_ms')
 
 
@@ -257,7 +241,7 @@ def _snapshot_timestamp_ms(config: object) -> int | None:
     return None
 
 
-def _last_data_update_from_config(datasource: DataSource) -> datetime | None:
+def last_data_update_from_config(datasource: DataSource) -> datetime | None:
     timestamp_ms = _snapshot_timestamp_ms(datasource.config)
     if timestamp_ms is None:
         return None
@@ -295,7 +279,7 @@ def _apply_last_data_update[DatasourceResponseT: (DataSourceResponse, DataSource
     datasource: DataSource,
     last_build_completed_at: datetime | None,
 ) -> DatasourceResponseT:
-    last_data_update = _last_data_update_from_config(datasource) or last_build_completed_at
+    last_data_update = last_data_update_from_config(datasource) or last_build_completed_at
     response.last_data_update = _aware_utc(last_data_update) if last_data_update is not None else None
     return response
 
@@ -436,26 +420,6 @@ def create_database_datasource_record(
     return DataSourceResponse.model_validate(datasource)
 
 
-def _get_column_metadata_map(session: Session, datasource_id: str) -> dict[str, str | None]:
-    rows = session.execute(
-        select(DataSourceColumnMetadata).where(sa(DataSourceColumnMetadata.datasource_id == datasource_id)),
-    ).scalars()
-    return {row.column_name: row.description for row in rows}
-
-
-def attach_column_descriptions(
-    session: Session,
-    datasource_id: str,
-    schema_info: datasource_pb2.SchemaInfo,
-) -> datasource_pb2.SchemaInfo:
-    descriptions = _get_column_metadata_map(session, datasource_id)
-    for column in schema_info.columns:
-        description = descriptions.get(column.name)
-        if description is not None:
-            column.description = description
-    return schema_info
-
-
 def cached_schema(session: Session, datasource_id: str) -> datasource_pb2.SchemaInfo | None:
     """Return the DB-cached schema when it is present and well-formed.
 
@@ -532,14 +496,18 @@ def update_column_descriptions(
     return attach_column_descriptions(session, datasource_id, schema_info)
 
 
-def get_datasource(session: Session, datasource_id: str) -> DataSourceResponse:
-    datasource = datasource_delete_service.get_active_datasource(session, datasource_id)
-    response = _apply_display_name(DataSourceResponse.model_validate(datasource), datasource)
-    response.config = _masked_config(response.config)
+def _datasource_response(session: Session, datasource: DataSource) -> DataSourceResponse:
+    response = DataSourceResponse.model_validate(datasource)
     response.output_of_tab_id = datasource.config.get('analysis_tab_id') if isinstance(datasource.config, dict) else None
     analysis_id = datasource.created_by_analysis_id
     last_build_completed_at = _last_build_completed_at_map(session, {analysis_id}).get(analysis_id) if analysis_id else None
     return _apply_last_data_update(response, datasource, last_build_completed_at)
+
+
+def get_datasource(session: Session, datasource_id: str) -> DataSourceResponse:
+    response = _datasource_response(session, datasource_delete_service.get_active_datasource(session, datasource_id))
+    response.config = _masked_config(response.config)
+    return response
 
 
 def list_datasources(session: Session, include_hidden: bool = False) -> list[DataSourceListItem]:
@@ -552,12 +520,12 @@ def list_datasources(session: Session, include_hidden: bool = False) -> list[Dat
     rows = session.execute(query).all()
     pending_analysis_ids: set[str] = set()
     for ds, _ in rows:
-        if _last_data_update_from_config(ds) is None and ds.created_by_analysis_id is not None:
+        if last_data_update_from_config(ds) is None and ds.created_by_analysis_id is not None:
             pending_analysis_ids.add(ds.created_by_analysis_id)
     last_build_completed_at = _last_build_completed_at_map(session, pending_analysis_ids)
     results: list[DataSourceListItem] = []
     for ds, list_row_count in rows:
-        item = _apply_display_name(DataSourceListItem.model_validate(ds), ds)
+        item = DataSourceListItem.model_validate(ds)
         item.config = _masked_config(item.config)
         item.row_count = _coerce_row_count(list_row_count)
         item.output_of_tab_id = ds.config.get('analysis_tab_id') if isinstance(ds.config, dict) else None
@@ -583,8 +551,6 @@ def update_datasource(
     if expected_revision is not None and datasource.revision != expected_revision:
         raise DataSourceValidationError('Datasource changed while Excel selection was being resolved', details={'datasource_id': datasource_id})
     changed = False
-
-    # Update name if provided
     if update.name is not None and update.name != datasource.name:
         datasource.name = update.name
         changed = True
@@ -595,12 +561,10 @@ def update_datasource(
             datasource.description = description
             changed = True
 
-    # Update is_hidden if provided
     if update.is_hidden is not None and update.is_hidden != datasource.is_hidden:
         datasource.is_hidden = update.is_hidden
         changed = True
 
-    # Update config if provided
     if update.config is not None:
         if 'column_schema' in update.config:
             raise DataSourceValidationError(
@@ -608,22 +572,12 @@ def update_datasource(
                 details={'datasource_id': datasource_id},
             )
 
-        protected_snapshot_keys = {
-            'snapshot_id',
-            'snapshot_timestamp_ms',
-            'current_snapshot_id',
-            'current_snapshot_timestamp_ms',
-            'time_travel_snapshot_id',
-            'time_travel_snapshot_timestamp_ms',
-            'time_travel_ui',
-        }
-        for key in protected_snapshot_keys:
-            if key not in update.config:
-                continue
-            raise DataSourceValidationError(
-                'Snapshot metadata fields are system-managed and cannot be modified',
-                details={'datasource_id': datasource_id, 'field': key},
-            )
+        for key in _PROTECTED_SNAPSHOT_KEYS:
+            if key in update.config:
+                raise DataSourceValidationError(
+                    'Snapshot metadata fields are system-managed and cannot be modified',
+                    details={'datasource_id': datasource_id, 'field': key},
+                )
 
         source_type = datasource.source_type_kind()
         immutable_keys = {
@@ -632,45 +586,16 @@ def update_datasource(
             DataSourceType.ICEBERG: ['metadata_path'],
         }
         for key in immutable_keys.get(source_type, []):
-            if key not in update.config:
-                continue
-            if update.config.get(key) == datasource.config.get(key):
-                continue
-            raise DataSourceValidationError(
-                'Datasource location is immutable. Create a new datasource to change location.',
-                details={'datasource_id': datasource_id, 'field': key},
-            )
+            if key in update.config and update.config.get(key) != datasource.config.get(key):
+                raise DataSourceValidationError(
+                    'Datasource location is immutable. Create a new datasource to change location.',
+                    details={'datasource_id': datasource_id, 'field': key},
+                )
 
-        # Check if parsing options changed (requires schema re-extraction)
-        parsing_keys = [
-            'csv_options',
-            'sheet_name',
-            'start_row',
-            'start_col',
-            'end_col',
-            'end_row',
-            'has_header',
-            'skip_rows',
-            'table_name',
-            'named_range',
-            'cell_range',
-        ]
-        parsing_changed = any(key in update.config for key in parsing_keys)
-
+        # Parsing option changes require schema re-extraction.
+        parsing_changed = any(key in update.config for key in (*_EXCEL_BOUND_KEYS, 'csv_options', 'has_header', 'skip_rows'))
         next_config = {**datasource.config, **update.config}
-        has_excel_bounds = any(
-            key in update.config
-            for key in [
-                'sheet_name',
-                'start_row',
-                'start_col',
-                'end_col',
-                'end_row',
-                'table_name',
-                'named_range',
-                'cell_range',
-            ]
-        )
+        has_excel_bounds = any(key in update.config for key in _EXCEL_BOUND_KEYS)
         is_excel_file = DataSourceFileType.read(next_config.get('file_type'), default=None) == DataSourceFileType.EXCEL
         if source_type == DataSourceType.FILE and is_excel_file and has_excel_bounds:
             file_path = next_config.get('file_path')
@@ -694,7 +619,6 @@ def update_datasource(
                 'end_row': resolved_end_row,
             }
 
-        # Merge new config with existing config
         config_changed = next_config != datasource.config
         if config_changed:
             datasource.config = next_config
@@ -710,11 +634,7 @@ def update_datasource(
     session.refresh(datasource)
 
     logger.info(f'Updated datasource {datasource_id}')
-    response = _apply_display_name(DataSourceResponse.model_validate(datasource), datasource)
-    response.output_of_tab_id = datasource.config.get('analysis_tab_id') if isinstance(datasource.config, dict) else None
-    analysis_id = datasource.created_by_analysis_id
-    last_build_completed_at = _last_build_completed_at_map(session, {analysis_id}).get(analysis_id) if analysis_id else None
-    return _apply_last_data_update(response, datasource, last_build_completed_at)
+    return _datasource_response(session, datasource)
 
 
 def delete_datasource(session: Session, datasource_id: str) -> None:

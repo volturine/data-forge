@@ -140,12 +140,7 @@ class AIParams(OperationParams):
 
 
 class AIHandler(OperationHandler):
-    def __call__(
-        self,
-        lf: pl.LazyFrame,
-        params: dict,
-        **_,
-    ) -> pl.LazyFrame:
+    def __call__(self, lf: pl.LazyFrame, params: dict, **_) -> pl.LazyFrame:
         validated = AIParams.model_validate(params)
         if validated.batch_size < 1:
             raise ValueError("batch_size must be at least 1")
@@ -202,7 +197,6 @@ class AIHandler(OperationHandler):
                     if uses_text and single_col:
                         row["text"] = row[select_cols[0]]
                     prompts.append(render_template_placeholders(validated.prompt_template, row))
-                success = False
                 for attempt in range(validated.max_retries + 1):
                     try:
                         if min_interval_sec > 0:
@@ -219,11 +213,9 @@ class AIHandler(OperationHandler):
                             raise AIError(f"AI output length mismatch for batch: got {len(outputs)}, expected {len(batch_rows)}")
                         results.extend(outputs)
                         errors.extend([""] * len(batch_rows))
-                        success = True
                         break
                     except Exception as exc:
-                        is_final_attempt = attempt >= validated.max_retries
-                        if is_final_attempt:
+                        if attempt >= validated.max_retries:
                             logger.error(
                                 "AI batch failed at row %d-%d after %d attempt(s): %s",
                                 offset,
@@ -232,11 +224,9 @@ class AIHandler(OperationHandler):
                                 exc,
                             )
                             detail = str(exc) or exc.__class__.__name__
-                            marker = f"[error: {detail}]"
-                            results.extend([marker] * len(batch_rows))
+                            results.extend([f"[error: {detail}]"] * len(batch_rows))
                             errors.extend([detail] * len(batch_rows))
                             break
-                        backoff_sec = min(2**attempt, 30)
                         logger.warning(
                             "AI batch retry %d/%d at row %d-%d: %s",
                             attempt + 1,
@@ -245,9 +235,7 @@ class AIHandler(OperationHandler):
                             offset + len(batch_rows),
                             exc,
                         )
-                        time.sleep(backoff_sec)
-                if not success and len(errors) < len(results):
-                    errors.extend(["Unknown AI batch failure"] * (len(results) - len(errors)))
+                        time.sleep(min(2**attempt, 30))
 
             if len(results) != row_count:
                 raise ValueError(f"AI output length mismatch: got {len(results)}, expected {row_count}")

@@ -1,4 +1,6 @@
 import time
+from collections.abc import Iterator
+from contextlib import contextmanager
 from datetime import datetime
 from hashlib import sha256
 from typing import Any
@@ -41,15 +43,13 @@ _ENGINE_STATUS_PROJECTION_FIELDS = (
 )
 
 
-def _start_snapshot_phase(phase_timings: dict[str, float] | None) -> float | None:
-    return _snapshot_phase_clock() if phase_timings is not None else None
-
-
-def _finish_snapshot_phase(phase_timings: dict[str, float] | None, name: str, started: float | None) -> None:
-    if phase_timings is None or started is None:
-        return
+@contextmanager
+def _snapshot_phase(phase_timings: dict[str, float] | None, name: str) -> Iterator[None]:
+    started = _snapshot_phase_clock()
+    yield
     elapsed_ms = (_snapshot_phase_clock() - started) * 1000
-    phase_timings[name] = phase_timings.get(name, 0.0) + elapsed_ms
+    if phase_timings is not None:
+        phase_timings[name] = phase_timings.get(name, 0.0) + elapsed_ms
 
 
 def _required_identity_value(value: str | None, field_name: str) -> str:
@@ -79,7 +79,7 @@ def _compute_worker_status_projection(
     instance_status: ComputeWorkerInstanceStatus,
     last_activity_at: datetime | None,
     stamp: datetime,
-) -> dict[str, object]:
+) -> dict[str, Any]:
     return {
         'container_id': status.container_id,
         'image_digest': status.image_digest,
@@ -103,23 +103,6 @@ def _compute_worker_status_projection(
     }
 
 
-def _apply_compute_worker_status(
-    row: ComputeWorkerInstance,
-    *,
-    status: ComputeWorkerStatusInfo,
-    instance_status: ComputeWorkerInstanceStatus,
-    stamp: datetime,
-) -> None:
-    projection = _compute_worker_status_projection(status=status, instance_status=instance_status, last_activity_at=row.last_activity_at, stamp=stamp)
-    changed = {field: value for field, value in projection.items() if getattr(row, field, None) != value}
-    if not changed:
-        return
-    for field, value in changed.items():
-        setattr(row, field, value)
-    row.last_seen_at = stamp
-    row.updated_at = stamp
-
-
 def persist_compute_worker_snapshot(
     session: Session,
     *,
@@ -138,24 +121,11 @@ def persist_compute_worker_snapshot(
     be written atomically and observed as one state transition.
     """
     for attempt in range(2):
-        lock_started = _snapshot_phase_clock()
-        _lock_engine_snapshot(session, worker_id=worker_id, namespace=namespace)
-        advisory_lock_wait_ms = (_snapshot_phase_clock() - lock_started) * 1000
-        if phase_timings is not None:
-            phase_timings['advisory_lock_wait_ms'] = phase_timings.get('advisory_lock_wait_ms', 0.0) + advisory_lock_wait_ms
-        snapshot_started = _snapshot_phase_clock()
+        with _snapshot_phase(phase_timings, 'advisory_lock_wait_ms'):
+            _lock_engine_snapshot(session, worker_id=worker_id, namespace=namespace)
         try:
-            _persist_engine_snapshot_locked(
-                session,
-                worker_id=worker_id,
-                namespace=namespace,
-                statuses=statuses,
-                now=now,
-                phase_timings=phase_timings,
-            )
-            snapshot_write_ms = (_snapshot_phase_clock() - snapshot_started) * 1000
-            if phase_timings is not None:
-                phase_timings['snapshot_write_ms'] = phase_timings.get('snapshot_write_ms', 0.0) + snapshot_write_ms
+            with _snapshot_phase(phase_timings, 'snapshot_write_ms'):
+                _persist_engine_snapshot_locked(session, worker_id=worker_id, namespace=namespace, statuses=statuses, now=now, phase_timings=phase_timings)
             return
         except IntegrityError:
             # PostgreSQL snapshots are fenced by the advisory lock. Retrying
@@ -176,93 +146,79 @@ def _persist_engine_snapshot_locked(
     phase_timings: dict[str, float] | None,
 ) -> None:
     stamp = now or _utcnow()
-    phase_started = _start_snapshot_phase(phase_timings)
-    active_by_id: dict[str, ComputeWorkerStatusInfo] = {}
-    for status in statuses:
-        scope = _required_identity_value(status.scope, 'scope')
-        resource_id = _required_identity_value(status.resource_id, 'resource_id')
-        active_by_id[f'{worker_id}:{namespace}:{scope}:{resource_id}'] = status
-    _finish_snapshot_phase(phase_timings, 'active_id_mapping_ms', phase_started)
+    with _snapshot_phase(phase_timings, 'active_id_mapping_ms'):
+        active_by_id: dict[str, ComputeWorkerStatusInfo] = {}
+        for status in statuses:
+            scope = _required_identity_value(status.scope, 'scope')
+            resource_id = _required_identity_value(status.resource_id, 'resource_id')
+            active_by_id[f'{worker_id}:{namespace}:{scope}:{resource_id}'] = status
 
     existing: dict[str, Any] = {}
-    phase_started = _start_snapshot_phase(phase_timings)
-    if active_by_id:
-        columns = (
-            col(ComputeWorkerInstance.id),
-            *(col(getattr(ComputeWorkerInstance, field)) for field in _ENGINE_STATUS_PROJECTION_FIELDS),
-        )
-        result = session.execute(select(*columns).where(col(ComputeWorkerInstance.id).in_(active_by_id)))
-        existing = {row['id']: row for row in result.mappings()}
-    _finish_snapshot_phase(phase_timings, 'existing_row_query_fetch_ms', phase_started)
+    with _snapshot_phase(phase_timings, 'existing_row_query_fetch_ms'):
+        if active_by_id:
+            columns = (
+                col(ComputeWorkerInstance.id),
+                *(col(getattr(ComputeWorkerInstance, field)) for field in _ENGINE_STATUS_PROJECTION_FIELDS),
+            )
+            result = session.execute(select(*columns).where(col(ComputeWorkerInstance.id).in_(active_by_id)))
+            existing = {row['id']: row for row in result.mappings()}
 
-    phase_started = _start_snapshot_phase(phase_timings)
-    updates: list[dict[str, object]] = []
-    for instance_id, status in active_by_id.items():
-        instance_status = _compute_worker_instance_status(status)
-        row = existing.get(instance_id)
-        if row is None:
-            scope = _required_identity_value(status.scope, 'scope')
-            row = ComputeWorkerInstance(
-                id=instance_id,
-                worker_id=worker_id,
-                namespace=namespace,
-                analysis_id=status.analysis_id,
-                compute_worker_scope=scope,
-                compute_worker_reuse_policy=_required_identity_value(status.reuse_policy, 'reuse_policy'),
-                status=instance_status,
+    with _snapshot_phase(phase_timings, 'applying_statuses_ms'):
+        updates: list[dict[str, object]] = []
+        for instance_id, status in active_by_id.items():
+            row = existing.get(instance_id)
+            projection = _compute_worker_status_projection(
+                status=status,
+                instance_status=_compute_worker_instance_status(status),
+                last_activity_at=None if row is None else row['last_activity_at'],
+                stamp=stamp,
+            )
+            if row is None:
+                session.add(
+                    ComputeWorkerInstance(
+                        id=instance_id,
+                        worker_id=worker_id,
+                        namespace=namespace,
+                        analysis_id=status.analysis_id,
+                        last_seen_at=stamp,
+                        updated_at=stamp,
+                        **projection,
+                    )
+                )
+                continue
+
+            changed = {field: value for field, value in projection.items() if row[field] != value}
+            if changed:
+                updates.append({'id': instance_id, **changed, 'last_seen_at': stamp, 'updated_at': stamp})
+        if updates:
+            session.execute(update(ComputeWorkerInstance).execution_options(synchronize_session=False), updates)
+
+    with _snapshot_phase(phase_timings, 'stale_row_sweep_ms'):
+        prior_worker_ids = runtime_workers_service.reclaimable_worker_ids(session, kind=RuntimeWorkerKind.COORDINATOR) - {worker_id}
+        stop_compute_workers = (
+            update(ComputeWorkerInstance)
+            .where(col(ComputeWorkerInstance.worker_id).in_(prior_worker_ids | {worker_id}))
+            .where(col(ComputeWorkerInstance.namespace) == namespace)
+            .where(col(ComputeWorkerInstance.status) != ComputeWorkerInstanceStatus.STOPPED.value)
+        )
+        if active_by_id:
+            stop_compute_workers = stop_compute_workers.where(col(ComputeWorkerInstance.id).not_in(active_by_id))
+        session.execute(
+            stop_compute_workers.values(
+                status=ComputeWorkerInstanceStatus.STOPPED.value,
+                current_job_id=None,
+                current_build_id=None,
+                current_compute_worker_run_id=None,
                 last_seen_at=stamp,
                 updated_at=stamp,
-            )
-            _apply_compute_worker_status(row, status=status, instance_status=instance_status, stamp=stamp)
-            session.add(row)
-            continue
-
-        projection = _compute_worker_status_projection(
-            status=status,
-            instance_status=instance_status,
-            last_activity_at=row['last_activity_at'],
-            stamp=stamp,
+            ).execution_options(synchronize_session=False)
         )
-        changed = {field: value for field, value in projection.items() if row[field] != value}
-        if changed:
-            updates.append({'id': instance_id, **changed, 'last_seen_at': stamp, 'updated_at': stamp})
-    if updates:
-        session.execute(update(ComputeWorkerInstance).execution_options(synchronize_session=False), updates)
-    _finish_snapshot_phase(phase_timings, 'applying_statuses_ms', phase_started)
 
-    phase_started = _start_snapshot_phase(phase_timings)
-    prior_worker_ids = runtime_workers_service.reclaimable_worker_ids(session, kind=RuntimeWorkerKind.COORDINATOR) - {worker_id}
-    worker_ids_to_stop = prior_worker_ids | {worker_id}
-    stop_compute_workers = (
-        update(ComputeWorkerInstance)
-        .where(col(ComputeWorkerInstance.worker_id).in_(worker_ids_to_stop))
-        .where(col(ComputeWorkerInstance.namespace) == namespace)
-        .where(col(ComputeWorkerInstance.status) != ComputeWorkerInstanceStatus.STOPPED.value)
-    )
-    if active_by_id:
-        stop_compute_workers = stop_compute_workers.where(col(ComputeWorkerInstance.id).not_in(active_by_id))
-    session.execute(
-        stop_compute_workers.values(
-            status=ComputeWorkerInstanceStatus.STOPPED.value,
-            current_job_id=None,
-            current_build_id=None,
-            current_compute_worker_run_id=None,
-            last_seen_at=stamp,
-            updated_at=stamp,
-        ).execution_options(synchronize_session=False)
-    )
-    _finish_snapshot_phase(phase_timings, 'stale_row_sweep_ms', phase_started)
+    with _snapshot_phase(phase_timings, 'notification_enqueue_ms'):
+        runtime_ipc.notify_runtime_payload_on_commit(session, {'kind': RuntimePayloadKind.ENGINE.value, 'namespace': namespace})
 
-    phase_started = _start_snapshot_phase(phase_timings)
-    runtime_ipc.notify_runtime_payload_on_commit(
-        session,
-        {'kind': RuntimePayloadKind.ENGINE.value, 'namespace': namespace},
-    )
-    _finish_snapshot_phase(phase_timings, 'notification_enqueue_ms', phase_started)
-
-    phase_started = _start_snapshot_phase(phase_timings)
-    session.commit()
-    _finish_snapshot_phase(phase_timings, 'snapshot_commit_ms', phase_started)
+    with _snapshot_phase(phase_timings, 'snapshot_commit_ms'):
+        session.commit()
 
 
 def list_compute_worker_instances(session: Session, *, namespace: str) -> list[ComputeWorkerInstance]:
@@ -282,29 +238,16 @@ def list_compute_worker_instances(session: Session, *, namespace: str) -> list[C
 
 
 def list_engine_projection(session: Session, *, namespace: str) -> list[ComputeWorkerInstance]:
-    rows = list_compute_worker_instances(session, namespace=namespace)
+    """Pick one row per identity: freshest sighting, then freshest activity, then lowest worker ID."""
+
+    def freshness(row: ComputeWorkerInstance) -> tuple[datetime, datetime]:
+        return row.last_seen_at or row.updated_at, row.last_activity_at or row.updated_at
+
     latest: dict[str, ComputeWorkerInstance] = {}
-    for row in rows:
+    for row in list_compute_worker_instances(session, namespace=namespace):
         key = _row_identity_key(row)
         current = latest.get(key)
-        if current is None:
-            latest[key] = row
-            continue
-        current_seen = current.last_seen_at or current.updated_at
-        row_seen = row.last_seen_at or row.updated_at
-        if row_seen > current_seen:
-            latest[key] = row
-            continue
-        if row_seen < current_seen:
-            continue
-        current_activity = current.last_activity_at or current.updated_at
-        row_activity = row.last_activity_at or row.updated_at
-        if row_activity > current_activity:
-            latest[key] = row
-            continue
-        if row_activity < current_activity:
-            continue
-        if row.worker_id < current.worker_id:
+        if current is None or (freshness(row), current.worker_id) > (freshness(current), row.worker_id):
             latest[key] = row
     return sorted(latest.values(), key=_row_identity_key)
 

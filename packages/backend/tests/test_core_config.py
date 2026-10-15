@@ -60,7 +60,10 @@ class TestSettings:
         assert settings.compute_workers == 32
         assert Settings.model_fields['compute_workers'].alias == 'COMPUTE_WORKERS'
 
-    @pytest.mark.parametrize(('value', 'message'), [('0', 'compute_workers must be >= 1'), ('101', 'compute_workers must be <= 100')])
+    @pytest.mark.parametrize(
+        ('value', 'message'),
+        [('0', 'COMPUTE_WORKERS\n  Input should be greater than or equal to 1'), ('101', 'COMPUTE_WORKERS\n  Input should be less than or equal to 100')],
+    )
     def test_compute_workers_must_be_between_one_and_one_hundred(self, monkeypatch, tmp_path, value, message):
         _set_isolated_settings_env(monkeypatch, tmp_path)
         monkeypatch.setenv('COMPUTE_WORKERS', value)
@@ -190,19 +193,19 @@ class TestSettings:
         _set_isolated_settings_env(monkeypatch, tmp_path)
         monkeypatch.setenv('SCHEDULER_CHECK_INTERVAL', '-100')
 
-        with pytest.raises(ValidationError, match='scheduler_check_interval must be >= 1'):
+        with pytest.raises(ValidationError, match='SCHEDULER_CHECK_INTERVAL\n  Input should be greater than or equal to 1'):
             Settings()
 
     def test_port_must_be_in_valid_range(self, monkeypatch, tmp_path):
         _set_isolated_settings_env(monkeypatch, tmp_path)
         monkeypatch.setenv('PORT', '0')
 
-        with pytest.raises(ValidationError, match='port must be >= 1'):
+        with pytest.raises(ValidationError, match='PORT\n  Input should be greater than or equal to 1'):
             Settings()
 
         monkeypatch.setenv('PORT', '65536')
 
-        with pytest.raises(ValidationError, match='port must be <= 65535'):
+        with pytest.raises(ValidationError, match='PORT\n  Input should be less than or equal to 65535'):
             Settings()
 
     def test_upload_max_file_size_matches_data_plane_ceiling(self, monkeypatch, tmp_path):
@@ -213,7 +216,7 @@ class TestSettings:
         assert settings.upload_max_file_size_bytes == 2 * 1024 * 1024 * 1024
 
         monkeypatch.setenv('UPLOAD_MAX_FILE_SIZE_BYTES', str(2 * 1024 * 1024 * 1024 + 1))
-        with pytest.raises(ValidationError, match='upload_max_file_size_bytes must be <= 2147483648'):
+        with pytest.raises(ValidationError, match='UPLOAD_MAX_FILE_SIZE_BYTES\n  Input should be less than or equal to 2147483648'):
             Settings()
 
         monkeypatch.setenv('UPLOAD_MAX_FILE_SIZE_BYTES', '0')
@@ -281,7 +284,7 @@ class TestSettings:
         _set_isolated_settings_env(monkeypatch, tmp_path)
         monkeypatch.setenv('TRUSTED_PROXY_HOPS', '-1')
 
-        with pytest.raises(ValidationError, match='TRUSTED_PROXY_HOPS must be >= 0'):
+        with pytest.raises(ValidationError, match='TRUSTED_PROXY_HOPS\n  Input should be greater than or equal to 0'):
             Settings()
 
     def test_rejects_lock_heartbeat_not_less_than_ttl(self, monkeypatch, tmp_path):

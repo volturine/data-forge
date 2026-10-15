@@ -178,12 +178,9 @@ class _EngineJobs:
                 error_details={},
             )
         except Exception as exc:
-            try:
-                from runtime.polars_compute import classify_engine_error
+            from runtime.polars_compute import classify_engine_error
 
-                error_kind, error_details = classify_engine_error(exc)
-            except Exception:
-                error_kind, error_details = "execution_error", {}
+            error_kind, error_details = classify_engine_error(exc)
             error_details = {**error_details, "exception_type": type(exc).__name__}
             logger.exception("Engine job %s failed", state.job_id)
             result = ComputeWorkerResult(
@@ -501,21 +498,17 @@ class PolarsComputeWorkerServicer(compute_worker_runtime_pb2_grpc.PolarsComputeW
             self._token = request.token
             os.environ["COMPUTE_WORKER_IDENTITY"] = request.engine_identity
             os.environ["COMPUTE_WORKER_RPC_TOKEN"] = request.token
-            if request.object_store_endpoint:
-                os.environ["OBJECT_STORE_ENDPOINT"] = request.object_store_endpoint
-                settings.object_store_endpoint = request.object_store_endpoint
-            if request.object_store_region:
-                os.environ["OBJECT_STORE_REGION"] = request.object_store_region
-                settings.object_store_region = request.object_store_region
-            if request.object_store_access_key:
-                os.environ["OBJECT_STORE_ACCESS_KEY"] = request.object_store_access_key
-                settings.object_store_access_key = request.object_store_access_key
-            if request.object_store_secret_key:
-                os.environ["OBJECT_STORE_SECRET_KEY"] = request.object_store_secret_key
-                settings.object_store_secret_key = request.object_store_secret_key
-            if request.HasField("object_store_session_token") and request.object_store_session_token:
-                os.environ["OBJECT_STORE_SESSION_TOKEN"] = request.object_store_session_token
-                settings.object_store_session_token = request.object_store_session_token
+            for field_name in (
+                "object_store_endpoint",
+                "object_store_region",
+                "object_store_access_key",
+                "object_store_secret_key",
+                "object_store_session_token",
+            ):
+                value = getattr(request, field_name)
+                if value:
+                    os.environ[field_name.upper()] = value
+                    setattr(settings, field_name, value)
             if request.polars_max_threads > 0:
                 os.environ["POLARS_MAX_THREADS"] = str(request.polars_max_threads)
             if request.polars_streaming_chunk_size > 0:

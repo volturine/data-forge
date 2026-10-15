@@ -15,6 +15,7 @@ from backend_core.database import run_settings_db
 from backend_core.error_handlers import handle_errors
 from backend_core.namespace import get_namespace
 from backend_core.secrets import MASKED_SECRET
+from backend_core.settings_projection import get_resolved_smtp
 from backend_core.settings_schemas import (
     DetectCustomBotRequest,
     DetectTelegramResponse,
@@ -89,7 +90,7 @@ async def write_settings(
 @handle_errors(operation='test smtp')
 async def test_smtp(body: TestSmtpRequest, user: User = Depends(get_current_user)) -> TestResult:
     """Send a test email via SMTP to verify email notification settings. Requires 'to' address in body."""
-    smtp = await run_api_blocking(settings_store.get_resolved_smtp)
+    smtp = await run_api_blocking(get_resolved_smtp)
     host = str(smtp.get('host', ''))
     port = int(str(smtp.get('port', 587)))
     smtp_user = str(smtp.get('user', ''))
@@ -164,6 +165,18 @@ async def test_telegram(body: TestTelegramRequest, user: User = Depends(get_curr
         raise HTTPException(status_code=502, detail=_redact_token(str(exc), token)) from exc
 
 
+async def _detect_chats(token: str, user_id: str) -> DetectTelegramResponse:
+    try:
+        result = await request_chat_detection(token=token, request_user_id=user_id, namespace=get_namespace())
+        return DetectTelegramResponse.model_validate(result)
+    except telegram_runtime_store.DetectionQueueFull as exc:
+        raise HTTPException(status_code=429, detail=str(exc)) from exc
+    except TelegramDetectionTimedOut as exc:
+        raise HTTPException(status_code=504, detail=str(exc)) from exc
+    except TelegramDetectionFailed as exc:
+        raise HTTPException(status_code=502, detail=str(exc)) from exc
+
+
 @router.post('/detect-telegram-chat', response_model=DetectTelegramResponse, mcp=True)
 @handle_errors(operation='detect telegram chat')
 async def detect_telegram_chat(
@@ -177,15 +190,7 @@ async def detect_telegram_chat(
     resolved = await run_api_blocking(run_settings_db, telegram_runtime_store.read_settings)
     if not resolved.enabled:
         return DetectTelegramResponse(success=False, message='Telegram bot token not configured')
-    try:
-        result = await request_chat_detection(token=resolved.token, request_user_id=user.id, namespace=get_namespace())
-        return DetectTelegramResponse.model_validate(result)
-    except telegram_runtime_store.DetectionQueueFull as exc:
-        raise HTTPException(status_code=429, detail=str(exc)) from exc
-    except TelegramDetectionTimedOut as exc:
-        raise HTTPException(status_code=504, detail=str(exc)) from exc
-    except TelegramDetectionFailed as exc:
-        raise HTTPException(status_code=502, detail=str(exc)) from exc
+    return await _detect_chats(resolved.token, user.id)
 
 
 @router.post('/detect-chat-custom', response_model=DetectTelegramResponse, mcp=True)
@@ -200,16 +205,4 @@ async def detect_custom_bot_chat(
     """
     if not body.bot_token:
         return DetectTelegramResponse(success=False, message='Bot token is required')
-    try:
-        result = await request_chat_detection(
-            token=body.bot_token,
-            request_user_id=user.id,
-            namespace=get_namespace(),
-        )
-        return DetectTelegramResponse.model_validate(result)
-    except telegram_runtime_store.DetectionQueueFull as exc:
-        raise HTTPException(status_code=429, detail=str(exc)) from exc
-    except TelegramDetectionTimedOut as exc:
-        raise HTTPException(status_code=504, detail=str(exc)) from exc
-    except TelegramDetectionFailed as exc:
-        raise HTTPException(status_code=502, detail=str(exc)) from exc
+    return await _detect_chats(body.bot_token, user.id)

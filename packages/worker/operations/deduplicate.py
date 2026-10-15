@@ -12,11 +12,6 @@ class DeduplicateParams(OperationParams):
 
 
 class DeduplicateHandler(OperationHandler):
-    def __call__(
-        self,
-        lf: pl.LazyFrame,
-        params: dict,
-        **_,
-    ) -> pl.LazyFrame:
+    def __call__(self, lf: pl.LazyFrame, params: dict, **_) -> pl.LazyFrame:
         validated = DeduplicateParams.model_validate(params)
         return lf.unique(subset=validated.subset, keep=validated.keep.polars_keep, maintain_order=True)

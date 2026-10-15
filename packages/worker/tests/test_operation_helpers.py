@@ -5,11 +5,11 @@ import polars as pl
 import pytest
 
 from dataforge_protocol import enums_pb2
-from operations.enums import FilterOperator, TimeComponent
+from operations.enums import ChartAggregation, FilterOperator, TimeComponent
 from operations.fill_null import cast_value, get_fill_strategy, get_polars_type
 from operations.filter import FilterOperatorDefinition
 from operations.groupby import GroupByAggregationDefinition
-from operations.plot import ChartAggregationDefinition
+from operations.plot import _agg_expr
 from operations.template_placeholders import render_template_placeholders
 from operations.timeseries import TimeseriesParams
 from runtime.config import settings
@@ -59,15 +59,9 @@ def test_groupby_aggregation_definition_invalid():
         GroupByAggregationDefinition.require("nope")
 
 
-def test_chart_aggregation_definition():
-    definition = ChartAggregationDefinition.require("sum")
-    expr = definition.apply("value")
+def test_chart_aggregation_expression():
+    expr = _agg_expr("value", ChartAggregation.SUM)
     assert isinstance(expr, pl.Expr)
-
-
-def test_chart_aggregation_definition_invalid():
-    with pytest.raises(ValueError, match="Unsupported chart aggregation"):
-        ChartAggregationDefinition.require("nope")
 
 
 def test_timeseries_extractor_and_duration():

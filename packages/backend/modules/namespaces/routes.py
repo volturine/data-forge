@@ -155,11 +155,6 @@ def _create_namespace_locked(name: str) -> NamespaceResponse:
 
     # Credentials before registration: a namespace that engines cannot open is
     # not usable, so a failure here must not leave one registered.
-    # Use short-lived settings sessions for the DB phases. Bucket creation is
-    # an external RPC and must not hold a database connection while it runs.
-    bucket_duration_ms = phase_durations['bucket']
-    credentials_duration_ms = phase_durations['credentials']
-    migration_duration_ms = phase_durations['migration']
     register_started = time.perf_counter()
     run_settings_db(register_namespace, name)
     register_duration_ms = int((time.perf_counter() - register_started) * 1000)
@@ -169,9 +164,9 @@ def _create_namespace_locked(name: str) -> NamespaceResponse:
         'Namespace provisioning completed name=%s total_ms=%s bucket_ms=%s credentials_ms=%s migration_ms=%s register_ms=%s',
         name,
         total_duration_ms,
-        bucket_duration_ms,
-        credentials_duration_ms,
-        migration_duration_ms,
+        phase_durations['bucket'],
+        phase_durations['credentials'],
+        phase_durations['migration'],
         register_duration_ms,
     )
     return NamespaceResponse(name=name, storage=storage, created_bucket=True)

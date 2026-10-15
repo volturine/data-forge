@@ -364,8 +364,6 @@ PROTOCOL_BACKED_ENUM_FILES = [
     Path('packages/worker/datasources/schemas.py'),
     Path('packages/worker/operations/datasource.py'),
     Path('packages/worker/runtime/domain/analysis/step_types.py'),
-    Path('packages/worker/runtime/domain/build_jobs/models.py'),
-    Path('packages/worker/runtime/domain/build_runs/models.py'),
     Path('packages/worker/runtime/domain/compute/schemas.py'),
     Path('packages/worker/runtime/domain/datasource/models.py'),
     Path('packages/worker/runtime/domain/datasource/source_types.py'),

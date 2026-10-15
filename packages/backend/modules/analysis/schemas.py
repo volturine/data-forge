@@ -94,23 +94,15 @@ class TabSchema(BaseModel):
     steps: list[PipelineStepSchema] = Field(default_factory=list)
 
 
-def _reject_pipeline_steps(data: Any) -> Any:
-    if isinstance(data, dict) and 'pipeline_steps' in data:
-        raise ValueError("'pipeline_steps' is not accepted; use 'tabs'")
-    return data
-
-
-def _reject_status(data: Any) -> Any:
-    if isinstance(data, dict) and 'status' in data:
-        raise ValueError("'status' is not accepted on analysis payloads; build lifecycle is tracked separately")
-    return data
-
-
 class _RejectPipelineStepsModel(BaseModel):
     @model_validator(mode='before')
     @classmethod
     def reject_pipeline_steps(cls, data: Any) -> Any:
-        return _reject_status(_reject_pipeline_steps(data))
+        if isinstance(data, dict) and 'pipeline_steps' in data:
+            raise ValueError("'pipeline_steps' is not accepted; use 'tabs'")
+        if isinstance(data, dict) and 'status' in data:
+            raise ValueError("'status' is not accepted on analysis payloads; build lifecycle is tracked separately")
+        return data
 
 
 class AnalysisCreateSchema(_RejectPipelineStepsModel):

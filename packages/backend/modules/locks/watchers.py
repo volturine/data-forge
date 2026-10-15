@@ -47,11 +47,6 @@ class LockWatcherRegistry:
         async with self._lock:
             return list(self._versions.items())
 
-    async def sockets(self, namespace: str, resource_type: str, resource_id: str) -> list[WebSocket]:
-        key = (namespace, resource_type, resource_id)
-        async with self._lock:
-            return list(self._watchers.get(key, set()))
-
     async def clear(self) -> None:
         async with self._lock:
             self._watchers.clear()
@@ -130,10 +125,7 @@ async def _send_status(namespace: str, resource_type: str, resource_id: str, pay
             return websocket, False
         return websocket, sent
 
-    results = await asyncio.gather(
-        *(_notify(websocket) for websocket in sockets),
-    )
-    stale = [websocket for websocket, sent in results if not sent]
-    for websocket in stale:
+    results = await asyncio.gather(*(_notify(websocket) for websocket in sockets))
+    for websocket in [websocket for websocket, sent in results if not sent]:
         await registry.discard(websocket, namespace, resource_type, resource_id)
     return True

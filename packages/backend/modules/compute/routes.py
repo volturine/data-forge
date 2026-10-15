@@ -4,12 +4,15 @@ import logging
 import os
 import re
 import uuid
+from collections.abc import Awaitable, Callable, Coroutine
 from datetime import datetime
+from typing import Any
 from urllib.parse import quote
 
 import anyio
 from fastapi import Depends, HTTPException, Request, WebSocket, WebSocketDisconnect
 from fastapi.responses import Response
+from pydantic import BaseModel
 from sqlmodel import Session
 
 from backend_core import (
@@ -27,7 +30,7 @@ from backend_core.domain.build_runs.live import BuildNotification, hub as build_
 from backend_core.domain.compute import schemas
 from backend_core.domain.compute_worker_runs.schemas import ComputeWorkerRunKind
 from backend_core.error_handlers import handle_errors
-from backend_core.namespace import get_namespace, reset_namespace, set_namespace_context
+from backend_core.namespace import get_namespace, namespace_scope, reset_namespace, set_namespace_context
 from backend_core.persistence.analysis.models import Analysis
 from backend_core.time import utc_now as _utcnow
 from backend_core.validation import (
@@ -48,11 +51,7 @@ from dataforge_protocol import compute_pb2, enums_pb2
 from modules.analysis.step_schemas import normalize_pipeline_step_configs_for_protocol
 from modules.auth.dependencies import get_current_user
 from modules.auth.models import User
-from modules.compute import commands, executor_client, representations
-from modules.compute.iceberg_service import (
-    delete_iceberg_snapshot as delete_iceberg_snapshot_info,
-    list_iceberg_snapshots as list_iceberg_snapshots_info,
-)
+from modules.compute import commands, executor_client, iceberg_service, representations
 from modules.datasource import service as datasource_service
 from modules.mcp.router import MCPRouter
 from modules.scheduler import service as scheduler_service
@@ -62,28 +61,11 @@ logger = logging.getLogger(__name__)
 router = MCPRouter(prefix='/compute', tags=['compute'], dependencies=[Depends(get_current_user)])
 
 
-async def _parse_preview_request(request: Request) -> schemas.StepPreviewRequest:
-    return await executor_client.parse_request_model(request, schemas.StepPreviewRequest)
+def _json_body[T: BaseModel](model_type: type[T]) -> Callable[[Request], Awaitable[T]]:
+    async def parse(request: Request) -> T:
+        return await executor_client.parse_request_model(request, model_type)
 
-
-async def _parse_schema_request(request: Request) -> schemas.StepSchemaRequest:
-    return await executor_client.parse_request_model(request, schemas.StepSchemaRequest)
-
-
-async def _parse_row_count_request(request: Request) -> schemas.StepRowCountRequest:
-    return await executor_client.parse_request_model(request, schemas.StepRowCountRequest)
-
-
-async def _parse_export_request(request: Request) -> schemas.ExportRequest:
-    return await executor_client.parse_request_model(request, schemas.ExportRequest)
-
-
-async def _parse_download_request(request: Request) -> schemas.DownloadRequest:
-    return await executor_client.parse_request_model(request, schemas.DownloadRequest)
-
-
-async def _parse_build_request(request: Request) -> schemas.BuildRequest:
-    return await executor_client.parse_request_model(request, schemas.BuildRequest)
+    return parse
 
 
 async def _wait_for_websocket_disconnect(websocket: WebSocket) -> None:
@@ -105,7 +87,6 @@ def _resolve_websocket_user(websocket: WebSocket) -> User | None:
     if override is not None:
         return override()
 
-    from backend_core.database import run_settings_db
     from modules.auth.service import ensure_default_user, validate_session
 
     token = resolve_websocket_session_token(websocket)
@@ -134,17 +115,13 @@ class _BuildNotActive(RuntimeError):
 
 def _start_build_in_new_session(command: commands.StartBuildCommand) -> schemas.BuildRunDetail | None:
     """Commit and read a build using one session owned by one worker thread."""
-    token = set_namespace_context(command.namespace)
-    try:
+    with namespace_scope(command.namespace):
 
         def _work(session: Session) -> schemas.BuildRunDetail | None:
             commands.start_build(session, command)
-            detail = _get_durable_build_detail(session, command.build_id)
-            return detail
+            return _get_durable_build_detail(session, command.build_id)
 
         return run_db(_work)
-    finally:
-        reset_namespace(token)
 
 
 def _cancel_build_in_new_session(
@@ -155,8 +132,7 @@ def _cancel_build_in_new_session(
     cancelled_at: datetime,
 ) -> tuple[schemas.BuildRunDetail, int, int]:
     """Cancel a build without sharing the request dependency session cross-thread."""
-    token = set_namespace_context(namespace)
-    try:
+    with namespace_scope(namespace):
 
         def _work(session: Session) -> tuple[schemas.BuildRunDetail, int, int]:
             detail = _get_durable_build_detail(session, build_id)
@@ -189,22 +165,6 @@ def _cancel_build_in_new_session(
             return detail, event_row.sequence, duration_ms
 
         return run_db(_work)
-    finally:
-        reset_namespace(token)
-
-
-def _list_durable_build_runs(session: Session, namespace: str) -> list[schemas.BuildRunSummary]:
-    runs = build_run_service.list_build_runs(session)
-    visible = [run for run in runs if run.namespace == namespace]
-    return [
-        build_run_service.build_summary(run)
-        for run in visible
-        if run.status
-        in {
-            build_run_service.BuildRunStatus.QUEUED,
-            build_run_service.BuildRunStatus.RUNNING,
-        }
-    ]
 
 
 def _build_snapshot_message(session: Session, build_id: str) -> schemas.BuildSnapshotMessage | None:
@@ -218,7 +178,11 @@ def _build_snapshot_message(session: Session, build_id: str) -> schemas.BuildSna
 
 
 def _build_list_snapshot_message(session: Session, namespace: str) -> schemas.BuildListSnapshotMessage:
-    return schemas.BuildListSnapshotMessage(builds=_list_durable_build_runs(session, namespace))
+    active = {build_run_service.BuildRunStatus.QUEUED, build_run_service.BuildRunStatus.RUNNING}
+    runs = build_run_service.list_build_runs(session)
+    return schemas.BuildListSnapshotMessage(
+        builds=[build_run_service.build_summary(run) for run in runs if run.namespace == namespace and run.status in active]
+    )
 
 
 async def _replay_build_events(websocket: WebSocket, build_id: str, after_sequence: int) -> int | None:
@@ -235,9 +199,10 @@ async def _replay_build_events(websocket: WebSocket, build_id: str, after_sequen
     return latest
 
 
-async def _wait_for_build_notification(websocket: WebSocket, build_id: str, last_sequence: int = 0) -> BuildNotification | None:
+async def _wait_unless_disconnected[T](websocket: WebSocket, notification: Coroutine[Any, Any, T]) -> T | None:
+    """Await a live notification, or return None once the client disconnects."""
     receive_task = asyncio.create_task(_wait_for_websocket_disconnect(websocket))
-    notify_task = asyncio.create_task(build_hub.wait_for_build(build_id, last_sequence))
+    notify_task = asyncio.create_task(notification)
     done, pending = await asyncio.wait({receive_task, notify_task}, return_when=asyncio.FIRST_COMPLETED)
     for task in pending:
         task.cancel()
@@ -248,24 +213,6 @@ async def _wait_for_build_notification(websocket: WebSocket, build_id: str, last
     return await notify_task
 
 
-async def _wait_for_namespace_build_update(websocket: WebSocket, namespace: str, last_seen: str | None) -> str | None:
-    last_version = int(last_seen) if last_seen and last_seen.isdigit() else 0
-    receive_task = asyncio.create_task(_wait_for_websocket_disconnect(websocket))
-    notify_task = asyncio.create_task(build_hub.wait_for_namespace(namespace, last_version))
-    done, pending = await asyncio.wait({receive_task, notify_task}, return_when=asyncio.FIRST_COMPLETED)
-    for task in pending:
-        task.cancel()
-    if pending:
-        await asyncio.gather(*pending, return_exceptions=True)
-    if receive_task in done:
-        return None
-    _ = await notify_task
-    latest_version = build_hub.latest_namespace_sequence(namespace)
-    if latest_version > last_version:
-        return str(latest_version)
-    return last_seen
-
-
 async def _require_websocket_user(websocket: WebSocket) -> User:
     user = await run_api_blocking(_resolve_websocket_user, websocket)
     if user is None:
@@ -273,40 +220,16 @@ async def _require_websocket_user(websocket: WebSocket) -> User:
     return user
 
 
-def _analysis_name(session: Session, analysis_id: str | None) -> str:
+def _analysis_name(session: Session, analysis_id: str) -> str:
     if not analysis_id:
         return 'Build'
     analysis = session.get(Analysis, analysis_id)
-    if analysis and analysis.name:
-        return analysis.name
-    return analysis_id
-
-
-def _build_analysis_name(session: Session, pipeline: dict) -> str:
-    analysis_id = pipeline.get('analysis_id')
-    if not isinstance(analysis_id, str) or not analysis_id:
-        return 'Build'
-    return _analysis_name(session, analysis_id)
-
-
-def _normalize_build_pipeline(request: schemas.BuildRequest) -> dict[str, object]:
-    """Normalize a complete build payload outside the API event loop."""
-    return normalize_pipeline_step_configs_for_protocol(request.pipeline_payload())
+    return analysis.name if analysis and analysis.name else analysis_id
 
 
 async def _send_build_list_snapshot(websocket: WebSocket, namespace: str) -> None:
     message = await run_api_blocking(run_db, lambda session: _build_list_snapshot_message(session, namespace))
     await safe_send_json(websocket, message)
-
-
-def _resolved_default_max_threads() -> int:
-    """Default engine threads when an analysis does not set max_threads.
-
-    POLARS_CORES_AVAILABLE is the platform budget (0 = all logical CPUs on host).
-    """
-    if settings.polars_cores_available > 0:
-        return settings.polars_cores_available
-    return os.cpu_count() or 1
 
 
 def _resolved_system_memory_mb() -> int:
@@ -321,12 +244,6 @@ def _resolved_system_memory_mb() -> int:
     if total_bytes <= 0:
         return 0
     return total_bytes // (1024 * 1024)
-
-
-def _resolved_default_max_memory_mb() -> int:
-    if settings.polars_max_memory_mb > 0:
-        return settings.polars_max_memory_mb
-    return _resolved_system_memory_mb()
 
 
 async def _send_compute_worker_snapshot(websocket: WebSocket) -> str:
@@ -346,24 +263,11 @@ async def _send_compute_worker_snapshot(websocket: WebSocket) -> str:
     return str(version)
 
 
-async def _wait_for_compute_worker_notification(websocket: WebSocket, namespace: str, last_seen: str | None) -> str | None:
-    receive_task = asyncio.create_task(_wait_for_websocket_disconnect(websocket))
-    notify_task = asyncio.create_task(compute_worker_registry.wait_for_namespace(namespace, last_seen))
-    done, pending = await asyncio.wait({receive_task, notify_task}, return_when=asyncio.FIRST_COMPLETED)
-    for task in pending:
-        task.cancel()
-    if pending:
-        await asyncio.gather(*pending, return_exceptions=True)
-    if receive_task in done:
-        return None
-    return await notify_task
-
-
 @router.post('/preview', response_model=None, mcp=True)
 @handle_errors(operation='preview step')
 async def preview_step(
     http_request: Request,
-    request: schemas.StepPreviewRequest = Depends(_parse_preview_request),
+    request: schemas.StepPreviewRequest = Depends(_json_body(schemas.StepPreviewRequest)),
     _user: User = Depends(get_current_user),
 ):
     """Preview the result of a pipeline step with pagination.
@@ -384,7 +288,7 @@ async def preview_step(
 @handle_errors(operation='get step schema')
 async def get_step_schema(
     http_request: Request,
-    request: schemas.StepSchemaRequest = Depends(_parse_schema_request),
+    request: schemas.StepSchemaRequest = Depends(_json_body(schemas.StepSchemaRequest)),
     _user: User = Depends(get_current_user),
 ):
     """Get the output column schema of a pipeline step without fetching data.
@@ -402,7 +306,7 @@ async def get_step_schema(
 @handle_errors(operation='get step row count')
 async def get_step_row_count(
     http_request: Request,
-    request: schemas.StepRowCountRequest = Depends(_parse_row_count_request),
+    request: schemas.StepRowCountRequest = Depends(_json_body(schemas.StepRowCountRequest)),
     _user: User = Depends(get_current_user),
 ):
     """Get the row count of a pipeline step result without fetching data. Faster than a full preview."""
@@ -431,7 +335,7 @@ async def list_iceberg_snapshots(
     """
     return await run_api_blocking(
         run_db,
-        list_iceberg_snapshots_info,
+        iceberg_service.list_iceberg_snapshots,
         parse_datasource_id(datasource_id),
         branch=branch,
         build_results_only=build_results_only,
@@ -452,26 +356,22 @@ async def delete_iceberg_snapshot(
 
     Warning: deleting snapshots removes the ability to time-travel to that point.
     """
-    return await run_api_blocking(
-        run_db,
-        delete_iceberg_snapshot_info,
-        parse_datasource_id(datasource_id),
-        str(snapshot_id),
-    )
+    return await run_api_blocking(run_db, iceberg_service.delete_iceberg_snapshot, parse_datasource_id(datasource_id), str(snapshot_id))
 
 
 @router.post('/builds', response_model=schemas.BuildRunDetail)
 @handle_errors(operation='start build')
 async def start_build(
-    request: schemas.BuildRequest = Depends(_parse_build_request),
+    request: schemas.BuildRequest = Depends(_json_body(schemas.BuildRequest)),
     user: User = Depends(get_current_user),
 ):
     # Build jobs are durable queue entries too. Do not turn a momentarily stale
     # worker heartbeat into a lost build; dispatch below will wake the manager
     # when it is available.
-    pipeline = await run_api_blocking(_normalize_build_pipeline, request)
+    # Normalizing the complete build payload is CPU work; keep it off the API event loop.
+    pipeline = await run_api_blocking(lambda: normalize_pipeline_step_configs_for_protocol(request.pipeline_payload()))
     analysis_id = str(pipeline.get('analysis_id') or '')
-    analysis_name = await run_api_blocking(run_db, _build_analysis_name, pipeline)
+    analysis_name = await run_api_blocking(run_db, _analysis_name, analysis_id)
     namespace = get_namespace()
     started_at = _utcnow()
     build_id = str(uuid.uuid4())
@@ -483,23 +383,10 @@ async def start_build(
     )
     if not isinstance(selected_tab, dict):
         raise HTTPException(status_code=404, detail=f'Build request tab {request.tab_id} not found in analysis pipeline')
-    active_tab = selected_tab
-    current_kind = ComputeWorkerRunKind.BUILD.value
-    current_datasource_id: str | None = None
-    current_tab_id: str | None = None
-    current_tab_name: str | None = None
-    current_output_id: str | None = None
-    current_output_name: str | None = None
+    selected_datasource = selected_tab.get('datasource')
+    current_datasource_id = selected_datasource.get('id') if isinstance(selected_datasource, dict) else None
+    current_tab_name = selected_tab.get('name')
     data_plane = None
-    if isinstance(active_tab, dict):
-        datasource = active_tab.get('datasource')
-        if isinstance(datasource, dict) and isinstance(datasource.get('id'), str):
-            current_datasource_id = datasource.get('id')
-        if isinstance(active_tab.get('id'), str):
-            current_tab_id = active_tab.get('id')
-        if isinstance(active_tab.get('name'), str):
-            current_tab_name = active_tab.get('name')
-    starter = schemas.BuildStarter.for_user(user)
     placeholders: list[commands.OutputPlaceholder] = []
     for tab in tabs:
         if not isinstance(tab, dict):
@@ -522,7 +409,6 @@ async def start_build(
         if isinstance(branch_name, str) and branch_name.strip():
             safe_branch = re.sub(r'[^a-zA-Z0-9_]+', '_', branch_name).strip('_')
             table_name = f'{result_id}_{safe_branch}'
-            namespace = get_namespace()
             if data_plane is None:
                 data_plane = await run_api_blocking(client_from_settings)
             warehouse_path = await run_api_blocking(data_plane.build_object_url, 'exports', namespace=namespace)
@@ -553,13 +439,13 @@ async def start_build(
         analysis_id=analysis_id,
         analysis_name=analysis_name,
         request_json={'analysis_pipeline': {'analysis_id': pipeline['analysis_id'], 'tabs': pipeline['tabs']}, 'tab_id': request.tab_id},
-        starter_json=await executor_client.model_payload(starter, mode='json'),
-        current_kind=current_kind,
-        current_datasource_id=current_datasource_id,
-        current_tab_id=current_tab_id,
-        current_tab_name=current_tab_name,
-        current_output_id=current_output_id,
-        current_output_name=current_output_name,
+        starter_json=await executor_client.model_payload(schemas.BuildStarter.for_user(user), mode='json'),
+        current_kind=ComputeWorkerRunKind.BUILD.value,
+        current_datasource_id=current_datasource_id if isinstance(current_datasource_id, str) else None,
+        current_tab_id=request.tab_id,
+        current_tab_name=current_tab_name if isinstance(current_tab_name, str) else None,
+        current_output_id=None,
+        current_output_name=None,
         total_tabs=1,
         started_at=started_at,
         placeholders=placeholders,
@@ -688,36 +574,43 @@ async def get_build(
 # Engine lifecycle endpoints
 
 
+def _analysis_identity(analysis_id: str) -> compute_pb2.ComputeWorkerIdentity:
+    return compute_pb2.ComputeWorkerIdentity(
+        scope=enums_pb2.COMPUTE_WORKER_SCOPE_ANALYSIS_INTERACTIVE,
+        reuse_policy=enums_pb2.COMPUTE_WORKER_REUSE_POLICY_SHARED,
+        analysis_id=analysis_id,
+        resource_id=analysis_id,
+    )
+
+
+def _datasource_preview_identity(datasource_id: DataSourceId) -> compute_pb2.ComputeWorkerIdentity:
+    datasource_id_value = parse_datasource_id(datasource_id)
+    return compute_pb2.ComputeWorkerIdentity(
+        scope=enums_pb2.COMPUTE_WORKER_SCOPE_DATASOURCE_PREVIEW,
+        reuse_policy=enums_pb2.COMPUTE_WORKER_REUSE_POLICY_SHARED,
+        datasource_id=datasource_id_value,
+        resource_id=datasource_id_value,
+    )
+
+
 async def _spawn_compute_worker_identity(
-    identity,
+    identity: compute_pb2.ComputeWorkerIdentity,
     request: schemas.SpawnComputeWorkerRequest | None,
 ):
     resource_config = await executor_client.model_payload(request.resource_config) if request and request.resource_config else None
-    return await executor_client.spawn_compute_worker(
-        identity=identity,
-        resource_config=resource_config,
-    )
+    return await executor_client.spawn_compute_worker(identity=identity, resource_config=resource_config)
 
 
 async def _configure_compute_worker_identity(
-    identity,
+    identity: compute_pb2.ComputeWorkerIdentity,
     request: schemas.ComputeWorkerResourceConfig,
 ):
     resource_config = await executor_client.model_payload(request)
-    return await executor_client.configure_compute_worker(
-        identity=identity,
-        resource_config=resource_config,
-    )
+    return await executor_client.configure_compute_worker(identity=identity, resource_config=resource_config)
 
 
-async def _shutdown_compute_worker_identity(
-    identity,
-) -> None:
-    await run_api_blocking(
-        run_db,
-        executor_client.request_compute_worker_shutdown,
-        identity=identity,
-    )
+async def _shutdown_compute_worker_identity(identity: compute_pb2.ComputeWorkerIdentity) -> None:
+    await run_api_blocking(run_db, executor_client.request_compute_worker_shutdown, identity=identity)
 
 
 @router.post('/compute-worker/spawn/analysis/{analysis_id}', response_model=schemas.ComputeWorkerStatusSchema, mcp=True)
@@ -727,15 +620,7 @@ async def spawn_analysis_compute_worker(
     request: schemas.SpawnComputeWorkerRequest | None = None,
     _user: User = Depends(get_current_user),
 ):
-    return await _spawn_compute_worker_identity(
-        compute_pb2.ComputeWorkerIdentity(
-            scope=enums_pb2.COMPUTE_WORKER_SCOPE_ANALYSIS_INTERACTIVE,
-            reuse_policy=enums_pb2.COMPUTE_WORKER_REUSE_POLICY_SHARED,
-            analysis_id=analysis_id,
-            resource_id=analysis_id,
-        ),
-        request,
-    )
+    return await _spawn_compute_worker_identity(_analysis_identity(analysis_id), request)
 
 
 @router.post('/compute-worker/spawn/datasource-preview/{datasource_id}', response_model=schemas.ComputeWorkerStatusSchema, mcp=True)
@@ -745,16 +630,7 @@ async def spawn_datasource_preview_compute_worker(
     request: schemas.SpawnComputeWorkerRequest | None = None,
     _user: User = Depends(get_current_user),
 ):
-    datasource_id_value = parse_datasource_id(datasource_id)
-    return await _spawn_compute_worker_identity(
-        compute_pb2.ComputeWorkerIdentity(
-            scope=enums_pb2.COMPUTE_WORKER_SCOPE_DATASOURCE_PREVIEW,
-            reuse_policy=enums_pb2.COMPUTE_WORKER_REUSE_POLICY_SHARED,
-            datasource_id=datasource_id_value,
-            resource_id=datasource_id_value,
-        ),
-        request,
-    )
+    return await _spawn_compute_worker_identity(_datasource_preview_identity(datasource_id), request)
 
 
 @router.post('/compute-worker/configure/analysis/{analysis_id}', response_model=schemas.ComputeWorkerStatusSchema, mcp=True)
@@ -764,15 +640,7 @@ async def configure_analysis_compute_worker(
     request: schemas.ComputeWorkerResourceConfig,
     _user: User = Depends(get_current_user),
 ):
-    return await _configure_compute_worker_identity(
-        compute_pb2.ComputeWorkerIdentity(
-            scope=enums_pb2.COMPUTE_WORKER_SCOPE_ANALYSIS_INTERACTIVE,
-            reuse_policy=enums_pb2.COMPUTE_WORKER_REUSE_POLICY_SHARED,
-            analysis_id=analysis_id,
-            resource_id=analysis_id,
-        ),
-        request,
-    )
+    return await _configure_compute_worker_identity(_analysis_identity(analysis_id), request)
 
 
 @router.post('/compute-worker/configure/datasource-preview/{datasource_id}', response_model=schemas.ComputeWorkerStatusSchema, mcp=True)
@@ -782,16 +650,7 @@ async def configure_datasource_preview_compute_worker(
     request: schemas.ComputeWorkerResourceConfig,
     _user: User = Depends(get_current_user),
 ):
-    datasource_id_value = parse_datasource_id(datasource_id)
-    return await _configure_compute_worker_identity(
-        compute_pb2.ComputeWorkerIdentity(
-            scope=enums_pb2.COMPUTE_WORKER_SCOPE_DATASOURCE_PREVIEW,
-            reuse_policy=enums_pb2.COMPUTE_WORKER_REUSE_POLICY_SHARED,
-            datasource_id=datasource_id_value,
-            resource_id=datasource_id_value,
-        ),
-        request,
-    )
+    return await _configure_compute_worker_identity(_datasource_preview_identity(datasource_id), request)
 
 
 @router.delete('/compute-worker/analysis/{analysis_id}', status_code=204, mcp=True, mcp_confirm_required=True)
@@ -800,14 +659,7 @@ async def shutdown_analysis_compute_worker(
     analysis_id: AnalysisId,
     _user: User = Depends(get_current_user),
 ):
-    await _shutdown_compute_worker_identity(
-        compute_pb2.ComputeWorkerIdentity(
-            scope=enums_pb2.COMPUTE_WORKER_SCOPE_ANALYSIS_INTERACTIVE,
-            reuse_policy=enums_pb2.COMPUTE_WORKER_REUSE_POLICY_SHARED,
-            analysis_id=analysis_id,
-            resource_id=analysis_id,
-        ),
-    )
+    await _shutdown_compute_worker_identity(_analysis_identity(analysis_id))
 
 
 @router.delete('/compute-worker/datasource-preview/{datasource_id}', status_code=204, mcp=True, mcp_confirm_required=True)
@@ -816,15 +668,7 @@ async def shutdown_datasource_preview_compute_worker(
     datasource_id: DataSourceId,
     _user: User = Depends(get_current_user),
 ):
-    datasource_id_value = parse_datasource_id(datasource_id)
-    await _shutdown_compute_worker_identity(
-        compute_pb2.ComputeWorkerIdentity(
-            scope=enums_pb2.COMPUTE_WORKER_SCOPE_DATASOURCE_PREVIEW,
-            reuse_policy=enums_pb2.COMPUTE_WORKER_REUSE_POLICY_SHARED,
-            datasource_id=datasource_id_value,
-            resource_id=datasource_id_value,
-        ),
-    )
+    await _shutdown_compute_worker_identity(_datasource_preview_identity(datasource_id))
 
 
 @router.delete('/compute-worker/build/{build_id}', status_code=204, mcp=True, mcp_confirm_required=True)
@@ -843,6 +687,22 @@ async def shutdown_build_compute_worker(
     )
 
 
+async def _send_websocket_failure(
+    websocket: WebSocket,
+    exc: Exception,
+    error_message: type[schemas.ComputeWorkersWebsocketErrorMessage] | type[schemas.BuildWebsocketErrorMessage],
+    label: str,
+) -> None:
+    """Report a stream failure to the client; client disconnects end the stream quietly."""
+    if isinstance(exc, HTTPException):
+        await safe_send_json_error(websocket, error_message(error=str(exc.detail), status_code=exc.status_code))
+        return
+    if isinstance(exc, RuntimeError) and is_disconnect_runtime_error(exc):
+        return
+    logger.error('%s websocket error: %s', label, exc, exc_info=True)
+    await safe_send_json_error(websocket, error_message(error='An internal error occurred'))
+
+
 @router.websocket('/ws/compute-workers')
 async def compute_workers_stream(websocket: WebSocket) -> None:
     token = set_namespace_context(websocket.headers.get('X-Namespace') or websocket.query_params.get('namespace'))
@@ -855,7 +715,7 @@ async def compute_workers_stream(websocket: WebSocket) -> None:
         subscribed = True
         last_seen = await _send_compute_worker_snapshot(websocket)
         while True:
-            updated = await _wait_for_compute_worker_notification(websocket, namespace, last_seen)
+            updated = await _wait_unless_disconnected(websocket, compute_worker_registry.wait_for_namespace(namespace, last_seen))
             if updated is None:
                 return
             last_seen = await _send_compute_worker_snapshot(websocket)
@@ -866,25 +726,8 @@ async def compute_workers_stream(websocket: WebSocket) -> None:
         return
     except asyncio.CancelledError, concurrent.futures.CancelledError:
         return
-    except HTTPException as exc:
-        await safe_send_json_error(
-            websocket,
-            schemas.ComputeWorkersWebsocketErrorMessage(error=str(exc.detail), status_code=exc.status_code),
-        )
-    except RuntimeError as exc:
-        if is_disconnect_runtime_error(exc):
-            return
-        logger.error('Compute worker websocket error: %s', exc, exc_info=True)
-        await safe_send_json_error(
-            websocket,
-            schemas.ComputeWorkersWebsocketErrorMessage(error='An internal error occurred'),
-        )
     except Exception as exc:
-        logger.error('Compute worker websocket error: %s', exc, exc_info=True)
-        await safe_send_json_error(
-            websocket,
-            schemas.ComputeWorkersWebsocketErrorMessage(error='An internal error occurred'),
-        )
+        await _send_websocket_failure(websocket, exc, schemas.ComputeWorkersWebsocketErrorMessage, 'Compute worker')
     finally:
         if subscribed:
             with anyio.CancelScope(shield=True):
@@ -901,42 +744,24 @@ async def build_list_stream(websocket: WebSocket) -> None:
     await websocket.accept()
     try:
         await _require_websocket_user(websocket)
-        last_seen = str(build_hub.subscribe_namespace(namespace))
+        last_version = build_hub.subscribe_namespace(namespace)
         subscribed = True
         await _send_build_list_snapshot(websocket, namespace)
         while True:
-            updated = await _wait_for_namespace_build_update(websocket, namespace, last_seen)
-            if updated is None:
+            if await _wait_unless_disconnected(websocket, build_hub.wait_for_namespace(namespace, last_version)) is None:
                 return
-
+            # Capture the version before reading so a racing update triggers another snapshot.
+            updated_version = max(last_version, build_hub.latest_namespace_sequence(namespace))
             payload = await run_api_blocking(run_db, lambda session: _build_list_snapshot_message(session, namespace).model_dump(mode='json'))
-            sent = await safe_send_json(websocket, payload)
-            if not sent:
+            if not await safe_send_json(websocket, payload):
                 return
-            last_seen = updated
+            last_version = updated_version
     except WebSocketDisconnect:
         return
     except asyncio.CancelledError, concurrent.futures.CancelledError:
         return
-    except HTTPException as exc:
-        await safe_send_json_error(
-            websocket,
-            schemas.BuildWebsocketErrorMessage(error=str(exc.detail), status_code=exc.status_code),
-        )
-    except RuntimeError as exc:
-        if is_disconnect_runtime_error(exc):
-            return
-        logger.error('Build list websocket error: %s', exc, exc_info=True)
-        await safe_send_json_error(
-            websocket,
-            schemas.BuildWebsocketErrorMessage(error='An internal error occurred'),
-        )
     except Exception as exc:
-        logger.error('Build list websocket error: %s', exc, exc_info=True)
-        await safe_send_json_error(
-            websocket,
-            schemas.BuildWebsocketErrorMessage(error='An internal error occurred'),
-        )
+        await _send_websocket_failure(websocket, exc, schemas.BuildWebsocketErrorMessage, 'Build list')
     finally:
         if subscribed:
             build_hub.unsubscribe_namespace(namespace)
@@ -972,12 +797,11 @@ async def build_stream(websocket: WebSocket, build_id: str) -> None:
                 last_sequence = replayed_sequence
                 continue
             break
-        sent = await safe_send_json(websocket, message)
-        if not sent:
+        if not await safe_send_json(websocket, message):
             return
         last_sequence = max(last_sequence, message.last_sequence)
         while True:
-            notification = await _wait_for_build_notification(websocket, build_id, last_sequence)
+            notification = await _wait_unless_disconnected(websocket, build_hub.wait_for_build(build_id, last_sequence))
             if notification is None:
                 return
             replayed_sequence = await _replay_build_events(websocket, build_id, last_sequence)
@@ -988,25 +812,8 @@ async def build_stream(websocket: WebSocket, build_id: str) -> None:
         return
     except asyncio.CancelledError, concurrent.futures.CancelledError:
         return
-    except HTTPException as exc:
-        await safe_send_json_error(
-            websocket,
-            schemas.BuildWebsocketErrorMessage(error=str(exc.detail), status_code=exc.status_code),
-        )
-    except RuntimeError as exc:
-        if is_disconnect_runtime_error(exc):
-            return
-        logger.error('Active build websocket error: %s', exc, exc_info=True)
-        await safe_send_json_error(
-            websocket,
-            schemas.BuildWebsocketErrorMessage(error='An internal error occurred'),
-        )
     except Exception as exc:
-        logger.error('Active build websocket error: %s', exc, exc_info=True)
-        await safe_send_json_error(
-            websocket,
-            schemas.BuildWebsocketErrorMessage(error='An internal error occurred'),
-        )
+        await _send_websocket_failure(websocket, exc, schemas.BuildWebsocketErrorMessage, 'Active build')
     finally:
         if subscribed:
             build_hub.unsubscribe_build(namespace, build_id)
@@ -1018,17 +825,27 @@ async def build_stream(websocket: WebSocket, build_id: str) -> None:
 @handle_errors(operation='get compute worker defaults')
 async def get_compute_worker_defaults():
     """Get resolved default engine resource settings for the UI."""
+    # POLARS_CORES_AVAILABLE is the platform budget (0 = all logical CPUs on host).
     return schemas.ComputeWorkerDefaults(
-        max_threads=_resolved_default_max_threads(),
-        max_memory_mb=_resolved_default_max_memory_mb(),
+        max_threads=settings.polars_cores_available if settings.polars_cores_available > 0 else os.cpu_count() or 1,
+        max_memory_mb=settings.polars_max_memory_mb if settings.polars_max_memory_mb > 0 else _resolved_system_memory_mb(),
         streaming_chunk_size=settings.polars_streaming_chunk_size,
+    )
+
+
+async def _download_response(request: schemas.DownloadRequest) -> Response:
+    file_bytes, filename, content_type = await executor_client.download_step(request)
+    return Response(
+        content=file_bytes,
+        media_type=content_type,
+        headers={'Content-Disposition': f'attachment; filename="{quote(filename)}"'},
     )
 
 
 @router.post('/export', mcp=True)
 @handle_errors(operation='export data')
 async def export_data(
-    request: schemas.ExportRequest = Depends(_parse_export_request),
+    request: schemas.ExportRequest = Depends(_json_body(schemas.ExportRequest)),
     _user: User = Depends(get_current_user),
 ):
     """Export pipeline results to a file download or output datasource.
@@ -1037,20 +854,15 @@ async def export_data(
     For destination='datasource': writes to an Iceberg output datasource (requires result_id and iceberg_options).
     """
     if request.destination == schemas.ExportDestination.DOWNLOAD:
-        download_request = schemas.DownloadRequest(
-            analysis_id=request.analysis_id,
-            target_step_id=request.target_step_id,
-            analysis_pipeline=request.analysis_pipeline,
-            tab_id=request.tab_id,
-            format=request.format,
-            filename=request.filename,
-        )
-        file_bytes, filename, content_type = await executor_client.download_step(download_request)
-        safe_name = quote(filename)
-        return Response(
-            content=file_bytes,
-            media_type=content_type,
-            headers={'Content-Disposition': f'attachment; filename="{safe_name}"'},
+        return await _download_response(
+            schemas.DownloadRequest(
+                analysis_id=request.analysis_id,
+                target_step_id=request.target_step_id,
+                analysis_pipeline=request.analysis_pipeline,
+                tab_id=request.tab_id,
+                format=request.format,
+                filename=request.filename,
+            )
         )
 
     response = await executor_client.export_data(request)
@@ -1060,7 +872,7 @@ async def export_data(
 @router.post('/download', mcp=True)
 @handle_errors(operation='download step')
 async def download_step(
-    request: schemas.DownloadRequest = Depends(_parse_download_request),
+    request: schemas.DownloadRequest = Depends(_json_body(schemas.DownloadRequest)),
     _user: User = Depends(get_current_user),
 ):
     """Download pipeline step result as a file.
@@ -1068,16 +880,4 @@ async def download_step(
     Returns the file bytes with appropriate Content-Type header.
     Supported formats: csv, parquet, json, ndjson, duckdb, excel.
     """
-    file_bytes, filename, content_type = await executor_client.download_step(request)
-
-    if file_bytes is None or filename is None or content_type is None:
-        from fastapi import HTTPException
-
-        raise HTTPException(status_code=500, detail='Download file content not available')
-
-    safe_name = quote(filename)
-    return Response(
-        content=file_bytes,
-        media_type=content_type,
-        headers={'Content-Disposition': f'attachment; filename="{safe_name}"'},
-    )
+    return await _download_response(request)

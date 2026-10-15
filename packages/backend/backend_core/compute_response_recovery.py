@@ -11,7 +11,7 @@ from dataclasses import dataclass, field
 
 from backend_core import compute_requests_service
 from backend_core.database import run_db
-from backend_core.namespace import reset_namespace, set_namespace_context
+from backend_core.namespace import namespace_scope
 
 logger = logging.getLogger(__name__)
 
@@ -31,11 +31,8 @@ class _PendingComputeResponse:
 
 
 def _poll_namespace(namespace: str, request_ids: Collection[str]) -> list[compute_requests_service.TerminalComputeRequest]:
-    token = set_namespace_context(namespace)
-    try:
+    with namespace_scope(namespace):
         return run_db(compute_requests_service.list_terminal_requests, request_ids)
-    finally:
-        reset_namespace(token)
 
 
 def _poll_with_timing(
@@ -65,8 +62,6 @@ class ComputeResponseRecovery:
     ) -> None:
         self._poll_seconds = max(float(poll_seconds), 0.1)
         self._poll_namespace = poll_namespace or _poll_namespace
-        # One state object owns the local single-flight reference count, wake,
-        # and terminal cache until the last HTTP follower unregisters.
         self._pending: dict[str, _PendingComputeResponse] = {}
         self._lock = asyncio.Lock()
         self._poll_requested: asyncio.Event | None = None
@@ -174,11 +169,11 @@ class ComputeResponseRecovery:
             self._poll_requested = None
 
     async def _poll_once(self) -> None:
-        async with self._lock:
-            pending = {request_id: (state.namespace, state.registered_at) for request_id, state in self._pending.items() if state.terminal is None}
         grouped: dict[str, list[str]] = defaultdict(list)
-        for request_id, (namespace, _registered_at) in pending.items():
-            grouped[namespace].append(request_id)
+        async with self._lock:
+            for request_id, state in self._pending.items():
+                if state.terminal is None:
+                    grouped[state.namespace].append(request_id)
 
         for namespace, request_ids in grouped.items():
             for offset in range(0, len(request_ids), _MAX_REQUESTS_PER_NAMESPACE_POLL):
@@ -194,8 +189,6 @@ class ComputeResponseRecovery:
                         batch,
                         queued_at,
                     )
-                except asyncio.CancelledError:
-                    raise
                 except Exception:
                     logger.warning(
                         'Compute response recovery poll failed process_id=%s namespace=%s request_count=%s',

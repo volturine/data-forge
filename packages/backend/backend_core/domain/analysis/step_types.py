@@ -3,7 +3,7 @@ from __future__ import annotations
 from dataclasses import dataclass, fields
 from typing import ClassVar, Final, Self
 
-from backend_core.domain.api_enums import ApiEnumValue, api_token
+from backend_core.domain.api_enums import ApiEnumValue
 from dataforge_protocol import enums_pb2
 
 
@@ -19,18 +19,18 @@ class ChartType(ApiEnumValue):
     BOXPLOT: ClassVar[Self]
 
 
-ChartType.BAR = ChartType(enums_pb2.CHART_TYPE_BAR, api_token('ChartType', enums_pb2.CHART_TYPE_BAR))
-ChartType.HORIZONTAL_BAR = ChartType(enums_pb2.CHART_TYPE_HORIZONTAL_BAR, api_token('ChartType', enums_pb2.CHART_TYPE_HORIZONTAL_BAR))
-ChartType.AREA = ChartType(enums_pb2.CHART_TYPE_AREA, api_token('ChartType', enums_pb2.CHART_TYPE_AREA))
-ChartType.HEATGRID = ChartType(enums_pb2.CHART_TYPE_HEATGRID, api_token('ChartType', enums_pb2.CHART_TYPE_HEATGRID))
-ChartType.HISTOGRAM = ChartType(enums_pb2.CHART_TYPE_HISTOGRAM, api_token('ChartType', enums_pb2.CHART_TYPE_HISTOGRAM))
-ChartType.SCATTER = ChartType(enums_pb2.CHART_TYPE_SCATTER, api_token('ChartType', enums_pb2.CHART_TYPE_SCATTER))
-ChartType.LINE = ChartType(enums_pb2.CHART_TYPE_LINE, api_token('ChartType', enums_pb2.CHART_TYPE_LINE))
-ChartType.PIE = ChartType(enums_pb2.CHART_TYPE_PIE, api_token('ChartType', enums_pb2.CHART_TYPE_PIE))
-ChartType.BOXPLOT = ChartType(enums_pb2.CHART_TYPE_BOXPLOT, api_token('ChartType', enums_pb2.CHART_TYPE_BOXPLOT))
+ChartType.BAR = ChartType(enums_pb2.CHART_TYPE_BAR)
+ChartType.HORIZONTAL_BAR = ChartType(enums_pb2.CHART_TYPE_HORIZONTAL_BAR)
+ChartType.AREA = ChartType(enums_pb2.CHART_TYPE_AREA)
+ChartType.HEATGRID = ChartType(enums_pb2.CHART_TYPE_HEATGRID)
+ChartType.HISTOGRAM = ChartType(enums_pb2.CHART_TYPE_HISTOGRAM)
+ChartType.SCATTER = ChartType(enums_pb2.CHART_TYPE_SCATTER)
+ChartType.LINE = ChartType(enums_pb2.CHART_TYPE_LINE)
+ChartType.PIE = ChartType(enums_pb2.CHART_TYPE_PIE)
+ChartType.BOXPLOT = ChartType(enums_pb2.CHART_TYPE_BOXPLOT)
 
 
-class PipelineStepType(ApiEnumValue):
+class PipelineStepType(ApiEnumValue, proto_enum='StepType'):
     SELECT: ClassVar[Self]
     DROP: ClassVar[Self]
     FILTER: ClassVar[Self]
@@ -69,42 +69,42 @@ class PipelineStepType(ApiEnumValue):
     PLOT_BOXPLOT: ClassVar[Self]
 
 
-PipelineStepType.SELECT = PipelineStepType(enums_pb2.STEP_TYPE_SELECT, api_token('StepType', enums_pb2.STEP_TYPE_SELECT))
-PipelineStepType.DROP = PipelineStepType(enums_pb2.STEP_TYPE_DROP, api_token('StepType', enums_pb2.STEP_TYPE_DROP))
-PipelineStepType.FILTER = PipelineStepType(enums_pb2.STEP_TYPE_FILTER, api_token('StepType', enums_pb2.STEP_TYPE_FILTER))
-PipelineStepType.GROUPBY = PipelineStepType(enums_pb2.STEP_TYPE_GROUPBY, api_token('StepType', enums_pb2.STEP_TYPE_GROUPBY))
-PipelineStepType.JOIN = PipelineStepType(enums_pb2.STEP_TYPE_JOIN, api_token('StepType', enums_pb2.STEP_TYPE_JOIN))
-PipelineStepType.UNION_BY_NAME = PipelineStepType(enums_pb2.STEP_TYPE_UNION_BY_NAME, api_token('StepType', enums_pb2.STEP_TYPE_UNION_BY_NAME))
-PipelineStepType.UNPIVOT = PipelineStepType(enums_pb2.STEP_TYPE_UNPIVOT, api_token('StepType', enums_pb2.STEP_TYPE_UNPIVOT))
-PipelineStepType.EXPLODE = PipelineStepType(enums_pb2.STEP_TYPE_EXPLODE, api_token('StepType', enums_pb2.STEP_TYPE_EXPLODE))
-PipelineStepType.PIVOT = PipelineStepType(enums_pb2.STEP_TYPE_PIVOT, api_token('StepType', enums_pb2.STEP_TYPE_PIVOT))
-PipelineStepType.SAMPLE = PipelineStepType(enums_pb2.STEP_TYPE_SAMPLE, api_token('StepType', enums_pb2.STEP_TYPE_SAMPLE))
-PipelineStepType.LIMIT = PipelineStepType(enums_pb2.STEP_TYPE_LIMIT, api_token('StepType', enums_pb2.STEP_TYPE_LIMIT))
-PipelineStepType.TOPK = PipelineStepType(enums_pb2.STEP_TYPE_TOPK, api_token('StepType', enums_pb2.STEP_TYPE_TOPK))
-PipelineStepType.VIEW = PipelineStepType(enums_pb2.STEP_TYPE_VIEW, api_token('StepType', enums_pb2.STEP_TYPE_VIEW))
-PipelineStepType.EXPORT = PipelineStepType(enums_pb2.STEP_TYPE_EXPORT, api_token('StepType', enums_pb2.STEP_TYPE_EXPORT))
-PipelineStepType.DOWNLOAD = PipelineStepType(enums_pb2.STEP_TYPE_DOWNLOAD, api_token('StepType', enums_pb2.STEP_TYPE_DOWNLOAD))
-PipelineStepType.CHART = PipelineStepType(enums_pb2.STEP_TYPE_CHART, api_token('StepType', enums_pb2.STEP_TYPE_CHART))
-PipelineStepType.NOTIFICATION = PipelineStepType(enums_pb2.STEP_TYPE_NOTIFICATION, api_token('StepType', enums_pb2.STEP_TYPE_NOTIFICATION))
-PipelineStepType.AI = PipelineStepType(enums_pb2.STEP_TYPE_AI, api_token('StepType', enums_pb2.STEP_TYPE_AI))
-PipelineStepType.DATASOURCE = PipelineStepType(enums_pb2.STEP_TYPE_DATASOURCE, api_token('StepType', enums_pb2.STEP_TYPE_DATASOURCE))
-PipelineStepType.SORT = PipelineStepType(enums_pb2.STEP_TYPE_SORT, api_token('StepType', enums_pb2.STEP_TYPE_SORT))
-PipelineStepType.RENAME = PipelineStepType(enums_pb2.STEP_TYPE_RENAME, api_token('StepType', enums_pb2.STEP_TYPE_RENAME))
-PipelineStepType.EXPRESSION = PipelineStepType(enums_pb2.STEP_TYPE_EXPRESSION, api_token('StepType', enums_pb2.STEP_TYPE_EXPRESSION))
-PipelineStepType.WITH_COLUMNS = PipelineStepType(enums_pb2.STEP_TYPE_WITH_COLUMNS, api_token('StepType', enums_pb2.STEP_TYPE_WITH_COLUMNS))
-PipelineStepType.FILL_NULL = PipelineStepType(enums_pb2.STEP_TYPE_FILL_NULL, api_token('StepType', enums_pb2.STEP_TYPE_FILL_NULL))
-PipelineStepType.DEDUPLICATE = PipelineStepType(enums_pb2.STEP_TYPE_DEDUPLICATE, api_token('StepType', enums_pb2.STEP_TYPE_DEDUPLICATE))
-PipelineStepType.STRING_TRANSFORM = PipelineStepType(enums_pb2.STEP_TYPE_STRING_TRANSFORM, api_token('StepType', enums_pb2.STEP_TYPE_STRING_TRANSFORM))
-PipelineStepType.TIMESERIES = PipelineStepType(enums_pb2.STEP_TYPE_TIMESERIES, api_token('StepType', enums_pb2.STEP_TYPE_TIMESERIES))
-PipelineStepType.PLOT_BAR = PipelineStepType(enums_pb2.STEP_TYPE_PLOT_BAR, api_token('StepType', enums_pb2.STEP_TYPE_PLOT_BAR))
-PipelineStepType.PLOT_HORIZONTAL_BAR = PipelineStepType(enums_pb2.STEP_TYPE_PLOT_HORIZONTAL_BAR, api_token('StepType', enums_pb2.STEP_TYPE_PLOT_HORIZONTAL_BAR))
-PipelineStepType.PLOT_AREA = PipelineStepType(enums_pb2.STEP_TYPE_PLOT_AREA, api_token('StepType', enums_pb2.STEP_TYPE_PLOT_AREA))
-PipelineStepType.PLOT_HEATGRID = PipelineStepType(enums_pb2.STEP_TYPE_PLOT_HEATGRID, api_token('StepType', enums_pb2.STEP_TYPE_PLOT_HEATGRID))
-PipelineStepType.PLOT_HISTOGRAM = PipelineStepType(enums_pb2.STEP_TYPE_PLOT_HISTOGRAM, api_token('StepType', enums_pb2.STEP_TYPE_PLOT_HISTOGRAM))
-PipelineStepType.PLOT_SCATTER = PipelineStepType(enums_pb2.STEP_TYPE_PLOT_SCATTER, api_token('StepType', enums_pb2.STEP_TYPE_PLOT_SCATTER))
-PipelineStepType.PLOT_LINE = PipelineStepType(enums_pb2.STEP_TYPE_PLOT_LINE, api_token('StepType', enums_pb2.STEP_TYPE_PLOT_LINE))
-PipelineStepType.PLOT_PIE = PipelineStepType(enums_pb2.STEP_TYPE_PLOT_PIE, api_token('StepType', enums_pb2.STEP_TYPE_PLOT_PIE))
-PipelineStepType.PLOT_BOXPLOT = PipelineStepType(enums_pb2.STEP_TYPE_PLOT_BOXPLOT, api_token('StepType', enums_pb2.STEP_TYPE_PLOT_BOXPLOT))
+PipelineStepType.SELECT = PipelineStepType(enums_pb2.STEP_TYPE_SELECT)
+PipelineStepType.DROP = PipelineStepType(enums_pb2.STEP_TYPE_DROP)
+PipelineStepType.FILTER = PipelineStepType(enums_pb2.STEP_TYPE_FILTER)
+PipelineStepType.GROUPBY = PipelineStepType(enums_pb2.STEP_TYPE_GROUPBY)
+PipelineStepType.JOIN = PipelineStepType(enums_pb2.STEP_TYPE_JOIN)
+PipelineStepType.UNION_BY_NAME = PipelineStepType(enums_pb2.STEP_TYPE_UNION_BY_NAME)
+PipelineStepType.UNPIVOT = PipelineStepType(enums_pb2.STEP_TYPE_UNPIVOT)
+PipelineStepType.EXPLODE = PipelineStepType(enums_pb2.STEP_TYPE_EXPLODE)
+PipelineStepType.PIVOT = PipelineStepType(enums_pb2.STEP_TYPE_PIVOT)
+PipelineStepType.SAMPLE = PipelineStepType(enums_pb2.STEP_TYPE_SAMPLE)
+PipelineStepType.LIMIT = PipelineStepType(enums_pb2.STEP_TYPE_LIMIT)
+PipelineStepType.TOPK = PipelineStepType(enums_pb2.STEP_TYPE_TOPK)
+PipelineStepType.VIEW = PipelineStepType(enums_pb2.STEP_TYPE_VIEW)
+PipelineStepType.EXPORT = PipelineStepType(enums_pb2.STEP_TYPE_EXPORT)
+PipelineStepType.DOWNLOAD = PipelineStepType(enums_pb2.STEP_TYPE_DOWNLOAD)
+PipelineStepType.CHART = PipelineStepType(enums_pb2.STEP_TYPE_CHART)
+PipelineStepType.NOTIFICATION = PipelineStepType(enums_pb2.STEP_TYPE_NOTIFICATION)
+PipelineStepType.AI = PipelineStepType(enums_pb2.STEP_TYPE_AI)
+PipelineStepType.DATASOURCE = PipelineStepType(enums_pb2.STEP_TYPE_DATASOURCE)
+PipelineStepType.SORT = PipelineStepType(enums_pb2.STEP_TYPE_SORT)
+PipelineStepType.RENAME = PipelineStepType(enums_pb2.STEP_TYPE_RENAME)
+PipelineStepType.EXPRESSION = PipelineStepType(enums_pb2.STEP_TYPE_EXPRESSION)
+PipelineStepType.WITH_COLUMNS = PipelineStepType(enums_pb2.STEP_TYPE_WITH_COLUMNS)
+PipelineStepType.FILL_NULL = PipelineStepType(enums_pb2.STEP_TYPE_FILL_NULL)
+PipelineStepType.DEDUPLICATE = PipelineStepType(enums_pb2.STEP_TYPE_DEDUPLICATE)
+PipelineStepType.STRING_TRANSFORM = PipelineStepType(enums_pb2.STEP_TYPE_STRING_TRANSFORM)
+PipelineStepType.TIMESERIES = PipelineStepType(enums_pb2.STEP_TYPE_TIMESERIES)
+PipelineStepType.PLOT_BAR = PipelineStepType(enums_pb2.STEP_TYPE_PLOT_BAR)
+PipelineStepType.PLOT_HORIZONTAL_BAR = PipelineStepType(enums_pb2.STEP_TYPE_PLOT_HORIZONTAL_BAR)
+PipelineStepType.PLOT_AREA = PipelineStepType(enums_pb2.STEP_TYPE_PLOT_AREA)
+PipelineStepType.PLOT_HEATGRID = PipelineStepType(enums_pb2.STEP_TYPE_PLOT_HEATGRID)
+PipelineStepType.PLOT_HISTOGRAM = PipelineStepType(enums_pb2.STEP_TYPE_PLOT_HISTOGRAM)
+PipelineStepType.PLOT_SCATTER = PipelineStepType(enums_pb2.STEP_TYPE_PLOT_SCATTER)
+PipelineStepType.PLOT_LINE = PipelineStepType(enums_pb2.STEP_TYPE_PLOT_LINE)
+PipelineStepType.PLOT_PIE = PipelineStepType(enums_pb2.STEP_TYPE_PLOT_PIE)
+PipelineStepType.PLOT_BOXPLOT = PipelineStepType(enums_pb2.STEP_TYPE_PLOT_BOXPLOT)
 
 
 @dataclass(frozen=True, slots=True)
@@ -199,9 +199,6 @@ class StepTypes:
     def is_plot_alias(self, step_type: str) -> bool:
         definition = self._definition_for(step_type)
         return definition.is_plot_alias if definition is not None else False
-
-    def is_chart_step_type(self, step_type: str) -> bool:
-        return step_type == self.chart.value or self.is_plot_alias(step_type)
 
     def normalized(self, step_type: str) -> str:
         definition = self._definition_for(step_type)

@@ -3,7 +3,7 @@ from __future__ import annotations
 from typing import ClassVar, Self
 
 from dataforge_protocol import enums_pb2
-from runtime.domain.domain_enums import DomainEnumValue, domain_token
+from runtime.domain.domain_enums import DomainEnumValue
 
 
 class ComputeWorkerRunKind(DomainEnumValue):
@@ -14,21 +14,11 @@ class ComputeWorkerRunKind(DomainEnumValue):
     INGEST: ClassVar[Self]
 
 
-ComputeWorkerRunKind.BUILD = ComputeWorkerRunKind(
-    enums_pb2.COMPUTE_WORKER_RUN_KIND_BUILD, domain_token("ComputeWorkerRunKind", enums_pb2.COMPUTE_WORKER_RUN_KIND_BUILD)
-)
-ComputeWorkerRunKind.PREVIEW = ComputeWorkerRunKind(
-    enums_pb2.COMPUTE_WORKER_RUN_KIND_PREVIEW, domain_token("ComputeWorkerRunKind", enums_pb2.COMPUTE_WORKER_RUN_KIND_PREVIEW)
-)
-ComputeWorkerRunKind.ROW_COUNT = ComputeWorkerRunKind(
-    enums_pb2.COMPUTE_WORKER_RUN_KIND_ROW_COUNT, domain_token("ComputeWorkerRunKind", enums_pb2.COMPUTE_WORKER_RUN_KIND_ROW_COUNT)
-)
-ComputeWorkerRunKind.DOWNLOAD = ComputeWorkerRunKind(
-    enums_pb2.COMPUTE_WORKER_RUN_KIND_DOWNLOAD, domain_token("ComputeWorkerRunKind", enums_pb2.COMPUTE_WORKER_RUN_KIND_DOWNLOAD)
-)
-ComputeWorkerRunKind.INGEST = ComputeWorkerRunKind(
-    enums_pb2.COMPUTE_WORKER_RUN_KIND_INGEST, domain_token("ComputeWorkerRunKind", enums_pb2.COMPUTE_WORKER_RUN_KIND_INGEST)
-)
+ComputeWorkerRunKind.BUILD = ComputeWorkerRunKind(enums_pb2.COMPUTE_WORKER_RUN_KIND_BUILD)
+ComputeWorkerRunKind.PREVIEW = ComputeWorkerRunKind(enums_pb2.COMPUTE_WORKER_RUN_KIND_PREVIEW)
+ComputeWorkerRunKind.ROW_COUNT = ComputeWorkerRunKind(enums_pb2.COMPUTE_WORKER_RUN_KIND_ROW_COUNT)
+ComputeWorkerRunKind.DOWNLOAD = ComputeWorkerRunKind(enums_pb2.COMPUTE_WORKER_RUN_KIND_DOWNLOAD)
+ComputeWorkerRunKind.INGEST = ComputeWorkerRunKind(enums_pb2.COMPUTE_WORKER_RUN_KIND_INGEST)
 
 
 class ComputeWorkerRunStatus(DomainEnumValue):
@@ -38,18 +28,10 @@ class ComputeWorkerRunStatus(DomainEnumValue):
     CANCELLED: ClassVar[Self]
 
 
-ComputeWorkerRunStatus.RUNNING = ComputeWorkerRunStatus(
-    enums_pb2.COMPUTE_WORKER_RUN_STATUS_RUNNING, domain_token("ComputeWorkerRunStatus", enums_pb2.COMPUTE_WORKER_RUN_STATUS_RUNNING)
-)
-ComputeWorkerRunStatus.SUCCESS = ComputeWorkerRunStatus(
-    enums_pb2.COMPUTE_WORKER_RUN_STATUS_SUCCESS, domain_token("ComputeWorkerRunStatus", enums_pb2.COMPUTE_WORKER_RUN_STATUS_SUCCESS)
-)
-ComputeWorkerRunStatus.FAILED = ComputeWorkerRunStatus(
-    enums_pb2.COMPUTE_WORKER_RUN_STATUS_FAILED, domain_token("ComputeWorkerRunStatus", enums_pb2.COMPUTE_WORKER_RUN_STATUS_FAILED)
-)
-ComputeWorkerRunStatus.CANCELLED = ComputeWorkerRunStatus(
-    enums_pb2.COMPUTE_WORKER_RUN_STATUS_CANCELLED, domain_token("ComputeWorkerRunStatus", enums_pb2.COMPUTE_WORKER_RUN_STATUS_CANCELLED)
-)
+ComputeWorkerRunStatus.RUNNING = ComputeWorkerRunStatus(enums_pb2.COMPUTE_WORKER_RUN_STATUS_RUNNING)
+ComputeWorkerRunStatus.SUCCESS = ComputeWorkerRunStatus(enums_pb2.COMPUTE_WORKER_RUN_STATUS_SUCCESS)
+ComputeWorkerRunStatus.FAILED = ComputeWorkerRunStatus(enums_pb2.COMPUTE_WORKER_RUN_STATUS_FAILED)
+ComputeWorkerRunStatus.CANCELLED = ComputeWorkerRunStatus(enums_pb2.COMPUTE_WORKER_RUN_STATUS_CANCELLED)
 
 
 class ComputeWorkerRunExecutionCategory(DomainEnumValue):
@@ -68,26 +50,11 @@ class ComputeWorkerRunExecutionCategory(DomainEnumValue):
                 return "unknown"
 
 
-ComputeWorkerRunExecutionCategory.READ = ComputeWorkerRunExecutionCategory(
-    enums_pb2.COMPUTE_WORKER_RUN_EXECUTION_CATEGORY_READ,
-    domain_token("ComputeWorkerRunExecutionCategory", enums_pb2.COMPUTE_WORKER_RUN_EXECUTION_CATEGORY_READ),
-)
-ComputeWorkerRunExecutionCategory.STEP = ComputeWorkerRunExecutionCategory(
-    enums_pb2.COMPUTE_WORKER_RUN_EXECUTION_CATEGORY_STEP,
-    domain_token("ComputeWorkerRunExecutionCategory", enums_pb2.COMPUTE_WORKER_RUN_EXECUTION_CATEGORY_STEP),
-)
-ComputeWorkerRunExecutionCategory.PLAN = ComputeWorkerRunExecutionCategory(
-    enums_pb2.COMPUTE_WORKER_RUN_EXECUTION_CATEGORY_PLAN,
-    domain_token("ComputeWorkerRunExecutionCategory", enums_pb2.COMPUTE_WORKER_RUN_EXECUTION_CATEGORY_PLAN),
-)
-ComputeWorkerRunExecutionCategory.COMPUTE = ComputeWorkerRunExecutionCategory(
-    enums_pb2.COMPUTE_WORKER_RUN_EXECUTION_CATEGORY_COMPUTE,
-    domain_token("ComputeWorkerRunExecutionCategory", enums_pb2.COMPUTE_WORKER_RUN_EXECUTION_CATEGORY_COMPUTE),
-)
-ComputeWorkerRunExecutionCategory.WRITE = ComputeWorkerRunExecutionCategory(
-    enums_pb2.COMPUTE_WORKER_RUN_EXECUTION_CATEGORY_WRITE,
-    domain_token("ComputeWorkerRunExecutionCategory", enums_pb2.COMPUTE_WORKER_RUN_EXECUTION_CATEGORY_WRITE),
-)
+ComputeWorkerRunExecutionCategory.READ = ComputeWorkerRunExecutionCategory(enums_pb2.COMPUTE_WORKER_RUN_EXECUTION_CATEGORY_READ)
+ComputeWorkerRunExecutionCategory.STEP = ComputeWorkerRunExecutionCategory(enums_pb2.COMPUTE_WORKER_RUN_EXECUTION_CATEGORY_STEP)
+ComputeWorkerRunExecutionCategory.PLAN = ComputeWorkerRunExecutionCategory(enums_pb2.COMPUTE_WORKER_RUN_EXECUTION_CATEGORY_PLAN)
+ComputeWorkerRunExecutionCategory.COMPUTE = ComputeWorkerRunExecutionCategory(enums_pb2.COMPUTE_WORKER_RUN_EXECUTION_CATEGORY_COMPUTE)
+ComputeWorkerRunExecutionCategory.WRITE = ComputeWorkerRunExecutionCategory(enums_pb2.COMPUTE_WORKER_RUN_EXECUTION_CATEGORY_WRITE)
 
 
 class SchemaDiffStatus(DomainEnumValue):
@@ -96,8 +63,6 @@ class SchemaDiffStatus(DomainEnumValue):
     TYPE_CHANGED: ClassVar[Self]
 
 
-SchemaDiffStatus.ADDED = SchemaDiffStatus(enums_pb2.SCHEMA_DIFF_STATUS_ADDED, domain_token("SchemaDiffStatus", enums_pb2.SCHEMA_DIFF_STATUS_ADDED))
-SchemaDiffStatus.REMOVED = SchemaDiffStatus(enums_pb2.SCHEMA_DIFF_STATUS_REMOVED, domain_token("SchemaDiffStatus", enums_pb2.SCHEMA_DIFF_STATUS_REMOVED))
-SchemaDiffStatus.TYPE_CHANGED = SchemaDiffStatus(
-    enums_pb2.SCHEMA_DIFF_STATUS_TYPE_CHANGED, domain_token("SchemaDiffStatus", enums_pb2.SCHEMA_DIFF_STATUS_TYPE_CHANGED)
-)
+SchemaDiffStatus.ADDED = SchemaDiffStatus(enums_pb2.SCHEMA_DIFF_STATUS_ADDED)
+SchemaDiffStatus.REMOVED = SchemaDiffStatus(enums_pb2.SCHEMA_DIFF_STATUS_REMOVED)
+SchemaDiffStatus.TYPE_CHANGED = SchemaDiffStatus(enums_pb2.SCHEMA_DIFF_STATUS_TYPE_CHANGED)

@@ -17,12 +17,7 @@ class SampleParams(OperationParams):
 class SampleHandler(OperationHandler):
     """Sample rows using a deterministic hash-based approach for lazy evaluation."""
 
-    def __call__(
-        self,
-        lf: pl.LazyFrame,
-        params: dict,
-        **_,
-    ) -> pl.LazyFrame:
+    def __call__(self, lf: pl.LazyFrame, params: dict, **_) -> pl.LazyFrame:
         validated = SampleParams.model_validate(params)
         if validated.fraction <= 0 or validated.fraction > 1:
             raise ValueError("Sample fraction must be between 0 and 1")

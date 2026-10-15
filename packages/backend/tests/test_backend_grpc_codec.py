@@ -6,41 +6,8 @@ from pathlib import Path
 import grpc
 import pytest
 
-from backend_core.data_plane_client import (
-    _OBJECT_TRANSFER_CHUNK_BYTES,
-    WorkerDataPlaneClient,
-    WorkerDataPlaneError,
-    _arrow_schema_proto,
-    _object_store_storage_options_payload,
-)
+from backend_core.data_plane_client import _OBJECT_TRANSFER_CHUNK_BYTES, WorkerDataPlaneClient, WorkerDataPlaneError
 from dataforge_protocol import object_store_pb2
-
-
-def test_data_plane_storage_options_use_typed_protocol_message() -> None:
-    payload = _object_store_storage_options_payload(
-        object_store_pb2.ObjectStoreStorageOptions(
-            endpoint_url='http://127.0.0.1:9000',
-            access_key_id='access',
-            secret_access_key='secret',
-            region='us-east-1',
-            force_virtual_addressing=False,
-            py_io_impl='pyiceberg.io.pyarrow.PyArrowFileIO',
-        )
-    )
-
-    assert payload == {
-        's3.endpoint': 'http://127.0.0.1:9000',
-        's3.access-key-id': 'access',
-        's3.secret-access-key': 'secret',
-        's3.region': 'us-east-1',
-        's3.force-virtual-addressing': False,
-        'py-io-impl': 'pyiceberg.io.pyarrow.PyArrowFileIO',
-    }
-
-
-def test_data_plane_arrow_schema_rejects_non_base64_payload() -> None:
-    with pytest.raises(ValueError, match='base64-encoded Arrow schema IPC'):
-        _arrow_schema_proto({'arrow_schema_ipc_base64': 'not base64'})
 
 
 class _FakeDownloadCall:
@@ -93,7 +60,7 @@ def test_nine_megabyte_byte_upload_splits_into_bounded_wire_chunks() -> None:
     assert [len(frame.chunk.data) for frame in stub.frames if frame.WhichOneof('frame') == 'chunk'] == [8 * 1024 * 1024, 1024 * 1024]
 
 
-def test_upload_object_file_streams_beyond_former_unary_limit(tmp_path: Path) -> None:
+def test_upload_object_fileobj_streams_beyond_former_unary_limit(tmp_path: Path) -> None:
     class Stub:
         def UploadObject(self, requests, **_kwargs):
             self.frame_kinds = []
@@ -114,11 +81,12 @@ def test_upload_object_file_streams_beyond_former_unary_limit(tmp_path: Path) ->
         output.truncate(file_size)
 
     stub = Stub()
-    result = _client_with_object_store(stub).upload_object_file(
-        source,
-        's3://analytics/uploads/large-artifact.bin',
-        max_bytes=2 * 1024 * 1024 * 1024,
-    )
+    with source.open('rb') as source_file:
+        result = _client_with_object_store(stub).upload_object_fileobj(
+            source_file,
+            's3://analytics/uploads/large-artifact.bin',
+            max_bytes=2 * 1024 * 1024 * 1024,
+        )
 
     assert stub.frame_kinds[0] == 'start'
     assert stub.frame_kinds[1:-1] == ['chunk'] * ((file_size + _OBJECT_TRANSFER_CHUNK_BYTES - 1) // _OBJECT_TRANSFER_CHUNK_BYTES)
@@ -183,30 +151,7 @@ def test_nine_megabyte_byte_download_remains_within_artifact_limit() -> None:
     assert not call.cancelled
 
 
-def test_download_file_error_preserves_destination_and_removes_partial(tmp_path: Path) -> None:
-    destination = tmp_path / 'artifact.bin'
-    destination.write_bytes(b'previous destination')
-    contents_before_download = set(tmp_path.iterdir())
-    call = _FakeDownloadCall([b'partial'], error=OSError('transfer failed'))
-
-    class Stub:
-        def DownloadObject(self, *_args, **_kwargs):
-            return call
-
-    with pytest.raises(OSError, match='transfer failed'):
-        _client_with_object_store(Stub()).download_object_file('s3://analytics/exports/artifact.bin', destination)
-
-    assert destination.read_bytes() == b'previous destination'
-    contents_after_download = set(tmp_path.iterdir())
-    assert contents_after_download == contents_before_download
-    assert not any(path.name.endswith('.partial') for path in contents_after_download)
-    assert call.cancelled
-
-
-def test_cancelled_download_removes_partial_and_preserves_destination(tmp_path: Path) -> None:
-    destination = tmp_path / 'artifact.bin'
-    destination.write_bytes(b'previous destination')
-    contents_before_download = set(tmp_path.iterdir())
+def test_cancelled_download_raises_data_plane_error_and_cancels_rpc() -> None:
     call = _FakeDownloadCall([b'partial'], error=_CancelledRpcError())
 
     class Stub:
@@ -214,13 +159,9 @@ def test_cancelled_download_removes_partial_and_preserves_destination(tmp_path: 
             return call
 
     with pytest.raises(WorkerDataPlaneError) as exc_info:
-        _client_with_object_store(Stub()).download_object_file('s3://analytics/exports/artifact.bin', destination)
+        _client_with_object_store(Stub()).download_object_bytes('s3://analytics/exports/artifact.bin')
 
     assert exc_info.value.code == grpc.StatusCode.CANCELLED
-    assert destination.read_bytes() == b'previous destination'
-    contents_after_download = set(tmp_path.iterdir())
-    assert contents_after_download == contents_before_download
-    assert not any(path.name.endswith('.partial') for path in contents_after_download)
     assert call.cancelled
 
 

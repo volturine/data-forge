@@ -14,10 +14,6 @@ from backend_core.sqlmodel_typing import col, sa
 from backend_core.time import utc_now as _utcnow
 
 
-def get_datasource(session: Session, datasource_id: str) -> DataSource | None:
-    return session.get(DataSource, datasource_id)
-
-
 def get_active_datasource(session: Session, datasource_id: str, *, for_update: bool = False) -> DataSource:
     """Load an active datasource, optionally reserving it for a transaction.
 
@@ -80,9 +76,7 @@ def finalize_delete(session: Session, datasource_id: str) -> bool:
     # that was republished in the meantime.
     lock_datasource_lifecycle(session, namespace=get_namespace(), datasource_id=datasource_id)
     datasource = session.get(DataSource, datasource_id, with_for_update=True)
-    if datasource is None:
-        return False
-    if not datasource.is_pending_delete:
+    if datasource is None or not datasource.is_pending_delete:
         return False
     if compute_requests_service.has_active_request_for_datasource(session, datasource_id) or build_runs_service.has_active_build_for_datasource(
         session,

@@ -24,25 +24,9 @@ def list_healthchecks(
     limit: int = 100,
     offset: int = 0,
 ) -> list[HealthCheckResponse]:
-    datasource = session.get(DataSource, datasource_id)
-    if not datasource:
+    if not session.get(DataSource, datasource_id):
         return []
-    query = (
-        select(HealthCheck).join(DataSource, sa(HealthCheck.datasource_id == DataSource.id), isouter=True).where(sa(HealthCheck.datasource_id == datasource_id))
-    )
-    if search:
-        q = f'%{search}%'
-        query = query.where(
-            or_(
-                col(HealthCheck.id).ilike(q),
-                col(HealthCheck.name).ilike(q),
-                col(HealthCheck.check_type).ilike(q),
-                col(DataSource.name).ilike(q),
-            )
-        )
-    query = query.order_by(col(HealthCheck.created_at).desc(), col(HealthCheck.id).asc()).limit(limit).offset(offset)
-    checks = session.execute(query).scalars().all()
-    return [HealthCheckResponse.model_validate(check) for check in checks]
+    return list_all_healthchecks(session, search=search, limit=limit, offset=offset, datasource_id=datasource_id)
 
 
 def list_all_healthchecks(
@@ -50,8 +34,11 @@ def list_all_healthchecks(
     search: str | None = None,
     limit: int = 100,
     offset: int = 0,
+    datasource_id: str | None = None,
 ) -> list[HealthCheckResponse]:
     query = select(HealthCheck).join(DataSource, sa(HealthCheck.datasource_id == DataSource.id), isouter=True)
+    if datasource_id is not None:
+        query = query.where(sa(HealthCheck.datasource_id == datasource_id))
     if search:
         q = f'%{search}%'
         query = query.where(
@@ -93,9 +80,7 @@ def update_healthcheck(
     check = session.get(HealthCheck, healthcheck_id)
     if not check:
         raise healthcheck_not_found(healthcheck_id)
-    check_type = payload.check_type or check.check_type
-    if HealthCheckType.require(check_type).requires_unique_per_datasource:
-        _ensure_unique_row_count(session, check.datasource_id, check_type, exclude_id=healthcheck_id)
+    _ensure_unique_row_count(session, check.datasource_id, payload.check_type or check.check_type, exclude_id=healthcheck_id)
     for key, value in payload.model_dump(exclude_none=True).items():
         setattr(check, key, value)
     session.add(check)
@@ -113,8 +98,7 @@ def delete_healthcheck(session: Session, healthcheck_id: str) -> None:
 
 
 def list_results(session: Session, datasource_id: str, limit: int = 10) -> list[HealthCheckResultResponse]:
-    datasource = session.get(DataSource, datasource_id)
-    if not datasource:
+    if not session.get(DataSource, datasource_id):
         return []
     query = select(HealthCheckResult).order_by(col(HealthCheckResult.checked_at).desc(), col(HealthCheckResult.id).asc()).limit(limit)
     check_ids = select(col(HealthCheck.id)).where(col(HealthCheck.datasource_id) == datasource_id)

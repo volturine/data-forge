@@ -2,7 +2,7 @@ from __future__ import annotations
 
 from typing import ClassVar, Self
 
-from backend_core.domain.api_enums import ApiEnumValue, api_token
+from backend_core.domain.api_enums import ApiEnumValue
 from dataforge_protocol import enums_pb2
 
 
@@ -11,12 +11,8 @@ class DataSourceCreatedBy(ApiEnumValue):
     ANALYSIS: ClassVar[Self]
 
 
-DataSourceCreatedBy.IMPORT = DataSourceCreatedBy(
-    enums_pb2.DATA_SOURCE_CREATED_BY_IMPORT, api_token('DataSourceCreatedBy', enums_pb2.DATA_SOURCE_CREATED_BY_IMPORT)
-)
-DataSourceCreatedBy.ANALYSIS = DataSourceCreatedBy(
-    enums_pb2.DATA_SOURCE_CREATED_BY_ANALYSIS, api_token('DataSourceCreatedBy', enums_pb2.DATA_SOURCE_CREATED_BY_ANALYSIS)
-)
+DataSourceCreatedBy.IMPORT = DataSourceCreatedBy(enums_pb2.DATA_SOURCE_CREATED_BY_IMPORT)
+DataSourceCreatedBy.ANALYSIS = DataSourceCreatedBy(enums_pb2.DATA_SOURCE_CREATED_BY_ANALYSIS)
 
 
 class DataSourceTargetKind(ApiEnumValue):
@@ -25,10 +21,6 @@ class DataSourceTargetKind(ApiEnumValue):
     DATASOURCE: ClassVar[Self]
 
 
-DataSourceTargetKind.ANALYSIS = DataSourceTargetKind(
-    enums_pb2.DATA_SOURCE_TARGET_KIND_ANALYSIS, api_token('DataSourceTargetKind', enums_pb2.DATA_SOURCE_TARGET_KIND_ANALYSIS)
-)
-DataSourceTargetKind.RAW = DataSourceTargetKind(enums_pb2.DATA_SOURCE_TARGET_KIND_RAW, api_token('DataSourceTargetKind', enums_pb2.DATA_SOURCE_TARGET_KIND_RAW))
-DataSourceTargetKind.DATASOURCE = DataSourceTargetKind(
-    enums_pb2.DATA_SOURCE_TARGET_KIND_DATASOURCE, api_token('DataSourceTargetKind', enums_pb2.DATA_SOURCE_TARGET_KIND_DATASOURCE)
-)
+DataSourceTargetKind.ANALYSIS = DataSourceTargetKind(enums_pb2.DATA_SOURCE_TARGET_KIND_ANALYSIS)
+DataSourceTargetKind.RAW = DataSourceTargetKind(enums_pb2.DATA_SOURCE_TARGET_KIND_RAW)
+DataSourceTargetKind.DATASOURCE = DataSourceTargetKind(enums_pb2.DATA_SOURCE_TARGET_KIND_DATASOURCE)

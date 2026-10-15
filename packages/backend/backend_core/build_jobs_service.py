@@ -1,5 +1,5 @@
 import uuid
-from datetime import UTC, datetime, timedelta
+from datetime import datetime, timedelta
 from typing import Any, cast
 
 from sqlalchemy import and_, desc, func, or_, select, update
@@ -7,7 +7,7 @@ from sqlalchemy.engine import CursorResult
 from sqlmodel import Session
 
 from backend_core import runtime_work_service
-from backend_core.claiming import CLAIM_DELIVERY_LEASE_SECONDS, claim_by_lease_owner, database_lease_clock, with_for_update_skip_locked
+from backend_core.claiming import CLAIM_DELIVERY_LEASE_SECONDS, claim_by_lease_owner, database_lease_clock, database_now, with_for_update_skip_locked
 from backend_core.config import settings
 from backend_core.domain.build_jobs.models import BuildJobStatus
 from backend_core.domain.build_runs.models import BuildRunStatus
@@ -18,7 +18,7 @@ from backend_core.persistence.build_runs.models import BuildRun
 from backend_core.runtime_work_service import RuntimeWorkKind
 from backend_core.sqlmodel_typing import col, sa
 from backend_core.transactions import committed
-from backend_core.transitions import TransitionOutcome, TransitionResult, applied, rejected
+from backend_core.transitions import TransitionOutcome
 
 _RECONCILIATION_BATCH_SIZE = 100
 _BUILD_WORK_PENDING_QUERY = """
@@ -38,15 +38,6 @@ _BUILD_WORK_DUE_QUERY = """
 """
 
 
-def _database_now(session: Session) -> datetime:
-    value = session.execute(select(func.current_timestamp())).scalar_one()
-    if not isinstance(value, datetime):
-        raise TypeError('Database CURRENT_TIMESTAMP did not return a datetime')
-    if value.tzinfo is None:
-        return value.replace(tzinfo=UTC)
-    return value.astimezone(UTC)
-
-
 def stage_job(
     session: Session,
     *,
@@ -60,12 +51,12 @@ def stage_job(
     # Claims compare availability against PostgreSQL CURRENT_TIMESTAMP. Use the
     # same clock when staging so a host/database clock skew cannot hide a fresh
     # job from the very next worker claim.
-    now = _database_now(session)
+    now = database_now(session)
     job = BuildJob(
         id=str(uuid.uuid4()),
         build_id=build_id,
         namespace=namespace,
-        status=status if isinstance(status, BuildJobStatus) else BuildJobStatus.require(status),
+        status=BuildJobStatus.require(status),
         priority=priority,
         attempts=0,
         max_attempts=max_attempts,
@@ -88,7 +79,7 @@ def get_job_by_build_id(session: Session, build_id: str) -> BuildJob | None:
 
 
 def claim_next_job(session: Session, *, worker_id: str, reclaimable_owner_ids: set[str] | None = None) -> BuildJob | None:
-    now = _database_now(session)
+    now = database_now(session)
     table = BuildJob.metadata.tables[BuildJob.__tablename__]
     reclaimable = set(reclaimable_owner_ids or ())
     queued_clause = table.c.status == BuildJobStatus.QUEUED
@@ -162,7 +153,7 @@ def claim_next_job(session: Session, *, worker_id: str, reclaimable_owner_ids: s
 
 
 def stage_exhausted_jobs(session: Session) -> list[str]:
-    now = _database_now(session)
+    now = database_now(session)
     table = BuildJob.metadata.tables[BuildJob.__tablename__]
     base = (
         select(BuildJob)
@@ -175,21 +166,10 @@ def stage_exhausted_jobs(session: Session) -> list[str]:
         .limit(_RECONCILIATION_BATCH_SIZE)
     )
     rows = list(session.execute(with_for_update_skip_locked(session, base)).scalars().all())
-    if not rows:
-        runtime_work_service.refresh_pending_work(
-            session,
-            namespace=get_namespace(),
-            kind=RuntimeWorkKind.BUILD,
-            pending_query=_BUILD_WORK_PENDING_QUERY,
-            due_query=_BUILD_WORK_DUE_QUERY,
-        )
-        return []
     build_ids: list[str] = []
     for row in rows:
         owner_id = row.lease_owner or 'unowned'
         claim_token = row.claim_token or ''
-        generation = row.lease_generation
-        attempt = row.attempts
         build_ids.append(row.build_id)
         schedule_id = session.execute(select(col(BuildRun.schedule_id)).where(col(BuildRun.id) == row.build_id)).scalar_one_or_none()
         row.status = BuildJobStatus.FAILED
@@ -217,8 +197,8 @@ def stage_exhausted_jobs(session: Session) -> list[str]:
             entity_id=row.id,
             owner_id=owner_id,
             claim_token=claim_token,
-            generation=generation,
-            attempt=attempt,
+            generation=row.lease_generation,
+            attempt=row.attempts,
         )
     session.flush()
     runtime_work_service.refresh_pending_work(
@@ -234,8 +214,8 @@ def stage_exhausted_jobs(session: Session) -> list[str]:
 expire_exhausted_jobs = committed(stage_exhausted_jobs)
 
 
-def renew_job_lease(session: Session, job_id: str, *, worker_id: str, claim_token: str, lease_generation: int) -> TransitionResult[BuildJob]:
-    now = _database_now(session)
+def renew_job_lease(session: Session, job_id: str, *, worker_id: str, claim_token: str, lease_generation: int) -> BuildJob | None:
+    now = database_now(session)
     lease_now = database_lease_clock(session, now)
     table = BuildJob.metadata.tables[BuildJob.__tablename__]
     statement = (
@@ -265,7 +245,7 @@ def renew_job_lease(session: Session, job_id: str, *, worker_id: str, claim_toke
             claim_token=claim_token,
             generation=lease_generation,
         )
-        return rejected(outcome)
+        return None
     session.commit()
     job = session.get(BuildJob, job_id)
     if job is None:
@@ -280,7 +260,7 @@ def renew_job_lease(session: Session, job_id: str, *, worker_id: str, claim_toke
         generation=lease_generation,
         attempt=job.attempts,
     )
-    return applied(job)
+    return job
 
 
 def _active_job_claim(
@@ -293,7 +273,7 @@ def _active_job_claim(
     lease_generation: int,
     lock: bool,
 ) -> BuildJob | None:
-    now = _database_now(session)
+    now = database_now(session)
     table = BuildJob.metadata.tables[BuildJob.__tablename__]
     statement = (
         select(BuildJob)
@@ -368,7 +348,7 @@ def finish_claimed_job(
 ) -> BuildJob | None:
     if status not in {BuildJobStatus.COMPLETED, BuildJobStatus.FAILED, BuildJobStatus.CANCELLED}:
         raise ValueError(f'Unsupported claimed build job terminal status: {status.value}')
-    now = _database_now(session)
+    now = database_now(session)
     table = BuildJob.metadata.tables[BuildJob.__tablename__]
     statement = (
         update(BuildJob)
@@ -398,7 +378,7 @@ def finish_claimed_job(
 
 
 def stage_job_cancelled(session: Session, job_id: str) -> BuildJob:
-    now = _database_now(session)
+    now = database_now(session)
     table = BuildJob.metadata.tables[BuildJob.__tablename__]
     cancellable_statuses = [BuildJobStatus.QUEUED, *[status for status in BuildJobStatus.members() if status.is_active]]
     statement = (
@@ -434,7 +414,7 @@ mark_job_cancelled = committed(stage_job_cancelled, refresh=True)
 
 
 def queued_job_count(session: Session) -> int:
-    now = _database_now(session)
+    now = database_now(session)
     table = BuildJob.metadata.tables[BuildJob.__tablename__]
     stmt = (
         select(func.count())
@@ -454,7 +434,7 @@ def queued_job_count(session: Session) -> int:
 
 
 def release_worker_jobs(session: Session, *, worker_id: str) -> list[BuildJob]:
-    now = _database_now(session)
+    now = database_now(session)
     table = BuildJob.metadata.tables[BuildJob.__tablename__]
     stmt = (
         select(BuildJob)

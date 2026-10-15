@@ -165,7 +165,7 @@ async def test_agent_early_returns_preserve_durable_terminal_or_confirmation_sta
     store = ChatTurnStore()
     store.enqueue(session_id=session.id, user_id='user', content='run', tool_ids=[], namespace='default', session_token='token')
     claim = store.claim_batch(generation=1, limit=1)[0]
-    runtime = TurnRuntime(claim, FastAPI(), (), [])
+    runtime = TurnRuntime(claim, FastAPI(), [])
     provider = AsyncMock(return_value={'choices': [{'message': {'content': ''}, 'finish_reason': 'stop'}]})
     tool_executor = AsyncMock()
     monkeypatch.setattr(routes_module, 'chat_with_tools', provider)
@@ -212,7 +212,7 @@ async def test_empty_openrouter_session_uses_stored_settings_key(monkeypatch: py
     store.enqueue(session_id=session.id, user_id='user', content='hello', tool_ids=[], namespace='default', session_token='token')
     claim = store.claim_batch(generation=1, limit=1)[0]
     assert claim.api_key == ''
-    runtime = TurnRuntime(claim, FastAPI(), (), [])
+    runtime = TurnRuntime(claim, FastAPI(), [])
     provider = AsyncMock(return_value={'choices': [{'message': {'content': 'ok'}, 'finish_reason': 'stop'}]})
     monkeypatch.setattr(routes_module, 'chat_with_tools', provider)
     monkeypatch.setattr(routes_module, 'get_resolved_openrouter_key', lambda: 'stored-openrouter-key')
@@ -286,8 +286,8 @@ async def test_revoked_turn_does_not_stop_later_turn_or_grpc_actor(monkeypatch: 
         methods[operation].side_effect = fail_removed
     store.finish.side_effect = finish
 
-    async def load_turn(claim: TurnClaim, app: FastAPI, registry: tuple) -> TurnRuntime:
-        return TurnRuntime(claim, app, registry, [])
+    async def load_turn(claim: TurnClaim, app: FastAPI) -> TurnRuntime:
+        return TurnRuntime(claim, app, [])
 
     async def grpc_actor() -> None:
         try:
@@ -338,10 +338,10 @@ async def test_infrastructure_failures_still_fail_closed(monkeypatch: pytest.Mon
 
         store.control_state.side_effect = control_state_side_effect
 
-    async def load_turn(claim: TurnClaim, app: FastAPI, registry: tuple) -> TurnRuntime:
+    async def load_turn(claim: TurnClaim, app: FastAPI) -> TurnRuntime:
         if phase == 'load':
             raise error
-        return TurnRuntime(claim, app, registry, [])
+        return TurnRuntime(claim, app, [])
 
     async def wait_for_watcher(*_args: object, **_kwargs: object) -> None:
         await asyncio.Event().wait()
@@ -371,7 +371,7 @@ async def test_revocation_during_sync_provider_io_keeps_admission_until_thread_e
     store = create_autospec(ChatTurnStore, instance=True)
     store.append_event.side_effect = ChatClaimRevoked('Turn was removed')
     monkeypatch.setattr(consumer_module, 'chat_turn_store', store)
-    runtime = TurnRuntime(replace(_claim(), provider='ollama'), FastAPI(), (), [])
+    runtime = TurnRuntime(replace(_claim(), provider='ollama'), FastAPI(), [])
     started = Event()
     release = Event()
 
