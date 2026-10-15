@@ -1,7 +1,7 @@
 # PRD: Build Length Tracking
 
 > **Status (2026-08-04): Implemented.**
-> **Current truth:** Build history shows formatted duration with a live elapsed timer for running builds; detail view includes per-step timing bars with slowest-step highlight; analysis/datasource-filtered views load a duration trend chart via `GET /engine-runs/stats`; optional `build_timeout_warning_ms` on output config flags long builds in the UI and notification text.
+> **Current truth:** Build history shows formatted duration with a live elapsed timer for running builds; detail view includes per-step timing bars with slowest-step highlight; analysis/datasource-filtered views load a duration trend chart via `GET /compute-worker-runs/stats`; optional `build_timeout_warning_ms` on output config flags long builds in the UI and notification text.
 > **Portfolio:** [PRD index](../README.md)
 
 
@@ -120,7 +120,7 @@ The `EngineRun` response already includes `duration_ms` and `step_timings`. Ensu
 **New endpoint for duration stats:**
 
 ```
-GET /api/v1/engine-runs/stats?analysis_id={id}&kind=BUILD&limit=20
+GET /api/v1/compute-worker-runs/stats?analysis_id={id}&kind=BUILD&limit=20
 Response: {
   runs: [{ id, started_at, duration_ms, status }],
   avg_duration_ms: number,

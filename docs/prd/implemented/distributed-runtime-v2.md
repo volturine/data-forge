@@ -1,7 +1,7 @@
 # PRD: Distributed Runtime v2
 
 > **Status (audited 2026-09-29): Implemented — single-coordinator distributed-runtime baseline.**
-> **Current truth:** v2 establishes durable PostgreSQL state, fenced work claims, multi-process API safety, and a dedicated runtime coordinator. It does not establish multi-active coordinator/worker-agent scale-out or database sharding. The active [Capacity-First Runtime Optimization](../active/elastic-runtime-scale-out.md) requires measuring the current topology before taking either step.
+> **Current truth:** v2 establishes durable PostgreSQL state, fenced work claims, multi-process API safety, and a dedicated runtime coordinator. It does not establish multi-active coordinator/worker-agent scale-out or database sharding. [Capacity-First Runtime Optimization](capacity-first-runtime-optimization.md) requires measuring the current topology before taking either step.
 > **Portfolio:** [PRD index](../README.md)
 
 

@@ -1,7 +1,7 @@
 # PRD: Capacity-First Runtime Optimization
 
-> **Status (2026-10-03): Active — `just verify`, the complete containerized test suite, the 1×1 E2E suite, and its permanent 50-tab probe pass. The 2,000-session connected-WebSocket profile and one coordinator-takeover-during-publication case pass; broader active-work chaos, interactive API/compute profiles, and formal SLO validation remain open.**
-> **Target:** Sustain a representative 2,000-user workload with the fewest service replicas that measurements support. A connected-session-only profile passed; the interactive API/compute workload mix and SLOs still need validation, so this is not yet a general 2,000-user capacity claim.
+> **Status (2026-10-15): Implemented — overhead reduction, runtime contracts, correctness invariants, scale policy, and readiness gates shipped.** `just verify`, the containerized suites, the E2E suite, its permanent 50-tab probe, the 2,000-session connected-WebSocket profile, and the coordinator-takeover-during-publication case pass.
+> **Follow-up:** Proving the full 2,000-user target (interactive API and compute profiles, resilience chaos, formal SLOs) is tracked in [2,000-User Capacity Validation](../backlog/two-thousand-user-capacity-validation.md). This document makes no general 2,000-user capacity claim.
 > **Portfolio:** [PRD index](../README.md)
 
 ## Objective
@@ -212,32 +212,9 @@ API processes or replicas.
 - Make tests use one stack and avoid repeated image builds, stack restarts, or
   overlapping load probes when those are not part of the measured workload.
 
-## Define and prove the 2,000-user target
+## Readiness evidence
 
-Do not infer compute demand from account or tab count. Benchmark these profiles
-separately on the minimal topology:
-
-1. **Connected-session profile:** 2,000 authenticated browser sessions with
-   realistic idle/heartbeat/WebSocket behavior. Measure memory, open sockets,
-   loop lag, reconnects, and API readiness.
-2. **Interactive API profile:** 2,000 sessions with a representative mix of
-   bootstrap/auth/config reads, navigation, saves, and status subscriptions.
-   Derive request rates from available product/E2E traces; publish the assumed
-   active-user ratio and request mix with each result.
-3. **Compute profile:** vary active unique RIDs and commands independently.
-   Include many tabs sharing one RID and identical command, one hot RID with
-   distinct commands, and many unique RIDs. Measure queue wait and worker cold
-   starts; do not call these dimensions “users.”
-4. **Resilience profile:** kill an API process during a request, interrupt
-   notifications, restart the coordinator, and kill a compute worker during
-   publication. Accepted work must finish or reach an explicit terminal error;
-   unrelated RIDs must continue.
-
-Keep the standard 3×5 E2E suite and permanent 50-tab probe in CI. They are
-correctness/readiness gates, not substitutes for sustained 2,000-session load
-tests. Define p95/p99 latency and error thresholds before claiming the target;
-report throughput, queue age, API loop lag, DB checkout/lock waits, coordinator
-RPC lane wait, worker starts, executor occupancy, and CPU/memory in the same run.
+The 2,000-user profile definitions and acceptance criteria moved to [2,000-User Capacity Validation](../backlog/two-thousand-user-capacity-validation.md). The evidence below records what this work proved.
 
 ### Current architecture gate status (2026-10-03)
 
@@ -554,16 +531,9 @@ resource use. Do not increase API workers, compute workers, pool sizes, and
 timeouts together; that makes both improvements and regressions impossible to
 attribute.
 
-## Definition of done
+## Delivered
 
-- The 1×1 API topology has repeatable 2,000-session results with the workload
-  assumptions, SLOs, and resource profile recorded.
-- No avoidable API/coordinator/worker/DB round trips, scans, polls, oversized
-  executor fan-out, or repeated container starts dominate measured requests.
-- The 50-tab probe and full E2E remain green with deterministic UI state and no
-  reload rescue/random retry.
-- Compute-worker isolation, exact-RID sharing, and durable single-flight remain
-  correct while worker capacity is varied independently from API capacity.
-- Any added process/replica is justified by a measured bottleneck and improves
-  the relevant p95/throughput without increasing errors or destabilizing other
-  services.
+- Request-path and orchestration overhead reduced on the 1×1 topology, with the runtime contracts, correctness invariants, and scale policy above.
+- The full E2E suite and the permanent 50-tab probe are green in CI with deterministic UI state and no reload rescue or random retry.
+- Compute-worker isolation, exact-RID sharing, and durable single-flight stay correct while worker capacity varies independently of API capacity.
+- The 2,000-session connected-WebSocket profile and the coordinator-takeover-during-publication case pass.

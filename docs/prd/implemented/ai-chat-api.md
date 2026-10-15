@@ -1,7 +1,7 @@
 # PRD: AI Chat API Support
 
-> **Status (audited 2026-10-05): Backlog — OpenRouter and Ollama are the supported providers. OpenAI is not.**
-> **Current truth:** Chat and pipeline AI use OpenRouter and Ollama. Sections below that specify an OpenAI provider are superseded.
+> **Status (2026-10-15): Implemented — OpenRouter and Ollama for in-app chat and the per-row AI step.**
+> **Current truth:** Chat selects its provider per request. AI steps carry their own provider, model, and endpoint URL (remote Ollama), with batching, retries, an optional rate limit, and an error column. Provider settings live in app settings. **Dropped:** the OpenAI and self-hosted OpenAI-compatible providers (G-3 and US-4); sections that specify them are historical.
 > **Portfolio:** [PRD index](../README.md)
 
 
@@ -17,9 +17,8 @@ Data-Forge now has broader AI provider support than this original baseline descr
 
 | Provider | Chat | Pipeline AI Step | Configuration |
 |----------|------|-----------------|---------------|
-| OpenRouter | ✅ | ✅ | Global settings + provider selection exist |
-| OpenAI | ✅ | ✅ | Global settings + provider selection exist |
-| Ollama | ✅ | ✅ | Global settings + provider selection exist |
+| OpenRouter | ✅ | ✅ | App settings + per-step model |
+| Ollama (local or remote) | ✅ | ✅ | App settings + per-step endpoint URL and model |
 
 ### Target State
 

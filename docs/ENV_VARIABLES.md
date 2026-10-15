@@ -137,10 +137,9 @@ durable results and distinct commands for one RID are serialized. API caches,
 projections, and waiters are process-local and disposable; PostgreSQL remains
 authoritative for durable work. Work remains durable while waiting. These are
 not cluster-wide leases across multiple manager containers; horizontal
-worker-service scaling is unsupported until
-distributed identity ownership and capacity grants are implemented and
-load-tested in the
-[capacity-first runtime plan](prd/active/elastic-runtime-scale-out.md).
+worker-service scaling is unsupported; the
+[scale policy](prd/implemented/capacity-first-runtime-optimization.md#scale-only-after-identifying-the-saturated-layer)
+requires a measured manager bottleneck before multi-manager identity ownership is designed.
 Active and warm starts are bounded by their configured budgets; there is no
 host-CPU-derived startup cap.
 
@@ -174,7 +173,7 @@ runtime coordinator, scheduler, and worker as separate processes. The checked-in
 `docker/env/prod.env` defaults to `WORKERS=1`. This controls API processes in
 the API container; it does not add runtime coordinator or worker-manager
 capacity. For the current supported topology and the future scale-out target,
-see [Deployment](DEPLOYMENT.md) and [Capacity-First Runtime Optimization](prd/active/elastic-runtime-scale-out.md).
+see [Deployment](DEPLOYMENT.md) and [Capacity-First Runtime Optimization](prd/implemented/capacity-first-runtime-optimization.md).
 
 ### Local development
 

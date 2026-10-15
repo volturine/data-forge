@@ -185,8 +185,10 @@ The repository defaults are tuned for concurrent clients:
   bounded threads; Polars-heavy parsing and execution stay in compute containers.
 - Durable external notification metadata is recorded in the outbox; email and
   Telegram network delivery runs outside the database transaction.
-- The capacity-first optimization plan and measured scale gates are in
-  [Capacity-First Runtime Optimization](docs/prd/active/elastic-runtime-scale-out.md).
+- The scale policy and measured readiness gates are in
+  [Capacity-First Runtime Optimization](docs/prd/implemented/capacity-first-runtime-optimization.md);
+  the remaining 2,000-user validation is in
+  [2,000-User Capacity Validation](docs/prd/backlog/two-thousand-user-capacity-validation.md).
 - API containers are stateless and can run as replicas behind an ingress;
   the active worker manager can place compute workers on several Docker
   hosts, and the whole stack can run on two or three machines with the
@@ -322,7 +324,7 @@ and durable recovery callbacks; publication remains synchronous database/thread
 work. Short database units open and close their own sessions in bounded threads.
 Private storage cleanup reuses the outbox and an independent worker I/O lane to
 retire abandoned source/staging data; published snapshots retain their existing
-retention policy. The [runtime contracts](docs/prd/active/elastic-runtime-scale-out.md#implemented-runtime-contracts)
+retention policy. The [runtime contracts](docs/prd/implemented/capacity-first-runtime-optimization.md#implemented-runtime-contracts)
 describe mutation, cancellation, recovery, and cleanup boundaries.
 
 ### Compute Workers

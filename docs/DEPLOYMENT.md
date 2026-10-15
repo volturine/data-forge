@@ -52,7 +52,7 @@ bound to one exact analysis or datasource RID. Identical full commands share
 durable results, while distinct commands for one RID are serialized. Increasing
 `WORKERS` scales API processes inside that container only. The Compose API
 service publishes one fixed host port, so adding API containers also requires
-an ingress/load-balancer topology. See [Capacity-First Runtime Optimization](prd/active/elastic-runtime-scale-out.md)
+an ingress/load-balancer topology. See [Capacity-First Runtime Optimization](prd/implemented/capacity-first-runtime-optimization.md)
 for the 1×1 baseline and evidence-gated scale path.
 
 External notification delivery claims durable outbox metadata before making
@@ -356,7 +356,7 @@ data; abandoned targets require fenced `AUTHORIZED` grants before deletion.
 Published snapshots keep their existing retention policy. Cleanup uses durable
 intents and indexed source references rather than blob discovery; it introduces
 no additional service or public configuration. See the
-[private GC contract](prd/active/elastic-runtime-scale-out.md#private-storage-gc)
+[private GC contract](prd/implemented/capacity-first-runtime-optimization.md#private-storage-gc)
 for authorization, ownership transfer, and acknowledgement rules.
 
 ## Backup and restore

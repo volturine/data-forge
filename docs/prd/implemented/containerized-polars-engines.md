@@ -5,7 +5,7 @@
 
 ## Summary
 
-Run each Polars engine in its own short-lived container instead of as a Python subprocess inside the worker container. The worker remains the authoritative lifecycle supervisor and command dispatcher; each engine container owns exactly one engine identity and its Polars compute process. Operator-provided namespace credentials are the current deployment contract; credential provisioning and rotation are tracked separately in [Namespace Credential Management](../backlog/namespace-credential-management.md).
+Run each Polars engine in its own short-lived container instead of as a Python subprocess inside the worker container. The worker remains the authoritative lifecycle supervisor and command dispatcher; each engine container owns exactly one engine identity and its Polars compute process. Namespace credentials were originally an operator-provided deployment map; the backend now provisions and serves them, see [Namespace Credential Management](namespace-credential-management.md).
 
 The first implementation targets one local Docker daemon in production Docker Compose deployments. It preserves the existing engine identity and durable compute-request contracts while replacing only the engine execution boundary. The executor interface and network protocol must remain suitable for a later Kubernetes executor, but Kubernetes scheduling is not part of this release.
 

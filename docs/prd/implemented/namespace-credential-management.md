@@ -1,8 +1,6 @@
 # PRD: Namespace Credential Management
 
-> **Status:** Partially implemented — provisioning, encrypted persistence, and
-> authenticated worker access shipped; rotation, revocation, and audit remain
-> backlog. Follow-up to the implemented [Containerized Polars Engines](../implemented/containerized-polars-engines.md) PRD.
+> **Status (2026-10-15): Implemented — backend provisioning, encrypted persistence, and scoped worker access.** Rotation, revocation, expiry, and audit are tracked in [Namespace Credential Lifecycle](../backlog/namespace-credential-lifecycle.md). The operator-map import mode is dropped: the map was removed and nothing reads it.
 > **Portfolio:** [PRD index](../README.md)
 
 ## Summary
@@ -19,8 +17,9 @@ internal `GetEngineCredentials` gRPC RPC, scoped to namespace and role. The
 worker has no broader-credential fallback. The `default` namespace is
 provisioned at API startup.
 
-**Still open:** rotation, revocation/expiry lifecycle, audit records, warm-engine
-renewal, and the explicit import mode for legacy operator maps.
+Rotation, revocation, expiry, audit, and warm-engine renewal moved to
+[Namespace Credential Lifecycle](../backlog/namespace-credential-lifecycle.md).
+The sections below are the original design and remain as context.
 
 The original boundary below is kept for context.
 
