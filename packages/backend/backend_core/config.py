@@ -189,8 +189,6 @@ class Settings(EnvFileSettings):
     telegram_bot_enabled: bool = Field(default=False, alias='TELEGRAM_BOT_ENABLED')
     openrouter_api_key: str = Field(default='', alias='OPENROUTER_API_KEY')
     openrouter_default_model: str = Field(default='', alias='OPENROUTER_DEFAULT_MODEL')
-    ollama_endpoint_url_db: str = Field(default='', alias='OLLAMA_ENDPOINT_URL_DB')
-    ollama_default_model_db: str = Field(default='', alias='OLLAMA_DEFAULT_MODEL_DB')
 
     trusted_proxy_hops: int = Field(default=0, ge=0, alias='TRUSTED_PROXY_HOPS')
 

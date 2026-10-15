@@ -49,7 +49,7 @@ a Docker API the manager can reach, and a route to RustFS.
    `docker network create <DF_COMPUTE_WORKER_DOCKER_NETWORK>`. Compute workers on a remote host
    still get their RPC port published on that host, so the network only has to
    exist; it does not need to reach the manager.
-4. **Open the route to the object store.** Engines on the host must reach the
+4. **Open the route to the object store.** Compute workers on the host must reach the
    endpoint you give as `object_store_endpoint` (or the worker's own
    `OBJECT_STORE_ENDPOINT` when omitted). `http://rustfs:9000` is Compose DNS and
    does not resolve from another machine, so publish RustFS on the manager's

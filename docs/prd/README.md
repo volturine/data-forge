@@ -14,7 +14,6 @@ The root [README](../../README.md) is the human-facing project overview. [AGENTS
 ## Implemented
 
 - [Build Length Tracking](implemented/build-length-tracking.md)
-- [Build Preview Checklist](implemented/build-preview-checklist.md) — archived rollout checklist
 - [Build Preview](implemented/build-preview.md)
 - [Containerized Polars Engines](implemented/containerized-polars-engines.md) — Docker-native execution, lifecycle, capacity, recovery, and reconciliation
 - [Cancel Build](implemented/cancel-build.md)
@@ -23,11 +22,9 @@ The root [README](../../README.md) is the human-facing project overview. [AGENTS
 - [Dataset Descriptions](implemented/dataset-descriptions.md)
 - [Core Product Specification](implemented/data-forge.md) — includes analysis UDF editing and large namespace/compute worker dialogs
 - [Distributed Runtime v2](implemented/distributed-runtime-v2.md)
-- [Distributed Runtime v2 Progress](implemented/distributed-runtime-v2-progress.md) — archived progress record
-- [Documentation Update](implemented/documentation-update.md)
 - [Duplicate Analysis Tab](implemented/duplicate-analysis-tab.md)
 - [Duplicate Analysis](implemented/duplicate-analysis.md)
-- [E2E Runtime Baseline](implemented/e2e-runtime-baseline.md) — current five-run measurement record
+- [E2E Runtime Baseline](implemented/e2e-runtime-baseline.md) — superseded five-run baseline retained for comparison
 - [Engine Lifecycle Alignment](implemented/engine-lifecycle-alignment.md) — superseded design
 - [Hot-Path Ownership Map](implemented/hot-path-ownership-map.md) — current product-path ownership contract
 - [Hot-Path Profiling Record](implemented/hot-path-request-map.md) — direct timing, request, and occupancy evidence
@@ -41,7 +38,6 @@ The root [README](../../README.md) is the human-facing project overview. [AGENTS
 - [Schedule Descriptions](implemented/schedule-descriptions.md)
 - [Scheduling](implemented/scheduling.md) — superseded design
 - [Settings Profile Page](implemented/settings-profile-page.md)
-- [Shared Boundary Checklist](implemented/shared-boundary-checklist.md) — archived completed audit
 - [SQL/Polars Snippet Export](implemented/sql-polars-snippet-export.md)
 - [S3 Storage Support](implemented/s3-storage-support.md) — per-namespace object-store buckets
 

@@ -72,11 +72,11 @@ file upload.
 
 ### Image channels
 
-CI publishes every role image to GHCR on three channels:
+CI publishes every role image to GHCR on two channels:
 
 | Channel          | Trigger                        | Tags                                  | Platforms                    |
 | ---------------- | ------------------------------ | ------------------------------------- | ---------------------------- |
-| Dev / PR preview | pull request, push to `master` | `dev-pr-<number>`, `dev-master`       | `linux/amd64`                |
+| Dev / PR preview | pull request, push to `master` | `dev-pr-<number>`, `dev-master`       | `linux/amd64`, `linux/arm64` |
 | Release          | tag `v*`                       | `<version>`, semver aliases, `latest` | `linux/amd64`, `linux/arm64` |
 
 Dev-channel images feed PR-preview deployments; release images are pinned in
@@ -175,11 +175,10 @@ docker compose --env-file docker/env/prod.env \
   'import asyncio; from backend_core.database import init_db; asyncio.run(init_db())'
 ```
 
-The revision order is part of the rollout: apply #244's table/column revisions
-first (public `0025`, tenant `0026`), then #246's constraints (public `0027`,
-tenant `0028`), all before restoring traffic. The current public head also
-includes #247's Docker-host revision `0029`. After the migration job succeeds,
-start the coordinated release:
+Before the first release the schema is one shared baseline revision,
+`runtime_schema_baseline`; the migration job upgrades schemas still at a managed
+pre-squash revision in place. After the migration job succeeds, start the
+coordinated release:
 
 ```bash
 docker compose --env-file docker/env/prod.env \
@@ -189,15 +188,9 @@ docker compose --env-file docker/env/prod.env \
 Watch the API and worker-manager logs, confirm `/health/ready`, and restore
 traffic only after the new release is healthy.
 
-For a rollback of the #246 constraint layer, downgrade public `0027` to `0025`
-and tenant `0028` to `0026`. The current public `0029` revision follows `0027`,
-so first unwind it to `0027`; reaching `0025` also removes the Docker-host
-column introduced by #247. Keep traffic drained and use application images
-compatible with that schema. For a full rollback of #244, continue to public
-`0020` and tenant `0024` before deploying the previous images. Restore the
-coordinated backups if the database and object-store data must return to their
-pre-upgrade state; do not roll back application images and persisted data
-independently.
+To roll back, keep traffic drained, restore the coordinated backups taken
+before the upgrade, and deploy the previous images; do not roll back application
+images and persisted data independently.
 
 ### Scale out
 
@@ -420,7 +413,8 @@ that provider's versioning, replication, or snapshot tooling.
 
 - Rotate database and object-store credentials in the services first, update all
   Data-Forge roles together, then restart the complete runtime.
-- Rotate `INTERNAL_API_TOKEN` simultaneously for API, scheduler, and worker; mixed
+- Rotate `INTERNAL_API_TOKEN` simultaneously for API, runtime coordinator,
+  scheduler, and worker; mixed
   values prevent role registration and job processing.
 - Treat `SETTINGS_ENCRYPTION_KEY` as data-encryption material, not an ordinary
   password. Follow an application-supported re-encryption procedure before

@@ -106,8 +106,9 @@ abandoned targets proceed through `TRACKED → AUTHORIZED → DELETED`. An
 independent worker I/O lane cleans exact managed objects/prefixes and associated
 catalog identifiers idempotently, deferring a busy RID until its writer and job
 slot settle. Cleanup is driven by intents and indexed exact source references,
-rather than discovery through blob scans. Tenant migration
-[0017_compute_source_index](../../../packages/backend/database/alembic/versions/0017_compute_source_index.py)
+rather than discovery through blob scans. The tenant
+`ix_compute_requests_active_source` index in the
+[baseline migration](../../../packages/backend/database/alembic/versions/0001_runtime_schema.py)
 supplies the exact-source index.
 
 Source ownership transfer advances the generation and invalidates the old

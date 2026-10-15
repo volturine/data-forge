@@ -12,7 +12,7 @@ just dev                  # API, worker, scheduler, frontend
 just format               # ruff + prettier
 just check                # lint/types/protocol
 just verify               # format + static checks
-just test                 # backend pytest + frontend unit
+just test                 # backend, worker, scheduler pytest + frontend unit
 just test-e2e             # Playwright only via this recipe
 just generate-protocol
 ```

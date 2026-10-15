@@ -116,8 +116,9 @@ docker compose --env-file docker/env/prod.env \
 ```
 
 `docker/compose.yaml` is the single production compose file and
-`docker/env/prod.env` is its production env template. GHCR-published images are
-for production releases only.
+`docker/env/prod.env` is its production env template. Pin release-channel GHCR
+images in production; dev-channel images feed PR previews (see
+[Image channels](DEPLOYMENT.md#image-channels)).
 `docker/compose.yaml` uses published fixed-role images and does not build application images during `up`.
 The compose topology uses separate `api`, `runtime`, `scheduler`, and `worker` containers from the same codebase release.
 The checked-in Docker topology still includes `postgres` because the supported Docker runtime path is Postgres-backed. `DF_DATABASE_URL` in the Docker env files points at that service.
@@ -198,6 +199,7 @@ just dev
 | `DATABASE_URL`                         | none                                                                                      | Full backend PostgreSQL database URL. Required.                                                                                                                                                                                                                  |
 | `DF_API_IMAGE`                         | `ghcr.io/volturine/data-forge-api:1.0.0`                                                  | Docker compose production image tag for the `api` service. Pull this image before `docker compose up`.                                                                                                                                                           |
 | `DF_SCHEDULER_IMAGE`                   | `ghcr.io/volturine/data-forge-scheduler:1.0.0`                                            | Docker compose production image tag for the `scheduler` service.                                                                                                                                                                                                 |
+| `DF_RUNTIME_IMAGE` | `ghcr.io/volturine/data-forge-runtime:1.0.0` | Docker compose production image tag for the `runtime` coordinator service. |
 | `DF_WORKER_IMAGE`                      | `ghcr.io/volturine/data-forge-worker:1.0.0`                                               | Docker compose production image tag for the `worker` service.                                                                                                                                                                                                    |
 | `DF_COMPUTE_WORKER_IMAGE`              | `ghcr.io/volturine/data-forge-compute-worker:1.0.0`                                      | Image used for dynamically-created compute-worker containers. A `repository@sha256:<digest>` reference keeps every launch byte-identical; tags remain supported for custom images.                                                                                |
 | `DF_COMPUTE_WORKER_DOCKER_HOST`         | `unix:///var/run/docker.sock`                                                             | Docker API endpoint used only by the worker manager service.                                                                                                                                                                                                      |
@@ -347,8 +349,6 @@ rejected explicitly while accepted compute requests remain durable.
 | `OPENROUTER_BASE_URL`       | `https://openrouter.ai/api/v1` | OpenRouter API base. Not a profile setting.     |
 | `OPENROUTER_API_KEY`        | empty                        | Copied into settings when the saved key is empty. A key saved in the profile replaces it. |
 | `OPENROUTER_DEFAULT_MODEL`  | empty                        | Seeded into DB on first run if DB field is empty. |
-| `OLLAMA_ENDPOINT_URL_DB`    | empty                        | DB-seeded Ollama endpoint override.               |
-| `OLLAMA_DEFAULT_MODEL_DB`   | empty                    | DB-seeded Ollama model override.                  |
 
 ### Notifications and encrypted settings
 

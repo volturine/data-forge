@@ -13,10 +13,10 @@
       "path": "../packages/scheduler",
     },
     {
-      "path": "../packages/shared",
+      "path": "../packages/worker",
     },
     {
-      "path": "../packages/worker-manager",
+      "path": "../packages/protocol",
     },
   ],
   "settings": {
