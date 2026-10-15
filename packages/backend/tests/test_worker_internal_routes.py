@@ -179,8 +179,6 @@ def test_runtime_rpc_executor_sizes_stay_within_database_budget() -> None:
         assert sizes[0] <= pool_size
         assert sizes[2] <= 1
 
-    assert backend_grpc_server._INTERNAL_GENERAL_VALIDATION_WORKERS == backend_grpc_server._INTERNAL_GENERAL_RPC_WORKERS
-
 
 @pytest.mark.asyncio
 async def test_prewarm_executor_starts_every_configured_thread() -> None:
@@ -317,11 +315,11 @@ async def test_generation_assertion_burst_cannot_starve_worker_heartbeat(monkeyp
         assert release_guard.wait(timeout=5)
 
     async def allow_internal_call(_context):
-        return backend_grpc_server.RpcMetadata(MappingProxyType(dict(_context.invocation_metadata())))
+        return MappingProxyType(dict(_context.invocation_metadata()))
 
     monkeypatch.setattr(backend_grpc_server, 'active_runtime_coordinator_generation', lambda: generation)
     monkeypatch.setattr(backend_grpc_server, '_require_internal_token', allow_internal_call)
-    monkeypatch.setattr(backend_grpc_server, 'run_critical_settings_db', lambda function: function(object()))
+    monkeypatch.setattr(backend_grpc_server, 'run_critical_settings_db', lambda function, *args, **kwargs: function(object(), *args, **kwargs))
     heartbeat_calls: list[tuple[str, int | None]] = []
     monkeypatch.setattr(
         backend_grpc_server.runtime_worker_service,
@@ -438,7 +436,7 @@ def test_compute_claim_rpc_executor_runs_a_db_pool_bounded_batch(monkeypatch: py
         assert release.wait(timeout=5)
         return request
 
-    claim_handler = backend_grpc_server._run_claim_handler_in_thread(blocked_handler)
+    claim_handler = backend_grpc_server._general_rpc(blocked_handler)
 
     async def exercise() -> None:
         calls = [asyncio.create_task(claim_handler(None, index, None)) for index in range(capacity)]
@@ -474,8 +472,8 @@ def test_lease_rpcs_do_not_queue_behind_lifecycle_control(monkeypatch: pytest.Mo
         assert release.wait(timeout=5)
         return request
 
-    lease_handler = backend_grpc_server._run_critical_runtime_handler_in_thread(blocked_handler)
-    control_handler = backend_grpc_server._run_control_handler_in_thread(blocked_handler)
+    lease_handler = backend_grpc_server._lease_rpc(blocked_handler)
+    control_handler = backend_grpc_server._general_rpc(blocked_handler)
 
     async def exercise() -> None:
         assert backend_grpc_server._INTERNAL_LEASE_RPC_WORKERS > 0
@@ -517,8 +515,8 @@ def test_scheduler_heartbeat_bypasses_saturated_general_rpc_lane(monkeypatch: py
         heartbeat_started.set()
         return request
 
-    general_handler = backend_grpc_server._run_control_handler_in_thread(block_general_handler)
-    liveness_handler = backend_grpc_server._run_scheduler_heartbeat_handler_in_thread(heartbeat_handler)
+    general_handler = backend_grpc_server._general_rpc(block_general_handler)
+    liveness_handler = backend_grpc_server._scheduler_heartbeat_rpc(heartbeat_handler)
 
     async def exercise() -> None:
         general_calls = [
@@ -558,8 +556,8 @@ def test_scheduler_heartbeat_does_not_queue_behind_saturated_lease_lane(monkeypa
         heartbeat_started.set()
         return request
 
-    lease_handler = backend_grpc_server._run_critical_runtime_handler_in_thread(blocked_lease)
-    liveness_handler = backend_grpc_server._run_scheduler_heartbeat_handler_in_thread(heartbeat)
+    lease_handler = backend_grpc_server._lease_rpc(blocked_lease)
+    liveness_handler = backend_grpc_server._scheduler_heartbeat_rpc(heartbeat)
 
     async def exercise() -> None:
         lease_call = asyncio.create_task(lease_handler(None, 'lease', None))
@@ -787,7 +785,7 @@ async def test_cancelled_rpc_waits_for_running_handler_and_uses_copied_metadata(
     started = threading.Event()
     release = threading.Event()
     settled = threading.Event()
-    rpc_metadata = backend_grpc_server.RpcMetadata(MappingProxyType({'x-test': 'copied'}))
+    rpc_metadata = MappingProxyType({'x-test': 'copied'})
 
     async def authenticate(_context):
         return rpc_metadata
@@ -800,7 +798,7 @@ async def test_cancelled_rpc_waits_for_running_handler_and_uses_copied_metadata(
         return request
 
     monkeypatch.setattr(backend_grpc_server, '_require_internal_token', authenticate)
-    wrapped = backend_grpc_server._run_control_handler_in_thread(handler)
+    wrapped = backend_grpc_server._general_rpc(handler)
     call = asyncio.create_task(wrapped(None, 'terminal-write', object()))
     try:
         assert await asyncio.to_thread(started.wait, 2)

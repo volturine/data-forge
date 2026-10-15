@@ -273,39 +273,36 @@ def configure_runtime_critical_database_budget() -> int:
     return _RUNTIME_CRITICAL_POOL_SIZE
 
 
-def _engine_kwargs() -> dict[str, object]:
-    general_pool_size, max_overflow, _critical_pool_size = _runtime_database_pool_split(
-        settings.database_pool_size,
-        settings.database_max_overflow,
-    )
-    if not _RUNTIME_CRITICAL_POOL_SIZE:
-        general_pool_size = settings.database_pool_size
-    return {
-        'poolclass': _TimedQueuePool,
-        'pool_pre_ping': True,
-        'pool_size': general_pool_size,
-        'max_overflow': max_overflow,
-        'pool_timeout': settings.database_pool_timeout,
-    }
-
-
 def _create_engine(
     url: str,
     *,
     pool_name: str,
+    search_path: Callable[[], str] | None = None,
+    critical: bool = False,
     connect_args: dict[str, object] | None = None,
-    pool_size: int | None = None,
-    max_overflow: int | None = None,
 ) -> Engine:
-    kwargs = _engine_kwargs()
-    if pool_size is not None:
-        kwargs['pool_size'] = pool_size
-    if max_overflow is not None:
-        kwargs['max_overflow'] = max_overflow
-    if connect_args is not None:
-        kwargs['connect_args'] = connect_args
-    engine = create_engine(url, echo=settings.sql_echo, **kwargs)
+    """Create a timed, checkout-tracked engine.
+
+    General engines give up the base connections reserved for the critical
+    coordinator pool; critical engines use exactly that reserve, without overflow.
+    """
+    engine = create_engine(
+        url,
+        echo=settings.sql_echo,
+        poolclass=_TimedQueuePool,
+        pool_pre_ping=True,
+        pool_size=_RUNTIME_CRITICAL_POOL_SIZE if critical else settings.database_pool_size - _RUNTIME_CRITICAL_POOL_SIZE,
+        max_overflow=0 if critical else settings.database_max_overflow,
+        pool_timeout=settings.database_pool_timeout,
+        connect_args=connect_args or {},
+    )
     _track_pool_checkouts(engine, pool_name)
+    if search_path is not None:
+
+        @event.listens_for(engine, 'checkout')
+        def _set_search_path(dbapi_connection, _connection_record, _connection_proxy) -> None:
+            _set_postgres_search_path(dbapi_connection, search_path())
+
     return engine
 
 
@@ -368,20 +365,13 @@ def _apply_postgres_search_path(connection: Connection, namespace: str) -> None:
 
 
 def _create_public_engine(*, critical: bool = False) -> Engine:
-    pool_size = _RUNTIME_CRITICAL_POOL_SIZE if critical else None
-    engine = _create_engine(
+    return _create_engine(
         settings.database_url,
         pool_name='settings-critical' if critical else 'settings',
+        search_path=lambda: _PUBLIC_SCHEMA,
+        critical=critical,
         connect_args={'options': f'-c search_path={_PUBLIC_SCHEMA}'},
-        pool_size=pool_size if critical else None,
-        max_overflow=0 if critical else None,
     )
-
-    @event.listens_for(engine, 'checkout')
-    def _set_public_search_path(dbapi_connection, _connection_record, _connection_proxy) -> None:
-        _set_postgres_search_path(dbapi_connection, _PUBLIC_SCHEMA)
-
-    return engine
 
 
 def get_settings_engine() -> Engine:
@@ -407,12 +397,7 @@ def _get_tenant_engine() -> Engine:
         return tenant_engine
     with _tenant_engine_lock:
         if tenant_engine is None:
-            tenant_engine = _create_engine(settings.database_url, pool_name='tenant')
-
-            @event.listens_for(tenant_engine, 'checkout')
-            def _set_namespace_search_path(dbapi_connection, _connection_record, _connection_proxy) -> None:
-                _set_postgres_search_path(dbapi_connection, get_namespace())
-
+            tenant_engine = _create_engine(settings.database_url, pool_name='tenant', search_path=get_namespace)
         return tenant_engine
 
 
@@ -440,17 +425,7 @@ def _get_critical_tenant_engine() -> Engine:
         return critical_tenant_engine
     with _critical_tenant_engine_lock:
         if critical_tenant_engine is None:
-            critical_tenant_engine = _create_engine(
-                settings.database_url,
-                pool_name='tenant-critical',
-                pool_size=_RUNTIME_CRITICAL_POOL_SIZE,
-                max_overflow=0,
-            )
-
-            @event.listens_for(critical_tenant_engine, 'checkout')
-            def _set_critical_namespace_search_path(dbapi_connection, _connection_record, _connection_proxy) -> None:
-                _set_postgres_search_path(dbapi_connection, get_namespace())
-
+            critical_tenant_engine = _create_engine(settings.database_url, pool_name='tenant-critical', search_path=get_namespace, critical=True)
         return critical_tenant_engine
 
 
@@ -506,17 +481,11 @@ def database_pool_snapshot() -> dict[str, object]:
         if engine is None or id(engine) in seen:
             continue
         seen.add(id(engine))
-        pool = getattr(engine, 'pool', None)
-        if pool is None:
-            continue
         for field in ('size', 'checkedin', 'checkedout', 'overflow'):
-            value = getattr(pool, field, None)
-            if not callable(value):
-                continue
-            try:
+            # Test engines may use pools without QueuePool counters.
+            value = getattr(engine.pool, field, None)
+            if callable(value):
                 snapshots[f'{name}_{field}'] = int(value())
-            except Exception:
-                continue
         checkout_snapshot = _pool_checkout_snapshot(engine, name)
         if checkout_snapshot:
             snapshots.setdefault('process_id', os.getpid())
@@ -636,13 +605,8 @@ def _run_postgres_init_locked(func) -> None:
     run_settings_connection_locked(lambda _connection: func())
 
 
-def _namespace_init_lock_key(namespace: str) -> int:
-    raw = f'{_NAMESPACE_INIT_LOCK_PREFIX}{normalize_namespace(namespace)}'.encode()
-    return int.from_bytes(sha256(raw).digest()[:8], 'big', signed=True)
-
-
-def _namespace_provision_lock_key(namespace: str) -> int:
-    raw = f'{_NAMESPACE_PROVISION_LOCK_PREFIX}{normalize_namespace(namespace)}'.encode()
+def _namespace_lock_key(prefix: str, namespace: str) -> int:
+    raw = f'{prefix}{normalize_namespace(namespace)}'.encode()
     return int.from_bytes(sha256(raw).digest()[:8], 'big', signed=True)
 
 
@@ -666,7 +630,7 @@ def namespace_provision_lock(namespace: str) -> Generator[None]:
     if get_settings_engine().dialect.name != 'postgresql':
         yield
         return
-    with _postgres_advisory_lock(_namespace_provision_lock_key(namespace)):
+    with _postgres_advisory_lock(_namespace_lock_key(_NAMESPACE_PROVISION_LOCK_PREFIX, namespace)):
         yield
 
 
@@ -678,7 +642,7 @@ def _run_namespace_init_locked(namespace: str, func: Callable[[], None]) -> None
     if get_settings_engine().dialect.name != 'postgresql':
         func()
         return
-    with _postgres_advisory_lock(_namespace_init_lock_key(namespace)):
+    with _postgres_advisory_lock(_namespace_lock_key(_NAMESPACE_INIT_LOCK_PREFIX, namespace)):
         func()
 
 

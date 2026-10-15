@@ -226,6 +226,17 @@ def test_filter_handler_not_in_list():
     assert lf.collect()["group"].to_list() == ["b"]
 
 
+def test_filter_handler_empty_list_semantics():
+    handler = FilterHandler()
+
+    def keep(operator: str) -> int:
+        condition = {"column": "group", "operator": operator, "value": [], "value_type": "string"}
+        return handler(_frame(), {"conditions": [condition], "logic": "AND"}).collect().height
+
+    assert keep("not_in") == 3
+    assert keep("in") == 0
+
+
 def test_filter_handler_empty_regex():
     handler = FilterHandler()
     lf = handler(
@@ -604,6 +615,14 @@ def test_string_transform_slice_uses_end_index_semantics() -> None:
     )
 
     assert lf.collect()["name_slice"].to_list() == ["li", "ob", "ha"]
+
+
+def test_fill_null_drop_rows():
+    handler = FillNullHandler()
+    frame = pl.DataFrame({"a": [1, None, 3], "b": [None, "x", "y"]}).lazy()
+
+    assert handler(frame, {"strategy": "drop_rows"}).collect()["a"].to_list() == [3]
+    assert handler(frame, {"strategy": "drop_rows", "columns": ["a"]}).collect()["a"].to_list() == [1, 3]
 
 
 def test_fill_null_literal():
@@ -1011,6 +1030,27 @@ def test_pivot_handler():
     )
     result = lf.collect()
     assert "x" in result.columns
+
+
+def test_pivot_handler_count_aggregates_with_len():
+    handler = PivotHandler()
+    result = (
+        handler(
+            pl.DataFrame({"idx": ["a", "a", "b"], "col": ["x", "x", "y"], "val": [1, 2, 3]}).lazy(),
+            {
+                "index": ["idx"],
+                "columns": "col",
+                "value_columns": ["val"],
+                "aggregate_function": "count",
+                "on_columns": ["x", "y"],
+            },
+        )
+        .collect()
+        .sort("idx")
+    )
+
+    assert result["x"].to_list() == [2, 0]
+    assert result["y"].to_list() == [0, 1]
 
 
 def test_pivot_handler_auto_discovers_on_columns_for_small_cardinality():

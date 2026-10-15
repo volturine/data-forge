@@ -26,12 +26,6 @@ Before you begin, ensure you have the following installed:
 - **Docker** — Required for tests and container workflows. Test runs need a
   daemon that permits privileged containers for the isolated nested daemon.
 
-You can run the prerequisites script for Ubuntu/Debian:
-
-```bash
-bash scripts/prerequisites.sh
-```
-
 ### Quick Setup
 
 ```bash
@@ -64,7 +58,7 @@ Backend API: http://localhost:8000
 ### Useful Commands
 
 ```bash
-just dev              # Start API, worker, scheduler, and frontend
+just dev              # Start API, runtime coordinator, worker, scheduler, and frontend
 just format           # Format all code (ruff + prettier)
 just check            # Run ruff + mypy + svelte-check + eslint
 just test             # Run backend pytest + frontend unit tests
@@ -178,14 +172,14 @@ Before reviewing a change, read [CODING_STANDARDS.md](CODING_STANDARDS.md) for t
 - All Svelte components must have `lang="ts"` on the `<script>` tag
 - Use Svelte 5 runes (`$state`, `$derived`, `$effect`, `$props`)
 - Use Panda CSS for styling — no inline styles or raw hex values
-- Never use `transition-all` — specify properties explicitly
+- Never transition `all` — specify properties explicitly
 - Avoid `as any` type assertions
 
 ### Backend (Python)
 
 - FastAPI async patterns throughout
 - Pydantic V2 models for all schemas
-- SQLAlchemy 2.0 async sessions
+- SQLAlchemy 2.0 sessions opened per short unit in bounded threads (`run_db`/`run_settings_db`); see [runtime invariants](docs/runtime-invariants.md)
 - Use Polars for data processing (not pandas)
 - Follow Google docstring convention
 

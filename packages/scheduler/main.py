@@ -8,9 +8,8 @@ import signal
 import socket
 import time
 import uuid
-from collections.abc import Awaitable, Callable
 from dataclasses import dataclass
-from typing import Protocol, TypeVar
+from typing import Any, Protocol, cast
 
 import grpc
 
@@ -19,7 +18,6 @@ from scheduler_grpc.health import DispatcherHealth
 
 logger = logging.getLogger(__name__)
 _TOKEN_METADATA_KEY = "x-internal-token"
-_T = TypeVar("_T")
 # The coordinator records scheduler staleness after 15 seconds. A 5-second RPC
 # deadline absorbs the measured 1–3-second control-plane tail without allowing
 # a hung heartbeat to suppress liveness detection.
@@ -68,35 +66,19 @@ class SchedulerApiClient:
         self._stub = scheduler_runtime_pb2_grpc.SchedulerRuntimeServiceStub(self._channel)
 
     async def register(self, *, worker_id: str, hostname: str, pid: int, capacity: int, retry_seconds: float | None = None) -> None:
-        await self._call_registration(
-            lambda: self._stub.RegisterScheduler(
-                scheduler_runtime_pb2.SchedulerRegisterRequest(
-                    worker_id=worker_id,
-                    hostname=hostname,
-                    pid=pid,
-                    capacity=capacity,
-                ),
-                timeout=min(self._timeout_seconds, 5.0),
-                metadata=self._metadata(),
-            ),
-            retry_seconds=retry_seconds,
-        )
+        request = scheduler_runtime_pb2.SchedulerRegisterRequest(worker_id=worker_id, hostname=hostname, pid=pid, capacity=capacity)
+        retry_window = self._registration_retry_seconds if retry_seconds is None else max(retry_seconds, 0.0)
+        await self._unary("RegisterScheduler", request, timeout=min(self._timeout_seconds, 5.0), retry_seconds=retry_window)
 
     async def heartbeat(self, *, worker_id: str, timeout_seconds: float | None = None) -> None:
         timeout = self._timeout_seconds if timeout_seconds is None else min(self._timeout_seconds, max(float(timeout_seconds), 0.1))
-        await self._call(lambda: self._stub.HeartbeatScheduler(_worker(worker_id), timeout=timeout, metadata=self._metadata()))
+        await self._unary("HeartbeatScheduler", _worker(worker_id), timeout=timeout)
 
     async def stop(self, *, worker_id: str) -> None:
-        await self._call(lambda: self._stub.StopScheduler(_worker(worker_id), timeout=self._timeout_seconds, metadata=self._metadata()))
+        await self._unary("StopScheduler", _worker(worker_id))
 
     async def due_schedule_namespaces(self) -> list[scheduler_runtime_pb2.SchedulerDueNamespace]:
-        response = await self._call(
-            lambda: self._stub.ListDueScheduleNamespaces(
-                common_pb2.EmptyRequest(),
-                timeout=self._timeout_seconds,
-                metadata=self._metadata(),
-            )
-        )
+        response = await self._unary("ListDueScheduleNamespaces", common_pb2.EmptyRequest())
         return list(response.namespaces)
 
     async def run_due(
@@ -107,42 +89,25 @@ class SchedulerApiClient:
         generation: int,
         wake_ids: tuple[int, ...] = (),
     ) -> scheduler_runtime_pb2.SchedulerRunDueResponse:
-        return await self._call(
-            lambda: self._stub.RunDueSchedules(
-                scheduler_runtime_pb2.SchedulerRunDueRequest(
-                    worker_id=worker_id,
-                    target_namespace=namespace,
-                    generation=generation,
-                    wake_ids=wake_ids,
-                ),
-                timeout=self._timeout_seconds,
-                metadata=self._metadata(),
-            )
-        )
+        request = scheduler_runtime_pb2.SchedulerRunDueRequest(worker_id=worker_id, target_namespace=namespace, generation=generation, wake_ids=wake_ids)
+        return cast(scheduler_runtime_pb2.SchedulerRunDueResponse, await self._unary("RunDueSchedules", request))
 
     async def close(self) -> None:
         await self._channel.close()
 
-    def _metadata(self) -> tuple[tuple[str, str], ...]:
-        return ((_TOKEN_METADATA_KEY, self._token),)
-
-    async def _call(self, fn: Callable[[], Awaitable[_T]]) -> _T:
-        try:
-            return await fn()
-        except grpc.RpcError as exc:
-            code = exc.code()
-            details = exc.details() or f"Backend scheduler gRPC call to {self._target} failed"
-            raise RuntimeError(f"Backend scheduler gRPC failed with {code.name}: {details}") from exc
-
-    async def _call_registration(self, fn: Callable[[], Awaitable[_T]], *, retry_seconds: float | None = None) -> _T:
-        deadline = time.monotonic() + (self._registration_retry_seconds if retry_seconds is None else max(retry_seconds, 0.0))
+    async def _unary(self, method: str, request: Any, *, timeout: float | None = None, retry_seconds: float = 0.0) -> Any:
+        """Call one scheduler-runtime RPC, retrying UNAVAILABLE until ``retry_seconds`` have elapsed."""
+        rpc = getattr(self._stub, method)
+        deadline = time.monotonic() + retry_seconds
         while True:
             try:
-                return await self._call(fn)
-            except RuntimeError as exc:
+                return await rpc(request, timeout=self._timeout_seconds if timeout is None else timeout, metadata=((_TOKEN_METADATA_KEY, self._token),))
+            except grpc.RpcError as exc:
+                code = exc.code()
                 remaining = deadline - time.monotonic()
-                if remaining <= 0 or "UNAVAILABLE" not in str(exc):
-                    raise
+                if code != grpc.StatusCode.UNAVAILABLE or remaining <= 0:
+                    details = exc.details() or f"Backend scheduler gRPC call to {self._target} failed"
+                    raise RuntimeError(f"Backend scheduler gRPC failed with {code.name}: {details}") from exc
                 await asyncio.sleep(min(1.0, remaining))
 
 
@@ -224,14 +189,11 @@ def _log_run_due_result(result: scheduler_runtime_pb2.SchedulerRunDueResponse) -
 async def _sleep_until_tick_or_stop(stop_event: asyncio.Event, seconds: float) -> None:
     sleep_task = asyncio.create_task(asyncio.sleep(seconds))
     stop_task = asyncio.create_task(stop_event.wait())
-    done, pending = await asyncio.wait({sleep_task, stop_task}, return_when=asyncio.FIRST_COMPLETED)
+    _, pending = await asyncio.wait({sleep_task, stop_task}, return_when=asyncio.FIRST_COMPLETED)
     for task in pending:
         task.cancel()
     if pending:
         await asyncio.gather(*pending, return_exceptions=True)
-    for task in done:
-        with contextlib.suppress(asyncio.CancelledError):
-            _task_result = task.result()
 
 
 async def _heartbeat_loop(*, client: SchedulerClient, stop_event: asyncio.Event, worker_id: str, heartbeat_seconds: float, health: DispatcherHealth) -> None:
@@ -259,19 +221,11 @@ async def _heartbeat_loop(*, client: SchedulerClient, stop_event: asyncio.Event,
             logger.exception("Scheduler heartbeat failed")
 
 
-def scheduler_id() -> str:
-    return f"scheduler:{uuid.uuid4()}"
-
-
 def install_stop_handlers(stop_event: asyncio.Event) -> None:
     loop = asyncio.get_running_loop()
-
-    def _stop() -> None:
-        stop_event.set()
-
     for sig in (signal.SIGINT, signal.SIGTERM):
         with contextlib.suppress(NotImplementedError):
-            loop.add_signal_handler(sig, _stop)
+            loop.add_signal_handler(sig, stop_event.set)
 
 
 async def main() -> None:
@@ -281,7 +235,7 @@ async def main() -> None:
     stop_event = asyncio.Event()
     install_stop_handlers(stop_event)
     client = SchedulerApiClient(target=settings.internal_grpc_target, token=settings.internal_api_token)
-    worker_id = scheduler_id()
+    worker_id = f"scheduler:{uuid.uuid4()}"
     health = DispatcherHealth(worker_id, lanes=("scheduler",), max_age_seconds=settings.scheduler_check_interval + 45.0)
     try:
         async with health.serve():

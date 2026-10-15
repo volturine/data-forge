@@ -10,11 +10,6 @@ class DropParams(OperationParams):
 
 
 class DropHandler(OperationHandler):
-    def __call__(
-        self,
-        lf: pl.LazyFrame,
-        params: dict,
-        **_,
-    ) -> pl.LazyFrame:
+    def __call__(self, lf: pl.LazyFrame, params: dict, **_) -> pl.LazyFrame:
         validated = DropParams.model_validate(params)
         return lf.drop(validated.columns)

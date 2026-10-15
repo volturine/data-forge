@@ -18,7 +18,7 @@ from pyiceberg.expressions import AlwaysTrue
 from pyiceberg.table import Table
 
 from dataforge_protocol import datasource_pb2, enums_pb2
-from datasources.datasource_loading import iter_datasource_batches, load_datasource
+from datasources.datasource_loading import iter_datasource_batches, load_datasource_frame
 from datasources.schemas import (
     ColumnStats,
     ColumnStatsResponse,
@@ -144,7 +144,7 @@ def stage_datasource_to_object_store(
     batches = iter_datasource_batches(dict(source_config), batch_size=65_536)
     first = next(batches, None)
     if first is None:
-        first = load_datasource(dict(source_config)).limit(0).collect(engine="streaming")
+        first = load_datasource_frame(dict(source_config)).limit(0).collect(engine="streaming")
     coerce = _coerce_database_iceberg_compatible_lazyframe if source_config.get("source_type") == "database" else _coerce_iceberg_compatible_lazyframe
     first = coerce(first.lazy()).collect(engine="streaming")
     schema = first.schema
@@ -272,22 +272,20 @@ def import_staged_parquet_files(manifest: Mapping[str, object], *, staged_prefix
             parent, branch_segment = table_path.rsplit("/", 1)
             revision_path = f"{parent}_rev{uuid.uuid4().hex[:8]}/{branch_segment}"
             revision_name = revision_path.rstrip("/").split("/")[-2]
-            table = catalog.create_table(f"clean.{revision_name}", schema=schema, location=revision_path)
-            if file_paths:
-                with table.transaction() as transaction:
-                    transaction.add_files(file_paths)
-            table.refresh()
-            return table, revision_path
-    else:
-        table = catalog.create_table(identifier, schema=schema, location=table_path)
-        if file_paths:
-            with table.transaction() as transaction:
-                transaction.add_files(file_paths)
-        table.refresh()
-        return table, table_path
+            return _create_table_with_files(catalog, f"clean.{revision_name}", schema, revision_path, file_paths), revision_path
+    return _create_table_with_files(catalog, identifier, schema, table_path, file_paths), table_path
 
 
-def _build_iceberg_config(
+def _create_table_with_files(catalog: Any, identifier: str, schema: Any, location: str, file_paths: list[str]) -> Table:
+    table = catalog.create_table(identifier, schema=schema, location=location)
+    if file_paths:
+        with table.transaction() as transaction:
+            transaction.add_files(file_paths)
+    table.refresh()
+    return table
+
+
+def build_iceberg_config(
     target_path: str,
     branch: str,
     *,
@@ -311,7 +309,7 @@ def _build_iceberg_config(
     }
 
 
-def _published_datasource_table_path(
+def published_datasource_table_path(
     datasource_id: str,
     branch: str,
     *,
@@ -324,7 +322,7 @@ def _published_datasource_table_path(
     return object_store_url("clean", datasource_id, branch, namespace=namespace)
 
 
-def _set_snapshot_metadata(config: dict[str, object], table: Any | None) -> None:
+def set_snapshot_metadata(config: dict[str, object], table: Any | None) -> None:
     if table is None:
         return
     snapshot = table.current_snapshot()
@@ -349,7 +347,7 @@ def _get_first_non_null_samples(lazy: pl.LazyFrame, max_rows: int = 1000) -> dic
     return {column: (str(result[column][0]) if result[column][0] is not None else None) for column in columns}
 
 
-def _require_metadata(client: WorkerRuntimeClient, *, namespace: str, datasource_id: str) -> DatasourceMetadata:
+def require_metadata(client: WorkerRuntimeClient, *, namespace: str, datasource_id: str) -> DatasourceMetadata:
     from runtime.worker_runtime_client import frozen_datasource_metadata
 
     metadata = frozen_datasource_metadata(namespace, datasource_id)
@@ -360,7 +358,7 @@ def _require_metadata(client: WorkerRuntimeClient, *, namespace: str, datasource
     return metadata
 
 
-def _create_ingest_run(
+def create_ingest_run(
     client: WorkerRuntimeClient,
     *,
     namespace: str,
@@ -392,7 +390,7 @@ def _create_ingest_run(
     )
 
 
-def _complete_ingest_run(
+def complete_ingest_run(
     client: WorkerRuntimeClient,
     *,
     namespace: str,
@@ -433,7 +431,7 @@ def _complete_ingest_run(
     )
 
 
-def _fail_ingest_run(client: WorkerRuntimeClient, *, namespace: str, run_id: str, started: float, exc: Exception) -> None:
+def fail_ingest_run(client: WorkerRuntimeClient, *, namespace: str, run_id: str, started: float, exc: Exception) -> None:
     with contextlib.suppress(Exception):
         client.update_compute_worker_run(
             namespace=namespace,
@@ -449,7 +447,7 @@ def _fail_ingest_run(client: WorkerRuntimeClient, *, namespace: str, run_id: str
         )
 
 
-def _external_source(metadata: DatasourceMetadata) -> tuple[dict[str, object], DataSourceType]:
+def external_source(metadata: DatasourceMetadata) -> tuple[dict[str, object], DataSourceType]:
     if metadata.source_type != DataSourceType.ICEBERG.value:
         raise DataSourceValidationError(
             "Ingest is only available for Iceberg datasources",
@@ -477,7 +475,7 @@ def is_reingestable_raw(metadata: DatasourceMetadata) -> bool:
     if metadata.created_by == "analysis":
         return False
     try:
-        _external_source(metadata)
+        external_source(metadata)
     except DataSourceValidationError:
         return False
     return True
@@ -497,10 +495,10 @@ def ingest_datasource_for_schedule(
     job_id: str,
     build_id: str,
 ) -> datasource_pb2.DataSourceRecord:
-    from dataforge_protocol import compute_pb2, enums_pb2
+    from dataforge_protocol import compute_pb2
     from runtime.compute_utils import await_compute_worker_result
 
-    metadata = _require_metadata(client, namespace=namespace, datasource_id=datasource_id)
+    metadata = require_metadata(client, namespace=namespace, datasource_id=datasource_id)
     if metadata.revision is None:
         raise ValueError("Scheduled datasource snapshot is missing its revision")
     if not is_reingestable_raw(metadata):
@@ -521,7 +519,6 @@ def ingest_datasource_for_schedule(
             branch = config.get("branch")
             if not isinstance(branch, str) or not branch:
                 raise DataSourceValidationError("Datasource branch is required")
-            branch_name = branch
             staging_id = f"{datasource_id}__claim_{staging_key.replace('-', '_')}"
             target = object_store_url("clean", staging_id, branch, namespace=namespace)
             client.register_datasource_stage(
@@ -536,17 +533,17 @@ def ingest_datasource_for_schedule(
                 manifest_url=manifest_url,
                 catalog_identifier=f"clean.{target.rstrip('/').split('/')[-2]}",
             )
-            source, _source_type = _external_source(metadata)
+            source, _source_type = external_source(metadata)
             engine_job = engine.datasource_job("datasource_stage", {"source_config": source, "table_path": target, "manifest_url": manifest_url})
             result = await_compute_worker_result(engine, job_id=engine_job)
             if result.get("error") or not isinstance(result.get("data"), dict):
                 raise DataSourceConnectionError("Scheduled datasource computation failed", details={"datasource_id": datasource_id})
             # Reuse the published table identity so snapshots from earlier
             # ingests remain readable; new datasources fall back to clean.<RID>.
-            table_path = _published_datasource_table_path(datasource_id, branch, namespace=namespace, existing_config=config)
+            table_path = published_datasource_table_path(datasource_id, branch, namespace=namespace, existing_config=config)
             table, published_table_path = import_staged_parquet_files(result["data"], staged_prefix=target, table_path=table_path, database_url=database_url)
-            config.update(_build_iceberg_config(published_table_path, branch_name, source_config=source))
-            _set_snapshot_metadata(config, table)
+            config.update(build_iceberg_config(published_table_path, branch, source_config=source))
+            set_snapshot_metadata(config, table)
             config["ingest"] = {
                 "ingested_at": datetime.now(UTC).replace(tzinfo=None).isoformat(),
                 "mode": "schedule_ingest",
@@ -590,8 +587,7 @@ def _schema_from_batches(config: dict[str, object]) -> datasource_pb2.SchemaInfo
         batches.close()
 
 
-def _schema_from_database(metadata: DatasourceMetadata, sheet_name: str | None) -> datasource_pb2.SchemaInfo:
-    del sheet_name
+def _schema_from_database(metadata: DatasourceMetadata) -> datasource_pb2.SchemaInfo:
     config = dict(metadata.config or {})
     if not isinstance(config.get("connection_string"), str) or not isinstance(config.get("query"), str):
         source = config.get("source")
@@ -614,7 +610,7 @@ def _schema_from_file(metadata: DatasourceMetadata, sheet_name: str | None) -> d
     if metadata.source_type == "file" and config.get("file_type") == "excel":
         return _schema_from_batches(config)
     try:
-        lazy = load_datasource(config)
+        lazy = load_datasource_frame(config)
     except Exception as exc:
         label = DataSourceType.require(metadata.source_type).category.value if metadata.source_type else "datasource"
         raise DataSourceConnectionError(
@@ -631,7 +627,7 @@ def _schema_from_file(metadata: DatasourceMetadata, sheet_name: str | None) -> d
     return schema
 
 
-def _extract_schema_from_metadata(metadata: DatasourceMetadata, sheet_name: str | None = None) -> datasource_pb2.SchemaInfo:
+def get_datasource_schema_from_metadata(metadata: DatasourceMetadata, *, sheet_name: str | None = None) -> datasource_pb2.SchemaInfo:
     try:
         if metadata.source_type is None:
             raise ValueError("Datasource metadata is missing source_type")
@@ -647,15 +643,11 @@ def _extract_schema_from_metadata(metadata: DatasourceMetadata, sheet_name: str 
             details={"datasource_id": metadata.id},
         )
     if source_type == DataSourceType.DATABASE:
-        return _schema_from_database(metadata, sheet_name)
+        return _schema_from_database(metadata)
     return _schema_from_file(metadata, sheet_name)
 
 
-def get_datasource_schema_from_metadata(metadata: DatasourceMetadata, *, sheet_name: str | None = None) -> datasource_pb2.SchemaInfo:
-    return _extract_schema_from_metadata(metadata, sheet_name=sheet_name)
-
-
-def _attach_column_descriptions(metadata: DatasourceMetadata, schema_info: datasource_pb2.SchemaInfo) -> datasource_pb2.SchemaInfo:
+def attach_column_descriptions(metadata: DatasourceMetadata, schema_info: datasource_pb2.SchemaInfo) -> datasource_pb2.SchemaInfo:
     descriptions = metadata.column_descriptions or {}
     for column in schema_info.columns:
         description = descriptions.get(column.name)
@@ -674,49 +666,30 @@ def _build_snapshot_preview(lazy: pl.LazyFrame, schema: pl.Schema, row_limit: in
     )
 
 
+_ORDERABLE_DTYPES = (
+    pl.Int8,
+    pl.Int16,
+    pl.Int32,
+    pl.Int64,
+    pl.UInt8,
+    pl.UInt16,
+    pl.UInt32,
+    pl.UInt64,
+    pl.Float32,
+    pl.Float64,
+    pl.Utf8,
+    pl.Date,
+    pl.Datetime,
+    pl.Time,
+)
+
+
 def _supports_min_max(dtype: pl.DataType) -> bool:
-    return isinstance(
-        dtype,
-        (
-            pl.Int8,
-            pl.Int16,
-            pl.Int32,
-            pl.Int64,
-            pl.UInt8,
-            pl.UInt16,
-            pl.UInt32,
-            pl.UInt64,
-            pl.Float32,
-            pl.Float64,
-            pl.Utf8,
-            pl.Date,
-            pl.Datetime,
-            pl.Time,
-        ),
-    )
+    return isinstance(dtype, _ORDERABLE_DTYPES)
 
 
 def _supports_unique(dtype: pl.DataType) -> bool:
-    return isinstance(
-        dtype,
-        (
-            pl.Int8,
-            pl.Int16,
-            pl.Int32,
-            pl.Int64,
-            pl.UInt8,
-            pl.UInt16,
-            pl.UInt32,
-            pl.UInt64,
-            pl.Float32,
-            pl.Float64,
-            pl.Utf8,
-            pl.Boolean,
-            pl.Date,
-            pl.Datetime,
-            pl.Time,
-        ),
-    )
+    return isinstance(dtype, (*_ORDERABLE_DTYPES, pl.Boolean))
 
 
 def _build_snapshot_stats(lazy: pl.LazyFrame, schema: pl.Schema) -> list[ColumnStats]:
@@ -779,8 +752,8 @@ def compare_iceberg_snapshots_from_metadata(
     config_base = {"source_type": metadata.source_type, **(metadata.config or {})}
     config_a = {**config_base, "snapshot_id": snapshot_a}
     config_b = {**config_base, "snapshot_id": snapshot_b}
-    lf_a = load_datasource(config_a)
-    lf_b = load_datasource(config_b)
+    lf_a = load_datasource_frame(config_a)
+    lf_b = load_datasource_frame(config_b)
     schema_a = lf_a.collect_schema()
     schema_b = lf_b.collect_schema()
     row_count_a = lf_a.select(pl.len()).collect(engine="streaming").item()
@@ -809,7 +782,7 @@ def get_column_stats_from_metadata(
     datasource_config: dict[str, object] | None = None,
 ) -> ColumnStatsResponse:
     config = {"source_type": metadata.source_type, **(metadata.config or {}), **(datasource_config or {})}
-    lazy = load_datasource(config)
+    lazy = load_datasource_frame(config)
     schema = lazy.collect_schema()
     if column_name not in schema:
         raise ValueError(f"Column not found: {column_name}")

@@ -10,11 +10,6 @@ class ViewParams(OperationParams):
 
 
 class ViewHandler(OperationHandler):
-    def __call__(
-        self,
-        lf: pl.LazyFrame,
-        params: dict,
-        **_,
-    ) -> pl.LazyFrame:
+    def __call__(self, lf: pl.LazyFrame, params: dict, **_) -> pl.LazyFrame:
         ViewParams.model_validate(params)
         return lf

@@ -1,6 +1,6 @@
 # PRD: Frontend Component Decomposition
 
-> **Status:** Backlog — identified by the 2026-08 codebase audit.
+> **Status (2026-10-15): Backlog — not started.** The four original audit hotspots (`ChatPanel`, the analysis editor page, `ScheduleManager`, `DatasourceConfigPanel`) have since been split or shrunk below 1,000 lines; the table below lists today's largest components.
 > **Portfolio:** [PRD index](../README.md)
 
 ## Summary
@@ -9,14 +9,19 @@ Several frontend surfaces have grown into multi-thousand-line monoliths that con
 
 ## Problem
 
-Audit-measured hotspots:
+Largest components (2026-10-15):
 
-| File | Lines | Responsibilities mixed |
-|------|-------|------------------------|
-| `lib/components/chat/ChatPanel.svelte` | ~2,640 | message list, markdown pipeline, composer, tool-call rendering, virtualization |
-| `routes/analysis/[id]/...` editor page | ~2,611 | tab state, step editing, preview orchestration, build triggers |
-| `lib/components/datasources/ScheduleManager.svelte` | ~2,043 | schedule CRUD, cron editing, run history |
-| `lib/components/datasources/DatasourceConfigPanel.svelte` | ~1,906 | config tabs, ingest settings, runs, stats |
+| File | Lines |
+|------|-------|
+| `lib/components/pipeline/OutputNode.svelte` | 1,813 |
+| `lib/components/operations/PlotConfig.svelte` | 1,614 |
+| `lib/components/common/HealthChecksManager.svelte` | 1,529 |
+| `lib/components/common/BuildsManager.svelte` | 1,462 |
+| `lib/components/common/BuildPreview.svelte` | 1,221 |
+| `lib/components/common/DataTable.svelte` | 1,157 |
+| `lib/components/datasources/BuildComparisonPanel.svelte` | 1,142 |
+
+Eleven `.svelte` components exceed 800 lines.
 
 Additional audit findings folded in here:
 
@@ -30,7 +35,7 @@ Additional audit findings folded in here:
 - [ ] Replace clickable-row patterns with accessible buttons or row-level interactive semantics.
 - [ ] Centralize timer lifecycle (one utility, effect-scoped cleanup).
 - [ ] Generate enum token tables from the protocol toolchain instead of hand maintenance.
-  - Current gap is frozen by `protocol-enum-tokens.test.ts`: every generated enum must either have a table or appear on the explicit exemption list (21 enums consumed via hand-maintained literal unions as of 2026-08-22). New protos fail the suite until tabled or exempted.
+  - Current gap is frozen by `protocol-enum-tokens.test.ts`: every generated enum must either have a table or appear on the explicit exemption list (22 exempted enums as of 2026-10-15). New protos fail the suite until tabled or exempted.
 
 ## Non-goals
 

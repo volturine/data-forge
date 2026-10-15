@@ -99,13 +99,13 @@ def test_process_manager_reaps_idle_shared_engines(monkeypatch) -> None:
     )
     try:
         manager.spawn_compute_worker(identity)
-        assert manager.get_engine(identity) is not None
+        assert manager.get_engine_info(identity) is not None
 
         deadline = time.monotonic() + 3.0
-        while time.monotonic() < deadline and manager.get_engine(identity) is not None:
+        while time.monotonic() < deadline and manager.get_engine_info(identity) is not None:
             time.sleep(0.05)
 
-        assert manager.get_engine(identity) is None
+        assert manager.get_engine_info(identity) is None
     finally:
         manager.shutdown_all()
 
@@ -132,7 +132,7 @@ def test_datasource_delete_cannot_stop_engine_with_admitted_request(monkeypatch)
             namespace="default",
             manager=manager,
         )
-        assert manager.get_engine(identity, namespace="default") is engine
+        assert manager.get_engine_info(identity, namespace="default").engine is engine
         assert engine.is_process_alive()
 
         manager.release_engine_request(identity, namespace="default")
@@ -141,7 +141,7 @@ def test_datasource_delete_cannot_stop_engine_with_admitted_request(monkeypatch)
             namespace="default",
             manager=manager,
         )
-        assert manager.get_engine(identity, namespace="default") is None
+        assert manager.get_engine_info(identity, namespace="default") is None
         assert not engine.is_process_alive()
     finally:
         manager.shutdown_all()
@@ -274,7 +274,7 @@ def test_process_manager_cancels_exact_shared_engine_job_without_stopping_worker
         assert manager.cancel_engine_job(identity, job_id="") is False
         assert manager.cancel_engine_job(identity, job_id="stale-request-42") is True
         assert engine.cancelled_jobs == ["stale-request-42"]
-        assert manager.get_engine(identity) is engine
+        assert manager.get_engine_info(identity).engine is engine
         assert engine.is_process_alive()
     finally:
         manager.shutdown_all()
@@ -292,13 +292,13 @@ def test_process_manager_does_not_reap_engine_with_request_reservation(monkeypat
 
         manager._reap_idle_engines_once()
 
-        assert manager.get_engine(identity) is engine
+        assert manager.get_engine_info(identity).engine is engine
         assert engine.is_process_alive()
 
         manager.release_engine_request(identity)
         manager._reap_idle_engines_once()
 
-        assert manager.get_engine(identity) is None
+        assert manager.get_engine_info(identity) is None
         assert not engine.is_process_alive()
     finally:
         manager.shutdown_all()
@@ -327,7 +327,7 @@ def test_process_manager_shutdown_stops_its_owned_engine() -> None:
 
         manager.shutdown_compute_worker(identity)
 
-        assert manager.get_engine(identity) is None
+        assert manager.get_engine_info(identity) is None
         assert not engine.is_process_alive()
         assert engine.shutdown_calls == 1
     finally:
@@ -515,7 +515,7 @@ def test_releasing_eviction_admission_restores_live_engine(monkeypatch) -> None:
 
         manager.release_spawn_admission(second_identity, owned=True)
 
-        assert manager.get_engine(first_identity) is first_engine
+        assert manager.get_engine_info(first_identity).engine is first_engine
     finally:
         manager.shutdown_all()
 
@@ -551,7 +551,7 @@ def test_cancelled_eviction_holds_capacity_until_live_engine_is_restored(monkeyp
             allow_probe.set()
             assert release.result(timeout=2) is True
 
-        assert manager.get_engine(current_identity) is current_engine
+        assert manager.get_engine_info(current_identity).engine is current_engine
         assert manager._capacity_starts == 0
     finally:
         allow_probe.set()
@@ -572,7 +572,7 @@ def test_process_manager_defers_while_engine_is_reserved(monkeypatch) -> None:
 
         second_info = manager.spawn_compute_worker(second_identity)
         assert second_info.engine.is_process_alive()
-        assert manager.get_engine(first_identity) is None
+        assert manager.get_engine_info(first_identity) is None
     finally:
         manager.shutdown_all()
 
@@ -586,12 +586,12 @@ def test_lease_loss_keeps_shared_engine_for_reuse() -> None:
         manager.reserve_engine_request(identity)
 
         assert manager.shutdown_compute_worker_after_request_lease_loss(identity) is False
-        assert manager.get_engine(identity) is engine
+        assert manager.get_engine_info(identity).engine is engine
         assert engine.is_process_alive()
 
         manager.release_engine_request(identity)
         assert manager.shutdown_compute_worker_after_request_lease_loss(identity) is False
-        assert manager.get_engine(identity) is engine
+        assert manager.get_engine_info(identity).engine is engine
         assert engine.is_process_alive()
     finally:
         manager.shutdown_all()
@@ -610,7 +610,7 @@ def test_lease_loss_releases_exclusive_engine_after_last_request() -> None:
         manager.reserve_engine_request(identity)
 
         assert manager.shutdown_compute_worker_after_request_lease_loss(identity) is True
-        assert manager.get_engine(identity) is None
+        assert manager.get_engine_info(identity) is None
         assert not engine.is_process_alive()
     finally:
         manager.shutdown_all()
@@ -625,7 +625,7 @@ def test_lease_loss_does_not_shutdown_compute_worker_with_active_job() -> None:
         engine.current_job_id = "job-1"
 
         assert manager.shutdown_compute_worker_after_request_lease_loss(identity) is False
-        assert manager.get_engine(identity) is not None
+        assert manager.get_engine_info(identity) is not None
         assert engine.is_process_alive()
     finally:
         manager.shutdown_all()
@@ -639,7 +639,7 @@ def test_lease_loss_does_not_shutdown_idle_engine_before_reaper(monkeypatch) -> 
         engine = manager.spawn_compute_worker(identity).engine
 
         assert manager.shutdown_compute_worker_after_request_lease_loss(identity) is False
-        assert manager.get_engine(identity) is engine
+        assert manager.get_engine_info(identity).engine is engine
         assert engine.is_process_alive()
     finally:
         manager.shutdown_all()
@@ -660,11 +660,11 @@ async def test_admitted_reused_engine_is_not_evicted_before_execution(monkeypatc
 
         with pytest.raises(ComputeWorkerCapacityFull):
             manager.spawn_compute_worker(second_identity)
-        assert manager.get_engine(first_identity) is not None
+        assert manager.get_engine_info(first_identity) is not None
 
         manager.release_engine_request(first_identity)
         manager.spawn_compute_worker(second_identity)
-        assert manager.get_engine(first_identity) is None
+        assert manager.get_engine_info(first_identity) is None
     finally:
         manager.release_spawn_admission(first_identity, owned=owns_admission)
         manager.shutdown_all()
@@ -689,7 +689,7 @@ async def test_process_manager_wait_for_capacity_then_spawn(monkeypatch) -> None
         await asyncio.wait_for(wait_task, timeout=2)
         second_info = manager.spawn_compute_worker(second_identity)
         assert second_info.engine.is_process_alive()
-        assert manager.get_engine(first_identity) is None
+        assert manager.get_engine_info(first_identity) is None
     finally:
         manager.shutdown_all()
 
@@ -1074,7 +1074,7 @@ def test_shutdown_waits_for_engine_start_and_stops_its_registration(monkeypatch)
         shutdown_thread.join(timeout=1)
 
         assert spawn_errors == []
-        assert manager.get_engine(identity) is None
+        assert manager.get_engine_info(identity) is None
         assert not manager._starting_engines
         assert len(created) == 1
         assert not created[0].is_process_alive()
@@ -1131,7 +1131,7 @@ async def test_same_identity_waiters_park_until_one_engine_start_finishes(monkey
         results = await asyncio.wait_for(asyncio.gather(*followers), timeout=2)
 
         assert results == [False] * 50
-        assert manager.get_engine(identity) is created[0]
+        assert manager.get_engine_info(identity).engine is created[0]
         assert len(created) == 1
     finally:
         release_start.set()
@@ -1175,9 +1175,9 @@ async def test_cancelled_request_does_not_release_runner_owned_admission(monkeyp
 
         release_start.set()
         deadline = time.monotonic() + 2
-        while manager.get_engine(identity) is None and time.monotonic() < deadline:
+        while manager.get_engine_info(identity) is None and time.monotonic() < deadline:
             await asyncio.sleep(0.01)
-        assert manager.get_engine(identity) is not None
+        assert manager.get_engine_info(identity) is not None
         with manager._capacity_changed:
             assert manager._capacity_starts == 0
             assert manager._cold_starts == 0
@@ -1243,7 +1243,7 @@ async def test_cold_engine_start_fanout_is_bounded_by_compute_workers(monkeypatc
         assert manager._cold_starts == 0
         # All starts completed, but idle identities beyond the active worker
         # budget are expected to be evicted as the queued starts are admitted.
-        registered_identities = [identity for identity in identities if manager.get_engine(identity) is not None]
+        registered_identities = [identity for identity in identities if manager.get_engine_info(identity) is not None]
         assert len(registered_identities) == 8
         assert len(registered_identities) < len(identities)
     finally:
@@ -1320,7 +1320,7 @@ async def test_warm_and_assigned_starts_use_independent_budgets(monkeypatch) -> 
         assert peak_starts == 4
         with manager._capacity_changed:
             assert manager._cold_starts == 0
-        assert all(manager.get_engine(identity) is not None for identity in identities)
+        assert all(manager.get_engine_info(identity) is not None for identity in identities)
     finally:
         release_starts.set()
         for task in tasks:
@@ -1466,8 +1466,7 @@ def test_engine_acquisition_warns_only_after_five_seconds(caplog) -> None:
         namespace="default",
         source="warm",
         acquisition_ms=4999.9,
-        warm_health_ms=2.0,
-        warm_bind_ms=3.0,
+        phase_ms={"warm_health_ms": 2.0, "warm_bind_ms": 3.0},
     )
     fast_record = next(record for record in caplog.records if "Compute worker acquisition" in record.message)
     assert fast_record.levelno == logging.INFO
@@ -1480,7 +1479,7 @@ def test_engine_acquisition_warns_only_after_five_seconds(caplog) -> None:
         namespace="default",
         source="cold",
         acquisition_ms=5000.1,
-        cold_start_ms=4900.0,
+        phase_ms={"cold_start_ms": 4900.0},
     )
     slow_record = next(record for record in caplog.records if "Compute worker acquisition" in record.message)
     assert slow_record.levelno == logging.WARNING
@@ -2003,7 +2002,7 @@ def test_busy_engine_is_not_evicted_or_reaped_after_liveness_failure(monkeypatch
 
         manager._reap_idle_engines_once()
 
-        assert manager.get_engine(identity) is info.engine
+        assert manager.get_engine_info(identity).engine is info.engine
     finally:
         manager.shutdown_all()
 
@@ -2037,7 +2036,7 @@ def test_engine_restart_transfers_its_capacity_once(monkeypatch, capacity: int, 
 
         assert second.engine is not first.engine
         assert len(created) == 2
-        assert manager.get_engine(identity) is second.engine
+        assert manager.get_engine_info(identity).engine is second.engine
         assert second.engine.resource_config == replacement_config
         with manager._capacity_changed:
             assert manager._capacity_starts == 0

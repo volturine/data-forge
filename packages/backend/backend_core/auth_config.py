@@ -1,10 +1,10 @@
 from __future__ import annotations
 
-from pydantic import Field, field_validator, model_validator
-from pydantic_settings import BaseSettings, SettingsConfigDict
-from pydantic_settings.sources import DotEnvSettingsSource
+import warnings
 
-from backend_core.config import Settings as SharedSettings, get_env_file
+from pydantic import Field, field_validator, model_validator
+
+from backend_core.config import EnvFileSettings, Settings as SharedSettings
 
 _PLACEHOLDER_ENCRYPTION_KEYS = {'your-encryption-key-here'}
 _PLACEHOLDER_PASSWORDS = {
@@ -15,28 +15,7 @@ _PLACEHOLDER_PASSWORDS = {
 }
 
 
-class AuthSettings(BaseSettings):
-    model_config = SettingsConfigDict(env_file=None, env_file_encoding='utf8', extra='ignore')
-
-    @classmethod
-    def settings_customise_sources(
-        cls,
-        settings_cls,
-        init_settings,
-        env_settings,
-        dotenv_settings,
-        file_secret_settings,
-    ):
-        env_file = get_env_file()
-        if env_file is None:
-            return (init_settings, env_settings, file_secret_settings)
-        return (
-            init_settings,
-            env_settings,
-            DotEnvSettingsSource(settings_cls, env_file=env_file, env_file_encoding='utf8'),
-            file_secret_settings,
-        )
-
+class AuthSettings(EnvFileSettings):
     auth_required: bool = Field(default=False, alias='AUTH_REQUIRED')
     verify_email_address: bool = Field(default=True, alias='VERIFY_EMAIL_ADDRESS')
     default_user_email: str = Field(default='default@example.com', alias='DEFAULT_USER_EMAIL')
@@ -65,11 +44,10 @@ class AuthSettings(BaseSettings):
         shared_runtime = SharedSettings()
         encryption_key = shared_runtime.settings_encryption_key.strip()
         prod_mode_enabled = shared_runtime.prod_mode_enabled
-        if self.auth_required and prod_mode_enabled and (not encryption_key or encryption_key in _PLACEHOLDER_ENCRYPTION_KEYS):
+        missing_encryption_key = not encryption_key or encryption_key in _PLACEHOLDER_ENCRYPTION_KEYS
+        if self.auth_required and prod_mode_enabled and missing_encryption_key:
             raise ValueError('SETTINGS_ENCRYPTION_KEY must be set to a non-placeholder value when AUTH_REQUIRED=true in production')
-        if self.auth_required and (not encryption_key or encryption_key in _PLACEHOLDER_ENCRYPTION_KEYS):
-            import warnings
-
+        if self.auth_required and missing_encryption_key:
             warnings.warn(
                 'SETTINGS_ENCRYPTION_KEY is empty while AUTH_REQUIRED=True. '
                 'Stored secrets (SMTP passwords, API keys) will not be encrypted. '

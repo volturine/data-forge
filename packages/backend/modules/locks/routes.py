@@ -24,35 +24,23 @@ from modules.mcp.router import MCPRouter
 logger = logging.getLogger(__name__)
 
 
-async def _run_lock[**P, T](function: Callable[P, T], *args: P.args, **kwargs: P.kwargs) -> T:
-    return await run_api_blocking(function, *args, **kwargs)
-
-
 router = MCPRouter(prefix='/locks', tags=['locks'])
 
 
-async def _get_websocket_owner_id(websocket: WebSocket) -> str | None:
-    return await _run_lock(
+async def _require_websocket_user(websocket: WebSocket) -> str:
+    owner_id = await run_api_blocking(
         run_settings_db,
         resolve_lock_owner_id,
         resolve_websocket_session_token(websocket),
         websocket.query_params.get('editor_client_id'),
     )
-
-
-async def _require_websocket_user(websocket: WebSocket) -> str:
-    owner_id = await _get_websocket_owner_id(websocket)
     if owner_id is None:
         raise HTTPException(status_code=401, detail='Not authenticated')
     return owner_id
 
 
 def _status_message(resource_type: str, resource_id: str, lock: schemas.LockStatusResponse | None) -> schemas.LockWebsocketStatusMessage:
-    return schemas.LockWebsocketStatusMessage(
-        resource_type=resource_type,
-        resource_id=resource_id,
-        lock=lock,
-    )
+    return schemas.LockWebsocketStatusMessage(resource_type=resource_type, resource_id=resource_id, lock=lock)
 
 
 async def _send_status(
@@ -65,13 +53,7 @@ async def _send_status(
 
 
 async def _send_error(websocket: WebSocket, error: str, status_code: int) -> None:
-    await safe_send_json(
-        websocket,
-        schemas.LockWebsocketErrorMessage(
-            error=error,
-            status_code=status_code,
-        ),
-    )
+    await safe_send_json(websocket, schemas.LockWebsocketErrorMessage(error=error, status_code=status_code))
 
 
 async def _notify_watchers(resource_type: str, resource_id: str, lock: schemas.LockStatusResponse | None) -> None:
@@ -83,45 +65,18 @@ async def _notify_watchers(resource_type: str, resource_id: str, lock: schemas.L
     # websocket for this namespace; PostgreSQL is the only shared state, so
     # the publish never depends on a deployment flag.
     try:
-        await _run_lock(
-            runtime_ipc.notify_api_lock,
-            namespace,
-            resource_type,
-            resource_id,
-            payload,
-        )
+        await run_api_blocking(runtime_ipc.notify_api_lock, namespace, resource_type, resource_id, payload)
     except Exception:
-        logger.warning(
-            'Failed to publish cross-process lock update for %s %s',
-            resource_type,
-            resource_id,
-            exc_info=True,
-        )
+        logger.warning('Failed to publish cross-process lock update for %s %s', resource_type, resource_id, exc_info=True)
 
 
 async def _lookup_lock_status(resource_type: str, resource_id: str) -> tuple[schemas.LockStatusResponse | None, bool]:
-    return await _run_lock(run_db, service.lookup_lock_status, resource_type, resource_id)
+    return await run_api_blocking(run_db, service.lookup_lock_status, resource_type, resource_id)
 
 
-async def _heartbeat_lock(
-    resource_type: str,
-    resource_id: str,
-    owner_id: str | None,
-    lock_token: str,
-    ttl_seconds: int | None,
-) -> schemas.LockStatusResponse:
-    if owner_id is None:
-        raise HTTPException(status_code=401, detail='Lock owner identity is required')
+async def _heartbeat_lock(resource_type: str, resource_id: str, owner_id: str, lock_token: str, ttl_seconds: int | None) -> schemas.LockStatusResponse:
     try:
-        return await _run_lock(
-            run_db,
-            service.heartbeat_lock,
-            resource_type,
-            resource_id,
-            owner_id,
-            lock_token,
-            ttl_seconds,
-        )
+        return await run_api_blocking(run_db, service.heartbeat_lock, resource_type, resource_id, owner_id, lock_token, ttl_seconds)
     except ValueError as exc:
         raise HTTPException(status_code=409, detail=str(exc)) from exc
 
@@ -129,29 +84,18 @@ async def _heartbeat_lock(
 async def _acquire_lock(
     resource_type: str,
     resource_id: str,
-    owner_id: str | None,
+    owner_id: str,
     ttl_seconds: int | None,
     *,
     on_acquired: Callable[[schemas.LockStatusResponse], None] | None = None,
 ) -> schemas.LockStatusResponse:
-    if owner_id is None:
-        raise HTTPException(status_code=401, detail='Lock owner identity is required')
     try:
         # asyncio.to_thread cannot stop a database transaction after the
         # websocket task is cancelled. Keep the result shielded until its
         # token is recorded, or the finally block could not release a lock
         # that committed just before cancellation.
         with anyio.CancelScope(shield=True):
-            acquisition = asyncio.create_task(
-                _run_lock(
-                    run_db,
-                    service.acquire_lock,
-                    resource_type,
-                    resource_id,
-                    owner_id,
-                    ttl_seconds,
-                )
-            )
+            acquisition = asyncio.create_task(run_api_blocking(run_db, service.acquire_lock, resource_type, resource_id, owner_id, ttl_seconds))
             try:
                 lock = await asyncio.shield(acquisition)
             except asyncio.CancelledError as cancellation:
@@ -174,22 +118,8 @@ async def _acquire_lock(
         raise HTTPException(status_code=409, detail=str(exc)) from exc
 
 
-async def _release_lock(
-    resource_type: str,
-    resource_id: str,
-    owner_id: str | None,
-    lock_token: str,
-) -> bool:
-    if owner_id is None:
-        raise HTTPException(status_code=401, detail='Lock owner identity is required')
-    return await _run_lock(
-        run_db,
-        service.release_lock,
-        resource_type,
-        resource_id,
-        owner_id,
-        lock_token,
-    )
+async def _release_lock(resource_type: str, resource_id: str, owner_id: str, lock_token: str) -> bool:
+    return await run_api_blocking(run_db, service.release_lock, resource_type, resource_id, owner_id, lock_token)
 
 
 @router.post('', response_model=schemas.LockStatusResponse, mcp=True)
@@ -198,14 +128,7 @@ async def acquire_lock(
     body: schemas.LockAcquireRequest,
     owner_id: str = Depends(get_lock_owner_id),
 ) -> schemas.LockStatusResponse:
-    lock = await _run_lock(
-        run_db,
-        service.acquire_lock,
-        body.resource_type,
-        body.resource_id,
-        owner_id,
-        body.ttl_seconds,
-    )
+    lock = await run_api_blocking(run_db, service.acquire_lock, body.resource_type, body.resource_id, owner_id, body.ttl_seconds)
     await _notify_watchers(body.resource_type, body.resource_id, lock)
     return lock
 
@@ -239,15 +162,7 @@ async def heartbeat_lock(
     body: schemas.LockHeartbeatRequest,
     owner_id: str = Depends(get_lock_owner_id),
 ) -> schemas.LockStatusResponse:
-    lock = await _run_lock(
-        run_db,
-        service.heartbeat_lock,
-        resource_type,
-        resource_id,
-        owner_id,
-        body.lock_token,
-        body.ttl_seconds,
-    )
+    lock = await run_api_blocking(run_db, service.heartbeat_lock, resource_type, resource_id, owner_id, body.lock_token, body.ttl_seconds)
     await _notify_watchers(resource_type, resource_id, lock)
     return lock
 
@@ -264,14 +179,7 @@ async def release_lock(
     body: schemas.LockReleaseRequest,
     owner_id: str = Depends(get_lock_owner_id),
 ) -> schemas.LockReleaseResponse:
-    released = await _run_lock(
-        run_db,
-        service.release_lock,
-        resource_type,
-        resource_id,
-        owner_id,
-        body.lock_token,
-    )
+    released = await run_api_blocking(run_db, service.release_lock, resource_type, resource_id, owner_id, body.lock_token)
     if released:
         await _notify_watchers(resource_type, resource_id, None)
     return schemas.LockReleaseResponse(released=released)
@@ -350,13 +258,7 @@ async def lock_websocket(websocket: WebSocket) -> None:
                         nonlocal watch_token
                         watch_token = lock.lock_token
 
-                    lock = await _acquire_lock(
-                        watch_type,
-                        watch_id,
-                        owner_id,
-                        message.ttl_seconds,
-                        on_acquired=remember_acquired_lock,
-                    )
+                    lock = await _acquire_lock(watch_type, watch_id, owner_id, message.ttl_seconds, on_acquired=remember_acquired_lock)
                     watch_token = lock.lock_token
                     await _notify_watchers(watch_type, watch_id, lock)
                     continue
@@ -366,33 +268,16 @@ async def lock_websocket(websocket: WebSocket) -> None:
                         await _send_error(websocket, 'watch must be called before release', 400)
                         continue
                     token_value = message.lock_token or watch_token
-                    if token_value is None:
-                        status, cleaned = await _lookup_lock_status(watch_type, watch_id)
-                        if cleaned:
-                            watch_token = None
-                            await _notify_watchers(watch_type, watch_id, None)
-                            continue
-                        if status is None:
-                            watch_token = None
-                        await _send_status(websocket, watch_type, watch_id, status)
-                        continue
-                    released = await _release_lock(
-                        watch_type,
-                        watch_id,
-                        owner_id,
-                        token_value,
-                    )
-                    if released:
+                    if token_value is not None and await _release_lock(watch_type, watch_id, owner_id, token_value):
                         watch_token = None
                         await _notify_watchers(watch_type, watch_id, None)
                         continue
                     status, cleaned = await _lookup_lock_status(watch_type, watch_id)
-                    if cleaned:
+                    if cleaned or status is None:
                         watch_token = None
+                    if cleaned:
                         await _notify_watchers(watch_type, watch_id, None)
                         continue
-                    if status is None:
-                        watch_token = None
                     await _send_status(websocket, watch_type, watch_id, status)
                     continue
 
@@ -402,13 +287,7 @@ async def lock_websocket(websocket: WebSocket) -> None:
 
                 token_value = message.lock_token or watch_token
                 if token_value is not None:
-                    lock = await _heartbeat_lock(
-                        watch_type,
-                        watch_id,
-                        owner_id,
-                        token_value,
-                        message.ttl_seconds,
-                    )
+                    lock = await _heartbeat_lock(watch_type, watch_id, owner_id, token_value, message.ttl_seconds)
                     if lock.lock_token != token_value:
                         # This socket's token was rotated. Tell it the live lock
                         # without adopting that token, so disconnect cannot release it.
@@ -422,9 +301,6 @@ async def lock_websocket(websocket: WebSocket) -> None:
                 if cleaned:
                     await _notify_watchers(watch_type, watch_id, None)
                     continue
-                if status is None:
-                    await _send_status(websocket, watch_type, watch_id, None)
-                    continue
                 await _send_status(websocket, watch_type, watch_id, status)
             except HTTPException as exc:
                 await _send_error(websocket, str(exc.detail), exc.status_code)
@@ -432,12 +308,9 @@ async def lock_websocket(websocket: WebSocket) -> None:
         await _send_error(websocket, str(exc.detail), exc.status_code)
     except WebSocketDisconnect:
         return
-    except RuntimeError as exc:
-        if is_disconnect_runtime_error(exc):
-            return
-        logger.error('Lock websocket error: %s', exc, exc_info=True)
-        await _send_error(websocket, 'An internal error occurred', 500)
     except Exception as exc:
+        if isinstance(exc, RuntimeError) and is_disconnect_runtime_error(exc):
+            return
         logger.error('Lock websocket error: %s', exc, exc_info=True)
         await _send_error(websocket, 'An internal error occurred', 500)
     finally:
@@ -447,9 +320,7 @@ async def lock_websocket(websocket: WebSocket) -> None:
         with anyio.CancelScope(shield=True):
             if watch_type is not None and watch_id is not None:
                 await watchers.registry.discard(websocket, namespace, watch_type, watch_id)
-            if watch_type is not None and watch_id is not None and watch_token is not None and owner_id is not None:
-                released = await _release_lock(watch_type, watch_id, owner_id, watch_token)
-                if released:
+                if watch_token is not None and owner_id is not None and await _release_lock(watch_type, watch_id, owner_id, watch_token):
                     await _notify_watchers(watch_type, watch_id, None)
             reset_namespace(token)
             await safe_close_websocket(websocket)

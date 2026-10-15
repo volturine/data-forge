@@ -4,7 +4,7 @@ import logging
 import os
 import secrets
 import uuid
-from datetime import UTC, datetime, timedelta
+from datetime import timedelta
 from email.message import EmailMessage
 from string import hexdigits
 from typing import Any, cast
@@ -27,7 +27,7 @@ from backend_core.database import namespace_connection, run_settings_db
 from backend_core.namespaces_service import list_runtime_namespaces
 from backend_core.smtp import send_smtp_message
 from backend_core.sqlmodel_typing import col, sa
-from backend_core.time import naive_utc_now as _utcnow
+from backend_core.time import naive_utc, naive_utc_now as _utcnow
 from backend_core.transactions import committed
 from modules.auth.models import (
     AuthProvider,
@@ -39,18 +39,8 @@ from modules.auth.models import (
     VerificationTokenType,
 )
 
-
-def _naive_utc(value: datetime) -> datetime:
-    if value.tzinfo is None:
-        return value
-    return value.astimezone(UTC).replace(tzinfo=None)
-
-
-_PASSWORD_PROVIDER = AuthProviderName.PASSWORD
 _PBKDF2_ALG = 'sha256'
 _PBKDF2_ITERATIONS = 200_000
-_EMAIL_VERIFY = VerificationTokenType.EMAIL_VERIFY
-_PASSWORD_RESET = VerificationTokenType.PASSWORD_RESET
 _RESEND_COOLDOWN_MINUTES = 5
 _DEFAULT_USER_ID = uuid.uuid5(uuid.NAMESPACE_URL, 'data-forge-default-user').hex
 _DEFAULT_USER_MARKER = 'env_default_user'
@@ -135,27 +125,9 @@ def validate_password(password: str) -> None:
         raise ValueError('Password must contain at least one digit')
 
 
-def _normalize_default_user_email(email: str) -> str:
-    normalized = email.strip().lower()
-    if normalized:
-        return normalized
-    return 'default@example.com'
-
-
-def _normalize_default_user_name(name: str, email: str) -> str:
-    normalized = name.strip()
-    if normalized:
-        return normalized
-    return email.split('@', maxsplit=1)[0]
-
-
-def _get_password_provider(session: Session, user_id: str) -> AuthProvider | None:
-    stmt = select(AuthProvider).where(sa(AuthProvider.user_id == user_id), sa(AuthProvider.provider == _PASSWORD_PROVIDER))
-    return session.exec(stmt).first()
-
-
 def get_password_provider(session: Session, user_id: str) -> AuthProvider | None:
-    return _get_password_provider(session, user_id)
+    stmt = select(AuthProvider).where(sa(AuthProvider.user_id == user_id), sa(AuthProvider.provider == AuthProviderName.PASSWORD))
+    return session.exec(stmt).first()
 
 
 def _build_default_provider_metadata(password: str) -> dict[str, object]:
@@ -169,21 +141,13 @@ def get_default_user_id() -> str:
     return _DEFAULT_USER_ID
 
 
-def get_default_user(session: Session) -> User | None:
-    return get_user_by_id(session, _DEFAULT_USER_ID)
-
-
 def stage_ensure_default_user(session: Session) -> User:
     _acquire_default_user_lock(session)
-    return _ensure_default_user_locked(session)
-
-
-def _ensure_default_user_locked(session: Session) -> User:
-    desired_email = _normalize_default_user_email(auth_settings.default_user_email)
-    desired_name = _normalize_default_user_name(auth_settings.default_user_name, desired_email)
+    desired_email = auth_settings.default_user_email.strip().lower() or 'default@example.com'
+    desired_name = auth_settings.default_user_name.strip() or desired_email.split('@', maxsplit=1)[0]
     desired_password = auth_settings.default_user_password
     now = _utcnow()
-    user = get_default_user(session)
+    user = get_user_by_id(session, _DEFAULT_USER_ID)
     changed = False
 
     if not user:
@@ -207,7 +171,7 @@ def _ensure_default_user_locked(session: Session) -> User:
             AuthProvider(
                 id=uuid.uuid4().hex,
                 user_id=user.id,
-                provider=_PASSWORD_PROVIDER,
+                provider=AuthProviderName.PASSWORD,
                 provider_subject=user.email,
                 provider_metadata=_build_default_provider_metadata(desired_password),
                 created_at=now,
@@ -240,21 +204,22 @@ def _ensure_default_user_locked(session: Session) -> User:
             desired_email,
         )
 
-    provider = _get_password_provider(session, user.id)
+    provider = get_password_provider(session, user.id)
     password_changed = False
     if not provider:
-        provider = AuthProvider(
-            id=uuid.uuid4().hex,
-            user_id=user.id,
-            provider=_PASSWORD_PROVIDER,
-            provider_subject=user.email,
-            provider_metadata=_build_default_provider_metadata(desired_password),
-            created_at=now,
+        session.add(
+            AuthProvider(
+                id=uuid.uuid4().hex,
+                user_id=user.id,
+                provider=AuthProviderName.PASSWORD,
+                provider_subject=user.email,
+                provider_metadata=_build_default_provider_metadata(desired_password),
+                created_at=now,
+            )
         )
-        session.add(provider)
         changed = True
         password_changed = True
-    if provider:
+    else:
         metadata = dict(provider.provider_metadata) if isinstance(provider.provider_metadata, dict) else {}
         hashed = metadata.get('password_hash')
         marker_changed = metadata.get('managed_by') != _DEFAULT_USER_MARKER
@@ -314,7 +279,7 @@ def stage_create_user(
     provider = AuthProvider(
         id=uuid.uuid4().hex,
         user_id=user.id,
-        provider=_PASSWORD_PROVIDER,
+        provider=AuthProviderName.PASSWORD,
         provider_subject=normalized_email,
         provider_metadata={'password_hash': hash_password(password)},
         created_at=now,
@@ -356,9 +321,6 @@ def stage_delete_user_account(session: Session, user_id: str) -> None:
     session.delete(user)
 
 
-delete_user_account = committed(stage_delete_user_account)
-
-
 def stage_update_profile(
     session: Session,
     user_id: str,
@@ -381,20 +343,13 @@ def stage_update_profile(
     return user
 
 
-update_profile = committed(stage_update_profile, refresh=True)
-
-
 def stage_change_password(session: Session, user_id: str, current_password: str, new_password: str) -> None:
     validate_password(new_password)
-    stmt = select(AuthProvider).where(sa(AuthProvider.user_id == user_id), sa(AuthProvider.provider == _PASSWORD_PROVIDER))
-    provider = session.exec(stmt).first()
+    provider = get_password_provider(session, user_id)
     if not provider:
         raise InvalidCredentialsError()
-    metadata = provider.provider_metadata or {}
-    hashed = metadata.get('password_hash')
-    if not isinstance(hashed, str):
-        raise InvalidCredentialsError()
-    if not verify_password(current_password, hashed):
+    hashed = (provider.provider_metadata or {}).get('password_hash')
+    if not isinstance(hashed, str) or not verify_password(current_password, hashed):
         raise InvalidCredentialsError()
     provider.provider_metadata = {'password_hash': hash_password(new_password)}
     user = get_user_by_id(session, user_id)
@@ -404,9 +359,6 @@ def stage_change_password(session: Session, user_id: str, current_password: str,
     user.updated_at = _utcnow()
     session.add(provider)
     session.add(user)
-
-
-change_password = committed(stage_change_password)
 
 
 def stage_create_session(session: Session, user_id: str, device_info: str | None, ip_address: str | None) -> UserSession:
@@ -445,7 +397,7 @@ def validate_session(session: Session, session_id: str) -> User | None:
     now = _utcnow()
     if user_session.revoked:
         return None
-    if _naive_utc(user_session.expires_at) <= now:
+    if naive_utc(user_session.expires_at) <= now:
         user_session.revoked = True
         session.add(user_session)
         # Expiry is the one exceptional write on this path. Valid session
@@ -460,23 +412,15 @@ def validate_session(session: Session, session_id: str) -> User | None:
 
 def stage_revoke_session(session: Session, session_id: str) -> None:
     user_session = session.get(UserSession, session_id)
-    if not user_session:
-        return
-    if user_session.revoked:
+    if not user_session or user_session.revoked:
         return
     user_session.revoked = True
     session.add(user_session)
 
 
-revoke_session = committed(stage_revoke_session)
-
-
 def stage_revoke_all_sessions(session: Session, user_id: str) -> None:
     stmt = select(UserSession).where(sa(UserSession.user_id == user_id), col(UserSession.revoked).is_(False))
-    sessions = session.exec(stmt).all()
-    if not sessions:
-        return
-    for item in sessions:
+    for item in session.exec(stmt).all():
         item.revoked = True
         session.add(item)
 
@@ -513,9 +457,6 @@ def stage_link_provider(
     session.add(linked)
     session.flush()
     return linked
-
-
-link_provider = committed(stage_link_provider, refresh=True)
 
 
 def stage_find_or_create_oauth_user(
@@ -596,19 +537,16 @@ def stage_unlink_provider(session: Session, user_id: str, provider: AuthProvider
     provider_row = next((row for row in providers if row.provider == provider_name), None)
     if not provider_row:
         return
-    if provider_row.provider == _PASSWORD_PROVIDER:
+    if provider_row.provider == AuthProviderName.PASSWORD:
         raise ProviderUnlinkError('Password login cannot be unlinked')
     user = get_user_by_id(session, user_id)
     if not user:
         raise ProviderUnlinkError('Cannot unlink provider for a missing account')
     session.delete(provider_row)
-    has_password_provider = any(row.provider == _PASSWORD_PROVIDER and row.id != provider_row.id for row in providers)
+    has_password_provider = any(row.provider == AuthProviderName.PASSWORD and row.id != provider_row.id for row in providers)
     user.has_password = has_password_provider
     user.updated_at = _utcnow()
     session.add(user)
-
-
-unlink_provider = committed(stage_unlink_provider)
 
 
 def stage_create_verification_token(
@@ -644,12 +582,9 @@ def stage_validate_verification_token(session: Session, token: str, token_type: 
         sa(VerificationToken.token_type == token_type_value),
     )
     row = session.exec(stmt).first()
-    if not row:
+    if not row or row.used:
         raise TokenInvalidError()
-    if row.used:
-        raise TokenInvalidError()
-    now = _utcnow()
-    if _naive_utc(row.expires_at) <= now:
+    if naive_utc(row.expires_at) <= _utcnow():
         raise TokenExpiredError()
     row.used = True
     session.add(row)
@@ -660,35 +595,24 @@ def stage_validate_verification_token(session: Session, token: str, token_type: 
 validate_verification_token = committed(stage_validate_verification_token)
 
 
-async def send_verification_email(user_email: str, token: str) -> bool:
-    try:
-        from backend_core.settings_store import get_resolved_smtp
+async def send_auth_email(user_email: str, subject: str, content: str) -> bool:
+    """Send an account email; return False when SMTP is not configured."""
+    from backend_core.settings_projection import get_resolved_smtp
 
-        smtp = await run_api_blocking(get_resolved_smtp)
-    except Exception:
-        logger.error('Failed to resolve SMTP config for verification email', exc_info=True)
-        raise
+    smtp = await run_api_blocking(get_resolved_smtp)
     host = str(smtp.get('host', ''))
     port = int(str(smtp.get('port', 587)))
     smtp_user = str(smtp.get('user', ''))
     password = str(smtp.get('password', ''))
-
     if not host or not smtp_user:
-        logger.debug('SMTP is not configured for verification email')
+        logger.debug('SMTP is not configured for %r email', subject)
         return False
-
-    verify_url = f'{auth_settings.auth_frontend_url}/verify?token={token}'
     msg = EmailMessage()
     msg['From'] = smtp_user
     msg['To'] = user_email
-    msg['Subject'] = 'Verify your email'
-    msg.set_content(f'Please verify your email by opening this link: {verify_url}')
-
-    try:
-        await run_api_blocking(send_smtp_message, host, port, smtp_user, password, msg)
-    except Exception:
-        logger.error('Failed to send verification email', exc_info=True)
-        raise
+    msg['Subject'] = subject
+    msg.set_content(content)
+    await run_api_blocking(send_smtp_message, host, port, smtp_user, password, msg)
     return True
 
 
@@ -701,91 +625,43 @@ def stage_prepare_resend_verification(session: Session, user_id: str) -> tuple[s
 
     stmt = select(VerificationToken).where(
         sa(VerificationToken.user_id == user_id),
-        sa(VerificationToken.token_type == _EMAIL_VERIFY),
+        sa(VerificationToken.token_type == VerificationTokenType.EMAIL_VERIFY),
     )
     rows = session.exec(stmt).all()
     last = max(rows, key=lambda row: row.created_at) if rows else None
     if last:
         now = _utcnow()
-        created_at = _naive_utc(last.created_at)
+        created_at = naive_utc(last.created_at)
         if created_at + timedelta(minutes=_RESEND_COOLDOWN_MINUTES) > now:
             raise ValueError('Verification email was sent recently. Please wait before requesting again')
 
-    token = stage_create_verification_token(session, user_id=user_id, token_type=_EMAIL_VERIFY)
+    token = stage_create_verification_token(session, user_id=user_id, token_type=VerificationTokenType.EMAIL_VERIFY)
     return user.email, token
-
-
-prepare_resend_verification = committed(stage_prepare_resend_verification)
 
 
 def stage_create_password_reset_token(session: Session, email: str) -> str | None:
     user = get_user_by_email(session, email)
     if not user:
         return None
-    return stage_create_verification_token(session, user_id=user.id, token_type=_PASSWORD_RESET, ttl_hours=1)
-
-
-create_password_reset_token = committed(stage_create_password_reset_token)
-
-
-async def send_password_reset_email(user_email: str, token: str) -> bool:
-    try:
-        from backend_core.settings_store import get_resolved_smtp
-
-        smtp = await run_api_blocking(get_resolved_smtp)
-    except Exception:
-        logger.error('Failed to resolve SMTP config for password reset email', exc_info=True)
-        raise
-    host = str(smtp.get('host', ''))
-    port = int(str(smtp.get('port', 587)))
-    smtp_user = str(smtp.get('user', ''))
-    password = str(smtp.get('password', ''))
-    if not host or not smtp_user:
-        logger.debug('SMTP is not configured for password reset email')
-        return False
-    reset_url = f'{auth_settings.auth_frontend_url}/reset-password?token={token}'
-    msg = EmailMessage()
-    msg['From'] = smtp_user
-    msg['To'] = user_email
-    msg['Subject'] = 'Reset your password'
-    msg.set_content(f'Use this link to reset your password: {reset_url}')
-    try:
-        await run_api_blocking(send_smtp_message, host, port, smtp_user, password, msg)
-    except Exception:
-        logger.error('Failed to send password reset email', exc_info=True)
-        raise
-    return True
+    return stage_create_verification_token(session, user_id=user.id, token_type=VerificationTokenType.PASSWORD_RESET, ttl_hours=1)
 
 
 def stage_reset_password(session: Session, token: str, new_password: str) -> None:
     validate_password(new_password)
-    stmt = select(VerificationToken).where(
-        sa(VerificationToken.token == token),
-        sa(VerificationToken.token_type == _PASSWORD_RESET),
-    )
-    row = session.exec(stmt).first()
-    if not row:
-        raise TokenInvalidError()
-    if row.used:
-        raise TokenInvalidError()
-    now = _utcnow()
-    if _naive_utc(row.expires_at) <= now:
-        raise TokenExpiredError()
-    user = get_user_by_id(session, row.user_id)
+    user = get_user_by_id(session, stage_validate_verification_token(session, token=token, token_type=VerificationTokenType.PASSWORD_RESET))
     if not user:
         raise TokenInvalidError()
-    provider = session.exec(
-        select(AuthProvider).where(sa(AuthProvider.user_id == user.id), sa(AuthProvider.provider == _PASSWORD_PROVIDER)),
-    ).first()
+    now = _utcnow()
+    provider = get_password_provider(session, user.id)
     if provider:
         provider.provider_metadata = {'password_hash': hash_password(new_password)}
         session.add(provider)
-    if not provider:
+    else:
         session.add(
             AuthProvider(
                 id=uuid.uuid4().hex,
                 user_id=user.id,
-                provider=_PASSWORD_PROVIDER,
+                provider=AuthProviderName.PASSWORD,
                 provider_subject=user.email,
                 provider_metadata={'password_hash': hash_password(new_password)},
                 created_at=now,
@@ -793,10 +669,5 @@ def stage_reset_password(session: Session, token: str, new_password: str) -> Non
         )
     user.has_password = True
     user.updated_at = now
-    row.used = True
     session.add(user)
-    session.add(row)
     stage_revoke_all_sessions(session, user.id)
-
-
-reset_password = committed(stage_reset_password)

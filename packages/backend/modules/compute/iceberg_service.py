@@ -124,29 +124,6 @@ def _ingest_run_snapshot_ids(
     return direct_snapshot_ids
 
 
-def _build_result_snapshot_ids(
-    session: Session,
-    *,
-    datasource_id: str,
-    branch: str | None,
-    snapshots: list[schemas.IcebergSnapshotInfo],
-) -> set[str]:
-    snapshot_ids = _build_run_snapshot_ids(
-        session,
-        datasource_id=datasource_id,
-        branch=branch,
-    )
-    snapshot_ids.update(
-        _ingest_run_snapshot_ids(
-            session,
-            datasource_id=datasource_id,
-            branch=branch,
-            snapshots=snapshots,
-        )
-    )
-    return snapshot_ids
-
-
 def list_iceberg_snapshots(
     session: Session,
     datasource_id: str,
@@ -162,13 +139,10 @@ def list_iceberg_snapshots(
     metadata_path = datasource.config.get('metadata_path')
     if not metadata_path:
         raise ValueError('Iceberg datasource missing metadata_path')
-    branch_name = branch or datasource.config.get('branch')
+    raw_branch = branch or datasource.config.get('branch')
+    branch_name = raw_branch if isinstance(raw_branch, str) else None
 
-    worker_response = client_from_settings().list_snapshots(
-        namespace=get_namespace(),
-        datasource_id=datasource_id,
-        branch=branch_name if isinstance(branch_name, str) else None,
-    )
+    worker_response = client_from_settings().list_snapshots(namespace=get_namespace(), datasource_id=datasource_id, branch=branch_name)
     snapshots = [
         schemas.IcebergSnapshotInfo(
             snapshot_id=snapshot.snapshot_id,
@@ -180,12 +154,8 @@ def list_iceberg_snapshots(
         for snapshot in worker_response.snapshots
     ]
     if build_results_only:
-        allowed_snapshot_ids = _build_result_snapshot_ids(
-            session,
-            datasource_id=datasource_id,
-            branch=branch_name if isinstance(branch_name, str) else None,
-            snapshots=snapshots,
-        )
+        allowed_snapshot_ids = _build_run_snapshot_ids(session, datasource_id=datasource_id, branch=branch_name)
+        allowed_snapshot_ids |= _ingest_run_snapshot_ids(session, datasource_id=datasource_id, branch=branch_name, snapshots=snapshots)
         snapshots = [snapshot for snapshot in snapshots if snapshot.snapshot_id in allowed_snapshot_ids]
     snapshots.sort(key=lambda snapshot: snapshot.timestamp_ms, reverse=True)
     return schemas.IcebergSnapshotsResponse(

@@ -228,7 +228,7 @@ Without it, the prompt would only have the flat `input_schema` — the AI couldn
 
 ### Fallback behavior
 
-If `arg_metadata` is missing or `None`, `_format_fallback_param_details()` falls back to describing params from the raw `input_schema` without placement hints.
+If `arg_metadata` is missing or `None`, the tool prompt builder in `modules/chat/routes.py` falls back to describing params from the raw `input_schema` without placement hints.
 
 ---
 

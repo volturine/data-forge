@@ -10,7 +10,6 @@ from backend_core.claiming import CLAIM_DELIVERY_LEASE_SECONDS
 from backend_core.config import settings
 from backend_core.domain.build_jobs.models import BuildJobStatus
 from backend_core.persistence.build_jobs.models import BuildJob
-from backend_core.transitions import TransitionOutcome
 
 
 def test_build_claims_do_not_refresh_the_namespace_wake_marker(test_db_session: Session, monkeypatch) -> None:
@@ -88,15 +87,14 @@ def test_renew_extends_only_the_active_claim(test_db_session: Session) -> None:
         lease_generation=claimed.lease_generation,
     )
 
-    assert renewed.outcome is TransitionOutcome.APPLIED
-    assert renewed.value is not None
-    assert renewed.value.lease_expires_at is not None
-    assert renewed.value.last_renewed_at is not None
-    assert renewed.value.lease_expires_at > previous_expiry
-    assert abs((renewed.value.lease_expires_at - renewed.value.last_renewed_at).total_seconds() - settings.runtime_work_lease_ttl_seconds) < 0.01
-    assert renewed.value.claim_token == claimed.claim_token
-    assert renewed.value.lease_generation == claimed.lease_generation
-    assert renewed.value.attempts == claimed.attempts
+    assert renewed is not None
+    assert renewed.lease_expires_at is not None
+    assert renewed.last_renewed_at is not None
+    assert renewed.lease_expires_at > previous_expiry
+    assert abs((renewed.lease_expires_at - renewed.last_renewed_at).total_seconds() - settings.runtime_work_lease_ttl_seconds) < 0.01
+    assert renewed.claim_token == claimed.claim_token
+    assert renewed.lease_generation == claimed.lease_generation
+    assert renewed.attempts == claimed.attempts
 
 
 def test_stale_claim_cannot_renew_or_complete_after_reclaim(test_db_session: Session) -> None:
@@ -130,7 +128,7 @@ def test_stale_claim_cannot_renew_or_complete_after_reclaim(test_db_session: Ses
         claim_token=first_token,
         lease_generation=first_generation,
     )
-    assert stale_renewal.outcome is TransitionOutcome.LEASE_LOST
+    assert stale_renewal is None
     assert (
         build_jobs_service.finish_claimed_job(
             test_db_session,

@@ -1,10 +1,9 @@
 from collections.abc import Awaitable, Callable
 from dataclasses import dataclass
-from datetime import datetime
+from datetime import UTC, datetime
 
 from builds.build_live import RuntimeBuild
 from runtime.domain.compute import schemas as compute_schemas
-from runtime.time import utc_now
 
 BuildEmitter = Callable[[compute_schemas.BuildEvent], Awaitable[None]]
 
@@ -40,7 +39,7 @@ class BuildEventContext:
         return cls(
             build_id=build.build_id,
             analysis_id=analysis_id,
-            emitted_at=emitted_at or utc_now(),
+            emitted_at=emitted_at or datetime.now(UTC),
             current_kind=current_kind if current_kind is not None else build.current_kind,
             current_datasource_id=current_datasource_id if current_datasource_id is not None else build.current_datasource_id,
             tab_id=tab_id,
@@ -79,16 +78,12 @@ class BuildCancelledError(Exception):
         self.cancelled_by = cancelled_by
 
 
-def event_model(payload: dict[str, object]) -> compute_schemas.BuildEvent:
-    return compute_schemas.BuildEventAdapter.validate_python(payload)
-
-
 def build_event(
     build: RuntimeBuild,
     analysis_id: str,
     payload: dict[str, object],
 ) -> compute_schemas.BuildEvent:
-    return event_model({**BuildEventContext.from_build(build, analysis_id).payload(), **payload})
+    return compute_schemas.BuildEventAdapter.validate_python({**BuildEventContext.from_build(build, analysis_id).payload(), **payload})
 
 
 async def emit_build_event(

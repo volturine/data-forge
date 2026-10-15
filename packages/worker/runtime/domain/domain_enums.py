@@ -14,16 +14,24 @@ def domain_token(enum_name: str, number: int) -> str:
 
 
 class DomainEnumValue(str):
+    """A str-valued enum whose members are the dataforge_token options of a protobuf enum.
+
+    The protobuf enum defaults to the subclass name; pass ``proto_enum`` when they differ.
+    """
+
+    _proto_enum: ClassVar[str]
     _number_by_token: ClassVar[dict[str, int]]
     _value_by_number: ClassVar[dict[int, Self]]
     _value_by_token: ClassVar[dict[str, Self]]
 
-    def __init_subclass__(cls) -> None:
+    def __init_subclass__(cls, *, proto_enum: str | None = None) -> None:
+        cls._proto_enum = proto_enum or cls.__name__
         cls._number_by_token = {}
         cls._value_by_number = {}
         cls._value_by_token = {}
 
-    def __new__(cls, number: int, token: str) -> Self:
+    def __new__(cls, number: int) -> Self:
+        token = domain_token(cls._proto_enum, number)
         value = cast(Self, str.__new__(cls, token))
         cls._number_by_token[token] = number
         cls._value_by_number[number] = value
@@ -49,10 +57,6 @@ class DomainEnumValue(str):
         return list(cls._value_by_token)
 
     @classmethod
-    def members(cls) -> list[Self]:
-        return list(cls._value_by_token.values())
-
-    @classmethod
     def parse(cls, value: Self | str | int | None) -> Self | None:
         if value is None:
             return None
@@ -62,16 +66,10 @@ class DomainEnumValue(str):
     def require(cls, value: Self | str | int) -> Self:
         if isinstance(value, cls):
             return value
-        if isinstance(value, str):
-            try:
-                return cls._value_by_token[value]
-            except KeyError:
-                pass
-        if isinstance(value, int):
-            try:
-                return cls._value_by_number[value]
-            except KeyError:
-                pass
+        if isinstance(value, str) and value in cls._value_by_token:
+            return cls._value_by_token[value]
+        if isinstance(value, int) and value in cls._value_by_number:
+            return cls._value_by_number[value]
         raise ValueError(f"Unsupported {cls.__name__}: {value!r}")
 
     @classmethod

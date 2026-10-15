@@ -32,7 +32,6 @@ from backend_core.runtime_outbox_dispatcher import OUTBOX_WAKE_HUB, RuntimeOutbo
 from backend_core.runtime_outbox_service import OUTBOX_WAKE_KIND
 from backend_grpc.server import start_runtime_grpc_server
 from modules.chat.consumer import ChatTurnConsumer
-from modules.chat.store import CHAT_TURN_WAKE_KIND
 from modules.telegram.runtime import TelegramIntegrationRuntime
 
 logger = logging.getLogger(__name__)
@@ -237,7 +236,7 @@ async def _handle_coordinator_notification(
         namespace = payload.get('namespace')
         OUTBOX_WAKE_HUB.publish(namespace if isinstance(namespace, str) and namespace else None)
         return
-    if kind == CHAT_TURN_WAKE_KIND:
+    if kind == runtime_ipc.CHAT_TURN_WAKE_KIND:
         chat_wake()
         return
     if kind in {'settings_changed', 'telegram_detection'}:
@@ -266,13 +265,9 @@ async def _supervise_epoch(tasks: list[asyncio.Task[None]], process_stop: asynci
 
 def _install_stop_handlers(stop_event: asyncio.Event) -> None:
     loop = asyncio.get_running_loop()
-
-    def stop() -> None:
-        stop_event.set()
-
     for signum in (signal.SIGINT, signal.SIGTERM):
         with contextlib.suppress(NotImplementedError):
-            loop.add_signal_handler(signum, stop)
+            loop.add_signal_handler(signum, stop_event.set)
 
 
 async def _lease_monitor(
@@ -375,14 +370,8 @@ async def _cancel_and_join_actors(tasks: list[asyncio.Task[None]]) -> None:
             task.exception()
 
 
-async def _finish_actor_shutdown(tasks: list[asyncio.Task[None]]) -> bool:
-    """Make actor join a teardown barrier even if the epoch is cancelled again.
-
-    Returns whether another cancellation arrived while the barrier was being
-    completed. The caller can propagate it after clearing the generation and
-    releasing the lease, which is safe only after all actor tasks have settled.
-    """
-    shutdown = asyncio.create_task(_cancel_and_join_actors(tasks), name='coordinator-actor-shutdown')
+async def _join_despite_cancellation(shutdown: asyncio.Task[Any]) -> bool:
+    """Wait for a teardown task to finish; report whether this task was cancelled meanwhile."""
     interrupted = False
     current = asyncio.current_task()
     while not shutdown.done():
@@ -392,6 +381,18 @@ async def _finish_actor_shutdown(tasks: list[asyncio.Task[None]]) -> bool:
             interrupted = True
             if current is not None:
                 current.uncancel()
+    return interrupted
+
+
+async def _finish_actor_shutdown(tasks: list[asyncio.Task[None]]) -> bool:
+    """Make actor join a teardown barrier even if the epoch is cancelled again.
+
+    Returns whether another cancellation arrived while the barrier was being
+    completed. The caller can propagate it after clearing the generation and
+    releasing the lease, which is safe only after all actor tasks have settled.
+    """
+    shutdown = asyncio.create_task(_cancel_and_join_actors(tasks), name='coordinator-actor-shutdown')
+    interrupted = await _join_despite_cancellation(shutdown)
     shutdown.result()
     return interrupted
 
@@ -436,8 +437,7 @@ async def _stop_endpoints_and_settle_epoch(
         # cannot overlap this possibly-live endpoint.
         await _finish_actor_shutdown(tasks)
         raise RuntimeError('Runtime coordinator endpoint shutdown failed; retaining its lease') from shutdown_errors[0]
-    interrupted = await _settle_epoch_ownership(tasks, lease)
-    return interrupted
+    return await _settle_epoch_ownership(tasks, lease)
 
 
 async def _finish_epoch_shutdown(
@@ -453,15 +453,7 @@ async def _finish_epoch_shutdown(
         _stop_endpoints_and_settle_epoch(owner_stop_event, control_tasks, grpc_server, listener, tasks, lease),
         name='coordinator-epoch-shutdown',
     )
-    interrupted = False
-    current = asyncio.current_task()
-    while not shutdown.done():
-        try:
-            await asyncio.shield(shutdown)
-        except asyncio.CancelledError:
-            interrupted = True
-            if current is not None:
-                current.uncancel()
+    interrupted = await _join_despite_cancellation(shutdown)
     return interrupted or shutdown.result()
 
 

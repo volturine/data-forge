@@ -12,7 +12,7 @@ from sqlalchemy import text
 
 from dataforge_protocol import compute_pb2, enums_pb2
 from runtime.compute_manager import ProcessManager
-from runtime.executors import _run_cleanup_in_thread, run_control_in_thread
+from runtime.executors import run_cleanup_in_thread, run_control_in_thread
 from runtime.iceberg_catalog import load_runtime_catalog
 from runtime.live_hubs import VersionHub
 from runtime.object_store import delete_object, delete_prefix, object_store_storage_options
@@ -130,7 +130,7 @@ async def process_cleanup(manager: ProcessManager, client: StorageCleanupClient,
             return False
         error = None
         try:
-            await _run_cleanup_in_thread(delete_cleanup_target, claim)
+            await run_cleanup_in_thread(delete_cleanup_target, claim)
         except Exception as exc:
             # Catalog and object-store exceptions can embed configured URIs.
             # Keep detailed identity in the durable intent, not in logs/errors.

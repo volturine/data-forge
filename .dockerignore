@@ -80,7 +80,6 @@ docs/
 
 # CI/CD
 .github/
-.gitlab-ci.yml
 
 # Other
 *.log

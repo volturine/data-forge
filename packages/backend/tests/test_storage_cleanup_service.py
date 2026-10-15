@@ -12,6 +12,7 @@ from sqlalchemy.engine import Engine
 from sqlmodel import Session
 
 from backend_core import build_runs_service, compute_requests_service, runtime_outbox_service, storage_cleanup_service as cleanup
+from backend_core.claiming import database_now
 from backend_core.config import settings
 from backend_core.database import init_db
 from backend_core.domain.build_runs.models import BuildRunStatus
@@ -566,7 +567,7 @@ def test_postgres_authorization_rejects_lease_expired_during_owner_lock_wait(tes
     assert source is not None
     event = test_db_session.get(RuntimeOutboxEvent, cleanup._event_id(source))
     assert event is not None
-    event.available_at = runtime_outbox_service._database_now(test_db_session)
+    event.available_at = database_now(test_db_session)
     test_db_session.commit()
     claim = _claim(test_db_session, source)
 

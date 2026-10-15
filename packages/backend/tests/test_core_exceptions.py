@@ -3,13 +3,9 @@
 import pytest
 
 from backend_core.exceptions import (
-    AnalysisError,
     AnalysisValidationError,
     AppError,
-    ComputeError,
-    DataSourceError,
     DataSourceValidationError,
-    PipelineError,
     PipelineExecutionCancelledError,
     PipelineExecutionError,
     analysis_not_found,
@@ -29,13 +25,6 @@ class TestExceptions:
         assert exc.error_code == 'VALIDATION'
         assert exc.details == {'field': 'value'}
 
-    def test_datasource_error(self):
-        """Test DataSourceError."""
-        exc = DataSourceError(message='DataSource error', error_code='DATASOURCE_VALIDATION_ERROR')
-
-        assert str(exc) == 'DataSource error'
-        assert exc.error_code == 'DATASOURCE_VALIDATION_ERROR'
-
     def test_datasource_not_found_error(self):
         """Test datasource_not_found."""
         exc = datasource_not_found(datasource_id='ds-123')
@@ -52,34 +41,12 @@ class TestExceptions:
         assert exc.error_code == 'DATASOURCE_VALIDATION_ERROR'
         assert exc.details == {'field': 'name'}
 
-    def test_analysis_error(self):
-        """Test AnalysisError."""
-        exc = AnalysisError(message='Analysis failed', error_code='ANALYSIS_VALIDATION_ERROR')
-
-        assert str(exc) == 'Analysis failed'
-        assert exc.error_code == 'ANALYSIS_VALIDATION_ERROR'
-
     def test_analysis_not_found_error(self):
         """Test analysis_not_found."""
         exc = analysis_not_found(analysis_id='analysis-123')
 
         assert 'analysis-123' in str(exc)
         assert exc.error_code == 'ANALYSIS_NOT_FOUND'
-
-    def test_compute_error(self):
-        """Test ComputeError."""
-        exc = ComputeError(message='Compute job failed', error_code='ENGINE_START_ERROR', details={'job_id': '123'})
-
-        assert str(exc) == 'Compute job failed'
-        assert exc.error_code == 'ENGINE_START_ERROR'
-        assert exc.details == {'job_id': '123'}
-
-    def test_pipeline_error(self):
-        """Test PipelineError."""
-        exc = PipelineError(message='Pipeline failed', error_code='PIPELINE_EXECUTION_ERROR')
-
-        assert str(exc) == 'Pipeline failed'
-        assert exc.error_code == 'PIPELINE_EXECUTION_ERROR'
 
     def test_pipeline_execution_cancelled_error_is_pipeline_execution_error(self):
         exc = PipelineExecutionCancelledError('Compute request cancelled because its compute worker was shut down')
@@ -106,10 +73,9 @@ class TestExceptions:
 
     def test_exception_inheritance(self):
         """Test that all custom exceptions inherit from AppError."""
-        assert issubclass(DataSourceError, AppError)
-        assert issubclass(AnalysisError, AppError)
-        assert issubclass(ComputeError, AppError)
-        assert issubclass(PipelineError, AppError)
+        assert issubclass(DataSourceValidationError, AppError)
+        assert issubclass(AnalysisValidationError, AppError)
+        assert issubclass(PipelineExecutionError, AppError)
 
     def test_exception_with_long_message(self):
         """Test exception with very long message."""

@@ -1,26 +1,16 @@
-import json
 import logging
 
-from sqlalchemy import text
 from sqlmodel import Session
 
 from backend_core.exceptions import SettingsConfigurationError
 from backend_core.persistence.settings.models import AppSettings
-from backend_core.secrets import decrypt_secret, encrypt_secret, is_masked_secret, mask_secret
-from backend_core.settings_projection import (
-    get_resolved_default_model as get_resolved_default_model,
-    get_resolved_ollama_settings as get_resolved_ollama_settings,
-    get_resolved_openrouter_key as get_resolved_openrouter_key,
-    get_resolved_smtp as get_resolved_smtp,
-    get_resolved_telegram_settings as get_resolved_telegram_settings,
-    get_resolved_telegram_token as get_resolved_telegram_token,
-)
+from backend_core.runtime_ipc import notify_on_commit
+from backend_core.secrets import encrypt_secret, is_masked_secret, mask_secret
+from backend_core.settings_projection import read_stored_secret
 from backend_core.settings_schemas import SettingsResponse, SettingsUpdate
 
 logger = logging.getLogger(__name__)
 
-_SETTINGS_CHANGED_NOTIFICATION = {'kind': 'settings_changed'}
-_RUNTIME_EVENTS_CHANNEL = 'runtime_events'
 
 _SECRET_FIELDS = (
     'smtp_password',
@@ -37,7 +27,6 @@ _RESPONSE_VALUE_FIELDS = (
     'ollama_default_model',
     'public_idb_debug',
 )
-_UPDATE_VALUE_FIELDS = _RESPONSE_VALUE_FIELDS
 _BOOTSTRAP_STRING_FIELDS = (
     ('smtp_host', 'smtp_host'),
     ('smtp_user', 'smtp_user'),
@@ -57,40 +46,12 @@ def _warn_bootstrap_secret_missing(name: str) -> None:
 
 
 def _notify_settings_changed(session: Session) -> None:
-    bind = session.get_bind()
-    if getattr(getattr(bind, 'dialect', None), 'name', None) != 'postgresql':
-        return
-    session.execute(
-        text('SELECT pg_notify(:channel, :payload)'),
-        {
-            'channel': _RUNTIME_EVENTS_CHANNEL,
-            'payload': json.dumps(_SETTINGS_CHANGED_NOTIFICATION, separators=(',', ':')),
-        },
-    )
-
-
-def _read_secret(row: AppSettings, field: str) -> str:
-    stored = str(getattr(row, field, '') or '')
-    if not stored:
-        return ''
-    return decrypt_secret(stored)
-
-
-def _write_secret(row: AppSettings, field: str, value: str) -> None:
-    setattr(row, field, encrypt_secret(value))
-
-
-def _resolve_updated_secret(row: AppSettings, field: str, value: str | None) -> str:
-    if value is None:
-        return _read_secret(row, field)
-    if is_masked_secret(value):
-        return _read_secret(row, field)
-    return value
+    notify_on_commit(session, {'kind': 'settings_changed'})
 
 
 def _masked_settings_response(row: AppSettings) -> SettingsResponse:
     payload = {field: getattr(row, field) for field in _RESPONSE_VALUE_FIELDS}
-    payload.update({field: mask_secret(_read_secret(row, field)) for field in _SECRET_FIELDS})
+    payload.update({field: mask_secret(read_stored_secret(row, field)) for field in _SECRET_FIELDS})
     return SettingsResponse(**payload)
 
 
@@ -104,14 +65,14 @@ def ensure_openrouter_key_populated(session: Session) -> str:
     if row is None:
         return ''
     if str(row.openrouter_api_key or ''):
-        return _read_secret(row, 'openrouter_api_key')
+        return read_stored_secret(row, 'openrouter_api_key')
     from backend_core.config import settings as app_settings
 
     deployment = app_settings.openrouter_api_key or ''
     if not deployment:
         return ''
     try:
-        _write_secret(row, 'openrouter_api_key', deployment)
+        row.openrouter_api_key = encrypt_secret(deployment)
     except SettingsConfigurationError:
         _warn_bootstrap_secret_missing('OpenRouter key')
         return ''
@@ -157,7 +118,7 @@ def seed_settings_from_env(session: Session) -> None:
         value = getattr(app_settings, settings_field)
         if not getattr(row, row_field) and value:
             try:
-                _write_secret(row, row_field, value)
+                setattr(row, row_field, encrypt_secret(value))
                 changed = True
             except SettingsConfigurationError:
                 bootstrap_complete = False
@@ -197,12 +158,15 @@ def update_settings(session: Session, data: SettingsUpdate) -> SettingsResponse:
         row = AppSettings(id=1)
         session.add(row)
 
-    for field in _UPDATE_VALUE_FIELDS:
+    for field in _RESPONSE_VALUE_FIELDS:
         value = getattr(data, field)
         if value is not None:
             setattr(row, field, value)
     for field in _SECRET_FIELDS:
-        _write_secret(row, field, _resolve_updated_secret(row, field, getattr(data, field)))
+        submitted = getattr(data, field)
+        # An omitted or still-masked secret keeps the stored value.
+        secret = read_stored_secret(row, field) if submitted is None or is_masked_secret(submitted) else submitted
+        setattr(row, field, encrypt_secret(secret))
     row.env_bootstrap_complete = True
 
     _notify_settings_changed(session)

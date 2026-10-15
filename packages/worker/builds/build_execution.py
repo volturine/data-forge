@@ -5,6 +5,7 @@ import contextlib
 import logging
 import time
 from collections.abc import AsyncIterator
+from datetime import UTC, datetime
 
 from builds.build_live import RuntimeBuild
 from dataforge_protocol import compute_pb2, enums_pb2
@@ -16,11 +17,9 @@ from runtime.domain.compute_worker_runs.schemas import ComputeWorkerRunKind
 from runtime.domain.datasource.models import DataSourceTargetKind
 from runtime.executors import run_compute_in_thread, run_control_in_thread, run_shutdown_in_thread
 from runtime.namespace import reset_namespace, set_namespace_context
-from runtime.worker_runtime_client import BuildJobLeaseLost, ClaimedBuildJob, WorkerRuntimeClient, async_client_from_env, client_from_env
+from runtime.worker_runtime_client import BuildJobLeaseLost, ClaimedBuildJob, async_client_from_env, client_from_env
 
 logger = logging.getLogger(__name__)
-
-_BUILD_CAPACITY_RACE_TIMEOUT_SECONDS = 2.0
 
 
 @contextlib.asynccontextmanager
@@ -61,15 +60,6 @@ async def _admitted_build_work_slot(
                     namespace=namespace,
                     owned=owns_admission,
                 )
-
-
-def worker_runtime_client() -> WorkerRuntimeClient:
-    return client_from_env()
-
-
-async def _wait_after_capacity_race(manager: ProcessManager) -> None:
-    """Rejoin bounded capacity admission after a build loses a slot race."""
-    await manager.wait_for_capacity(timeout_seconds=_BUILD_CAPACITY_RACE_TIMEOUT_SECONDS)
 
 
 async def _emit_build_event(
@@ -131,7 +121,7 @@ async def _run_build_task(
             schemas.BuildFailedEvent(
                 build_id=build.build_id,
                 analysis_id=build.analysis_id,
-                emitted_at=service._utcnow(),
+                emitted_at=datetime.now(UTC),
                 current_kind=ComputeWorkerRunKind.parse(build.current_kind),
                 current_datasource_id=build.current_datasource_id,
                 tab_id=build.current_tab_id,
@@ -215,7 +205,7 @@ async def _run_queued_build_job(
                 schemas.BuildStepStartEvent(
                     build_id=build.build_id,
                     analysis_id=build.analysis_id,
-                    emitted_at=service._utcnow(),
+                    emitted_at=datetime.now(UTC),
                     current_kind=ComputeWorkerRunKind.parse(build.current_kind),
                     current_datasource_id=build.current_datasource_id,
                     tab_id=build.current_tab_id,
@@ -237,7 +227,7 @@ async def _run_queued_build_job(
                 async with _admitted_build_work_slot(manager, datasource_identity, namespace=build.namespace):
                     refreshed = await run_compute_in_thread(
                         datasource_execution.ingest_datasource_for_schedule,
-                        worker_runtime_client(),
+                        client_from_env(),
                         manager=manager,
                         namespace=build.namespace,
                         database_url=worker_settings.database_url,
@@ -257,7 +247,7 @@ async def _run_queued_build_job(
                     schemas.BuildStepFailedEvent(
                         build_id=build.build_id,
                         analysis_id=build.analysis_id,
-                        emitted_at=service._utcnow(),
+                        emitted_at=datetime.now(UTC),
                         current_kind=ComputeWorkerRunKind.parse(build.current_kind),
                         current_datasource_id=build.current_datasource_id,
                         tab_id=build.current_tab_id,
@@ -281,7 +271,7 @@ async def _run_queued_build_job(
                     schemas.BuildFailedEvent(
                         build_id=build.build_id,
                         analysis_id=build.analysis_id,
-                        emitted_at=service._utcnow(),
+                        emitted_at=datetime.now(UTC),
                         current_kind=ComputeWorkerRunKind.parse(build.current_kind),
                         current_datasource_id=build.current_datasource_id,
                         tab_id=build.current_tab_id,
@@ -308,7 +298,7 @@ async def _run_queued_build_job(
                 schemas.BuildStepCompleteEvent(
                     build_id=build.build_id,
                     analysis_id=build.analysis_id,
-                    emitted_at=service._utcnow(),
+                    emitted_at=datetime.now(UTC),
                     current_kind=ComputeWorkerRunKind.parse(build.current_kind),
                     current_datasource_id=build.current_datasource_id,
                     tab_id=build.current_tab_id,
@@ -332,7 +322,7 @@ async def _run_queued_build_job(
                 schemas.BuildCompleteEvent(
                     build_id=build.build_id,
                     analysis_id=build.analysis_id,
-                    emitted_at=service._utcnow(),
+                    emitted_at=datetime.now(UTC),
                     current_kind=ComputeWorkerRunKind.parse(build.current_kind),
                     current_datasource_id=build.current_datasource_id,
                     tab_id=build.current_tab_id,
@@ -364,7 +354,7 @@ async def _run_queued_build_job(
                 schemas.BuildFailedEvent(
                     build_id=build.build_id,
                     analysis_id=build.analysis_id,
-                    emitted_at=service._utcnow(),
+                    emitted_at=datetime.now(UTC),
                     current_kind=ComputeWorkerRunKind.parse(build.current_kind),
                     current_datasource_id=build.current_datasource_id,
                     tab_id=build.current_tab_id,
@@ -405,7 +395,8 @@ async def _run_queued_build_job(
                 )
             return
         except ComputeWorkerCapacityFull:
-            await _wait_after_capacity_race(manager)
+            # Rejoin bounded capacity admission after a build loses a slot race.
+            await manager.wait_for_capacity(timeout_seconds=2.0)
             continue
 
 

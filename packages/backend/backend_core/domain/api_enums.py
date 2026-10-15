@@ -7,23 +7,31 @@ from pydantic_core import core_schema
 from dataforge_protocol import enums_pb2
 
 
-def api_token(enum_name: str, number: int) -> str:
-    enum_descriptor = enums_pb2.DESCRIPTOR.enum_types_by_name[enum_name]
+def _api_token(proto_enum: str, number: int) -> str:
+    enum_descriptor = enums_pb2.DESCRIPTOR.enum_types_by_name[proto_enum]
     value_descriptor = enum_descriptor.values_by_number[number]
     return cast(str, value_descriptor.GetOptions().Extensions[cast(Any, enums_pb2.dataforge_token)])
 
 
 class ApiEnumValue(str):
+    """A str-valued enum whose members are the dataforge_token options of a protobuf enum.
+
+    The protobuf enum defaults to the subclass name; pass ``proto_enum`` when they differ.
+    """
+
+    _proto_enum: ClassVar[str]
     _number_by_token: ClassVar[dict[str, int]]
     _value_by_number: ClassVar[dict[int, Self]]
     _value_by_token: ClassVar[dict[str, Self]]
 
-    def __init_subclass__(cls) -> None:
+    def __init_subclass__(cls, *, proto_enum: str | None = None) -> None:
+        cls._proto_enum = proto_enum or cls.__name__
         cls._number_by_token = {}
         cls._value_by_number = {}
         cls._value_by_token = {}
 
-    def __new__(cls, number: int, token: str) -> Self:
+    def __new__(cls, number: int) -> Self:
+        token = _api_token(cls._proto_enum, number)
         value = cast(Self, str.__new__(cls, token))
         cls._number_by_token[token] = number
         cls._value_by_number[number] = value

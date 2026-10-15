@@ -7,7 +7,7 @@ import logging
 from collections.abc import Awaitable, Callable
 
 import psycopg
-from psycopg import AsyncConnection, Notify
+from psycopg import AsyncConnection
 
 from runtime.config import settings
 
@@ -87,8 +87,6 @@ async def serve_runtime_notifications(
                 await listener.replace(connection)
                 reconnect_delay = 0.25
                 logger.info("Worker runtime notification listener reconnected")
-            except asyncio.CancelledError:
-                raise
             except Exception:
                 logger.warning("Worker runtime notification listener reconnect failed", exc_info=True)
                 reconnect_delay = min(reconnect_delay * 2, 5.0)
@@ -98,15 +96,13 @@ async def serve_runtime_notifications(
             async for notification in connection.notifies(timeout=0.5, stop_after=100):
                 notifications_since_yield += 1
                 try:
-                    payload = json.loads(_notification_payload(notification))
+                    payload = json.loads(notification.payload)
                 except json.JSONDecodeError as exc:
                     logger.debug("Ignoring malformed worker runtime notification: %s", exc)
                 else:
                     if isinstance(payload, dict):
                         try:
                             await handler(payload)
-                        except asyncio.CancelledError:
-                            raise
                         except Exception:
                             logger.exception("Worker runtime notification handler failed kind=%s", payload.get("kind", "-"))
                 if stop_event.is_set():
@@ -114,14 +110,8 @@ async def serve_runtime_notifications(
                 if notifications_since_yield == 64:
                     notifications_since_yield = 0
                     await asyncio.sleep(0)
-        except asyncio.CancelledError:
-            raise
         except OSError, psycopg.Error:
             logger.warning("Worker runtime notification listener lost its connection; reconnecting", exc_info=True)
             await listener.replace(None)
             reconnect_delay = min(reconnect_delay * 2, 5.0)
             continue
-
-
-def _notification_payload(notification: Notify) -> str:
-    return notification.payload

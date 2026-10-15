@@ -23,10 +23,6 @@ _inflight: dict[tuple[str, str], Future[ObjectStoreCredentials]] = {}
 _cache_lock = threading.Lock()
 
 
-def _credential_role(identity: compute_pb2.ComputeWorkerIdentity) -> str:
-    return "builder" if identity.scope in {enums_pb2.COMPUTE_WORKER_SCOPE_BUILD, enums_pb2.COMPUTE_WORKER_SCOPE_DATASOURCE_PREVIEW} else "reader"
-
-
 def resolve_compute_worker_credentials(namespace: str, identity: compute_pb2.ComputeWorkerIdentity) -> ObjectStoreCredentials:
     """Fetch namespace-scoped engine credentials from the backend.
 
@@ -35,7 +31,7 @@ def resolve_compute_worker_credentials(namespace: str, identity: compute_pb2.Com
     artifacts; both roles remain confined to their namespace bucket. A missing
     record fails the launch; there is no broader-credential fallback.
     """
-    role = _credential_role(identity)
+    role = "builder" if identity.scope in {enums_pb2.COMPUTE_WORKER_SCOPE_BUILD, enums_pb2.COMPUTE_WORKER_SCOPE_DATASOURCE_PREVIEW} else "reader"
     key = (namespace, role)
     with _cache_lock:
         cached = _cache.get(key)

@@ -12,9 +12,7 @@ from backend_core.domain.compute.schemas import (
     BuildEventType,
     BuildFailedEvent,
     BuildLifecycleStatus,
-    BuildRequest,
     BuildStarter,
-    BuildStepState,
     BuildTabResult,
     BuildTabStatus,
     ComputeRunStatus,
@@ -241,12 +239,6 @@ def test_build_event_type_enum_values_are_explicit() -> None:
 
 
 def test_build_event_type_owns_live_build_mappings() -> None:
-    assert BuildEventType.STEP_START.step_state == BuildStepState.RUNNING
-    assert BuildEventType.STEP_COMPLETE.step_state == BuildStepState.COMPLETED
-    assert BuildEventType.STEP_FAILED.step_state == BuildStepState.FAILED
-    assert BuildEventType.COMPLETE.terminal_build_status == BuildLifecycleStatus.COMPLETED
-    assert BuildEventType.CANCELLED.terminal_build_status == BuildLifecycleStatus.CANCELLED
-    assert BuildEventType.CANCELLED.terminal_error_message == 'Build cancelled'
     assert BuildLifecycleStatus.RUNNING.is_terminal is False
     assert BuildLifecycleStatus.FAILED.is_terminal is True
 
@@ -310,30 +302,6 @@ def test_step_preview_request_bounds_pagination() -> None:
 
     assert request.row_limit == 1000
     assert request.page == 1
-
-
-def test_build_request_owns_schedule_ingest_detection() -> None:
-    ingest_request = BuildRequest.model_validate(
-        {
-            'analysis_pipeline': {
-                'analysis_id': 'schedule-1',
-                'tabs': [
-                    {
-                        'id': 'tab-1',
-                        'name': 'Scheduled ingest',
-                        'datasource': {'id': 'datasource-1', 'analysis_tab_id': None, 'source_type': 'schedule', 'config': {'branch': 'master'}},
-                        'output': {'result_id': 'datasource-1', 'filename': 'scheduled_ingest', 'format': 'parquet'},
-                        'steps': [],
-                    }
-                ],
-            },
-            'tab_id': 'tab-1',
-        }
-    )
-    analysis_request = BuildRequest.model_validate({'analysis_pipeline': _pipeline_payload(), 'tab_id': 'tab-1'})
-
-    assert ingest_request.is_schedule_ingest_request() is True
-    assert analysis_request.is_schedule_ingest_request() is False
 
 
 def test_build_starter_owns_schedule_trigger_detection() -> None:

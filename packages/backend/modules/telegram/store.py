@@ -1,22 +1,22 @@
 from __future__ import annotations
 
 import hashlib
-import json
 import secrets
 from datetime import UTC, datetime, timedelta
 
-from sqlalchemy import func, select, text
+from sqlalchemy import func, select
 from sqlmodel import Session
 
 from backend_core.persistence.runtime_events.models import RuntimeCoordinatorState
 from backend_core.persistence.settings.models import AppSettings
 from backend_core.persistence.telegram.models import TelegramDetectionRequest, TelegramPollOffset
+from backend_core.runtime_ipc import notify_on_commit
 from backend_core.secrets import decrypt_secret, encrypt_secret
 from backend_core.sqlmodel_typing import col, sa
 from modules.telegram.domain import TelegramDetectionClaim, TelegramDetectionResult, TelegramSettings
 
-_RUNTIME_CHANNEL = 'runtime_events'
 _DETECTION_WAKE_KIND = 'telegram_detection'
+_DETECTION_RESULT_KIND = 'telegram_detection_result'
 MAX_PENDING_DETECTIONS = 32
 DETECTION_TIMEOUT_SECONDS = 20
 
@@ -114,31 +114,32 @@ def enqueue_detection(
     )
     session.add(request)
     session.flush()
-    if session.get_bind().dialect.name == 'postgresql':
-        session.execute(
-            text('SELECT pg_notify(:channel, :payload)'),
-            {
-                'channel': _RUNTIME_CHANNEL,
-                'payload': json.dumps({'kind': _DETECTION_WAKE_KIND, 'request_id': request_id}, separators=(',', ':')),
-            },
-        )
+    notify_on_commit(session, {'kind': _DETECTION_WAKE_KIND, 'request_id': request_id})
     session.commit()
     return request_id
 
 
-def _notify_detection_result(session: Session, request_id: str) -> None:
-    if session.get_bind().dialect.name != 'postgresql':
-        return
-    session.execute(
-        text('SELECT pg_notify(:channel, :payload)'),
-        {
-            'channel': _RUNTIME_CHANNEL,
-            'payload': json.dumps(
-                {'kind': 'telegram_detection_result', 'request_id': request_id},
-                separators=(',', ':'),
-            ),
-        },
-    )
+def _time_out(session: Session, request: TelegramDetectionRequest, now: datetime) -> None:
+    request.status = 'timed_out'
+    request.token_encrypted = ''
+    request.error = 'Telegram chat detection deadline expired'
+    request.updated_at = now
+    session.add(request)
+    notify_on_commit(session, {'kind': _DETECTION_RESULT_KIND, 'request_id': request.id})
+
+
+def _running_detection(session: Session, claim: TelegramDetectionClaim) -> TelegramDetectionRequest | None:
+    require_generation(session, claim.owner_generation)
+    request = session.execute(
+        select(TelegramDetectionRequest)
+        .where(sa(TelegramDetectionRequest.id == claim.request_id))
+        .where(sa(TelegramDetectionRequest.owner_generation == claim.owner_generation))
+        .where(sa(TelegramDetectionRequest.status == 'running'))
+        .with_for_update()
+    ).scalar_one_or_none()
+    if request is None:
+        session.rollback()
+    return request
 
 
 def recover_detection_requests(session: Session, *, generation: int) -> None:
@@ -151,12 +152,7 @@ def recover_detection_requests(session: Session, *, generation: int) -> None:
         .with_for_update()
     ).scalars()
     for request in expired:
-        request.status = 'timed_out'
-        request.token_encrypted = ''
-        request.error = 'Telegram chat detection deadline expired'
-        request.updated_at = now
-        session.add(request)
-        _notify_detection_result(session, request.id)
+        _time_out(session, request, now)
 
     abandoned = session.execute(
         select(TelegramDetectionRequest)
@@ -210,16 +206,8 @@ def complete_detection(
     claim: TelegramDetectionClaim,
     result: dict[str, object],
 ) -> bool:
-    require_generation(session, claim.owner_generation)
-    request = session.execute(
-        select(TelegramDetectionRequest)
-        .where(sa(TelegramDetectionRequest.id == claim.request_id))
-        .where(sa(TelegramDetectionRequest.owner_generation == claim.owner_generation))
-        .where(sa(TelegramDetectionRequest.status == 'running'))
-        .with_for_update()
-    ).scalar_one_or_none()
+    request = _running_detection(session, claim)
     if request is None:
-        session.rollback()
         return False
     now = datetime.now(UTC)
     if request.deadline_at <= now:
@@ -232,22 +220,14 @@ def complete_detection(
     request.token_encrypted = ''
     request.updated_at = now
     session.add(request)
-    _notify_detection_result(session, request.id)
+    notify_on_commit(session, {'kind': _DETECTION_RESULT_KIND, 'request_id': request.id})
     session.commit()
     return True
 
 
 def fail_detection(session: Session, *, claim: TelegramDetectionClaim, error: str) -> bool:
-    require_generation(session, claim.owner_generation)
-    request = session.execute(
-        select(TelegramDetectionRequest)
-        .where(sa(TelegramDetectionRequest.id == claim.request_id))
-        .where(sa(TelegramDetectionRequest.owner_generation == claim.owner_generation))
-        .where(sa(TelegramDetectionRequest.status == 'running'))
-        .with_for_update()
-    ).scalar_one_or_none()
+    request = _running_detection(session, claim)
     if request is None:
-        session.rollback()
         return False
     expired = request.deadline_at <= datetime.now(UTC)
     request.status = 'timed_out' if expired else 'failed'
@@ -255,7 +235,7 @@ def fail_detection(session: Session, *, claim: TelegramDetectionClaim, error: st
     request.token_encrypted = ''
     request.updated_at = datetime.now(UTC)
     session.add(request)
-    _notify_detection_result(session, request.id)
+    notify_on_commit(session, {'kind': _DETECTION_RESULT_KIND, 'request_id': request.id})
     session.commit()
     return True
 
@@ -283,12 +263,7 @@ def time_out_detection(session: Session, *, request_id: str, request_user_id: st
     if request is None:
         session.rollback()
         return
-    request.status = 'timed_out'
-    request.token_encrypted = ''
-    request.error = 'Telegram chat detection deadline expired'
-    request.updated_at = datetime.now(UTC)
-    session.add(request)
-    _notify_detection_result(session, request.id)
+    _time_out(session, request, datetime.now(UTC))
     session.commit()
 
 

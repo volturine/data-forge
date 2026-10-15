@@ -1,5 +1,7 @@
 from __future__ import annotations
 
+from collections.abc import Iterator
+from contextlib import contextmanager
 from contextvars import ContextVar, Token
 
 from backend_core.config import settings
@@ -29,6 +31,15 @@ def set_namespace_context(value: str | None) -> Token:
 
 def reset_namespace(token: Token) -> None:
     _NAMESPACE.reset(token)
+
+
+@contextmanager
+def namespace_scope(value: str | None) -> Iterator[None]:
+    token = set_namespace_context(value)
+    try:
+        yield
+    finally:
+        reset_namespace(token)
 
 
 def get_namespace() -> str:

@@ -24,6 +24,7 @@ from modules.analysis.revisions import (
     version as analysis_version,
 )
 from modules.analysis.step_schemas import get_step_catalog, normalize_step_config
+from modules.analysis.templates import get_template, list_templates
 from modules.auth.dependencies import get_current_user, get_current_user_id
 from modules.auth.models import User
 from modules.compute import executor_client
@@ -83,7 +84,7 @@ async def create_analysis(
 @handle_errors(operation='list analysis templates', value_error_status=404)
 def list_analysis_templates():
     """List built-in analysis templates available in the guided creation flow."""
-    return service.list_analysis_templates()
+    return list_templates()
 
 
 @router.get(
@@ -94,7 +95,7 @@ def list_analysis_templates():
 @handle_errors(operation='get analysis template', value_error_status=404)
 def get_analysis_template(template_id: str):
     """Get one analysis template including the step skeleton used for creation."""
-    return service.get_analysis_template(template_id)
+    return get_template(template_id).to_detail()
 
 
 @router.post('/generate', response_model=schemas.GeneratedAnalysisResponseSchema, mcp=True)
@@ -272,10 +273,7 @@ async def delete_analysis(
 
     def delete_and_queue_shutdown(session: Session) -> None:
         require_analysis_revision(analysis_id_value, if_match, session, owner_id)
-        try:
-            service.delete_analysis(session, analysis_id_value)
-        except ValueError as exc:
-            raise HTTPException(status_code=404, detail=str(exc)) from exc
+        service.delete_analysis(session, analysis_id_value)
         # The deletion is committed above; runtime teardown must not delay its response.
         with contextlib.suppress(HTTPException):
             executor_client.request_compute_worker_shutdown(

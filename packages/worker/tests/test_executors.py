@@ -20,7 +20,7 @@ async def test_executor_submission_queue_stays_bounded_under_burst() -> None:
         started.set()
         assert release.wait(timeout=3)
 
-    tasks = [asyncio.create_task(_run_in_executor(lane, "test", blocking_work, False, None)) for _ in range(20)]
+    tasks = [asyncio.create_task(_run_in_executor(lane, "test", blocking_work, None)) for _ in range(20)]
     try:
         assert await asyncio.to_thread(started.wait, 1)
         await asyncio.sleep(0.05)
@@ -43,8 +43,8 @@ async def test_cancelled_pending_submission_does_not_consume_admission() -> None
         started.set()
         assert release.wait(timeout=3)
 
-    first = asyncio.create_task(_run_in_executor(lane, "test", blocking_work, False, None))
-    pending = asyncio.create_task(_run_in_executor(lane, "test", lambda: None, False, None))
+    first = asyncio.create_task(_run_in_executor(lane, "test", blocking_work, None))
+    pending = asyncio.create_task(_run_in_executor(lane, "test", lambda: None, None))
     try:
         assert await asyncio.to_thread(started.wait, 1)
         await asyncio.sleep(0)
@@ -53,7 +53,7 @@ async def test_cancelled_pending_submission_does_not_consume_admission() -> None
             await pending
         release.set()
         await first
-        assert await _run_in_executor(lane, "test", lambda: "accepted", False, None) == "accepted"
+        assert await _run_in_executor(lane, "test", lambda: "accepted", None) == "accepted"
     finally:
         release.set()
         await asyncio.gather(first, pending, return_exceptions=True)
@@ -75,12 +75,12 @@ async def test_running_cancellation_keeps_admission_until_thread_settles() -> No
     def later_work() -> None:
         later_started.set()
 
-    running = asyncio.create_task(_run_in_executor(lane, "test", blocking_work, False, None))
+    running = asyncio.create_task(_run_in_executor(lane, "test", blocking_work, None))
     later = None
     try:
         assert await asyncio.to_thread(started.wait, 1)
         running.cancel()
-        later = asyncio.create_task(_run_in_executor(lane, "test", later_work, False, None))
+        later = asyncio.create_task(_run_in_executor(lane, "test", later_work, None))
         await asyncio.sleep(0.05)
         assert not later_started.is_set()
         assert lane._semaphore(asyncio.get_running_loop())._value == 0
@@ -108,10 +108,10 @@ async def test_lease_lane_progresses_while_compute_lane_is_full() -> None:
         compute_started.set()
         assert release_compute.wait(timeout=3)
 
-    compute = asyncio.create_task(_run_in_executor(compute_lane, "compute", blocking_compute, False, None))
+    compute = asyncio.create_task(_run_in_executor(compute_lane, "compute", blocking_compute, None))
     try:
         assert await asyncio.to_thread(compute_started.wait, 1)
-        assert await _run_in_executor(lease_lane, "lease", lambda: "renewed", False, None) == "renewed"
+        assert await _run_in_executor(lease_lane, "lease", lambda: "renewed", None) == "renewed"
     finally:
         release_compute.set()
         await compute
@@ -140,7 +140,7 @@ async def test_cancelled_executor_retrieves_work_errors_and_reports_unexpected_f
             raise BuildCancelledError("build-id")
         raise RuntimeError("Unexpected work failure")
 
-    task = asyncio.create_task(_run_in_executor(lane, "test", work, False, stop_requested.set, expected_cancel_errors=(BuildCancelledError,)))
+    task = asyncio.create_task(_run_in_executor(lane, "test", work, stop_requested.set, expected_cancel_errors=(BuildCancelledError,)))
     try:
         assert await asyncio.to_thread(started.wait, 5)
         task.cancel()
@@ -185,7 +185,7 @@ async def test_cancel_callback_failure_is_reported_and_work_is_still_joined(capl
         stop_requested.set()
         raise RuntimeError("Stop request failed")
 
-    task = asyncio.create_task(_run_in_executor(lane, "test", work, False, cancel_work, expected_cancel_errors=(BuildCancelledError,)))
+    task = asyncio.create_task(_run_in_executor(lane, "test", work, cancel_work, expected_cancel_errors=(BuildCancelledError,)))
     try:
         assert await asyncio.to_thread(started.wait, 5)
         task.cancel()

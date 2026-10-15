@@ -3,10 +3,10 @@
 Data-Forge has one Docker runtime model:
 
 ```text
-Postgres + RustFS + API + Scheduler + Worker
+Postgres + RustFS + API + Runtime coordinator + Scheduler + Worker
 ```
 
-The API container serves the backend API and built frontend. Scheduler and worker are separate Python role containers built from the same source tree.
+The API container serves the backend API and built frontend. The runtime coordinator, scheduler, and worker are separate Python role containers built from the same source tree.
 
 See [Deployment](../docs/DEPLOYMENT.md) for production prerequisites, TLS,
 health checks, upgrades, backup, restore, and secret rotation;
@@ -21,7 +21,7 @@ Each invocation of a public per-suite recipe (`just test-backend-unit`,
 `just test-frontend`, or `just test-e2e`) launches a private Compose enclave
 through `scripts/test_container.sh`. Every enclave has a seeded Linux runner
 image, a named volume mounted at `/app` for the workspace, and a
-`docker:29.7.2-dind` service with its own Docker daemon and socket. Each gets
+`docker:29.9.0-dind` service with its own Docker daemon and socket. Each gets
 its own Compose network and volumes. It does not mount the host Docker socket
 or publish ports on the host. Test services are started inside that
 invocation's enclave, and collected logs and diagnostics are copied to
@@ -62,10 +62,15 @@ every suite, whether it succeeds or fails.
 | `compose.yaml` | Base runtime stack. |
 | `compose.dev.yaml` | Development override with source mounts and Vite. |
 | `compose.replicas.yaml` | Production override: N stateless API replicas behind an nginx ingress. |
+| `compose.multi-host.yaml` | Production override: one identical stack per machine for high availability. |
+| `compose.e2e.yaml` | E2E stack started by `scripts/test_e2e.sh`. |
+| `compose.tests.yaml` | Per-invocation test enclave started by `scripts/test_container.sh`. |
 | `ingress/nginx.conf` | Ingress config used by `compose.replicas.yaml`. |
 | `env/prod.env` | Production image tags, ports, credentials, auth, and sizing. |
 | `env/dev.env` | Local Docker development config. |
+| `env/e2e.env` | E2E suite config. |
 | `Dockerfile` | Builds app role images. |
+| `Dockerfile.tests` | Builds the containerized test runner image. |
 
 ## Development stack
 
@@ -86,7 +91,7 @@ just docker-dev-logs
 ```
 
 The dev stack uses the same host ports as `just dev` (API 8000, Vite 3000) and
-the same compute-worker network name is unique to its `-p dataforge-dev` project, so the
+the same compute-worker network (`dataforge-dev-compute-worker-runtime`), so the
 two dev modes are mutually exclusive by design: run either one, not both.
 
 ## Production compose
@@ -129,7 +134,7 @@ volumes is intentional and verified.
 
 ## Maintainer local production smoke test
 
-`just docker-prod` builds local `api` / `scheduler` / `worker manager` / `compute worker` images and starts
+`just docker-prod` builds local `api` / `runtime` / `scheduler` / `worker` / `compute-worker` images and starts
 the same production compose file and env file, overriding the five
 `DF_*_IMAGE` tags and binding the API to host port 8300 so the smoke stack
 never collides with the dev stacks or the central deployment stacks:
@@ -157,7 +162,7 @@ central deployments workspace can coexist on one host:
 | Central deployment prod | `dataforge-app` | `dataforge-app-compute-worker-runtime` | 3300 |
 | Central deployment dev / PR preview | `dataforge-app-dev` | `dataforge-app-dev-compute-worker-runtime` | 3400 |
 | Unit/integration tests | — | `dataforge-integration-compute-worker-<uuid>` | random free ports |
-| E2E suite | — | `dataforge-e2e-compute-worker-<run-id>` | random free ports |
+| E2E suite | — | `dataforge-e2e-<stack-id>-net` | random free ports |
 
 When adding a new fixed resource, pick the next free name/port and update this
 table. See [Deployment](../docs/DEPLOYMENT.md) for the full standard.

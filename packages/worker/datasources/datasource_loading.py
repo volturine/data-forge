@@ -48,35 +48,21 @@ def _csv_opts(opts: dict[str, Any] | None) -> dict[str, Any]:
 
 
 def _read_excel(path: str, opts: dict[str, Any]) -> pl.LazyFrame:
-    sheet_name = opts.get("sheet_name")
-    table_name = opts.get("table_name")
-    named_range = opts.get("named_range")
-    next_opts: dict[str, Any] = {}
-    if sheet_name is not None:
-        next_opts["sheet_name"] = sheet_name
-    if table_name is not None:
-        next_opts["table_name"] = table_name
-    if named_range is not None:
-        next_opts["named_range"] = named_range
+    next_opts = {key: opts[key] for key in ("sheet_name", "table_name", "named_range") if opts.get(key) is not None}
     return pl.read_excel(path, **next_opts).lazy()
 
 
 def _merge_excel_opts(config: dict[str, Any], opts: dict[str, Any]) -> dict[str, Any]:
     next_opts = dict(opts)
-    if config.get("sheet_name"):
-        next_opts["sheet_name"] = config["sheet_name"]
-    if config.get("table_name"):
-        next_opts["table_name"] = config["table_name"]
-    if config.get("named_range"):
-        next_opts["named_range"] = config["named_range"]
-    if config.get("cell_range"):
-        next_opts["cell_range"] = config["cell_range"]
+    for key in ("sheet_name", "table_name", "named_range", "cell_range"):
+        if config.get(key):
+            next_opts[key] = config[key]
     if config.get("has_header") is not None:
         next_opts["has_header"] = config["has_header"]
     return next_opts
 
 
-def _normalize_headers(values: tuple[object | None, ...]) -> list[str]:
+def normalize_excel_headers(values: tuple[object | None, ...]) -> list[str]:
     names: list[str] = []
     seen: dict[str, int] = {}
     for index, value in enumerate(values):
@@ -90,7 +76,7 @@ def _normalize_headers(values: tuple[object | None, ...]) -> list[str]:
     return names
 
 
-def _has_bounds(config: dict[str, Any]) -> bool:
+def has_excel_bounds(config: dict[str, Any]) -> bool:
     return (
         config.get("start_row") is not None and config.get("start_col") is not None and config.get("end_col") is not None and config.get("end_row") is not None
     )
@@ -125,7 +111,7 @@ def _read_excel_bounds(config: dict[str, Any]) -> pl.LazyFrame:
 
     if has_header:
         header = rows[0]
-        columns = _normalize_headers(header)
+        columns = normalize_excel_headers(header)
         data_rows = rows[1:]
     else:
         columns = [f"column_{index + 1}" for index in range(len(rows[0]))]
@@ -186,7 +172,7 @@ def load_datasource_frame(config: dict[str, Any]) -> pl.LazyFrame:
             local_path = str(temp_path)
             local_config = {**config, "file_path": local_path}
             try:
-                if file_type == DataSourceFileType.EXCEL and _has_bounds(local_config):
+                if file_type == DataSourceFileType.EXCEL and has_excel_bounds(local_config):
                     return _read_excel_bounds(local_config)
                 match file_type:
                     case DataSourceFileType.CSV:
@@ -201,7 +187,7 @@ def load_datasource_frame(config: dict[str, Any]) -> pl.LazyFrame:
                         return _read_excel(local_path, opts)
             finally:
                 temp_path.unlink(missing_ok=True)
-        if file_type == DataSourceFileType.EXCEL and _has_bounds(config):
+        if file_type == DataSourceFileType.EXCEL and has_excel_bounds(config):
             return _read_excel_bounds(config)
         match file_type:
             case DataSourceFileType.CSV:
@@ -289,10 +275,6 @@ def load_datasource_frame(config: dict[str, Any]) -> pl.LazyFrame:
         )
 
     raise ValueError(f"Unsupported source type: {source_type}")
-
-
-# Public alias used by execution and pipeline loaders.
-load_datasource = load_datasource_frame
 
 
 def iter_datasource_batches(config: dict[str, Any], *, batch_size: int) -> Generator[pl.DataFrame]:

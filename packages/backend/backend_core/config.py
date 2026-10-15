@@ -9,41 +9,6 @@ from pydantic_settings.sources import DotEnvSettingsSource
 
 _MAX_UPLOAD_FILE_SIZE_BYTES = 2 * 1024 * 1024 * 1024
 
-# (field_name, min_inclusive, max_inclusive) — None means no bound
-_NUMERIC_CONSTRAINTS: list[tuple[str, int | None, int | None]] = [
-    ('port', 1, 65535),
-    ('internal_grpc_port', 1, 65535),
-    ('worker_data_plane_grpc_port', 1, 65535),
-    ('database_pool_size', 1, 100),
-    ('database_max_overflow', 0, 32),
-    ('compute_workers', 1, 100),
-    ('database_pool_timeout', 1, None),
-    ('scheduler_check_interval', 1, None),
-    ('lock_ttl_seconds', 1, None),
-    ('lock_heartbeat_interval_seconds', 1, None),
-    ('polars_cores_available', 0, None),
-    ('polars_max_memory_mb', 0, None),
-    ('polars_streaming_chunk_size', 0, None),
-    ('workers', 0, 32),
-    ('runtime_reconciliation_poll_interval_seconds', 1, None),
-    ('runtime_outbox_retry_seconds', 1, None),
-    ('runtime_outbox_claim_ttl_seconds', 1, None),
-    ('runtime_outbox_max_attempts', 1, None),
-    ('runtime_compute_max_attempts', 1, None),
-    ('runtime_work_lease_ttl_seconds', 1, None),
-    ('engine_idle_ttl_seconds', 1, None),
-    ('engine_idle_reap_interval_seconds', 1, None),
-    ('log_queue_max_size', 1, None),
-    ('log_max_body_size', 0, None),
-    ('log_client_batch_size', 1, None),
-    ('log_client_flush_interval_ms', 1, None),
-    ('log_client_dedupe_window_ms', 1, None),
-    ('log_client_flush_cooldown_ms', 1, None),
-    ('upload_max_file_size_bytes', 0, _MAX_UPLOAD_FILE_SIZE_BYTES),
-]
-_PLACEHOLDER_ENCRYPTION_KEYS = {'your-encryption-key-here'}
-_PLACEHOLDER_PASSWORDS = {'changeme123', 'changeme123!', 'replaceme123', 'replace-with-strong-password'}
-
 
 def _default_data_dir() -> Path:
     """Return a stable writable default data directory when DATA_DIR is unset."""
@@ -73,21 +38,13 @@ def get_env_file() -> str | None:
     path replaces the default.
     """
     if 'ENV_FILE' in os.environ:
-        env_val = os.environ.get('ENV_FILE', '')
-        if env_val:
-            return env_val
-        return None
+        return os.environ['ENV_FILE'] or None
     return str(_repo_root() / '.env')
 
 
-def _resolve_dir(value: Path | str) -> Path:
-    """Ensure a directory path exists and return it."""
-    path_value = Path(value)
-    path_value.mkdir(parents=True, exist_ok=True)
-    return path_value
+class EnvFileSettings(BaseSettings):
+    """Settings read from the process environment, then the ``get_env_file`` dotenv file."""
 
-
-class Settings(BaseSettings):
     model_config = SettingsConfigDict(env_file=None, env_file_encoding='utf8', extra='ignore')
 
     @classmethod
@@ -97,13 +54,15 @@ class Settings(BaseSettings):
             return (init_settings, env_settings, file_secret_settings)
         return (init_settings, env_settings, DotEnvSettingsSource(settings_cls, env_file=env_file, env_file_encoding='utf8'), file_secret_settings)
 
+
+class Settings(EnvFileSettings):
     app_name: str = 'Data-Forge Analysis Platform'
     app_version: str = '1.0.0'
 
     # Debug mode - enables SQL echo, verbose logging
     debug: bool = False
     prod_mode_enabled: bool = Field(default=False, alias='PROD_MODE_ENABLED')
-    port: int = Field(default=8000, alias='PORT')
+    port: int = Field(default=8000, ge=1, le=65535, alias='PORT')
 
     # CORS origins - comma-separated list of allowed origins
     cors_origins: str = 'http://localhost:3000,http://127.0.0.1:3000,http://localhost:5173,http://127.0.0.1:5173'
@@ -113,56 +72,56 @@ class Settings(BaseSettings):
     distributed_runtime_enabled: bool = Field(default=False, alias='DISTRIBUTED_RUNTIME_ENABLED')
     internal_api_token: str = Field(default='', alias='INTERNAL_API_TOKEN')
     internal_grpc_host: str = Field(default='127.0.0.1', alias='INTERNAL_GRPC_HOST')
-    internal_grpc_port: int = Field(default=50051, alias='INTERNAL_GRPC_PORT')
+    internal_grpc_port: int = Field(default=50051, ge=1, le=65535, alias='INTERNAL_GRPC_PORT')
     runtime_coordinator_target: str = Field(default='', alias='RUNTIME_COORDINATOR_TARGET')
     worker_data_plane_grpc_target: str = Field(default='127.0.0.1:50052', alias='WORKER_DATA_PLANE_GRPC_TARGET')
-    worker_data_plane_grpc_port: int = Field(default=50052, alias='WORKER_DATA_PLANE_GRPC_PORT')
+    worker_data_plane_grpc_port: int = Field(default=50052, ge=1, le=65535, alias='WORKER_DATA_PLANE_GRPC_PORT')
     # These limits apply to one process and one SQLAlchemy engine. Deployments
     # with multiple API children must budget them per child; the compose
     # runtime coordinator uses a smaller explicit override.
-    database_pool_size: int = Field(default=8, alias='DATABASE_POOL_SIZE')
-    database_max_overflow: int = Field(default=4, alias='DATABASE_MAX_OVERFLOW')
-    database_pool_timeout: int = Field(default=30, alias='DATABASE_POOL_TIMEOUT')
-    compute_workers: int = Field(default=14, alias='COMPUTE_WORKERS')
+    database_pool_size: int = Field(default=8, ge=1, le=100, alias='DATABASE_POOL_SIZE')
+    database_max_overflow: int = Field(default=4, ge=0, le=32, alias='DATABASE_MAX_OVERFLOW')
+    database_pool_timeout: int = Field(default=30, ge=1, alias='DATABASE_POOL_TIMEOUT')
+    compute_workers: int = Field(default=14, ge=1, le=100, alias='COMPUTE_WORKERS')
     default_namespace: str = Field(default='default', alias='DEFAULT_NAMESPACE')
 
     # Zero disables the configurable soft cap; the data-plane transport still enforces its 2 GiB ceiling.
-    upload_max_file_size_bytes: int = Field(default=_MAX_UPLOAD_FILE_SIZE_BYTES, alias='UPLOAD_MAX_FILE_SIZE_BYTES')
+    upload_max_file_size_bytes: int = Field(default=_MAX_UPLOAD_FILE_SIZE_BYTES, ge=0, le=_MAX_UPLOAD_FILE_SIZE_BYTES, alias='UPLOAD_MAX_FILE_SIZE_BYTES')
 
     # Scheduler check interval in seconds (default 60 seconds)
     # How often to check for schedules that need to run
-    scheduler_check_interval: int = Field(default=60, alias='SCHEDULER_CHECK_INTERVAL')
+    scheduler_check_interval: int = Field(default=60, ge=1, alias='SCHEDULER_CHECK_INTERVAL')
 
     # Resource lock defaults
-    lock_ttl_seconds: int = Field(default=30, alias='LOCK_TTL_SECONDS')
-    lock_heartbeat_interval_seconds: int = Field(default=10, alias='LOCK_HEARTBEAT_INTERVAL_SECONDS')
+    lock_ttl_seconds: int = Field(default=30, ge=1, alias='LOCK_TTL_SECONDS')
+    lock_heartbeat_interval_seconds: int = Field(default=10, ge=1, alias='LOCK_HEARTBEAT_INTERVAL_SECONDS')
 
     # Polars engine resource defaults (app config — not Polars' native env names).
     # Total cores available for compute engines (0 = all logical CPUs on this host).
     # Per-analysis resource_config.max_threads may override within this budget.
-    polars_cores_available: int = Field(default=0, alias='POLARS_CORES_AVAILABLE')
+    polars_cores_available: int = Field(default=0, ge=0, alias='POLARS_CORES_AVAILABLE')
 
     # Memory limit per engine in MB (0 = unlimited)
-    polars_max_memory_mb: int = Field(default=0, alias='POLARS_MAX_MEMORY_MB')
+    polars_max_memory_mb: int = Field(default=0, ge=0, alias='POLARS_MAX_MEMORY_MB')
 
     # Streaming chunk size for large datasets (0 = auto)
-    polars_streaming_chunk_size: int = Field(default=0, alias='POLARS_STREAMING_CHUNK_SIZE')
+    polars_streaming_chunk_size: int = Field(default=0, ge=0, alias='POLARS_STREAMING_CHUNK_SIZE')
 
     # Worker Configuration
     # Number of Gunicorn/Uvicorn workers (0 = auto: 2 * cores + 1)
-    workers: int = Field(default=1, alias='WORKERS')
-    runtime_reconciliation_poll_interval_seconds: int = Field(default=1, alias='RUNTIME_RECONCILIATION_POLL_INTERVAL_SECONDS')
-    runtime_outbox_retry_seconds: int = Field(default=5, alias='RUNTIME_OUTBOX_RETRY_SECONDS')
-    runtime_outbox_claim_ttl_seconds: int = Field(default=30, alias='RUNTIME_OUTBOX_CLAIM_TTL_SECONDS')
-    runtime_outbox_max_attempts: int = Field(default=10, alias='RUNTIME_OUTBOX_MAX_ATTEMPTS')
-    runtime_compute_max_attempts: int = Field(default=3, alias='RUNTIME_COMPUTE_MAX_ATTEMPTS')
-    runtime_work_lease_ttl_seconds: int = Field(default=300, alias='RUNTIME_WORK_LEASE_TTL_SECONDS')
+    workers: int = Field(default=1, ge=0, le=32, alias='WORKERS')
+    runtime_reconciliation_poll_interval_seconds: int = Field(default=1, ge=1, alias='RUNTIME_RECONCILIATION_POLL_INTERVAL_SECONDS')
+    runtime_outbox_retry_seconds: int = Field(default=5, ge=1, alias='RUNTIME_OUTBOX_RETRY_SECONDS')
+    runtime_outbox_claim_ttl_seconds: int = Field(default=30, ge=1, alias='RUNTIME_OUTBOX_CLAIM_TTL_SECONDS')
+    runtime_outbox_max_attempts: int = Field(default=10, ge=1, alias='RUNTIME_OUTBOX_MAX_ATTEMPTS')
+    runtime_compute_max_attempts: int = Field(default=3, ge=1, alias='RUNTIME_COMPUTE_MAX_ATTEMPTS')
+    runtime_work_lease_ttl_seconds: int = Field(default=300, ge=1, alias='RUNTIME_WORK_LEASE_TTL_SECONDS')
 
     # Maximum connections per worker
     worker_connections: int = Field(default=4096, alias='WORKER_CONNECTIONS')
 
-    engine_idle_ttl_seconds: int = Field(default=300, alias='ENGINE_IDLE_TTL_SECONDS')
-    engine_idle_reap_interval_seconds: int = Field(default=30, alias='ENGINE_IDLE_REAP_INTERVAL_SECONDS')
+    engine_idle_ttl_seconds: int = Field(default=300, ge=1, alias='ENGINE_IDLE_TTL_SECONDS')
+    engine_idle_reap_interval_seconds: int = Field(default=30, ge=1, alias='ENGINE_IDLE_REAP_INTERVAL_SECONDS')
 
     object_store_endpoint: str = Field(default='http://127.0.0.1:9000', alias='OBJECT_STORE_ENDPOINT')
     object_store_region: str = Field(default='us-east-1', alias='OBJECT_STORE_REGION')
@@ -185,29 +144,29 @@ class Settings(BaseSettings):
 
     # Client audit log configuration (frontend)
     # Batch size per flush request
-    log_client_batch_size: int = Field(default=20, alias='LOG_CLIENT_BATCH_SIZE')
+    log_client_batch_size: int = Field(default=20, ge=1, alias='LOG_CLIENT_BATCH_SIZE')
 
     # Flush interval in milliseconds
-    log_client_flush_interval_ms: int = Field(default=5000, alias='LOG_CLIENT_FLUSH_INTERVAL_MS')
+    log_client_flush_interval_ms: int = Field(default=5000, ge=1, alias='LOG_CLIENT_FLUSH_INTERVAL_MS')
 
     # Dedupe window in milliseconds for repeated events
-    log_client_dedupe_window_ms: int = Field(default=500, alias='LOG_CLIENT_DEDUPE_WINDOW_MS')
+    log_client_dedupe_window_ms: int = Field(default=500, ge=1, alias='LOG_CLIENT_DEDUPE_WINDOW_MS')
 
     # Cooldown in milliseconds before logging repeated flush failures
-    log_client_flush_cooldown_ms: int = Field(default=3000, alias='LOG_CLIENT_FLUSH_COOLDOWN_MS')
+    log_client_flush_cooldown_ms: int = Field(default=3000, ge=1, alias='LOG_CLIENT_FLUSH_COOLDOWN_MS')
 
     # Server-side log flush interval in seconds
     log_flush_interval_seconds: int = Field(default=5, alias='LOG_FLUSH_INTERVAL_SECONDS')
     log_requests_enabled: bool = Field(default=True, alias='LOG_REQUESTS_ENABLED')
 
     # Max queued log batches before dropping
-    log_queue_max_size: int = Field(default=2000, alias='LOG_QUEUE_MAX_SIZE')
+    log_queue_max_size: int = Field(default=2000, ge=1, alias='LOG_QUEUE_MAX_SIZE')
 
     # Queue overflow behavior: 'block' or 'drop' (default)
     log_queue_overflow: str = Field(default='drop', alias='LOG_QUEUE_OVERFLOW')
 
     # Max known-size request/response body to log in bytes (0 disables body logging)
-    log_max_body_size: int = Field(default=64 * 1024, alias='LOG_MAX_BODY_SIZE')
+    log_max_body_size: int = Field(default=64 * 1024, ge=0, alias='LOG_MAX_BODY_SIZE')
 
     # Frontend debug panels
     public_idb_debug: bool = Field(default=False, alias='PUBLIC_IDB_DEBUG')
@@ -230,10 +189,8 @@ class Settings(BaseSettings):
     telegram_bot_enabled: bool = Field(default=False, alias='TELEGRAM_BOT_ENABLED')
     openrouter_api_key: str = Field(default='', alias='OPENROUTER_API_KEY')
     openrouter_default_model: str = Field(default='', alias='OPENROUTER_DEFAULT_MODEL')
-    ollama_endpoint_url_db: str = Field(default='', alias='OLLAMA_ENDPOINT_URL_DB')
-    ollama_default_model_db: str = Field(default='', alias='OLLAMA_DEFAULT_MODEL_DB')
 
-    trusted_proxy_hops: int = Field(default=0, alias='TRUSTED_PROXY_HOPS')
+    trusted_proxy_hops: int = Field(default=0, ge=0, alias='TRUSTED_PROXY_HOPS')
 
     @property
     def cors_origins_list(self) -> list[str]:
@@ -242,8 +199,10 @@ class Settings(BaseSettings):
 
     @field_validator('data_dir', mode='before')
     @classmethod
-    def _ensure_dirs(cls, value: Path) -> Path:
-        return _resolve_dir(value)
+    def _ensure_dirs(cls, value: Path | str) -> Path:
+        path = Path(value)
+        path.mkdir(parents=True, exist_ok=True)
+        return path
 
     @field_validator('log_level')
     @classmethod
@@ -280,30 +239,10 @@ class Settings(BaseSettings):
             raise ValueError(f'log_queue_overflow must be one of {valid}, got {value}')
         return value.lower()
 
-    @field_validator('trusted_proxy_hops')
-    @classmethod
-    def _validate_trusted_proxy_hops(cls, value: int) -> int:
-        if value < 0:
-            raise ValueError('TRUSTED_PROXY_HOPS must be >= 0')
-        return value
-
-    @model_validator(mode='after')
-    def _validate_numeric_constraints(self) -> Settings:
-        for field_name, min_val, max_val in _NUMERIC_CONSTRAINTS:
-            value = getattr(self, field_name)
-            if min_val is not None and value < min_val:
-                raise ValueError(f'{field_name} must be >= {min_val}, got {value}')
-            if max_val is not None and value > max_val:
-                raise ValueError(f'{field_name} must be <= {max_val}, got {value}')
-        return self
-
     @model_validator(mode='after')
     def _validate_directories_writable(self) -> Settings:
-        """Ensure all directories are writable."""
-        for dir_name in ['data_dir']:
-            dir_path = getattr(self, dir_name)
-            if not os.access(dir_path, os.W_OK):
-                raise ValueError(f'{dir_name} is not writable: {dir_path}')
+        if not os.access(self.data_dir, os.W_OK):
+            raise ValueError(f'data_dir is not writable: {self.data_dir}')
         return self
 
     @model_validator(mode='after')
@@ -316,14 +255,9 @@ class Settings(BaseSettings):
     def _validate_runtime_mode(self) -> Settings:
         if self.engine_idle_reap_interval_seconds >= self.engine_idle_ttl_seconds:
             raise ValueError('ENGINE_IDLE_REAP_INTERVAL_SECONDS must be < ENGINE_IDLE_TTL_SECONDS')
-        if not self.object_store_endpoint.strip():
-            raise ValueError('OBJECT_STORE_ENDPOINT must not be empty')
-        if not self.object_store_region.strip():
-            raise ValueError('OBJECT_STORE_REGION must not be empty')
-        if not self.object_store_access_key.strip():
-            raise ValueError('OBJECT_STORE_ACCESS_KEY must not be empty')
-        if not self.object_store_secret_key.strip():
-            raise ValueError('OBJECT_STORE_SECRET_KEY must not be empty')
+        for name in ('endpoint', 'region', 'access_key', 'secret_key'):
+            if not getattr(self, f'object_store_{name}').strip():
+                raise ValueError(f'OBJECT_STORE_{name.upper()} must not be empty')
         if self.prod_mode_enabled and 'rustfsadmin' in {self.object_store_access_key, self.object_store_secret_key}:
             raise ValueError('OBJECT_STORE credentials must be changed from the rustfsadmin default in production')
         # Default namespace is the default S3 bucket name.

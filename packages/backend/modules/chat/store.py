@@ -3,7 +3,6 @@
 from __future__ import annotations
 
 import asyncio
-import json
 import logging
 import secrets
 import time
@@ -11,21 +10,19 @@ from dataclasses import dataclass
 from datetime import UTC, datetime
 from typing import Any
 
-from sqlalchemy import and_, delete, func, or_, select, text
+from sqlalchemy import and_, delete, func, or_, select
 from sqlmodel import Session
 
 from backend_core.api_execution_budget import run_api_blocking
 from backend_core.database import RuntimeCoordinatorFenced, run_settings_db
 from backend_core.exceptions import SettingsConfigurationError
 from backend_core.live_hubs import KeyedVersionHub
+from backend_core.runtime_ipc import CHAT_EVENT_WAKE_KIND, CHAT_TURN_WAKE_KIND, notify_on_commit
 from backend_core.secrets import decrypt_secret, encrypt_secret
 from backend_core.sqlmodel_typing import col
 from modules.chat.models import ChatEvent, ChatMessage, ChatSession, ChatTurn
 from modules.chat.sessions import ACTIVE_TURN_STATUSES, MAX_EVENTS, MAX_MESSAGES, normalize_epoch_milliseconds
 
-CHAT_TURN_WAKE_KIND = 'chat_turn'
-CHAT_EVENT_WAKE_KIND = 'chat_event'
-_RUNTIME_CHANNEL = 'runtime_events'
 _CHAT_CREDENTIAL_DECRYPTION_ERROR = 'Chat credentials could not be decrypted; update the session credentials and try again.'
 logger = logging.getLogger(__name__)
 
@@ -57,15 +54,6 @@ class TurnClaim:
     confirmation_decision: bool | None
 
 
-def _notify(db: Session, payload: dict[str, Any]) -> None:
-    if db.get_bind().dialect.name != 'postgresql':
-        return
-    db.execute(
-        text('SELECT pg_notify(:channel, :payload)'),
-        {'channel': _RUNTIME_CHANNEL, 'payload': json.dumps(payload, separators=(',', ':'))},
-    )
-
-
 def _verify_claim(db: Session, turn_id: str, claim_token: str, generation: int) -> ChatTurn:
     turn = db.execute(select(ChatTurn).where(col(ChatTurn.id) == turn_id).with_for_update()).scalar_one_or_none()
     if turn is None:
@@ -89,7 +77,7 @@ def _append_event(db: Session, *, session_id: str, turn_id: str | None, payload:
     sequence = int(row.sequence)
     old_events = select(col(ChatEvent.sequence)).where(col(ChatEvent.session_id) == session_id).order_by(col(ChatEvent.sequence).desc()).offset(MAX_EVENTS)
     db.execute(delete(ChatEvent).where(col(ChatEvent.session_id) == session_id, col(ChatEvent.sequence).in_(old_events)))
-    _notify(db, {'kind': CHAT_EVENT_WAKE_KIND, 'session_id': session_id, 'sequence': sequence})
+    notify_on_commit(db, {'kind': CHAT_EVENT_WAKE_KIND, 'session_id': session_id, 'sequence': sequence})
     return sequence
 
 
@@ -148,7 +136,7 @@ def _enqueue(
     db.flush()
     _append_message(db, session_id=session_id, turn_id=turn_id, message={'role': 'user', 'content': content})
     _append_event(db, session_id=session_id, turn_id=turn_id, payload={'type': 'message', 'role': 'user', 'content': content})
-    _notify(db, {'kind': CHAT_TURN_WAKE_KIND, 'session_id': session_id, 'turn_id': turn_id})
+    notify_on_commit(db, {'kind': CHAT_TURN_WAKE_KIND, 'session_id': session_id, 'turn_id': turn_id})
     db.commit()
     return turn_id
 
@@ -260,69 +248,6 @@ def _recover(db: Session, *, generation: int) -> int:
     return recovered
 
 
-def _control_state(db: Session, *, turn_id: str, claim_token: str, generation: int) -> tuple[bool, bool | None]:
-    turn = _verify_claim(db, turn_id, claim_token, generation)
-    return turn.stop_requested, turn.confirmation_decision
-
-
-def _set_checkpoint(
-    db: Session,
-    *,
-    turn_id: str,
-    claim_token: str,
-    generation: int,
-    checkpoint: dict[str, Any],
-    status: str | None = None,
-    clear_confirmation: bool = False,
-) -> None:
-    turn = _verify_claim(db, turn_id, claim_token, generation)
-    turn.checkpoint = checkpoint
-    turn.updated_at = datetime.now(UTC)
-    if status is not None:
-        turn.status = status
-    if clear_confirmation:
-        turn.confirmation_decision = None
-    db.add(turn)
-    db.commit()
-
-
-def _write_message(
-    db: Session,
-    *,
-    turn_id: str,
-    claim_token: str,
-    generation: int,
-    message: dict[str, Any],
-) -> None:
-    turn = _verify_claim(db, turn_id, claim_token, generation)
-    _append_message(db, session_id=turn.session_id, turn_id=turn.id, message=message)
-    db.commit()
-
-
-def _write_event(
-    db: Session,
-    *,
-    turn_id: str,
-    claim_token: str,
-    generation: int,
-    payload: dict[str, Any],
-) -> int:
-    turn = _verify_claim(db, turn_id, claim_token, generation)
-    sequence = _append_event(db, session_id=turn.session_id, turn_id=turn.id, payload=payload)
-    db.commit()
-    return sequence
-
-
-def _finish(db: Session, *, turn_id: str, claim_token: str, generation: int, status: str) -> None:
-    turn = _verify_claim(db, turn_id, claim_token, generation)
-    turn.status = status
-    turn.claim_token = None
-    turn.coordinator_generation = None
-    turn.updated_at = datetime.now(UTC)
-    _append_event(db, session_id=turn.session_id, turn_id=turn.id, payload={'type': 'done'})
-    db.commit()
-
-
 def _request_stop(db: Session, *, session_id: str, user_id: str) -> bool:
     turn = db.execute(
         select(ChatTurn)
@@ -333,7 +258,7 @@ def _request_stop(db: Session, *, session_id: str, user_id: str) -> bool:
         return False
     turn.stop_requested = True
     turn.updated_at = datetime.now(UTC)
-    _notify(db, {'kind': CHAT_TURN_WAKE_KIND, 'session_id': session_id, 'turn_id': turn.id})
+    notify_on_commit(db, {'kind': CHAT_TURN_WAKE_KIND, 'session_id': session_id, 'turn_id': turn.id})
     db.commit()
     return True
 
@@ -353,7 +278,7 @@ def _confirm(db: Session, *, session_id: str, user_id: str, approved: bool) -> b
         return False
     turn.confirmation_decision = approved
     turn.updated_at = datetime.now(UTC)
-    _notify(db, {'kind': CHAT_TURN_WAKE_KIND, 'session_id': session_id, 'turn_id': turn.id})
+    notify_on_commit(db, {'kind': CHAT_TURN_WAKE_KIND, 'session_id': session_id, 'turn_id': turn.id})
     db.commit()
     return True
 
@@ -372,7 +297,11 @@ def _read_events(db: Session, *, session_id: str, after: int, limit: int) -> tup
 
 
 class ChatTurnStore:
-    """Synchronous database boundary used by API routes and the coordinator."""
+    """Synchronous database boundary used by API routes and the coordinator.
+
+    Every coordinator write first re-verifies the turn's claim token and
+    generation under a row lock, so a revoked or fenced owner cannot write.
+    """
 
     def enqueue(self, *, session_id: str, user_id: str, content: str, tool_ids: list[str], namespace: str, session_token: str) -> str:
         return run_settings_db(
@@ -396,29 +325,56 @@ class ChatTurnStore:
         run_settings_db(release)
 
     def control_state(self, *, turn_id: str, claim_token: str, generation: int) -> tuple[bool, bool | None]:
-        return run_settings_db(_control_state, turn_id=turn_id, claim_token=claim_token, generation=generation)
+        def read(db: Session) -> tuple[bool, bool | None]:
+            turn = _verify_claim(db, turn_id, claim_token, generation)
+            return turn.stop_requested, turn.confirmation_decision
+
+        return run_settings_db(read)
 
     def set_checkpoint(
         self, *, turn_id: str, claim_token: str, generation: int, checkpoint: dict[str, Any], status: str | None = None, clear_confirmation: bool = False
     ) -> None:
-        run_settings_db(
-            _set_checkpoint,
-            turn_id=turn_id,
-            claim_token=claim_token,
-            generation=generation,
-            checkpoint=checkpoint,
-            status=status,
-            clear_confirmation=clear_confirmation,
-        )
+        def write(db: Session) -> None:
+            turn = _verify_claim(db, turn_id, claim_token, generation)
+            turn.checkpoint = checkpoint
+            turn.updated_at = datetime.now(UTC)
+            if status is not None:
+                turn.status = status
+            if clear_confirmation:
+                turn.confirmation_decision = None
+            db.add(turn)
+            db.commit()
+
+        run_settings_db(write)
 
     def append_message(self, *, turn_id: str, claim_token: str, generation: int, message: dict[str, Any]) -> None:
-        run_settings_db(_write_message, turn_id=turn_id, claim_token=claim_token, generation=generation, message=message)
+        def write(db: Session) -> None:
+            turn = _verify_claim(db, turn_id, claim_token, generation)
+            _append_message(db, session_id=turn.session_id, turn_id=turn.id, message=message)
+            db.commit()
+
+        run_settings_db(write)
 
     def append_event(self, *, turn_id: str, claim_token: str, generation: int, payload: dict[str, Any]) -> int:
-        return run_settings_db(_write_event, turn_id=turn_id, claim_token=claim_token, generation=generation, payload=payload)
+        def write(db: Session) -> int:
+            turn = _verify_claim(db, turn_id, claim_token, generation)
+            sequence = _append_event(db, session_id=turn.session_id, turn_id=turn.id, payload=payload)
+            db.commit()
+            return sequence
+
+        return run_settings_db(write)
 
     def finish(self, *, turn_id: str, claim_token: str, generation: int, status: str) -> None:
-        run_settings_db(_finish, turn_id=turn_id, claim_token=claim_token, generation=generation, status=status)
+        def write(db: Session) -> None:
+            turn = _verify_claim(db, turn_id, claim_token, generation)
+            turn.status = status
+            turn.claim_token = None
+            turn.coordinator_generation = None
+            turn.updated_at = datetime.now(UTC)
+            _append_event(db, session_id=turn.session_id, turn_id=turn.id, payload={'type': 'done'})
+            db.commit()
+
+        run_settings_db(write)
 
     def request_stop(self, *, session_id: str, user_id: str) -> bool:
         return run_settings_db(_request_stop, session_id=session_id, user_id=user_id)
@@ -513,8 +469,6 @@ class ChatStreamRecovery:
                 for task in pending:
                     task.cancel()
                 await asyncio.gather(wake_task, stop_task, return_exceptions=True)
-        except asyncio.CancelledError:
-            raise
         finally:
             self._task = None
             self._loop = None

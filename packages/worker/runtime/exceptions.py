@@ -27,21 +27,17 @@ class AppError(Exception):
         super().__init__(message)
 
 
-def not_found_error(message: str, *, error_code: ErrorCodeInput, details: dict[str, object]) -> AppError:
-    return AppError(message=message, error_code=error_code, details=details)
-
-
 def datasource_not_found(datasource_id: str) -> AppError:
-    return not_found_error(
-        f"DataSource {datasource_id} not found",
+    return AppError(
+        message=f"DataSource {datasource_id} not found",
         error_code="DATASOURCE_NOT_FOUND",
         details={"datasource_id": datasource_id},
     )
 
 
 def step_not_found(step_id: str) -> AppError:
-    return not_found_error(
-        f"Step with id {step_id} not found in pipeline",
+    return AppError(
+        message=f"Step with id {step_id} not found in pipeline",
         error_code="STEP_NOT_FOUND",
         details={"step_id": step_id},
     )

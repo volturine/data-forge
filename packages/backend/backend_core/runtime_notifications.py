@@ -15,7 +15,7 @@ from backend_core.compute_worker_live import registry as compute_worker_registry
 from backend_core.database import run_db
 from backend_core.domain.build_runs.live import BuildNotification, hub as build_hub
 from backend_core.domain.runtime.events import RuntimePayloadKind
-from backend_core.namespace import reset_namespace, set_namespace_context
+from backend_core.namespace import namespace_scope
 from backend_core.persistence.build_runs.models import BuildRun
 from backend_core.persistence.locks.models import ResourceLock
 from backend_core.runtime_outbox_dispatcher import OUTBOX_WAKE_HUB
@@ -24,8 +24,6 @@ from modules.locks import watchers as lock_watchers
 from modules.locks.schemas import LockStatusResponse, LockWebsocketStatusMessage
 
 logger = logging.getLogger(__name__)
-_CHAT_EVENT_WAKE_KIND = 'chat_event'
-_CHAT_TURN_WAKE_KIND = 'chat_turn'
 _PROJECTION_RECOVERY_BATCH_SIZE = 128
 
 
@@ -34,11 +32,8 @@ def _read_build_sequences(namespace: str, build_ids: list[str]) -> dict[str, int
         rows = session.exec(select(BuildRun.id, BuildRun.next_event_sequence).where(col(BuildRun.id).in_(build_ids))).all()
         return {build_id: max(sequence - 1, 0) for build_id, sequence in rows}
 
-    token = set_namespace_context(namespace)
-    try:
+    with namespace_scope(namespace):
         return run_db(read)
-    finally:
-        reset_namespace(token)
 
 
 async def refresh_build_projections() -> None:
@@ -65,11 +60,8 @@ def _read_lock_statuses(namespace: str, keys: list[tuple[str, str]]) -> dict[tup
             if not row.is_expired()
         }
 
-    token = set_namespace_context(namespace)
-    try:
+    with namespace_scope(namespace):
         return run_db(read)
-    finally:
-        reset_namespace(token)
 
 
 async def refresh_lock_projections() -> None:
@@ -131,7 +123,7 @@ async def handle_runtime_payload(payload: dict[str, object]) -> None:
 
             notify_detection_result(request_id)
         return
-    if payload.get('kind') == _CHAT_EVENT_WAKE_KIND:
+    if payload.get('kind') == runtime_ipc.CHAT_EVENT_WAKE_KIND:
         session_id = payload.get('session_id')
         sequence = payload.get('sequence')
         if isinstance(session_id, str):
@@ -139,7 +131,7 @@ async def handle_runtime_payload(payload: dict[str, object]) -> None:
 
             chat_stream_recovery.publish(session_id, sequence if isinstance(sequence, int) else None)
         return
-    if payload.get('kind') == _CHAT_TURN_WAKE_KIND:
+    if payload.get('kind') == runtime_ipc.CHAT_TURN_WAKE_KIND:
         return
     if payload.get('kind') == OUTBOX_WAKE_KIND:
         namespace = payload.get('namespace')

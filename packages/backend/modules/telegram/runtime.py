@@ -21,7 +21,6 @@ from modules.telegram.domain import TelegramDetectionClaim, TelegramSettings
 
 logger = logging.getLogger(__name__)
 
-_TELEGRAM_BASE_URL = 'https://api.telegram.org'
 _POLL_TIMEOUT_SECONDS = 5
 _HTTP_TIMEOUT = httpx.Timeout(connect=3.0, read=10.0, write=5.0, pool=3.0)
 _RECOVERY_SECONDS = 5.0
@@ -85,14 +84,6 @@ async def _wait_chat_detection(*, token: str, request_user_id: str, namespace: s
             # the recovery path if this API process missed a notification.
 
 
-async def _run_public_database[T](function: Callable[..., T], *args: object, **kwargs: object) -> T:
-    """Run one coordinator DB operation; its single actor awaits each call."""
-    loop = asyncio.get_running_loop()
-    context = contextvars.copy_context()
-    work = partial(run_settings_db, function, *args, **kwargs)
-    return await loop.run_in_executor(_COORDINATOR_DATABASE_EXECUTOR, context.run, work)
-
-
 async def _run_detection_database[T](function: Callable[..., T], *args: object, **kwargs: object) -> T:
     """Run HTTP-waiter DB work through the API's bounded protected lane."""
     return await run_bootstrap_settings_db(function, *args, **kwargs)
@@ -121,10 +112,6 @@ class TelegramIntegrationRuntime:
             while not stop_event.is_set():
                 try:
                     wake_version = await self._run_cycle(client, stop_event, wake_version)
-                except asyncio.CancelledError:
-                    raise
-                except store.TelegramOwnerFenced:
-                    raise
                 except _TRANSIENT_DATABASE_ERRORS:
                     logger.warning(
                         'Telegram actor database operation failed; retrying in %.2fs',
@@ -228,9 +215,7 @@ class TelegramIntegrationRuntime:
             except httpx.HTTPError:
                 logger.warning('Telegram command response failed; update offset was not advanced')
                 return False
-            except store.TelegramOwnerFenced:
-                raise
-            except _TRANSIENT_DATABASE_ERRORS:
+            except (store.TelegramOwnerFenced, *_TRANSIENT_DATABASE_ERRORS):
                 raise
             except Exception:
                 logger.warning('Telegram update handling failed; update offset was not advanced')
@@ -239,22 +224,19 @@ class TelegramIntegrationRuntime:
 
     async def _process_detection(self, client: httpx.AsyncClient, claim: TelegramDetectionClaim) -> None:
         if claim.deadline_at <= datetime.now(UTC):
-            await self._complete_detection(claim, {'success': False, 'message': 'Telegram chat detection timed out', 'chats': []})
+            await self._database(store.complete_detection, claim=claim, result={'success': False, 'message': 'Telegram chat detection timed out', 'chats': []})
             return
         try:
             offset = await self._database(store.get_next_update_id, claim.token_sha256)
             async with asyncio.timeout(min(10.0, max((claim.deadline_at - datetime.now(UTC)).total_seconds(), 0.01))):
                 response = await client.get(
-                    f'{_TELEGRAM_BASE_URL}/bot{claim.token}/getUpdates',
+                    f'{bot.TELEGRAM_BASE_URL}/bot{claim.token}/getUpdates',
                     params={'limit': 10, 'timeout': 0, 'offset': offset},
                     timeout=_HTTP_TIMEOUT,
                 )
             if response.status_code != 200:
                 message = _redact_token(_telegram_error_message(response), claim.token)
-                await self._complete_detection(
-                    claim,
-                    {'success': False, 'message': message, 'chats': []},
-                )
+                await self._database(store.complete_detection, claim=claim, result={'success': False, 'message': message, 'chats': []})
                 return
             payload = response.json()
             if not isinstance(payload, dict) or not isinstance(payload.get('result'), list):
@@ -263,25 +245,17 @@ class TelegramIntegrationRuntime:
             by_chat = {chat['chat_id']: chat for chat in previous}
             by_chat.update({chat['chat_id']: chat for chat in _detected_chats(payload['result'])})
             chats = list(by_chat.values())
-            await self._complete_detection(
-                claim,
-                {'success': True, 'message': f'Found {len(chats)} chat(s)', 'chats': chats},
-            )
-        except store.TelegramOwnerFenced:
-            raise
-        except _TRANSIENT_DATABASE_ERRORS:
+            await self._database(store.complete_detection, claim=claim, result={'success': True, 'message': f'Found {len(chats)} chat(s)', 'chats': chats})
+        except (store.TelegramOwnerFenced, *_TRANSIENT_DATABASE_ERRORS):
             raise
         except Exception as exc:
             error = _redact_token(str(exc), claim.token)
             await self._database(store.fail_detection, claim=claim, error=error)
 
-    async def _complete_detection(self, claim: TelegramDetectionClaim, result: dict[str, object]) -> None:
-        await self._database(store.complete_detection, claim=claim, result=result)
-
     async def _clear_webhook(self, client: httpx.AsyncClient, token: str) -> None:
         try:
             await client.post(
-                f'{_TELEGRAM_BASE_URL}/bot{token}/deleteWebhook',
+                f'{bot.TELEGRAM_BASE_URL}/bot{token}/deleteWebhook',
                 json={'drop_pending_updates': False},
                 timeout=_HTTP_TIMEOUT,
             )
@@ -299,11 +273,7 @@ class TelegramIntegrationRuntime:
         poll_timeout: int,
     ) -> tuple[httpx.Response | None, int]:
         request_task = asyncio.create_task(
-            _poll_request(
-                client,
-                f'{_TELEGRAM_BASE_URL}/bot{token}/getUpdates',
-                params={'offset': offset, 'timeout': poll_timeout},
-            )
+            _poll_request(client, f'{bot.TELEGRAM_BASE_URL}/bot{token}/getUpdates', params={'offset': offset, 'timeout': poll_timeout})
         )
         wake_task = asyncio.create_task(self._wake_hub.wait(last_seen=wake_version))
         stop_task = asyncio.create_task(stop_event.wait())
@@ -311,26 +281,19 @@ class TelegramIntegrationRuntime:
         try:
             done, _pending = await asyncio.wait(tasks, return_when=asyncio.FIRST_COMPLETED)
         finally:
-            pending = {task for task in tasks if not task.done()}
-            for task in pending:
-                task.cancel()
+            for task in tasks:
+                if not task.done():
+                    task.cancel()
             await asyncio.gather(*tasks, return_exceptions=True)
         if stop_task in done:
             return None, self._wake_hub.version()
         if wake_task in done:
-            if request_task in done:
-                await asyncio.gather(request_task, return_exceptions=True)
             return None, wake_task.result()
-        if request_task in done:
-            try:
-                return request_task.result(), self._wake_hub.version()
-            except httpx.HTTPError, TimeoutError:
-                logger.warning('Telegram getUpdates transport failed')
-                version = await self._wait_for_signal(stop_event, self._wake_hub.version(), timeout=_RECOVERY_SECONDS)
-                return None, version
-        if wake_task in done:
-            return None, wake_task.result()
-        return None, self._wake_hub.version()
+        try:
+            return request_task.result(), self._wake_hub.version()
+        except httpx.HTTPError, TimeoutError:
+            logger.warning('Telegram getUpdates transport failed')
+            return None, await self._wait_for_signal(stop_event, self._wake_hub.version(), timeout=_RECOVERY_SECONDS)
 
     async def _wait_for_signal(self, stop_event: asyncio.Event, wake_version: int, *, timeout: float) -> int:
         wake_task = asyncio.create_task(self._wake_hub.wait(last_seen=wake_version))
@@ -350,7 +313,10 @@ class TelegramIntegrationRuntime:
 
     @staticmethod
     async def _database[T](function: Callable[..., T], *args: object, **kwargs: object) -> T:
-        return await _run_public_database(function, *args, **kwargs)
+        """Run one coordinator DB operation; its single actor awaits each call."""
+        loop = asyncio.get_running_loop()
+        work = partial(run_settings_db, function, *args, **kwargs)
+        return await loop.run_in_executor(_COORDINATOR_DATABASE_EXECUTOR, contextvars.copy_context().run, work)
 
 
 async def _poll_request(client: httpx.AsyncClient, url: str, *, params: dict[str, int]) -> httpx.Response:

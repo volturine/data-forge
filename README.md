@@ -38,7 +38,8 @@ Data-Forge is a **local-first**, **no-code** data transformation tool. Build mul
     - [Code Style](#code-style)
   - [Project Structure](#project-structure)
   - [Architecture](#architecture)
-    - [Compute Engine](#compute-engine)
+    - [Runtime topology](#runtime-topology)
+    - [Compute Workers](#compute-workers)
     - [Pipeline Execution](#pipeline-execution)
     - [Scheduling](#scheduling)
     - [Storage Layout](#storage-layout)
@@ -54,7 +55,7 @@ Data-Forge is a **local-first**, **no-code** data transformation tool. Build mul
 ## Features
 
 - **Visual Pipeline Builder** — Add, configure, and reorder transformation steps with immediate data preview
-- **Multi-tab Analyses** — Organize related pipelines into tabs; tabs share a single compute engine run
+- **Multi-tab Analyses** — Organize related pipelines into tabs; tabs share a single compute run
 - **Polars Performance** — All transformations execute as Polars LazyFrames, compiled to efficient query plans
 - **Multiple Data Sources** — CSV, Excel, Parquet, JSON, DuckDB, external databases, and Apache Iceberg tables
 - **Iceberg Storage** — Outputs materialized as Iceberg tables with time-travel snapshot support
@@ -147,7 +148,7 @@ just dev
 - Frontend: http://localhost:3000 (Vite dev server, proxies `/api` to backend)
 - Backend API: http://localhost:8000
 - API Docs: http://localhost:8000/docs
-- Background runtime: scheduler + dynamic build workers supervised by the local app runtime
+- Background runtime: runtime coordinator, scheduler, and worker manager processes; the manager starts isolated compute containers
 
 ---
 
@@ -184,10 +185,12 @@ The repository defaults are tuned for concurrent clients:
   bounded threads; Polars-heavy parsing and execution stay in compute containers.
 - Durable external notification metadata is recorded in the outbox; email and
   Telegram network delivery runs outside the database transaction.
-- The capacity-first optimization plan and measured scale gates are in
-  [Capacity-First Runtime Optimization](docs/prd/active/elastic-runtime-scale-out.md).
+- The scale policy and measured readiness gates are in
+  [Capacity-First Runtime Optimization](docs/prd/implemented/capacity-first-runtime-optimization.md);
+  the remaining 2,000-user validation is in
+  [2,000-User Capacity Validation](docs/prd/backlog/two-thousand-user-capacity-validation.md).
 - API containers are stateless and can run as replicas behind an ingress;
-  the active worker manager can place engine containers on several Docker
+  the active worker manager can place compute workers on several Docker
   hosts, and the whole stack can run on two or three machines with the
   coordinator and manager failing over through PostgreSQL leases. See
   [Deployment](docs/DEPLOYMENT.md#scale-out), [Compute hosts](docs/COMPUTE_HOSTS.md)
@@ -233,7 +236,7 @@ and [Deployment](docs/DEPLOYMENT.md) for production operations.
 
 ```bash
 just install        # Install all dependencies
-just dev            # Start supervised app runtime and frontend
+just dev            # Start API, runtime coordinator, scheduler, worker, and frontend
 just format         # Format all code (ruff + prettier)
 just check          # Run ruff + mypy + svelte-check + eslint
 just test           # Run backend pytest + frontend Vitest
@@ -271,7 +274,7 @@ so their combined use can exceed available host capacity. These limits do not
 reserve host resources; all containers and other workloads still share the
 machine's finite CPU and memory.
 
-For code or config changes, run all three commands before opening a PR. For targeted local work, the tests live under `packages/backend/tests/`, `packages/scheduler/tests/`, `packages/worker/tests/`, and `packages/frontend/tests/` (unit) plus `packages/frontend/src/**/*.test.ts` (Vitest).
+For code or config changes, run all three commands before opening a PR. For targeted local work, the tests live under `packages/backend/tests/`, `packages/scheduler/tests/`, `packages/worker/tests/`, and `packages/frontend/tests/` (Playwright E2E) plus `packages/frontend/src/**/*.test.ts` (Vitest).
 
 ### Code Style
 
@@ -312,7 +315,7 @@ Production and local development use the same role split:
 - **API** — HTTP/WebSocket/SSE surface, auth, metadata, durable enqueue/wait, and disposable local caches/projections/waiters
 - **Runtime coordinator** — fenced internal gRPC/dispatch, durable chat, Telegram polling, and independent external delivery lanes
 - **Scheduler** — evaluates cron/dependency/event schedules and enqueues builds
-- **Worker manager** — sole Docker owner, claims build/compute work, manages exact-RID engine containers and the warm reserve, and serves data-plane gRPC
+- **Worker manager** — sole Docker owner, claims build/compute work, manages exact-RID compute workers and the warm reserve, and serves data-plane gRPC
 
 Coordination is Postgres-backed (claims, leases, outbox, run history). Process-to-process control uses internal gRPC; product data lives in S3-compatible object storage (Iceberg tables, uploads, exports).
 
@@ -321,23 +324,23 @@ and durable recovery callbacks; publication remains synchronous database/thread
 work. Short database units open and close their own sessions in bounded threads.
 Private storage cleanup reuses the outbox and an independent worker I/O lane to
 retire abandoned source/staging data; published snapshots retain their existing
-retention policy. The [runtime contracts](docs/prd/active/elastic-runtime-scale-out.md#implemented-runtime-contracts)
+retention policy. The [runtime contracts](docs/prd/implemented/capacity-first-runtime-optimization.md#implemented-runtime-contracts)
 describe mutation, cancellation, recovery, and cleanup boundaries.
 
-### Compute Engine
+### Compute Workers
 
-Analysis and datasource compute runs in **isolated engine containers** owned by
+Analysis and datasource compute runs in **isolated compute-worker containers** owned by
 the worker manager. Each assigned worker serves one exact RID and serializes its
 commands; identical full commands share durable results. That provides:
 
 - Memory isolation between analyses
-- Configurable resource limits per engine
-- Automatic cleanup of idle engines after a timeout
-- WebSocket streaming of real-time build and engine status through the API
+- Configurable resource limits per compute worker
+- Automatic cleanup of idle compute workers after a timeout
+- WebSocket streaming of real-time build and compute-worker status through the API
 
 ### Pipeline Execution
 
-A pipeline is a list of steps operating on a Polars LazyFrame. All tabs in an analysis are resolved in a **single engine run** — tab B can reference tab A's output as a LazyFrame without an intermediate disk write (intra-analysis dependency). Cross-analysis dependencies use materialized Iceberg snapshots.
+A pipeline is a list of steps operating on a Polars LazyFrame. All tabs in an analysis are resolved in a **single compute run** — tab B can reference tab A's output as a LazyFrame without an intermediate disk write (intra-analysis dependency). Cross-analysis dependencies use materialized Iceberg snapshots.
 
 ### Scheduling
 
@@ -393,7 +396,6 @@ If you discover a security vulnerability, please report it privately to the proj
 
 ### Development
 
-- [docs/CHANGELOG.md](docs/CHANGELOG.md) — Release and project history
 - [docs/DEPLOYMENT.md](docs/DEPLOYMENT.md) — Production deployment and operations
 - [docs/ENV_VARIABLES.md](docs/ENV_VARIABLES.md) — Environment variable reference
 - [docs/prd/implemented/data-forge.md](docs/prd/implemented/data-forge.md) — Core product baseline and architecture

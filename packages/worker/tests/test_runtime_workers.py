@@ -336,26 +336,27 @@ async def test_compute_recovery_drains_all_pending_namespaces_in_one_poll(monkey
     assert set(recovered) == {"tenant-a", "tenant-b"}
 
 
-def test_worker_control_rpcs_have_a_short_deadline() -> None:
+@pytest.mark.asyncio
+async def test_worker_control_rpcs_have_a_short_deadline(monkeypatch) -> None:
     calls: list[tuple[str, float]] = []
 
     class Stub:
-        def ClaimBuildJob(self, _request, *, timeout, metadata):  # noqa: N802
+        async def ClaimBuildJob(self, _request, *, timeout, metadata):  # noqa: N802
             del metadata
             calls.append(("claim-build", timeout))
             return worker_runtime_pb2.WorkerClaimBuildJobResponse()
 
-        def ClaimComputeRequest(self, _request, *, timeout, metadata):  # noqa: N802
+        async def ClaimComputeRequest(self, _request, *, timeout, metadata):  # noqa: N802
             del metadata
             calls.append(("claim-compute", timeout))
             return worker_runtime_pb2.WorkerClaimComputeRequestResponse()
 
     client = WorkerRuntimeClient(target="unused:50051", token="token", timeout_seconds=120.0)
-    client._stub = Stub()  # type: ignore[assignment]
+    monkeypatch.setattr(client, "_async_stubs", lambda: (Stub(), None))
 
-    assert client.claim_build_job(worker_id="worker", namespace="default") is None
+    assert await client.claim_build_job_async(worker_id="worker", namespace="default") is None
     assert (
-        client.claim_compute_request(
+        await client.claim_compute_request_async(
             worker_id="worker",
             allowed_kinds=frozenset({enums_pb2.COMPUTE_REQUEST_KIND_PREVIEW}),
             namespace="default",
@@ -363,116 +364,6 @@ def test_worker_control_rpcs_have_a_short_deadline() -> None:
         is None
     )
     assert calls == [("claim-build", 15.0), ("claim-compute", 15.0)]
-
-
-@pytest.mark.asyncio
-async def test_sync_and_async_claim_transports_share_domain_mapping(monkeypatch) -> None:
-    expires_at = datetime.now(UTC) + timedelta(minutes=5)
-    build_response = worker_runtime_pb2.WorkerClaimBuildJobResponse(
-        job=worker_runtime_pb2.WorkerClaimedBuildJob(
-            job_id="job-1",
-            build_id="build-1",
-            namespace="tenant-a",
-            claim_token="build-token",
-            lease_generation=4,
-            attempt=2,
-            lease_ttl_seconds=300,
-        )
-    )
-    build_response.job.lease_expires_at.CopyFrom(datetime_to_timestamp(expires_at))
-    command = compute_pb2.ComputeCommandEnvelope(
-        kind=enums_pb2.COMPUTE_REQUEST_KIND_PREVIEW,
-        version=1,
-        idempotency_key="key-1",
-        correlation_id="correlation-1",
-        command=compute_pb2.ComputeCommand(),
-    )
-    request_response = worker_runtime_pb2.WorkerClaimComputeRequestResponse(
-        request=worker_runtime_pb2.WorkerClaimedComputeRequest(
-            id="request-1",
-            namespace="tenant-a",
-            command=command,
-            claim_token="compute-token",
-            lease_generation=7,
-            attempt=3,
-            lease_ttl_seconds=300,
-        )
-    )
-    request_response.request.lease_expires_at.CopyFrom(datetime_to_timestamp(expires_at))
-
-    class SyncStub:
-        def ClaimBuildJob(self, request, *, timeout, metadata):  # noqa: N802
-            return build_response
-
-        def ClaimComputeRequest(self, request, *, timeout, metadata):  # noqa: N802
-            return request_response
-
-    class AsyncStub:
-        async def ClaimBuildJob(self, request, *, timeout, metadata):  # noqa: N802
-            return build_response
-
-        async def ClaimComputeRequest(self, request, *, timeout, metadata):  # noqa: N802
-            return request_response
-
-    client = WorkerRuntimeClient(target="unused:50051", token="token")
-    client._stub = SyncStub()  # type: ignore[assignment]
-    monkeypatch.setattr(client, "_async_stubs", lambda: (AsyncStub(), None))
-
-    sync_build = client.claim_build_job(worker_id="worker-1", namespace="tenant-a")
-    async_build = await client.claim_build_job_async(worker_id="worker-1", namespace="tenant-a")
-    sync_compute = client.claim_compute_request(
-        worker_id="worker-1",
-        allowed_kinds=frozenset({enums_pb2.COMPUTE_REQUEST_KIND_PREVIEW}),
-        namespace="tenant-a",
-    )
-    async_compute = await client.claim_compute_request_async(
-        worker_id="worker-1",
-        allowed_kinds=frozenset({enums_pb2.COMPUTE_REQUEST_KIND_PREVIEW}),
-        namespace="tenant-a",
-    )
-
-    assert sync_build is not None and async_build is not None
-    assert (
-        sync_build.job_id,
-        sync_build.build_id,
-        sync_build.namespace,
-        sync_build.claim_token,
-        sync_build.lease_generation,
-        sync_build.lease_expires_at,
-        sync_build.attempt,
-    ) == (
-        async_build.job_id,
-        async_build.build_id,
-        async_build.namespace,
-        async_build.claim_token,
-        async_build.lease_generation,
-        async_build.lease_expires_at,
-        async_build.attempt,
-    )
-    assert sync_compute is not None and async_compute is not None
-    assert (
-        sync_compute.id,
-        sync_compute.namespace,
-        sync_compute.kind,
-        sync_compute.command_envelope,
-        sync_compute.worker_id,
-        sync_compute.claim_token,
-        sync_compute.lease_generation,
-        sync_compute.lease_expires_at,
-        sync_compute.attempt,
-        sync_compute.command_hash,
-    ) == (
-        async_compute.id,
-        async_compute.namespace,
-        async_compute.kind,
-        async_compute.command_envelope,
-        async_compute.worker_id,
-        async_compute.claim_token,
-        async_compute.lease_generation,
-        async_compute.lease_expires_at,
-        async_compute.attempt,
-        async_compute.command_hash,
-    )
 
 
 def test_claim_lease_deadline_uses_remaining_database_expiry() -> None:
@@ -492,9 +383,10 @@ def test_claim_lease_deadline_uses_remaining_database_expiry() -> None:
         _claim_lease_timing(expiry, 20, wall_now=expiry, monotonic_now=100.0)
 
 
-def test_build_claim_client_accounts_for_time_spent_in_claim_rpc() -> None:
+@pytest.mark.asyncio
+async def test_build_claim_client_accounts_for_time_spent_in_claim_rpc(monkeypatch) -> None:
     class Stub:
-        def ClaimBuildJob(self, _request, *, timeout, metadata):  # noqa: N802 - generated gRPC method
+        async def ClaimBuildJob(self, _request, *, timeout, metadata):  # noqa: N802 - generated gRPC method
             del timeout, metadata
             return worker_runtime_pb2.WorkerClaimBuildJobResponse(
                 job=worker_runtime_pb2.WorkerClaimedBuildJob(
@@ -510,9 +402,9 @@ def test_build_claim_client_accounts_for_time_spent_in_claim_rpc() -> None:
             )
 
     client = WorkerRuntimeClient(target="unused:50051", token="token")
-    client._stub = Stub()  # type: ignore[assignment]
+    monkeypatch.setattr(client, "_async_stubs", lambda: (Stub(), None))
 
-    claim = client.claim_build_job(worker_id="worker", namespace="default")
+    claim = await client.claim_build_job_async(worker_id="worker", namespace="default")
 
     assert claim is not None
     assert 0 < claim.lease_ttl_seconds <= 3
@@ -520,9 +412,10 @@ def test_build_claim_client_accounts_for_time_spent_in_claim_rpc() -> None:
     assert 0 < claim.lease_deadline_monotonic - time.monotonic() <= claim.lease_ttl_seconds
 
 
-def test_compute_claim_client_accounts_for_time_spent_in_claim_rpc() -> None:
+@pytest.mark.asyncio
+async def test_compute_claim_client_accounts_for_time_spent_in_claim_rpc(monkeypatch) -> None:
     class Stub:
-        def ClaimComputeRequest(self, _request, *, timeout, metadata):  # noqa: N802 - generated gRPC method
+        async def ClaimComputeRequest(self, _request, *, timeout, metadata):  # noqa: N802 - generated gRPC method
             del timeout, metadata
             return worker_runtime_pb2.WorkerClaimComputeRequestResponse(
                 request=worker_runtime_pb2.WorkerClaimedComputeRequest(
@@ -538,9 +431,9 @@ def test_compute_claim_client_accounts_for_time_spent_in_claim_rpc() -> None:
             )
 
     client = WorkerRuntimeClient(target="unused:50051", token="token")
-    client._stub = Stub()  # type: ignore[assignment]
+    monkeypatch.setattr(client, "_async_stubs", lambda: (Stub(), None))
 
-    claim = client.claim_compute_request(
+    claim = await client.claim_compute_request_async(
         worker_id="worker",
         allowed_kinds=frozenset({enums_pb2.COMPUTE_REQUEST_KIND_PREVIEW}),
         namespace="default",
@@ -1495,7 +1388,8 @@ async def test_cancelled_async_runtime_rpc_settles_before_cancellation_returns()
     assert committed == ["done"]
 
 
-def test_coordinator_generation_rpc_bootstraps_and_validates_generation(monkeypatch) -> None:
+@pytest.mark.asyncio
+async def test_coordinator_generation_rpc_bootstraps_and_validates_generation(monkeypatch) -> None:
     class CoordinatorStub:
         def __init__(self) -> None:
             self.active_generation = 7
@@ -1503,7 +1397,7 @@ def test_coordinator_generation_rpc_bootstraps_and_validates_generation(monkeypa
             self.bootstrap_timeout = None
             self.assertion: tuple[int, float, tuple[tuple[str, str], ...]] | None = None
 
-        def GetCoordinatorGeneration(self, _request, *, timeout: float, metadata):
+        async def GetCoordinatorGeneration(self, _request, *, timeout: float, metadata):
             self.bootstrap_metadata = metadata
             self.bootstrap_timeout = timeout
             return SimpleNamespace(generation=self.active_generation)
@@ -1520,9 +1414,10 @@ def test_coordinator_generation_rpc_bootstraps_and_validates_generation(monkeypa
     client._call = lambda operation: operation()
     client._coordinator_assertions_lock = threading.Lock()
     client._coordinator_assertions = {}
+    client._async_stubs = lambda: (None, client._coordinator_stub)
     monkeypatch.delenv("RUNTIME_COORDINATOR_GENERATION", raising=False)
 
-    assert client.get_coordinator_generation() == 7
+    assert await client.get_coordinator_generation_async() == 7
     assert client._coordinator_stub.bootstrap_metadata == (("x-internal-token", "internal-token"),)
     assert client._coordinator_stub.bootstrap_timeout == 15.0
 

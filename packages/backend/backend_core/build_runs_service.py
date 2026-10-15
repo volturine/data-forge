@@ -27,6 +27,7 @@ from dataforge_protocol import compute_pb2
 logger = logging.getLogger(__name__)
 _TERMINAL_STATUSES = frozenset(status for status in BuildRunStatus.members() if status.is_terminal)
 _SLOW_BUILD_EVENT_SECONDS = 1.0
+_SLOW_EVENT_SERIALIZATION_SECONDS = 0.1
 
 
 class _RejectedBuildEvent(Exception):
@@ -121,6 +122,18 @@ def _build_terminal_event_proto(
     return message
 
 
+def _fill_step_proto(
+    message: Any,
+    event: compute_schemas.BuildStepStartEvent | compute_schemas.BuildStepCompleteEvent | compute_schemas.BuildStepFailedEvent,
+) -> None:
+    message.build_step_index = event.build_step_index
+    message.step_index = event.step_index
+    message.step_id = event.step_id
+    message.step_name = event.step_name
+    message.step_kind.CopyFrom(_build_step_kind_proto(event.step_type))
+    message.total_steps = event.total_steps
+
+
 def _build_event_proto(event: compute_schemas.BuildEvent, *, namespace: str, sequence: int) -> compute_pb2.BuildEvent:
     message = compute_pb2.BuildEvent(context=_build_event_context_proto(event, sequence=sequence), namespace=namespace)
     match event:
@@ -129,32 +142,17 @@ def _build_event_proto(event: compute_schemas.BuildEvent, *, namespace: str, seq
             message.plan.unoptimized_plan = event.unoptimized_plan
             return message
         case compute_schemas.BuildStepStartEvent():
-            message.step_started.build_step_index = event.build_step_index
-            message.step_started.step_index = event.step_index
-            message.step_started.step_id = event.step_id
-            message.step_started.step_name = event.step_name
-            message.step_started.step_kind.CopyFrom(_build_step_kind_proto(event.step_type))
-            message.step_started.total_steps = event.total_steps
+            _fill_step_proto(message.step_started, event)
             return message
         case compute_schemas.BuildStepCompleteEvent():
-            message.step_completed.build_step_index = event.build_step_index
-            message.step_completed.step_index = event.step_index
-            message.step_completed.step_id = event.step_id
-            message.step_completed.step_name = event.step_name
-            message.step_completed.step_kind.CopyFrom(_build_step_kind_proto(event.step_type))
+            _fill_step_proto(message.step_completed, event)
             message.step_completed.duration_ms = event.duration_ms
-            message.step_completed.total_steps = event.total_steps
             if event.row_count is not None:
                 message.step_completed.row_count = event.row_count
             return message
         case compute_schemas.BuildStepFailedEvent():
-            message.step_failed.build_step_index = event.build_step_index
-            message.step_failed.step_index = event.step_index
-            message.step_failed.step_id = event.step_id
-            message.step_failed.step_name = event.step_name
-            message.step_failed.step_kind.CopyFrom(_build_step_kind_proto(event.step_type))
+            _fill_step_proto(message.step_failed, event)
             message.step_failed.error = event.error
-            message.step_failed.total_steps = event.total_steps
             return message
         case compute_schemas.BuildProgressEvent():
             message.progress.progress = event.progress
@@ -362,18 +360,13 @@ def _cas_update_build_run(
         .where(sa(BuildRun.version == run.version))
         .values(**values)
     )
-    rowcount = getattr(result, 'rowcount', None)
-    if rowcount != 1:
+    if getattr(result, 'rowcount', None) == 1:
+        session.commit()
+    else:
         session.rollback()
-        fresh = session.get(BuildRun, run.id)
-        if fresh is not None:
-            session.refresh(fresh)
-        return fresh
-    session.commit()
     fresh = session.get(BuildRun, run.id)
-    if fresh is None:
-        return None
-    session.refresh(fresh)
+    if fresh is not None:
+        session.refresh(fresh)
     return fresh
 
 
@@ -431,10 +424,14 @@ def stage_build_event(
 ) -> BuildEvent | None:
     if expected_execution_generation is not None and authoritative_execution_generation is not None:
         raise ValueError('Expected and authoritative execution generations are mutually exclusive')
+
+    def record_phase(name: str, started: float) -> None:
+        if _timings is not None:
+            _timings[name] = (time.perf_counter() - started) * 1000
+
     phase_started = time.perf_counter()
     run = session.execute(select(BuildRun).where(sa(BuildRun.id == build_id)).with_for_update().execution_options(populate_existing=True)).scalars().first()
-    if _timings is not None:
-        _timings['run_lock_ms'] = (time.perf_counter() - phase_started) * 1000
+    record_phase('run_lock_ms', phase_started)
     if run is None:
         raise ValueError(f'Build run {build_id} not found')
     if expected_execution_generation is not None and run.execution_generation != expected_execution_generation:
@@ -470,8 +467,7 @@ def stage_build_event(
     event_id = str(uuid.uuid4())
     phase_started = time.perf_counter()
     payload_json = event.model_dump(mode='json')
-    if _timings is not None:
-        _timings['event_serialization_ms'] = (time.perf_counter() - phase_started) * 1000
+    record_phase('event_serialization_ms', phase_started)
     created_at = _utcnow()
     event_row = BuildEvent(
         id=event_id,
@@ -487,30 +483,18 @@ def stage_build_event(
     session.add(event_row)
     session.add(run)
     phase_started = time.perf_counter()
-    if _outbox_notification is None:
-        if terminal_status is not None:
-            runtime_outbox_service.enqueue_api_build_notification(
-                session,
-                namespace=run_namespace,
-                build_id=build_id,
-                latest_sequence=sequence,
-            )
-    else:
-        _outbox_notification.payload_json = {
-            **_outbox_notification.payload_json,
-            'latest_sequence': sequence,
-        }
+    if _outbox_notification is not None:
+        _outbox_notification.payload_json = {**_outbox_notification.payload_json, 'latest_sequence': sequence}
         session.add(_outbox_notification)
-    if _timings is not None and _outbox_notification is None and terminal_status is not None:
-        _timings['outbox_enqueue_ms'] = (time.perf_counter() - phase_started) * 1000
-    elif _timings is not None and _outbox_notification is not None:
-        _timings['outbox_sequence_update_ms'] = (time.perf_counter() - phase_started) * 1000
+        record_phase('outbox_sequence_update_ms', phase_started)
+    elif terminal_status is not None:
+        runtime_outbox_service.enqueue_api_build_notification(session, namespace=run_namespace, build_id=build_id, latest_sequence=sequence)
+        record_phase('outbox_enqueue_ms', phase_started)
     phase_started = time.perf_counter()
     session.flush()
     if terminal_status is not None and run.schedule_id is not None:
         runtime_work_service.mark_schedule_pending(session, namespace=run_namespace)
-    if _timings is not None:
-        _timings['flush_ms'] = (time.perf_counter() - phase_started) * 1000
+    record_phase('flush_ms', phase_started)
     if _outbox_notification is None and terminal_status is None:
         phase_started = time.perf_counter()
         runtime_ipc.notify_runtime_payload_on_commit(
@@ -522,8 +506,7 @@ def stage_build_event(
                 'latest_sequence': sequence,
             },
         )
-        if _timings is not None:
-            _timings['notify_ms'] = (time.perf_counter() - phase_started) * 1000
+        record_phase('notify_ms', phase_started)
     return BuildEvent(
         id=event_id,
         build_id=build_id,
@@ -551,34 +534,33 @@ def append_build_event(
     started = time.perf_counter()
     result: BuildEvent | None = None
     try:
-        try:
-            with transaction(session):
-                notification: RuntimeOutboxEvent | None = None
-                if BuildRun.terminal_status_for_event(event) is not None:
-                    phase_started = time.perf_counter()
-                    notification = runtime_outbox_service.enqueue_api_build_notification(
-                        session,
-                        namespace=get_namespace(),
-                        build_id=build_id,
-                        latest_sequence=0,
-                    )
-                    timings['outbox_enqueue_ms'] = (time.perf_counter() - phase_started) * 1000
-                result = stage_build_event(
+        with transaction(session):
+            notification: RuntimeOutboxEvent | None = None
+            if BuildRun.terminal_status_for_event(event) is not None:
+                phase_started = time.perf_counter()
+                notification = runtime_outbox_service.enqueue_api_build_notification(
                     session,
+                    namespace=get_namespace(),
                     build_id=build_id,
-                    event=event,
-                    resource_config_json=resource_config_json,
-                    expected_execution_generation=expected_execution_generation,
-                    authoritative_execution_generation=authoritative_execution_generation,
-                    _outbox_notification=notification,
-                    _timings=timings,
+                    latest_sequence=0,
                 )
-                if result is None:
-                    raise _RejectedBuildEvent
-                commit_started = time.perf_counter()
-            timings['commit_ms'] = (time.perf_counter() - commit_started) * 1000
-        except _RejectedBuildEvent:
-            result = None
+                timings['outbox_enqueue_ms'] = (time.perf_counter() - phase_started) * 1000
+            result = stage_build_event(
+                session,
+                build_id=build_id,
+                event=event,
+                resource_config_json=resource_config_json,
+                expected_execution_generation=expected_execution_generation,
+                authoritative_execution_generation=authoritative_execution_generation,
+                _outbox_notification=notification,
+                _timings=timings,
+            )
+            if result is None:
+                raise _RejectedBuildEvent
+            commit_started = time.perf_counter()
+        timings['commit_ms'] = (time.perf_counter() - commit_started) * 1000
+    except _RejectedBuildEvent:
+        result = None
     finally:
         total_ms = (time.perf_counter() - started) * 1000
         if total_ms >= _SLOW_BUILD_EVENT_SECONDS * 1000:
@@ -596,11 +578,6 @@ def append_build_event(
                 timings.get('commit_ms', 0.0),
             )
     return result
-
-
-def _list_build_events(session: Session, build_id: str) -> list[BuildEvent]:
-    stmt = select(BuildEvent).where(sa(BuildEvent.build_id == build_id)).order_by(sa(BuildEvent.sequence))
-    return list(session.execute(stmt).scalars().all())
 
 
 def list_build_events_after(session: Session, build_id: str, sequence: int = 0) -> list[BuildEvent]:
@@ -626,6 +603,36 @@ def serialize_event_row(row: BuildEvent) -> dict[str, object]:
     return payload
 
 
+def persist_build_event(
+    session: Session,
+    *,
+    build_id: str,
+    execution_generation: int,
+    event: compute_schemas.BuildEvent,
+    resource_config_json: dict[str, Any] | None = None,
+) -> tuple[dict[str, Any], int] | None:
+    event_row = append_build_event(
+        session,
+        build_id=build_id,
+        event=event,
+        resource_config_json=resource_config_json,
+        expected_execution_generation=execution_generation,
+    )
+    appended = time.perf_counter()
+    if event_row is None:
+        return None
+    normalized = serialize_event_row(event_row)
+    serialized = time.perf_counter()
+    if serialized - appended >= _SLOW_EVENT_SERIALIZATION_SECONDS:
+        logger.warning(
+            'Slow build event response serialization build_id=%s event_type=%s serialize_ms=%.1f',
+            build_id,
+            event.type,
+            (serialized - appended) * 1000,
+        )
+    return normalized, event_row.sequence
+
+
 def fold_build_detail(session: Session, build_run: BuildRun) -> compute_schemas.BuildRunDetail:
     steps: dict[tuple[str | None, str], compute_schemas.BuildStepSnapshot] = {}
     plans: dict[tuple[str | None, str | None], compute_schemas.BuildQueryPlanSnapshot] = {}
@@ -633,15 +640,16 @@ def fold_build_detail(session: Session, build_run: BuildRun) -> compute_schemas.
     logs: list[compute_schemas.BuildLogEntry] = []
     results: list[compute_schemas.BuildTabResult] = []
 
-    for row in _list_build_events(session, build_run.id):
+    # Event sequences start at 1, so ``after 0`` is the full event history.
+    for row in list_build_events_after(session, build_run.id):
         event = compute_schemas.BuildEventAdapter.validate_python(row.payload_json)
         if isinstance(event, compute_schemas.BuildPlanEvent):
             plans[(event.tab_id, event.tab_name)] = compute_schemas.BuildQueryPlanSnapshot(
                 tab_id=event.tab_id, tab_name=event.tab_name, optimized_plan=event.optimized_plan, unoptimized_plan=event.unoptimized_plan
             )
             continue
-        if isinstance(event, compute_schemas.BuildStepStartEvent):
-            steps[(event.tab_id, event.step_id)] = compute_schemas.BuildStepSnapshot(
+        if isinstance(event, compute_schemas.BuildStepStartEvent | compute_schemas.BuildStepCompleteEvent | compute_schemas.BuildStepFailedEvent):
+            step = compute_schemas.BuildStepSnapshot(
                 build_step_index=event.build_step_index,
                 step_index=event.step_index,
                 step_id=event.step_id,
@@ -651,33 +659,13 @@ def fold_build_detail(session: Session, build_run: BuildRun) -> compute_schemas.
                 tab_name=event.tab_name,
                 state=compute_schemas.BuildStepState.RUNNING,
             )
-            continue
-        if isinstance(event, compute_schemas.BuildStepCompleteEvent):
-            steps[(event.tab_id, event.step_id)] = compute_schemas.BuildStepSnapshot(
-                build_step_index=event.build_step_index,
-                step_index=event.step_index,
-                step_id=event.step_id,
-                step_name=event.step_name,
-                step_type=event.step_type,
-                tab_id=event.tab_id,
-                tab_name=event.tab_name,
-                state=compute_schemas.BuildStepState.COMPLETED,
-                duration_ms=event.duration_ms,
-                row_count=event.row_count,
-            )
-            continue
-        if isinstance(event, compute_schemas.BuildStepFailedEvent):
-            steps[(event.tab_id, event.step_id)] = compute_schemas.BuildStepSnapshot(
-                build_step_index=event.build_step_index,
-                step_index=event.step_index,
-                step_id=event.step_id,
-                step_name=event.step_name,
-                step_type=event.step_type,
-                tab_id=event.tab_id,
-                tab_name=event.tab_name,
-                state=compute_schemas.BuildStepState.FAILED,
-                error=event.error,
-            )
+            if isinstance(event, compute_schemas.BuildStepCompleteEvent):
+                step = step.model_copy(
+                    update={'state': compute_schemas.BuildStepState.COMPLETED, 'duration_ms': event.duration_ms, 'row_count': event.row_count}
+                )
+            if isinstance(event, compute_schemas.BuildStepFailedEvent):
+                step = step.model_copy(update={'state': compute_schemas.BuildStepState.FAILED, 'error': event.error})
+            steps[(event.tab_id, event.step_id)] = step
             continue
         if isinstance(event, compute_schemas.BuildResourceEvent):
             resources.append(
@@ -707,39 +695,9 @@ def fold_build_detail(session: Session, build_run: BuildRun) -> compute_schemas.
         if isinstance(event, compute_schemas.BuildCompleteEvent | compute_schemas.BuildFailedEvent | compute_schemas.BuildCancelledEvent):
             results = list(event.results)
 
-    status, orphan_error = build_run.status_kind().to_build_lifecycle_status()
-    error = build_run.error_message or orphan_error
-    resource_config = (
-        compute_schemas.BuildResourceConfigSummary.model_validate(build_run.resource_config_json) if isinstance(build_run.resource_config_json, dict) else None
-    )
-    starter = compute_schemas.BuildStarter.model_validate(build_run.starter_json)
-    result_json = copy_json_dict(build_run.result_json) if isinstance(build_run.result_json, dict) else None
+    _status, orphan_error = build_run.status_kind().to_build_lifecycle_status()
     return compute_schemas.BuildRunDetail(
-        build_id=build_run.id,
-        analysis_id=build_run.analysis_id,
-        analysis_name=build_run.analysis_name,
-        namespace=build_run.namespace,
-        status=status,
-        started_at=build_run.started_at,
-        starter=starter,
-        resource_config=resource_config,
-        progress=build_run.progress,
-        elapsed_ms=build_run.elapsed_ms,
-        estimated_remaining_ms=build_run.estimated_remaining_ms,
-        current_step=build_run.current_step,
-        current_step_index=build_run.current_step_index,
-        total_steps=build_run.total_steps,
-        current_kind=ComputeWorkerRunKind.parse(build_run.current_kind),
-        current_datasource_id=build_run.current_datasource_id,
-        current_tab_id=build_run.current_tab_id,
-        current_tab_name=build_run.current_tab_name,
-        current_output_id=build_run.current_output_id,
-        current_output_name=build_run.current_output_name,
-        current_compute_worker_run_id=build_run.current_compute_worker_run_id,
-        total_tabs=build_run.total_tabs,
-        cancelled_at=build_run.cancelled_at,
-        cancelled_by=build_run.cancelled_by,
-        result_json=result_json,
+        **dict(build_summary(build_run)),
         steps=sorted(steps.values(), key=lambda item: item.build_step_index),
         query_plans=list(plans.values()),
         latest_resources=resources[-1] if resources else None,
@@ -747,7 +705,7 @@ def fold_build_detail(session: Session, build_run: BuildRun) -> compute_schemas.
         logs=logs,
         results=results,
         duration_ms=build_run.duration_ms,
-        error=error,
+        error=build_run.error_message or orphan_error,
         request_json=dict(build_run.request_json),
     )
 

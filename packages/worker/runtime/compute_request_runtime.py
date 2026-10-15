@@ -760,10 +760,6 @@ async def _renew_compute_lease(
 
 
 def _datasource_result_from_payload(kind: enums_pb2.ComputeRequestKind, payload: dict[str, object]) -> datasource_pb2.DatasourceResult:
-    from google.protobuf import json_format
-
-    from dataforge_protocol import datasource_pb2
-
     result = datasource_pb2.DatasourceResult()
     if "error" in payload:
         result.error.CopyFrom(json_format.ParseDict(payload, datasource_pb2.DatasourceErrorResult()))
@@ -797,19 +793,6 @@ def _datasource_result_from_payload(kind: enums_pb2.ComputeRequestKind, payload:
         result.preflight.CopyFrom(json_format.ParseDict(payload, datasource_pb2.DatasourcePreflightResult()))
         return result
     raise ValueError(f"Unsupported datasource response kind: {_compute_request_kind_name(kind)}")
-
-
-def _datasource_metadata_payload(metadata: DatasourceMetadata) -> dict[str, object]:
-    return {
-        "id": metadata.id,
-        "name": metadata.name,
-        "source_type": metadata.source_type,
-        "config": metadata.config,
-        "revision": metadata.revision,
-        "is_hidden": metadata.is_hidden,
-        "description": metadata.description,
-        "column_descriptions": metadata.column_descriptions or {},
-    }
 
 
 def _datasource_engine_job(
@@ -896,8 +879,8 @@ def _publish_staged_datasource(
         source = struct_to_dict(request.source)
         branch = request.branch
     elif operation == "ingest":
-        metadata = datasource_execution._require_metadata(client, namespace=claimed.namespace, datasource_id=command.ingest.datasource_id)
-        source, _source_type = datasource_execution._external_source(metadata)
+        metadata = datasource_execution.require_metadata(client, namespace=claimed.namespace, datasource_id=command.ingest.datasource_id)
+        source, _source_type = datasource_execution.external_source(metadata)
         branch = (metadata.config or {}).get("branch") or source.get("branch")
         request = command.ingest
     else:
@@ -917,7 +900,7 @@ def _publish_staged_datasource(
     # Reuse the datasource's published table identity so earlier snapshots
     # remain available. New datasources use clean.<datasource_id>; reingests
     # keep the metadata_path already recorded on the datasource.
-    table_path = datasource_execution._published_datasource_table_path(
+    table_path = datasource_execution.published_datasource_table_path(
         datasource_id,
         branch,
         namespace=claimed.namespace,
@@ -937,7 +920,7 @@ def _publish_staged_datasource(
         manifest_url=manifest_url,
         catalog_identifier=f"clean.{target_path.rstrip('/').split('/')[-2]}",
     )
-    run_id = datasource_execution._create_ingest_run(
+    run_id = datasource_execution.create_ingest_run(
         client,
         namespace=claimed.namespace,
         datasource_id=datasource_id,
@@ -960,15 +943,15 @@ def _publish_staged_datasource(
             manifest, staged_prefix=target_path, table_path=table_path, database_url=settings.database_url
         )
         if create:
-            config = datasource_execution._build_iceberg_config(published_table_path, branch, source_config=source)
+            config = datasource_execution.build_iceberg_config(published_table_path, branch, source_config=source)
         else:
             assert metadata is not None
             config = dict(metadata.config or {})
-        config.update(datasource_execution._build_iceberg_config(published_table_path, branch, source_config=source))
+        config.update(datasource_execution.build_iceberg_config(published_table_path, branch, source_config=source))
         if not create:
             for key in ("time_travel_snapshot_id", "time_travel_snapshot_timestamp_ms", "time_travel_ui"):
                 config.pop(key, None)
-        datasource_execution._set_snapshot_metadata(config, table)
+        datasource_execution.set_snapshot_metadata(config, table)
         # The snapshot added by this ingest references the staged parquet files
         # under the claim prefix. Record it in the published config so the
         # publication settles the cleanup intent: the prefix is part of table
@@ -1009,7 +992,7 @@ def _publish_staged_datasource(
                 lease_generation=claimed.lease_generation,
                 compute_request_id=claimed.id,
             )
-        datasource_execution._complete_ingest_run(
+        datasource_execution.complete_ingest_run(
             client,
             namespace=claimed.namespace,
             run_id=run_id,
@@ -1022,12 +1005,12 @@ def _publish_staged_datasource(
         result.datasource.CopyFrom(record)
         return result
     except BackendWorkerRpcError as exc:
-        datasource_execution._fail_ingest_run(client, namespace=claimed.namespace, run_id=run_id, started=started, exc=exc)
+        datasource_execution.fail_ingest_run(client, namespace=claimed.namespace, run_id=run_id, started=started, exc=exc)
         if exc.error_code == "FAILED_PRECONDITION":
             raise datasource_execution.DatasourcePublicationClaimLost("Datasource publication claim is no longer active") from exc
         raise
     except Exception as exc:
-        datasource_execution._fail_ingest_run(client, namespace=claimed.namespace, run_id=run_id, started=started, exc=exc)
+        datasource_execution.fail_ingest_run(client, namespace=claimed.namespace, run_id=run_id, started=started, exc=exc)
         raise
 
 
@@ -1055,10 +1038,21 @@ def _execute_datasource_command(
     if operation not in {"schema", "column_stats", "compare_iceberg_snapshots"}:
         raise ValueError("Unsupported datasource compute operation")
     request = getattr(command, operation)
-    metadata = datasource_execution._require_metadata(client, namespace=claimed.namespace, datasource_id=request.datasource_id)
+    metadata = datasource_execution.require_metadata(client, namespace=claimed.namespace, datasource_id=request.datasource_id)
     if metadata.revision is None:
         raise ValueError("Datasource snapshot is missing its revision")
-    payload = {"datasource_metadata": _datasource_metadata_payload(metadata)}
+    payload = {
+        "datasource_metadata": {
+            "id": metadata.id,
+            "name": metadata.name,
+            "source_type": metadata.source_type,
+            "config": metadata.config,
+            "revision": metadata.revision,
+            "is_hidden": metadata.is_hidden,
+            "description": metadata.description,
+            "column_descriptions": metadata.column_descriptions or {},
+        }
+    }
     if operation == "schema":
         sheet_name = request.sheet_name if request.HasField("sheet_name") else None
         if metadata.schema_cache and sheet_name is None and not request.refresh:
@@ -1067,7 +1061,7 @@ def _execute_datasource_command(
             except ValueError:
                 cached = None
             if cached is not None and cached.columns:
-                datasource_execution._attach_column_descriptions(metadata, cached)
+                datasource_execution.attach_column_descriptions(metadata, cached)
                 return _datasource_result_from_payload(claimed.kind, schema_info_payload(cached))
         payload["sheet_name"] = sheet_name
         schema = schema_info_proto(_datasource_engine_job(manager, claimed, "datasource_schema", payload))
@@ -1082,7 +1076,7 @@ def _execute_datasource_command(
                 claim_token=claimed.claim_token,
                 lease_generation=claimed.lease_generation,
             )
-        datasource_execution._attach_column_descriptions(metadata, schema)
+        datasource_execution.attach_column_descriptions(metadata, schema)
         return _datasource_result_from_payload(claimed.kind, schema_info_payload(schema))
     if operation == "column_stats":
         payload.update(
@@ -1211,7 +1205,13 @@ def _execute_request_sync(
                 analysis_pipeline=analysis_pipeline_to_execution_payload(schema_request.analysis_pipeline),
                 tab_id=schema_request.tab_id if schema_request.HasField("tab_id") else None,
             )
-            publish_complete(response=_schema_result(schema_response))
+            publish_complete(
+                response=compute_pb2.ComputeResponse(
+                    schema=compute_pb2.StepSchemaResult(
+                        step_id=schema_response.step_id, columns=schema_response.columns, column_types=schema_response.column_types
+                    )
+                )
+            )
         elif claimed.kind == enums_pb2.COMPUTE_REQUEST_KIND_ROW_COUNT:
             row_count_request = cast(compute_pb2.StepRowCountCommand, _compute_command_from_claimed(claimed, "row_count"))
             if not row_count_request.HasField("analysis_id"):
@@ -1225,7 +1225,11 @@ def _execute_request_sync(
                 tab_id=row_count_request.tab_id if row_count_request.HasField("tab_id") else None,
                 request_json=request_json,
             )
-            publish_complete(response=_row_count_result(row_count_response))
+            publish_complete(
+                response=compute_pb2.ComputeResponse(
+                    row_count=compute_pb2.StepRowCountResult(step_id=row_count_response.step_id, row_count=row_count_response.row_count)
+                )
+            )
         elif claimed.kind == enums_pb2.COMPUTE_REQUEST_KIND_DOWNLOAD:
             download_request = cast(compute_pb2.DownloadCommand, _compute_command_from_claimed(claimed, "download"))
             file_bytes, filename, content_type = service.download_step(
@@ -1237,7 +1241,8 @@ def _execute_request_sync(
                 analysis_id=download_request.analysis_id if download_request.HasField("analysis_id") else None,
                 tab_id=download_request.tab_id if download_request.HasField("tab_id") else None,
             )
-            artifact_path = _write_artifact(claimed.id, filename, file_bytes)
+            artifact_path = object_store_url("runtime-artifacts", claimed.id, filename)
+            upload_bytes(file_bytes, artifact_path)
             publish_complete(
                 response=compute_pb2.ComputeResponse(ack=compute_pb2.ComputeAckResult(success=True)),
                 artifact_path=artifact_path,
@@ -1269,7 +1274,7 @@ def _execute_request_sync(
                 export_result.datasource_name = datasource_name
             publish_complete(response=compute_pb2.ComputeResponse(export=export_result))
         elif claimed.kind == enums_pb2.COMPUTE_REQUEST_KIND_SPAWN_ENGINE:
-            command = _lifecycle_command_from_claimed(claimed, "spawn_engine")
+            command = cast(compute_pb2.ComputeWorkerLifecycleCommand, _compute_command_from_claimed(claimed, "spawn_engine"))
             identity = command.engine_identity
             resource_config = _resource_config_from_command(command)
             manager.spawn_compute_worker(
@@ -1279,7 +1284,7 @@ def _execute_request_sync(
             response = compute_schemas.ComputeWorkerStatusSchema.model_validate(manager.get_compute_worker_status(identity))
             publish_complete(response=_compute_worker_status_result(response))
         elif claimed.kind == enums_pb2.COMPUTE_REQUEST_KIND_CONFIGURE_ENGINE:
-            command = _lifecycle_command_from_claimed(claimed, "configure_engine")
+            command = cast(compute_pb2.ComputeWorkerLifecycleCommand, _compute_command_from_claimed(claimed, "configure_engine"))
             identity = command.engine_identity
             resource_config = _resource_config_from_command(command)
             if resource_config is None:
@@ -1288,7 +1293,7 @@ def _execute_request_sync(
             response = compute_schemas.ComputeWorkerStatusSchema.model_validate(manager.get_compute_worker_status(identity))
             publish_complete(response=_compute_worker_status_result(response))
         elif claimed.kind == enums_pb2.COMPUTE_REQUEST_KIND_SHUTDOWN_ENGINE:
-            command = _lifecycle_command_from_claimed(claimed, "shutdown_engine")
+            command = cast(compute_pb2.ComputeWorkerLifecycleCommand, _compute_command_from_claimed(claimed, "shutdown_engine"))
             identity = command.engine_identity
             # Shutdown is idempotent: capacity eviction, idle reaping, or a prior
             # crash may already have removed the container. Missing engines are a
@@ -1385,7 +1390,7 @@ def _compute_worker_identity_for_claimed(claimed: ClaimedComputeRequest) -> comp
         enums_pb2.COMPUTE_REQUEST_KIND_CONFIGURE_ENGINE,
     }:
         field = "spawn_engine" if kind == enums_pb2.COMPUTE_REQUEST_KIND_SPAWN_ENGINE else "configure_engine"
-        return _lifecycle_command_from_claimed(claimed, field).engine_identity
+        return cast(compute_pb2.ComputeWorkerLifecycleCommand, _compute_command_from_claimed(claimed, field)).engine_identity
     if kind == enums_pb2.COMPUTE_REQUEST_KIND_PREVIEW:
         preview = cast(compute_pb2.StepPreviewCommand, _compute_command_from_claimed(claimed, "preview"))
         if preview.HasField("engine_identity"):
@@ -1394,13 +1399,6 @@ def _compute_worker_identity_for_claimed(claimed: ClaimedComputeRequest) -> comp
     if kind in _STATELESS_COMMAND_FIELDS:
         return _stateless_compute_worker_identity_for_command(_compute_command_from_claimed(claimed, _STATELESS_COMMAND_FIELDS[kind]))
     return None
-
-
-def _lifecycle_command_from_claimed(claimed: ClaimedComputeRequest, field_name: str) -> compute_pb2.ComputeWorkerLifecycleCommand:
-    command = claimed.command_envelope.command
-    if command.WhichOneof("command") != field_name:
-        raise ValueError(f"compute command envelope must contain {field_name}")
-    return getattr(command, field_name)
 
 
 def _compute_command_from_claimed(claimed: ClaimedComputeRequest, field_name: str) -> message.Message:
@@ -1438,12 +1436,6 @@ def _resource_config_from_command(
     return {field: getattr(config, field) for field in ("max_threads", "max_memory_mb", "streaming_chunk_size") if config.HasField(field)}
 
 
-def _write_artifact(request_id: str, filename: str, content: bytes) -> str:
-    artifact_url = object_store_url("runtime-artifacts", request_id, filename)
-    upload_bytes(content, artifact_url)
-    return artifact_url
-
-
 def _preview_result(value: compute_schemas.StepPreviewResponse) -> compute_pb2.ComputeResponse:
     result = compute_pb2.StepPreviewResult(
         step_id=value.step_id,
@@ -1457,14 +1449,6 @@ def _preview_result(value: compute_schemas.StepPreviewResponse) -> compute_pb2.C
     if value.metadata is not None:
         result.metadata.CopyFrom(dict_to_struct(value.metadata))
     return compute_pb2.ComputeResponse(preview=result)
-
-
-def _schema_result(value: compute_schemas.StepSchemaResponse) -> compute_pb2.ComputeResponse:
-    return compute_pb2.ComputeResponse(schema=compute_pb2.StepSchemaResult(step_id=value.step_id, columns=value.columns, column_types=value.column_types))
-
-
-def _row_count_result(value: compute_schemas.StepRowCountResponse) -> compute_pb2.ComputeResponse:
-    return compute_pb2.ComputeResponse(row_count=compute_pb2.StepRowCountResult(step_id=value.step_id, row_count=value.row_count))
 
 
 def _resource_config_proto(value: compute_schemas.ComputeWorkerResourceConfig | None) -> compute_pb2.ComputeWorkerResourceConfig | None:
@@ -1525,34 +1509,16 @@ def _compute_worker_status_result(value: compute_schemas.ComputeWorkerStatusSche
     return compute_pb2.ComputeResponse(engine_status=result)
 
 
-def _complete_request_once(
-    client: WorkerRuntimeClient,
-    claimed: ClaimedComputeRequest,
-    *,
-    response: compute_pb2.ComputeResponse,
-    artifact_path: str | None = None,
-    artifact_name: str | None = None,
-    artifact_content_type: str | None = None,
-    compute_worker_run_finalization: ComputeWorkerRunFinalization | None = None,
-) -> None:
-    client.complete_compute_request(
-        namespace=claimed.namespace,
-        request_id=claimed.id,
-        kind=claimed.kind,
-        worker_id=claimed.worker_id,
-        claim_token=claimed.claim_token,
-        lease_generation=claimed.lease_generation,
-        response=response,
-        artifact_path=artifact_path,
-        artifact_name=artifact_name,
-        artifact_content_type=artifact_content_type,
-        compute_worker_run_finalization=compute_worker_run_finalization,
-        timeout_seconds=_TERMINAL_RPC_TIMEOUT_SECONDS,
-    )
-
-
-def _is_transient_terminal_error(exc: BackendWorkerRpcError) -> bool:
-    return exc.error_code in {"UNAVAILABLE", "DEADLINE_EXCEEDED"}
+def _retry_terminal_publication(claimed: ClaimedComputeRequest, publication: str, publish: Callable[[], None]) -> None:
+    for attempt, delay in enumerate((*_TERMINAL_PUBLISH_BACKOFF_SECONDS, None), start=1):
+        try:
+            publish()
+            return
+        except BackendWorkerRpcError as exc:
+            if exc.error_code not in {"UNAVAILABLE", "DEADLINE_EXCEEDED"} or delay is None:
+                raise
+            logger.warning("Compute request %s %s publication failed (attempt %s); retrying: %s", claimed.id, publication, attempt, exc)
+            time.sleep(delay)
 
 
 def _complete_request(
@@ -1565,28 +1531,25 @@ def _complete_request(
     artifact_content_type: str | None = None,
     compute_worker_run_finalization: ComputeWorkerRunFinalization | None = None,
 ) -> None:
-    for attempt, delay in enumerate((*_TERMINAL_PUBLISH_BACKOFF_SECONDS, None), start=1):
-        try:
-            _complete_request_once(
-                client,
-                claimed,
-                response=response,
-                artifact_path=artifact_path,
-                artifact_name=artifact_name,
-                artifact_content_type=artifact_content_type,
-                compute_worker_run_finalization=compute_worker_run_finalization,
-            )
-            return
-        except BackendWorkerRpcError as exc:
-            if not _is_transient_terminal_error(exc) or delay is None:
-                raise
-            logger.warning(
-                "Compute request %s completion publication failed (attempt %s); retrying: %s",
-                claimed.id,
-                attempt,
-                exc,
-            )
-            time.sleep(delay)
+    _retry_terminal_publication(
+        claimed,
+        "completion",
+        partial(
+            client.complete_compute_request,
+            namespace=claimed.namespace,
+            request_id=claimed.id,
+            kind=claimed.kind,
+            worker_id=claimed.worker_id,
+            claim_token=claimed.claim_token,
+            lease_generation=claimed.lease_generation,
+            response=response,
+            artifact_path=artifact_path,
+            artifact_name=artifact_name,
+            artifact_content_type=artifact_content_type,
+            compute_worker_run_finalization=compute_worker_run_finalization,
+            timeout_seconds=_TERMINAL_RPC_TIMEOUT_SECONDS,
+        ),
+    )
 
 
 def _reject_malformed_request(claimed: ClaimedComputeRequest, exc: ValueError) -> None:
@@ -1609,31 +1572,23 @@ def _fail_request_with_retry(
     error: compute_pb2.ComputeErrorResult,
     compute_worker_run_finalization: ComputeWorkerRunFinalization | None = None,
 ) -> None:
-    for attempt, delay in enumerate((*_TERMINAL_PUBLISH_BACKOFF_SECONDS, None), start=1):
-        try:
-            client.fail_compute_request(
-                namespace=claimed.namespace,
-                request_id=claimed.id,
-                kind=claimed.kind,
-                worker_id=claimed.worker_id,
-                claim_token=claimed.claim_token,
-                lease_generation=claimed.lease_generation,
-                error_message=error_message,
-                error=error,
-                compute_worker_run_finalization=compute_worker_run_finalization,
-                timeout_seconds=_TERMINAL_RPC_TIMEOUT_SECONDS,
-            )
-            return
-        except BackendWorkerRpcError as exc:
-            if not _is_transient_terminal_error(exc) or delay is None:
-                raise
-            logger.warning(
-                "Compute request %s failure publication failed (attempt %s); retrying: %s",
-                claimed.id,
-                attempt,
-                exc,
-            )
-            time.sleep(delay)
+    _retry_terminal_publication(
+        claimed,
+        "failure",
+        partial(
+            client.fail_compute_request,
+            namespace=claimed.namespace,
+            request_id=claimed.id,
+            kind=claimed.kind,
+            worker_id=claimed.worker_id,
+            claim_token=claimed.claim_token,
+            lease_generation=claimed.lease_generation,
+            error_message=error_message,
+            error=error,
+            compute_worker_run_finalization=compute_worker_run_finalization,
+            timeout_seconds=_TERMINAL_RPC_TIMEOUT_SECONDS,
+        ),
+    )
 
 
 def _error_message(exc: Exception) -> str:

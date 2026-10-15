@@ -5,14 +5,16 @@ import contextvars
 import logging
 from collections import deque
 from collections.abc import Callable
-from concurrent.futures import ThreadPoolExecutor
+from concurrent.futures import Executor, ThreadPoolExecutor
 from functools import partial
 from typing import TypeVar
+
+from sqlmodel import Session
 
 from backend_core import runtime_outbox_service
 from backend_core.database import run_db, run_settings_db
 from backend_core.live_hubs import VersionHub
-from backend_core.namespace import reset_namespace, set_namespace_context
+from backend_core.namespace import namespace_scope
 
 logger = logging.getLogger(__name__)
 
@@ -23,50 +25,49 @@ _OUTBOX_EXECUTOR = ThreadPoolExecutor(max_workers=1, thread_name_prefix='runtime
 T = TypeVar('T')
 
 
-def wake(namespace: str) -> None:
-    """Wake runtime event consumers for one namespace."""
-    OUTBOX_WAKE_HUB.publish(namespace)
+def run_namespace_db[R](namespace: str, operation: Callable[[Session], R]) -> R:
+    with namespace_scope(namespace):
+        return run_db(operation)
 
 
-async def run(stop_event: asyncio.Event) -> None:
-    """Exported lifecycle hook for the runtime wake lane."""
-    await RuntimeOutboxDispatcher().run(stop_event)
+class NamespaceWakeDispatcher:
+    """Round-robin durable namespace work from wake hints and a bounded recovery cursor.
 
-
-class RuntimeOutboxDispatcher:
-    """Deliver durable runtime events with one bounded recovery cursor.
-
-    A request path may dispatch the event it just created, but terminal worker
-    events are produced by another process. This task handles those events
-    without one RPC per request: PostgreSQL NOTIFY wakes it immediately after
-    commit, while a five-second indexed pending-work query is the
-    lost-notification backstop. Claims remain row-locked and directed to one
-    namespace at a time.
+    PostgreSQL NOTIFY wakes the dispatcher immediately after commit, while an
+    indexed pending-work query is the lost-notification backstop. Claims remain
+    row-locked and directed to one namespace at a time.
     """
 
     def __init__(
         self,
         *,
+        executor: Executor,
+        log_name: str,
+        log_detail: str = '',
         poll_seconds: float = _DEFAULT_RECOVERY_SECONDS,
         namespace_refresh_seconds: float = _DEFAULT_RECOVERY_SECONDS,
-        batch_size: int = _DEFAULT_BATCH_SIZE,
+        batch_size: int,
         list_namespaces: Callable[[], list[str]] | None = None,
-        dispatch_namespace: Callable[[str, int], int] | None = None,
         wake_hub: VersionHub = OUTBOX_WAKE_HUB,
     ) -> None:
+        self._executor = executor
+        self._log_name = log_name
+        self._log_detail = log_detail
         self._poll_seconds = max(float(poll_seconds), 0.1)
         self._namespace_refresh_seconds = max(float(namespace_refresh_seconds), 1.0)
         self._batch_size = max(int(batch_size), 1)
         self._list_namespaces = list_namespaces or (lambda: run_settings_db(runtime_outbox_service.list_pending_outbox_namespaces))
-        self._dispatch_namespace = dispatch_namespace or self._dispatch_namespace_in_database
         self._wake_hub = wake_hub
         self._namespaces: list[str] = []
         self._next_refresh = 0.0
         self._pending_namespaces: deque[str] = deque()
         self._pending_namespace_set: set[str] = set()
 
+    async def dispatch_namespace(self, namespace: str) -> int:
+        raise NotImplementedError
+
     async def run(self, stop_event: asyncio.Event) -> None:
-        """Run until API shutdown, never blocking the event loop on delivery."""
+        """Run until shutdown, never blocking the event loop on delivery."""
         wake_version = self._wake_hub.version()
         while not stop_event.is_set():
             try:
@@ -77,8 +78,7 @@ class RuntimeOutboxDispatcher:
                 if namespace is None:
                     wake_version = await self._wait_for_wakeup_or_stop(stop_event, wake_version)
                     continue
-                dispatched = await self._run_blocking(self._dispatch_namespace, namespace, self._batch_size)
-                if dispatched:
+                if await self.dispatch_namespace(namespace):
                     # A successful delivery may leave more ready events even
                     # when some claims in the batch failed and backed off.
                     # Requeue at the tail so every tenant gets a turn before
@@ -92,7 +92,7 @@ class RuntimeOutboxDispatcher:
             except asyncio.CancelledError:
                 raise
             except Exception:
-                logger.warning('Runtime outbox dispatcher pass failed', exc_info=True)
+                logger.warning('%s pass failed%s', self._log_name, self._log_detail, exc_info=True)
                 last_seen = wake_version
                 wake_version = await self._wait_for_wakeup_or_stop(stop_event, last_seen, retry_seconds=1.0)
                 self._enqueue_wake_namespaces(last_seen)
@@ -110,14 +110,13 @@ class RuntimeOutboxDispatcher:
 
     async def _next_namespace(self) -> str | None:
         loop = asyncio.get_running_loop()
-        now = loop.time()
-        if now >= self._next_refresh:
+        if loop.time() >= self._next_refresh:
             try:
                 names = await self._run_blocking(self._list_namespaces)
             except Exception:
                 if not self._namespaces:
                     raise
-                logger.warning('Outbox namespace refresh failed; retrying from the last durable snapshot', exc_info=True)
+                logger.warning('%s namespace refresh failed; retrying from the last durable snapshot%s', self._log_name, self._log_detail, exc_info=True)
                 names = self._namespaces
                 self._next_refresh = loop.time() + min(self._namespace_refresh_seconds, 1.0)
             else:
@@ -135,7 +134,7 @@ class RuntimeOutboxDispatcher:
         loop = asyncio.get_running_loop()
         context = contextvars.copy_context()
         operation_name = getattr(function, '__qualname__', type(function).__qualname__)
-        operation = loop.run_in_executor(_OUTBOX_EXECUTOR, context.run, partial(function, *args))
+        operation = loop.run_in_executor(self._executor, context.run, partial(function, *args))
         try:
             return await asyncio.shield(operation)
         except asyncio.CancelledError:
@@ -157,19 +156,14 @@ class RuntimeOutboxDispatcher:
             except BaseException as exc:
                 if not isinstance(exc, asyncio.CancelledError):
                     logger.warning(
-                        'Runtime outbox operation failed after its caller was cancelled operation=%s exception=%s',
+                        '%s operation failed after its caller was cancelled%s operation=%s exception=%s',
+                        self._log_name,
+                        self._log_detail,
                         operation_name,
                         type(exc).__name__,
                         exc_info=(type(exc), exc, exc.__traceback__),
                     )
             raise
-
-    def _dispatch_namespace_in_database(self, namespace: str, limit: int) -> int:
-        token = set_namespace_context(namespace)
-        try:
-            return run_db(lambda session: runtime_outbox_service.dispatch_pending_events(session, limit=limit))
-        finally:
-            reset_namespace(token)
 
     async def _wait_for_wakeup_or_stop(
         self,
@@ -186,8 +180,38 @@ class RuntimeOutboxDispatcher:
             task.cancel()
         if pending:
             await asyncio.gather(*pending, return_exceptions=True)
-        if stop_task in done:
-            return self._wake_hub.version()
-        if wake_task in done:
+        if wake_task in done and stop_task not in done:
             return wake_task.result()
         return self._wake_hub.version()
+
+
+class RuntimeOutboxDispatcher(NamespaceWakeDispatcher):
+    """Deliver durable runtime wakes produced by request paths and other processes."""
+
+    def __init__(
+        self,
+        *,
+        poll_seconds: float = _DEFAULT_RECOVERY_SECONDS,
+        namespace_refresh_seconds: float = _DEFAULT_RECOVERY_SECONDS,
+        batch_size: int = _DEFAULT_BATCH_SIZE,
+        list_namespaces: Callable[[], list[str]] | None = None,
+        dispatch_namespace: Callable[[str, int], int] | None = None,
+        wake_hub: VersionHub = OUTBOX_WAKE_HUB,
+    ) -> None:
+        super().__init__(
+            executor=_OUTBOX_EXECUTOR,
+            log_name='Runtime outbox',
+            poll_seconds=poll_seconds,
+            namespace_refresh_seconds=namespace_refresh_seconds,
+            batch_size=batch_size,
+            list_namespaces=list_namespaces,
+            wake_hub=wake_hub,
+        )
+        self._dispatch_namespace = dispatch_namespace or self._dispatch_namespace_in_database
+
+    async def dispatch_namespace(self, namespace: str) -> int:
+        return await self._run_blocking(self._dispatch_namespace, namespace, self._batch_size)
+
+    @staticmethod
+    def _dispatch_namespace_in_database(namespace: str, limit: int) -> int:
+        return run_namespace_db(namespace, lambda session: runtime_outbox_service.dispatch_pending_events(session, limit=limit))

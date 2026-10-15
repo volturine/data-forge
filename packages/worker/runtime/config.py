@@ -49,17 +49,6 @@ class WorkerSettings:
     deployment_id: str
 
 
-def _read_int(
-    name: str,
-    default: int,
-    *,
-    min_value: int | None = None,
-    max_value: int | None = None,
-    legacy_names: tuple[str, ...] = (),
-) -> int:
-    return read_int(name, default, min_value=min_value, max_value=max_value, legacy_names=legacy_names)
-
-
 def _read_bool(name: str, default: bool) -> bool:
     raw = os.environ.get(name)
     if raw is None or raw == "":
@@ -72,22 +61,19 @@ def _read_bool(name: str, default: bool) -> bool:
     raise RuntimeError(f"{name} must be a boolean value")
 
 
-_COMPUTE_WORKERS = _read_int("COMPUTE_WORKERS", 14, min_value=1, max_value=100)
-
-
 settings = WorkerSettings(
     data_dir=Path(os.environ.get("DATA_DIR", str(Path(tempfile.gettempdir()) / "data-forge"))),
     default_namespace=os.environ.get("DEFAULT_NAMESPACE", "default").strip() or "default",
-    compute_workers=_COMPUTE_WORKERS,
-    runtime_reconciliation_poll_interval_seconds=_read_int("RUNTIME_RECONCILIATION_POLL_INTERVAL_SECONDS", 1, min_value=1),
-    compute_worker_idle_ttl_seconds=_read_int("COMPUTE_WORKER_IDLE_TTL_SECONDS", 300, min_value=1, legacy_names=("ENGINE_IDLE_TTL_SECONDS",)),
-    compute_worker_idle_reap_interval_seconds=_read_int(
+    compute_workers=read_int("COMPUTE_WORKERS", 14, min_value=1, max_value=100),
+    runtime_reconciliation_poll_interval_seconds=read_int("RUNTIME_RECONCILIATION_POLL_INTERVAL_SECONDS", 1, min_value=1),
+    compute_worker_idle_ttl_seconds=read_int("COMPUTE_WORKER_IDLE_TTL_SECONDS", 300, min_value=1, legacy_names=("ENGINE_IDLE_TTL_SECONDS",)),
+    compute_worker_idle_reap_interval_seconds=read_int(
         "COMPUTE_WORKER_IDLE_REAP_INTERVAL_SECONDS", 30, min_value=1, legacy_names=("ENGINE_IDLE_REAP_INTERVAL_SECONDS",)
     ),
     # Total cores available for compute workers (0 = all logical CPUs). Not Polars' native env.
-    polars_cores_available=_read_int("POLARS_CORES_AVAILABLE", 0, min_value=0),
-    polars_max_memory_mb=_read_int("POLARS_MAX_MEMORY_MB", 0, min_value=0),
-    polars_streaming_chunk_size=_read_int("POLARS_STREAMING_CHUNK_SIZE", 0, min_value=0),
+    polars_cores_available=read_int("POLARS_CORES_AVAILABLE", 0, min_value=0),
+    polars_max_memory_mb=read_int("POLARS_MAX_MEMORY_MB", 0, min_value=0),
+    polars_streaming_chunk_size=read_int("POLARS_STREAMING_CHUNK_SIZE", 0, min_value=0),
     normalize_tz=_read_bool("NORMALIZE_TZ", False),
     timezone=os.environ.get("TIMEZONE", "UTC").strip() or "UTC",
     persist_preview_runs=_read_bool("PERSIST_PREVIEW_RUNS", True),
@@ -100,7 +86,7 @@ settings = WorkerSettings(
     object_store_session_token=os.environ.get("OBJECT_STORE_SESSION_TOKEN", ""),
     internal_api_token=os.environ.get("INTERNAL_API_TOKEN", ""),
     data_plane_grpc_host=os.environ.get("WORKER_DATA_PLANE_GRPC_HOST", "127.0.0.1").strip() or "127.0.0.1",
-    data_plane_grpc_port=_read_int("WORKER_DATA_PLANE_GRPC_PORT", 50052, min_value=1, max_value=65535),
+    data_plane_grpc_port=read_int("WORKER_DATA_PLANE_GRPC_PORT", 50052, min_value=1, max_value=65535),
     compute_worker_docker_host=read_env(
         "COMPUTE_WORKER_DOCKER_HOST",
         "unix:///var/run/docker.sock",
@@ -108,7 +94,7 @@ settings = WorkerSettings(
     ).strip()
     or "unix:///var/run/docker.sock",
     compute_worker_docker_hosts=read_env("COMPUTE_WORKER_DOCKER_HOSTS", legacy_names=("DF_ENGINE_DOCKER_HOSTS", "ENGINE_DOCKER_HOSTS")).strip(),
-    compute_worker_docker_host_health_interval_seconds=_read_int(
+    compute_worker_docker_host_health_interval_seconds=read_int(
         "COMPUTE_WORKER_DOCKER_HOST_HEALTH_INTERVAL_SECONDS",
         15,
         min_value=1,
@@ -136,14 +122,14 @@ settings = WorkerSettings(
         "COMPUTE_WORKER_CONNECT_HOST",
         legacy_names=("DF_ENGINE_CONNECT_HOST", "ENGINE_CONNECT_HOST"),
     ).strip(),
-    compute_worker_rpc_port=_read_int("COMPUTE_WORKER_RPC_PORT", 50053, min_value=1, max_value=65535, legacy_names=("DF_ENGINE_RPC_PORT", "ENGINE_RPC_PORT")),
-    compute_worker_start_timeout_seconds=_read_int(
+    compute_worker_rpc_port=read_int("COMPUTE_WORKER_RPC_PORT", 50053, min_value=1, max_value=65535, legacy_names=("DF_ENGINE_RPC_PORT", "ENGINE_RPC_PORT")),
+    compute_worker_start_timeout_seconds=read_int(
         "COMPUTE_WORKER_START_TIMEOUT_SECONDS", 30, min_value=1, legacy_names=("DF_ENGINE_START_TIMEOUT_SECONDS", "ENGINE_START_TIMEOUT_SECONDS")
     ),
-    compute_worker_shutdown_grace_seconds=_read_int(
+    compute_worker_shutdown_grace_seconds=read_int(
         "COMPUTE_WORKER_SHUTDOWN_GRACE_SECONDS", 10, min_value=1, legacy_names=("DF_ENGINE_SHUTDOWN_GRACE_SECONDS", "ENGINE_SHUTDOWN_GRACE_SECONDS")
     ),
-    compute_worker_heartbeat_interval_seconds=_read_int(
+    compute_worker_heartbeat_interval_seconds=read_int(
         "COMPUTE_WORKER_HEARTBEAT_INTERVAL_SECONDS",
         5,
         min_value=1,
@@ -151,6 +137,6 @@ settings = WorkerSettings(
     ),
     # Ready, unassigned compute workers kept as a latency reserve. A worker
     # receives an application-wide lease only when bound to a compute-worker identity.
-    compute_warm_workers=_read_int("COMPUTE_WARM_WORKERS", 0, min_value=0, max_value=100),
+    compute_warm_workers=read_int("COMPUTE_WARM_WORKERS", 0, min_value=0, max_value=100),
     deployment_id=os.environ.get("DATAFORGE_DEPLOYMENT_ID", "dataforge").strip() or "dataforge",
 )

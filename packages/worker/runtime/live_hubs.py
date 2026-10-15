@@ -64,7 +64,7 @@ class VersionHub[T]:
         try:
             return await future
         finally:
-            await self._discard_waiter(future)
+            self._discard_waiter(future)
 
     async def clear(self) -> None:
         with self._lock:
@@ -77,7 +77,7 @@ class VersionHub[T]:
                 continue
             loop.call_soon_threadsafe(future.cancel)
 
-    async def _discard_waiter(self, future: asyncio.Future[int]) -> None:
+    def _discard_waiter(self, future: asyncio.Future[int]) -> None:
         with self._lock:
             self._waiters = [(loop, item) for loop, item in self._waiters if item is not future and not item.done()]
 

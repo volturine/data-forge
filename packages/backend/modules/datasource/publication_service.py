@@ -50,20 +50,36 @@ def _schema_cache_payload(schema_info: datasource_pb2.SchemaInfo | None) -> dict
 
 
 def _response(datasource: DataSource) -> DataSourceResponse:
-    return DataSourceResponse.model_validate(datasource)
-
-
-def _enriched_response(datasource: DataSource, response: DataSourceResponse) -> DataSourceResponse:
-    """Add the computed last_data_update the proto record cannot carry.
+    """Validate a response including the computed last_data_update.
 
     Publication responses serialize as DataSourceRecord, which has no
     last_data_update field: the API re-derives it from the freshly published
     config so re-ingest feedback shows the new ingest time immediately.
     """
-    from modules.datasource.service import _last_data_update_from_config
+    # Deferred: modules.datasource.service imports this module.
+    from modules.datasource.service import last_data_update_from_config
 
-    response.last_data_update = _last_data_update_from_config(datasource)
+    response = DataSourceResponse.model_validate(datasource)
+    response.last_data_update = last_data_update_from_config(datasource)
     return response
+
+
+def _replayed_response(
+    session: Session,
+    existing: DataSource,
+    *,
+    name: str,
+    source_type: DataSourceType,
+    owner_id: str | None,
+    publication_guard: Callable[[Session], None] | None = None,
+) -> DataSourceResponse:
+    if existing.name != name or existing.source_type != source_type or existing.owner_id != owner_id:
+        raise ValueError(f'Datasource publication ID {existing.id} is already in use')
+    if publication_guard is not None:
+        publication_guard(session)
+    storage_cleanup_service.settle_publication(session, existing.config)
+    session.commit()
+    return _response(existing)
 
 
 def create_datasource(
@@ -88,11 +104,7 @@ def create_datasource(
         # ID is the datasource ID for create requests, so replaying the same
         # request must return the committed row instead of inserting another
         # row with the same user-visible name.
-        if existing.name != name or existing.source_type != resolved_type or existing.owner_id != owner_id:
-            raise ValueError(f'Datasource publication ID {datasource_id} is already in use')
-        storage_cleanup_service.settle_publication(session, existing.config)
-        session.commit()
-        return _enriched_response(existing, _response(existing))
+        return _replayed_response(session, existing, name=name, source_type=resolved_type, owner_id=owner_id)
 
     datasource = DataSource(
         id=datasource_id,
@@ -117,15 +129,9 @@ def create_datasource(
         existing = session.get(DataSource, datasource_id)
         if existing is None:
             raise
-        if existing.name != name or existing.source_type != resolved_type or existing.owner_id != owner_id:
-            raise ValueError(f'Datasource publication ID {datasource_id} is already in use')
-        if publication_guard is not None:
-            publication_guard(session)
-        storage_cleanup_service.settle_publication(session, existing.config)
-        session.commit()
-        return _enriched_response(existing, _response(existing))
+        return _replayed_response(session, existing, name=name, source_type=resolved_type, owner_id=owner_id, publication_guard=publication_guard)
     session.refresh(datasource)
-    return _enriched_response(datasource, _response(datasource))
+    return _response(datasource)
 
 
 def publish_ingest(
@@ -142,18 +148,10 @@ def publish_ingest(
         raise datasource_not_found(datasource_id)
     if publication_guard is not None:
         publication_guard(session)
-    values: dict[str, object] = {
-        'config': dict(config),
-        'revision': expected_revision + 1,
-    }
-    if schema_info is not None:
-        values['schema_cache'] = _schema_cache_payload(schema_info)
-    else:
-        values['schema_cache'] = None
     statement = (
         update(DataSource)
         .where(sa(DataSource.id == datasource_id), sa(DataSource.revision == expected_revision), col(DataSource.is_pending_delete).is_(False))
-        .values(**values)
+        .values(config=dict(config), revision=expected_revision + 1, schema_cache=_schema_cache_payload(schema_info))
     )
     publication = cast(CursorResult[Any], session.execute(statement))
     if publication.rowcount != 1:
@@ -163,7 +161,7 @@ def publish_ingest(
     session.commit()
     session.expire(datasource)
     session.refresh(datasource)
-    return _enriched_response(datasource, _response(datasource))
+    return _response(datasource)
 
 
 def publish_schema_cache(

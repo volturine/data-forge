@@ -7,7 +7,8 @@ from typing import Any
 import polars as pl
 from openpyxl import load_workbook
 
-from datasources.excel_preflight import _resolve_bounds
+from datasources.datasource_loading import has_excel_bounds, normalize_excel_headers
+from datasources.excel_preflight import resolve_excel_bounds
 
 
 def _kind(value: object) -> str | None:
@@ -41,16 +42,14 @@ def _merge(current: str | None, incoming: str | None) -> str | None:
 
 
 def iter_excel_batches(config: dict[str, Any], *, batch_size: int) -> Generator[pl.DataFrame]:
-    from datasources.datasource_loading import _has_bounds, _normalize_headers
-
-    workbook = load_workbook(config["file_path"], read_only=_has_bounds(config) or config.get("table_name") is None, data_only=True)
+    workbook = load_workbook(config["file_path"], read_only=has_excel_bounds(config) or config.get("table_name") is None, data_only=True)
     try:
         sheet_name = config.get("sheet_name") or workbook.sheetnames[0]
         end_row: int | None
-        if _has_bounds(config):
+        if has_excel_bounds(config):
             start_row, start_col, end_col, end_row = (int(config[key]) for key in ("start_row", "start_col", "end_col", "end_row"))
         else:
-            sheet_name, start_row, start_col, end_col, end_row = _resolve_bounds(
+            sheet_name, start_row, start_col, end_col, end_row = resolve_excel_bounds(
                 workbook,
                 sheet_name=sheet_name,
                 start_row=int(config.get("start_row") or 0),
@@ -74,7 +73,7 @@ def iter_excel_batches(config: dict[str, Any], *, batch_size: int) -> Generator[
             ),
             (),
         )
-        columns = _normalize_headers(header) if has_header else [f"column_{index + 1}" for index in range(len(header))]
+        columns = normalize_excel_headers(header) if has_header else [f"column_{index + 1}" for index in range(len(header))]
         kinds: list[str | None] = [None] * len(columns)
         first_data_row = start_row + (2 if has_header else 1)
 

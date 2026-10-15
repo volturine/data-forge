@@ -10,12 +10,7 @@ class ExplodeParams(OperationParams):
 
 
 class ExplodeHandler(OperationHandler):
-    def __call__(
-        self,
-        lf: pl.LazyFrame,
-        params: dict,
-        **_,
-    ) -> pl.LazyFrame:
+    def __call__(self, lf: pl.LazyFrame, params: dict, **_) -> pl.LazyFrame:
         validated = ExplodeParams.model_validate(params)
         columns = [validated.columns] if isinstance(validated.columns, str) else validated.columns
         if not columns:

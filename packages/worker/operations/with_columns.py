@@ -77,12 +77,7 @@ class WithColumnsParams(OperationParams):
 class WithColumnsHandler(OperationHandler):
     """Add or modify columns using expressions."""
 
-    def __call__(
-        self,
-        lf: pl.LazyFrame,
-        params: dict,
-        **_,
-    ) -> pl.LazyFrame:
+    def __call__(self, lf: pl.LazyFrame, params: dict, **_) -> pl.LazyFrame:
         validated = WithColumnsParams.model_validate(params)
         exprs: list[pl.Expr] = []
         for expr in validated.expressions:

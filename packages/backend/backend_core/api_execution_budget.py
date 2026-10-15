@@ -7,7 +7,7 @@ import contextvars
 import threading
 import time
 from collections.abc import Awaitable, Callable
-from concurrent.futures import CancelledError as ConcurrentCancelledError, Future, ThreadPoolExecutor
+from concurrent.futures import Future, ThreadPoolExecutor
 from contextlib import AsyncExitStack
 from dataclasses import dataclass
 from functools import partial
@@ -87,20 +87,14 @@ class ApiDatabaseBudget:
 
 
 @dataclass(frozen=True)
-class _BootstrapRuntime:
+class _LaneRuntime:
     executor: ThreadPoolExecutor
     admission: asyncio.Semaphore
 
 
-@dataclass(frozen=True)
-class _ApiBlockingRuntime:
-    executor: ThreadPoolExecutor
-    admission: asyncio.Semaphore
-
-
-_BOOTSTRAP_RUNTIMES: WeakKeyDictionary[asyncio.AbstractEventLoop, _BootstrapRuntime] = WeakKeyDictionary()
+_BOOTSTRAP_RUNTIMES: WeakKeyDictionary[asyncio.AbstractEventLoop, _LaneRuntime] = WeakKeyDictionary()
 _BOOTSTRAP_RUNTIMES_LOCK = threading.Lock()
-_API_BLOCKING_RUNTIMES: WeakKeyDictionary[asyncio.AbstractEventLoop, _ApiBlockingRuntime] = WeakKeyDictionary()
+_API_BLOCKING_RUNTIMES: WeakKeyDictionary[asyncio.AbstractEventLoop, _LaneRuntime] = WeakKeyDictionary()
 _API_BLOCKING_RUNTIMES_LOCK = threading.Lock()
 _BOUNDED_EXECUTOR_ADMISSIONS: WeakKeyDictionary[
     asyncio.AbstractEventLoop,
@@ -119,7 +113,7 @@ def install_api_blocking_executor(
     if workers <= 0 or max_pending < 0:
         raise ValueError('API blocking executor capacity must have positive workers and non-negative pending slots')
     with _API_BLOCKING_RUNTIMES_LOCK:
-        _API_BLOCKING_RUNTIMES[loop] = _ApiBlockingRuntime(executor, asyncio.Semaphore(workers + max_pending))
+        _API_BLOCKING_RUNTIMES[loop] = _LaneRuntime(executor, asyncio.Semaphore(workers + max_pending))
 
 
 def remove_api_blocking_executor(loop: asyncio.AbstractEventLoop) -> None:
@@ -154,7 +148,7 @@ def install_bootstrap_executor(
     if pending_limit < 0:
         raise ValueError('max_pending must be non-negative')
     with _BOOTSTRAP_RUNTIMES_LOCK:
-        _BOOTSTRAP_RUNTIMES[loop] = _BootstrapRuntime(executor, asyncio.Semaphore(workers + pending_limit))
+        _BOOTSTRAP_RUNTIMES[loop] = _LaneRuntime(executor, asyncio.Semaphore(workers + pending_limit))
 
 
 def remove_bootstrap_executor(loop: asyncio.AbstractEventLoop) -> None:
@@ -184,65 +178,23 @@ def register_bootstrap_executor_lifecycle(
     install_bootstrap_executor(loop, executor, workers, max_pending=max_pending)
 
 
-async def run_bootstrap_db[**P, T](function: Callable[P, T], *args: P.args, **kwargs: P.kwargs) -> T:
-    """Queue protected API database work without blocking or rejecting callers."""
-    loop = asyncio.get_running_loop()
-    with _BOOTSTRAP_RUNTIMES_LOCK:
-        runtime = _BOOTSTRAP_RUNTIMES.get(loop)
-    if runtime is None:
-        raise RuntimeError('Protected API database executor is not active for this event loop')
+async def _await_admitted[T](loop: asyncio.AbstractEventLoop, admission: asyncio.Semaphore, actual_future: Future[T], failure_message: str) -> T:
+    """Await admitted thread work, holding its admission slot until the thread finishes.
 
-    requested_at = time.perf_counter()
-    await runtime.admission.acquire()
-    admission_wait_ms = (time.perf_counter() - requested_at) * 1000
-    try:
-        from backend_core.database import (
-            record_api_blocking_admission_wait,
-            record_api_blocking_executor_queue,
-            record_api_blocking_work,
-        )
-
-        record_api_blocking_admission_wait(admission_wait_ms, lane='bootstrap')
-        context = contextvars.copy_context()
-        work = partial(function, *args, **kwargs)
-        submitted_at = time.perf_counter()
-
-        def invoke() -> T:
-            started_at = time.perf_counter()
-            record_api_blocking_executor_queue((started_at - submitted_at) * 1000, lane='bootstrap')
-            try:
-                return work()
-            finally:
-                record_api_blocking_work((time.perf_counter() - started_at) * 1000, lane='bootstrap')
-
-        actual_future: Future[T] = runtime.executor.submit(context.run, invoke)
-    except BaseException:
-        runtime.admission.release()
-        raise
-
+    A cancelled caller cancels the future but cannot stop a running thread, so
+    the slot is released only when the work completes; failures that no
+    caller observes are reported to the loop exception handler.
+    """
     wrapped_future = asyncio.wrap_future(actual_future, loop=loop)
     caller_cancelled = threading.Event()
 
     def settle(completed: Future[T]) -> None:
-        try:
-            completed.result()
-        except ConcurrentCancelledError:
-            exception = None
-        except BaseException as exc:
-            exception = exc
-        else:
-            exception = None
+        exception = None if completed.cancelled() else completed.exception()
 
         def release_admission() -> None:
-            runtime.admission.release()
+            admission.release()
             if exception is not None and caller_cancelled.is_set():
-                loop.call_exception_handler(
-                    {
-                        'message': 'Protected API database work failed after its caller was cancelled',
-                        'exception': exception,
-                        'future': wrapped_future,
-                    }
-                )
+                loop.call_exception_handler({'message': failure_message, 'exception': exception, 'future': wrapped_future})
 
         loop.call_soon_threadsafe(release_admission)
 
@@ -254,6 +206,46 @@ async def run_bootstrap_db[**P, T](function: Callable[P, T], *args: P.args, **kw
         caller_cancelled.set()
         actual_future.cancel()
         raise
+
+
+async def _run_in_lane[T](runtime: _LaneRuntime, lane: str, failure_message: str, work: Callable[[], T]) -> T:
+    from backend_core.database import (
+        record_api_blocking_admission_wait,
+        record_api_blocking_executor_queue,
+        record_api_blocking_work,
+    )
+
+    loop = asyncio.get_running_loop()
+    requested_at = time.perf_counter()
+    await runtime.admission.acquire()
+    try:
+        record_api_blocking_admission_wait((time.perf_counter() - requested_at) * 1000, lane=lane)
+        submitted_at = time.perf_counter()
+
+        def invoke() -> T:
+            started_at = time.perf_counter()
+            record_api_blocking_executor_queue((started_at - submitted_at) * 1000, lane=lane)
+            try:
+                return work()
+            finally:
+                record_api_blocking_work((time.perf_counter() - started_at) * 1000, lane=lane)
+
+        actual_future: Future[T] = runtime.executor.submit(contextvars.copy_context().run, invoke)
+    except BaseException:
+        runtime.admission.release()
+        raise
+    return await _await_admitted(loop, runtime.admission, actual_future, failure_message)
+
+
+async def run_bootstrap_db[**P, T](function: Callable[P, T], *args: P.args, **kwargs: P.kwargs) -> T:
+    """Queue protected API database work without blocking or rejecting callers."""
+    loop = asyncio.get_running_loop()
+    with _BOOTSTRAP_RUNTIMES_LOCK:
+        runtime = _BOOTSTRAP_RUNTIMES.get(loop)
+    if runtime is None:
+        raise RuntimeError('Protected API database executor is not active for this event loop')
+    work = partial(function, *args, **kwargs)
+    return await _run_in_lane(runtime, 'bootstrap', 'Protected API database work failed after its caller was cancelled', work)
 
 
 async def run_api_blocking[**P, T](function: Callable[P, T], *args: P.args, **kwargs: P.kwargs) -> T:
@@ -266,75 +258,13 @@ async def run_api_blocking[**P, T](function: Callable[P, T], *args: P.args, **kw
     loop = asyncio.get_running_loop()
     with _API_BLOCKING_RUNTIMES_LOCK:
         runtime = _API_BLOCKING_RUNTIMES.get(loop)
+    work = partial(function, *args, **kwargs)
     if runtime is None:
-        context = contextvars.copy_context()
-        return await loop.run_in_executor(None, context.run, partial(function, *args, **kwargs))
-
-    requested_at = time.perf_counter()
-    await runtime.admission.acquire()
-    admission_wait_ms = (time.perf_counter() - requested_at) * 1000
-    try:
-        from backend_core.database import (
-            record_api_blocking_admission_wait,
-            record_api_blocking_executor_queue,
-            record_api_blocking_work,
-        )
-
-        record_api_blocking_admission_wait(admission_wait_ms, lane='general')
-        context = contextvars.copy_context()
-        work = partial(function, *args, **kwargs)
-        submitted_at = time.perf_counter()
-
-        def invoke() -> T:
-            started_at = time.perf_counter()
-            record_api_blocking_executor_queue((started_at - submitted_at) * 1000, lane='general')
-            try:
-                return work()
-            finally:
-                record_api_blocking_work((time.perf_counter() - started_at) * 1000, lane='general')
-
-        actual_future: Future[T] = runtime.executor.submit(context.run, invoke)
-    except BaseException:
-        runtime.admission.release()
-        raise
-
-    wrapped_future = asyncio.wrap_future(actual_future, loop=loop)
-    caller_cancelled = threading.Event()
-
-    def settle(completed: Future[T]) -> None:
-        try:
-            completed.result()
-        except ConcurrentCancelledError:
-            exception = None
-        except BaseException as exc:
-            exception = exc
-        else:
-            exception = None
-
-        def release_admission() -> None:
-            runtime.admission.release()
-            if exception is not None and caller_cancelled.is_set():
-                loop.call_exception_handler(
-                    {
-                        'message': 'API blocking work failed after its caller was cancelled',
-                        'exception': exception,
-                        'future': wrapped_future,
-                    }
-                )
-
-        loop.call_soon_threadsafe(release_admission)
-
-    actual_future.add_done_callback(settle)
-
-    try:
-        return await asyncio.shield(wrapped_future)
-    except asyncio.CancelledError:
-        caller_cancelled.set()
-        actual_future.cancel()
-        raise
+        return await loop.run_in_executor(None, contextvars.copy_context().run, work)
+    return await _run_in_lane(runtime, 'general', 'API blocking work failed after its caller was cancelled', work)
 
 
-async def run_in_bounded_executor[**P, T](
+async def run_in_bounded_executor[T](
     executor: BoundedThreadPoolExecutor,
     *,
     work: Callable[[], T],
@@ -342,10 +272,7 @@ async def run_in_bounded_executor[**P, T](
     """Run work in a bounded executor after asynchronously waiting for admission."""
     loop = asyncio.get_running_loop()
     with _BOUNDED_EXECUTOR_ADMISSIONS_LOCK:
-        per_loop = _BOUNDED_EXECUTOR_ADMISSIONS.get(loop)
-        if per_loop is None:
-            per_loop = WeakKeyDictionary()
-            _BOUNDED_EXECUTOR_ADMISSIONS[loop] = per_loop
+        per_loop = _BOUNDED_EXECUTOR_ADMISSIONS.setdefault(loop, WeakKeyDictionary())
         admission = per_loop.get(executor)
         if admission is None:
             admission = asyncio.Semaphore(executor.max_workers + executor.max_pending)
@@ -353,46 +280,11 @@ async def run_in_bounded_executor[**P, T](
 
     await admission.acquire()
     try:
-        context = contextvars.copy_context()
-        actual_future: Future[T] = executor.submit(context.run, work)
+        actual_future: Future[T] = executor.submit(contextvars.copy_context().run, work)
     except BaseException:
         admission.release()
         raise
-
-    wrapped_future = asyncio.wrap_future(actual_future, loop=loop)
-    caller_cancelled = threading.Event()
-
-    def settle(completed: Future[T]) -> None:
-        try:
-            completed.result()
-        except ConcurrentCancelledError:
-            exception = None
-        except BaseException as exc:
-            exception = exc
-        else:
-            exception = None
-
-        def release_admission() -> None:
-            admission.release()
-            if exception is not None and caller_cancelled.is_set():
-                loop.call_exception_handler(
-                    {
-                        'message': 'Bounded executor work failed after its caller was cancelled',
-                        'exception': exception,
-                        'future': wrapped_future,
-                    }
-                )
-
-        loop.call_soon_threadsafe(release_admission)
-
-    actual_future.add_done_callback(settle)
-
-    try:
-        return await asyncio.shield(wrapped_future)
-    except asyncio.CancelledError:
-        caller_cancelled.set()
-        actual_future.cancel()
-        raise
+    return await _await_admitted(loop, admission, actual_future, 'Bounded executor work failed after its caller was cancelled')
 
 
 async def run_bootstrap_settings_db[**P, T](function: Callable[Concatenate[Session, P], T], *args: P.args, **kwargs: P.kwargs) -> T:

@@ -39,8 +39,8 @@ def _terminal_outcome(run_status: BuildRunStatus | str, error_message: str | Non
     return None
 
 
-@committed
-def fail_build_job(session: Session, claim: BuildClaimCommand, *, error: str) -> FailedBuildResult | None:
+def _already_finished(session: Session, claim: BuildClaimCommand) -> BuildJob | None:
+    """Return the job when this exact claim already reached a terminal state (idempotent replay)."""
     existing = session.get(BuildJob, claim.job_id)
     if (
         existing is not None
@@ -48,19 +48,46 @@ def fail_build_job(session: Session, claim: BuildClaimCommand, *, error: str) ->
         and existing.lease_generation == claim.lease_generation
         and existing.status_kind().is_terminal
     ):
+        return existing
+    return None
+
+
+def _lock_claim(session: Session, claim: BuildClaimCommand) -> bool:
+    return (
+        build_jobs_service.lock_active_job_claim(
+            session,
+            claim.job_id,
+            build_id=claim.build_id,
+            worker_id=claim.worker_id,
+            claim_token=claim.claim_token,
+            lease_generation=claim.lease_generation,
+        )
+        is not None
+    )
+
+
+def _finish_claim(session: Session, claim: BuildClaimCommand, *, status: BuildJobStatus, error: str | None) -> BuildJob | None:
+    return build_jobs_service.finish_claimed_job(
+        session,
+        claim.job_id,
+        worker_id=claim.worker_id,
+        build_id=claim.build_id,
+        claim_token=claim.claim_token,
+        lease_generation=claim.lease_generation,
+        status=status,
+        error=error,
+    )
+
+
+@committed
+def fail_build_job(session: Session, claim: BuildClaimCommand, *, error: str) -> FailedBuildResult | None:
+    existing = _already_finished(session, claim)
+    if existing is not None:
         run = build_runs_service.get_build_run(session, claim.build_id)
         if run is None:
             return None
         return FailedBuildResult(job=existing, namespace=run.namespace, latest_sequence=None)
-    active_claim = build_jobs_service.lock_active_job_claim(
-        session,
-        claim.job_id,
-        build_id=claim.build_id,
-        worker_id=claim.worker_id,
-        claim_token=claim.claim_token,
-        lease_generation=claim.lease_generation,
-    )
-    if active_claim is None:
+    if not _lock_claim(session, claim):
         return None
     run = build_runs_service.get_build_run(session, claim.build_id)
     if run is None:
@@ -97,17 +124,7 @@ def fail_build_job(session: Session, claim: BuildClaimCommand, *, error: str) ->
             return None
         latest_sequence = event_row.sequence
         outcome = (BuildJobStatus.FAILED, error)
-    status, terminal_error = outcome
-    job = build_jobs_service.finish_claimed_job(
-        session,
-        claim.job_id,
-        worker_id=claim.worker_id,
-        build_id=claim.build_id,
-        claim_token=claim.claim_token,
-        lease_generation=claim.lease_generation,
-        status=status,
-        error=terminal_error,
-    )
+    job = _finish_claim(session, claim, status=outcome[0], error=outcome[1])
     if job is None:
         return None
     return FailedBuildResult(job=job, namespace=run.namespace, latest_sequence=latest_sequence)
@@ -115,23 +132,10 @@ def fail_build_job(session: Session, claim: BuildClaimCommand, *, error: str) ->
 
 @committed
 def finalize_build_job(session: Session, claim: BuildClaimCommand) -> BuildJob | None:
-    existing = session.get(BuildJob, claim.job_id)
-    if (
-        existing is not None
-        and existing.build_id == claim.build_id
-        and existing.lease_generation == claim.lease_generation
-        and existing.status_kind().is_terminal
-    ):
+    existing = _already_finished(session, claim)
+    if existing is not None:
         return existing
-    active_claim = build_jobs_service.lock_active_job_claim(
-        session,
-        claim.job_id,
-        build_id=claim.build_id,
-        worker_id=claim.worker_id,
-        claim_token=claim.claim_token,
-        lease_generation=claim.lease_generation,
-    )
-    if active_claim is None:
+    if not _lock_claim(session, claim):
         return None
     run = build_runs_service.get_build_run(session, claim.build_id)
     if run is None:
@@ -139,17 +143,4 @@ def finalize_build_job(session: Session, claim: BuildClaimCommand) -> BuildJob |
     outcome = _terminal_outcome(run.status, run.error_message)
     if outcome is None:
         return None
-    status, error = outcome
-    job = build_jobs_service.finish_claimed_job(
-        session,
-        claim.job_id,
-        worker_id=claim.worker_id,
-        build_id=claim.build_id,
-        claim_token=claim.claim_token,
-        lease_generation=claim.lease_generation,
-        status=status,
-        error=error,
-    )
-    if job is None:
-        return None
-    return job
+    return _finish_claim(session, claim, status=outcome[0], error=outcome[1])

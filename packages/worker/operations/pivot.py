@@ -22,12 +22,7 @@ class PivotHandler(OperationHandler):
             raise ValueError(f"Pivot requires explicit on_columns when {pivot_column!r} has more than {_MAX_AUTO_PIVOT_VALUES} distinct values")
         return values
 
-    def __call__(
-        self,
-        lf: pl.LazyFrame,
-        params: dict,
-        **_,
-    ) -> pl.LazyFrame:
+    def __call__(self, lf: pl.LazyFrame, params: dict, **_) -> pl.LazyFrame:
         validated = PivotParams.model_validate(params)
 
         if not validated.columns:

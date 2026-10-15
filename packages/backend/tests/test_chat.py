@@ -235,7 +235,7 @@ def _runtime(client: TestClient, generation: int = 10) -> TurnRuntime:
     store = ChatTurnStore()
     _enqueue(store, session_id, 'run')
     claim = store.claim_batch(generation=generation, limit=1)[0]
-    return TurnRuntime(claim, FastAPI(), (), session_store.messages(session_id))
+    return TurnRuntime(claim, FastAPI(), session_store.messages(session_id))
 
 
 @pytest.mark.asyncio
@@ -330,7 +330,7 @@ async def test_confirmation_restart_preserves_decision_and_remaining_calls(clien
     assert store.confirm(session_id=runtime.id, user_id=runtime.user_id, approved=approved)
     store.recover(generation=12)
     claim = store.claim_batch(generation=12, limit=1)[0]
-    resumed = TurnRuntime(claim, runtime.app, (), session_store.messages(runtime.id))
+    resumed = TurnRuntime(claim, runtime.app, session_store.messages(runtime.id))
     tool_executor = AsyncMock(return_value={'ok': True, 'status': 200, 'body': {'saved': True}})
     provider = AsyncMock(return_value=_completion())
     with patch('modules.chat.routes.call_tool', new=tool_executor), patch('modules.chat.routes.chat_with_tools', new=provider):

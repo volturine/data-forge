@@ -1,20 +1,18 @@
 import json
 import re
 import uuid
-from collections.abc import Callable
 from copy import deepcopy
-from dataclasses import dataclass
 from datetime import UTC, datetime
 from typing import Any
 
 from pydantic import ValidationError
-from sqlalchemy import delete, select
+from sqlalchemy import Select, delete, select
 from sqlalchemy.orm import defer
 from sqlalchemy.orm.attributes import flag_modified
 from sqlmodel import Session
 
 from backend_core import datasource_delete_service
-from backend_core.ai_clients import AIError, ai_provider_name, get_ai_client, require_ai_provider
+from backend_core.ai_clients import AIError, get_ai_client, require_ai_provider
 from backend_core.analysis_cycles import assert_no_analysis_cycle
 from backend_core.domain.analysis.models import AnalysisStatus
 from backend_core.domain.analysis.pipeline_types import (
@@ -31,7 +29,7 @@ from backend_core.exceptions import (
 )
 from backend_core.persistence.analysis.models import Analysis, AnalysisDataSource, AnalysisFavorite
 from backend_core.persistence.datasource.models import DataSource
-from backend_core.settings_store import (
+from backend_core.settings_projection import (
     get_resolved_default_model,
     get_resolved_ollama_settings,
     get_resolved_openrouter_key,
@@ -42,7 +40,6 @@ from modules.analysis import revisions
 from modules.analysis.schemas import (
     AnalysisCreateSchema,
     AnalysisGalleryItemSchema,
-    AnalysisGenerationDatasourceSchema,
     AnalysisResponseSchema,
     AnalysisUpdateSchema,
     DuplicateAnalysisSchema,
@@ -50,8 +47,7 @@ from modules.analysis.schemas import (
     ImportAnalysisSchema,
     TabSchema,
 )
-from modules.analysis.step_schemas import normalize_step_config
-from modules.analysis.templates import get_template, list_templates
+from modules.analysis.step_schemas import get_step_catalog, normalize_step_config
 from modules.analysis_versions import service as version_service
 
 
@@ -82,6 +78,21 @@ def timestamped_analysis_name(base: str, now: datetime | None = None) -> str:
     return f'{stem} · {moment:%b} {moment.day}, {moment:%Y, %H:%M:%S}.{moment.microsecond // 1000:03d} UTC'
 
 
+def _require_analysis(session: Session, analysis_id: str) -> Analysis:
+    analysis = session.get(Analysis, analysis_id)
+    if not analysis:
+        raise analysis_not_found(analysis_id)
+    return analysis
+
+
+def _save_pipeline(session: Session, analysis: Analysis, pipeline: PipelineDefinition) -> None:
+    analysis.pipeline_definition = pipeline.to_dict()
+    flag_modified(analysis, 'pipeline_definition')
+    analysis.updated_at = datetime.now(UTC).replace(tzinfo=None)
+    analysis.revision += 1
+    session.commit()
+
+
 def _slugify(value: str) -> str:
     normalized = re.sub(r'[^a-zA-Z0-9]+', '_', value.strip().lower()).strip('_')
     return normalized or 'analysis'
@@ -104,17 +115,6 @@ def _build_output_config(analysis_name: str, tab_name: str, branch: str, index: 
             'branch': branch,
         },
     }
-
-
-def _datasource_config_from_request(
-    item: AnalysisGenerationDatasourceSchema,
-) -> dict[str, Any]:
-    config: dict[str, Any] = {'branch': item.branch}
-    if item.snapshot_id is not None:
-        config['snapshot_id'] = item.snapshot_id
-    if item.snapshot_timestamp_ms is not None:
-        config['snapshot_timestamp_ms'] = item.snapshot_timestamp_ms
-    return config
 
 
 def _extract_json_object(content: str) -> dict[str, Any]:
@@ -194,32 +194,28 @@ def _rewrite_import_payload(
             datasource['id'] = output_id_map[original_id]
         elif original_id in datasource_remap:
             datasource['id'] = datasource_remap[original_id]
-        steps = tab.get('steps', [])
-        for step in steps:
-            config = step.get('config')
-            if isinstance(config, dict):
-                right_source = config.get('right_source')
-                if isinstance(right_source, str):
-                    if right_source in output_id_map:
-                        config['right_source'] = output_id_map[right_source]
-                    elif right_source in tab_id_map:
-                        config['right_source'] = tab_id_map[right_source]
-                    elif right_source in datasource_remap:
-                        config['right_source'] = datasource_remap[right_source]
-                sources = config.get('sources')
-                if isinstance(sources, list):
-                    rewritten_sources: list[Any] = []
-                    for source in sources:
-                        if isinstance(source, str):
-                            rewritten_sources.append(output_id_map.get(source) or tab_id_map.get(source) or datasource_remap.get(source) or source)
-                        else:
-                            rewritten_sources.append(source)
-                    config['sources'] = rewritten_sources
-            depends_on = step.get('depends_on')
-            if isinstance(depends_on, list):
-                step['depends_on'] = [step_id_map.get(str(dep_id), str(dep_id)) for dep_id in depends_on]
+        _remap_step_references(tab.get('steps', []), step_id_map, {**datasource_remap, **tab_id_map, **output_id_map})
 
     return rewritten
+
+
+def _remap_step_references(steps: list[Any], step_id_map: dict[str, str], source_id_map: dict[str, str]) -> None:
+    """Point step dependencies and join/union sources at the remapped tab, output, and datasource IDs."""
+    for step in steps:
+        if not isinstance(step, dict):
+            continue
+        depends_on = step.get('depends_on')
+        if isinstance(depends_on, list):
+            step['depends_on'] = [step_id_map.get(str(dep_id), str(dep_id)) for dep_id in depends_on]
+        config = step.get('config')
+        if not isinstance(config, dict):
+            continue
+        right_source = config.get('right_source')
+        if isinstance(right_source, str):
+            config['right_source'] = source_id_map.get(right_source, right_source)
+        sources = config.get('sources')
+        if isinstance(sources, list):
+            config['sources'] = [source_id_map.get(source, source) if isinstance(source, str) else source for source in sources]
 
 
 def _collect_missing_import_datasources(session: Session, pipeline: dict[str, Any]) -> list[str]:
@@ -259,108 +255,19 @@ def _collect_missing_import_datasources(session: Session, pipeline: dict[str, An
     return sorted(missing)
 
 
-@dataclass(frozen=True, slots=True)
-class GenerationProviderResolution:
-    provider: enums_pb2.AIProvider
-    model: str
-    client_kwargs: dict[str, str]
-
-    def as_tuple(self) -> tuple[str, str, dict[str, str]]:
-        return ai_provider_name(self.provider), self.model, self.client_kwargs
-
-
-GenerationProviderResolver = Callable[[], GenerationProviderResolution | None]
-GenerationProviderRequiredResolver = Callable[[], GenerationProviderResolution]
-
-
-@dataclass(frozen=True, slots=True)
-class AnalysisGenerationProviderDefinition:
-    provider: enums_pb2.AIProvider
-    resolve_requested: GenerationProviderRequiredResolver
-    resolve_default: GenerationProviderResolver
-
-    @classmethod
-    def require(cls, provider: str | enums_pb2.AIProvider) -> AnalysisGenerationProviderDefinition:
-        try:
-            normalized = require_ai_provider(provider)
-        except ValueError as exc:
-            raise ValueError(f'Unknown AI provider: {provider}') from exc
-        return ANALYSIS_GENERATION_PROVIDER_DEFINITIONS[normalized]
-
-
-def resolve_requested_openrouter_generation_provider() -> GenerationProviderResolution:
-    api_key = get_resolved_openrouter_key()
-    if not api_key:
-        raise ValueError('OpenRouter is not configured')
-    return GenerationProviderResolution(
-        provider=enums_pb2.AI_PROVIDER_OPENROUTER,
-        model=get_resolved_default_model(),
-        client_kwargs={'api_key': api_key},
-    )
-
-
-def resolve_default_openrouter_generation_provider() -> GenerationProviderResolution | None:
-    api_key = get_resolved_openrouter_key()
-    if not api_key:
-        return None
-    return GenerationProviderResolution(
-        provider=enums_pb2.AI_PROVIDER_OPENROUTER,
-        model=get_resolved_default_model(),
-        client_kwargs={'api_key': api_key},
-    )
-
-
-def resolve_requested_ollama_generation_provider() -> GenerationProviderResolution:
-    resolved = get_resolved_ollama_settings()
-    return GenerationProviderResolution(
-        provider=enums_pb2.AI_PROVIDER_OLLAMA,
-        model=str(resolved['default_model']),
-        client_kwargs={'endpoint_url': str(resolved['endpoint_url'])},
-    )
-
-
-def resolve_default_ollama_generation_provider() -> GenerationProviderResolution | None:
-    resolved = get_resolved_ollama_settings()
-    if not resolved['endpoint_url']:
-        return None
-    return GenerationProviderResolution(
-        provider=enums_pb2.AI_PROVIDER_OLLAMA,
-        model=str(resolved['default_model']),
-        client_kwargs={'endpoint_url': str(resolved['endpoint_url'])},
-    )
-
-
-ANALYSIS_GENERATION_PROVIDER_DEFINITIONS: dict[enums_pb2.AIProvider, AnalysisGenerationProviderDefinition] = {
-    enums_pb2.AI_PROVIDER_OPENROUTER: AnalysisGenerationProviderDefinition(
-        provider=enums_pb2.AI_PROVIDER_OPENROUTER,
-        resolve_requested=resolve_requested_openrouter_generation_provider,
-        resolve_default=resolve_default_openrouter_generation_provider,
-    ),
-    enums_pb2.AI_PROVIDER_OLLAMA: AnalysisGenerationProviderDefinition(
-        provider=enums_pb2.AI_PROVIDER_OLLAMA,
-        resolve_requested=resolve_requested_ollama_generation_provider,
-        resolve_default=resolve_default_ollama_generation_provider,
-    ),
-}
-
-ANALYSIS_GENERATION_PROVIDER_PRIORITY: tuple[enums_pb2.AIProvider, ...] = (
-    enums_pb2.AI_PROVIDER_OPENROUTER,
-    enums_pb2.AI_PROVIDER_OLLAMA,
-)
-
-
-def _resolved_generation_provider(
-    provider: str | None = None,
-) -> tuple[str, str, dict[str, str]]:
-    if provider:
-        definition = AnalysisGenerationProviderDefinition.require(provider.strip().lower())
-        return definition.resolve_requested().as_tuple()
-
-    for candidate in ANALYSIS_GENERATION_PROVIDER_PRIORITY:
-        resolution = ANALYSIS_GENERATION_PROVIDER_DEFINITIONS[candidate].resolve_default()
-        if resolution is not None:
-            return resolution.as_tuple()
-    raise ValueError('No AI provider is configured')
+def _resolved_generation_provider(provider: str | None = None) -> tuple[str, str, dict[str, str]]:
+    """Resolve the requested provider, or the first configured one (OpenRouter, then Ollama)."""
+    requested = require_ai_provider(provider.strip().lower()) if provider else None
+    if requested in (None, enums_pb2.AI_PROVIDER_OPENROUTER):
+        api_key = get_resolved_openrouter_key()
+        if api_key:
+            return 'openrouter', get_resolved_default_model(), {'api_key': api_key}
+        if requested is not None:
+            raise ValueError('OpenRouter is not configured')
+    ollama = get_resolved_ollama_settings()
+    if requested is None and not ollama['endpoint_url']:
+        raise ValueError('No AI provider is configured')
+    return 'ollama', str(ollama['default_model']), {'endpoint_url': str(ollama['endpoint_url'])}
 
 
 def validate_stored_pipeline_definition(
@@ -534,10 +441,7 @@ def get_analysis(
     session: Session,
     analysis_id: str,
 ) -> AnalysisResponseSchema:
-    analysis = session.get(Analysis, analysis_id)
-
-    if not analysis:
-        raise analysis_not_found(analysis_id)
+    analysis = _require_analysis(session, analysis_id)
 
     return _to_response(analysis)
 
@@ -550,21 +454,19 @@ def get_analysis_etag(session: Session, analysis_id: str) -> str:
     return revisions.etag_for(analysis_id, revision)
 
 
-def list_analyses(
+def _gallery_items(
     session: Session,
+    stmt: Select[Any],
+    *,
+    is_favorite: bool,
 ) -> list[AnalysisGalleryItemSchema]:
-    stmt = (
-        select(Analysis)
-        .options(
-            defer(sa(Analysis.pipeline_definition)),
-            defer(sa(Analysis.description)),
-            defer(sa(Analysis.status)),
-            defer(sa(Analysis.result_path)),
-            defer(sa(Analysis.owner_id)),
-        )
-        .order_by(col(Analysis.updated_at).desc(), col(Analysis.id).asc())
-    )
-    analyses = list(session.execute(stmt).scalars())
+    stmt = stmt.options(
+        defer(sa(Analysis.pipeline_definition)),
+        defer(sa(Analysis.description)),
+        defer(sa(Analysis.status)),
+        defer(sa(Analysis.result_path)),
+        defer(sa(Analysis.owner_id)),
+    ).order_by(col(Analysis.updated_at).desc(), col(Analysis.id).asc())
     return [
         AnalysisGalleryItemSchema.model_validate(
             {
@@ -574,11 +476,17 @@ def list_analyses(
                 'created_at': analysis.created_at,
                 'updated_at': analysis.updated_at,
                 'revision': analysis.revision,
-                'is_favorite': False,
+                'is_favorite': is_favorite,
             }
         )
-        for analysis in analyses
+        for analysis in session.execute(stmt).scalars()
     ]
+
+
+def list_analyses(
+    session: Session,
+) -> list[AnalysisGalleryItemSchema]:
+    return _gallery_items(session, select(Analysis), is_favorite=False)
 
 
 def list_favorite_analyses(
@@ -592,36 +500,7 @@ def list_favorite_analyses(
     if not favorite_ids:
         return []
     analysis_stmt = select(Analysis).where(col(Analysis.id).in_(favorite_ids))
-    analysis_stmt = analysis_stmt.options(
-        defer(sa(Analysis.pipeline_definition)),
-        defer(sa(Analysis.description)),
-        defer(sa(Analysis.status)),
-        defer(sa(Analysis.result_path)),
-        defer(sa(Analysis.owner_id)),
-    ).order_by(col(Analysis.updated_at).desc(), col(Analysis.id).asc())
-    analyses = list(session.execute(analysis_stmt).scalars())
-    return [
-        AnalysisGalleryItemSchema.model_validate(
-            {
-                'id': analysis.id,
-                'name': analysis.name,
-                'thumbnail': analysis.thumbnail,
-                'created_at': analysis.created_at,
-                'updated_at': analysis.updated_at,
-                'revision': analysis.revision,
-                'is_favorite': True,
-            }
-        )
-        for analysis in analyses
-    ]
-
-
-def list_analysis_templates() -> list[dict[str, Any]]:
-    return list_templates()
-
-
-def get_analysis_template(template_id: str) -> dict[str, Any]:
-    return get_template(template_id).to_detail()
+    return _gallery_items(session, analysis_stmt, is_favorite=True)
 
 
 def duplicate_analysis(
@@ -630,9 +509,7 @@ def duplicate_analysis(
     data: DuplicateAnalysisSchema,
     owner_id: str | None = None,
 ) -> AnalysisResponseSchema:
-    original = session.get(Analysis, analysis_id)
-    if not original:
-        raise analysis_not_found(analysis_id)
+    original = _require_analysis(session, analysis_id)
     name = data.name or timestamped_analysis_name(f'Copy of {original.name}')
 
     pipeline = deepcopy(original.pipeline_definition)
@@ -699,22 +576,7 @@ def duplicate_analysis(
                 if source_id not in output_id_map:
                     raise ValueError(f"Duplicate source references missing output '{source_id}'")
                 datasource['id'] = output_id_map[source_id]
-        for step in tab.get('steps', []):
-            if not isinstance(step, dict):
-                continue
-            depends_on = step.get('depends_on')
-            if isinstance(depends_on, list):
-                step['depends_on'] = [step_id_map.get(str(dep_id), str(dep_id)) for dep_id in depends_on]
-            config = step.get('config')
-            if isinstance(config, dict):
-                right_source = config.get('right_source')
-                if isinstance(right_source, str):
-                    config['right_source'] = output_id_map.get(right_source) or tab_id_map.get(right_source) or right_source
-                sources = config.get('sources')
-                if isinstance(sources, list):
-                    config['sources'] = [
-                        output_id_map.get(source) or tab_id_map.get(source) or source if isinstance(source, str) else source for source in sources
-                    ]
+        _remap_step_references(tab.get('steps', []), step_id_map, {**tab_id_map, **output_id_map})
 
     payload = AnalysisCreateSchema(
         name=name,
@@ -754,11 +616,9 @@ def generate_analysis_pipeline(
     if not data.datasources:
         raise ValueError('At least one datasource is required for generation')
 
-    selected_datasources: list[DataSource] = []
     datasource_schemas: list[dict[str, Any]] = []
     for item in data.datasources:
         datasource = _require_visible_analysis_input(session, item.id)
-        selected_datasources.append(datasource)
         schema_cache = datasource.schema_cache if isinstance(datasource.schema_cache, dict) else {}
         datasource_schemas.append(
             {
@@ -775,18 +635,14 @@ def generate_analysis_pipeline(
     if not model_name:
         raise ValueError('No model configured for the selected AI provider')
 
-    operation_summaries = []
-    from modules.analysis.step_schemas import get_step_catalog
-
-    operation_catalog = get_step_catalog()
-    for operation in operation_catalog:
-        operation_summaries.append(
-            {
-                'type': operation['type'],
-                'description': operation['description'],
-                'config_schema': operation['config_schema'],
-            },
-        )
+    operation_summaries = [
+        {
+            'type': operation['type'],
+            'description': operation['description'],
+            'config_schema': operation['config_schema'],
+        }
+        for operation in get_step_catalog()
+    ]
 
     prompt = '\n'.join(
         [
@@ -865,6 +721,11 @@ def generate_analysis_pipeline(
                     'is_applied': True,
                 },
             )
+        datasource_config: dict[str, Any] = {'branch': selected.branch}
+        if selected.snapshot_id is not None:
+            datasource_config['snapshot_id'] = selected.snapshot_id
+        if selected.snapshot_timestamp_ms is not None:
+            datasource_config['snapshot_timestamp_ms'] = selected.snapshot_timestamp_ms
         tabs_payload.append(
             TabSchema.model_validate(
                 {
@@ -874,7 +735,7 @@ def generate_analysis_pipeline(
                     'datasource': {
                         'id': datasource_id,
                         'analysis_tab_id': None,
-                        'config': _datasource_config_from_request(selected),
+                        'config': datasource_config,
                     },
                     'output': _build_output_config(data.name, tab_name, branch, index),
                     'steps': built_steps,
@@ -898,10 +759,7 @@ def update_analysis(
     analysis_id: str,
     data: AnalysisUpdateSchema,
 ) -> AnalysisResponseSchema:
-    analysis = session.get(Analysis, analysis_id)
-
-    if not analysis:
-        raise analysis_not_found(analysis_id)
+    analysis = _require_analysis(session, analysis_id)
 
     version_service.create_version(session, analysis)
 
@@ -938,9 +796,7 @@ def set_favorite(
     user_id: str,
     is_favorite: bool,
 ) -> dict[str, Any]:
-    analysis = session.get(Analysis, analysis_id)
-    if not analysis:
-        raise analysis_not_found(analysis_id)
+    _require_analysis(session, analysis_id)
 
     stmt = select(AnalysisFavorite).where(
         col(AnalysisFavorite.user_id) == user_id,
@@ -964,10 +820,7 @@ def delete_analysis(
     session: Session,
     analysis_id: str,
 ) -> None:
-    analysis = session.get(Analysis, analysis_id)
-
-    if not analysis:
-        raise analysis_not_found(analysis_id)
+    analysis = _require_analysis(session, analysis_id)
 
     created_datasources = (
         session.execute(
@@ -1000,9 +853,7 @@ def add_step(
     position: int | None = None,
     depends_on: list[str] | None = None,
 ) -> PipelineStep:
-    analysis = session.get(Analysis, analysis_id)
-    if not analysis:
-        raise analysis_not_found(analysis_id)
+    analysis = _require_analysis(session, analysis_id)
 
     version_service.create_version(session, analysis)
 
@@ -1019,19 +870,13 @@ def add_step(
     # in-scope. External ids must be in the visible input catalog (404 if outside).
     pipeline_source_ids = tab_ids | {t.datasource.id for t in pipeline.tabs if t.datasource.id}
 
-    def _assert_step_source(src_id: str) -> None:
-        if src_id in pipeline_source_ids:
-            return
-        _require_visible_analysis_input(session, src_id)
-
-    right_source = config.get('right_source')
-    if right_source:
-        _assert_step_source(str(right_source))
+    referenced_ids = [str(right_source)] if (right_source := config.get('right_source')) else []
     sources = config.get('sources')
     if isinstance(sources, list):
-        for src in sources:
-            if isinstance(src, str):
-                _assert_step_source(src)
+        referenced_ids.extend(src for src in sources if isinstance(src, str))
+    for src_id in referenced_ids:
+        if src_id not in pipeline_source_ids:
+            _require_visible_analysis_input(session, src_id)
 
     step = PipelineStep(
         id=str(uuid.uuid4()),
@@ -1047,11 +892,7 @@ def add_step(
         pos = max(0, min(position, len(tab.steps)))
         tab.steps.insert(pos, step)
 
-    analysis.pipeline_definition = pipeline.to_dict()
-    flag_modified(analysis, 'pipeline_definition')
-    analysis.updated_at = datetime.now(UTC).replace(tzinfo=None)
-    analysis.revision += 1
-    session.commit()
+    _save_pipeline(session, analysis, pipeline)
     session.refresh(analysis)
     return step
 
@@ -1063,9 +904,7 @@ def get_step(
     step_id: str,
 ) -> PipelineStep:
     """Get a step by ID from an analysis tab."""
-    analysis = session.get(Analysis, analysis_id)
-    if not analysis:
-        raise analysis_not_found(analysis_id)
+    analysis = _require_analysis(session, analysis_id)
     pipeline = analysis.pipeline
     tab = pipeline.find_tab(tab_id)
     step = next((s for s in tab.steps if s.id == step_id), None)
@@ -1082,9 +921,7 @@ def update_step(
     config: dict[str, object] | None = None,
     step_type: str | None = None,
 ) -> PipelineStep:
-    analysis = session.get(Analysis, analysis_id)
-    if not analysis:
-        raise analysis_not_found(analysis_id)
+    analysis = _require_analysis(session, analysis_id)
 
     version_service.create_version(session, analysis)
 
@@ -1100,11 +937,7 @@ def update_step(
     if config is not None:
         step.config = config
 
-    analysis.pipeline_definition = pipeline.to_dict()
-    flag_modified(analysis, 'pipeline_definition')
-    analysis.updated_at = datetime.now(UTC).replace(tzinfo=None)
-    analysis.revision += 1
-    session.commit()
+    _save_pipeline(session, analysis, pipeline)
     session.refresh(analysis)
     return step
 
@@ -1115,9 +948,7 @@ def remove_step(
     tab_id: str,
     step_id: str,
 ) -> None:
-    analysis = session.get(Analysis, analysis_id)
-    if not analysis:
-        raise analysis_not_found(analysis_id)
+    analysis = _require_analysis(session, analysis_id)
 
     version_service.create_version(session, analysis)
 
@@ -1134,11 +965,7 @@ def remove_step(
         if step_id in s.depends_on:
             s.depends_on.remove(step_id)
 
-    analysis.pipeline_definition = pipeline.to_dict()
-    flag_modified(analysis, 'pipeline_definition')
-    analysis.updated_at = datetime.now(UTC).replace(tzinfo=None)
-    analysis.revision += 1
-    session.commit()
+    _save_pipeline(session, analysis, pipeline)
 
 
 def derive_tab(
@@ -1148,9 +975,7 @@ def derive_tab(
     name: str | None = None,
 ) -> PipelineTab:
     """Create a new tab whose datasource is the given tab's output result_id."""
-    analysis = session.get(Analysis, analysis_id)
-    if not analysis:
-        raise analysis_not_found(analysis_id)
+    analysis = _require_analysis(session, analysis_id)
 
     version_service.create_version(session, analysis)
 
@@ -1189,11 +1014,7 @@ def derive_tab(
     )
 
     pipeline.tabs.append(new_tab)
-    analysis.pipeline_definition = pipeline.to_dict()
-    flag_modified(analysis, 'pipeline_definition')
-    analysis.updated_at = datetime.now(UTC).replace(tzinfo=None)
-    analysis.revision += 1
-    session.commit()
+    _save_pipeline(session, analysis, pipeline)
     session.refresh(analysis)
     return new_tab
 
@@ -1226,9 +1047,7 @@ def duplicate_tab(
     name: str | None = None,
 ) -> PipelineTab:
     """Duplicate an existing tab in-place with fresh tab/step/output identities."""
-    analysis = session.get(Analysis, analysis_id)
-    if not analysis:
-        raise analysis_not_found(analysis_id)
+    analysis = _require_analysis(session, analysis_id)
 
     version_service.create_version(session, analysis)
 
@@ -1286,15 +1105,7 @@ def duplicate_tab(
         steps=duplicated_steps,
     )
 
-    source_idx = next((idx for idx, tab in enumerate(pipeline.tabs) if tab.id == tab_id), -1)
-    if source_idx < 0:
-        raise ValueError(f'Tab {tab_id} not found')
-
-    pipeline.tabs.insert(source_idx + 1, duplicated_tab)
-    analysis.pipeline_definition = pipeline.to_dict()
-    flag_modified(analysis, 'pipeline_definition')
-    analysis.updated_at = datetime.now(UTC).replace(tzinfo=None)
-    analysis.revision += 1
-    session.commit()
+    pipeline.tabs.insert(pipeline.tabs.index(source) + 1, duplicated_tab)
+    _save_pipeline(session, analysis, pipeline)
     session.refresh(analysis)
     return duplicated_tab

@@ -4,7 +4,6 @@ from typing import Any, cast
 from google.protobuf import json_format, struct_pb2, timestamp_pb2
 
 from dataforge_protocol import datasource_pb2, enums_pb2
-from runtime.json_values import dict_to_struct as dict_to_struct
 
 
 def struct_to_dict(payload: struct_pb2.Struct) -> dict[str, object]:

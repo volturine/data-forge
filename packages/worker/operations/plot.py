@@ -1,6 +1,5 @@
 import logging
 from collections.abc import Callable
-from dataclasses import dataclass
 from typing import cast
 
 import polars as pl
@@ -186,12 +185,7 @@ class ChartHandler(OperationHandler):
     Visualization data is computed separately via compute_chart_data().
     """
 
-    def __call__(
-        self,
-        lf: pl.LazyFrame,
-        params: dict,
-        **_,
-    ) -> pl.LazyFrame:
+    def __call__(self, lf: pl.LazyFrame, params: dict, **_) -> pl.LazyFrame:
         # Validate params but return input unchanged — chart is pass-through
         ChartParams.model_validate(params)
         return lf
@@ -200,41 +194,21 @@ class ChartHandler(OperationHandler):
 # --- Chart computation functions (used by compute_chart_data) ---
 
 
-ChartAggregationExpr = Callable[[str], pl.Expr]
-
-
-@dataclass(frozen=True, slots=True)
-class ChartAggregationDefinition:
-    aggregation: ChartAggregation
-    expr_factory: ChartAggregationExpr
-
-    @classmethod
-    def require(cls, value: ChartAggregation | str) -> ChartAggregationDefinition:
-        try:
-            aggregation = ChartAggregation.require(value)
-        except ValueError as exc:
-            raise ValueError(f"Unsupported chart aggregation: {value}") from exc
-        return CHART_AGGREGATION_DEFINITIONS[aggregation]
-
-    def apply(self, column: str, *, alias: str = "y") -> pl.Expr:
-        return self.expr_factory(column).alias(alias)
-
-
-CHART_AGGREGATION_DEFINITIONS: dict[ChartAggregation, ChartAggregationDefinition] = {
-    ChartAggregation.SUM: ChartAggregationDefinition(ChartAggregation.SUM, lambda column: pl.col(column).sum()),
-    ChartAggregation.MEAN: ChartAggregationDefinition(ChartAggregation.MEAN, lambda column: pl.col(column).mean()),
-    ChartAggregation.COUNT: ChartAggregationDefinition(ChartAggregation.COUNT, lambda column: pl.col(column).count()),
-    ChartAggregation.MIN: ChartAggregationDefinition(ChartAggregation.MIN, lambda column: pl.col(column).min()),
-    ChartAggregation.MAX: ChartAggregationDefinition(ChartAggregation.MAX, lambda column: pl.col(column).max()),
-    ChartAggregation.MEDIAN: ChartAggregationDefinition(ChartAggregation.MEDIAN, lambda column: pl.col(column).median()),
-    ChartAggregation.STD: ChartAggregationDefinition(ChartAggregation.STD, lambda column: pl.col(column).std()),
-    ChartAggregation.VARIANCE: ChartAggregationDefinition(ChartAggregation.VARIANCE, lambda column: pl.col(column).var()),
-    ChartAggregation.UNIQUE_COUNT: ChartAggregationDefinition(ChartAggregation.UNIQUE_COUNT, lambda column: pl.col(column).n_unique()),
+_CHART_AGGREGATION_EXPRS: dict[ChartAggregation, Callable[[str], pl.Expr]] = {
+    ChartAggregation.SUM: lambda column: pl.col(column).sum(),
+    ChartAggregation.MEAN: lambda column: pl.col(column).mean(),
+    ChartAggregation.COUNT: lambda column: pl.col(column).count(),
+    ChartAggregation.MIN: lambda column: pl.col(column).min(),
+    ChartAggregation.MAX: lambda column: pl.col(column).max(),
+    ChartAggregation.MEDIAN: lambda column: pl.col(column).median(),
+    ChartAggregation.STD: lambda column: pl.col(column).std(),
+    ChartAggregation.VARIANCE: lambda column: pl.col(column).var(),
+    ChartAggregation.UNIQUE_COUNT: lambda column: pl.col(column).n_unique(),
 }
 
 
 def _agg_expr(col: str, agg: ChartAggregation, *, alias: str = "y") -> pl.Expr:
-    return ChartAggregationDefinition.require(agg).apply(col, alias=alias)
+    return _CHART_AGGREGATION_EXPRS[agg](col).alias(alias)
 
 
 def _apply_sort(df: pl.LazyFrame, p: ChartParams) -> pl.LazyFrame:
@@ -284,14 +258,6 @@ def _apply_date_bucket(lf: pl.LazyFrame, column: str, p: ChartParams) -> pl.Lazy
     return lf
 
 
-def _group_sort_value_col(p: ChartParams) -> str | None:
-    if p.group_sort_by == GroupSortBy.CUSTOM and p.group_sort_column:
-        return p.group_sort_column
-    if p.group_sort_by == GroupSortBy.VALUE:
-        return "y"
-    return None
-
-
 def _apply_group_sort(
     df: pl.LazyFrame,
     p: ChartParams,
@@ -313,7 +279,11 @@ def _apply_group_sort(
     if p.group_sort_by == GroupSortBy.NAME:
         order = df.select(pl.col(group_key)).unique().sort(group_key, descending=descending)
 
-    value_col = _group_sort_value_col(p)
+    value_col: str | None = None
+    if p.group_sort_by == GroupSortBy.CUSTOM and p.group_sort_column:
+        value_col = p.group_sort_column
+    elif p.group_sort_by == GroupSortBy.VALUE:
+        value_col = "y"
     if value_col is not None and value_col not in schema:
         if order_lf is None:
             return df
@@ -458,28 +428,14 @@ def _build_boxplot(lf: pl.LazyFrame, p: ChartParams) -> pl.LazyFrame:
     col = p.x_column if not p.y_column else p.y_column
     group_col = p.x_column if p.y_column else None
 
-    if group_col:
-        result = (
-            lf.group_by(group_col)
-            .agg(
-                pl.col(col).min().alias("min"),
-                pl.col(col).quantile(0.25).alias("q1"),
-                pl.col(col).median().alias("median"),
-                pl.col(col).quantile(0.75).alias("q3"),
-                pl.col(col).max().alias("max"),
-            )
-            .sort(group_col)
-            .rename({group_col: "group"})
-        )
-    else:
-        result = lf.select(
-            pl.col(col).min().alias("min"),
-            pl.col(col).quantile(0.25).alias("q1"),
-            pl.col(col).median().alias("median"),
-            pl.col(col).quantile(0.75).alias("q3"),
-            pl.col(col).max().alias("max"),
-            pl.lit("all").alias("group"),
-        )
+    stats = [
+        pl.col(col).min().alias("min"),
+        pl.col(col).quantile(0.25).alias("q1"),
+        pl.col(col).median().alias("median"),
+        pl.col(col).quantile(0.75).alias("q3"),
+        pl.col(col).max().alias("max"),
+    ]
+    result = lf.group_by(group_col).agg(stats).sort(group_col).rename({group_col: "group"}) if group_col else lf.select(*stats, pl.lit("all").alias("group"))
     if p.sort_by == SortBy.CUSTOM and p.sort_column:
         return result.sort(p.sort_column, descending=p.sort_order == SortDirection.DESC)
     return result

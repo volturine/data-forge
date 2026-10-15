@@ -48,12 +48,6 @@ def _connect(database_url: str) -> psycopg.Connection:
     return psycopg.connect(database_url, autocommit=True)
 
 
-def _normalized_database_url(database_url: str) -> str:
-    if database_url.startswith('postgresql+psycopg://'):
-        return database_url.replace('postgresql+psycopg://', 'postgresql://', 1)
-    return database_url
-
-
 def _database_exists(database_url: str) -> bool:
     try:
         with _connect(database_url):
@@ -66,13 +60,8 @@ def _database_exists(database_url: str) -> bool:
         raise
 
 
-def _maintenance_database_url(database_url: str) -> str:
-    parsed = urlparse(database_url)
-    return urlunparse(parsed._replace(path='/postgres'))
-
-
 def ensure_database_exists(database_url: str | None = None) -> None:
-    target_url = _normalized_database_url(database_url or settings.database_url)
+    target_url = (database_url or settings.database_url).replace('postgresql+psycopg://', 'postgresql://', 1)
     if _database_exists(target_url):
         return
 
@@ -84,7 +73,7 @@ def ensure_database_exists(database_url: str | None = None) -> None:
     if not owner:
         raise ValueError('DATABASE_URL must include a username')
 
-    maintenance_url = _maintenance_database_url(target_url)
+    maintenance_url = urlunparse(parsed._replace(path='/postgres'))
     with _connect(maintenance_url) as connection, connection.cursor() as cursor:
         cursor.execute('SELECT 1 FROM pg_database WHERE datname = %s', (database,))
         if cursor.fetchone() is not None:
@@ -92,30 +81,18 @@ def ensure_database_exists(database_url: str | None = None) -> None:
         cursor.execute(sql.SQL('CREATE DATABASE {} OWNER {}').format(sql.Identifier(database), sql.Identifier(owner)))
 
 
-def _has_version_table(schema: str) -> bool:
-    engine = create_engine(settings.database_url, pool_pre_ping=True)
+def _current_revision(schema: str) -> str | None:
+    engine = create_engine(settings.database_url, poolclass=pool.NullPool)
     try:
         with engine.begin() as connection:
-            row = connection.execute(
+            has_version_table = connection.execute(
                 text('SELECT 1 FROM information_schema.tables WHERE table_schema = :schema AND table_name = :table_name'),
                 {'schema': schema, 'table_name': 'alembic_version'},
             ).first()
-        return row is not None
-    finally:
-        engine.dispose()
-
-
-def _current_revision(schema: str) -> str | None:
-    if not _has_version_table(schema):
-        return None
-    engine = create_engine(settings.database_url, pool_pre_ping=True)
-    try:
-        with engine.begin() as connection:
-            row = connection.execute(text(f'SELECT version_num FROM "{schema}".alembic_version LIMIT 1')).first()
-        if row is None:
-            return None
-        value = row[0]
-        return str(value) if isinstance(value, str) else None
+            if has_version_table is None:
+                return None
+            value = connection.execute(text(f'SELECT version_num FROM "{schema}".alembic_version LIMIT 1')).scalar()
+        return value if isinstance(value, str) else None
     finally:
         engine.dispose()
 

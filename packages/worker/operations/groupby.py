@@ -64,12 +64,7 @@ GROUPBY_AGGREGATION_DEFINITIONS: dict[GroupByAggregationFunction, GroupByAggrega
 
 
 class GroupByHandler(OperationHandler):
-    def __call__(
-        self,
-        lf: pl.LazyFrame,
-        params: dict,
-        **_,
-    ) -> pl.LazyFrame:
+    def __call__(self, lf: pl.LazyFrame, params: dict, **_) -> pl.LazyFrame:
         validated = GroupByParams.model_validate(params)
         exprs = [
             GroupByAggregationDefinition.require(aggregation.function)

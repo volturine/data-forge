@@ -29,10 +29,10 @@ def test_worker_datasource_enums_keep_string_storage_with_protocol_numbers() -> 
     assert DataSourceType.ICEBERG.number == enums_pb2.DATA_SOURCE_TYPE_ICEBERG
     assert DataSourceType.require(enums_pb2.DATA_SOURCE_TYPE_ICEBERG) == DataSourceType.ICEBERG
     assert DataSourceType.require("iceberg") is DataSourceType.ICEBERG
-    assert [item.value for item in DataSourceFileType.members()] == ["csv", "parquet", "json", "ndjson", "excel"]
+    assert DataSourceFileType.values() == ["csv", "parquet", "json", "ndjson", "excel"]
     assert DataSourceLoadType.DUCKDB.number == enums_pb2.DATA_SOURCE_LOAD_TYPE_DUCKDB
     assert DataSourceLoadType.require(enums_pb2.DATA_SOURCE_LOAD_TYPE_DATABASE) is DataSourceLoadType.DATABASE
-    assert [item.value for item in DataSourceLoadType.members()] == ["file", "database", "duckdb", "iceberg"]
+    assert DataSourceLoadType.values() == ["file", "database", "duckdb", "iceberg"]
     assert IcebergReader.NATIVE.number == enums_pb2.ICEBERG_READER_NATIVE
     assert IcebergReader.require("native") is IcebergReader.NATIVE
 

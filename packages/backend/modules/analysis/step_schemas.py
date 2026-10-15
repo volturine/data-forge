@@ -581,51 +581,6 @@ STEP_CATALOG: dict[str, StepCatalogEntry] = {
         'category': 'visualization',
         'config': ChartConfig,
     },
-    'plot_bar': {
-        'description': 'Bar chart visualization (alias for chart with chart_type=bar).',
-        'category': 'visualization',
-        'config': ChartConfig,
-    },
-    'plot_horizontal_bar': {
-        'description': 'Horizontal bar chart (alias for chart with chart_type=horizontal_bar).',
-        'category': 'visualization',
-        'config': ChartConfig,
-    },
-    'plot_area': {
-        'description': 'Area chart visualization (alias for chart with chart_type=area).',
-        'category': 'visualization',
-        'config': ChartConfig,
-    },
-    'plot_heatgrid': {
-        'description': 'Heatgrid visualization (alias for chart with chart_type=heatgrid).',
-        'category': 'visualization',
-        'config': ChartConfig,
-    },
-    'plot_histogram': {
-        'description': 'Histogram visualization (alias for chart with chart_type=histogram).',
-        'category': 'visualization',
-        'config': ChartConfig,
-    },
-    'plot_scatter': {
-        'description': 'Scatter plot visualization (alias for chart with chart_type=scatter).',
-        'category': 'visualization',
-        'config': ChartConfig,
-    },
-    'plot_line': {
-        'description': 'Line chart visualization (alias for chart with chart_type=line).',
-        'category': 'visualization',
-        'config': ChartConfig,
-    },
-    'plot_pie': {
-        'description': 'Pie chart visualization (alias for chart with chart_type=pie).',
-        'category': 'visualization',
-        'config': ChartConfig,
-    },
-    'plot_boxplot': {
-        'description': 'Boxplot visualization (alias for chart with chart_type=boxplot).',
-        'category': 'visualization',
-        'config': ChartConfig,
-    },
     'ai': {
         'description': (
             'Run AI inference on rows using Ollama or OpenRouter. Configure input columns, prompt template with {{column}} placeholders, and output column.'
@@ -659,12 +614,16 @@ def get_step_catalog() -> list[StepCatalogItem]:
     return result
 
 
-def normalize_step_config(step_type: str, config: dict) -> dict[str, object]:
-    """Validate and return the canonical config for a step type."""
+def _config_model(step_type: str) -> type[BaseModel]:
+    """Return the config schema for a step type; plot aliases share the chart schema."""
     if not STEP_TYPES.has(step_type):
         raise ValueError(f"Unknown step type '{step_type}'")
-    model = cast(type[BaseModel], STEP_CATALOG[step_type]['config'])
-    return model.model_validate(config).model_dump(mode='json', by_alias=True)
+    return cast(type[BaseModel], STEP_CATALOG[STEP_TYPES.normalized(step_type)]['config'])
+
+
+def normalize_step_config(step_type: str, config: dict) -> dict[str, object]:
+    """Validate and return the canonical config for a step type."""
+    return _config_model(step_type).model_validate(config).model_dump(mode='json', by_alias=True)
 
 
 def _filter_value_for_protocol(value: object) -> dict[str, object] | None:
@@ -683,10 +642,7 @@ def _filter_value_for_protocol(value: object) -> dict[str, object] | None:
 
 def normalize_step_config_for_protocol(step_type: str, config: dict) -> dict[str, object]:
     """Validate an HTTP operation config and serialize its typed protocol fields."""
-    if not STEP_TYPES.has(step_type):
-        raise ValueError(f"Unknown step type '{step_type}'")
-    model = cast(type[BaseModel], STEP_CATALOG[step_type]['config'])
-    validated_config = model.model_validate(config)
+    validated_config = _config_model(step_type).model_validate(config)
     payload = cast(
         dict[str, object],
         validated_config.model_dump(

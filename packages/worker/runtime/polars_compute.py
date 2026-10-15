@@ -12,7 +12,7 @@ from operations.datasource import load_datasource
 from operations.plot import ChartParams, compute_chart_data, compute_overlay_datasets
 from operations.step_converter import BackendStep, convert_step_format
 from runtime.compute_utils import apply_steps, normalize_timezones
-from runtime.domain.analysis.step_types import chart_type_for_step, is_chart_step_type
+from runtime.domain.analysis.step_types import STEP_TYPES
 from runtime.exceptions import IcebergMetadataPathNotFoundError, PipelineValidationError
 from runtime.export_formats import get_export_format
 
@@ -46,7 +46,7 @@ def _build_pipeline_details(
     job_id: str,
     additional_datasources: dict[str, dict] | None = None,
     progress_callback: Callable[[dict[str, object]], None] | None = None,
-) -> tuple[pl.LazyFrame, dict[str, float], list[pl.LazyFrame], float]:
+) -> tuple[pl.LazyFrame, dict[str, float], float]:
     read_started = time.perf_counter()
     lf = load_datasource(datasource_config)
     read_duration_ms = (time.perf_counter() - read_started) * 1000
@@ -65,7 +65,7 @@ def _build_pipeline_details(
     steps = apply_steps(steps)
 
     if not steps:
-        return lf, {}, [lf], read_duration_ms
+        return lf, {}, read_duration_ms
 
     step_map: dict[str, dict] = {}
     for step in steps:
@@ -118,7 +118,6 @@ def _build_pipeline_details(
     schema_map: dict[str, pl.LazyFrame] = {}
     total_steps = len(ordered_steps)
     step_timings: dict[str, float] = {}
-    plan_frames: list[pl.LazyFrame] = []
 
     for idx, step in enumerate(ordered_steps):
         # Convert frontend format to backend format
@@ -208,64 +207,22 @@ def _build_pipeline_details(
                 }
             )
 
-    # Return the final LazyFrame
-    last_step = ordered_steps[-1]
-    last_id = last_step.get("id")
-    if not last_id:
-        raise ValueError("Each pipeline step must include an id")
-    last_frame = schema_map.get(last_id)
-    if last_frame is None:
-        raise ValueError(f"Missing frame for step {last_id}")
-
-    plan_frames.append(last_frame)
-
-    return last_frame, step_timings, plan_frames, read_duration_ms
+    return schema_map[ordered_steps[-1]["id"]], step_timings, read_duration_ms
 
 
-def _merge_query_plans(plans: list[dict | None]) -> dict | None:
-    if not plans:
-        return None
-    optimized_parts: list[str] = []
-    unoptimized_parts: list[str] = []
-    for plan in plans:
-        if not plan:
-            continue
-        optimized = plan.get("optimized")
-        unoptimized = plan.get("unoptimized")
-        if isinstance(optimized, str):
-            optimized_parts.append(optimized)
-        if isinstance(unoptimized, str):
-            unoptimized_parts.append(unoptimized)
-
-    if not optimized_parts and not unoptimized_parts:
-        return None
-    return {
-        "optimized": "".join(optimized_parts),
-        "unoptimized": "".join(unoptimized_parts),
-    }
-
-
-def _get_query_plans(lf: pl.LazyFrame) -> dict | None:
-    if not hasattr(lf, "explain"):
-        return None
-
-    optimized = lf.explain(optimized=True)
-    unoptimized = lf.explain(optimized=False)
-
-    return {
-        "optimized": optimized,
-        "unoptimized": unoptimized,
-    }
-
-
-def _extract_plans(
-    plan_frames: list[pl.LazyFrame],
-) -> tuple[dict | None, str | None]:
-    """Build merged query plans and return (query_plans, optimized_plan_str)."""
-    segments = [_get_query_plans(f) for f in plan_frames]
-    query_plans = _merge_query_plans(segments)
-    query_plan = query_plans.get("optimized") if query_plans else None
-    return query_plans, query_plan
+def _build_pipeline_with_plans(
+    datasource_config: dict,
+    steps: list[dict],
+    job_id: str,
+    additional_datasources: dict[str, dict] | None,
+    progress_callback: Callable[[dict[str, object]], None] | None,
+) -> tuple[pl.LazyFrame, dict[str, float], float, dict[str, str]]:
+    """Build the pipeline frame and report its optimized/unoptimized query plans."""
+    lf, step_timings, read_duration_ms = _build_pipeline_details(datasource_config, steps, job_id, additional_datasources, progress_callback)
+    query_plans = {"optimized": lf.explain(optimized=True), "unoptimized": lf.explain(optimized=False)}
+    if progress_callback is not None:
+        progress_callback({"type": "plan", "optimized_plan": query_plans["optimized"], "unoptimized_plan": query_plans["unoptimized"]})
+    return lf, step_timings, read_duration_ms, query_plans
 
 
 def _resolve_chart_preview(
@@ -279,11 +236,11 @@ def _resolve_chart_preview(
         return lf, None
     last_step = steps[-1]
     last_type = str(last_step.get("type", ""))
-    if not is_chart_step_type(last_type):
+    if not STEP_TYPES.is_chart_step_type(last_type):
         return lf, None
 
     chart_config = last_step.get("config", {})
-    chart_type = chart_type_for_step(last_type)
+    chart_type = STEP_TYPES.chart_type(last_type)
     if chart_type:
         chart_config = {**chart_config, "chart_type": chart_type}
     chart_model = ChartParams.model_validate(chart_config)
@@ -317,22 +274,7 @@ def execute_preview(
     progress_callback: Callable[[dict[str, object]], None] | None = None,
 ) -> dict:
     """Execute pipeline and return limited rows for preview."""
-    lf, step_timings, plan_frames, read_duration_ms = _build_pipeline_details(
-        datasource_config,
-        steps,
-        job_id,
-        additional_datasources,
-        progress_callback,
-    )
-    query_plans, query_plan = _extract_plans(plan_frames)
-    if progress_callback is not None and query_plans:
-        progress_callback(
-            {
-                "type": "plan",
-                "optimized_plan": query_plans.get("optimized") or "",
-                "unoptimized_plan": query_plans.get("unoptimized") or "",
-            }
-        )
+    lf, step_timings, read_duration_ms, query_plans = _build_pipeline_with_plans(datasource_config, steps, job_id, additional_datasources, progress_callback)
 
     preview_lf, metadata = _resolve_chart_preview(lf, steps, row_limit, offset)
 
@@ -350,7 +292,7 @@ def execute_preview(
         "schema": schema,
         "row_count": preview_df.height,  # Rows in this preview page
         "data": preview_df.to_dicts(),
-        "query_plan": query_plan,
+        "query_plan": query_plans["optimized"],
         "query_plans": query_plans,
         "step_timings": step_timings,
         "read_duration_ms": read_duration_ms,
@@ -373,22 +315,7 @@ def execute_export(
     progress_callback: Callable[[dict[str, object]], None] | None = None,
 ) -> dict:
     """Execute pipeline and write full results to file."""
-    lf, step_timings, plan_frames, read_duration_ms = _build_pipeline_details(
-        datasource_config,
-        steps,
-        job_id,
-        additional_datasources,
-        progress_callback,
-    )
-    query_plans, query_plan = _extract_plans(plan_frames)
-    if progress_callback is not None and query_plans:
-        progress_callback(
-            {
-                "type": "plan",
-                "optimized_plan": query_plans.get("optimized") or "",
-                "unoptimized_plan": query_plans.get("unoptimized") or "",
-            }
-        )
+    lf, step_timings, read_duration_ms, query_plans = _build_pipeline_with_plans(datasource_config, steps, job_id, additional_datasources, progress_callback)
 
     fmt = get_export_format(export_format)
     schema = {col: str(dtype) for col, dtype in lf.collect_schema().items()}
@@ -408,7 +335,7 @@ def execute_export(
         "export_format": export_format,
         "row_count": row_count,
         "schema": schema,
-        "query_plan": query_plan,
+        "query_plan": query_plans["optimized"],
         "query_plans": query_plans,
         "step_timings": step_timings,
         "read_duration_ms": read_duration_ms,
@@ -424,33 +351,15 @@ def execute_schema(
     progress_callback: Callable[[dict[str, object]], None] | None = None,
 ) -> dict:
     """Execute pipeline and return schema without collecting full data."""
-    lf, step_timings, plan_frames, read_duration_ms = _build_pipeline_details(
-        datasource_config,
-        steps,
-        job_id,
-        additional_datasources,
-        progress_callback,
-    )
-
+    lf, step_timings, read_duration_ms, query_plans = _build_pipeline_with_plans(datasource_config, steps, job_id, additional_datasources, progress_callback)
     # Get schema from lazy frame (no full collection needed)
-    schema_obj = lf.collect_schema()
-    schema = {col: str(dtype) for col, dtype in schema_obj.items()}
-
-    query_plans, query_plan = _extract_plans(plan_frames)
-    if progress_callback is not None and query_plans:
-        progress_callback(
-            {
-                "type": "plan",
-                "optimized_plan": query_plans.get("optimized") or "",
-                "unoptimized_plan": query_plans.get("unoptimized") or "",
-            }
-        )
+    schema = {col: str(dtype) for col, dtype in lf.collect_schema().items()}
 
     return {
         "schema": schema,
         "columns": list(schema.keys()),
         "step_timings": step_timings,
-        "query_plan": query_plan,
+        "query_plan": query_plans["optimized"],
         "query_plans": query_plans,
         "read_duration_ms": read_duration_ms,
     }
@@ -464,23 +373,7 @@ def execute_row_count(
     progress_callback: Callable[[dict[str, object]], None] | None = None,
 ) -> dict:
     """Execute pipeline and return row count without collecting full data."""
-    lf, step_timings, plan_frames, read_duration_ms = _build_pipeline_details(
-        datasource_config,
-        steps,
-        job_id,
-        additional_datasources,
-        progress_callback,
-    )
-
-    query_plans, query_plan = _extract_plans(plan_frames)
-    if progress_callback is not None and query_plans:
-        progress_callback(
-            {
-                "type": "plan",
-                "optimized_plan": query_plans.get("optimized") or "",
-                "unoptimized_plan": query_plans.get("unoptimized") or "",
-            }
-        )
+    lf, step_timings, read_duration_ms, query_plans = _build_pipeline_with_plans(datasource_config, steps, job_id, additional_datasources, progress_callback)
 
     collect_started = time.perf_counter()
     row_count = lf.select(pl.len()).collect().item()
@@ -489,7 +382,7 @@ def execute_row_count(
     return {
         "row_count": int(row_count),
         "step_timings": step_timings,
-        "query_plan": query_plan,
+        "query_plan": query_plans["optimized"],
         "query_plans": query_plans,
         "read_duration_ms": read_duration_ms,
         "collect_duration_ms": collect_duration_ms,

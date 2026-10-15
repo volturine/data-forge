@@ -92,7 +92,7 @@ def test_datasource_schema_publication_carries_metadata_revision_and_claim(monke
     def fail_local_compute(*_args, **_kwargs):
         raise AssertionError("Datasource schema extraction ran in the manager")
 
-    monkeypatch.setattr(datasource_execution, "_extract_schema_from_metadata", fail_local_compute)
+    monkeypatch.setattr(datasource_execution, "get_datasource_schema_from_metadata", fail_local_compute)
     command = compute_pb2.ComputeCommand()
     command.datasource.schema.CopyFrom(datasource_pb2.DatasourceSchemaCommand(datasource_id="datasource-1", refresh=True))
     command.input_revisions.add(datasource_id="datasource-1", revision=7)
@@ -370,7 +370,7 @@ async def test_compute_request_lease_client_routes_through_batcher(monkeypatch) 
             return 45
 
     client = cast(Any, object.__new__(worker_runtime_client.WorkerRuntimeClient))
-    monkeypatch.setattr(worker_runtime_client, "_get_compute_lease_batcher", lambda _loop: Batcher())
+    monkeypatch.setattr(worker_runtime_client, "_compute_lease_batchers", {asyncio.get_running_loop(): Batcher()})
 
     renewed_ttl = await client.renew_compute_request_lease(
         request_id="request-batched",
@@ -1758,7 +1758,7 @@ def test_shutdown_compute_request_removes_active_engine_and_emits_empty_snapshot
 
     manager = ProcessManager(engine_factory=lambda _identity, _resource_config: cast(Any, engine), on_snapshot=snapshots.append)
     manager.spawn_compute_worker(identity)
-    assert manager.get_engine(identity) is engine
+    assert manager.get_engine_info(identity).engine is engine
     claimed = compute_request_runtime.ClaimedComputeRequest(
         id="req-1",
         namespace="default",
@@ -1778,7 +1778,7 @@ def test_shutdown_compute_request_removes_active_engine_and_emits_empty_snapshot
     try:
         compute_request_runtime._execute_request_sync(claimed, manager)
 
-        assert manager.get_engine(identity) is None
+        assert manager.get_engine_info(identity) is None
         assert engine.shutdown_calls == 1
         assert snapshots[-1] == []
         assert len(completed) == 1
@@ -2095,7 +2095,6 @@ async def test_run_analysis_build_stream_shuts_down_build_engine_after_completio
             datasource_id="out-1",
             datasource_name="output_table",
             result_meta={},
-            source_datasource_id="source-1",
         )
 
     monkeypatch.setattr(compute_service, "export_data", fake_export_data)
@@ -2947,7 +2946,7 @@ class TestStepTimingLabels:
                     "depends_on": [],
                 },
             ]
-            _, timings, _plan_frames, _read_duration_ms = _build_pipeline_details(config, steps, "job-1")
+            _, timings, _read_duration_ms = _build_pipeline_details(config, steps, "job-1")
             assert "select" in timings
             assert "id-abc123" not in timings
         finally:
@@ -2971,7 +2970,7 @@ class TestStepTimingLabels:
                     "depends_on": ["id-1"],
                 },
             ]
-            _, timings, _plan_frames, _read_duration_ms = _build_pipeline_details(config, steps, "job-2")
+            _, timings, _read_duration_ms = _build_pipeline_details(config, steps, "job-2")
             assert "select" in timings
             assert "select_2" in timings
         finally:

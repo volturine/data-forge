@@ -426,7 +426,7 @@ async def test_queued_same_datasource_build_releases_only_its_rid_slot_when_canc
         assert slot.references == 1
         assert manager._request_reservations[shared_key] == 1
         assert tracker.cancelled_jobs == []
-        assert manager.get_engine(shared_identity) is not None
+        assert manager.get_engine_info(shared_identity) is not None
         assert build_submissions == []
 
         tracker.release(shared_claim.id)
@@ -502,7 +502,7 @@ async def test_lease_loss_cancels_exact_job_and_joins_before_releasing_manager_s
 
         assert tracker.cancelled_jobs == [claim.id]
         assert execution_joined.is_set()
-        assert manager.get_engine(identity) is not None
+        assert manager.get_engine_info(identity) is not None
         assert manager._request_reservations == {}
         assert manager._engine_job_slots == {}
     finally:

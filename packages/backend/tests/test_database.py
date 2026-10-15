@@ -157,7 +157,7 @@ def test_namespace_provision_lock_serializes_concurrent_sessions() -> None:
 
 
 def test_namespace_migration_holds_advisory_lock_without_checking_out_pool_connection(monkeypatch) -> None:
-    lock_key = database._namespace_init_lock_key('tenant-a')
+    lock_key = database._namespace_lock_key(database._NAMESPACE_INIT_LOCK_PREFIX, 'tenant-a')
     lock_entered = False
 
     class PostgresEngine:

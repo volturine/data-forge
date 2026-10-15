@@ -15,11 +15,8 @@ from modules.mcp.models import MCPHttpMethod
 from modules.mcp.tool_output import redact_secrets
 
 
-def build_tool_context(
-    headers: dict[str, str] | None = None,
-) -> dict[str, dict[str, str]]:
-    context_headers = {k: v for k, v in (headers or {}).items() if v}
-    return {'headers': context_headers}
+def build_tool_context(headers: dict[str, str] | None = None) -> dict[str, dict[str, str]]:
+    return {'headers': {k: v for k, v in (headers or {}).items() if v}}
 
 
 def _interpolate_path(path: str, args: dict) -> tuple[str, dict]:
@@ -53,34 +50,20 @@ async def call_tool(
 ) -> dict[str, Any]:
     """Execute a tool call by invoking the app's route in-process."""
     url, remaining = _interpolate_path(path, {k: v for k, v in args.items() if k != 'payload'})
-
     method_name = method.value if isinstance(method, MCPHttpMethod) else method
 
-    transport = httpx.ASGITransport(app=app)
-    async with httpx.AsyncClient(transport=transport, base_url='http://testserver') as client:
-        payload = args.get('payload')
-        headers = {'Content-Type': 'application/json'}
-        forwarded = (context or {}).get('headers', {})
-        if isinstance(forwarded, dict):
-            for key, value in forwarded.items():
-                if not value:
-                    continue
-                headers[str(key)] = str(value)
+    headers = {'Content-Type': 'application/json'}
+    forwarded = (context or {}).get('headers', {})
+    if isinstance(forwarded, dict):
+        headers.update({str(key): str(value) for key, value in forwarded.items() if value})
 
-        query_params = {k: v for k, v in remaining.items() if k != 'payload'}
-
+    async with httpx.AsyncClient(transport=httpx.ASGITransport(app=app), base_url='http://testserver') as client:
         if method_name in ('POST', 'PUT', 'PATCH'):
-            resp = await client.request(
-                method_name,
-                url,
-                content=await serialize_json(payload) if payload is not None else b'',
-                headers=headers,
-                params=query_params,
-            )
-        elif method_name == 'DELETE':
-            resp = await client.request(method_name, url, params=query_params, headers=headers)
+            payload = args.get('payload')
+            content = await serialize_json(payload) if payload is not None else b''
+            resp = await client.request(method_name, url, content=content, headers=headers, params=remaining)
         else:
-            resp = await client.request(method_name, url, params=query_params, headers=headers)
+            resp = await client.request(method_name, url, params=remaining, headers=headers)
 
     def decode_response() -> dict[str, Any]:
         status = resp.status_code

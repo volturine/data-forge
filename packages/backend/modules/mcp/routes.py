@@ -40,8 +40,7 @@ def _resolve_tool(app: FastAPI, tool_id: str, args: dict) -> tuple[MCPToolDefini
     tool = next((t for t in registry if t.id == tool_id), None)
     if tool is None:
         raise HTTPException(status_code=404, detail=f'Tool {tool_id!r} not found')
-    valid, errors, normalized = tool.validate_arguments(args)
-    return tool, valid, errors, normalized
+    return tool, *tool.validate_arguments(args)
 
 
 class ToolRequest(BaseModel):
@@ -76,9 +75,8 @@ def list_tools(request: Request, user: User = Depends(get_current_user)) -> list
 def validate(request: Request, body: ToolRequest, user: User = Depends(get_current_user)) -> dict:
     """Validate tool args against the tool's input schema without executing."""
     del user
-    tool, valid, errors, normalized = _resolve_tool(request.app, body.tool_id, body.args)
-    if not valid:
-        return {'valid': False, 'errors': errors, 'args': body.args}
+    _tool, valid, errors, normalized = _resolve_tool(request.app, body.tool_id, body.args)
+    # Invalid arguments are returned unchanged as `normalized`.
     return {'valid': valid, 'errors': errors, 'args': normalized}
 
 
@@ -91,7 +89,6 @@ async def call(request: Request, body: ToolRequest, user: User = Depends(get_cur
         return tool.validation_error_response(errors, body.args)
 
     context = _request_tool_context(request)
-
     if tool.method.is_mutating:
         token = await run_api_blocking(
             pending_store.create,
@@ -123,8 +120,8 @@ async def confirm(request: Request, body: ConfirmRequest, user: User = Depends(g
     if tool is None:
         raise HTTPException(status_code=404, detail=f'Tool {entry.tool_id!r} not found')
 
+    context = _request_tool_context(request, namespace=entry.namespace)
     try:
-        context = _request_tool_context(request, namespace=entry.namespace)
         result = await call_tool(request.app, entry.method, entry.path, entry.args, context)
     except ValueError as exc:
         return tool.path_param_error_response(str(exc), entry.args)

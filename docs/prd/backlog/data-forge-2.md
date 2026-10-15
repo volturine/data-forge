@@ -17,14 +17,13 @@ in its focused PRD.
 | [Authentication and Identity](authentication-and-identity.md) | Backlog | Product identity decisions |
 | [Authorization, Ownership, and Collaboration](authorization-ownership-and-collaboration.md) | Backlog | Authentication and identity |
 | [Application Shell and Shared Panels](application-shell.md) | Backlog | Navigation decisions; can otherwise proceed independently |
-| [Lineage Revamp](../active/lineage-revamp.md) | Active — partially implemented | Can proceed independently of identity |
 
 ## Recommended sequence
 
 1. Resolve the identity, workspace, permissions, and guest/local-product decisions.
 2. Implement and verify authentication and account management.
 3. Establish ownership and authorization before adding collaboration/admin features.
-4. Run the application-shell redesign in parallel with lineage work where the chosen navigation model permits it.
+4. Run the application-shell redesign in parallel where the chosen navigation model permits it.
 5. Complete migration, rollout, and documentation only after each feature's own acceptance criteria pass.
 
 ## Cross-feature requirements

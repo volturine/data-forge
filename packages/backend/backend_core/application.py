@@ -1,4 +1,5 @@
 import asyncio
+import contextlib
 import logging
 import mimetypes
 import os
@@ -60,7 +61,7 @@ from backend_core.logging import (
     flush_request_logs,
     shutdown_logging,
 )
-from backend_core.namespace import normalize_namespace, reset_namespace, set_namespace_context
+from backend_core.namespace import namespace_scope, normalize_namespace
 from backend_core.namespaces_service import register_namespace
 from backend_core.runtime_notifications import handle_runtime_payload, recover_runtime_notifications, refresh_build_projections, refresh_lock_projections
 from backend_core.settings_store import seed_settings_from_env
@@ -99,25 +100,6 @@ def _api_thread_budget() -> ApiDatabaseBudget:
 def _api_blocking_pending_limit(workers: int) -> int:
     """Keep blocking-work backlog proportional to its thread budget, not socket count."""
     return max(0, workers * _API_BLOCKING_PENDING_PER_WORKER)
-
-
-def _new_api_blocking_executor(workers: int | None = None) -> BoundedThreadPoolExecutor:
-    # ``asyncio.to_thread`` is used for short database, object-store, and
-    # filesystem operations throughout the async API routes. The default
-    # executor is based on host CPU count, not application capacity; in a
-    # container with many visible CPUs that creates a large GIL/database
-    # burst for a few dozen browser tabs. Keep one bounded budget for those
-    # operations and let the async request tasks absorb the rest.
-    #
-    # Create this per event loop. TestClient and development reloads close
-    # their loop, which also shuts down its default executor; a process-global
-    # executor would then be reused after shutdown by the next lifespan.
-    worker_count = _api_thread_budget().general_workers if workers is None else workers
-    return BoundedThreadPoolExecutor(
-        max_workers=worker_count,
-        max_pending=_api_blocking_pending_limit(worker_count),
-        thread_name_prefix='api-blocking',
-    )
 
 
 async def _prewarm_executor(executor: ThreadPoolExecutor, workers: int) -> None:
@@ -239,10 +221,6 @@ _EVENT_LOOP_LAG_INTERVAL_SECONDS = 0.25
 _EVENT_LOOP_LAG_INFO_SECONDS = 0.5
 _EVENT_LOOP_LAG_WARN_SECONDS = 1.5
 _EVENT_LOOP_BLOCK_SAMPLE_SECONDS = 0.1
-
-
-def _event_loop_lag_log_level(lag_seconds: float, warning_seconds: float) -> int:
-    return logging.WARNING if lag_seconds >= warning_seconds else logging.INFO
 
 
 class EventLoopBlockWatchdog:
@@ -407,6 +385,10 @@ async def _provision_default_namespace_credentials() -> None:
             await asyncio.sleep(2.0)
 
 
+def event_loop_lag_log_level(lag_seconds: float, warning_seconds: float) -> int:
+    return logging.WARNING if lag_seconds >= warning_seconds else logging.INFO
+
+
 async def event_loop_lag_loop(
     stop_event: asyncio.Event,
     *,
@@ -423,27 +405,22 @@ async def event_loop_lag_loop(
             if watchdog is not None:
                 watchdog.tick()
             started = loop.time()
-            try:
+            with contextlib.suppress(TimeoutError):
                 await asyncio.wait_for(stop_event.wait(), timeout=interval)
                 return
-            except TimeoutError:
-                pass
             lag = max(0.0, loop.time() - started - interval)
             if lag >= _EVENT_LOOP_LAG_INFO_SECONDS:
                 logger.log(
-                    _event_loop_lag_log_level(lag, warning),
+                    event_loop_lag_log_level(lag, warning),
                     'API event loop lag detected pid=%s lag_ms=%.1f interval_ms=%.1f',
                     os.getpid(),
                     lag * 1000,
                     interval * 1000,
                 )
-        except asyncio.CancelledError:
-            raise
         except Exception:
             # Diagnostics must never silently disappear after one unusual task
             # state (for example a task finishing between all_tasks() and
-            # get_stack()). Keep the monitor alive and let the next interval
-            # produce a fresh signal.
+            # get_stack()); the next interval produces a fresh signal.
             logger.exception('API event-loop lag monitor iteration failed')
             await asyncio.sleep(interval)
 
@@ -467,7 +444,17 @@ async def _start_api_lifespan(app: FastAPI, cleanup: AsyncExitStack) -> None:
     # adapters; application call sites use run_api_blocking directly.
     loop = asyncio.get_running_loop()
     api_blocking_workers = api_budget.general_workers
-    api_blocking_executor = _new_api_blocking_executor(api_blocking_workers)
+    # The default executor is sized from host CPU count, not application
+    # capacity; with many visible CPUs that creates a large GIL/database burst
+    # for a few dozen browser tabs. Keep one bounded budget per event loop:
+    # TestClient and development reloads close their loop, which also shuts
+    # down its default executor, so a process-global one would be reused after
+    # shutdown by the next lifespan.
+    api_blocking_executor = BoundedThreadPoolExecutor(
+        max_workers=api_blocking_workers,
+        max_pending=_api_blocking_pending_limit(api_blocking_workers),
+        thread_name_prefix='api-blocking',
+    )
     loop.set_default_executor(api_blocking_executor)
     register_api_blocking_executor_lifecycle(
         loop,
@@ -537,7 +524,6 @@ async def _start_api_lifespan(app: FastAPI, cleanup: AsyncExitStack) -> None:
     await _provision_default_namespace_credentials()
     await run_api_blocking(run_db, udf_service.seed_defaults)
 
-    # Start background cleanup task
     stop_event = asyncio.Event()
     event_loop_watchdog = EventLoopBlockWatchdog()
     event_loop_watchdog.start()
@@ -588,7 +574,6 @@ async def api_work_admission_full_handler(_request: Request, _exc: ApiWorkAdmiss
     )
 
 
-# Global exception handlers for consistent structured error responses
 app.add_exception_handler(AppError, cast(Any, app_error_handler))
 app.add_exception_handler(RequestValidationError, cast(Any, validation_error_handler))
 app.add_exception_handler(ClientDisconnect, cast(Any, client_disconnect_handler))
@@ -653,12 +638,10 @@ class NamespaceMiddleware:
             await self.app(scope, receive, send)
             return
 
-        namespace_header = _scope_header(scope, b'x-namespace')
-        raw = namespace_header
-        token = set_namespace_context(raw)
-        try:
+        raw = _scope_header(scope, b'x-namespace')
+        with namespace_scope(raw):
             if not auth_settings.auth_required:
-                if not (is_health_request and namespace_header is None):
+                if not (is_health_request and raw is None):
                     await run_api_blocking(run_settings_db, register_namespace, raw)
                 await self.app(scope, receive, send)
                 return
@@ -676,8 +659,6 @@ class NamespaceMiddleware:
                 await run_api_blocking(run_settings_db, register_namespace, raw)
                 _KNOWN_NAMESPACES.add(normalized)
             await self.app(scope, receive, send)
-        finally:
-            reset_namespace(token)
 
 
 app.add_middleware(NamespaceMiddleware)
@@ -784,7 +765,6 @@ async def root() -> Response | dict[str, str]:
     }
 
 
-# Health Check Endpoints
 @app.get('/health')
 async def health() -> dict[str, str]:
     """Basic liveness check - returns 200 if app is running."""
@@ -799,8 +779,6 @@ def _readiness_checks() -> tuple[dict[str, str], bool]:
     """Run blocking readiness checks outside both the event loop and AnyIO pool."""
     checks = {}
     is_ready = True
-
-    # Check database
     try:
         run_settings_db(lambda session: session.execute(text('SELECT 1')))
         checks['database'] = 'ok'

@@ -116,8 +116,9 @@ docker compose --env-file docker/env/prod.env \
 ```
 
 `docker/compose.yaml` is the single production compose file and
-`docker/env/prod.env` is its production env template. GHCR-published images are
-for production releases only.
+`docker/env/prod.env` is its production env template. Pin release-channel GHCR
+images in production; dev-channel images feed PR previews (see
+[Image channels](DEPLOYMENT.md#image-channels)).
 `docker/compose.yaml` uses published fixed-role images and does not build application images during `up`.
 The compose topology uses separate `api`, `runtime`, `scheduler`, and `worker` containers from the same codebase release.
 The checked-in Docker topology still includes `postgres` because the supported Docker runtime path is Postgres-backed. `DF_DATABASE_URL` in the Docker env files points at that service.
@@ -136,10 +137,9 @@ durable results and distinct commands for one RID are serialized. API caches,
 projections, and waiters are process-local and disposable; PostgreSQL remains
 authoritative for durable work. Work remains durable while waiting. These are
 not cluster-wide leases across multiple manager containers; horizontal
-worker-service scaling is unsupported until
-distributed identity ownership and capacity grants are implemented and
-load-tested in the
-[capacity-first runtime plan](prd/active/elastic-runtime-scale-out.md).
+worker-service scaling is unsupported; the
+[scale policy](prd/implemented/capacity-first-runtime-optimization.md#scale-only-after-identifying-the-saturated-layer)
+requires a measured manager bottleneck before multi-manager identity ownership is designed.
 Active and warm starts are bounded by their configured budgets; there is no
 host-CPU-derived startup cap.
 
@@ -173,7 +173,7 @@ runtime coordinator, scheduler, and worker as separate processes. The checked-in
 `docker/env/prod.env` defaults to `WORKERS=1`. This controls API processes in
 the API container; it does not add runtime coordinator or worker-manager
 capacity. For the current supported topology and the future scale-out target,
-see [Deployment](DEPLOYMENT.md) and [Capacity-First Runtime Optimization](prd/active/elastic-runtime-scale-out.md).
+see [Deployment](DEPLOYMENT.md) and [Capacity-First Runtime Optimization](prd/implemented/capacity-first-runtime-optimization.md).
 
 ### Local development
 
@@ -198,6 +198,7 @@ just dev
 | `DATABASE_URL`                         | none                                                                                      | Full backend PostgreSQL database URL. Required.                                                                                                                                                                                                                  |
 | `DF_API_IMAGE`                         | `ghcr.io/volturine/data-forge-api:1.0.0`                                                  | Docker compose production image tag for the `api` service. Pull this image before `docker compose up`.                                                                                                                                                           |
 | `DF_SCHEDULER_IMAGE`                   | `ghcr.io/volturine/data-forge-scheduler:1.0.0`                                            | Docker compose production image tag for the `scheduler` service.                                                                                                                                                                                                 |
+| `DF_RUNTIME_IMAGE` | `ghcr.io/volturine/data-forge-runtime:1.0.0` | Docker compose production image tag for the `runtime` coordinator service. |
 | `DF_WORKER_IMAGE`                      | `ghcr.io/volturine/data-forge-worker:1.0.0`                                               | Docker compose production image tag for the `worker` service.                                                                                                                                                                                                    |
 | `DF_COMPUTE_WORKER_IMAGE`              | `ghcr.io/volturine/data-forge-compute-worker:1.0.0`                                      | Image used for dynamically-created compute-worker containers. A `repository@sha256:<digest>` reference keeps every launch byte-identical; tags remain supported for custom images.                                                                                |
 | `DF_COMPUTE_WORKER_DOCKER_HOST`         | `unix:///var/run/docker.sock`                                                             | Docker API endpoint used only by the worker manager service.                                                                                                                                                                                                      |
@@ -347,8 +348,6 @@ rejected explicitly while accepted compute requests remain durable.
 | `OPENROUTER_BASE_URL`       | `https://openrouter.ai/api/v1` | OpenRouter API base. Not a profile setting.     |
 | `OPENROUTER_API_KEY`        | empty                        | Copied into settings when the saved key is empty. A key saved in the profile replaces it. |
 | `OPENROUTER_DEFAULT_MODEL`  | empty                        | Seeded into DB on first run if DB field is empty. |
-| `OLLAMA_ENDPOINT_URL_DB`    | empty                        | DB-seeded Ollama endpoint override.               |
-| `OLLAMA_DEFAULT_MODEL_DB`   | empty                    | DB-seeded Ollama model override.                  |
 
 ### Notifications and encrypted settings
 

@@ -7,9 +7,8 @@ from sqlmodel import Session
 from backend_core.exceptions import analysis_not_found
 from backend_core.persistence.analysis.models import Analysis
 from backend_core.persistence.datasource.models import DataSource
-from modules.export.generators import generate_code, select_tabs
+from modules.export.generators import export_slug, generate_code, select_tabs
 from modules.export.models import CodeExportFormat
-from modules.export.utils import build_export_filename
 
 
 @dataclass(frozen=True)
@@ -40,11 +39,8 @@ def export_analysis_code(
 
     code, warnings = generate_code(export_format, selection, datasources_by_id)
 
-    filename = build_export_filename(
-        analysis_name=analysis.name,
-        tab_name=selection.target_tab.name if tab_id else None,
-        export_format=export_format,
-    )
+    tab_suffix = export_slug(selection.target_tab.name, fallback='item') if tab_id and selection.target_tab.name else 'pipeline'
+    filename = f'{export_slug(analysis.name, fallback="analysis")}_{tab_suffix}.{export_format.file_extension}'
     return CodeExportResult(
         code=code,
         warnings=warnings,

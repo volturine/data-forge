@@ -507,7 +507,7 @@ class TestLockWebsocket:
             await finish.wait()
             return committed_lock
 
-        monkeypatch.setattr(routes, '_run_lock', delayed_acquire)
+        monkeypatch.setattr(routes, 'run_api_blocking', delayed_acquire)
         recorded_tokens: list[str] = []
         task = asyncio.create_task(
             routes._acquire_lock(

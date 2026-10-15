@@ -5,7 +5,7 @@ from datetime import UTC, datetime, timedelta
 from typing import Any
 
 import pytest
-from sqlalchemy import event, select, update
+from sqlalchemy import event, select, text, update
 from sqlmodel import Session
 
 from backend_core import (
@@ -836,6 +836,30 @@ class TestScheduleClaiming:
                 worker_id='scheduler:stale',
                 claim_token=stale_token,
                 lease_generation=stale_generation,
+            )
+
+    def test_lease_expiry_compares_in_utc_under_non_utc_session_timezone(self, test_db_session: Session, output_datasource: DataSource):
+        schedule = create_schedule(
+            test_db_session,
+            ScheduleCreate(datasource_id=output_datasource.id, cron_expression='* * * * *'),
+        )
+        row = test_db_session.get(Schedule, schedule.id)
+        assert row is not None
+        token, generation = _assign_schedule_claim(row)
+        row.lease_expires_at = datetime.now(UTC) - timedelta(seconds=30)
+        test_db_session.add(row)
+        test_db_session.commit()
+
+        # Rows now load as +02:00 aware datetimes. Dropping the offset instead of
+        # converting would shift the expired lease two hours into the future.
+        test_db_session.execute(text("SET LOCAL TIME ZONE INTERVAL '+02:00' HOUR TO MINUTE"))
+        with pytest.raises(ValueError, match='claim is stale'):
+            enqueue_schedule_run(
+                test_db_session,
+                schedule.id,
+                worker_id='scheduler:test',
+                claim_token=token,
+                lease_generation=generation,
             )
 
 

@@ -33,13 +33,7 @@ from modules.auth.schemas import (
     UserPublic,
     VerifyEmailRequest,
 )
-from modules.auth.service import (
-    ensure_default_user,
-    get_user_providers,
-    send_password_reset_email,
-    send_verification_email,
-    validate_session,
-)
+from modules.auth.service import ensure_default_user, get_user_providers, send_auth_email, validate_session
 
 router = APIRouter(prefix='/auth', tags=['auth'])
 
@@ -49,7 +43,9 @@ async def _run_auth_db[**P, T](function: Callable[Concatenate[Session, P], T], *
     return await run_api_blocking(work)
 
 
-_OAUTH_STATE_MAX_AGE_SECONDS = 600
+async def send_verification_email(user_email: str, token: str) -> bool:
+    verify_url = f'{auth_settings.auth_frontend_url}/verify?token={token}'
+    return await send_auth_email(user_email, 'Verify your email', f'Please verify your email by opening this link: {verify_url}')
 
 
 def _set_session_cookie(response: Response, session_token: str, *, secure: bool) -> None:
@@ -68,24 +64,8 @@ def _clear_session_cookie(response: Response) -> None:
     response.delete_cookie(key='session_token', path='/')
 
 
-def _oauth_state_cookie_key(provider: str) -> str:
-    return f'oauth_state_{provider}'
-
-
-def _set_oauth_state_cookie(response: Response, provider: str, state: str, *, secure: bool) -> None:
-    response.set_cookie(
-        key=_oauth_state_cookie_key(provider),
-        value=state,
-        httponly=True,
-        secure=secure,
-        samesite='lax',
-        max_age=_OAUTH_STATE_MAX_AGE_SECONDS,
-        path='/',
-    )
-
-
 def _validate_oauth_state(request: Request, response: Response, provider: str, state: str | None) -> None:
-    key = _oauth_state_cookie_key(provider)
+    key = f'oauth_state_{provider}'
     cookie_state = request.cookies.get(key)
     response.delete_cookie(key=key, path='/')
     if not state:
@@ -96,30 +76,11 @@ def _validate_oauth_state(request: Request, response: Response, provider: str, s
         raise OAuthError('OAuth state mismatch')
 
 
-def _github_redirect_uri(request: Request) -> str:
-    return str(
-        request.url.replace(
-            scheme=request_scheme(request),
-            path='/api/v1/auth/github/callback',
-            query='',
-            fragment='',
-        )
-    )
-
-
-def _github_frontend_callback_url(request: Request) -> str:
-    return str(
-        request.url.replace(
-            scheme=request_scheme(request),
-            path='/callback',
-            query='',
-            fragment='',
-        )
-    )
+def _request_url(request: Request, path: str) -> str:
+    return str(request.url.replace(scheme=request_scheme(request), path=path, query='', fragment=''))
 
 
 def _build_user_public(session: Session, user: User) -> UserPublic:
-    providers = get_user_providers(session, user.id)
     return UserPublic(
         id=user.id,
         email=user.email,
@@ -129,16 +90,14 @@ def _build_user_public(session: Session, user: User) -> UserPublic:
         email_verified=user.email_verified,
         has_password=user.has_password,
         preferences=user.preferences,
-        providers=providers,
+        providers=get_user_providers(session, user.id),
         created_at=user.created_at,
     )
 
 
 def _request_device_info(request: Request) -> str | None:
     user_agent = request.headers.get('user-agent')
-    if user_agent:
-        return user_agent[:512]
-    return None
+    return user_agent[:512] if user_agent else None
 
 
 def _register_user(
@@ -292,7 +251,8 @@ async def resend_verification_route(
 async def forgot_password(body: ForgotPasswordRequest) -> MessageResponse:
     token = await _run_auth_db(commands.create_password_reset_token, body.email)
     if token:
-        await send_password_reset_email(body.email.strip().lower(), token)
+        reset_url = f'{auth_settings.auth_frontend_url}/reset-password?token={token}'
+        await send_auth_email(body.email.strip().lower(), 'Reset your password', f'Use this link to reset your password: {reset_url}')
     return MessageResponse(message='If the email exists, a password reset link has been sent')
 
 
@@ -310,8 +270,7 @@ def _resolve_me(session: Session, token: str | None) -> UserPublic:
         if user:
             return _build_user_public(session, user)
     if not auth_settings.auth_required:
-        user = ensure_default_user(session)
-        return _build_user_public(session, user)
+        return _build_user_public(session, ensure_default_user(session))
     raise HTTPException(status_code=401, detail='Not authenticated')
 
 
@@ -339,8 +298,7 @@ def _update_profile(session: Session, token: str | None, body: UpdateProfileRequ
 @router.get('/me', response_model=UserPublic)
 @handle_errors(operation='get current user')
 async def me(request: Request) -> UserPublic:
-    token = resolve_session_token(request)
-    return await run_bootstrap_settings_db(_resolve_me, token)
+    return await run_bootstrap_settings_db(_resolve_me, resolve_session_token(request))
 
 
 @router.put('/profile', response_model=UserPublic)
@@ -349,8 +307,7 @@ async def update_profile_route(
     request: Request,
     body: UpdateProfileRequest,
 ) -> UserPublic:
-    token = resolve_session_token(request)
-    return await _run_auth_db(_update_profile, token, body)
+    return await _run_auth_db(_update_profile, resolve_session_token(request), body)
 
 
 @router.put('/password')
@@ -359,13 +316,7 @@ async def change_password_route(
     body: ChangePasswordRequest,
     current_user: User = Depends(get_current_user),
 ) -> dict[str, bool]:
-    await run_api_blocking(
-        run_settings_db,
-        commands.change_password,
-        current_user.id,
-        body.current_password,
-        body.new_password,
-    )
+    await run_api_blocking(run_settings_db, commands.change_password, current_user.id, body.current_password, body.new_password)
     return {'success': True}
 
 
@@ -376,13 +327,7 @@ async def revoke_all_sessions_route(
     response: Response,
     current_user: User = Depends(get_current_user),
 ) -> dict[str, bool]:
-    current_token = resolve_session_token(request)
-    await run_api_blocking(
-        run_settings_db,
-        commands.revoke_all_user_sessions,
-        user_id=current_user.id,
-        current_session_id=current_token,
-    )
+    await run_api_blocking(run_settings_db, commands.revoke_all_user_sessions, user_id=current_user.id, current_session_id=resolve_session_token(request))
     _clear_session_cookie(response)
     return {'success': True}
 
@@ -393,17 +338,20 @@ def github_oauth_start(request: Request) -> RedirectResponse:
     state = secrets.token_urlsafe(32)
     params = {
         'client_id': auth_settings.github_client_id,
-        'redirect_uri': _github_redirect_uri(request),
+        'redirect_uri': _request_url(request, '/api/v1/auth/github/callback'),
         'scope': 'read:user user:email',
         'state': state,
     }
     url = f'https://github.com/login/oauth/authorize?{urlencode(params)}'
     response = RedirectResponse(url=url)
-    _set_oauth_state_cookie(
-        response,
-        provider=AuthProviderName.GITHUB.value,
-        state=state,
+    response.set_cookie(
+        key=f'oauth_state_{AuthProviderName.GITHUB.value}',
+        value=state,
+        httponly=True,
         secure=request_scheme(request) == 'https',
+        samesite='lax',
+        max_age=600,
+        path='/',
     )
     return response
 
@@ -414,22 +362,16 @@ async def github_oauth_callback(
     request: Request,
     params: OAuthCallbackParams = Depends(),
 ) -> RedirectResponse:
-    response = RedirectResponse(url=_github_frontend_callback_url(request))
+    response = RedirectResponse(url=_request_url(request, '/callback'))
     _validate_oauth_state(request, response, provider=AuthProviderName.GITHUB.value, state=params.state)
     payload = {
         'client_id': auth_settings.github_client_id,
         'client_secret': auth_settings.github_client_secret,
         'code': params.code,
-        'redirect_uri': _github_redirect_uri(request),
+        'redirect_uri': _request_url(request, '/api/v1/auth/github/callback'),
     }
-    headers = {'Accept': 'application/json'}
     client = http_client.get_async_client()
-    token_resp = await client.post(
-        'https://github.com/login/oauth/access_token',
-        data=payload,
-        headers=headers,
-        timeout=15.0,
-    )
+    token_resp = await client.post('https://github.com/login/oauth/access_token', data=payload, headers={'Accept': 'application/json'}, timeout=15.0)
     if token_resp.status_code != 200:
         raise OAuthError('GitHub token exchange failed')
     token_data = token_resp.json()
@@ -451,15 +393,12 @@ async def github_oauth_callback(
     subject = gh_user.get('id')
     if not isinstance(subject, int):
         raise OAuthError('GitHub user id missing')
-    email = next(
-        (item.get('email') for item in emails if item.get('primary') and item.get('verified')),
-        None,
-    )
+    email = next((item.get('email') for item in emails if item.get('primary') and item.get('verified')), None)
     if not isinstance(email, str):
         email = next((item.get('email') for item in emails if item.get('verified')), None)
     if not isinstance(email, str):
         raise OAuthError('GitHub account has no verified email')
-    result = await run_api_blocking(
+    session_token = await run_api_blocking(
         run_settings_db,
         _authenticate_oauth_user,
         provider=AuthProviderName.GITHUB,
@@ -470,7 +409,7 @@ async def github_oauth_callback(
         device_info=_request_device_info(request),
         ip_address=client_ip(request),
     )
-    _set_session_cookie(response, result, secure=request_scheme(request) == 'https')
+    _set_session_cookie(response, session_token, secure=request_scheme(request) == 'https')
     return response
 
 

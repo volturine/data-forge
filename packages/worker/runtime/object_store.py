@@ -170,11 +170,6 @@ def reset_object_store_client() -> None:
         _BUCKETS_READY.clear()
 
 
-def _bucket_is_ready(bucket: str) -> bool:
-    with _BUCKETS_READY_LOCK:
-        return bucket in _BUCKETS_READY
-
-
 def _bucket_lock(bucket: str) -> Lock:
     """Return the lock for one bucket without serializing other buckets."""
     with _BUCKET_LOCKS_LOCK:
@@ -185,6 +180,11 @@ def _bucket_lock(bucket: str) -> Lock:
         return lock
 
 
+def _error_code(exc: ClientError) -> str:
+    error = exc.response.get("Error", {}) if isinstance(exc.response, dict) else {}
+    return str(error.get("Code") or "")
+
+
 def ensure_bucket_exists(bucket: str | None = None) -> str:
     """Ensure a namespace bucket exists. Defaults to the current namespace bucket."""
     if bucket is None:
@@ -193,18 +193,18 @@ def ensure_bucket_exists(bucket: str | None = None) -> str:
         resolved = namespace_bucket(get_namespace())
     else:
         resolved = namespace_bucket(bucket.strip())
-    if _bucket_is_ready(resolved):
-        return resolved
-    with _bucket_lock(resolved):
-        if _bucket_is_ready(resolved):
+    with _BUCKETS_READY_LOCK:
+        if resolved in _BUCKETS_READY:
             return resolved
+    with _bucket_lock(resolved):
+        with _BUCKETS_READY_LOCK:
+            if resolved in _BUCKETS_READY:
+                return resolved
         client = _client()
         try:
             client.head_bucket(Bucket=resolved)
         except ClientError as exc:
-            error = exc.response.get("Error", {}) if isinstance(exc.response, dict) else {}
-            code = str(error.get("Code") or "")
-            if code not in {"404", "NoSuchBucket", "NotFound"}:
+            if _error_code(exc) not in {"404", "NoSuchBucket", "NotFound"}:
                 raise
             client.create_bucket(Bucket=resolved)
         with _BUCKETS_READY_LOCK:
@@ -360,19 +360,21 @@ def object_exists(source_url: str) -> bool:
     try:
         _client().head_object(Bucket=bucket, Key=key)
     except ClientError as exc:
-        error = exc.response.get("Error", {}) if isinstance(exc.response, dict) else {}
-        code = str(error.get("Code") or "")
-        if code in {"404", "NoSuchKey", "NotFound"}:
+        if _error_code(exc) in {"404", "NoSuchKey", "NotFound"}:
             return False
         raise
     return True
 
 
+def _directory_prefix(key: str) -> str:
+    """Return ``key`` as an object-key prefix ending in "/", or "" for the bucket root."""
+    prefix = key.rstrip("/")
+    return prefix + "/" if prefix else ""
+
+
 def list_prefixes(prefix_url: str) -> list[str]:
     bucket, key = parse_object_store_url(prefix_url)
-    prefix = key.rstrip("/")
-    if prefix:
-        prefix = prefix + "/"
+    prefix = _directory_prefix(key)
     response = _client().list_objects_v2(Bucket=bucket, Prefix=prefix, Delimiter="/")
     prefixes = response.get("CommonPrefixes") or []
     names: list[str] = []
@@ -406,9 +408,7 @@ def list_metadata_files(base_url: str) -> list[str]:
 def prefix_last_modified(prefix_url: str) -> datetime | None:
     """Newest LastModified among all objects under prefix, or None if empty/missing."""
     bucket, key = parse_object_store_url(prefix_url)
-    prefix = key.rstrip("/")
-    if prefix:
-        prefix = prefix + "/"
+    prefix = _directory_prefix(key)
     paginator = _client().get_paginator("list_objects_v2")
     newest: datetime | None = None
     for page in paginator.paginate(Bucket=bucket, Prefix=prefix):
@@ -419,11 +419,15 @@ def prefix_last_modified(prefix_url: str) -> datetime | None:
     return newest
 
 
+def _delete_objects(bucket: str, keys: list[dict[str, str]]) -> None:
+    response = _client().delete_objects(Bucket=bucket, Delete={"Objects": keys})
+    if response.get("Errors"):
+        raise RuntimeError(f"Object prefix cleanup returned deletion errors: {response['Errors']}")
+
+
 def delete_prefix(prefix_url: str) -> None:
     bucket, key = parse_object_store_url(prefix_url)
-    prefix = key.rstrip("/")
-    if prefix:
-        prefix = prefix + "/"
+    prefix = _directory_prefix(key)
     paginator = _client().get_paginator("list_objects_v2")
     delete_batch: list[dict[str, str]] = []
     for page in paginator.paginate(Bucket=bucket, Prefix=prefix):
@@ -433,11 +437,7 @@ def delete_prefix(prefix_url: str) -> None:
                 continue
             delete_batch.append({"Key": object_key})
             if len(delete_batch) == 1000:
-                response = _client().delete_objects(Bucket=bucket, Delete={"Objects": delete_batch})
-                if response.get("Errors"):
-                    raise RuntimeError(f"Object prefix cleanup returned deletion errors: {response['Errors']}")
+                _delete_objects(bucket, delete_batch)
                 delete_batch = []
     if delete_batch:
-        response = _client().delete_objects(Bucket=bucket, Delete={"Objects": delete_batch})
-        if response.get("Errors"):
-            raise RuntimeError(f"Object prefix cleanup returned deletion errors: {response['Errors']}")
+        _delete_objects(bucket, delete_batch)

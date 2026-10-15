@@ -5,6 +5,7 @@ import re
 from collections import deque
 from collections.abc import Callable
 from dataclasses import dataclass
+from functools import partial
 from typing import Any
 
 from backend_core.domain.analysis.pipeline_types import PipelineDefinition, PipelineTab
@@ -22,7 +23,6 @@ from backend_core.domain.step_config_enums import (
 from backend_core.persistence.datasource.models import DataSource
 from modules.analysis.step_schemas import FilterConfig
 from modules.export.models import CodeExportFormat
-from modules.export.utils import export_slug
 
 _POLARS_CAST_MAP = {
     'Int64': 'Int64',
@@ -60,6 +60,11 @@ def generate_code(format_name: CodeExportFormat, selection: ExportSelection, dat
     raise ValueError(f"Unsupported export format '{format_name.value}'")
 
 
+def export_slug(value: str, *, fallback: str) -> str:
+    slug = re.sub(r'[^a-z0-9]+', '_', value.strip().lower()).strip('_')
+    return slug or fallback
+
+
 def _identifier(value: str) -> str:
     ident = re.sub(r'[^a-zA-Z0-9_]+', '_', value).strip('_')
     if not ident:
@@ -86,6 +91,20 @@ def _safe_py(value: Any) -> str:
     return json.dumps(str(value), ensure_ascii=True)
 
 
+def _quoted_list(values: list[Any]) -> str:
+    return '[' + ', '.join(json.dumps(value) for value in values if isinstance(value, str)) + ']'
+
+
+def _add_warning(warnings: list[str], message: str) -> None:
+    if message not in warnings:
+        warnings.append(message)
+
+
+def _upstream_tab_id(tab: PipelineTab) -> str | None:
+    source_tab_id = tab.datasource.analysis_tab_id
+    return source_tab_id if isinstance(source_tab_id, str) and source_tab_id else None
+
+
 def _sql_quote(value: str) -> str:
     escaped = value.replace('"', '""')
     return f'"{escaped}"'
@@ -104,9 +123,8 @@ def _sql_literal(value: Any) -> str:
 
 def _tab_dependencies(tab: PipelineTab) -> set[str]:
     deps: set[str] = set()
-    source_tab_id = tab.datasource.analysis_tab_id
-    if isinstance(source_tab_id, str) and source_tab_id:
-        deps.add(source_tab_id)
+    if upstream_tab_id := _upstream_tab_id(tab):
+        deps.add(upstream_tab_id)
     for step in tab.steps:
         deps.update(STEP_TYPES.dependency_values(step.type, step.config))
     return deps
@@ -305,7 +323,7 @@ def _sql_filter_expr(condition: dict[str, Any]) -> str | None:
     return None
 
 
-def _polars_group_agg_expr(aggregation: dict[str, Any]) -> str | None:
+def _group_agg_parts(aggregation: dict[str, Any]) -> tuple[GroupByAggregationFunction, str, str] | None:
     column = aggregation.get('column')
     function_raw = aggregation.get('function')
     alias = aggregation.get('alias')
@@ -318,23 +336,7 @@ def _polars_group_agg_expr(aggregation: dict[str, Any]) -> str | None:
     except ValueError:
         return None
     alias_name = alias if isinstance(alias, str) and alias else function.default_alias(column)
-    return function.render_polars_export(f'pl.col({json.dumps(column)})', json.dumps(alias_name))
-
-
-def _sql_group_agg_expr(aggregation: dict[str, Any]) -> str | None:
-    column = aggregation.get('column')
-    function_raw = aggregation.get('function')
-    alias = aggregation.get('alias')
-    if not isinstance(column, str) or not column:
-        return None
-    if not isinstance(function_raw, (str, GroupByAggregationFunction)):
-        return None
-    try:
-        function = GroupByAggregationFunction.require(function_raw)
-    except ValueError:
-        return None
-    alias_name = alias if isinstance(alias, str) and alias else function.default_alias(column)
-    return function.render_sql_export(_sql_quote(column), _sql_quote(alias_name))
+    return function, column, alias_name
 
 
 @dataclass(slots=True)
@@ -349,8 +351,7 @@ class PolarsStepRenderContext:
     warnings: list[str]
 
     def warn(self, message: str) -> None:
-        if message not in self.warnings:
-            self.warnings.append(message)
+        _add_warning(self.warnings, message)
 
     def assign(self, expression: str) -> str:
         self.lines.append(f'{self.next_var} = {expression}')
@@ -378,16 +379,12 @@ class SqlStepRenderContext:
     warnings: list[str]
 
     def warn(self, message: str) -> None:
-        if message not in self.warnings:
-            self.warnings.append(message)
-
-    def select_all(self) -> str:
-        return f'SELECT * FROM {self.current_cte}'
+        _add_warning(self.warnings, message)
 
     def result(self, body: str | None = None, *, comments: tuple[str, ...] = (), warning: str | None = None) -> SqlStepRenderResult:
         if warning is not None:
             self.warn(warning)
-        return SqlStepRenderResult(body=body or self.select_all(), comments=comments)
+        return SqlStepRenderResult(body=body or f'SELECT * FROM {self.current_cte}', comments=comments)
 
 
 PolarsStepRenderer = Callable[[PolarsStepRenderContext], str]
@@ -398,8 +395,7 @@ SQL_STEP_RENDERERS: dict[str, SqlStepRenderer] = {}
 
 def polars_step_renderer(*step_types: str) -> Callable[[PolarsStepRenderer], PolarsStepRenderer]:
     def register(renderer: PolarsStepRenderer) -> PolarsStepRenderer:
-        for step_type in step_types:
-            POLARS_STEP_RENDERERS[step_type] = renderer
+        POLARS_STEP_RENDERERS.update(dict.fromkeys(step_types, renderer))
         return renderer
 
     return register
@@ -407,8 +403,7 @@ def polars_step_renderer(*step_types: str) -> Callable[[PolarsStepRenderer], Pol
 
 def sql_step_renderer(*step_types: str) -> Callable[[SqlStepRenderer], SqlStepRenderer]:
     def register(renderer: SqlStepRenderer) -> SqlStepRenderer:
-        for step_type in step_types:
-            SQL_STEP_RENDERERS[step_type] = renderer
+        SQL_STEP_RENDERERS.update(dict.fromkeys(step_types, renderer))
         return renderer
 
     return register
@@ -430,7 +425,7 @@ def render_polars_select(context: PolarsStepRenderContext) -> str:
     columns = context.config.get('columns')
     cast_map = context.config.get('cast_map')
     if isinstance(columns, list) and columns:
-        quoted = '[' + ', '.join(json.dumps(col) for col in columns if isinstance(col, str)) + ']'
+        quoted = _quoted_list(columns)
         current = context.assign(f'{context.current_var}.select({quoted})')
     else:
         current = context.alias_current(warning=f"Select step in tab '{context.tab.name}' has no columns and was treated as pass-through")
@@ -455,8 +450,7 @@ def render_polars_drop(context: PolarsStepRenderContext) -> str:
     columns = context.config.get('columns')
     if not isinstance(columns, list) or not columns:
         return context.alias_current()
-    quoted = '[' + ', '.join(json.dumps(col) for col in columns if isinstance(col, str)) + ']'
-    return context.assign(f'{context.current_var}.drop({quoted})')
+    return context.assign(f'{context.current_var}.drop({_quoted_list(columns)})')
 
 
 @polars_step_renderer(STEP_TYPES.sort.value)
@@ -465,7 +459,7 @@ def render_polars_sort(context: PolarsStepRenderContext) -> str:
     descending = context.config.get('descending')
     if not isinstance(columns, list) or not columns:
         return context.alias_current()
-    cols = '[' + ', '.join(json.dumps(col) for col in columns if isinstance(col, str)) + ']'
+    cols = _quoted_list(columns)
     if isinstance(descending, list) and descending:
         desc = '[' + ', '.join('True' if bool(item) else 'False' for item in descending) + ']'
         return context.assign(f'{context.current_var}.sort({cols}, descending={desc})')
@@ -486,10 +480,14 @@ def render_polars_rename(context: PolarsStepRenderContext) -> str:
 def render_polars_groupby(context: PolarsStepRenderContext) -> str:
     group_by = context.config.get('group_by')
     aggregations = context.config.get('aggregations')
-    agg_exprs = [expr for agg in aggregations if isinstance(agg, dict) if (expr := _polars_group_agg_expr(agg))] if isinstance(aggregations, list) else []
+    agg_exprs: list[str] = []
+    for agg in aggregations if isinstance(aggregations, list) else []:
+        if isinstance(agg, dict) and (parts := _group_agg_parts(agg)):
+            function, column, alias_name = parts
+            agg_exprs.append(function.render_polars_export(f'pl.col({json.dumps(column)})', json.dumps(alias_name)))
     if not (isinstance(group_by, list) and group_by and agg_exprs):
         return context.alias_current(warning=f"GroupBy step in tab '{context.tab.name}' is missing group_by or aggregations")
-    group_cols = '[' + ', '.join(json.dumps(col) for col in group_by if isinstance(col, str)) + ']'
+    group_cols = _quoted_list(group_by)
     agg_list = '[' + ', '.join(agg_exprs) + ']'
     return context.assign(f'{context.current_var}.group_by({group_cols}).agg({agg_list})')
 
@@ -519,8 +517,8 @@ def render_polars_join(context: PolarsStepRenderContext) -> str:
     ]
     if not (left_cols and right_cols):
         return context.alias_current(warning=f"Join step in tab '{context.tab.name}' has empty join column mappings")
-    left_list = '[' + ', '.join(json.dumps(col) for col in left_cols) + ']'
-    right_list = '[' + ', '.join(json.dumps(col) for col in right_cols) + ']'
+    left_list = _quoted_list(left_cols)
+    right_list = _quoted_list(right_cols)
     return context.assign(
         f'{context.current_var}.join({right_var}, left_on={left_list}, right_on={right_list}, how={json.dumps(how.polars_how)}, suffix={json.dumps(suffix)})',
     )
@@ -568,7 +566,7 @@ def render_polars_pivot(context: PolarsStepRenderContext) -> str:
     aggregate_function = str(context.config.get('aggregate_function', PivotAggregateFunction.FIRST.value))
     if not (isinstance(on_col, str) and on_col):
         return context.alias_current(warning=f"Pivot step in tab '{context.tab.name}' is missing columns")
-    index_expr = '[' + ', '.join(json.dumps(col) for col in index if isinstance(col, str)) + ']' if isinstance(index, list) else '[]'
+    index_expr = _quoted_list(index) if isinstance(index, list) else '[]'
     values_expr = json.dumps(values) if isinstance(values, list) and values else 'None'
     return context.assign(
         f'{context.current_var}.pivot(on={json.dumps(on_col)}, values={values_expr}, index={index_expr}, aggregate_function={json.dumps(aggregate_function)})',
@@ -583,8 +581,8 @@ def render_polars_unpivot(context: PolarsStepRenderContext) -> str:
     value_name = str(context.config.get('value_name', 'value'))
     if not (isinstance(value_vars, list) and value_vars):
         return context.alias_current(warning=f"Unpivot step in tab '{context.tab.name}' is missing value_vars")
-    ids_expr = '[' + ', '.join(json.dumps(col) for col in id_vars if isinstance(col, str)) + ']' if isinstance(id_vars, list) else '[]'
-    value_expr = '[' + ', '.join(json.dumps(col) for col in value_vars if isinstance(col, str)) + ']'
+    ids_expr = _quoted_list(id_vars) if isinstance(id_vars, list) else '[]'
+    value_expr = _quoted_list(value_vars)
     return context.assign(
         f'{context.current_var}.unpivot(on={value_expr}, index={ids_expr}, variable_name={json.dumps(variable_name)}, value_name={json.dumps(value_name)})',
     )
@@ -595,8 +593,7 @@ def render_polars_deduplicate(context: PolarsStepRenderContext) -> str:
     subset = context.config.get('subset')
     keep = str(context.config.get('keep', DeduplicateKeep.FIRST.value))
     if isinstance(subset, list) and subset:
-        subset_expr = '[' + ', '.join(json.dumps(col) for col in subset if isinstance(col, str)) + ']'
-        return context.assign(f'{context.current_var}.unique(subset={subset_expr}, keep={json.dumps(keep)})')
+        return context.assign(f'{context.current_var}.unique(subset={_quoted_list(subset)}, keep={json.dumps(keep)})')
     return context.assign(f'{context.current_var}.unique(keep={json.dumps(keep)})')
 
 
@@ -702,7 +699,12 @@ def render_sql_groupby(context: SqlStepRenderContext) -> SqlStepRenderResult:
     if not (isinstance(group_by, list) and group_by and isinstance(aggregations, list) and aggregations):
         return context.result(warning=f"GroupBy step in tab '{context.tab.name}' is missing group_by or aggregations")
     group_cols = [_sql_quote(col) for col in group_by if isinstance(col, str)]
-    agg_exprs = [expr for agg in aggregations if isinstance(agg, dict) if (expr := _sql_group_agg_expr(agg))]
+    agg_exprs: list[str] = []
+    for agg in aggregations:
+        if isinstance(agg, dict) and (parts := _group_agg_parts(agg)):
+            function, column, alias_name = parts
+            if expr := function.render_sql_export(_sql_quote(column), _sql_quote(alias_name)):
+                agg_exprs.append(expr)
     if not (group_cols and agg_exprs):
         return context.result(warning=f"GroupBy step in tab '{context.tab.name}' has unsupported aggregation functions")
     return context.result('SELECT ' + ', '.join(group_cols + agg_exprs) + f' FROM {context.current_cte} GROUP BY ' + ', '.join(group_cols))
@@ -798,10 +800,7 @@ def generate_polars_code(
 ) -> tuple[str, list[str]]:
     lines: list[str] = []
     warnings: list[str] = []
-
-    def warn(message: str) -> None:
-        if message not in warnings:
-            warnings.append(message)
+    warn = partial(_add_warning, warnings)
 
     lines.extend(
         [
@@ -815,8 +814,7 @@ def generate_polars_code(
     source_constants: dict[str, str] = {}
     used_constants: set[str] = set()
     for tab in selection.ordered_tabs:
-        source_tab_id = tab.datasource.analysis_tab_id
-        if isinstance(source_tab_id, str) and source_tab_id:
+        if _upstream_tab_id(tab):
             continue
         datasource = datasources_by_id.get(tab.datasource.id)
         const_name, replacement = _datasource_path_constant(tab, datasource, used_constants)
@@ -831,8 +829,7 @@ def generate_polars_code(
         source_var = f'{tab_slug}_source'
 
         lines.append(f'# ---- Tab: {tab.name} ----')
-        source_tab_id = tab.datasource.analysis_tab_id
-        if isinstance(source_tab_id, str) and source_tab_id:
+        if source_tab_id := _upstream_tab_id(tab):
             parent_var = tab_last_var.get(source_tab_id)
             if parent_var:
                 lines.append(f'{source_var} = {parent_var}')
@@ -889,16 +886,12 @@ def generate_sql_code(
     datasources_by_id: dict[str, DataSource],
 ) -> tuple[str, list[str]]:
     warnings: list[str] = []
-
-    def warn(message: str) -> None:
-        if message not in warnings:
-            warnings.append(message)
+    warn = partial(_add_warning, warnings)
 
     source_tables: dict[str, str] = {}
     used_table_names: set[str] = set()
     for tab in selection.ordered_tabs:
-        source_tab_id = tab.datasource.analysis_tab_id
-        if isinstance(source_tab_id, str) and source_tab_id:
+        if _upstream_tab_id(tab):
             continue
         datasource = datasources_by_id.get(tab.datasource.id)
         base = _identifier(export_slug(datasource.name if datasource else tab.name, fallback='item'))
@@ -929,8 +922,7 @@ def generate_sql_code(
     for tab_index, tab in enumerate(selection.ordered_tabs, start=1):
         tab_alias = _identifier(f'tab_{tab_index}_{export_slug(tab.name, fallback="item")}')
         source_cte = f'{tab_alias}_source'
-        source_tab_id = tab.datasource.analysis_tab_id
-        if isinstance(source_tab_id, str) and source_tab_id:
+        if source_tab_id := _upstream_tab_id(tab):
             upstream_cte = tab_final_cte.get(source_tab_id)
             if upstream_cte:
                 source_from = upstream_cte

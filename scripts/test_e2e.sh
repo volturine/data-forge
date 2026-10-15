@@ -532,6 +532,39 @@ run_playwright_architecture_tests() {
         "${runner_env[@]}" -- "${playwright_args[@]}"
 }
 
+run_runtime_bootstrap_probe() {
+    # Runs on the fresh stack, before any fixture creates users or builds.
+    local runner_name="dataforge-e2e-${E2E_STACK_ID}-runtime-bootstrap"
+    local probe_script="${ROOT_DIR}/scripts/e2e/runtime_bootstrap_probe.py"
+    local expected_revision
+    expected_revision="$(sed -n "s/^_SCHEMA_REVISION = '\(.*\)'$/\1/p" "${ROOT_DIR}/packages/backend/backend_core/migrations.py")"
+    local run_status=0
+    echo "Running the runtime bootstrap probe (schemas, manual build, scheduler-fired build)"
+    python3 "${ROOT_DIR}/scripts/run_with_timeout.py" \
+        --timeout-seconds "${E2E_RUNTIME_BOOTSTRAP_TIMEOUT_SECONDS:-600}" \
+        --grace-seconds "${E2E_TIMEOUT_GRACE_SECONDS:-30}" \
+        -- \
+        docker run --init \
+            --name "$runner_name" \
+            --label "io.dataforge.deployment=${E2E_DEPLOYMENT_ID}" \
+            --network "$E2E_DOCKER_NETWORK" \
+            --cpus=1.0 --memory=512m \
+            -v "${probe_script}:/runtime_bootstrap_probe.py:ro" \
+            --entrypoint python3 \
+            data-forge-api:e2e \
+            /runtime_bootstrap_probe.py \
+            --api-url http://api:8000 \
+            --db-url postgresql://dataforge:dataforge@postgres:5432/dataforge \
+            --email "$DEFAULT_USER_EMAIL" \
+            --password "$DEFAULT_USER_PASSWORD" \
+            --expected-revision "$expected_revision" || run_status=$?
+    if [ "$run_status" -ne 0 ]; then
+        docker logs --timestamps "$runner_name" >&2 || true
+    fi
+    docker rm -f "$runner_name" >/dev/null 2>&1 || true
+    return "$run_status"
+}
+
 run_connected_session_probe() {
     local sessions="$1"
     local run_index="$2"
@@ -727,6 +760,14 @@ case "$action" in
         for shard in $(seq 1 "$shards"); do
             mkdir -p "${PLAYWRIGHT_SHARD_ARTIFACTS_DIR}/shard${shard}/test-results" "${PLAYWRIGHT_SHARD_ARTIFACTS_DIR}/shard${shard}/playwright-report"
         done
+        if [ -z "${PLAYWRIGHT_TEST_FILES:-}" ] && [ -z "${PLAYWRIGHT_GREP:-}" ]; then
+            runtime_bootstrap_status=0
+            run_runtime_bootstrap_probe || runtime_bootstrap_status=$?
+            dump_service_logs runtime-bootstrap "$runtime_bootstrap_status"
+            if [ "$runtime_bootstrap_status" -ne 0 ]; then
+                exit "$runtime_bootstrap_status"
+            fi
+        fi
         prepare_playwright_selection
         bootstrap_status=0
         bootstrap_shared_fixtures || bootstrap_status=$?

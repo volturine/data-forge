@@ -1,8 +1,8 @@
 from collections.abc import Iterable, Mapping
-from datetime import datetime
+from datetime import UTC, datetime
 from typing import Any, cast
 
-from sqlalchemy import func, update
+from sqlalchemy import func, select, update
 from sqlalchemy.engine import CursorResult
 from sqlalchemy.sql.elements import ColumnElement
 from sqlmodel import Session
@@ -11,6 +11,21 @@ from sqlmodel import Session
 # renewal. A lost claim response must not hold durable work for the full
 # execution lease.
 CLAIM_DELIVERY_LEASE_SECONDS = 20
+
+
+def database_now(session: Session, *, wall_clock: bool = False) -> datetime:
+    """Return the database clock durable work availability is compared against.
+
+    The default is the transaction timestamp; ``wall_clock`` reads PostgreSQL's
+    current wall time for checks made after waiting on row locks.
+    """
+    clock = func.clock_timestamp() if wall_clock and session.get_bind().dialect.name == 'postgresql' else func.current_timestamp()
+    value = session.execute(select(clock)).scalar_one()
+    if not isinstance(value, datetime):
+        raise TypeError('Database CURRENT_TIMESTAMP did not return a datetime')
+    if value.tzinfo is None:
+        return value.replace(tzinfo=UTC)
+    return value.astimezone(UTC)
 
 
 def database_lease_clock(session: Session, fallback: datetime) -> Any:

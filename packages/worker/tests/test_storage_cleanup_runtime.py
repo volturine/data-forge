@@ -512,7 +512,7 @@ def test_reingest_datasource_strips_stale_time_travel_keys(monkeypatch: pytest.M
             "time_travel_ui": {"selected": True},
         }
 
-    monkeypatch.setattr(compute_request_runtime.datasource_execution, "_require_metadata", lambda *_args, **_kwargs: DummyMetadata())
+    monkeypatch.setattr(compute_request_runtime.datasource_execution, "require_metadata", lambda *_args, **_kwargs: DummyMetadata())
     monkeypatch.setattr(compute_request_runtime, "_datasource_engine_job", lambda *_args, **_kwargs: manifest)
     import_kwargs: list[dict[str, object]] = []
 
@@ -521,7 +521,7 @@ def test_reingest_datasource_strips_stale_time_travel_keys(monkeypatch: pytest.M
         return object(), str(kwargs["table_path"])
 
     monkeypatch.setattr(compute_request_runtime.datasource_execution, "import_staged_parquet_files", import_staged)
-    monkeypatch.setattr(compute_request_runtime.datasource_execution, "_set_snapshot_metadata", lambda config, table: None)
+    monkeypatch.setattr(compute_request_runtime.datasource_execution, "set_snapshot_metadata", lambda config, table: None)
 
     response = compute_request_runtime._publish_staged_datasource(
         cast(compute_request_runtime.WorkerRuntimeClient, ReingestClient()), _manager(), claimed, command.datasource

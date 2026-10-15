@@ -4,17 +4,7 @@ from typing import Any, cast
 import pytest
 
 from backend_core.lease_observability import record_lease_transition
-from backend_core.transitions import TransitionOutcome, TransitionResult, applied, rejected
-
-
-def test_transition_result_exposes_typed_outcome() -> None:
-    accepted = applied('value')
-    stale: TransitionResult[str] = rejected(TransitionOutcome.LEASE_LOST)
-
-    assert accepted.applied
-    assert accepted.value == 'value'
-    assert not stale.applied
-    assert stale.value is None
+from backend_core.transitions import TransitionOutcome
 
 
 def test_lease_transition_records_redacted_context(caplog: pytest.LogCaptureFixture) -> None:

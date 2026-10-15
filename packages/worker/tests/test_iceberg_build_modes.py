@@ -8,8 +8,9 @@ import pyarrow as pa  # type: ignore[import-untyped]
 from pyiceberg.schema import Schema as IcebergSchema
 from pyiceberg.types import NestedField, StringType
 
-from runtime.compute_service import _schema_cache_payload_from_arrow, _sync_iceberg_schema, export_data
+from runtime.compute_service import _schema_cache_payload_from_arrow, export_data
 from runtime.domain.compute.base import ComputeWorkerResult
+from runtime.iceberg_metadata import sync_iceberg_schema
 from runtime.namespace import namespace_paths
 from runtime.worker_runtime_client import ClaimedBuildJob
 
@@ -32,7 +33,7 @@ class TestSyncIcebergSchema:
         )
         new_schema = pa.schema([pa.field("a", pa.string()), pa.field("b", pa.string())])
 
-        result = _sync_iceberg_schema(table, new_schema)
+        result = sync_iceberg_schema(table, new_schema)
 
         assert result is False
         table.update_schema.assert_not_called()
@@ -47,7 +48,7 @@ class TestSyncIcebergSchema:
         )
         new_schema = pa.schema([pa.field("a", pa.string())])
 
-        result = _sync_iceberg_schema(table, new_schema)
+        result = sync_iceberg_schema(table, new_schema)
 
         assert result is True
         update.delete_column.assert_any_call("b")
@@ -69,7 +70,7 @@ class TestSyncIcebergSchema:
             ]
         )
 
-        result = _sync_iceberg_schema(table, new_schema)
+        result = sync_iceberg_schema(table, new_schema)
 
         assert result is True
         update.union_by_name.assert_called_once_with(new_schema)
@@ -89,7 +90,7 @@ class TestSyncIcebergSchema:
             ],
         )
 
-        result = _sync_iceberg_schema(table, new_schema)
+        result = sync_iceberg_schema(table, new_schema)
 
         assert result is True
         update.delete_column.assert_called_once_with("remove")
@@ -105,7 +106,7 @@ class TestSyncIcebergSchema:
         )
         new_schema = pa.schema([pa.field("a", pa.string())])
 
-        _sync_iceberg_schema(table, new_schema)
+        sync_iceberg_schema(table, new_schema)
 
         update.delete_column.assert_called_once_with("b")
         update.union_by_name.assert_not_called()
@@ -209,7 +210,7 @@ class TestBuildModeWiring:
             patch("runtime.compute_service.load_runtime_catalog", return_value=mock_catalog),
             patch("runtime.compute_service.pq.read_table", return_value=mock_arrow),
             patch("runtime.compute_service.pq.ParquetFile", return_value=self._mock_parquet_file()),
-            patch("runtime.compute_service._sync_iceberg_schema", return_value=False) as mock_sync,
+            patch("runtime.compute_service.sync_iceberg_schema", return_value=False) as mock_sync,
             patch("runtime.compute_service.os.path.getsize", return_value=100),
             patch("runtime.compute_service.ensure_bucket_exists"),
             patch("runtime.compute_service.client_from_env", return_value=self._make_internal_client_mock(output_ds_id)),
@@ -291,7 +292,7 @@ class TestBuildModeWiring:
             patch("runtime.compute_service.load_runtime_catalog", return_value=mock_catalog),
             patch("runtime.compute_service.pq.read_table", return_value=mock_arrow),
             patch("runtime.compute_service.pq.ParquetFile", return_value=self._mock_parquet_file()),
-            patch("runtime.compute_service._sync_iceberg_schema") as mock_sync,
+            patch("runtime.compute_service.sync_iceberg_schema") as mock_sync,
             patch("runtime.compute_service.os.path.getsize", return_value=100),
             patch("runtime.compute_service.ensure_bucket_exists"),
             patch("runtime.compute_service.client_from_env", return_value=self._make_internal_client_mock(output_ds_id)),
@@ -422,7 +423,7 @@ class TestBuildModeWiring:
                 "runtime.compute_service.resolve_iceberg_metadata_path",
                 return_value="/tmp/iceberg/warehouse/ns/tbl/metadata/v1.metadata.json",
             ),
-            patch("runtime.compute_service._sync_iceberg_schema", return_value=False) as mock_sync,
+            patch("runtime.compute_service.sync_iceberg_schema", return_value=False) as mock_sync,
             patch("runtime.compute_service.os.path.getsize", return_value=100),
             patch("runtime.compute_service.ensure_bucket_exists"),
             patch("runtime.compute_service.client_from_env", return_value=self._make_internal_client_mock(output_ds_id)),

@@ -180,7 +180,7 @@ clean_workspace_artifacts() {
 	fi
 	if ! docker run --rm --user 0:0 --entrypoint sh \
 		--volume "${workspace}:/workspace" \
-		docker:29.7.2-dind \
+		docker:29.9.0-dind \
 		-c 'rm -rf /workspace/.e2e-artifacts /workspace/.test-artifacts' >/dev/null 2>&1; then
 		warn 'Could not remove stale E2E artifact directories.'
 	fi

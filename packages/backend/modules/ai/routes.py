@@ -33,7 +33,7 @@ class AIProviderStatus(BaseModel):
 
 
 def resolve_openrouter_status() -> AIProviderStatus:
-    from backend_core.settings_store import get_resolved_openrouter_key
+    from backend_core.settings_projection import get_resolved_openrouter_key
 
     openrouter_key = get_resolved_openrouter_key()
     return AIProviderStatus(
@@ -45,7 +45,7 @@ def resolve_openrouter_status() -> AIProviderStatus:
 
 
 def resolve_ollama_status() -> AIProviderStatus:
-    from backend_core.settings_store import get_resolved_ollama_settings
+    from backend_core.settings_projection import get_resolved_ollama_settings
 
     ollama = get_resolved_ollama_settings()
     return AIProviderStatus(

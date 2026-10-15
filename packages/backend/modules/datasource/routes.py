@@ -48,6 +48,7 @@ from modules.datasource.preflight import (
     resolved_selection,
 )
 from modules.datasource.schema_protocol import schema_info_response_payload
+from modules.datasource.service_lineage import build_lineage
 from modules.mcp.router import MCPRouter
 
 logger = logging.getLogger(__name__)
@@ -232,8 +233,8 @@ async def _create_uploaded_datasource(
 
 
 def _list_export_branches(metadata_path: str, current_branch: str | None = None) -> list[str]:
-    if client_from_settings().classify_object_url(metadata_path).is_object_store:
-        data_plane = client_from_settings()
+    data_plane = client_from_settings()
+    if data_plane.classify_object_url(metadata_path).is_object_store:
         entries = data_plane.list_prefixes(metadata_path)
         if entries:
             branches = sorted(entries)
@@ -242,25 +243,15 @@ def _list_export_branches(metadata_path: str, current_branch: str | None = None)
         else:
             branches = []
     else:
-        normalized = str(Path(metadata_path))
-        path = Path(normalized)
+        path = Path(metadata_path)
         if not path.is_dir():
             return []
-        metadata_dir = path / 'metadata'
-        if metadata_dir.is_dir():
+        if (path / 'metadata').is_dir():
             branches = [current_branch or 'master']
         else:
-            entries = []
-            for entry in path.iterdir():
-                if not entry.is_dir():
-                    continue
-                if (entry / 'metadata').is_dir():
-                    entries.append(entry.name)
-                    continue
-                if list(entry.glob('*.metadata.json')):
-                    entries.append(entry.name)
-                    continue
-            branches = sorted(entries)
+            branches = sorted(
+                entry.name for entry in path.iterdir() if entry.is_dir() and ((entry / 'metadata').is_dir() or any(entry.glob('*.metadata.json')))
+            )
     if not branches:
         return []
     if current_branch and current_branch not in branches:
@@ -317,14 +308,13 @@ async def upload_file(
         )
 
     try:
-        owner_id = user.id if user else None
         datasource = await _create_uploaded_datasource(
             name=name,
             description=description,
-            file_path=str(file_path),
+            file_path=file_path,
             file_type=file_type.value,
             csv_options=csv_options.model_dump() if csv_options else None,
-            owner_id=owner_id,
+            owner_id=user.id if user else None,
         )
         return await json_response(datasource)
     except AppError, HTTPException, ValueError:
@@ -363,8 +353,8 @@ async def upload_bulk(
             detail='Bulk upload must use a single file type per batch',
         )
 
+    owner_id = user.id if user else None
     results: list[schemas.BulkUploadResult] = []
-
     for file in files:
         if not file.filename:
             results.append(schemas.BulkUploadResult(name='unknown', success=False, error='No filename provided'))
@@ -413,7 +403,6 @@ async def upload_bulk(
 
         file_csv_options = csv_options if file_type.uses_csv_options else None
         try:
-            owner_id = user.id if user else None
             datasource = await _create_uploaded_datasource(
                 name=name,
                 description=None,
@@ -471,52 +460,30 @@ async def preflight_excel(
     unique_filename = f'{uuid.uuid4()}{Path(file.filename).suffix.lower()}'
     try:
         source_path = await _stage_upload_to_object_store(file, unique_filename)
-    except asyncio.CancelledError:
-        raise
     except HTTPException:
         raise
     except Exception as e:
         logger.error('Failed to save file: %s', type(e).__name__, exc_info=True)
         raise HTTPException(status_code=500, detail='Failed to save file') from e
 
-    try:
-        preflight_id, preflight, result = await create_preflight(
-            source_path=source_path,
-            selection={
-                'sheet_name': sheet_name,
-                'start_row': start_row,
-                'start_col': start_col,
-                'end_col': end_col,
-                'end_row': end_row,
-                'has_header': has_header,
-                'table_name': table_name,
-                'named_range': named_range,
-                'cell_range': cell_range,
-            },
-            delete_source=True,
-        )
-    except asyncio.CancelledError:
-        # The durable preflight intent owns this object while its worker may
-        # still be reading it; cleanup authorization runs after the request
-        # settles and checks for any published datasource reference.
-        raise
-    target_sheet = sheet_name or (preflight.sheets[0] if preflight.sheets else None)
-    if not target_sheet:
-        await clear_preflight(preflight_id)
-        raise HTTPException(status_code=400, detail='No sheets found in file')
-
-    result_sheet, result_start_row, result_start_col, result_end_col, result_end_row, rows = preview_result(result)
-    return schemas.ExcelPreflightResponse(
-        preflight_id=preflight_id,
-        sheet_name=result_sheet or target_sheet,
-        sheet_names=preflight.sheets,
-        tables=preflight.tables,
-        named_ranges=preflight.named_ranges,
-        preview=rows,
-        start_row=result_start_row,
-        start_col=result_start_col,
-        end_col=result_end_col,
-        detected_end_row=result_end_row,
+    # On cancellation the durable preflight intent owns this object while its
+    # worker may still be reading it; cleanup authorization runs after the
+    # request settles and checks for any published datasource reference.
+    return await _create_preflight_response(
+        source_path,
+        sheet_name,
+        {
+            'sheet_name': sheet_name,
+            'start_row': start_row,
+            'start_col': start_col,
+            'end_col': end_col,
+            'end_row': end_row,
+            'has_header': has_header,
+            'table_name': table_name,
+            'named_range': named_range,
+            'cell_range': cell_range,
+        },
+        delete_source=True,
     )
 
 
@@ -531,24 +498,16 @@ async def preflight_excel_path(
 
     if DataSourceFileType.from_upload_suffix(Path(urlparse(payload.file_path).path).suffix.lower()) != DataSourceFileType.EXCEL:
         raise HTTPException(status_code=400, detail='Only .xlsx files are supported for preflight')
-    preflight_id, preflight, result = await create_preflight(
-        source_path=payload.file_path,
-        selection={
-            'sheet_name': payload.sheet_name,
-            'start_row': payload.start_row,
-            'start_col': payload.start_col,
-            'end_col': payload.end_col,
-            'end_row': payload.end_row,
-            'has_header': payload.has_header,
-            'table_name': payload.table_name,
-            'named_range': payload.named_range,
-            'cell_range': payload.cell_range,
-        },
-        delete_source=False,
-    )
-    target_sheet = payload.sheet_name or (preflight.sheets[0] if preflight.sheets else None)
+    return await _create_preflight_response(payload.file_path, payload.sheet_name, payload.model_dump(include=set(_EXCEL_PARSING_KEYS)), delete_source=False)
+
+
+async def _create_preflight_response(
+    source_path: str, sheet_name: str | None, selection: dict[str, object], *, delete_source: bool
+) -> schemas.ExcelPreflightResponse:
+    preflight_id, preflight, result = await create_preflight(source_path=source_path, selection=selection, delete_source=delete_source)
+    target_sheet = sheet_name or (preflight.sheets[0] if preflight.sheets else None)
     if not target_sheet:
-        await clear_preflight(preflight_id, delete_source=False)
+        await clear_preflight(preflight_id, delete_source=delete_source)
         raise HTTPException(status_code=400, detail='No sheets found in file')
     result_sheet, result_start_row, result_start_col, result_end_col, result_end_row, rows = preview_result(result)
     return schemas.ExcelPreflightResponse(
@@ -582,12 +541,13 @@ async def preflight_preview(
     named_range: str | None = None,
     cell_range: str | None = None,
 ):
-    preflight = await get_preflight(parse_preflight_id(preflight_id))
+    preflight_key = parse_preflight_id(preflight_id)
+    preflight = await get_preflight(preflight_key)
     if not preflight:
         raise HTTPException(status_code=404, detail='Preflight not found')
 
     result = await execute_excel_preflight(
-        preflight_id=parse_preflight_id(preflight_id),
+        preflight_id=preflight_key,
         source_path=preflight.source_path,
         action=enums_pb2.DATASOURCE_PREFLIGHT_ACTION_PREVIEW,
         selection={
@@ -631,18 +591,19 @@ async def confirm_excel(
     cell_range: str | None = Form(None),
     user: User | None = Depends(get_current_user),
 ):
-    preflight = await get_preflight(parse_preflight_id(preflight_id))
+    preflight_key = parse_preflight_id(preflight_id)
+    preflight = await get_preflight(preflight_key)
     if not preflight:
         raise HTTPException(status_code=404, detail='Preflight not found')
 
     target_sheet = sheet_name or (preflight.sheets[0] if preflight.sheets else None)
     if not target_sheet:
-        await clear_preflight(parse_preflight_id(preflight_id))
+        await clear_preflight(preflight_key)
         raise HTTPException(status_code=400, detail='No sheet selected')
 
     try:
         resolved = await execute_excel_preflight(
-            preflight_id=parse_preflight_id(preflight_id),
+            preflight_id=preflight_key,
             source_path=preflight.source_path,
             action=enums_pb2.DATASOURCE_PREFLIGHT_ACTION_RESOLVE_SELECTION,
             selection={
@@ -659,9 +620,6 @@ async def confirm_excel(
             delete_source=False,
         )
         resolved_sheet, resolved_start_row, resolved_start_col, resolved_end_col, resolved_end_row = resolved_selection(resolved)
-        if resolved_end_row is None:
-            raise ValueError('Excel selection result has no end row')
-        target_path = preflight.source_path
         resolved_cell_range = cell_range
         if not resolved_cell_range and (table_name or named_range or cell_range):
             resolved_cell_range = format_excel_cell_range(
@@ -674,7 +632,7 @@ async def confirm_excel(
         datasource = await create_remote_file_datasource(
             name=name,
             description=description,
-            file_path=target_path,
+            file_path=preflight.source_path,
             file_type=DataSourceFileType.EXCEL.value,
             sheet_name=resolved_sheet,
             start_row=resolved_start_row,
@@ -687,15 +645,14 @@ async def confirm_excel(
             cell_range=resolved_cell_range,
             owner_id=user.id if user else None,
         )
-    except AppError, HTTPException:
-        await clear_preflight(parse_preflight_id(preflight_id))
-        raise
     except Exception as e:
+        await clear_preflight(preflight_key)
+        if isinstance(e, AppError | HTTPException):
+            raise
         logger.error('Failed to create datasource: %s', type(e).__name__, exc_info=True)
-        await clear_preflight(parse_preflight_id(preflight_id))
         raise HTTPException(status_code=500, detail='Failed to create datasource') from e
 
-    await clear_preflight(parse_preflight_id(preflight_id), delete_source=False)
+    await clear_preflight(preflight_key, delete_source=False)
     return await json_response(datasource)
 
 
@@ -776,40 +733,20 @@ def _toggle_internal_postgres_table(
     request: schemas.InternalPostgresToggleRequest,
     owner_id: str | None,
 ) -> schemas.InternalPostgresTable:
-    if request.enabled:
-        if service.internal_postgres_table_is_onboarded(session, request.schema_name, request.table_name):
-            return schemas.InternalPostgresTable(
-                schema_name=request.schema_name,
-                table_name=request.table_name,
-                is_onboarded=True,
-            )
+    if not request.enabled:
+        return service.set_internal_postgres_table_onboarded(session, request.schema_name, request.table_name, enabled=False)
+    if not service.internal_postgres_table_is_onboarded(session, request.schema_name, request.table_name):
         query = service.internal_postgres_table_query(session, request.schema_name, request.table_name)
         service.create_database_datasource_record(
             session,
-            name=service.InternalPostgresOnboarding.datasource_name_for(
-                request.schema_name,
-                request.table_name,
-            ),
-            description=service.InternalPostgresOnboarding.datasource_description_for(
-                request.schema_name,
-                request.table_name,
-            ),
-            connection_string=service.internal_postgres_connection_string(),
+            name=service.InternalPostgresOnboarding.datasource_name_for(request.schema_name, request.table_name),
+            description=service.InternalPostgresOnboarding.datasource_description_for(request.schema_name, request.table_name),
+            connection_string=service.InternalPostgresOnboarding.connection_string(),
             query=query,
             branch='master',
             owner_id=owner_id,
         )
-        return schemas.InternalPostgresTable(
-            schema_name=request.schema_name,
-            table_name=request.table_name,
-            is_onboarded=True,
-        )
-    return service.set_internal_postgres_table_onboarded(
-        session,
-        request.schema_name,
-        request.table_name,
-        enabled=False,
-    )
+    return schemas.InternalPostgresTable(schema_name=request.schema_name, table_name=request.table_name, is_onboarded=True)
 
 
 @router.post('/internal-postgres/toggle', response_model=schemas.InternalPostgresTable)
@@ -851,18 +788,12 @@ async def get_lineage(
     Returns nodes (datasources and analyses) and edges showing data flow.
     Optionally filter by target_datasource_id or branch to scope the graph.
     """
-    from modules.datasource.service_lineage import build_lineage
-
     datasource_id = None
     if target_datasource_id:
         try:
             datasource_id = parse_datasource_id(target_datasource_id)
         except HTTPException:
             datasource_id = target_datasource_id
-    if branch is not None:
-        branch = branch.strip()
-        if not branch:
-            branch = None
     return await run_api_blocking(
         run_db,
         build_lineage,
@@ -915,18 +846,12 @@ async def get_datasource_schema(
         source = datasource.config.get('source') if isinstance(datasource.config, dict) else None
         source_type = DataSourceType.read(source.get('source_type') if isinstance(source, dict) else None, default=None)
         if datasource.source_type == DataSourceType.ICEBERG and source_type is not None and source_type.supports_external_ingestion:
-            await ingest_remote_datasource(
-                datasource_id=datasource_id_value,
-            )
+            await ingest_remote_datasource(datasource_id=datasource_id_value)
     schema = None
     if sheet_name is None:
         schema = await run_api_blocking(run_db, service.cached_schema, datasource_id_value)
     if schema is None:
-        schema = await get_remote_datasource_schema(
-            datasource_id=datasource_id_value,
-            sheet_name=sheet_name,
-            refresh=False,
-        )
+        schema = await get_remote_datasource_schema(datasource_id=datasource_id_value, sheet_name=sheet_name, refresh=False)
     schema = await run_api_blocking(run_db, service.attach_column_descriptions, datasource_id_value, schema)
     response = await run_api_blocking(schemas.SchemaInfo.model_validate, schema_info_response_payload(schema))
     return await json_response(response)
@@ -943,11 +868,7 @@ async def update_datasource_column_metadata(
     await run_api_blocking(run_db, _require_active_datasource, datasource_id_value)
     schema = await run_api_blocking(run_db, service.cached_schema, datasource_id_value)
     if schema is None:
-        schema = await get_remote_datasource_schema(
-            datasource_id=datasource_id_value,
-            sheet_name=None,
-            refresh=False,
-        )
+        schema = await get_remote_datasource_schema(datasource_id=datasource_id_value, sheet_name=None, refresh=False)
     schema = await run_api_blocking(run_db, service.update_column_descriptions, datasource_id_value, payload, schema)
     response = await run_api_blocking(schemas.SchemaInfo.model_validate, schema_info_response_payload(schema))
     return await json_response(response)
@@ -987,10 +908,7 @@ async def _handle_column_stats(
 ):
     datasource_id_value = parse_datasource_id(datasource_id)
     await run_api_blocking(run_db, _require_active_datasource, datasource_id_value)
-    datasource = payload.datasource if payload else None
-    config = None
-    if isinstance(datasource, dict):
-        config = datasource.get('config')
+    config = payload.datasource.get('config') if payload and isinstance(payload.datasource, dict) else None
     return await get_remote_column_stats(
         datasource_id=datasource_id_value,
         column_name=column_name,
@@ -1091,9 +1009,7 @@ async def ingest_datasource(
     """Ingest an external datasource again from source. Useful after upstream data changes."""
     datasource_id_value = parse_datasource_id(datasource_id)
     await run_api_blocking(run_db, _require_active_datasource, datasource_id_value)
-    response = await ingest_remote_datasource(
-        datasource_id=datasource_id_value,
-    )
+    response = await ingest_remote_datasource(datasource_id=datasource_id_value)
     return await json_response(response)
 
 

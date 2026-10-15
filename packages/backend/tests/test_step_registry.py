@@ -11,7 +11,7 @@ FRONTEND_PROTOCOL_ANALYSIS = (
 
 
 def test_step_catalog_matches_public_step_types() -> None:
-    assert set(STEP_CATALOG) == set(STEP_TYPES.all(include_plot_aliases=True))
+    assert set(STEP_CATALOG) == set(STEP_TYPES.all(include_plot_aliases=False))
 
 
 def test_generated_frontend_protocol_exports_catalog_configs() -> None:

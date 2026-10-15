@@ -34,16 +34,6 @@ def ensure_catalog_namespace(catalog: Any, namespace: str) -> None:
         logger.info("Namespace %s was created concurrently; continuing", namespace)
 
 
-def _normalized_database_url(database_url: str) -> str:
-    if database_url.startswith("postgresql+psycopg://"):
-        return database_url.replace("postgresql+psycopg://", "postgresql://", 1)
-    return database_url
-
-
-def _is_sql_catalog_bootstrap_duplicate(error: ProgrammingError) -> bool:
-    return 'relation "iceberg_tables" already exists' in str(error)
-
-
 def load_runtime_catalog(name: str, **catalog_config: Any):
     catalog_type = catalog_config.get("type")
     catalog_uri = catalog_config.get("uri")
@@ -54,13 +44,14 @@ def load_runtime_catalog(name: str, **catalog_config: Any):
         if catalog_uri in _sql_catalog_bootstrapped_uris:
             return load_catalog(name, **catalog_config)
 
-        with psycopg.connect(_normalized_database_url(catalog_uri), autocommit=True) as connection:
+        lock_url = catalog_uri.replace("postgresql+psycopg://", "postgresql://", 1) if catalog_uri.startswith("postgresql+psycopg://") else catalog_uri
+        with psycopg.connect(lock_url, autocommit=True) as connection:
             connection.execute("SELECT pg_advisory_lock(%s)", (_SQL_CATALOG_BOOTSTRAP_LOCK_KEY,))
             try:
                 try:
                     catalog = load_catalog(name, **catalog_config)
                 except ProgrammingError as exc:
-                    if not _is_sql_catalog_bootstrap_duplicate(exc):
+                    if 'relation "iceberg_tables" already exists' not in str(exc):
                         raise
                     logger.info("Iceberg SQL catalog bootstrap raced; retrying after duplicate-table error")
                     catalog = load_catalog(name, **catalog_config)

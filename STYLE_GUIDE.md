@@ -100,7 +100,11 @@ const result = await fetchData() as any;
 ```svelte
 <script lang="ts">
 	// Good — runes, typed props, derived state
-	const { items } = $props<{ items: string[] }>();
+	interface Props {
+		items: string[];
+	}
+
+	let { items }: Props = $props();
 	const count = $derived(items.length);
 </script>
 ```
@@ -109,30 +113,29 @@ const result = await fetchData() as any;
 
 - Use Panda CSS recipes and semantic tokens — never raw hex/rgb values
 - Avoid inline `style=""` attributes — use `css()` or recipe classes
-- Never use `transition-all` — always specify the properties:
+- Never transition `all` — always specify the properties:
 
 ```ts
 // Good
-'transition-colors duration-150'
-'transition-opacity duration-200'
-'transition-[color,background-color,border-color,opacity] duration-150'
+css({ transitionProperty: 'color, background-color', transitionDuration: 'normal' });
 
 // Bad
-'transition-all duration-150'
+css({ transitionProperty: 'all', transitionDuration: 'normal' });
 ```
 
 ## Patterns
 
-**Config Defaults:** Centralize in `step-config-defaults.ts`
+**Config Defaults:** Centralize in `packages/frontend/src/lib/utils/step-config-defaults.ts`
 
 ```typescript
-export function getDefaultConfig(stepType: string) {
-	const defaults = { select: { columns: [] }, filter: { conditions: [] } };
-	return JSON.parse(JSON.stringify(defaults[stepType] ?? {}));
+export function getDefaultConfig(stepType: string): StepConfig {
+	const normalizedType = normalizePipelineStepType(stepType);
+	const defaults = defaultConfigs[normalizedType];
+	return defaults ? cloneJson(defaults) : {};
 }
 ```
 
-**Icons:** Use Lucide. Store as component references, render as `<Icon />`.
+**Icons:** Use Lucide (`@lucide/svelte`). Store as component references, render as `<Icon />`.
 
 **Dynamic Styles:** Use Svelte actions (e.g., `use:setWidth`) not inline styles.
 

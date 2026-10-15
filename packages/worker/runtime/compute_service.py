@@ -13,7 +13,7 @@ from collections.abc import Callable, Mapping
 from dataclasses import dataclass
 from datetime import UTC, datetime
 from pathlib import Path
-from typing import Final, TypedDict, cast
+from typing import Any, Final, cast
 
 import polars as pl
 import pyarrow as pa  # type: ignore[import-untyped]
@@ -22,6 +22,7 @@ from pyiceberg.table import Table as IcebergTable
 
 from builds.build_live import RuntimeBuild
 from dataforge_protocol import compute_pb2, enums_pb2
+from operations.datasource import step_source_payload
 from runtime.build_events import (
     BuildCancelledError,
     BuildEmitter,
@@ -38,7 +39,7 @@ from runtime.compute_utils import (
     resolve_applied_target,
 )
 from runtime.config import settings
-from runtime.domain.analysis.step_types import get_step_timing_key
+from runtime.domain.analysis.step_types import STEP_TYPES
 from runtime.domain.compute import schemas as compute_schemas
 from runtime.domain.compute.schemas import BuildStatus, BuildTabStatus, ComputeRunStatus
 from runtime.domain.compute_worker_runs.schemas import ComputeWorkerRunExecutionCategory, ComputeWorkerRunKind, ComputeWorkerRunStatus
@@ -61,7 +62,6 @@ from runtime.healthchecks import (
 )
 from runtime.iceberg_catalog import ensure_catalog_namespace, load_runtime_catalog
 from runtime.iceberg_metadata import resolve_iceberg_branch_metadata_path, resolve_iceberg_metadata_path, sync_iceberg_schema
-from runtime.json_utils import copy_json_dict
 from runtime.namespace import get_namespace
 from runtime.notification_delivery import (
     STAGED_NOTIFICATION_PREFIX,
@@ -84,8 +84,7 @@ from runtime.resource_observation import (
     stop_stream_task as _stop_stream_task,
     stream_resource_events as _stream_resource_events,
 )
-from runtime.time import utc_now as _utcnow
-from runtime.worker_runtime_client import ClaimedBuildJob, ComputeWorkerRunFinalization, DatasourceMetadata, HealthCheckSpec, client_from_env
+from runtime.worker_runtime_client import ClaimedBuildJob, ComputeWorkerRunFinalization, HealthCheckSpec, client_from_env
 
 logger = logging.getLogger(__name__)
 
@@ -169,34 +168,6 @@ def _strip_staged_notification_columns(path: str) -> list[dict[str, object]] | N
     return deliveries
 
 
-class _UnsetType:
-    __slots__ = ()
-
-
-_UNSET: Final = _UnsetType()
-
-
-class _ComputeWorkerRunFailureUpdateKwargs(TypedDict, total=False):
-    datasource_id: str
-    status: ComputeRunStatus
-    result_json: dict[str, object]
-    error_message: str
-    completed_at: datetime
-    duration_ms: int
-    step_timings: dict
-    query_plan: str | None
-    execution_entries: list[dict[str, object]]
-    progress: float
-    current_step: str | None
-
-
-def _datasource_name(datasource_id: str | None) -> str | None:
-    if not datasource_id:
-        return None
-    metadata = client_from_env().datasource_metadata(namespace=get_namespace(), datasource_id=datasource_id)
-    return metadata.name if metadata.found else None
-
-
 @dataclass(frozen=True, slots=True)
 class PreviewOutcome:
     response: compute_schemas.StepPreviewResponse
@@ -218,10 +189,6 @@ class ExportDatasourceResult:
     datasource_id: str
     datasource_name: str
     result_meta: dict
-    source_datasource_id: str
-    source_datasource_name: str | None = None
-    read_duration_ms: float | None = None
-    write_duration_ms: float | None = None
 
 
 @dataclass(slots=True)
@@ -342,33 +309,20 @@ def _preflight_datasource_for_compute(
     config["metadata_path"] = resolved_metadata_path
 
 
-def _output_timeout_warning_ms(analysis_pipeline: dict | None, tab_id: str | None) -> int | None:
-    if not isinstance(analysis_pipeline, dict):
-        return None
+def _tab_output_config(analysis_pipeline: dict, tab_id: str | None) -> dict:
+    """Output config of the requested tab, falling back to the first tab."""
     tabs = analysis_pipeline.get("tabs")
-    if not isinstance(tabs, list):
-        return None
-    selected = None
-    if isinstance(tab_id, str) and tab_id:
-        selected = next((tab for tab in tabs if isinstance(tab, dict) and tab.get("id") == tab_id), None)
-    if selected is None:
-        selected = next((tab for tab in tabs if isinstance(tab, dict)), None)
-    if not isinstance(selected, dict):
-        return None
+    dict_tabs = [tab for tab in tabs if isinstance(tab, dict)] if isinstance(tabs, list) else []
+    selected = next((tab for tab in dict_tabs if tab_id and tab.get("id") == tab_id), dict_tabs[0] if dict_tabs else {})
     output = selected.get("output")
-    if not isinstance(output, dict):
-        return None
-    raw = output.get("build_timeout_warning_ms")
-    if isinstance(raw, bool) or not isinstance(raw, (int, float)):
-        return None
-    value = int(raw)
-    if value <= 0:
-        return None
-    return value
+    return output if isinstance(output, dict) else {}
 
 
-def _duration_exceeded_warning(*, duration_ms: int, timeout_warning_ms: int | None) -> bool:
-    return timeout_warning_ms is not None and duration_ms > timeout_warning_ms
+def _output_timeout_warning_ms(analysis_pipeline: dict, tab_id: str | None) -> int | None:
+    raw = _tab_output_config(analysis_pipeline, tab_id).get("build_timeout_warning_ms")
+    if isinstance(raw, bool) or not isinstance(raw, (int, float)) or int(raw) <= 0:
+        return None
+    return int(raw)
 
 
 def _build_subscriber_message(context: BuildContext) -> str:
@@ -440,129 +394,24 @@ def _prepare_pipeline_notifications(
 
     # Subscriber-based notifications (from Telegram bot /subscribe)
     datasource_id = str(context.get("datasource_id", ""))
-    if datasource_id:
-        try:
-            namespace = get_namespace()
-            raw_targets = client_from_env().telegram_targets(namespace=namespace, datasource_id=datasource_id)
-            excluded: set[str] = set()
-            if output_notification and output_notification.get("method") == "telegram":
-                raw_targets = client_from_env().telegram_targets(namespace=namespace, active_subscribers=True)
-                excluded_raw = output_notification.get("excluded_recipients")
-                if isinstance(excluded_raw, list):
-                    excluded = {str(item) for item in excluded_raw}
-
-            def _normalize_target(value: object) -> tuple[str, str] | None:
-                if isinstance(value, tuple) and len(value) == 2:
-                    chat_id, token = value
-                    return str(chat_id), str(token)
-                chat_id = getattr(value, "chat_id", None)
-                token = getattr(value, "bot_token", None)
-                if isinstance(chat_id, str) and isinstance(token, str):
-                    return chat_id, token
-                return None
-
-            pairs = [item for item in (_normalize_target(value) for value in raw_targets) if item is not None]
-            if excluded:
-                pairs = [(cid, token) for cid, token in pairs if cid not in excluded]
-            if pairs:
-                msg = _build_subscriber_message(cast(BuildContext, context))
-                for cid, token in pairs:
-                    if not token:
-                        continue
-                    deliveries.append({"method": "telegram", "recipient": cid, "message": msg, "bot_token": token})
-        except Exception as e:
-            raise PipelineExecutionError("Notification target resolution failed", details={"error": str(e)}) from e
-
-    return deliveries
-
-
-def _sync_iceberg_schema(table: IcebergTable, new_schema: pa.Schema) -> bool:
-    return sync_iceberg_schema(table, new_schema)
-
-
-def _upsert_output_datasource(
-    result_id: str,
-    name: str,
-    source_type: str,
-    config: dict,
-    schema_cache: dict,
-    analysis_id: str | None,
-    is_hidden: bool | None = None,
-    keep_schema_cache: bool = False,
-    publication_claim: ClaimedBuildJob | None = None,
-    worker_id: str | None = None,
-    build_result_json: dict[str, object] | None = None,
-    notification_deliveries: list[dict[str, object]] | None = None,
-) -> DatasourceMetadata:
-    """Publish an exported datasource through the worker runtime client."""
+    if not datasource_id:
+        return deliveries
     try:
-        uuid.UUID(result_id)
-    except ValueError, AttributeError:
-        raise ValueError(f"result_id must be a valid UUID, got: {result_id!r}") from None
-    return client_from_env().upsert_output_datasource(
-        namespace=get_namespace(),
-        result_id=result_id,
-        name=name,
-        source_type=str(source_type),
-        config=config,
-        schema_cache=schema_cache,
-        analysis_id=analysis_id,
-        is_hidden=is_hidden,
-        keep_schema_cache=keep_schema_cache,
-        job_id=publication_claim.job_id if publication_claim is not None else None,
-        build_id=publication_claim.build_id if publication_claim is not None else None,
-        worker_id=worker_id,
-        claim_token=publication_claim.claim_token if publication_claim is not None else None,
-        lease_generation=publication_claim.lease_generation if publication_claim is not None else None,
-        build_result_json=build_result_json,
-        notification_deliveries=notification_deliveries or [],
-    )
-
-
-def _build_preview_result_metadata(
-    data: dict,
-    page: int,
-    row_limit: int,
-    offset: int,
-) -> dict:
-    schema = data.get("schema", {}) or {}
-    rows = data.get("data", []) or []
-    query_plans = data.get("query_plans")
-
-    result: dict = {
-        "schema": schema,
-        "columns": list(schema.keys()),
-        "row_count": data.get("row_count", 0),
-        "page": page,
-        "row_limit": row_limit,
-        "offset": offset,
-        "page_size": len(rows),
-    }
-
-    if query_plans:
-        result["query_plans"] = query_plans
-    if metadata := data.get("metadata"):
-        result["metadata"] = metadata
-
-    return result
-
-
-def _build_export_result_metadata(
-    data: dict,
-    file_size_bytes: int,
-) -> dict:
-    query_plans = data.get("query_plans")
-
-    result: dict = {
-        "row_count": data.get("row_count", 0),
-        "export_format": data.get("export_format"),
-        "file_size_bytes": file_size_bytes,
-    }
-
-    if query_plans:
-        result["query_plans"] = query_plans
-
-    return result
+        excluded: set[str] = set()
+        if output_notification and output_notification.get("method") == "telegram":
+            targets = client_from_env().telegram_targets(namespace=get_namespace(), active_subscribers=True)
+            excluded_raw = output_notification.get("excluded_recipients")
+            if isinstance(excluded_raw, list):
+                excluded = {str(item) for item in excluded_raw}
+        else:
+            targets = client_from_env().telegram_targets(namespace=get_namespace(), datasource_id=datasource_id)
+        pairs = [(target.chat_id, target.bot_token) for target in targets if target.chat_id not in excluded]
+        if pairs:
+            msg = _build_subscriber_message(cast(BuildContext, context))
+            deliveries.extend({"method": "telegram", "recipient": cid, "message": msg, "bot_token": token} for cid, token in pairs if token)
+    except Exception as e:
+        raise PipelineExecutionError("Notification target resolution failed", details={"error": str(e)}) from e
+    return deliveries
 
 
 def _schema_cache_payload_from_arrow(arrow_schema: pa.Schema, data: Mapping[str, object]) -> dict[str, object]:
@@ -597,41 +446,16 @@ def _build_compute_worker_run_execution_entries(
     payload = result_data if isinstance(result_data, dict) else {}
     raw_data = payload.get("data")
     data = raw_data if isinstance(raw_data, dict) else {}
-    query_plans = payload.get("query_plans")
-    if not isinstance(query_plans, dict):
-        query_plans = data.get("query_plans")
-    normalized_query_plans = query_plans if isinstance(query_plans, dict) else None
-    query_plan_value = payload.get("query_plan")
-    if not isinstance(query_plan_value, str):
-        query_plan_value = data.get("query_plan")
-    query_plan = query_plan_value if isinstance(query_plan_value, str) else None
-    read_duration = payload.get("read_duration_ms")
-    collect_duration = payload.get("collect_duration_ms")
+    step_timings = payload.get("step_timings")
     return _build_execution_entries(
-        step_timings=payload.get("step_timings") if isinstance(payload.get("step_timings"), dict) else None,
-        query_plans=normalized_query_plans,
-        query_plan=query_plan,
-        read_duration_ms=float(read_duration) if isinstance(read_duration, (int, float)) else None,
-        collect_duration_ms=float(collect_duration) if isinstance(collect_duration, (int, float)) else None,
+        step_timings=step_timings if isinstance(step_timings, dict) else None,
+        query_plans=next((value for value in (payload.get("query_plans"), data.get("query_plans")) if isinstance(value, dict)), None),
+        query_plan=next((value for value in (payload.get("query_plan"), data.get("query_plan")) if isinstance(value, str)), None),
+        read_duration_ms=payload.get("read_duration_ms"),
+        collect_duration_ms=payload.get("collect_duration_ms"),
         write_duration_ms=write_duration_ms,
         total_duration_ms=duration_ms,
     )
-
-
-def _normalize_step_timings(values: dict | None) -> dict[str, float]:
-    if not values:
-        return {}
-    normalized: dict[str, float] = {}
-    for key, value in values.items():
-        try:
-            duration_ms = float(value)
-        except TypeError:
-            continue
-        except ValueError:
-            continue
-        if math.isfinite(duration_ms) and duration_ms >= 0:
-            normalized[str(key)] = duration_ms
-    return normalized
 
 
 def _nonnegative_duration(value: object) -> float | None:
@@ -643,15 +467,22 @@ def _nonnegative_duration(value: object) -> float | None:
 
 def _build_execution_entries(
     *,
-    step_timings: dict[str, float] | None = None,
+    step_timings: dict | None = None,
     query_plans: dict[str, object] | None = None,
     query_plan: str | None = None,
-    read_duration_ms: float | None = None,
-    collect_duration_ms: float | None = None,
+    read_duration_ms: object = None,
+    collect_duration_ms: object = None,
     write_duration_ms: float | None = None,
     total_duration_ms: int | None = None,
 ) -> list[dict[str, object]]:
-    normalized_timings = _normalize_step_timings(step_timings)
+    normalized_timings: dict[str, float] = {}
+    for key, value in (step_timings or {}).items():
+        try:
+            duration_ms = float(value)
+        except TypeError, ValueError:
+            continue
+        if math.isfinite(duration_ms) and duration_ms >= 0:
+            normalized_timings[str(key)] = duration_ms
     read_duration = _nonnegative_duration(read_duration_ms)
     collect_duration = _nonnegative_duration(collect_duration_ms)
     write_duration = _nonnegative_duration(write_duration_ms)
@@ -703,7 +534,7 @@ def _build_execution_entries(
             unoptimized_plan=unoptimized_plan or query_plan,
         )
     for timing_key, timing_duration_ms in normalized_timings.items():
-        base_key, label = get_step_timing_key(timing_key)
+        base_key, label = STEP_TYPES.timing_key(timing_key)
         append_entry(
             key=timing_key,
             label=label,
@@ -716,53 +547,6 @@ def _build_execution_entries(
     if write_duration is not None:
         append_entry(key="write_output", label="Write Output", category=ComputeWorkerRunExecutionCategory.WRITE, duration_ms=write_duration)
     return entries
-
-
-def _json_field(value: object) -> object:
-    return value.isoformat() if isinstance(value, datetime) else value
-
-
-def _create_compute_worker_run(
-    *,
-    analysis_id: str | None,
-    datasource_id: str,
-    kind: str,
-    status: str,
-    request_json: dict[str, object],
-    result_json: dict[str, object] | None = None,
-    created_at: datetime | None = None,
-    progress: float = 0.0,
-    triggered_by: str | None = None,
-    idempotency_key: str | None = None,
-) -> str:
-    run_id = client_from_env().create_compute_worker_run(
-        namespace=get_namespace(),
-        analysis_id=analysis_id,
-        datasource_id=datasource_id,
-        kind=kind,
-        status=status,
-        request_json=request_json,
-        result_json=result_json,
-        created_at=created_at,
-        progress=progress,
-        triggered_by=triggered_by,
-        idempotency_key=idempotency_key,
-    )
-    return run_id
-
-
-def _update_compute_worker_run(
-    run_id: str,
-    *,
-    merge_result_json: bool = True,
-    **fields: object,
-) -> None:
-    client_from_env().update_compute_worker_run(
-        namespace=get_namespace(),
-        run_id=run_id,
-        fields={key: _json_field(value) for key, value in fields.items()},
-        merge_result_json=merge_result_json,
-    )
 
 
 def _tab_name_from_pipeline(analysis_pipeline: dict, tab_id: str | None) -> str | None:
@@ -790,21 +574,21 @@ def _normalize_query_plan_snapshots(
     tab_name: str | None,
 ) -> list[dict[str, str | None]]:
     if isinstance(query_plans, list):
-        snapshots: list[dict[str, str | None]] = []
-        for plan in query_plans:
-            if not isinstance(plan, dict):
-                continue
-            snapshots.append(
-                {
-                    "tab_id": str(plan.get("tab_id")) if isinstance(plan.get("tab_id"), str) and plan.get("tab_id") else tab_id,
-                    "tab_name": (str(plan.get("tab_name")) if isinstance(plan.get("tab_name"), str) and plan.get("tab_name") else tab_name),
-                    "optimized_plan": (str(plan.get("optimized_plan")) if isinstance(plan.get("optimized_plan"), str) and plan.get("optimized_plan") else ""),
-                    "unoptimized_plan": (
-                        str(plan.get("unoptimized_plan")) if isinstance(plan.get("unoptimized_plan"), str) and plan.get("unoptimized_plan") else ""
-                    ),
-                }
-            )
-        return snapshots
+
+        def text(plan: dict, key: str, default: str | None) -> str | None:
+            value = plan.get(key)
+            return value if isinstance(value, str) and value else default
+
+        return [
+            {
+                "tab_id": text(plan, "tab_id", tab_id),
+                "tab_name": text(plan, "tab_name", tab_name),
+                "optimized_plan": text(plan, "optimized_plan", ""),
+                "unoptimized_plan": text(plan, "unoptimized_plan", ""),
+            }
+            for plan in query_plans
+            if isinstance(plan, dict)
+        ]
 
     if isinstance(query_plans, dict):
         optimized_plan = query_plans.get("optimized_plan")
@@ -875,54 +659,12 @@ def _build_step_snapshots_from_execution_entries(
     return snapshots
 
 
-def _result_entry(
-    *,
-    tab_id: str | None,
-    tab_name: str | None,
-    status: BuildTabStatus,
-    output_id: str | None = None,
-    output_name: str | None = None,
-    error: str | None = None,
-) -> dict[str, object]:
-    result: dict[str, object] = {
-        "tab_id": tab_id or "",
-        "tab_name": tab_name or "Build",
-        "status": status,
-    }
-    if output_id is not None:
-        result["output_id"] = output_id
-    if output_name is not None:
-        result["output_name"] = output_name
-    if error is not None:
-        result["error"] = error
-    return result
-
-
-def _log_entry(
-    *,
-    message: str,
-    level: str = "info",
-    tab_id: str | None = None,
-    tab_name: str | None = None,
-    step_id: str | None = None,
-    step_name: str | None = None,
-) -> dict[str, object]:
-    return {
-        "timestamp": datetime.now(UTC).isoformat(),
-        "level": level,
-        "message": message,
-        "step_id": step_id,
-        "step_name": step_name,
-        "tab_id": tab_id,
-        "tab_name": tab_name,
-    }
-
-
 def _load_compute_worker_run_result_json(run_id: str) -> dict[str, object]:
     state = client_from_env().compute_worker_run_state(namespace=get_namespace(), run_id=run_id)
     if state is None:
         return {}
-    return copy_json_dict(state.get("result_json"))
+    result_json = state.get("result_json")
+    return dict(result_json) if isinstance(result_json, dict) else {}
 
 
 def _raise_if_compute_worker_run_cancelled(run_id: str) -> None:
@@ -938,12 +680,6 @@ def _raise_if_compute_worker_run_cancelled(run_id: str) -> None:
     )
 
 
-def _parse_cancelled_at(value: str | None) -> datetime | None:
-    if value is None:
-        return None
-    return datetime.fromisoformat(value)
-
-
 def _raise_if_build_cancelled(build_id: str) -> None:
     cancelled, cancelled_at, cancelled_by = client_from_env().build_cancel_status(namespace=get_namespace(), build_id=build_id)
     if not cancelled:
@@ -951,119 +687,76 @@ def _raise_if_build_cancelled(build_id: str) -> None:
     raise BuildCancelledError(build_id, cancelled_at=cancelled_at, cancelled_by=cancelled_by)
 
 
-def _build_failed_compute_worker_run_finalization(
-    *,
+def _single_tab_run_finalization(
     run_id: str,
+    *,
     existing_result: dict[str, object] | None,
-    execution_entries: list[dict[str, object]],
-    error: Exception,
-    completed_at: datetime,
-    duration_ms: int,
-    step_timings: dict,
-    query_plan: str | None | _UnsetType = _UNSET,
-    current_output_id: str | None = None,
-    current_output_name: str | None = None,
-    current_tab_id: str | None = None,
-    current_tab_name: str | None = None,
-    total_steps: int | None = None,
-    total_tabs: int | None = None,
-    resource_config: dict[str, int | None] | None = None,
-    resources: list[dict[str, object]] | None = None,
-    result_entry: dict[str, object] | None = None,
-    log_entry: dict[str, object] | None = None,
+    result_data: dict | None,
+    started_perf: float,
+    tab_id: str | None,
+    tab_name: str | None,
+    total_steps: int,
+    error: Exception | None = None,
     summary_meta: dict[str, object] | None = None,
-    datasource_id: str | _UnsetType = _UNSET,
-    current_step: str | None | _UnsetType = _UNSET,
+    log_message: str = "",
+    resource_config: dict[str, int | None] | None = None,
+    write_duration_ms: float | None = None,
+    **fields: object,
 ) -> ComputeWorkerRunFinalization:
+    """Terminal run update for a single-tab preview, row count, or download."""
+    completed_at = datetime.now(UTC)
+    duration_ms = int((time.perf_counter() - started_perf) * 1000)
+    execution_entries = _build_compute_worker_run_execution_entries(result_data, duration_ms=duration_ms, write_duration_ms=write_duration_ms)
+    failed = error is not None
     result_json = _build_canonical_compute_worker_run_result(
         existing_result=existing_result,
         summary_meta=summary_meta,
         execution_entries=execution_entries,
-        current_output_id=current_output_id,
-        current_output_name=current_output_name,
-        current_tab_id=current_tab_id,
-        current_tab_name=current_tab_name,
+        current_tab_id=tab_id,
+        current_tab_name=tab_name,
         total_steps=total_steps,
-        total_tabs=total_tabs,
         resource_config=resource_config,
-        resources=resources,
-        results=[result_entry] if result_entry is not None else None,
-        append_logs=[log_entry] if log_entry is not None else None,
+        results=[
+            {
+                "tab_id": tab_id or "",
+                "tab_name": tab_name or "Build",
+                "status": BuildTabStatus.FAILED if failed else BuildTabStatus.SUCCESS,
+                **({"error": str(error)} if failed else {}),
+            }
+        ],
+        append_logs=[
+            {
+                "timestamp": datetime.now(UTC).isoformat(),
+                "level": "error" if failed else "info",
+                "message": str(error) if failed else log_message,
+                "step_id": None,
+                "step_name": None,
+                "tab_id": tab_id,
+                "tab_name": tab_name,
+            }
+        ],
     )
-    kwargs: _ComputeWorkerRunFailureUpdateKwargs = {
-        "status": ComputeRunStatus.FAILED,
+    run_fields: dict[str, object] = {
+        "status": ComputeRunStatus.FAILED if failed else ComputeRunStatus.SUCCESS,
         "result_json": result_json,
-        "error_message": str(error),
         "completed_at": completed_at,
         "duration_ms": duration_ms,
-        "step_timings": step_timings,
+        "step_timings": result_data.get("step_timings", {}) if isinstance(result_data, dict) else {},
         "execution_entries": execution_entries,
-        "progress": 0.0,
+        "progress": 0.0 if failed else 1.0,
+        **fields,
     }
-    if not isinstance(datasource_id, _UnsetType):
-        kwargs["datasource_id"] = datasource_id
-    if not isinstance(query_plan, _UnsetType):
-        kwargs["query_plan"] = query_plan
-    if not isinstance(current_step, _UnsetType):
-        kwargs["current_step"] = current_step
-    return ComputeWorkerRunFinalization(
-        run_id=run_id,
-        fields=kwargs,
-        merge_result_json=False,
-    )
+    if failed:
+        run_fields["error_message"] = str(error)
+    return ComputeWorkerRunFinalization(run_id=run_id, fields=run_fields, merge_result_json=False)
 
 
-def _finalize_failed_compute_worker_run(
-    *,
-    run_id: str,
-    existing_result: dict[str, object] | None,
-    execution_entries: list[dict[str, object]],
-    error: Exception,
-    completed_at: datetime,
-    duration_ms: int,
-    step_timings: dict,
-    query_plan: str | None | _UnsetType = _UNSET,
-    current_output_id: str | None = None,
-    current_output_name: str | None = None,
-    current_tab_id: str | None = None,
-    current_tab_name: str | None = None,
-    total_steps: int | None = None,
-    total_tabs: int | None = None,
-    resource_config: dict[str, int | None] | None = None,
-    resources: list[dict[str, object]] | None = None,
-    result_entry: dict[str, object] | None = None,
-    log_entry: dict[str, object] | None = None,
-    summary_meta: dict[str, object] | None = None,
-    datasource_id: str | _UnsetType = _UNSET,
-    current_step: str | None | _UnsetType = _UNSET,
-) -> None:
-    finalization = _build_failed_compute_worker_run_finalization(
-        run_id=run_id,
-        existing_result=existing_result,
-        execution_entries=execution_entries,
-        error=error,
-        completed_at=completed_at,
-        duration_ms=duration_ms,
-        step_timings=step_timings,
-        query_plan=query_plan,
-        current_output_id=current_output_id,
-        current_output_name=current_output_name,
-        current_tab_id=current_tab_id,
-        current_tab_name=current_tab_name,
-        total_steps=total_steps,
-        total_tabs=total_tabs,
-        resource_config=resource_config,
-        resources=resources,
-        result_entry=result_entry,
-        log_entry=log_entry,
-        summary_meta=summary_meta,
-        datasource_id=datasource_id,
-        current_step=current_step,
-    )
-    _update_compute_worker_run(
-        finalization.run_id,
+def _apply_run_finalization(finalization: ComputeWorkerRunFinalization) -> None:
+    client_from_env().update_compute_worker_run(
+        namespace=get_namespace(),
+        run_id=finalization.run_id,
+        fields={key: value.isoformat() if isinstance(value, datetime) else value for key, value in finalization.fields.items()},
         merge_result_json=finalization.merge_result_json,
-        **finalization.fields,
     )
 
 
@@ -1072,81 +765,42 @@ def _build_canonical_compute_worker_run_result(
     existing_result: dict[str, object] | None,
     summary_meta: dict[str, object] | None,
     execution_entries: list[dict[str, object]],
-    current_output_id: str | None = None,
-    current_output_name: str | None = None,
-    current_tab_id: str | None = None,
-    current_tab_name: str | None = None,
-    total_steps: int | None = None,
-    total_tabs: int | None = None,
-    resource_config: dict[str, int | None] | None = None,
-    resources: list[dict[str, object]] | None = None,
-    results: list[dict[str, object]] | None = None,
-    append_logs: list[dict[str, object]] | None = None,
+    current_tab_id: str | None,
+    current_tab_name: str | None,
+    total_steps: int,
+    resource_config: dict[str, int | None] | None,
+    results: list[dict[str, object]],
+    append_logs: list[dict[str, object]],
 ) -> dict[str, object]:
-    execution_step_count = sum(1 for entry in execution_entries if entry.get("category") != "plan")
-    result = _initial_live_run_result(
-        current_output_id=current_output_id,
-        current_output_name=current_output_name,
-        current_tab_id=current_tab_id,
-        current_tab_name=current_tab_name,
-        total_steps=total_steps,
-        total_tabs=total_tabs,
-        resource_config=resource_config,
-    )
-    result.update(copy_json_dict(existing_result))
-    result.update(copy_json_dict(summary_meta))
-
-    result["current_output_id"] = current_output_id
-    result["current_output_name"] = current_output_name
+    result: dict[str, object] = {**(existing_result or {}), **(summary_meta or {})}
+    result["current_output_id"] = None
+    result["current_output_name"] = None
     result["current_tab_id"] = current_tab_id
     result["current_tab_name"] = current_tab_name
-    result["total_steps"] = max(total_steps or 0, execution_step_count)
-    result["total_tabs"] = total_tabs or 1
-
+    result["total_steps"] = max(total_steps, sum(1 for entry in execution_entries if entry.get("category") != "plan"))
+    result["total_tabs"] = 1
     if resource_config is not None:
         result["resource_config"] = resource_config
-    if resources is not None:
-        result["resources"] = [resource for resource in resources if isinstance(resource, dict)]
-
-    plan_snapshots = _normalize_query_plan_snapshots(result.get("query_plans"), tab_id=current_tab_id, tab_name=current_tab_name)
-    result["query_plans"] = plan_snapshots
-
-    result["steps"] = _build_step_snapshots_from_execution_entries(
-        execution_entries,
-        tab_id=current_tab_id,
-        tab_name=current_tab_name,
-    )
-
+    result["query_plans"] = _normalize_query_plan_snapshots(result.get("query_plans"), tab_id=current_tab_id, tab_name=current_tab_name)
+    result["steps"] = _build_step_snapshots_from_execution_entries(execution_entries, tab_id=current_tab_id, tab_name=current_tab_name)
     raw_resources = result.get("resources")
-    normalized_resources = [resource for resource in raw_resources if isinstance(resource, dict)] if isinstance(raw_resources, list) else []
-    result["resources"] = normalized_resources
+    resources = [resource for resource in raw_resources if isinstance(resource, dict)] if isinstance(raw_resources, list) else []
+    result["resources"] = resources
     logs = result.get("logs")
-    normalized_logs = [entry for entry in logs if isinstance(entry, dict)] if isinstance(logs, list) else []
-    if append_logs is not None:
-        normalized_logs.extend(entry for entry in append_logs if isinstance(entry, dict))
-    result["logs"] = normalized_logs
-    if normalized_resources:
-        result["latest_resources"] = normalized_resources[-1]
+    result["logs"] = [*(entry for entry in logs if isinstance(entry, dict)), *append_logs] if isinstance(logs, list) else append_logs
+    if resources:
+        result["latest_resources"] = resources[-1]
     else:
         result.pop("latest_resources", None)
-
-    if results is not None:
-        result["results"] = results
-    else:
-        existing_results = result.get("results")
-        result["results"] = [entry for entry in existing_results if isinstance(entry, dict)] if isinstance(existing_results, list) else []
-
+    result["results"] = results
     return result
 
 
 def _initial_live_run_result(
     *,
-    current_output_id: str | None = None,
-    current_output_name: str | None = None,
-    current_tab_id: str | None = None,
-    current_tab_name: str | None = None,
-    total_steps: int | None = None,
-    total_tabs: int | None = None,
+    current_tab_id: str | None,
+    current_tab_name: str | None,
+    total_steps: int,
     resource_config: dict[str, int | None] | None = None,
 ) -> dict[str, object]:
     result: dict[str, object] = {
@@ -1155,23 +809,16 @@ def _initial_live_run_result(
         "resources": [],
         "logs": [],
         "results": [],
-        "current_output_id": current_output_id,
-        "current_output_name": current_output_name,
+        "current_output_id": None,
+        "current_output_name": None,
         "current_tab_id": current_tab_id,
         "current_tab_name": current_tab_name,
-        "total_steps": total_steps or 0,
-        "total_tabs": total_tabs or 0,
+        "total_steps": total_steps,
+        "total_tabs": 1,
     }
     if resource_config is not None:
         result["resource_config"] = resource_config
     return result
-
-
-def _resolve_branch_value(config: dict) -> str:
-    branch = config.get("branch")
-    if isinstance(branch, str) and branch.strip():
-        return branch.strip()
-    raise ValueError("branch is required")
 
 
 _REVISION_DIR_PREFIX = "revision_"
@@ -1235,15 +882,16 @@ def _set_snapshot_metadata(config: dict, snapshot_id: str | None, snapshot_times
     return updated
 
 
-def _ensure_request_branch(request_payload: dict, branch: str) -> dict:
+def _ensure_request_branch(request_payload: dict, config: dict) -> dict:
+    branch = config.get("branch")
+    if not isinstance(branch, str) or not branch.strip():
+        raise ValueError("branch is required")
     payload = dict(request_payload)
     opts = payload.get("iceberg_options")
-    if isinstance(opts, dict):
-        if isinstance(opts.get("branch"), str) and opts["branch"].strip():
-            return payload
-        payload["iceberg_options"] = {**opts, "branch": branch}
-        return payload
-    payload["iceberg_options"] = {"branch": branch}
+    if not isinstance(opts, dict):
+        payload["iceberg_options"] = {"branch": branch.strip()}
+    elif not (isinstance(opts.get("branch"), str) and opts["branch"].strip()):
+        payload["iceberg_options"] = {**opts, "branch": branch.strip()}
     return payload
 
 
@@ -1348,19 +996,6 @@ def _pipeline_output_to_tab_id(pipeline: dict) -> dict[str, str]:
     return output_to_tab
 
 
-def _step_source_payload(step_config: dict, source_id: str) -> dict | None:
-    direct = step_config.get("right_source_datasource")
-    if isinstance(direct, dict) and direct.get("id") == source_id:
-        return direct
-    raw_many = step_config.get("source_datasources")
-    if not isinstance(raw_many, list):
-        return None
-    return next(
-        (item for item in raw_many if isinstance(item, dict) and isinstance(item.get("id"), str) and item.get("id") == source_id),
-        None,
-    )
-
-
 def _pipeline_datasource_payload(pipeline: dict, datasource_id: str) -> dict | None:
     tabs = pipeline.get("tabs", [])
     if not isinstance(tabs, list):
@@ -1448,7 +1083,7 @@ def _resolve_step_source_config(
             "analysis_id": analysis_id,
             "analysis_tab_id": output_to_tab[source_id],
         }
-    embedded = _step_source_payload(step_config, source_id)
+    embedded = step_source_payload(step_config, source_id)
     if isinstance(embedded, dict):
         return _resolve_pipeline_datasource_config(analysis_pipeline, embedded)
     payload = _pipeline_datasource_payload(analysis_pipeline, source_id)
@@ -1509,11 +1144,24 @@ def default_stateless_compute_worker_identity(analysis_pipeline: dict) -> comput
     )
 
 
+@dataclass(frozen=True, slots=True)
+class _StepRequest:
+    analysis_id: str | None
+    datasource_id: str
+    datasource_config: dict
+    steps: list[dict]
+    target_step_id: str
+
+
 def _resolve_pipeline_request(
     pipeline: dict,
     tab_id: str | None,
     target_step_id: str,
-) -> dict:
+    *,
+    analysis_id: str | None,
+    operation: str,
+    analysis_required_by: str | None = None,
+) -> _StepRequest:
     selected = _select_pipeline_tab(pipeline, tab_id, target_step_id)
 
     datasource = selected.get("datasource")
@@ -1528,42 +1176,44 @@ def _resolve_pipeline_request(
         raise ValueError("analysis_pipeline tab steps must be a list")
 
     merged = _resolve_pipeline_datasource_config(pipeline, datasource)
-    analysis_id = pipeline.get("analysis_id")
-    analysis_id = str(analysis_id) if analysis_id is not None else None
+    pipeline_analysis_id = pipeline.get("analysis_id")
+    pipeline_analysis_id = str(pipeline_analysis_id) if pipeline_analysis_id is not None else None
     if (
-        analysis_id
+        pipeline_analysis_id
         and DataSourceType.read(merged.get("source_type"), default=None) == DataSourceType.ANALYSIS
-        and str(merged.get("analysis_id")) == analysis_id
+        and str(merged.get("analysis_id")) == pipeline_analysis_id
     ):
         merged = {**merged, "analysis_pipeline": pipeline}
 
     resolved_target = resolve_applied_target(steps, target_step_id)
+    resolved_analysis_id = pipeline_analysis_id if pipeline_analysis_id is not None else analysis_id
+    if analysis_required_by is not None and not resolved_analysis_id:
+        raise ValueError(f"{analysis_required_by} requires analysis_id")
+    _preflight_datasource_for_compute(merged, operation=operation, datasource_id=str(datasource_id))
+    return _StepRequest(
+        analysis_id=resolved_analysis_id,
+        datasource_id=str(datasource_id),
+        datasource_config=merged,
+        steps=steps,
+        target_step_id=resolved_target,
+    )
 
-    return {
-        "analysis_id": analysis_id,
-        "datasource_id": str(datasource_id),
-        "steps": steps,
-        "target_step_id": resolved_target,
-        "datasource_config": merged,
-    }
+
+def _steps_through_target(steps: list[dict], target_step_id: str) -> list[dict]:
+    """Applied steps up to and including the target, with library UDF code attached."""
+    if target_step_id == "source":
+        return []
+    applied = apply_steps(steps)
+    return _hydrate_udfs(applied[: find_step_index(applied, target_step_id) + 1])
 
 
-def _resolve_export_compute_worker_identity(
-    *,
-    compute_worker_identity: compute_pb2.ComputeWorkerIdentity | None,
-    build_id: str | None,
-    analysis_pipeline: dict,
-) -> compute_pb2.ComputeWorkerIdentity:
-    if compute_worker_identity is not None:
-        return compute_worker_identity
-    if build_id is not None:
-        return compute_pb2.ComputeWorkerIdentity(
-            scope=enums_pb2.COMPUTE_WORKER_SCOPE_BUILD,
-            reuse_policy=enums_pb2.COMPUTE_WORKER_REUSE_POLICY_EXCLUSIVE,
-            build_id=build_id,
-            resource_id=build_id,
-        )
-    return default_stateless_compute_worker_identity(analysis_pipeline)
+def _build_compute_worker_identity(build_id: str) -> compute_pb2.ComputeWorkerIdentity:
+    return compute_pb2.ComputeWorkerIdentity(
+        scope=enums_pb2.COMPUTE_WORKER_SCOPE_BUILD,
+        reuse_policy=enums_pb2.COMPUTE_WORKER_REUSE_POLICY_EXCLUSIVE,
+        build_id=build_id,
+        resource_id=build_id,
+    )
 
 
 def preview_step(
@@ -1586,59 +1236,28 @@ def preview_step(
 
     started_at = datetime.now(UTC)
     started_perf = time.perf_counter()
-    resolved = _resolve_pipeline_request(analysis_pipeline, tab_id, target_step_id)
-    datasource_id = resolved["datasource_id"]
-    steps = resolved["steps"]
-    target_step_id = resolved["target_step_id"]
-    datasource_config = resolved["datasource_config"]
-    analysis_id_value = resolved["analysis_id"] if resolved["analysis_id"] is not None else analysis_id
-
-    if not isinstance(datasource_config, dict):
-        raise ValueError("Preview requires datasource_config")
-
-    if not analysis_id_value:
-        raise ValueError("Preview requires analysis_id")
-
-    config: dict = datasource_config
-    _preflight_datasource_for_compute(
-        config,
-        operation="preview",
-        datasource_id=datasource_id,
-    )
-
-    run_analysis_id = analysis_id_value
-
-    branch = _resolve_branch_value(config)
+    request = _resolve_pipeline_request(analysis_pipeline, tab_id, target_step_id, analysis_id=analysis_id, operation="preview", analysis_required_by="Preview")
     tab_name = _tab_name_from_pipeline(analysis_pipeline, tab_id)
     if request_json is None:
         raise ValueError("Preview requires request_json")
-    request_payload = _ensure_request_branch(request_json, branch)
-
-    steps = apply_steps(steps)
-
-    if target_step_id == "source":
-        preview_steps = []
-    else:
-        step_index = find_step_index(steps, target_step_id)
-        preview_steps = steps[: step_index + 1]
-        preview_steps = _hydrate_udfs(preview_steps)
+    request_payload = _ensure_request_branch(request_json, request.datasource_config)
+    preview_steps = _steps_through_target(request.steps, request.target_step_id)
 
     resolved_compute_worker_identity = compute_worker_identity or default_stateless_compute_worker_identity(analysis_pipeline)
     request_namespace = get_namespace()
-    persist_preview_runs = settings.persist_preview_runs
     run_id = None
     initial_run_result: dict[str, object] | None = None
-    if persist_preview_runs:
+    if settings.persist_preview_runs:
         initial_run_result = _initial_live_run_result(
             current_tab_id=tab_id,
             current_tab_name=tab_name,
             total_steps=len(preview_steps),
-            total_tabs=1,
             resource_config=resource_config if isinstance(resource_config, dict) else None,
         )
-        run_id = _create_compute_worker_run(
-            analysis_id=run_analysis_id,
-            datasource_id=datasource_id,
+        run_id = client_from_env().create_compute_worker_run(
+            namespace=request_namespace,
+            analysis_id=request.analysis_id,
+            datasource_id=request.datasource_id,
             kind="preview",
             status="running",
             request_json=request_payload,
@@ -1650,23 +1269,22 @@ def preview_step(
         )
 
     additional_datasources = _get_additional_datasources(preview_steps, analysis_pipeline)
-
-    # Calculate offset for pagination
     offset = (page - 1) * row_limit
-    engine = None
     preview_resource_summary: dict[str, int | None] = {}
-    execution_phases: dict[str, float] = {}
-
-    def execute_preview() -> dict[str, object]:
-        nonlocal engine, preview_resource_summary
+    result_data: dict | None = None
+    execution_phases = {"prepare_ms": (time.perf_counter() - started_perf) * 1000}
+    execution_started = time.perf_counter()
+    try:
+        # The durable request layer owns active deduplication and the short
+        # completed-response cache. The worker executes only the admitted
+        # leader; it does not keep a second, weaker semantic result cache.
         phase_started = time.perf_counter()
-        with manager.acquire_engine(resolved_compute_worker_identity, resource_config=resource_config) as acquired_engine:
+        with manager.acquire_engine(resolved_compute_worker_identity, resource_config=resource_config) as engine:
             execution_phases["engine_acquire_ms"] = (time.perf_counter() - phase_started) * 1000
-            engine = acquired_engine
-            preview_resource_summary = _resource_summary(acquired_engine)
+            preview_resource_summary = _resource_summary(engine)
             phase_started = time.perf_counter()
-            job_id = acquired_engine.preview(
-                datasource_config=config,
+            job_id = engine.preview(
+                datasource_config=request.datasource_config,
                 steps=preview_steps,
                 row_limit=row_limit,
                 offset=offset,
@@ -1678,87 +1296,52 @@ def preview_step(
             # idle again and a disconnect/shutdown path may otherwise evict it
             # while this request is still assembling its response.
             phase_started = time.perf_counter()
-            result = await_compute_worker_result(acquired_engine, job_id=job_id)
+            result_data = await_compute_worker_result(engine, job_id=job_id)
             execution_phases["engine_result_wait_ms"] = (time.perf_counter() - phase_started) * 1000
-            return result
-
-    result_data: dict | None = None
-    step_timings: dict = {}
-    current_step_id: str | None = None
-    query_plan: str | None = None
-    compute_worker_run_finalization: ComputeWorkerRunFinalization | None = None
-    execution_phases["prepare_ms"] = (time.perf_counter() - started_perf) * 1000
-    cache_started = time.perf_counter()
-    try:
-        # The durable request layer owns active deduplication and the short
-        # completed-response cache. The worker executes only the admitted
-        # leader; it does not keep a second, weaker semantic result cache.
-        result_data = execute_preview()
-        execution_phases["execution_ms"] = (time.perf_counter() - cache_started) * 1000
-        step_timings = result_data.get("step_timings", {}) if isinstance(result_data, dict) else {}
-        query_plan = result_data.get("query_plan") if isinstance(result_data, dict) else None
-        _raise_engine_failure(
-            result_data,
-            operation="preview",
-            datasource_id=datasource_id,
-            failure_prefix="Preview",
-        )
+        execution_phases["execution_ms"] = (time.perf_counter() - execution_started) * 1000
+        _raise_engine_failure(result_data, operation="preview", datasource_id=request.datasource_id, failure_prefix="Preview")
 
         raw_data = result_data.get("data", {})
         if not isinstance(raw_data, Mapping):
             raise TypeError("Preview result data must be an object")
         data = strip_staged_preview(raw_data)
-        result_meta = _build_preview_result_metadata(
-            data=data,
-            page=page,
-            row_limit=row_limit,
-            offset=offset,
-        )
 
-        completed_at = datetime.now(UTC)
-        duration_ms = int((time.perf_counter() - started_perf) * 1000)
-        execution_entries = _build_compute_worker_run_execution_entries(result_data, duration_ms=duration_ms)
+        compute_worker_run_finalization = None
         if run_id is not None:
-            assert initial_run_result is not None
-            result_json = _build_canonical_compute_worker_run_result(
-                existing_result=initial_run_result,
-                summary_meta=result_meta,
-                execution_entries=execution_entries,
-                current_tab_id=tab_id,
-                current_tab_name=tab_name,
-                total_steps=len(preview_steps),
-                total_tabs=1,
-                resource_config=preview_resource_summary,
-                results=[
-                    _result_entry(
-                        tab_id=tab_id,
-                        tab_name=tab_name,
-                        status=BuildTabStatus.SUCCESS,
-                    )
-                ],
-                append_logs=[_log_entry(message="Preview completed", tab_id=tab_id, tab_name=tab_name)],
-            )
-            finalization_fields: dict[str, object] = {
-                "status": ComputeRunStatus.SUCCESS,
-                "result_json": result_json,
-                "completed_at": completed_at,
-                "duration_ms": duration_ms,
-                "step_timings": step_timings,
-                "execution_entries": execution_entries,
-                "progress": 1.0,
-                "current_step": current_step_id,
+            schema = data.get("schema", {}) or {}
+            result_meta: dict[str, object] = {
+                "schema": schema,
+                "columns": list(schema.keys()),
+                "row_count": data.get("row_count", 0),
+                "page": page,
+                "row_limit": row_limit,
+                "offset": offset,
+                "page_size": len(data.get("data", []) or []),
             }
-            if isinstance(query_plan, str):
-                finalization_fields["query_plan"] = query_plan
-            compute_worker_run_finalization = ComputeWorkerRunFinalization(
-                run_id=run_id,
-                fields=finalization_fields,
-                merge_result_json=False,
+            if query_plans := data.get("query_plans"):
+                result_meta["query_plans"] = query_plans
+            if metadata := data.get("metadata"):
+                result_meta["metadata"] = metadata
+            query_plan = result_data.get("query_plan")
+            plan_fields: dict[str, Any] = {"query_plan": query_plan} if isinstance(query_plan, str) else {}
+            compute_worker_run_finalization = _single_tab_run_finalization(
+                run_id,
+                existing_result=initial_run_result,
+                result_data=result_data,
+                started_perf=started_perf,
+                tab_id=tab_id,
+                tab_name=tab_name,
+                total_steps=len(preview_steps),
+                summary_meta=result_meta,
+                log_message="Preview completed",
+                resource_config=preview_resource_summary,
+                current_step=None,
+                **plan_fields,
             )
 
         return PreviewOutcome(
             response=StepPreviewResponse(
-                step_id=target_step_id,
+                step_id=request.target_step_id,
                 columns=list(data.get("schema", {}).keys()),
                 column_types=data.get("schema", {}),
                 data=data.get("data", []),
@@ -1770,38 +1353,21 @@ def preview_step(
             compute_worker_run_finalization=compute_worker_run_finalization,
         )
     except Exception as exc:
-        completed_at = datetime.now(UTC)
-        duration_ms = int((time.perf_counter() - started_perf) * 1000)
-        execution_entries = _build_compute_worker_run_execution_entries(
-            result_data if isinstance(result_data, dict) else None,
-            duration_ms=duration_ms,
+        if run_id is None:
+            raise
+        finalization = _single_tab_run_finalization(
+            run_id,
+            existing_result=initial_run_result,
+            result_data=result_data,
+            started_perf=started_perf,
+            tab_id=tab_id,
+            tab_name=tab_name,
+            total_steps=len(preview_steps),
+            error=exc,
+            resource_config=preview_resource_summary,
+            current_step=None,
         )
-        if run_id is not None:
-            assert initial_run_result is not None
-            finalization = _build_failed_compute_worker_run_finalization(
-                run_id=run_id,
-                existing_result=initial_run_result,
-                execution_entries=execution_entries,
-                error=exc,
-                completed_at=completed_at,
-                duration_ms=duration_ms,
-                step_timings=step_timings,
-                current_tab_id=tab_id,
-                current_tab_name=tab_name,
-                total_steps=len(preview_steps),
-                total_tabs=1,
-                resource_config=preview_resource_summary,
-                result_entry=_result_entry(
-                    tab_id=tab_id,
-                    tab_name=tab_name,
-                    status=BuildTabStatus.FAILED,
-                    error=str(exc),
-                ),
-                log_entry=_log_entry(message=str(exc), level="error", tab_id=tab_id, tab_name=tab_name),
-                current_step=current_step_id,
-            )
-            raise PreviewExecutionError(exc, finalization) from exc
-        raise
+        raise PreviewExecutionError(exc, finalization) from exc
     finally:
         total_duration_ms = (time.perf_counter() - started_perf) * 1000
         if total_duration_ms >= _SLOW_PREVIEW_LOG_SECONDS * 1000:
@@ -1832,60 +1398,20 @@ def get_step_schema(
     """Get the output schema of a pipeline step without returning data."""
     from runtime.domain.compute.schemas import StepSchemaResponse
 
-    resolved = _resolve_pipeline_request(analysis_pipeline, tab_id, target_step_id)
-    datasource_id = resolved["datasource_id"]
-    steps = resolved["steps"]
-    target_step_id = resolved["target_step_id"]
-    datasource_config = resolved["datasource_config"]
-    analysis_id_value = resolved["analysis_id"] if resolved["analysis_id"] is not None else analysis_id
-
-    if not isinstance(datasource_config, dict):
-        raise ValueError("Schema fetch requires datasource_config")
-    if not analysis_id_value:
-        raise ValueError("Schema fetch requires analysis_id")
-
-    config: dict = datasource_config
-    _preflight_datasource_for_compute(
-        config,
-        operation="schema",
-        datasource_id=datasource_id,
+    request = _resolve_pipeline_request(
+        analysis_pipeline, tab_id, target_step_id, analysis_id=analysis_id, operation="schema", analysis_required_by="Schema fetch"
     )
-
-    steps = apply_steps(steps)
-
-    if target_step_id == "source":
-        schema_steps = []
-    else:
-        step_index = find_step_index(steps, target_step_id)
-        schema_steps = steps[: step_index + 1]
-        schema_steps = _hydrate_udfs(schema_steps)
-
-    with manager.acquire_engine(
-        default_stateless_compute_worker_identity(analysis_pipeline),
-    ) as engine:
-        additional_datasources = _get_additional_datasources(schema_steps, analysis_pipeline)
-
-        # Use the new schema command that doesn't collect full data
+    schema_steps = _steps_through_target(request.steps, request.target_step_id)
+    with manager.acquire_engine(default_stateless_compute_worker_identity(analysis_pipeline)) as engine:
         job_id = engine.get_schema(
-            datasource_config=config,
+            datasource_config=request.datasource_config,
             steps=schema_steps,
-            additional_datasources=additional_datasources,
+            additional_datasources=_get_additional_datasources(schema_steps, analysis_pipeline),
         )
         result_data = await_compute_worker_result(engine, job_id=job_id)
-    _raise_engine_failure(
-        result_data,
-        operation="schema",
-        datasource_id=datasource_id,
-        failure_prefix="Schema fetch",
-    )
-
-    data = result_data.get("data", {})
-    schema = data.get("schema", {})
-    return StepSchemaResponse(
-        step_id=target_step_id,
-        columns=list(schema.keys()),
-        column_types=schema,
-    )
+    _raise_engine_failure(result_data, operation="schema", datasource_id=request.datasource_id, failure_prefix="Schema fetch")
+    schema = result_data.get("data", {}).get("schema", {})
+    return StepSchemaResponse(step_id=request.target_step_id, columns=list(schema.keys()), column_types=schema)
 
 
 def _reported_row_count_error(exc: Exception) -> Exception:
@@ -1915,127 +1441,54 @@ def get_step_row_count(
 
     started_at = datetime.now(UTC)
     started_perf = time.perf_counter()
-
-    resolved = _resolve_pipeline_request(analysis_pipeline, tab_id, target_step_id)
-    datasource_id = resolved["datasource_id"]
-    steps = resolved["steps"]
-    target_step_id = resolved["target_step_id"]
-    datasource_config = resolved["datasource_config"]
-    analysis_id_value = resolved["analysis_id"] if resolved["analysis_id"] is not None else analysis_id
-
-    if not isinstance(datasource_config, dict):
-        raise ValueError("Row count requires datasource_config")
-    if not analysis_id_value:
-        raise ValueError("Row count requires analysis_id")
-
-    config: dict = datasource_config
-    _preflight_datasource_for_compute(
-        config,
-        operation="row_count",
-        datasource_id=datasource_id,
+    request = _resolve_pipeline_request(
+        analysis_pipeline, tab_id, target_step_id, analysis_id=analysis_id, operation="row_count", analysis_required_by="Row count"
     )
-    branch = _resolve_branch_value(config)
     tab_name = _tab_name_from_pipeline(analysis_pipeline, tab_id)
-
     if request_json is None:
         raise ValueError("Row count requires request_json")
-    request_payload = _ensure_request_branch(request_json, branch)
+    request_payload = _ensure_request_branch(request_json, request.datasource_config)
+    count_steps = _steps_through_target(request.steps, request.target_step_id)
 
-    steps = apply_steps(steps)
-
-    if target_step_id == "source":
-        count_steps = []
-    else:
-        step_index = find_step_index(steps, target_step_id)
-        count_steps = steps[: step_index + 1]
-        count_steps = _hydrate_udfs(count_steps)
-
-    run_id = _create_compute_worker_run(
-        analysis_id=analysis_id_value,
-        datasource_id=datasource_id,
+    run_id = client_from_env().create_compute_worker_run(
+        namespace=get_namespace(),
+        analysis_id=request.analysis_id,
+        datasource_id=request.datasource_id,
         kind="row_count",
         status="running",
         request_json=request_payload,
-        result_json=_initial_live_run_result(
-            current_tab_id=tab_id,
-            current_tab_name=tab_name,
-            total_steps=len(count_steps),
-            total_tabs=1,
-        ),
+        result_json=_initial_live_run_result(current_tab_id=tab_id, current_tab_name=tab_name, total_steps=len(count_steps)),
         created_at=started_at,
         progress=0.0,
         triggered_by=triggered_by,
     )
-
-    step_timings: dict = {}
-    current_step_id: str | None = None
-    query_plan: str | None = None
     result_data: dict | None = None
     try:
-        with manager.acquire_engine(
-            default_stateless_compute_worker_identity(analysis_pipeline),
-        ) as engine:
-            additional_datasources = _get_additional_datasources(count_steps, analysis_pipeline)
-
+        with manager.acquire_engine(default_stateless_compute_worker_identity(analysis_pipeline)) as engine:
             job_id = engine.get_row_count(
-                datasource_config=config,
+                datasource_config=request.datasource_config,
                 steps=count_steps,
-                additional_datasources=additional_datasources,
+                additional_datasources=_get_additional_datasources(count_steps, analysis_pipeline),
             )
             result_data = await_compute_worker_result(engine, job_id=job_id)
-        step_timings = result_data.get("step_timings", {}) if isinstance(result_data, dict) else {}
-        query_plan = result_data.get("query_plan") if isinstance(result_data, dict) else None
-        _raise_engine_failure(
-            result_data,
-            operation="row_count",
-            datasource_id=datasource_id,
-            failure_prefix="Row count",
+        _raise_engine_failure(result_data, operation="row_count", datasource_id=request.datasource_id, failure_prefix="Row count")
+        row_count = result_data.get("data", {}).get("row_count", 0)
+        _apply_run_finalization(
+            _single_tab_run_finalization(
+                run_id,
+                existing_result=_load_compute_worker_run_result_json(run_id),
+                result_data=result_data,
+                started_perf=started_perf,
+                tab_id=tab_id,
+                tab_name=tab_name,
+                total_steps=len(count_steps),
+                summary_meta={"row_count": row_count},
+                log_message=f"Computed row count: {row_count}",
+                query_plan=result_data.get("query_plan"),
+                current_step=None,
+            )
         )
-
-        data = result_data.get("data", {})
-        row_count = data.get("row_count", 0)
-
-        completed_at = datetime.now(UTC)
-        duration_ms = int((time.perf_counter() - started_perf) * 1000)
-        execution_entries = _build_compute_worker_run_execution_entries(result_data, duration_ms=duration_ms)
-        result_json = _build_canonical_compute_worker_run_result(
-            existing_result=_load_compute_worker_run_result_json(run_id),
-            summary_meta={"row_count": row_count},
-            execution_entries=execution_entries,
-            current_tab_id=tab_id,
-            current_tab_name=tab_name,
-            total_steps=len(count_steps),
-            total_tabs=1,
-            results=[
-                _result_entry(
-                    tab_id=tab_id,
-                    tab_name=tab_name,
-                    status=BuildTabStatus.SUCCESS,
-                )
-            ],
-            append_logs=[
-                _log_entry(
-                    message=f"Computed row count: {row_count}",
-                    tab_id=tab_id,
-                    tab_name=tab_name,
-                )
-            ],
-        )
-        _update_compute_worker_run(
-            run_id,
-            merge_result_json=False,
-            status=ComputeRunStatus.SUCCESS,
-            result_json=result_json,
-            completed_at=completed_at,
-            duration_ms=duration_ms,
-            step_timings=step_timings,
-            query_plan=query_plan,
-            execution_entries=execution_entries,
-            progress=1.0,
-            current_step=current_step_id,
-        )
-
-        return StepRowCountResponse(step_id=target_step_id, row_count=row_count)
+        return StepRowCountResponse(step_id=request.target_step_id, row_count=row_count)
     except Exception as exc:
         try:
             _raise_if_compute_worker_run_cancelled(run_id)
@@ -2043,29 +1496,18 @@ def get_step_row_count(
             raise cancel_exc from exc
 
         reported = _reported_row_count_error(exc)
-        completed_at = datetime.now(UTC)
-        duration_ms = int((time.perf_counter() - started_perf) * 1000)
-        execution_entries = _build_compute_worker_run_execution_entries(result_data if isinstance(result_data, dict) else None, duration_ms=duration_ms)
-        _finalize_failed_compute_worker_run(
-            run_id=run_id,
-            existing_result=_load_compute_worker_run_result_json(run_id),
-            execution_entries=execution_entries,
-            error=reported,
-            completed_at=completed_at,
-            duration_ms=duration_ms,
-            step_timings=step_timings,
-            current_tab_id=tab_id,
-            current_tab_name=tab_name,
-            total_steps=len(count_steps),
-            total_tabs=1,
-            result_entry=_result_entry(
+        _apply_run_finalization(
+            _single_tab_run_finalization(
+                run_id,
+                existing_result=_load_compute_worker_run_result_json(run_id),
+                result_data=result_data,
+                started_perf=started_perf,
                 tab_id=tab_id,
                 tab_name=tab_name,
-                status=BuildTabStatus.FAILED,
-                error=str(reported),
-            ),
-            log_entry=_log_entry(message=str(reported), level="error", tab_id=tab_id, tab_name=tab_name),
-            current_step=current_step_id,
+                total_steps=len(count_steps),
+                error=reported,
+                current_step=None,
+            )
         )
         if reported is exc:
             raise
@@ -2100,51 +1542,26 @@ def export_data(
             raise ValueError("Output publication claim does not belong to the build")
 
     started_perf = time.perf_counter()
-
-    resolved = _resolve_pipeline_request(analysis_pipeline, tab_id, target_step_id)
-    datasource_id = resolved["datasource_id"]
-    steps = resolved["steps"]
-    target_step_id = resolved["target_step_id"]
-    datasource_config = resolved["datasource_config"]
-    analysis_id_value = resolved["analysis_id"] if resolved["analysis_id"] is not None else analysis_id
-
-    if not isinstance(datasource_config, dict):
-        raise ValueError("Export requires datasource_config")
-    _preflight_datasource_for_compute(
-        datasource_config,
-        operation="export",
-        datasource_id=datasource_id,
-    )
-
-    _resolve_branch_value(datasource_config)
+    request = _resolve_pipeline_request(analysis_pipeline, tab_id, target_step_id, analysis_id=analysis_id, operation="export")
+    datasource_id = request.datasource_id
+    datasource_config = request.datasource_config
     existing_output_metadata = client_from_env().datasource_metadata(namespace=get_namespace(), datasource_id=result_id)
     output_hidden = existing_output_metadata.is_hidden if existing_output_metadata.found else True
+    export_steps = _steps_through_target(request.steps, request.target_step_id)
 
-    steps = apply_steps(steps)
-
-    if target_step_id == "source":
-        export_steps = []
-    else:
-        step_index = find_step_index(steps, target_step_id)
-        export_steps = steps[: step_index + 1]
-    export_steps = _hydrate_udfs(export_steps)
-
-    resolved_compute_worker_identity = _resolve_export_compute_worker_identity(
-        compute_worker_identity=compute_worker_identity,
-        build_id=build_id,
-        analysis_pipeline=analysis_pipeline,
-    )
-
+    if compute_worker_identity is None:
+        compute_worker_identity = (
+            _build_compute_worker_identity(build_id) if build_id is not None else default_stateless_compute_worker_identity(analysis_pipeline)
+        )
     additional_datasources = _get_additional_datasources(export_steps, analysis_pipeline)
-    source_datasource_name = _datasource_name(datasource_id)
+    source_metadata = client_from_env().datasource_metadata(namespace=get_namespace(), datasource_id=datasource_id)
+    source_datasource_name = source_metadata.name if source_metadata.found else None
 
     tmp_output = _secure_temp_path(suffix=".parquet")
-    result_data: dict | None = None
-    initial_output_name = iceberg_options.get("table_name", filename) if isinstance(iceberg_options, dict) else filename
     tab_name = _tab_name_from_pipeline(analysis_pipeline, tab_id)
 
     try:
-        with manager.acquire_engine(resolved_compute_worker_identity) as engine:
+        with manager.acquire_engine(compute_worker_identity) as engine:
             job_id = engine.export(
                 datasource_config=datasource_config,
                 steps=export_steps,
@@ -2153,21 +1570,9 @@ def export_data(
                 additional_datasources=additional_datasources,
             )
             if job_started is not None:
-                job_payload: dict[str, object] = {
-                    "job_id": job_id,
-                    "engine": engine,
-                    "steps": export_steps,
-                    "tab_id": tab_id,
-                }
-                job_started(job_payload)
-
+                job_started({"job_id": job_id, "engine": engine, "steps": export_steps, "tab_id": tab_id})
             result_data = await_compute_worker_result(engine, job_id=job_id)
-        _raise_engine_failure(
-            result_data,
-            operation="export",
-            datasource_id=datasource_id,
-            failure_prefix="Export",
-        )
+        _raise_engine_failure(result_data, operation="export", datasource_id=datasource_id, failure_prefix="Export")
         if build_id is not None:
             _raise_if_build_cancelled(build_id)
 
@@ -2176,18 +1581,20 @@ def export_data(
         logger.info(f"Export completed: {row_count} rows written to parquet")
 
         staged_result = _strip_staged_notification_columns(tmp_output)
-        staged_notification_deliveries = staged_result if staged_result is not None else []
         if staged_result is not None:
             data = strip_staged_preview(data)
 
         duration_ms = int((time.perf_counter() - started_perf) * 1000)
         timeout_warning_ms = _output_timeout_warning_ms(analysis_pipeline, tab_id)
-        duration_exceeded = _duration_exceeded_warning(duration_ms=duration_ms, timeout_warning_ms=timeout_warning_ms)
+        duration_exceeded = timeout_warning_ms is not None and duration_ms > timeout_warning_ms
 
-        result_meta = _build_export_result_metadata(
-            data=data,
-            file_size_bytes=os.path.getsize(tmp_output),
-        )
+        result_meta: dict = {
+            "row_count": data.get("row_count", 0),
+            "export_format": data.get("export_format"),
+            "file_size_bytes": os.path.getsize(tmp_output),
+        }
+        if query_plans := data.get("query_plans"):
+            result_meta["query_plans"] = query_plans
         if timeout_warning_ms is not None:
             result_meta["build_timeout_warning_ms"] = timeout_warning_ms
             result_meta["duration_exceeded_warning"] = duration_exceeded
@@ -2219,13 +1626,7 @@ def export_data(
                         "Critical health checks failed",
                         details={
                             "datasource_id": hc_datasource_id,
-                            "failed": [
-                                {
-                                    "healthcheck_id": result.healthcheck_id,
-                                    "message": result.message,
-                                }
-                                for result in critical_failed
-                            ],
+                            "failed": [{"healthcheck_id": result.healthcheck_id, "message": result.message} for result in critical_failed],
                         },
                     )
                 failed_count = sum(1 for r in hc_results if not r.passed)
@@ -2233,26 +1634,16 @@ def export_data(
 
         status, hc_summary, hc_details = _resolve_build_status(hc_results, hc_checks)
 
-        analysis_name = client_from_env().analysis_name(namespace=get_namespace(), analysis_id=analysis_id_value) if analysis_id_value else None
+        analysis_name = client_from_env().analysis_name(namespace=get_namespace(), analysis_id=request.analysis_id) if request.analysis_id else None
 
         output_notification = datasource_config.get("notification")
-        if not isinstance(output_notification, dict) and isinstance(analysis_pipeline, dict):
-            tabs = analysis_pipeline.get("tabs")
-            if isinstance(tabs, list):
-                selected_tab = next(
-                    (tab for tab in tabs if isinstance(tab, dict) and tab.get("id") == tab_id),
-                    next((tab for tab in tabs if isinstance(tab, dict)), None),
-                )
-                if isinstance(selected_tab, dict):
-                    output_cfg = selected_tab.get("output")
-                    if isinstance(output_cfg, dict) and isinstance(output_cfg.get("notification"), dict):
-                        output_notification = output_cfg.get("notification")
+        if not isinstance(output_notification, dict):
+            tab_notification = _tab_output_config(analysis_pipeline, tab_id).get("notification")
+            if isinstance(tab_notification, dict):
+                output_notification = tab_notification
         excluded = datasource_config.get("excluded_recipients")
         if output_notification and excluded is not None:
-            output_notification = {
-                **output_notification,
-                "excluded_recipients": excluded,
-            }
+            output_notification = {**output_notification, "excluded_recipients": excluded}
 
         namespace = iceberg_options.get("namespace", "outputs")
         branch_name = iceberg_options["branch"]
@@ -2272,26 +1663,13 @@ def export_data(
         final_metadata_path: str = export_base
         ensure_bucket_exists()
 
-        catalog_config = {
-            "type": "sql",
-            "uri": settings.database_url,
-            "warehouse": warehouse_path,
-            **object_store_storage_options(),
-        }
-
-        catalog = load_runtime_catalog("local", **catalog_config)
+        catalog = load_runtime_catalog("local", type="sql", uri=settings.database_url, warehouse=warehouse_path, **object_store_storage_options())
         ensure_catalog_namespace(catalog, namespace)
-
         identifier = f"{namespace}.{table_name}"
 
+        read_duration_ms = result_data.get("read_duration_ms")
         if build_stage_event is not None:
-            read_duration_ms = result_data.get("read_duration_ms") if isinstance(result_data, dict) else None
-            build_stage_event(
-                {
-                    "stage": "write_start",
-                    "read_duration_ms": float(read_duration_ms) if isinstance(read_duration_ms, (int, float)) else None,
-                }
-            )
+            build_stage_event({"stage": "write_start", "read_duration_ms": float(read_duration_ms) if isinstance(read_duration_ms, (int, float)) else None})
 
         write_started = time.perf_counter()
         arrow_table = pq.read_table(tmp_output)
@@ -2316,14 +1694,14 @@ def export_data(
                 # concurrent readers may still be resolving.
                 iceberg_table = catalog.load_table(identifier)
                 final = pa.concat_tables([previous_arrow, arrow_table], promote_options="default") if previous_arrow is not None else arrow_table
-                _sync_iceberg_schema(iceberg_table, final.schema)
+                sync_iceberg_schema(iceberg_table, final.schema)
                 iceberg_table.overwrite(final)
             else:
                 initial_schema = previous_arrow.schema if previous_arrow is not None else arrow_table.schema
                 iceberg_table = catalog.create_table(identifier, schema=initial_schema, location=table_path)
                 if previous_arrow is not None:
                     iceberg_table.append(previous_arrow)
-                    _sync_iceberg_schema(iceberg_table, arrow_table.schema)
+                    sync_iceberg_schema(iceberg_table, arrow_table.schema)
                 iceberg_table.append(arrow_table)
         elif table_exists:
             iceberg_table = catalog.load_table(identifier)
@@ -2331,26 +1709,18 @@ def export_data(
                 iceberg_table.append(arrow_table)
             else:
                 try:
-                    _sync_iceberg_schema(iceberg_table, arrow_table.schema)
+                    sync_iceberg_schema(iceberg_table, arrow_table.schema)
                     iceberg_table.overwrite(arrow_table)
                 except Exception as exc:
                     # Incompatible schema evolution (e.g. a conflicting column
                     # type change) cannot be applied in place. Write a fresh
                     # revision table and repoint the published config at it;
                     # never drop the table readers may still be resolving.
-                    logger.warning(
-                        "In-place rebuild of %s failed (%s); writing revision table instead",
-                        identifier,
-                        exc,
-                    )
+                    logger.warning("In-place rebuild of %s failed (%s); writing revision table instead", identifier, exc)
                     revision_token = uuid.uuid4().hex[:8]
                     revision_table_name = f"{table_name}_rev{revision_token}"
                     revision_location = join_object_store_url(table_path, f"revision_{revision_token}")
-                    iceberg_table = catalog.create_table(
-                        f"{namespace}.{revision_table_name}",
-                        schema=arrow_table.schema,
-                        location=revision_location,
-                    )
+                    iceberg_table = catalog.create_table(f"{namespace}.{revision_table_name}", schema=arrow_table.schema, location=revision_location)
                     iceberg_table.append(arrow_table)
                     final_table_name = revision_table_name
                     final_metadata_path = revision_location
@@ -2372,12 +1742,9 @@ def export_data(
             except Exception as exc:
                 logger.warning("Revision GC failed for %s: %s", table_path, exc)
 
-        snapshot_id = None
-        snapshot_timestamp_ms = None
         current_snapshot = iceberg_table.current_snapshot()
-        if current_snapshot:
-            snapshot_id = str(current_snapshot.snapshot_id)
-            snapshot_timestamp_ms = int(current_snapshot.timestamp_ms)
+        snapshot_id = str(current_snapshot.snapshot_id) if current_snapshot else None
+        snapshot_timestamp_ms = int(current_snapshot.timestamp_ms) if current_snapshot else None
 
         datasource_name = iceberg_options.get("table_name", "exported_data")
         iceberg_ds_config = {
@@ -2398,26 +1765,12 @@ def export_data(
         write_duration_ms = (time.perf_counter() - write_started) * 1000
         if build_stage_event is not None:
             build_stage_event({"stage": "write_complete", "write_duration_ms": write_duration_ms})
-        ds_id = result_id
-        result_meta["datasource_id"] = ds_id
+        result_meta["datasource_id"] = result_id
         result_meta["datasource_name"] = datasource_name
         if snapshot_id:
             result_meta["snapshot_id"] = snapshot_id
         if snapshot_timestamp_ms is not None:
             result_meta["snapshot_timestamp_ms"] = snapshot_timestamp_ms
-        build_result_summary = {
-            **result_meta,
-            "source_datasource_id": datasource_id,
-            "source_datasource_name": source_datasource_name,
-            "current_output_id": ds_id,
-            "current_output_name": datasource_name,
-            "current_tab_id": tab_id,
-            "current_tab_name": tab_name,
-            "branch": branch_name,
-            "duration_ms": duration_ms,
-            "duration_exceeded_warning": duration_exceeded,
-            "build_timeout_warning_ms": timeout_warning_ms,
-        }
         notification_deliveries = _prepare_pipeline_notifications(
             context={
                 "analysis_name": analysis_name,
@@ -2434,64 +1787,77 @@ def export_data(
             },
             output_notification=output_notification,
         )
-        notification_deliveries.extend(staged_notification_deliveries)
-        target_ds = _upsert_output_datasource(
+        notification_deliveries.extend(staged_result or [])
+        try:
+            uuid.UUID(result_id)
+        except ValueError, AttributeError:
+            raise ValueError(f"result_id must be a valid UUID, got: {result_id!r}") from None
+        target_ds = client_from_env().upsert_output_datasource(
+            namespace=get_namespace(),
             result_id=result_id,
             name=datasource_name,
-            source_type=DataSourceType.ICEBERG,
+            source_type=str(DataSourceType.ICEBERG),
             config=iceberg_ds_config,
             schema_cache=schema_cache,
-            analysis_id=analysis_id_value,
+            analysis_id=request.analysis_id,
             is_hidden=output_hidden,
             keep_schema_cache=build_mode == "incremental" and publication_claim is None,
-            publication_claim=publication_claim,
+            job_id=publication_claim.job_id if publication_claim is not None else None,
+            build_id=publication_claim.build_id if publication_claim is not None else None,
             worker_id=worker_id,
-            build_result_json=build_result_summary if publication_claim is not None else None,
+            claim_token=publication_claim.claim_token if publication_claim is not None else None,
+            lease_generation=publication_claim.lease_generation if publication_claim is not None else None,
+            build_result_json=(
+                {
+                    **result_meta,
+                    "source_datasource_id": datasource_id,
+                    "source_datasource_name": source_datasource_name,
+                    "current_output_id": result_id,
+                    "current_output_name": datasource_name,
+                    "current_tab_id": tab_id,
+                    "current_tab_name": tab_name,
+                    "branch": branch_name,
+                    "duration_ms": duration_ms,
+                    "duration_exceeded_warning": duration_exceeded,
+                    "build_timeout_warning_ms": timeout_warning_ms,
+                }
+                if publication_claim is not None
+                else None
+            ),
             notification_deliveries=notification_deliveries,
         )
-        ds_id = str(target_ds.id)
         if publication_claim is not None:
             _persist_healthcheck_results(hc_results)
-        read_duration_ms = result_data.get("read_duration_ms") if isinstance(result_data, dict) else None
-        return ExportDatasourceResult(
-            datasource_id=ds_id,
-            datasource_name=datasource_name,
-            result_meta=result_meta,
-            source_datasource_id=datasource_id,
-            source_datasource_name=source_datasource_name,
-            read_duration_ms=float(read_duration_ms) if isinstance(read_duration_ms, (int, float)) else None,
-            write_duration_ms=write_duration_ms,
-        )
+        return ExportDatasourceResult(datasource_id=str(target_ds.id), datasource_name=datasource_name, result_meta=result_meta)
     except BuildCancelledError:
         raise
     except Exception as exc:
+        if build_id is None:
+            raise
         try:
-            if build_id is not None:
-                _raise_if_build_cancelled(build_id)
+            _raise_if_build_cancelled(build_id)
         except BuildCancelledError as cancel_exc:
             raise cancel_exc from exc
-        duration_ms = int((time.perf_counter() - started_perf) * 1000)
-        if build_id is not None:
-            failed_summary = {
+        assert publication_claim is not None
+        assert worker_id is not None
+        initial_output_name = iceberg_options.get("table_name", filename)
+        client_from_env().update_build_result(
+            namespace=get_namespace(),
+            build_id=build_id,
+            job_id=publication_claim.job_id,
+            worker_id=worker_id,
+            claim_token=publication_claim.claim_token,
+            lease_generation=publication_claim.lease_generation,
+            result_json={
                 "source_datasource_id": datasource_id,
                 "source_datasource_name": source_datasource_name,
                 "current_output_id": result_id,
                 "current_output_name": initial_output_name if isinstance(initial_output_name, str) else filename,
                 "current_tab_id": tab_id,
                 "current_tab_name": tab_name,
-                "branch": iceberg_options.get("branch") if isinstance(iceberg_options, dict) else None,
-            }
-            assert publication_claim is not None
-            assert worker_id is not None
-            client_from_env().update_build_result(
-                namespace=get_namespace(),
-                build_id=build_id,
-                job_id=publication_claim.job_id,
-                worker_id=worker_id,
-                claim_token=publication_claim.claim_token,
-                lease_generation=publication_claim.lease_generation,
-                result_json=failed_summary,
-            )
+                "branch": iceberg_options.get("branch"),
+            },
+        )
         raise
     finally:
         if os.path.exists(tmp_output):
@@ -2512,53 +1878,29 @@ def download_step(
 
     started_at = datetime.now(UTC)
     started_perf = time.perf_counter()
-
-    resolved = _resolve_pipeline_request(analysis_pipeline, tab_id, target_step_id)
-    datasource_id = resolved["datasource_id"]
-    steps = resolved["steps"]
-    target_step_id = resolved["target_step_id"]
-    datasource_config = resolved["datasource_config"]
-    analysis_id_value = resolved["analysis_id"] if resolved["analysis_id"] is not None else analysis_id
-
-    if not isinstance(datasource_config, dict):
-        raise ValueError("Download requires datasource_config")
-    _preflight_datasource_for_compute(
-        datasource_config,
-        operation="download",
-        datasource_id=datasource_id,
-    )
-
-    if not analysis_id_value:
+    request = _resolve_pipeline_request(analysis_pipeline, tab_id, target_step_id, analysis_id=analysis_id, operation="download")
+    if not request.analysis_id:
         raise ValueError("Download requires analysis_id")
 
-    download_steps = [step for step in steps if step.get("type") != "download"]
-    target_step = next((step for step in steps if step.get("id") == target_step_id), None)
+    target_step_id = request.target_step_id
+    steps = [step for step in request.steps if step.get("type") != "download"]
+    target_step = next((step for step in request.steps if step.get("id") == target_step_id), None)
     if target_step and target_step.get("type") == "download":
         depends_on = target_step.get("depends_on") or []
         parent_id = str(depends_on[0]) if depends_on and depends_on[0] else None
         if parent_id:
             target_step_id = parent_id
-        elif download_steps:
-            target_step_id = str(download_steps[-1].get("id") or "source")
+        elif steps:
+            target_step_id = str(steps[-1].get("id") or "source")
         else:
             target_step_id = "source"
+    download_steps = _steps_through_target(steps, target_step_id)
 
-    steps = apply_steps(download_steps)
-
-    if target_step_id == "source":
-        download_steps = []
-    else:
-        step_index = find_step_index(steps, target_step_id)
-        download_steps = steps[: step_index + 1]
-        download_steps = _hydrate_udfs(download_steps)
-
-    resolved_compute_worker_identity = default_stateless_compute_worker_identity(analysis_pipeline)
-    branch = _resolve_branch_value(datasource_config)
     tab_name = _tab_name_from_pipeline(analysis_pipeline, tab_id)
     request_payload = _ensure_request_branch(
         {
-            "analysis_id": analysis_id_value,
-            "datasource_id": datasource_id,
+            "analysis_id": request.analysis_id,
+            "datasource_id": request.datasource_id,
             "steps": download_steps,
             "target_step_id": target_step_id,
             "format": export_format,
@@ -2566,25 +1908,21 @@ def download_step(
             "tab_id": tab_id,
             "analysis_pipeline": analysis_pipeline,
         },
-        branch,
+        request.datasource_config,
     )
-
     additional_datasources = _get_additional_datasources(download_steps, analysis_pipeline)
-
     export_fmt = get_export_format(export_format)
-    ext = export_fmt.extension
-    content_type = export_fmt.content_type
+    download_name = f"{filename}{export_fmt.extension}"
 
-    tmp_output = _secure_temp_path(suffix=ext)
+    tmp_output = _secure_temp_path(suffix=export_fmt.extension)
     run_id = None
-    step_timings: dict = {}
-    query_plan: str | None = None
     result_data: dict | None = None
     try:
-        with manager.acquire_engine(resolved_compute_worker_identity) as engine:
-            run_id = _create_compute_worker_run(
-                analysis_id=analysis_id_value,
-                datasource_id=datasource_id,
+        with manager.acquire_engine(default_stateless_compute_worker_identity(analysis_pipeline)) as engine:
+            run_id = client_from_env().create_compute_worker_run(
+                namespace=get_namespace(),
+                analysis_id=request.analysis_id,
+                datasource_id=request.datasource_id,
                 kind="download",
                 status="running",
                 request_json=request_payload,
@@ -2592,120 +1930,70 @@ def download_step(
                     current_tab_id=tab_id,
                     current_tab_name=tab_name,
                     total_steps=len(download_steps),
-                    total_tabs=1,
                     resource_config=_resource_summary(engine),
                 ),
                 created_at=started_at,
                 progress=0.0,
             )
             job_id = engine.preview(
-                datasource_config=datasource_config,
+                datasource_config=request.datasource_config,
                 steps=download_steps,
                 row_limit=10_000_000,  # Large limit to get all data for download
                 offset=0,
                 additional_datasources=additional_datasources,
             )
             result_data = await_compute_worker_result(engine, job_id=job_id)
-        step_timings = result_data.get("step_timings", {}) if isinstance(result_data, dict) else {}
-        query_plan = result_data.get("query_plan") if isinstance(result_data, dict) else None
-        _raise_engine_failure(
-            result_data,
-            operation="download",
-            datasource_id=datasource_id,
-            failure_prefix="Download",
-        )
+        _raise_engine_failure(result_data, operation="download", datasource_id=request.datasource_id, failure_prefix="Download")
 
         data = result_data.get("data", {})
-        df_data = data.get("data", [])
         schema = data.get("schema", {})
-
         if not schema:
             raise ValueError("No data to download")
 
         from operations.fill_null import get_polars_type
 
         schema_types = {name: get_polars_type(dtype) or pl.Utf8() for name, dtype in schema.items()}
-        df = pl.DataFrame(df_data, schema=schema_types)
+        df = pl.DataFrame(data.get("data", []), schema=schema_types)
         write_started = time.perf_counter()
         export_fmt.write_df(df, tmp_output)
         write_duration_ms = (time.perf_counter() - write_started) * 1000
         _ensure_download_size(tmp_output)
-
         with open(tmp_output, "rb") as f:
             file_bytes = f.read()
 
-        completed_at = datetime.now(UTC)
-        duration_ms = int((time.perf_counter() - started_perf) * 1000)
-        execution_entries = _build_compute_worker_run_execution_entries(
-            result_data,
-            duration_ms=duration_ms,
-            write_duration_ms=write_duration_ms,
+        _apply_run_finalization(
+            _single_tab_run_finalization(
+                run_id,
+                existing_result=_load_compute_worker_run_result_json(run_id),
+                result_data=result_data,
+                started_perf=started_perf,
+                tab_id=tab_id,
+                tab_name=tab_name,
+                total_steps=len(download_steps),
+                summary_meta={"filename": download_name, "format": export_format},
+                log_message=f"Prepared download {download_name}",
+                resource_config=_resource_summary(engine),
+                write_duration_ms=write_duration_ms,
+                query_plan=result_data.get("query_plan"),
+            )
         )
-        result_json = _build_canonical_compute_worker_run_result(
-            existing_result=_load_compute_worker_run_result_json(run_id),
-            summary_meta={"filename": f"{filename}{ext}", "format": export_format},
-            execution_entries=execution_entries,
-            current_tab_id=tab_id,
-            current_tab_name=tab_name,
-            total_steps=len(download_steps),
-            total_tabs=1,
-            resource_config=_resource_summary(engine),
-            results=[
-                _result_entry(
-                    tab_id=tab_id,
-                    tab_name=tab_name,
-                    status=BuildTabStatus.SUCCESS,
-                )
-            ],
-            append_logs=[
-                _log_entry(
-                    message=f"Prepared download {filename}{ext}",
-                    tab_id=tab_id,
-                    tab_name=tab_name,
-                )
-            ],
-        )
-        _update_compute_worker_run(
-            run_id,
-            merge_result_json=False,
-            status=ComputeRunStatus.SUCCESS,
-            result_json=result_json,
-            completed_at=completed_at,
-            duration_ms=duration_ms,
-            step_timings=step_timings,
-            query_plan=query_plan,
-            execution_entries=execution_entries,
-            progress=1.0,
-        )
-
-        return file_bytes, f"{filename}{ext}", content_type
+        return file_bytes, download_name, export_fmt.content_type
     except Exception as exc:
         if run_id is None:
             raise
-        completed_at = datetime.now(UTC)
-        duration_ms = int((time.perf_counter() - started_perf) * 1000)
-        execution_entries = _build_compute_worker_run_execution_entries(result_data, duration_ms=duration_ms)
-        _finalize_failed_compute_worker_run(
-            run_id=run_id,
-            existing_result=_load_compute_worker_run_result_json(run_id),
-            execution_entries=execution_entries,
-            error=exc,
-            completed_at=completed_at,
-            duration_ms=duration_ms,
-            step_timings=step_timings,
-            query_plan=query_plan,
-            current_tab_id=tab_id,
-            current_tab_name=tab_name,
-            total_steps=len(download_steps),
-            total_tabs=1,
-            resource_config=_resource_summary(engine),
-            result_entry=_result_entry(
+        _apply_run_finalization(
+            _single_tab_run_finalization(
+                run_id,
+                existing_result=_load_compute_worker_run_result_json(run_id),
+                result_data=result_data,
+                started_perf=started_perf,
                 tab_id=tab_id,
                 tab_name=tab_name,
-                status=BuildTabStatus.FAILED,
-                error=str(exc),
-            ),
-            log_entry=_log_entry(message=str(exc), level="error", tab_id=tab_id, tab_name=tab_name),
+                total_steps=len(download_steps),
+                error=exc,
+                resource_config=_resource_summary(engine),
+                query_plan=result_data.get("query_plan") if isinstance(result_data, dict) else None,
+            )
         )
         raise
     finally:
@@ -2713,7 +2001,7 @@ def download_step(
             os.remove(tmp_output)
 
 
-def _build_execution_tabs(pipeline: dict) -> list[dict]:
+def _build_execution_tab(pipeline: dict) -> dict:
     """The single tab to execute for this build.
 
     Builds are always tab-scoped: the tab's input datasource inlines the
@@ -2730,7 +2018,7 @@ def _build_execution_tabs(pipeline: dict) -> list[dict]:
     selected = next((tab for tab in tabs if isinstance(tab, dict) and str(tab.get("id")) == tab_id), None)
     if selected is None:
         raise ValueError(f"analysis_pipeline missing tab {tab_id}")
-    return [selected]
+    return selected
 
 
 def _resolve_live_output_metadata(output_config: dict, tab_name: str) -> tuple[str | None, str | None]:
@@ -2749,18 +2037,27 @@ def _resolve_live_output_metadata(output_config: dict, tab_name: str) -> tuple[s
     return None, tab_name
 
 
-def _count_total_build_steps(tabs: list[dict]) -> int:
-    total = 0
-    for tab in tabs:
-        output_config = tab.get("output") if isinstance(tab, dict) else None
-        steps = tab.get("steps", []) if isinstance(tab, dict) else []
-        if not isinstance(steps, list):
-            continue
-        if not isinstance(output_config, dict) or "filename" not in output_config:
-            total += max(len(steps), 1)
-            continue
-        total += len(steps) + 2
-    return total
+def _count_total_build_steps(tab: dict) -> int:
+    steps = tab.get("steps", [])
+    if not isinstance(steps, list):
+        return 0
+    output_config = tab.get("output")
+    if not isinstance(output_config, dict) or "filename" not in output_config:
+        return max(len(steps), 1)
+    # Synthetic read stage + pipeline steps + synthetic write stage.
+    return len(steps) + 2
+
+
+def _stage_event(stage: _SyntheticBuildStage, event_type: str, **fields: object) -> dict[str, object]:
+    return {
+        "type": event_type,
+        "build_step_index": stage.build_step_index,
+        "step_index": stage.step_index,
+        "step_id": stage.step_id,
+        "step_name": stage.step_name,
+        "step_type": stage.step_type,
+        **fields,
+    }
 
 
 async def _stream_engine_events(
@@ -2769,9 +2066,7 @@ async def _stream_engine_events(
     analysis_id: str,
     engine,
     job_id: str,
-    compute_worker_run_id: str | None = None,
-    build_step_base: int,
-    engine_step_offset: int,
+    compute_worker_run_id: str | None,
     total_steps: int,
     started_perf: float,
     tab_id: str | None,
@@ -2779,9 +2074,28 @@ async def _stream_engine_events(
     current_output_id: str | None,
     current_output_name: str | None,
     emitter: BuildEmitter | None,
-    read_stage: _SyntheticBuildStage | None = None,
+    read_stage: _SyntheticBuildStage,
 ) -> None:
-    completed_steps = build_step_base
+    completed_steps = 0
+
+    async def emit_progress(current_step: object, current_step_index: object, *, progress_without_steps: float = 1.0) -> None:
+        await _emit_progress(
+            emitter,
+            build=build,
+            analysis_id=analysis_id,
+            progress=(completed_steps / total_steps) if total_steps else progress_without_steps,
+            elapsed_ms=int((time.perf_counter() - started_perf) * 1000),
+            completed_steps=completed_steps,
+            total_steps=total_steps,
+            current_step=current_step if isinstance(current_step, str) else None,
+            current_step_index=current_step_index if isinstance(current_step_index, int) else None,
+            tab_id=tab_id,
+            tab_name=tab_name,
+            current_output_id=current_output_id,
+            current_output_name=current_output_name,
+            compute_worker_run_id=compute_worker_run_id,
+        )
+
     draining = False
     drain_deadline: float | None = None
     while True:
@@ -2797,7 +2111,6 @@ async def _stream_engine_events(
             if engine.current_job_id != job_id:
                 draining = True
                 drain_deadline = time.monotonic() + 0.5
-                continue
             continue
 
         payload = dict(event.event)
@@ -2805,55 +2118,35 @@ async def _stream_engine_events(
         # Build stream events must stay in build context even if engine-internal events
         # include preview-oriented metadata.
         payload["current_kind"] = build.current_kind
-        if emitted_type in {"step_start", "step_complete", "step_failed"} and read_stage is not None and not read_stage.completed:
-            read_duration_ms = int((time.perf_counter() - read_stage.started_at) * 1000)
+        if emitted_type in {"step_start", "step_complete", "step_failed"} and not read_stage.completed:
             read_stage.completed = True
             await _emit_build_event(
                 emitter,
                 event=_build_event(
                     build,
                     analysis_id,
-                    {
-                        "type": "step_complete",
-                        "build_step_index": read_stage.build_step_index,
-                        "step_index": read_stage.step_index,
-                        "step_id": read_stage.step_id,
-                        "step_name": read_stage.step_name,
-                        "step_type": read_stage.step_type,
-                        "duration_ms": read_duration_ms,
-                        "row_count": None,
-                        "total_steps": total_steps,
-                        "tab_id": tab_id,
-                        "tab_name": tab_name,
-                        "current_output_id": current_output_id,
-                        "current_output_name": current_output_name,
-                        "compute_worker_run_id": compute_worker_run_id,
-                    },
+                    _stage_event(
+                        read_stage,
+                        "step_complete",
+                        duration_ms=int((time.perf_counter() - read_stage.started_at) * 1000),
+                        row_count=None,
+                        total_steps=total_steps,
+                        tab_id=tab_id,
+                        tab_name=tab_name,
+                        current_output_id=current_output_id,
+                        current_output_name=current_output_name,
+                        compute_worker_run_id=compute_worker_run_id,
+                    ),
                 ),
             )
             completed_steps += 1
-            elapsed_ms = int((time.perf_counter() - started_perf) * 1000)
-            await _emit_progress(
-                emitter,
-                build=build,
-                analysis_id=analysis_id,
-                progress=(completed_steps / total_steps) if total_steps else 1.0,
-                elapsed_ms=elapsed_ms,
-                completed_steps=completed_steps,
-                total_steps=total_steps,
-                current_step=read_stage.step_name,
-                current_step_index=read_stage.build_step_index,
-                tab_id=tab_id,
-                tab_name=tab_name,
-                current_output_id=current_output_id,
-                current_output_name=current_output_name,
-                compute_worker_run_id=compute_worker_run_id,
-            )
+            await emit_progress(read_stage.step_name, read_stage.build_step_index)
 
         step_index = payload.get("step_index")
         if isinstance(step_index, int):
-            payload["build_step_index"] = build_step_base + engine_step_offset + step_index
-            payload["step_index"] = engine_step_offset + step_index
+            # Engine steps follow the synthetic read stage.
+            payload["build_step_index"] = 1 + step_index
+            payload["step_index"] = 1 + step_index
         payload["tab_id"] = tab_id
         payload["tab_name"] = tab_name
         payload["current_output_id"] = current_output_id
@@ -2865,191 +2158,53 @@ async def _stream_engine_events(
 
         if emitted_type == "step_complete":
             completed_steps += 1
-            step_name = payload.get("step_name") if isinstance(payload.get("step_name"), str) else None
-            step_index_value = payload.get("build_step_index") if isinstance(payload.get("build_step_index"), int) else None
-            elapsed_ms = int((time.perf_counter() - started_perf) * 1000)
-            await _emit_progress(
-                emitter,
-                build=build,
-                analysis_id=analysis_id,
-                progress=(completed_steps / total_steps) if total_steps else 1.0,
-                elapsed_ms=elapsed_ms,
-                completed_steps=completed_steps,
-                total_steps=total_steps,
-                current_step=step_name,
-                current_step_index=step_index_value,
-                tab_id=tab_id,
-                tab_name=tab_name,
-                current_output_id=current_output_id,
-                current_output_name=current_output_name,
-                compute_worker_run_id=compute_worker_run_id,
-            )
+            await emit_progress(payload.get("step_name"), payload.get("build_step_index"))
         if emitted_type == "compute_start":
-            elapsed_ms = int((time.perf_counter() - started_perf) * 1000)
-            await _emit_progress(
-                emitter,
-                build=build,
-                analysis_id=analysis_id,
-                progress=(completed_steps / total_steps) if total_steps else 1.0,
-                elapsed_ms=elapsed_ms,
-                completed_steps=completed_steps,
-                total_steps=total_steps,
-                current_step="Computing",
-                current_step_index=None,
-                tab_id=tab_id,
-                tab_name=tab_name,
-                current_output_id=current_output_id,
-                current_output_name=current_output_name,
-                compute_worker_run_id=compute_worker_run_id,
-            )
+            await emit_progress("Computing", None)
         if emitted_type == "step_failed":
-            elapsed_ms = int((time.perf_counter() - started_perf) * 1000)
-            step_name = payload.get("step_name") if isinstance(payload.get("step_name"), str) else None
-            step_index_value = payload.get("build_step_index") if isinstance(payload.get("build_step_index"), int) else None
-            await _emit_progress(
-                emitter,
-                build=build,
-                analysis_id=analysis_id,
-                progress=(completed_steps / total_steps) if total_steps else 0.0,
-                elapsed_ms=elapsed_ms,
-                completed_steps=completed_steps,
-                total_steps=total_steps,
-                current_step=step_name,
-                current_step_index=step_index_value,
-                tab_id=tab_id,
-                tab_name=tab_name,
-                current_output_id=current_output_id,
-                current_output_name=current_output_name,
-                compute_worker_run_id=compute_worker_run_id,
-            )
+            await emit_progress(payload.get("step_name"), payload.get("build_step_index"), progress_without_steps=0.0)
             return
 
 
-def _schedule_stream_tasks(
-    loop: asyncio.AbstractEventLoop,
-    *,
-    build: RuntimeBuild,
-    analysis_id: str,
-    engine,
-    job_id: str,
-    compute_worker_run_id: str | None = None,
-    build_step_base: int,
-    engine_step_offset: int,
-    total_steps: int,
-    started_perf: float,
-    tab_id: str | None,
-    tab_name: str | None,
-    current_output_id: str | None,
-    current_output_name: str | None,
-    emitter: BuildEmitter | None,
-    read_stage: _SyntheticBuildStage | None,
-) -> tuple[asyncio.Task, asyncio.Task]:
-    progress_task = loop.create_task(
-        _stream_engine_events(
-            build=build,
-            analysis_id=analysis_id,
-            engine=engine,
-            job_id=job_id,
-            compute_worker_run_id=compute_worker_run_id,
-            build_step_base=build_step_base,
-            engine_step_offset=engine_step_offset,
-            total_steps=total_steps,
-            started_perf=started_perf,
-            tab_id=tab_id,
-            tab_name=tab_name,
-            current_output_id=current_output_id,
-            current_output_name=current_output_name,
-            emitter=emitter,
-            read_stage=read_stage,
-        )
-    )
-    resource_task = loop.create_task(
-        _stream_resource_events(
-            build=build,
-            analysis_id=analysis_id,
-            engine=engine,
-            emitter=emitter,
-            tab_id=tab_id,
-            tab_name=tab_name,
-        )
-    )
-    progress_task.add_done_callback(_observe_stream_task)
-    resource_task.add_done_callback(_observe_stream_task)
-    return progress_task, resource_task
-
-
 def _start_stream_tasks(
-    loop: asyncio.AbstractEventLoop,
-    *,
-    analysis_id: str,
-    engine,
-    job_id: str,
-    compute_worker_run_id: str | None = None,
-    build_step_base: int,
-    engine_step_offset: int,
-    total_steps: int,
-    started_perf: float,
-    tab_id: str | None,
-    tab_name: str | None,
-    current_output_id: str | None,
-    current_output_name: str | None,
-    emitter: BuildEmitter | None,
-    build: RuntimeBuild,
-    read_stage: _SyntheticBuildStage | None,
+    loop: asyncio.AbstractEventLoop, *, build: RuntimeBuild, engine, job_id: str, **stream_kwargs
 ) -> tuple[asyncio.Task | None, asyncio.Task | None]:
     build.resource_config = compute_schemas.BuildResourceConfigSummary.model_validate(_resource_summary(engine))
     if loop.is_closed() or not loop.is_running():
-        logger.warning(
-            "Skipping build stream tasks for job %s because the event loop is unavailable",
-            job_id,
-        )
+        logger.warning("Skipping build stream tasks for job %s because the event loop is unavailable", job_id)
         return None, None
 
     future: concurrent.futures.Future[tuple[asyncio.Task, asyncio.Task]] = concurrent.futures.Future()
 
     def assign() -> None:
         try:
-            future.set_result(
-                _schedule_stream_tasks(
-                    loop,
+            progress_task = loop.create_task(_stream_engine_events(build=build, engine=engine, job_id=job_id, **stream_kwargs))
+            resource_task = loop.create_task(
+                _stream_resource_events(
                     build=build,
-                    analysis_id=analysis_id,
+                    analysis_id=stream_kwargs["analysis_id"],
                     engine=engine,
-                    job_id=job_id,
-                    compute_worker_run_id=compute_worker_run_id,
-                    build_step_base=build_step_base,
-                    engine_step_offset=engine_step_offset,
-                    total_steps=total_steps,
-                    started_perf=started_perf,
-                    tab_id=tab_id,
-                    tab_name=tab_name,
-                    current_output_id=current_output_id,
-                    current_output_name=current_output_name,
-                    emitter=emitter,
-                    read_stage=read_stage,
+                    emitter=stream_kwargs["emitter"],
+                    tab_id=stream_kwargs["tab_id"],
+                    tab_name=stream_kwargs["tab_name"],
                 )
             )
+            progress_task.add_done_callback(_observe_stream_task)
+            resource_task.add_done_callback(_observe_stream_task)
+            future.set_result((progress_task, resource_task))
         except Exception as exc:
             future.set_exception(exc)
 
     try:
         loop.call_soon_threadsafe(assign)
     except RuntimeError as exc:
-        logger.warning(
-            "Skipping build stream tasks for job %s because the event loop rejected scheduling: %s",
-            job_id,
-            exc,
-        )
+        logger.warning("Skipping build stream tasks for job %s because the event loop rejected scheduling: %s", job_id, exc)
         return None, None
 
     try:
         return future.result()
     except RuntimeError as exc:
-        logger.warning(
-            "Skipping build stream tasks for job %s because scheduling did not complete: %s",
-            job_id,
-            exc,
-        )
+        logger.warning("Skipping build stream tasks for job %s because scheduling did not complete: %s", job_id, exc)
         return None, None
 
 
@@ -3065,25 +2220,17 @@ async def run_analysis_build_stream(
     if not isinstance(pipeline, dict):
         raise ValueError("analysis_pipeline is required")
 
-    execution_tabs = _build_execution_tabs(pipeline)
+    tab = _build_execution_tab(pipeline)
     analysis_id = pipeline.get("analysis_id")
     analysis_id_value = str(analysis_id) if analysis_id is not None else ""
-    total_steps = _count_total_build_steps(execution_tabs)
+    total_steps = _count_total_build_steps(tab)
     build.total_steps = total_steps
     started_perf = time.perf_counter()
 
-    await _emit_build_event(
-        emitter,
-        event=_build_event(
-            build,
-            analysis_id_value,
-            {
-                "type": "log",
-                "level": compute_schemas.BuildLogLevel.INFO.value,
-                "message": f"Starting build for {build.analysis_name}",
-            },
-        ),
-    )
+    async def emit(payload: dict[str, object]) -> None:
+        await _emit_build_event(emitter, event=_build_event(build, analysis_id_value, payload))
+
+    await emit({"type": "log", "level": compute_schemas.BuildLogLevel.INFO.value, "message": f"Starting build for {build.analysis_name}"})
     await _emit_progress(
         emitter,
         build=build,
@@ -3096,42 +2243,25 @@ async def run_analysis_build_stream(
         current_step_index=None,
         tab_id=None,
         tab_name=None,
-        current_output_id=None,
-        current_output_name=None,
         compute_worker_run_id=build.current_compute_worker_run_id,
     )
 
-    build_identity = compute_pb2.ComputeWorkerIdentity(
-        scope=enums_pb2.COMPUTE_WORKER_SCOPE_BUILD,
-        reuse_policy=enums_pb2.COMPUTE_WORKER_REUSE_POLICY_EXCLUSIVE,
-        build_id=build.build_id,
-        resource_id=build.build_id,
-    )
+    build_identity = _build_compute_worker_identity(build.build_id)
     results: list[dict] = []
-    tabs_built = 0
-    build_step_base = 0
-    has_failures = False
-    was_cancelled = False
-    cancelled_at: str | None = None
-    cancelled_by: str | None = None
     loop = asyncio.get_running_loop()
 
-    for tab in execution_tabs:
+    async def build_tab() -> BuildCancelledError | None:
         tab_id = str(tab.get("id", "unknown"))
         tab_name = str(tab.get("name", "unnamed"))
-        datasource = tab.get("datasource") if isinstance(tab, dict) else None
+        datasource = tab.get("datasource")
         tab_datasource_id = datasource.get("id") if isinstance(datasource, dict) else None
-        steps = tab.get("steps", []) if isinstance(tab, dict) else []
-        output_config = tab.get("output") if isinstance(tab, dict) else None
-
+        steps = tab.get("steps", [])
+        output_config = tab.get("output")
         if not tab_datasource_id:
-            continue
-
+            return None
         if not isinstance(steps, list):
             steps = []
 
-        target_step_id = steps[-1].get("id", "source") if steps else "source"
-        execution_step_count = len(steps) + 2
         build.current_kind = ComputeWorkerRunKind.BUILD.value
         build.current_datasource_id = str(tab_datasource_id)
         build.current_tab_id = tab_id
@@ -3139,71 +2269,37 @@ async def run_analysis_build_stream(
 
         if not isinstance(output_config, dict) or "filename" not in output_config:
             error = f"Tab {tab_id} missing output configuration"
-            has_failures = True
-            results.append(
-                {
-                    "tab_id": tab_id,
-                    "tab_name": tab_name,
-                    "status": BuildTabStatus.FAILED,
-                    "error": error,
-                }
-            )
-            await _emit_build_event(
-                emitter,
-                event=_build_event(
-                    build,
-                    analysis_id_value,
-                    {
-                        "type": "log",
-                        "level": compute_schemas.BuildLogLevel.ERROR.value,
-                        "message": error,
-                        "tab_id": tab_id,
-                        "tab_name": tab_name,
-                    },
-                ),
-            )
-            build_step_base += max(len(steps), 1)
-            continue
+            results.append({"tab_id": tab_id, "tab_name": tab_name, "status": BuildTabStatus.FAILED, "error": error})
+            await emit({"type": "log", "level": compute_schemas.BuildLogLevel.ERROR.value, "message": error, "tab_id": tab_id, "tab_name": tab_name})
+            return None
 
         raw_filename = output_config.get("filename")
         if not isinstance(raw_filename, str) or not raw_filename.strip():
             raise ValueError(f"Build output filename is required for tab {tab_id}")
-        filename = raw_filename.strip()
         result_id = output_config.get("result_id") if isinstance(output_config.get("result_id"), str) else None
         current_output_id, current_output_name = _resolve_live_output_metadata(output_config, tab_name)
         iceberg_cfg = output_config.get("iceberg")
         if not isinstance(iceberg_cfg, dict):
             raise ValueError(f"Build output iceberg config is required for tab {tab_id}")
-        table_name = iceberg_cfg.get("table_name")
-        namespace = iceberg_cfg.get("namespace")
-        branch = iceberg_cfg.get("branch")
-        if not isinstance(table_name, str) or not table_name.strip():
-            raise ValueError(f"Build output iceberg.table_name is required for tab {tab_id}")
-        if not isinstance(namespace, str) or not namespace.strip():
-            raise ValueError(f"Build output iceberg.namespace is required for tab {tab_id}")
-        if not isinstance(branch, str) or not branch.strip():
-            raise ValueError(f"Build output iceberg.branch is required for tab {tab_id}")
-        iceberg_options = {
-            "table_name": table_name,
-            "namespace": namespace,
-            "branch": branch,
-        }
-        raw_build_mode = output_config.get("build_mode")
-        if raw_build_mode not in {"full", "incremental", "recreate"}:
+        for key in ("table_name", "namespace", "branch"):
+            value = iceberg_cfg.get(key)
+            if not isinstance(value, str) or not value.strip():
+                raise ValueError(f"Build output iceberg.{key} is required for tab {tab_id}")
+        build_mode = output_config.get("build_mode")
+        if build_mode not in {"full", "incremental", "recreate"}:
             raise ValueError(f"Build output build_mode is required for tab {tab_id}")
-        tab_build_mode = raw_build_mode
         build.current_output_id = current_output_id
         build.current_output_name = current_output_name
 
+        tab_fields = {"tab_id": tab_id, "tab_name": tab_name, "current_output_id": current_output_id, "current_output_name": current_output_name}
         progress_task: asyncio.Task | None = None
         resource_task: asyncio.Task | None = None
-        export_result: ExportDatasourceResult | None = None
         cancellation = _BuildJobCancellation(manager, build_identity, namespace=build.namespace)
         read_stage = _SyntheticBuildStage(
             step_id=f"{tab_id}:initial_read",
             step_name="Initial Read",
             step_type="read",
-            build_step_index=build_step_base,
+            build_step_index=0,
             step_index=0,
             started_at=time.perf_counter(),
         )
@@ -3211,399 +2307,149 @@ async def run_analysis_build_stream(
             step_id=f"{tab_id}:write_output",
             step_name="Write Output",
             step_type="write",
-            build_step_index=build_step_base + len(steps) + 1,
+            build_step_index=len(steps) + 1,
             step_index=len(steps) + 1,
             started_at=read_stage.started_at,
         )
 
+        def stage_event(stage: _SyntheticBuildStage, event_type: str, **fields: object) -> dict[str, object]:
+            return _stage_event(stage, event_type, **fields, total_steps=total_steps, **tab_fields, compute_worker_run_id=build.current_compute_worker_run_id)
+
+        async def emit_stage_progress(completed_steps: int, stage: _SyntheticBuildStage) -> None:
+            await _emit_progress(
+                emitter,
+                build=build,
+                analysis_id=analysis_id_value,
+                progress=(completed_steps / total_steps) if total_steps else 1.0,
+                elapsed_ms=int((time.perf_counter() - started_perf) * 1000),
+                completed_steps=completed_steps,
+                total_steps=total_steps,
+                current_step=stage.step_name,
+                current_step_index=stage.build_step_index,
+                tab_id=tab_id,
+                tab_name=tab_name,
+                current_output_id=current_output_id,
+                current_output_name=current_output_name,
+                compute_worker_run_id=build.current_compute_worker_run_id,
+            )
+
+        def handle_job_started(info: dict[str, object]) -> None:
+            nonlocal progress_task, resource_task
+            job_id = info["job_id"]
+            engine = info.get("engine")
+            if not isinstance(job_id, str) or not job_id:
+                raise ValueError("Build engine job ID is required")
+            cancellation.job_started(job_id)
+            if engine is None:
+                return
+            run_started: dict[str, object] = {
+                "type": "progress",
+                "progress": 0.0,
+                "elapsed_ms": 0,
+                "estimated_remaining_ms": None,
+                "current_step": None,
+                "current_step_index": None,
+                "total_steps": total_steps,
+                **tab_fields,
+            }
+            asyncio.run_coroutine_threadsafe(emit(run_started), loop).result()
+            progress_task, resource_task = _start_stream_tasks(
+                loop,
+                build=build,
+                engine=engine,
+                job_id=job_id,
+                analysis_id=analysis_id_value,
+                compute_worker_run_id=build.current_compute_worker_run_id,
+                total_steps=total_steps,
+                started_perf=started_perf,
+                emitter=emitter,
+                read_stage=read_stage,
+                **tab_fields,
+            )
+
+        def handle_stage_event(info: dict[str, object]) -> None:
+            stage = info.get("stage")
+            if not isinstance(stage, str) or loop.is_closed() or not loop.is_running():
+                return
+
+            def stage_duration_ms(key: str, synthetic_stage: _SyntheticBuildStage) -> int:
+                value = info.get(key)
+                return int(float(value)) if isinstance(value, (int, float)) else int((time.perf_counter() - synthetic_stage.started_at) * 1000)
+
+            async def emit_stage_updates() -> None:
+                if stage == "write_start":
+                    if not read_stage.completed:
+                        read_duration_ms = stage_duration_ms("read_duration_ms", read_stage)
+                        read_stage.completed = True
+                        await emit(stage_event(read_stage, "step_complete", duration_ms=read_duration_ms, row_count=None))
+                        await emit_stage_progress(1, read_stage)
+                    write_stage.started = True
+                    write_stage.started_at = time.perf_counter()
+                    await emit(stage_event(write_stage, "step_start"))
+                    return
+                if stage == "write_complete":
+                    write_duration_ms = stage_duration_ms("write_duration_ms", write_stage)
+                    write_stage.completed = True
+                    await emit(stage_event(write_stage, "step_complete", duration_ms=write_duration_ms, row_count=None))
+                    await emit_stage_progress(len(steps) + 2, write_stage)
+
+            asyncio.run_coroutine_threadsafe(emit_stage_updates(), loop).result()
+
+        def run_export_job() -> ExportDatasourceResult:
+            cancellation.raise_if_cancelled()
+            return export_data(
+                manager=manager,
+                target_step_id=steps[-1].get("id", "source") if steps else "source",
+                analysis_pipeline=pipeline,
+                filename=raw_filename.strip(),
+                iceberg_options={key: iceberg_cfg[key] for key in ("table_name", "namespace", "branch")},
+                analysis_id=analysis_id_value,
+                tab_id=tab_id,
+                result_id=result_id,
+                build_mode=build_mode,
+                job_started=handle_job_started,
+                build_stage_event=handle_stage_event,
+                compute_worker_identity=build_identity,
+                build_id=build.build_id,
+                publication_claim=publication_claim,
+                worker_id=worker_id,
+            )
+
         try:
-            await _emit_build_event(
-                emitter,
-                event=_build_event(
-                    build,
-                    analysis_id_value,
-                    {
-                        "type": "log",
-                        "level": compute_schemas.BuildLogLevel.INFO.value,
-                        "message": f"Starting tab {tab_name}",
-                        "tab_id": tab_id,
-                        "tab_name": tab_name,
-                        "current_output_id": current_output_id,
-                        "current_output_name": current_output_name,
-                    },
-                ),
-            )
+            await emit({"type": "log", "level": compute_schemas.BuildLogLevel.INFO.value, "message": f"Starting tab {tab_name}", **tab_fields})
             read_stage.started = True
-            await _emit_build_event(
-                emitter,
-                event=_build_event(
-                    build,
-                    analysis_id_value,
-                    {
-                        "type": "step_start",
-                        "build_step_index": read_stage.build_step_index,
-                        "step_index": read_stage.step_index,
-                        "step_id": read_stage.step_id,
-                        "step_name": read_stage.step_name,
-                        "step_type": read_stage.step_type,
-                        "total_steps": total_steps,
-                        "tab_id": tab_id,
-                        "tab_name": tab_name,
-                        "current_output_id": current_output_id,
-                        "current_output_name": current_output_name,
-                        "compute_worker_run_id": build.current_compute_worker_run_id,
-                    },
-                ),
-            )
-
-            def handle_job_started(
-                info: dict[str, object],
-                *,
-                current_build_step_base: int = build_step_base,
-                current_tab_id: str = tab_id,
-                current_tab_name: str = tab_name,
-                current_output_id_value: str | None = current_output_id,
-                current_output_name_value: str | None = current_output_name,
-                current_read_stage: _SyntheticBuildStage = read_stage,
-                current_cancellation: _BuildJobCancellation = cancellation,
-            ) -> None:
-                nonlocal progress_task, resource_task
-                job_id = info["job_id"]
-                engine = info.get("engine")
-                run_id = info.get("compute_worker_run_id")
-                if not isinstance(job_id, str) or not job_id:
-                    raise ValueError("Build engine job ID is required")
-                current_cancellation.job_started(job_id)
-                if engine is None:
-                    return
-                if isinstance(run_id, str):
-                    build.current_compute_worker_run_id = run_id
-                    manager.set_compute_worker_runtime_context(
-                        compute_pb2.ComputeWorkerIdentity(
-                            scope=enums_pb2.COMPUTE_WORKER_SCOPE_BUILD,
-                            reuse_policy=enums_pb2.COMPUTE_WORKER_REUSE_POLICY_EXCLUSIVE,
-                            build_id=build.build_id,
-                            resource_id=build.build_id,
-                        ),
-                        current_build_id=build.build_id,
-                        current_compute_worker_run_id=run_id,
-                    )
-
-                async def emit_run_started() -> None:
-                    payload: dict[str, object] = {
-                        "type": "progress",
-                        "progress": 0.0,
-                        "elapsed_ms": 0,
-                        "estimated_remaining_ms": None,
-                        "current_step": None,
-                        "current_step_index": None,
-                        "total_steps": total_steps,
-                        "tab_id": current_tab_id,
-                        "tab_name": current_tab_name,
-                        "current_output_id": current_output_id_value,
-                        "current_output_name": current_output_name_value,
-                    }
-                    if isinstance(run_id, str):
-                        payload["compute_worker_run_id"] = run_id
-                    await _emit_build_event(emitter, event=_build_event(build, analysis_id_value, payload))
-
-                future = asyncio.run_coroutine_threadsafe(emit_run_started(), loop)
-                future.result()
-
-                next_progress_task, next_resource_task = _start_stream_tasks(
-                    loop,
-                    analysis_id=analysis_id_value,
-                    engine=engine,
-                    job_id=job_id,
-                    compute_worker_run_id=run_id if isinstance(run_id, str) else build.current_compute_worker_run_id,
-                    build_step_base=current_build_step_base,
-                    engine_step_offset=1,
-                    total_steps=total_steps,
-                    started_perf=started_perf,
-                    tab_id=current_tab_id,
-                    tab_name=current_tab_name,
-                    current_output_id=current_output_id_value,
-                    current_output_name=current_output_name_value,
-                    emitter=emitter,
-                    build=build,
-                    read_stage=current_read_stage,
-                )
-                progress_task = next_progress_task
-                resource_task = next_resource_task
-
-            def handle_stage_event(
-                info: dict[str, object],
-                *,
-                current_tab_id: str = tab_id,
-                current_tab_name: str = tab_name,
-                current_output_id_value: str | None = current_output_id,
-                current_output_name_value: str | None = current_output_name,
-                current_execution_step_count: int = execution_step_count,
-                current_build_step_base: int = build_step_base,
-                current_read_stage: _SyntheticBuildStage = read_stage,
-                current_write_stage: _SyntheticBuildStage = write_stage,
-            ) -> None:
-                stage = info.get("stage")
-                if not isinstance(stage, str) or loop.is_closed() or not loop.is_running():
-                    return
-
-                async def emit_stage_updates() -> None:
-                    if stage == "write_start":
-                        if not current_read_stage.completed:
-                            read_duration_ms = info.get("read_duration_ms")
-                            resolved_read_duration = (
-                                int(float(read_duration_ms))
-                                if isinstance(read_duration_ms, (int, float))
-                                else int((time.perf_counter() - current_read_stage.started_at) * 1000)
-                            )
-                            current_read_stage.completed = True
-                            await _emit_build_event(
-                                emitter,
-                                event=_build_event(
-                                    build,
-                                    analysis_id_value,
-                                    {
-                                        "type": "step_complete",
-                                        "build_step_index": current_read_stage.build_step_index,
-                                        "step_index": current_read_stage.step_index,
-                                        "step_id": current_read_stage.step_id,
-                                        "step_name": current_read_stage.step_name,
-                                        "step_type": current_read_stage.step_type,
-                                        "duration_ms": resolved_read_duration,
-                                        "row_count": None,
-                                        "total_steps": total_steps,
-                                        "tab_id": current_tab_id,
-                                        "tab_name": current_tab_name,
-                                        "current_output_id": current_output_id_value,
-                                        "current_output_name": current_output_name_value,
-                                        "compute_worker_run_id": build.current_compute_worker_run_id,
-                                    },
-                                ),
-                            )
-                            elapsed_ms = int((time.perf_counter() - started_perf) * 1000)
-                            await _emit_progress(
-                                emitter,
-                                build=build,
-                                analysis_id=analysis_id_value,
-                                progress=((current_build_step_base + 1) / total_steps) if total_steps else 1.0,
-                                elapsed_ms=elapsed_ms,
-                                completed_steps=current_build_step_base + 1,
-                                total_steps=total_steps,
-                                current_step=current_read_stage.step_name,
-                                current_step_index=current_read_stage.build_step_index,
-                                tab_id=current_tab_id,
-                                tab_name=current_tab_name,
-                                current_output_id=current_output_id_value,
-                                current_output_name=current_output_name_value,
-                                compute_worker_run_id=build.current_compute_worker_run_id,
-                            )
-                        current_write_stage.started = True
-                        current_write_stage.started_at = time.perf_counter()
-                        await _emit_build_event(
-                            emitter,
-                            event=_build_event(
-                                build,
-                                analysis_id_value,
-                                {
-                                    "type": "step_start",
-                                    "build_step_index": current_write_stage.build_step_index,
-                                    "step_index": current_write_stage.step_index,
-                                    "step_id": current_write_stage.step_id,
-                                    "step_name": current_write_stage.step_name,
-                                    "step_type": current_write_stage.step_type,
-                                    "total_steps": total_steps,
-                                    "tab_id": current_tab_id,
-                                    "tab_name": current_tab_name,
-                                    "current_output_id": current_output_id_value,
-                                    "current_output_name": current_output_name_value,
-                                    "compute_worker_run_id": build.current_compute_worker_run_id,
-                                },
-                            ),
-                        )
-                        return
-
-                    if stage == "write_complete":
-                        write_duration_ms = info.get("write_duration_ms")
-                        resolved_write_duration = (
-                            int(float(write_duration_ms))
-                            if isinstance(write_duration_ms, (int, float))
-                            else int((time.perf_counter() - current_write_stage.started_at) * 1000)
-                        )
-                        current_write_stage.completed = True
-                        await _emit_build_event(
-                            emitter,
-                            event=_build_event(
-                                build,
-                                analysis_id_value,
-                                {
-                                    "type": "step_complete",
-                                    "build_step_index": current_write_stage.build_step_index,
-                                    "step_index": current_write_stage.step_index,
-                                    "step_id": current_write_stage.step_id,
-                                    "step_name": current_write_stage.step_name,
-                                    "step_type": current_write_stage.step_type,
-                                    "duration_ms": resolved_write_duration,
-                                    "row_count": None,
-                                    "total_steps": total_steps,
-                                    "tab_id": current_tab_id,
-                                    "tab_name": current_tab_name,
-                                    "current_output_id": current_output_id_value,
-                                    "current_output_name": current_output_name_value,
-                                    "compute_worker_run_id": build.current_compute_worker_run_id,
-                                },
-                            ),
-                        )
-                        elapsed_ms = int((time.perf_counter() - started_perf) * 1000)
-                        await _emit_progress(
-                            emitter,
-                            build=build,
-                            analysis_id=analysis_id_value,
-                            progress=((current_build_step_base + current_execution_step_count) / total_steps) if total_steps else 1.0,
-                            elapsed_ms=elapsed_ms,
-                            completed_steps=current_build_step_base + current_execution_step_count,
-                            total_steps=total_steps,
-                            current_step=current_write_stage.step_name,
-                            current_step_index=current_write_stage.build_step_index,
-                            tab_id=current_tab_id,
-                            tab_name=current_tab_name,
-                            current_output_id=current_output_id_value,
-                            current_output_name=current_output_name_value,
-                            compute_worker_run_id=build.current_compute_worker_run_id,
-                        )
-
-                future = asyncio.run_coroutine_threadsafe(emit_stage_updates(), loop)
-                future.result()
-
-            def run_export_job(
-                *,
-                current_target_step_id: str = target_step_id,
-                current_filename: str = filename,
-                current_iceberg_options: dict | None = iceberg_options,
-                current_tab_id: str = tab_id,
-                current_result_id: str | None = result_id,
-                current_build_mode: str = tab_build_mode,
-                current_cancellation: _BuildJobCancellation = cancellation,
-            ) -> ExportDatasourceResult:
-                current_cancellation.raise_if_cancelled()
-                return export_data(
-                    manager=manager,
-                    target_step_id=current_target_step_id,
-                    analysis_pipeline=pipeline,
-                    filename=current_filename,
-                    iceberg_options=current_iceberg_options,
-                    analysis_id=analysis_id_value,
-                    tab_id=current_tab_id,
-                    result_id=current_result_id,
-                    build_mode=current_build_mode,
-                    job_started=handle_job_started,
-                    build_stage_event=handle_stage_event,
-                    compute_worker_identity=build_identity,
-                    build_id=build.build_id,
-                    publication_claim=publication_claim,
-                    worker_id=worker_id,
-                )
-
-            export_result = await run_compute_in_thread(
-                run_export_job,
-                cancel_work=cancellation.cancel,
-                expected_cancel_errors=(BuildCancelledError,),
-            )
-
+            await emit(stage_event(read_stage, "step_start"))
+            export_result = await run_compute_in_thread(run_export_job, cancel_work=cancellation.cancel, expected_cancel_errors=(BuildCancelledError,))
             if progress_task is not None:
                 _ = await progress_task
             await _stop_stream_task(resource_task)
-
-            tabs_built += 1
-            if export_result is not None:
-                build.current_output_id = export_result.datasource_id
-                build.current_output_name = export_result.datasource_name
-            build_step_base += execution_step_count
+            build.current_output_id = export_result.datasource_id
+            build.current_output_name = export_result.datasource_name
             results.append(
                 {
                     "tab_id": tab_id,
                     "tab_name": tab_name,
                     "status": BuildTabStatus.SUCCESS,
-                    "output_id": export_result.datasource_id if export_result is not None else current_output_id,
-                    "output_name": export_result.datasource_name if export_result is not None else current_output_name,
+                    "output_id": export_result.datasource_id,
+                    "output_name": export_result.datasource_name,
                 }
             )
+            return None
         except BuildCancelledError as exc:
             if progress_task is not None:
                 with contextlib.suppress(Exception):
                     _ = await progress_task
             await _stop_stream_task(resource_task)
-            was_cancelled = True
-            cancelled_at = exc.cancelled_at
-            cancelled_by = exc.cancelled_by
-            await _emit_build_event(
-                emitter,
-                event=_build_event(
-                    build,
-                    analysis_id_value,
-                    {
-                        "type": "log",
-                        "level": compute_schemas.BuildLogLevel.WARNING.value,
-                        "message": "Build cancellation requested",
-                        "tab_id": tab_id,
-                        "tab_name": tab_name,
-                        "current_output_id": current_output_id,
-                        "current_output_name": current_output_name,
-                    },
-                ),
-            )
-            break
+            await emit({"type": "log", "level": compute_schemas.BuildLogLevel.WARNING.value, "message": "Build cancellation requested", **tab_fields})
+            return exc
         except Exception as exc:
-            has_failures = True
             if progress_task is not None:
                 with contextlib.suppress(Exception):
                     _ = await progress_task
             await _stop_stream_task(resource_task)
-            if write_stage.started and not write_stage.completed:
-                await _emit_build_event(
-                    emitter,
-                    event=_build_event(
-                        build,
-                        analysis_id_value,
-                        {
-                            "type": "step_failed",
-                            "build_step_index": write_stage.build_step_index,
-                            "step_index": write_stage.step_index,
-                            "step_id": write_stage.step_id,
-                            "step_name": write_stage.step_name,
-                            "step_type": write_stage.step_type,
-                            "error": str(exc),
-                            "total_steps": total_steps,
-                            "tab_id": tab_id,
-                            "tab_name": tab_name,
-                            "current_output_id": current_output_id,
-                            "current_output_name": current_output_name,
-                            "compute_worker_run_id": build.current_compute_worker_run_id,
-                        },
-                    ),
-                )
-            elif not read_stage.completed:
-                await _emit_build_event(
-                    emitter,
-                    event=_build_event(
-                        build,
-                        analysis_id_value,
-                        {
-                            "type": "step_failed",
-                            "build_step_index": read_stage.build_step_index,
-                            "step_index": read_stage.step_index,
-                            "step_id": read_stage.step_id,
-                            "step_name": read_stage.step_name,
-                            "step_type": read_stage.step_type,
-                            "error": str(exc),
-                            "total_steps": total_steps,
-                            "tab_id": tab_id,
-                            "tab_name": tab_name,
-                            "current_output_id": current_output_id,
-                            "current_output_name": current_output_name,
-                            "compute_worker_run_id": build.current_compute_worker_run_id,
-                        },
-                    ),
-                )
+            failed_stage = write_stage if write_stage.started and not write_stage.completed else read_stage if not read_stage.completed else None
+            if failed_stage is not None:
+                await emit(stage_event(failed_stage, "step_failed", error=str(exc)))
             results.append(
                 {
                     "tab_id": tab_id,
@@ -3614,25 +2460,11 @@ async def run_analysis_build_stream(
                     "error": str(exc),
                 }
             )
-            await _emit_build_event(
-                emitter,
-                event=_build_event(
-                    build,
-                    analysis_id_value,
-                    {
-                        "type": "log",
-                        "level": compute_schemas.BuildLogLevel.ERROR.value,
-                        "message": str(exc),
-                        "tab_id": tab_id,
-                        "tab_name": tab_name,
-                        "current_output_id": current_output_id,
-                        "current_output_name": current_output_name,
-                    },
-                ),
-            )
-            build_step_base += execution_step_count
-            continue
+            await emit({"type": "log", "level": compute_schemas.BuildLogLevel.ERROR.value, "message": str(exc), **tab_fields})
+            return None
 
+    cancellation_error = await build_tab()
+    tabs_built = sum(1 for result in results if result["status"] == BuildTabStatus.SUCCESS)
     elapsed_ms = int((time.perf_counter() - started_perf) * 1000)
     base = _BuildEventBase.from_build(
         build,
@@ -3641,90 +2473,59 @@ async def run_analysis_build_stream(
         current_output_name=build.current_output_name,
         compute_worker_run_id=build.current_compute_worker_run_id,
     )
-    event_results = [compute_schemas.BuildTabResult.model_validate(item) for item in results]
-    if was_cancelled:
-        await _emit_build_event(
-            emitter,
-            event=compute_schemas.BuildCancelledEvent(
-                build_id=base.build_id,
-                analysis_id=base.analysis_id,
-                emitted_at=base.emitted_at,
-                current_kind=ComputeWorkerRunKind.parse(base.current_kind),
-                current_datasource_id=base.current_datasource_id,
-                tab_id=base.tab_id,
-                tab_name=base.tab_name,
-                current_output_id=base.current_output_id,
-                current_output_name=base.current_output_name,
-                compute_worker_run_id=base.compute_worker_run_id,
-                progress=0.0,
-                elapsed_ms=elapsed_ms,
-                total_steps=total_steps,
-                tabs_built=tabs_built,
-                results=event_results,
-                duration_ms=elapsed_ms,
-                cancelled_at=_parse_cancelled_at(cancelled_at) or _utcnow(),
-                cancelled_by=cancelled_by,
-            ),
+    terminal_fields: dict[str, object] = {
+        "build_id": base.build_id,
+        "analysis_id": base.analysis_id,
+        "emitted_at": base.emitted_at,
+        "current_kind": ComputeWorkerRunKind.parse(base.current_kind),
+        "current_datasource_id": base.current_datasource_id,
+        "tab_id": base.tab_id,
+        "tab_name": base.tab_name,
+        "current_output_id": base.current_output_id,
+        "current_output_name": base.current_output_name,
+        "compute_worker_run_id": base.compute_worker_run_id,
+        "elapsed_ms": elapsed_ms,
+        "total_steps": total_steps,
+        "tabs_built": tabs_built,
+        "results": [compute_schemas.BuildTabResult.model_validate(item) for item in results],
+        "duration_ms": elapsed_ms,
+    }
+    terminal_event: compute_schemas.BuildEvent
+    if cancellation_error is not None:
+        cancelled_at = cancellation_error.cancelled_at
+        terminal_event = compute_schemas.BuildCancelledEvent.model_validate(
+            {
+                **terminal_fields,
+                "progress": 0.0,
+                "cancelled_at": datetime.fromisoformat(cancelled_at) if cancelled_at is not None else datetime.now(UTC),
+                "cancelled_by": cancellation_error.cancelled_by,
+            }
         )
-    elif has_failures:
-        await _emit_build_event(
-            emitter,
-            event=compute_schemas.BuildFailedEvent(
-                build_id=base.build_id,
-                analysis_id=base.analysis_id,
-                emitted_at=base.emitted_at,
-                current_kind=ComputeWorkerRunKind.parse(base.current_kind),
-                current_datasource_id=base.current_datasource_id,
-                tab_id=base.tab_id,
-                tab_name=base.tab_name,
-                current_output_id=base.current_output_id,
-                current_output_name=base.current_output_name,
-                compute_worker_run_id=base.compute_worker_run_id,
-                progress=0.0,
-                elapsed_ms=elapsed_ms,
-                total_steps=total_steps,
-                tabs_built=tabs_built,
-                results=event_results,
-                duration_ms=elapsed_ms,
-                error="One or more tabs failed",
-            ),
-        )
+    elif any(result["status"] == BuildTabStatus.FAILED for result in results):
+        terminal_event = compute_schemas.BuildFailedEvent.model_validate({**terminal_fields, "progress": 0.0, "error": "One or more tabs failed"})
     else:
-        await _emit_build_event(
-            emitter,
-            event=compute_schemas.BuildCompleteEvent(
-                build_id=base.build_id,
-                analysis_id=base.analysis_id,
-                emitted_at=base.emitted_at,
-                current_kind=ComputeWorkerRunKind.parse(base.current_kind),
-                current_datasource_id=base.current_datasource_id,
-                tab_id=base.tab_id,
-                tab_name=base.tab_name,
-                current_output_id=base.current_output_id,
-                current_output_name=base.current_output_name,
-                compute_worker_run_id=base.compute_worker_run_id,
-                elapsed_ms=elapsed_ms,
-                total_steps=total_steps,
-                tabs_built=tabs_built,
-                results=event_results,
-                duration_ms=elapsed_ms,
-            ),
-        )
+        terminal_event = compute_schemas.BuildCompleteEvent.model_validate(terminal_fields)
+    await _emit_build_event(emitter, event=terminal_event)
     with contextlib.suppress(Exception):
-        await run_shutdown_in_thread(
-            manager.shutdown_compute_worker,
-            compute_pb2.ComputeWorkerIdentity(
-                scope=enums_pb2.COMPUTE_WORKER_SCOPE_BUILD,
-                reuse_policy=enums_pb2.COMPUTE_WORKER_REUSE_POLICY_EXCLUSIVE,
-                build_id=build.build_id,
-                resource_id=build.build_id,
-            ),
-        )
+        await run_shutdown_in_thread(manager.shutdown_compute_worker, _build_compute_worker_identity(build.build_id))
     return {
         "analysis_id": analysis_id_value,
         "tabs_built": tabs_built,
         "results": results,
     }
+
+
+def _load_catalog_table(config: dict) -> IcebergTable | None:
+    """Load a catalog-backed Iceberg datasource table, or None for static metadata datasources."""
+    catalog_uri = _internal_catalog_uri(config.get("catalog_uri"))
+    namespace = config.get("namespace")
+    table_name = config.get("table")
+    if not (config.get("catalog_type") and catalog_uri and namespace and table_name):
+        return None
+    catalog_config = {"type": config.get("catalog_type"), "uri": catalog_uri, **object_store_storage_options()}
+    if warehouse := config.get("warehouse"):
+        catalog_config["warehouse"] = warehouse
+    return load_runtime_catalog("local", **catalog_config).load_table(f"{namespace}.{table_name}")
 
 
 def list_iceberg_snapshots(
@@ -3748,23 +2549,8 @@ def list_iceberg_snapshots(
     raw_branch_name = branch or datasource.config.get("branch")
     branch_name = raw_branch_name if isinstance(raw_branch_name, str) else None
 
-    catalog_type = datasource.config.get("catalog_type")
-    catalog_uri = _internal_catalog_uri(datasource.config.get("catalog_uri"))
-    namespace = datasource.config.get("namespace")
-    table_name = datasource.config.get("table")
-    warehouse = datasource.config.get("warehouse")
-
-    if catalog_type and catalog_uri and namespace and table_name:
-        catalog_config = {
-            "type": catalog_type,
-            "uri": catalog_uri,
-            **object_store_storage_options(),
-        }
-        if warehouse:
-            catalog_config["warehouse"] = warehouse
-        catalog = load_runtime_catalog("local", **catalog_config)
-        identifier = f"{namespace}.{table_name}"
-        table = catalog.load_table(identifier)
+    table = _load_catalog_table(datasource.config)
+    if table is not None:
         resolved = resolve_iceberg_metadata_path(str(table.metadata_location))
     else:
         from pyiceberg.table import StaticTable
@@ -3812,35 +2598,15 @@ def delete_iceberg_snapshot(datasource_id: str, snapshot_id: str, *, request_nam
     except (TypeError, ValueError) as exc:
         raise DataSourceSnapshotError("Snapshot ID must be an integer", details={"snapshot_id": snapshot_id}) from exc
 
-    catalog_type = datasource.config.get("catalog_type")
-    catalog_uri = _internal_catalog_uri(datasource.config.get("catalog_uri"))
-    namespace = datasource.config.get("namespace")
-    table_name = datasource.config.get("table")
-    warehouse = datasource.config.get("warehouse")
-    if catalog_type and catalog_uri and namespace and table_name:
-        catalog_config = {
-            "type": catalog_type,
-            "uri": catalog_uri,
-            **object_store_storage_options(),
-        }
-        if warehouse:
-            catalog_config["warehouse"] = warehouse
-        catalog = load_runtime_catalog("local", **catalog_config)
-        identifier = f"{namespace}.{table_name}"
-        table = catalog.load_table(identifier)
-    else:
+    table = _load_catalog_table(datasource.config)
+    if table is None:
         raise DataSourceSnapshotError(
             "Snapshot deletion requires a catalog-backed Iceberg datasource",
             details={"snapshot_id": snapshot_id},
         )
 
-    if not hasattr(table, "maintenance"):
-        raise DataSourceSnapshotError(
-            "Snapshot deletion is not supported by the current Iceberg runtime",
-            details={"snapshot_id": snapshot_id},
-        )
-    maintenance = table.maintenance
-    if not hasattr(maintenance, "expire_snapshots"):
+    expire_snapshots = getattr(getattr(table, "maintenance", None), "expire_snapshots", None)
+    if expire_snapshots is None:
         raise DataSourceSnapshotError(
             "Snapshot deletion is not supported by the current Iceberg runtime",
             details={"snapshot_id": snapshot_id},
@@ -3862,7 +2628,7 @@ def delete_iceberg_snapshot(datasource_id: str, snapshot_id: str, *, request_nam
                     "available_snapshot_ids": available_ids,
                 },
             )
-        maintenance.expire_snapshots().by_id(snapshot_value).commit()
+        expire_snapshots().by_id(snapshot_value).commit()
     except ValueError as exc:
         raise DataSourceSnapshotError(str(exc), details={"snapshot_id": snapshot_id}) from exc
     except NotImplementedError as exc:

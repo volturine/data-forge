@@ -31,15 +31,15 @@ from dataforge_protocol import (
     worker_runtime_pb2_grpc,
 )
 from runtime.domain.compute.base import ComputeWorkerStatusInfo
+from runtime.json_values import dict_to_struct
 from runtime.protocol_mapping import (
     datetime_to_timestamp,
-    dict_to_struct,
     enum_to_proto_value,
     optional_struct_to_dict,
     optional_timestamp_to_datetime,
     proto_value_to_enum_name,
-    schema_info_payload as _schema_info_payload,
-    schema_info_proto as _schema_info_proto,
+    schema_info_payload,
+    schema_info_proto,
     struct_to_dict,
 )
 
@@ -169,15 +169,6 @@ class _ComputeLeaseRenewalBatcher:
 _compute_lease_batcher_lock = threading.Lock()
 _compute_lease_batchers: WeakKeyDictionary[asyncio.AbstractEventLoop, _ComputeLeaseRenewalBatcher] = WeakKeyDictionary()
 _async_runtime_clients: WeakKeyDictionary[asyncio.AbstractEventLoop, dict[tuple[str, str], WorkerRuntimeClient]] = WeakKeyDictionary()
-
-
-def _get_compute_lease_batcher(loop: asyncio.AbstractEventLoop) -> _ComputeLeaseRenewalBatcher:
-    with _compute_lease_batcher_lock:
-        batcher = _compute_lease_batchers.get(loop)
-        if batcher is None:
-            batcher = _ComputeLeaseRenewalBatcher()
-            _compute_lease_batchers[loop] = batcher
-        return batcher
 
 
 async def shutdown_compute_request_lease_batcher() -> None:
@@ -416,39 +407,11 @@ def _storage_cleanup_claim_from_proto(row: worker_runtime_pb2.WorkerStorageClean
         resource_id=row.resource_id,
         url=row.url,
         is_prefix=row.is_prefix,
-        catalog_identifier=row.catalog_identifier if row.HasField("catalog_identifier") else None,
-        catalog_type=row.catalog_type if row.HasField("catalog_type") else None,
-        catalog_uri=row.catalog_uri if row.HasField("catalog_uri") else None,
-        warehouse=row.warehouse if row.HasField("warehouse") else None,
-        catalog_namespace=row.catalog_namespace if row.HasField("catalog_namespace") else None,
-        catalog_table=row.catalog_table if row.HasField("catalog_table") else None,
-        catalog_family_prefix=row.catalog_family_prefix if row.HasField("catalog_family_prefix") else None,
+        **{
+            field: _optional_field(row, field)
+            for field in ("catalog_identifier", "catalog_type", "catalog_uri", "warehouse", "catalog_namespace", "catalog_table", "catalog_family_prefix")
+        },
     )
-
-
-def _persist_build_event_request(
-    *,
-    namespace: str,
-    build_id: str,
-    job_id: str,
-    worker_id: str,
-    claim_token: str,
-    lease_generation: int,
-    event: dict[str, object],
-    resource_config_json: dict[str, object] | None,
-) -> worker_runtime_pb2.WorkerPersistBuildEventRequest:
-    request = worker_runtime_pb2.WorkerPersistBuildEventRequest(
-        namespace=namespace,
-        build_id=build_id,
-        job_id=job_id,
-        worker_id=worker_id,
-        claim_token=claim_token,
-        lease_generation=lease_generation,
-        build_event=_build_event_proto(namespace, event),
-    )
-    if resource_config_json is not None:
-        request.build_resource_config.CopyFrom(_build_resource_config_proto(resource_config_json))
-    return request
 
 
 @dataclass(frozen=True)
@@ -537,6 +500,34 @@ class WorkerRuntimeClient:
                     self._target,
                 )
 
+    def _unary(self, method: str, request: Any, *, timeout: float | None = None) -> Any:
+        """Call one worker-runtime RPC with the active coordinator metadata."""
+        rpc = getattr(self._stub, method)
+        return self._call(lambda: rpc(request, timeout=self._control_timeout() if timeout is None else timeout, metadata=self._metadata()))
+
+    async def _unary_async(self, method: str, request: Any, *, timeout: float | None = None, reconnect: bool = False) -> Any:
+        """Call one worker-runtime RPC on the loop-owned channel.
+
+        ``reconnect`` retries transient transport failures while the API
+        reconnects; callers must guarantee that repeated execution has the same
+        durable effect through a lease generation or an idempotency key.
+        """
+        worker_stub, _coordinator_stub = self._async_stubs()
+        rpc = getattr(worker_stub, method)
+        rpc_timeout = self._control_timeout() if timeout is None else timeout
+        deadline = asyncio.get_running_loop().time() + _BUILD_LIFECYCLE_RETRY_SECONDS
+        delay = 0.25
+        while True:
+            try:
+                return await self._call_async(rpc(request, timeout=rpc_timeout, metadata=self._metadata()), operation=method)
+            except BackendWorkerRpcError as exc:
+                remaining = deadline - asyncio.get_running_loop().time()
+                if not reconnect or exc.error_code not in _TRANSIENT_RECONNECT_CODES or remaining <= 0:
+                    raise
+                logger.warning("%s unavailable; retrying runtime lifecycle RPC in %.2fs: %s", method, min(delay, remaining), exc.error)
+                await asyncio.sleep(min(delay, remaining))
+                delay = min(delay * 2, 2.0)
+
     async def aclose(self) -> None:
         channel = self._aio_channel
         if channel is None:
@@ -549,24 +540,13 @@ class WorkerRuntimeClient:
         self._aio_coordinator_stub = None
         self._aio_loop = None
 
-    def get_coordinator_generation(self) -> int:
-        request = common_pb2.EmptyRequest()
-        response = self._call(
-            lambda: self._coordinator_stub.GetCoordinatorGeneration(
-                request,
-                timeout=self._control_timeout(),
-                metadata=self._token_metadata(),
-            )
-        )
-        return response.generation
-
     async def get_coordinator_generation_async(self) -> int:
         _worker_stub, coordinator_stub = self._async_stubs()
         response = await self._call_async(
             coordinator_stub.GetCoordinatorGeneration(
                 common_pb2.EmptyRequest(),
                 timeout=self._control_timeout(),
-                metadata=self._token_metadata(),
+                metadata=((_TOKEN_METADATA_KEY, self._token),),
             ),
             operation="GetCoordinatorGeneration",
         )
@@ -607,7 +587,7 @@ class WorkerRuntimeClient:
                 error_code="FAILED_PRECONDITION",
             )
 
-    def register_worker(
+    def _registration_request(
         self,
         *,
         worker_id: str,
@@ -615,37 +595,10 @@ class WorkerRuntimeClient:
         hostname: str,
         pid: int,
         capacity: int,
-        active_jobs: int = 0,
-        retry_seconds: float | None = None,
-    ) -> None:
-        request = worker_runtime_pb2.RuntimeWorkerRegisterRequest(
-            worker_id=worker_id,
-            kind=enum_to_proto_value("RUNTIME_WORKER_KIND", kind),
-            hostname=hostname,
-            pid=pid,
-            capacity=capacity,
-            active_jobs=active_jobs,
-        )
-        registration_timeout = min(
-            self._timeout_seconds,
-            _CONTROL_RPC_TIMEOUT_SECONDS if retry_seconds is None else min(max(float(retry_seconds), 0.25), _CONTROL_RPC_TIMEOUT_SECONDS),
-        )
-        self._call_registration(
-            lambda: self._stub.RegisterWorker(request, timeout=registration_timeout, metadata=self._metadata()),
-            retry_seconds=retry_seconds,
-        )
-
-    async def register_worker_async(
-        self,
-        *,
-        worker_id: str,
-        kind: str,
-        hostname: str,
-        pid: int,
-        capacity: int,
-        active_jobs: int = 0,
-        retry_seconds: float | None = None,
-    ) -> None:
+        active_jobs: int,
+        retry_seconds: float | None,
+    ) -> tuple[worker_runtime_pb2.RuntimeWorkerRegisterRequest, float, float]:
+        """Return the registration request, its per-attempt timeout and its retry window."""
         request = worker_runtime_pb2.RuntimeWorkerRegisterRequest(
             worker_id=worker_id,
             kind=enum_to_proto_value("RUNTIME_WORKER_KIND", kind),
@@ -659,15 +612,51 @@ class WorkerRuntimeClient:
             _CONTROL_RPC_TIMEOUT_SECONDS if retry_seconds is None else min(max(float(retry_seconds), 0.25), _CONTROL_RPC_TIMEOUT_SECONDS),
         )
         retry_window = self._registration_retry_seconds if retry_seconds is None else max(retry_seconds, 0.0)
-        deadline = asyncio.get_running_loop().time() + retry_window
-        delay = 0.25
-        worker_stub, _coordinator_stub = self._async_stubs()
+        return request, timeout, retry_window
+
+    def register_worker(
+        self,
+        *,
+        worker_id: str,
+        kind: str,
+        hostname: str,
+        pid: int,
+        capacity: int,
+        active_jobs: int = 0,
+        retry_seconds: float | None = None,
+    ) -> None:
+        request, timeout, retry_window = self._registration_request(
+            worker_id=worker_id, kind=kind, hostname=hostname, pid=pid, capacity=capacity, active_jobs=active_jobs, retry_seconds=retry_seconds
+        )
+        deadline = time.monotonic() + retry_window
         while True:
             try:
-                await self._call_async(
-                    worker_stub.RegisterWorker(request, timeout=timeout, metadata=self._metadata()),
-                    operation="RegisterWorker",
-                )
+                self._unary("RegisterWorker", request, timeout=timeout)
+                return
+            except BackendWorkerRpcError as exc:
+                if time.monotonic() >= deadline or exc.error_code not in _TRANSIENT_RECONNECT_CODES:
+                    raise
+                time.sleep(min(1.0, max(deadline - time.monotonic(), 0.05)))
+
+    async def register_worker_async(
+        self,
+        *,
+        worker_id: str,
+        kind: str,
+        hostname: str,
+        pid: int,
+        capacity: int,
+        active_jobs: int = 0,
+        retry_seconds: float | None = None,
+    ) -> None:
+        request, timeout, retry_window = self._registration_request(
+            worker_id=worker_id, kind=kind, hostname=hostname, pid=pid, capacity=capacity, active_jobs=active_jobs, retry_seconds=retry_seconds
+        )
+        deadline = asyncio.get_running_loop().time() + retry_window
+        delay = 0.25
+        while True:
+            try:
+                await self._unary_async("RegisterWorker", request, timeout=timeout)
                 return
             except BackendWorkerRpcError as exc:
                 remaining = deadline - asyncio.get_running_loop().time()
@@ -680,83 +669,24 @@ class WorkerRuntimeClient:
         request = worker_runtime_pb2.RuntimeWorkerHeartbeatRequest(worker_id=worker_id)
         if active_jobs is not None:
             request.active_jobs = active_jobs
-        timeout = self._control_timeout(timeout_seconds)
-        self._call(lambda: self._stub.HeartbeatWorker(request, timeout=timeout, metadata=self._metadata()))
+        self._unary("HeartbeatWorker", request, timeout=self._control_timeout(timeout_seconds))
 
     async def heartbeat_worker_async(self, *, worker_id: str, active_jobs: int | None = None, timeout_seconds: float | None = None) -> None:
         request = worker_runtime_pb2.RuntimeWorkerHeartbeatRequest(worker_id=worker_id)
         if active_jobs is not None:
             request.active_jobs = active_jobs
-        timeout = self._control_timeout(timeout_seconds)
-        worker_stub, _coordinator_stub = self._async_stubs()
-        await self._call_async(
-            worker_stub.HeartbeatWorker(request, timeout=timeout, metadata=self._metadata()),
-            operation="HeartbeatWorker",
-        )
-
-    def stop_worker(self, *, worker_id: str, timeout_seconds: float | None = None) -> None:
-        timeout = self._control_timeout(timeout_seconds)
-        self._call(lambda: self._stub.StopWorker(_worker(worker_id), timeout=timeout, metadata=self._metadata()))
+        await self._unary_async("HeartbeatWorker", request, timeout=self._control_timeout(timeout_seconds))
 
     async def stop_worker_async(self, *, worker_id: str, timeout_seconds: float | None = None) -> None:
-        timeout = self._control_timeout(timeout_seconds)
-        worker_stub, _coordinator_stub = self._async_stubs()
-        await self._call_async(
-            worker_stub.StopWorker(_worker(worker_id), timeout=timeout, metadata=self._metadata()),
-            operation="StopWorker",
-        )
-
-    def claim_build_job(self, *, worker_id: str, namespace: str) -> ClaimedBuildJob | None:
-        response = self._call(
-            lambda: self._stub.ClaimBuildJob(
-                common_pb2.RuntimeWorkerRequest(worker_id=worker_id, protocol_version=2, target_namespace=namespace),
-                timeout=self._control_timeout(),
-                metadata=self._metadata(),
-            )
-        )
-        if not response.HasField("job"):
-            return None
-        return _claimed_build_job_from_proto(response.job)
+        request = common_pb2.RuntimeWorkerRequest(worker_id=worker_id, protocol_version=2)
+        await self._unary_async("StopWorker", request, timeout=self._control_timeout(timeout_seconds))
 
     async def claim_build_job_async(self, *, worker_id: str, namespace: str) -> ClaimedBuildJob | None:
         request = common_pb2.RuntimeWorkerRequest(worker_id=worker_id, protocol_version=2, target_namespace=namespace)
-        worker_stub, _coordinator_stub = self._async_stubs()
-        response = await self._call_async(
-            worker_stub.ClaimBuildJob(request, timeout=self._control_timeout(), metadata=self._metadata()),
-            operation="ClaimBuildJob",
-        )
+        response = await self._unary_async("ClaimBuildJob", request)
         if not response.HasField("job"):
             return None
         return _claimed_build_job_from_proto(response.job)
-
-    def renew_build_job_lease(
-        self,
-        *,
-        job_id: str,
-        namespace: str,
-        worker_id: str,
-        claim_token: str,
-        lease_generation: int,
-        timeout_seconds: float,
-    ) -> int | None:
-        response = self._call(
-            lambda: self._stub.RenewBuildJobLease(
-                worker_runtime_pb2.WorkerBuildJobClaimRequest(
-                    job_id=job_id,
-                    namespace=namespace,
-                    claim_token=claim_token,
-                    lease_generation=lease_generation,
-                    worker_id=worker_id,
-                ),
-                timeout=min(self._control_timeout(), max(float(timeout_seconds), 0.1)),
-                metadata=self._metadata(),
-            )
-        )
-        if not response.renewed:
-            return None
-        if not response.HasField("lease_ttl_seconds"):
-            raise ValueError(f"Renewed build job {job_id} has no lease TTL")
-        return int(response.lease_ttl_seconds)
 
     async def renew_build_job_lease_async(
         self,
@@ -775,43 +705,12 @@ class WorkerRuntimeClient:
             lease_generation=lease_generation,
             worker_id=worker_id,
         )
-        worker_stub, _coordinator_stub = self._async_stubs()
-        response = await self._call_async(
-            worker_stub.RenewBuildJobLease(
-                request,
-                timeout=min(self._control_timeout(), max(float(timeout_seconds), 0.1)),
-                metadata=self._metadata(),
-            ),
-            operation="RenewBuildJobLease",
-        )
+        response = await self._unary_async("RenewBuildJobLease", request, timeout=min(self._control_timeout(), max(float(timeout_seconds), 0.1)))
         if not response.renewed:
             return None
         if not response.HasField("lease_ttl_seconds"):
             raise ValueError(f"Renewed build job {job_id} has no lease TTL")
         return int(response.lease_ttl_seconds)
-
-    def claim_compute_request(
-        self,
-        *,
-        worker_id: str,
-        allowed_kinds: frozenset[enums_pb2.ComputeRequestKind],
-        namespace: str,
-    ) -> ClaimedComputeRequest | None:
-        response = self._call(
-            lambda: self._stub.ClaimComputeRequest(
-                common_pb2.RuntimeWorkerRequest(
-                    worker_id=worker_id,
-                    protocol_version=2,
-                    allowed_compute_request_kinds=sorted(allowed_kinds),
-                    target_namespace=namespace,
-                ),
-                timeout=self._control_timeout(),
-                metadata=self._metadata(),
-            )
-        )
-        if not response.HasField("request"):
-            return None
-        return _claimed_compute_request_from_proto(response.request, worker_id)
 
     async def claim_compute_request_async(
         self,
@@ -826,11 +725,7 @@ class WorkerRuntimeClient:
             allowed_compute_request_kinds=sorted(allowed_kinds),
             target_namespace=namespace,
         )
-        worker_stub, _coordinator_stub = self._async_stubs()
-        response = await self._call_async(
-            worker_stub.ClaimComputeRequest(request, timeout=self._control_timeout(), metadata=self._metadata()),
-            operation="ClaimComputeRequest",
-        )
+        response = await self._unary_async("ClaimComputeRequest", request)
         if not response.HasField("request"):
             return None
         return _claimed_compute_request_from_proto(response.request, worker_id)
@@ -846,7 +741,12 @@ class WorkerRuntimeClient:
         timeout_seconds: float,
     ) -> int | None:
         loop = asyncio.get_running_loop()
-        return await _get_compute_lease_batcher(loop).renew(
+        with _compute_lease_batcher_lock:
+            batcher = _compute_lease_batchers.get(loop)
+            if batcher is None:
+                batcher = _ComputeLeaseRenewalBatcher()
+                _compute_lease_batchers[loop] = batcher
+        return await batcher.renew(
             self,
             request_id=request_id,
             namespace=namespace,
@@ -855,44 +755,6 @@ class WorkerRuntimeClient:
             lease_generation=lease_generation,
             timeout_seconds=timeout_seconds,
         )
-
-    def _renew_compute_request_leases_batch(
-        self,
-        *,
-        namespace: str,
-        worker_id: str,
-        renewals: Sequence[tuple[str, str, int]],
-        timeout_seconds: float,
-    ) -> dict[str, int | None]:
-        request = worker_runtime_pb2.WorkerRenewComputeRequestLeasesRequest(
-            namespace=namespace,
-            worker_id=worker_id,
-            renewals=[
-                worker_runtime_pb2.WorkerComputeRequestLeaseRenewal(
-                    request_id=request_id,
-                    claim_token=claim_token,
-                    lease_generation=lease_generation,
-                )
-                for request_id, claim_token, lease_generation in renewals
-            ],
-        )
-        response = self._call(
-            lambda: self._stub.RenewComputeRequestLeases(
-                request,
-                timeout=self._control_timeout(timeout_seconds),
-                metadata=self._metadata(),
-            )
-        )
-        results: dict[str, int | None] = {request_id: None for request_id, _, _ in renewals}
-        for result in response.renewals:
-            if result.request_id not in results:
-                continue
-            if not result.renewed:
-                continue
-            if not result.HasField("lease_ttl_seconds"):
-                raise ValueError(f"Renewed compute request {result.request_id} has no lease TTL")
-            results[result.request_id] = int(result.lease_ttl_seconds)
-        return results
 
     async def _renew_compute_request_leases_batch_async(
         self,
@@ -914,15 +776,7 @@ class WorkerRuntimeClient:
                 for request_id, claim_token, lease_generation in renewals
             ],
         )
-        worker_stub, _coordinator_stub = self._async_stubs()
-        response = await self._call_async(
-            worker_stub.RenewComputeRequestLeases(
-                request,
-                timeout=self._control_timeout(timeout_seconds),
-                metadata=self._metadata(),
-            ),
-            operation="RenewComputeRequestLeases",
-        )
+        response = await self._unary_async("RenewComputeRequestLeases", request, timeout=self._control_timeout(timeout_seconds))
         results: dict[str, int | None] = {request_id: None for request_id, _, _ in renewals}
         for result in response.renewals:
             if result.request_id not in results or not result.renewed:
@@ -969,8 +823,7 @@ class WorkerRuntimeClient:
             request.artifact_content_type = artifact_content_type
         if compute_worker_run_finalization is not None:
             request.engine_run_finalization.CopyFrom(_compute_worker_run_finalization_proto(compute_worker_run_finalization))
-        timeout = self._control_timeout(timeout_seconds)
-        self._call(lambda: self._stub.CompleteComputeRequest(request, timeout=timeout, metadata=self._metadata()))
+        self._unary("CompleteComputeRequest", request, timeout=self._control_timeout(timeout_seconds))
 
     def fail_compute_request(
         self,
@@ -986,7 +839,6 @@ class WorkerRuntimeClient:
         compute_worker_run_finalization: ComputeWorkerRunFinalization | None = None,
         timeout_seconds: float | None = None,
     ) -> None:
-        timeout = self._control_timeout(timeout_seconds)
         request = worker_runtime_pb2.WorkerFailComputeRequestRequest(
             namespace=namespace,
             request_id=request_id,
@@ -1004,13 +856,7 @@ class WorkerRuntimeClient:
         )
         if compute_worker_run_finalization is not None:
             request.engine_run_finalization.CopyFrom(_compute_worker_run_finalization_proto(compute_worker_run_finalization))
-        self._call(
-            lambda: self._stub.FailComputeRequest(
-                request,
-                timeout=timeout,
-                metadata=self._metadata(),
-            )
-        )
+        self._unary("FailComputeRequest", request, timeout=self._control_timeout(timeout_seconds))
 
     def register_datasource_stage(
         self,
@@ -1045,57 +891,23 @@ class WorkerRuntimeClient:
             request.job_id = job_id
         if build_id is not None:
             request.build_id = build_id
-        response = self._call(lambda: self._stub.RegisterDatasourceStage(request, timeout=self._control_timeout(), metadata=self._metadata()))
-        if not response.value:
+        if not self._unary("RegisterDatasourceStage", request).value:
             raise RuntimeError("Datasource staging cleanup intents were not accepted")
-
-    def claim_storage_cleanups(self, *, namespace: str, limit: int = 1) -> list[StorageCleanupClaim]:
-        response = self._call(
-            lambda: self._stub.ClaimStorageCleanup(
-                worker_runtime_pb2.WorkerClaimStorageCleanupRequest(namespace=namespace, limit=limit),
-                timeout=self._control_timeout(),
-                metadata=self._metadata(),
-            )
-        )
-        return [_storage_cleanup_claim_from_proto(row) for row in response.cleanups]
 
     async def claim_storage_cleanups_async(self, *, namespace: str, limit: int = 1) -> list[StorageCleanupClaim]:
         request = worker_runtime_pb2.WorkerClaimStorageCleanupRequest(namespace=namespace, limit=limit)
-        worker_stub, _coordinator_stub = self._async_stubs()
-        response = await self._call_async(
-            worker_stub.ClaimStorageCleanup(request, timeout=self._control_timeout(), metadata=self._metadata()),
-            operation="ClaimStorageCleanup",
-        )
+        response = await self._unary_async("ClaimStorageCleanup", request)
         return [_storage_cleanup_claim_from_proto(row) for row in response.cleanups]
 
-    def authorize_storage_cleanup(self, claim: StorageCleanupClaim) -> bool:
-        response = self._call(lambda: self._stub.AuthorizeStorageCleanup(claim.protocol_claim(), timeout=self._control_timeout(), metadata=self._metadata()))
-        return bool(response.value)
-
     async def authorize_storage_cleanup_async(self, claim: StorageCleanupClaim) -> bool:
-        worker_stub, _coordinator_stub = self._async_stubs()
-        response = await self._call_async(
-            worker_stub.AuthorizeStorageCleanup(claim.protocol_claim(), timeout=self._control_timeout(), metadata=self._metadata()),
-            operation="AuthorizeStorageCleanup",
-        )
-        return bool(response.value)
-
-    def complete_storage_cleanup(self, claim: StorageCleanupClaim, *, error: str | None = None) -> bool:
-        request = worker_runtime_pb2.WorkerCompleteStorageCleanupRequest(claim=claim.protocol_claim())
-        if error is not None:
-            request.error = error
-        response = self._call(lambda: self._stub.CompleteStorageCleanup(request, timeout=self._control_timeout(), metadata=self._metadata()))
+        response = await self._unary_async("AuthorizeStorageCleanup", claim.protocol_claim())
         return bool(response.value)
 
     async def complete_storage_cleanup_async(self, claim: StorageCleanupClaim, *, error: str | None = None) -> bool:
         request = worker_runtime_pb2.WorkerCompleteStorageCleanupRequest(claim=claim.protocol_claim())
         if error is not None:
             request.error = error
-        worker_stub, _coordinator_stub = self._async_stubs()
-        response = await self._call_async(
-            worker_stub.CompleteStorageCleanup(request, timeout=self._control_timeout(), metadata=self._metadata()),
-            operation="CompleteStorageCleanup",
-        )
+        response = await self._unary_async("CompleteStorageCleanup", request)
         return bool(response.value)
 
     def publish_datasource_create(
@@ -1114,7 +926,6 @@ class WorkerRuntimeClient:
         owner_id: str | None = None,
         schema_info: datasource_pb2.SchemaInfo | None = None,
     ) -> datasource_pb2.DataSourceRecord:
-
         request = worker_runtime_pb2.WorkerPublishDatasourceCreateRequest(
             namespace=namespace,
             datasource_id=datasource_id,
@@ -1132,7 +943,7 @@ class WorkerRuntimeClient:
             request.owner_id = owner_id
         if schema_info is not None:
             request.schema_info.CopyFrom(schema_info)
-        response = self._call(lambda: self._stub.PublishDatasourceCreate(request, timeout=self._timeout_seconds, metadata=self._metadata()))
+        response = self._unary("PublishDatasourceCreate", request, timeout=self._timeout_seconds)
         return _validated_datasource_record(response.datasource)
 
     def publish_datasource_ingest(
@@ -1150,7 +961,6 @@ class WorkerRuntimeClient:
         job_id: str | None = None,
         build_id: str | None = None,
     ) -> datasource_pb2.DataSourceRecord:
-
         request = worker_runtime_pb2.WorkerPublishDatasourceIngestRequest(
             namespace=namespace,
             datasource_id=datasource_id,
@@ -1168,7 +978,7 @@ class WorkerRuntimeClient:
             request.job_id = job_id
         if build_id is not None:
             request.build_id = build_id
-        response = self._call(lambda: self._stub.PublishDatasourceIngest(request, timeout=self._timeout_seconds, metadata=self._metadata()))
+        response = self._unary("PublishDatasourceIngest", request, timeout=self._timeout_seconds)
         return _validated_datasource_record(response.datasource)
 
     def publish_datasource_schema_cache(
@@ -1193,74 +1003,43 @@ class WorkerRuntimeClient:
             claim_token=claim_token,
             lease_generation=lease_generation,
         )
-        response = self._call(lambda: self._stub.PublishDatasourceSchemaCache(request, timeout=self._timeout_seconds, metadata=self._metadata()))
-        return response.schema_info
+        return self._unary("PublishDatasourceSchemaCache", request, timeout=self._timeout_seconds).schema_info
 
     def datasource_metadata(self, *, namespace: str, datasource_id: str) -> DatasourceMetadata:
         snapshot = _datasource_metadata_snapshot.get()
         if snapshot is not None and (namespace, datasource_id) in snapshot:
             return snapshot[(namespace, datasource_id)]
-        response = self._call(
-            lambda: self._stub.GetDatasourceMetadata(
-                worker_runtime_pb2.WorkerDatasourceMetadataRequest(namespace=namespace, datasource_id=datasource_id),
-                timeout=self._control_timeout(),
-                metadata=self._metadata(),
-            )
-        )
+        response = self._unary("GetDatasourceMetadata", worker_runtime_pb2.WorkerDatasourceMetadataRequest(namespace=namespace, datasource_id=datasource_id))
         return DatasourceMetadata(
             found=response.found,
-            id=_optional_str(response, "id"),
-            name=_optional_str(response, "name"),
+            id=_optional_field(response, "id"),
+            name=_optional_field(response, "name"),
             source_type=_optional_proto_enum_name(response, "source_type", enums_pb2.DataSourceType, "DATA_SOURCE_TYPE"),
             config=optional_struct_to_dict(response, "config"),
-            schema_cache=_schema_info_payload(response.schema_info) if response.HasField("schema_info") else None,
-            is_hidden=_optional_bool(response, "is_hidden"),
+            schema_cache=schema_info_payload(response.schema_info) if response.HasField("schema_info") else None,
+            is_hidden=_optional_field(response, "is_hidden"),
             revision=int(response.revision) if response.HasField("revision") else None,
-            description=_optional_str(response, "description"),
+            description=_optional_field(response, "description"),
             column_descriptions=dict(response.column_descriptions) if response.column_descriptions else {},
-            created_by=_optional_str(response, "created_by"),
+            created_by=_optional_field(response, "created_by"),
         )
 
     def udf_codes(self, *, namespace: str, udf_ids: list[str]) -> dict[str, str]:
-        response = self._call(
-            lambda: self._stub.GetUdfCodes(
-                worker_runtime_pb2.WorkerUdfCodesRequest(namespace=namespace, udf_ids=udf_ids),
-                timeout=self._control_timeout(),
-                metadata=self._metadata(),
-            )
-        )
+        response = self._unary("GetUdfCodes", worker_runtime_pb2.WorkerUdfCodesRequest(namespace=namespace, udf_ids=udf_ids))
         return dict(response.codes)
 
     def engine_credentials(self, *, namespace: str, role: str) -> worker_runtime_pb2.WorkerComputeWorkerCredentialsResponse:
-        return self._call(
-            lambda: self._stub.GetComputeWorkerCredentials(
-                worker_runtime_pb2.WorkerComputeWorkerCredentialsRequest(namespace=namespace, role=role),
-                timeout=self._control_timeout(),
-                metadata=self._metadata(),
-            )
-        )
+        return self._unary("GetComputeWorkerCredentials", worker_runtime_pb2.WorkerComputeWorkerCredentialsRequest(namespace=namespace, role=role))
 
     def analysis_name(self, *, namespace: str, analysis_id: str) -> str | None:
-        response = self._call(
-            lambda: self._stub.GetAnalysisMetadata(
-                worker_runtime_pb2.WorkerAnalysisMetadataRequest(namespace=namespace, analysis_id=analysis_id),
-                timeout=self._control_timeout(),
-                metadata=self._metadata(),
-            )
-        )
+        response = self._unary("GetAnalysisMetadata", worker_runtime_pb2.WorkerAnalysisMetadataRequest(namespace=namespace, analysis_id=analysis_id))
         if not response.found:
             return None
-        return _optional_str(response, "name")
+        return _optional_field(response, "name")
 
     def build_cancel_status(self, *, namespace: str, build_id: str) -> tuple[bool, str | None, str | None]:
-        response = self._call(
-            lambda: self._stub.GetBuildCancelStatus(
-                worker_runtime_pb2.WorkerBuildCancelStatusRequest(namespace=namespace, build_id=build_id),
-                timeout=self._control_timeout(),
-                metadata=self._metadata(),
-            )
-        )
-        return (response.cancelled, _optional_timestamp_iso(response, "cancelled_at"), _optional_str(response, "cancelled_by"))
+        response = self._unary("GetBuildCancelStatus", worker_runtime_pb2.WorkerBuildCancelStatusRequest(namespace=namespace, build_id=build_id))
+        return (response.cancelled, _optional_timestamp_iso(response, "cancelled_at"), _optional_field(response, "cancelled_by"))
 
     def update_build_result(
         self,
@@ -1273,22 +1052,17 @@ class WorkerRuntimeClient:
         lease_generation: int,
         result_json: dict[str, object],
     ) -> None:
+        request = worker_runtime_pb2.WorkerUpdateBuildResultRequest(
+            namespace=namespace,
+            build_id=build_id,
+            job_id=job_id,
+            worker_id=worker_id,
+            claim_token=claim_token,
+            lease_generation=lease_generation,
+            result=dict_to_struct(result_json),
+        )
         try:
-            self._call(
-                lambda: self._stub.UpdateBuildResult(
-                    worker_runtime_pb2.WorkerUpdateBuildResultRequest(
-                        namespace=namespace,
-                        build_id=build_id,
-                        job_id=job_id,
-                        worker_id=worker_id,
-                        claim_token=claim_token,
-                        lease_generation=lease_generation,
-                        result=dict_to_struct(result_json),
-                    ),
-                    timeout=self._timeout_seconds,
-                    metadata=self._metadata(),
-                )
-            )
+            self._unary("UpdateBuildResult", request, timeout=self._timeout_seconds)
         except BackendWorkerRpcError as exc:
             if exc.error_code == "FAILED_PRECONDITION":
                 raise BuildJobLeaseLost(f"Build job {job_id} result update was rejected because its lease is no longer active") from exc
@@ -1320,7 +1094,7 @@ class WorkerRuntimeClient:
             name=name,
             source_type=enum_to_proto_value("DATA_SOURCE_TYPE", source_type),
             config=dict_to_struct(config),
-            schema_info=_schema_info_proto(schema_cache),
+            schema_info=schema_info_proto(schema_cache),
             keep_schema_cache=keep_schema_cache,
             notification_delivery=[_notification_delivery_proto(delivery) for delivery in notification_deliveries],
         )
@@ -1339,7 +1113,7 @@ class WorkerRuntimeClient:
         if is_hidden is not None:
             request.is_hidden = is_hidden
         try:
-            response = self._call(lambda: self._stub.UpsertOutputDatasource(request, timeout=self._timeout_seconds, metadata=self._metadata()))
+            response = self._unary("UpsertOutputDatasource", request, timeout=self._timeout_seconds)
         except BackendWorkerRpcError as exc:
             if exc.error_code == "FAILED_PRECONDITION" and job_id is not None:
                 raise BuildJobLeaseLost(f"Build job {job_id} output publication was rejected because its lease is no longer active") from exc
@@ -1355,13 +1129,8 @@ class WorkerRuntimeClient:
         )
 
     def list_healthchecks(self, *, namespace: str, datasource_id: str) -> list[HealthCheckSpec]:
-        response = self._call(
-            lambda: self._stub.ListHealthChecks(
-                worker_runtime_pb2.WorkerListHealthChecksRequest(namespace=namespace, datasource_id=datasource_id),
-                timeout=self._timeout_seconds,
-                metadata=self._metadata(),
-            )
-        )
+        request = worker_runtime_pb2.WorkerListHealthChecksRequest(namespace=namespace, datasource_id=datasource_id)
+        response = self._unary("ListHealthChecks", request, timeout=self._timeout_seconds)
         return [
             HealthCheckSpec(
                 id=check.id,
@@ -1373,21 +1142,9 @@ class WorkerRuntimeClient:
             for check in response.checks
         ]
 
-    def record_healthcheck_results(self, *, namespace: str, results: list[Mapping[str, object]]) -> None:
-        request = worker_runtime_pb2.WorkerRecordHealthCheckResultsRequest(
-            namespace=namespace,
-            results=[
-                worker_runtime_pb2.WorkerHealthCheckResultPayload(
-                    healthcheck_id=_required_mapping_str(result, "healthcheck_id"),
-                    passed=_required_mapping_bool(result, "passed"),
-                    message=_required_mapping_str(result, "message"),
-                    details=dict_to_struct(_required_mapping_dict(result, "details")),
-                    checked_at=datetime_to_timestamp(datetime.fromisoformat(_required_mapping_str(result, "checked_at"))),
-                )
-                for result in results
-            ],
-        )
-        self._call(lambda: self._stub.RecordHealthCheckResults(request, timeout=self._timeout_seconds, metadata=self._metadata()))
+    def record_healthcheck_results(self, *, namespace: str, results: Sequence[worker_runtime_pb2.WorkerHealthCheckResultPayload]) -> None:
+        request = worker_runtime_pb2.WorkerRecordHealthCheckResultsRequest(namespace=namespace, results=results)
+        self._unary("RecordHealthCheckResults", request, timeout=self._timeout_seconds)
 
     def create_compute_worker_run(
         self,
@@ -1458,54 +1215,24 @@ class WorkerRuntimeClient:
         fields: dict[str, object],
         merge_result_json: bool = True,
     ) -> None:
-        self._call(
-            lambda: self._stub.UpdateComputeWorkerRun(
-                worker_runtime_pb2.WorkerUpdateComputeWorkerRunRequest(
-                    namespace=namespace,
-                    run_id=run_id,
-                    merge_result=merge_result_json,
-                    update=_compute_worker_run_update_proto(fields),
-                ),
-                timeout=self._control_timeout(),
-                metadata=self._metadata(),
-            )
+        request = worker_runtime_pb2.WorkerUpdateComputeWorkerRunRequest(
+            namespace=namespace,
+            run_id=run_id,
+            merge_result=merge_result_json,
+            update=_compute_worker_run_update_proto(fields),
         )
+        self._unary("UpdateComputeWorkerRun", request)
 
     def compute_worker_run_state(self, *, namespace: str, run_id: str) -> dict[str, object] | None:
-        response = self._call(
-            lambda: self._stub.GetComputeWorkerRunState(
-                worker_runtime_pb2.WorkerComputeWorkerRunStateRequest(namespace=namespace, run_id=run_id),
-                timeout=self._control_timeout(),
-                metadata=self._metadata(),
-            )
-        )
+        response = self._unary("GetComputeWorkerRunState", worker_runtime_pb2.WorkerComputeWorkerRunStateRequest(namespace=namespace, run_id=run_id))
         if not response.found:
             return None
         return {
             "status": _optional_proto_enum_name(response, "status", enums_pb2.ComputeWorkerRunStatus, "COMPUTE_WORKER_RUN_STATUS"),
             "result_json": optional_struct_to_dict(response, "result") or {},
             "cancelled_at": _optional_timestamp_iso(response, "cancelled_at"),
-            "cancelled_by": _optional_str(response, "cancelled_by"),
+            "cancelled_by": _optional_field(response, "cancelled_by"),
         }
-
-    def fail_build_job(self, *, job_id: str, build_id: str, namespace: str, worker_id: str, claim_token: str, lease_generation: int, error: str) -> bool:
-        response = self._call_with_reconnect(
-            lambda: self._stub.FailBuildJob(
-                worker_runtime_pb2.WorkerFailBuildJobRequest(
-                    job_id=job_id,
-                    namespace=namespace,
-                    error=error,
-                    claim_token=claim_token,
-                    lease_generation=lease_generation,
-                    worker_id=worker_id,
-                    build_id=build_id,
-                ),
-                timeout=self._control_timeout(),
-                metadata=self._metadata(),
-            ),
-            operation="FailBuildJob",
-        )
-        return bool(response.value)
 
     async def fail_build_job_async(
         self,
@@ -1527,29 +1254,7 @@ class WorkerRuntimeClient:
             worker_id=worker_id,
             build_id=build_id,
         )
-        worker_stub, _coordinator_stub = self._async_stubs()
-        response = await self._call_with_reconnect_async(
-            lambda: worker_stub.FailBuildJob(request, timeout=self._control_timeout(), metadata=self._metadata()),
-            operation="FailBuildJob",
-        )
-        return bool(response.value)
-
-    def finalize_build_job(self, *, job_id: str, build_id: str, namespace: str, worker_id: str, claim_token: str, lease_generation: int) -> bool:
-        response = self._call_with_reconnect(
-            lambda: self._stub.FinalizeBuildJob(
-                worker_runtime_pb2.WorkerFinalizeBuildJobRequest(
-                    job_id=job_id,
-                    build_id=build_id,
-                    namespace=namespace,
-                    claim_token=claim_token,
-                    lease_generation=lease_generation,
-                    worker_id=worker_id,
-                ),
-                timeout=self._control_timeout(),
-                metadata=self._metadata(),
-            ),
-            operation="FinalizeBuildJob",
-        )
+        response = await self._unary_async("FailBuildJob", request, reconnect=True)
         return bool(response.value)
 
     async def finalize_build_job_async(
@@ -1570,77 +1275,21 @@ class WorkerRuntimeClient:
             lease_generation=lease_generation,
             worker_id=worker_id,
         )
-        worker_stub, _coordinator_stub = self._async_stubs()
-        response = await self._call_with_reconnect_async(
-            lambda: worker_stub.FinalizeBuildJob(request, timeout=self._control_timeout(), metadata=self._metadata()),
-            operation="FinalizeBuildJob",
-        )
+        response = await self._unary_async("FinalizeBuildJob", request, reconnect=True)
         return bool(response.value)
 
     async def reconcile_expired_build_jobs_async(self, *, namespace: str) -> int:
-        worker_stub, _coordinator_stub = self._async_stubs()
-        response = await self._call_async(
-            worker_stub.ReconcileExpiredBuildJobs(
-                common_pb2.EmptyRequest(namespace=namespace),
-                timeout=self._control_timeout(),
-                metadata=self._metadata(),
-            ),
-            operation="ReconcileExpiredBuildJobs",
-        )
+        response = await self._unary_async("ReconcileExpiredBuildJobs", common_pb2.EmptyRequest(namespace=namespace))
         return int(response.count)
 
     async def reconcile_expired_compute_requests_async(self, *, namespace: str) -> int:
-        worker_stub, _coordinator_stub = self._async_stubs()
-        response = await self._call_async(
-            worker_stub.ReconcileExpiredComputeRequests(
-                common_pb2.EmptyRequest(namespace=namespace),
-                timeout=self._control_timeout(),
-                metadata=self._metadata(),
-            ),
-            operation="ReconcileExpiredComputeRequests",
-        )
+        response = await self._unary_async("ReconcileExpiredComputeRequests", common_pb2.EmptyRequest(namespace=namespace))
         return int(response.count)
 
     async def pending_runtime_work_namespaces_async(self, *, work_kinds: tuple[str, ...] = ()) -> list[str]:
-        worker_stub, _coordinator_stub = self._async_stubs()
-        response = await self._call_async(
-            worker_stub.ListPendingRuntimeWorkNamespaces(
-                worker_runtime_pb2.WorkerPendingRuntimeWorkNamespacesRequest(kinds=work_kinds),
-                timeout=self._control_timeout(),
-                metadata=self._metadata(),
-            ),
-            operation="ListPendingRuntimeWorkNamespaces",
-        )
+        request = worker_runtime_pb2.WorkerPendingRuntimeWorkNamespacesRequest(kinds=work_kinds)
+        response = await self._unary_async("ListPendingRuntimeWorkNamespaces", request)
         return list(response.namespaces)
-
-    def persist_build_event(
-        self,
-        *,
-        namespace: str,
-        build_id: str,
-        job_id: str,
-        worker_id: str,
-        claim_token: str,
-        lease_generation: int,
-        event: dict[str, object],
-        resource_config_json: dict[str, object] | None = None,
-    ) -> int | None:
-        request = _persist_build_event_request(
-            namespace=namespace,
-            build_id=build_id,
-            job_id=job_id,
-            worker_id=worker_id,
-            claim_token=claim_token,
-            lease_generation=lease_generation,
-            event=event,
-            resource_config_json=resource_config_json,
-        )
-        # Event publication is intentionally not retried here: a successful
-        # transaction followed by a lost response must not append the same
-        # event twice. The surrounding build path turns an unavailable event
-        # publication into an explicit durable failure instead.
-        response = self._call(lambda: self._stub.PersistBuildEvent(request, timeout=self._control_timeout(), metadata=self._metadata()))
-        return int(response.sequence) if response.HasField("sequence") else None
 
     async def persist_build_event_async(
         self,
@@ -1654,40 +1303,23 @@ class WorkerRuntimeClient:
         event: dict[str, object],
         resource_config_json: dict[str, object] | None = None,
     ) -> int | None:
-        request = _persist_build_event_request(
+        request = worker_runtime_pb2.WorkerPersistBuildEventRequest(
             namespace=namespace,
             build_id=build_id,
             job_id=job_id,
             worker_id=worker_id,
             claim_token=claim_token,
             lease_generation=lease_generation,
-            event=event,
-            resource_config_json=resource_config_json,
+            build_event=_build_event_proto(namespace, event),
         )
-        worker_stub, _coordinator_stub = self._async_stubs()
-        response = await self._call_async(
-            worker_stub.PersistBuildEvent(request, timeout=self._control_timeout(), metadata=self._metadata()),
-            operation="PersistBuildEvent",
-        )
+        if resource_config_json is not None:
+            request.build_resource_config.CopyFrom(_build_resource_config_proto(resource_config_json))
+        # Event publication is intentionally not retried here: a successful
+        # transaction followed by a lost response must not append the same
+        # event twice. The surrounding build path turns an unavailable event
+        # publication into an explicit durable failure instead.
+        response = await self._unary_async("PersistBuildEvent", request)
         return int(response.sequence) if response.HasField("sequence") else None
-
-    def start_build_run(self, *, namespace: str, build_id: str, job_id: str, worker_id: str, claim_token: str, lease_generation: int) -> StartedBuildRun | None:
-        response = self._call_with_reconnect(
-            lambda: self._stub.StartBuildRun(
-                worker_runtime_pb2.WorkerStartBuildRunRequest(
-                    namespace=namespace,
-                    build_id=build_id,
-                    job_id=job_id,
-                    worker_id=worker_id,
-                    claim_token=claim_token,
-                    lease_generation=lease_generation,
-                ),
-                timeout=self._control_timeout(),
-                metadata=self._metadata(),
-            ),
-            operation="StartBuildRun",
-        )
-        return _started_build_run_from_response(response)
 
     async def start_build_run_async(
         self,
@@ -1707,65 +1339,43 @@ class WorkerRuntimeClient:
             claim_token=claim_token,
             lease_generation=lease_generation,
         )
-        worker_stub, _coordinator_stub = self._async_stubs()
-        response = await self._call_with_reconnect_async(
-            lambda: worker_stub.StartBuildRun(request, timeout=self._control_timeout(), metadata=self._metadata()),
-            operation="StartBuildRun",
+        response = await self._unary_async("StartBuildRun", request, reconnect=True)
+        if not response.HasField("run"):
+            return None
+        run = response.run
+        return StartedBuildRun(
+            id=run.id,
+            namespace=run.namespace,
+            analysis_id=run.analysis_id,
+            analysis_name=run.analysis_name,
+            analysis_pipeline=run.analysis_pipeline,
+            tab_id=_optional_field(run, "tab_id"),
+            starter_json={
+                key: getattr(run.build_starter, key) for key in ("user_id", "display_name", "email", "triggered_by") if run.build_starter.HasField(key)
+            },
+            current_kind=_optional_proto_enum_name(run, "current_kind", enums_pb2.ComputeWorkerRunKind, "COMPUTE_WORKER_RUN_KIND"),
+            current_datasource_id=_optional_field(run, "current_datasource_id"),
+            current_tab_id=_optional_field(run, "current_tab_id"),
+            current_tab_name=_optional_field(run, "current_tab_name"),
+            current_output_id=_optional_field(run, "current_output_id"),
+            current_output_name=_optional_field(run, "current_output_name"),
         )
-        return _started_build_run_from_response(response)
 
     def persist_compute_worker_snapshot(self, *, worker_id: str, namespace: str, statuses: Sequence[ComputeWorkerStatusInfo]) -> None:
-        self._call(
-            lambda: self._stub.PersistComputeWorkerSnapshot(
-                worker_runtime_pb2.WorkerPersistComputeWorkerSnapshotRequest(
-                    worker_id=worker_id,
-                    namespace=namespace,
-                    engine_status=[_compute_worker_status_result_proto(status) for status in statuses],
-                ),
-                timeout=self._control_timeout(),
-                metadata=self._metadata(),
-            )
+        request = worker_runtime_pb2.WorkerPersistComputeWorkerSnapshotRequest(
+            worker_id=worker_id,
+            namespace=namespace,
+            engine_status=[_compute_worker_status_result_proto(status) for status in statuses],
         )
-
-    def pending_datasource_deletes(self, *, namespace: str) -> list[PendingDatasourceDelete]:
-        response = self._call(
-            lambda: self._stub.ListPendingDatasourceDeletes(
-                common_pb2.EmptyRequest(namespace=namespace),
-                timeout=self._control_timeout(),
-                metadata=self._metadata(),
-            )
-        )
-        return [PendingDatasourceDelete(namespace=delete.namespace, datasource_id=delete.datasource_id) for delete in response.deletes]
+        self._unary("PersistComputeWorkerSnapshot", request)
 
     async def pending_datasource_deletes_async(self, *, namespace: str) -> list[PendingDatasourceDelete]:
-        worker_stub, _coordinator_stub = self._async_stubs()
-        response = await self._call_async(
-            worker_stub.ListPendingDatasourceDeletes(
-                common_pb2.EmptyRequest(namespace=namespace),
-                timeout=self._control_timeout(),
-                metadata=self._metadata(),
-            ),
-            operation="ListPendingDatasourceDeletes",
-        )
+        response = await self._unary_async("ListPendingDatasourceDeletes", common_pb2.EmptyRequest(namespace=namespace))
         return [PendingDatasourceDelete(namespace=delete.namespace, datasource_id=delete.datasource_id) for delete in response.deletes]
-
-    def finalize_datasource_delete(self, *, namespace: str, datasource_id: str) -> bool:
-        response = self._call(
-            lambda: self._stub.FinalizeDatasourceDelete(
-                worker_runtime_pb2.WorkerFinalizeDatasourceDeleteRequest(namespace=namespace, datasource_id=datasource_id),
-                timeout=self._control_timeout(),
-                metadata=self._metadata(),
-            )
-        )
-        return response.deleted
 
     async def finalize_datasource_delete_async(self, *, namespace: str, datasource_id: str) -> bool:
         request = worker_runtime_pb2.WorkerFinalizeDatasourceDeleteRequest(namespace=namespace, datasource_id=datasource_id)
-        worker_stub, _coordinator_stub = self._async_stubs()
-        response = await self._call_async(
-            worker_stub.FinalizeDatasourceDelete(request, timeout=self._control_timeout(), metadata=self._metadata()),
-            operation="FinalizeDatasourceDelete",
-        )
+        response = await self._unary_async("FinalizeDatasourceDelete", request)
         return bool(response.deleted)
 
     def generate_ai(
@@ -1788,14 +1398,13 @@ class WorkerRuntimeClient:
             request.endpoint_url = endpoint_url
         if api_key is not None:
             request.api_key = api_key
-        response = self._call(lambda: self._stub.GenerateAI(request, timeout=self._timeout_seconds, metadata=self._metadata()))
-        return list(response.outputs)
+        return list(self._unary("GenerateAI", request, timeout=self._timeout_seconds).outputs)
 
     def telegram_targets(self, *, namespace: str, datasource_id: str | None = None, active_subscribers: bool = False) -> list[TelegramTarget]:
         request = worker_runtime_pb2.WorkerTelegramTargetsRequest(namespace=namespace, active_subscribers=active_subscribers)
         if datasource_id is not None:
             request.datasource_id = datasource_id
-        response = self._call(lambda: self._stub.GetTelegramTargets(request, timeout=self._timeout_seconds, metadata=self._metadata()))
+        response = self._unary("GetTelegramTargets", request, timeout=self._timeout_seconds)
         return [TelegramTarget(chat_id=target.chat_id, bot_token=target.bot_token) for target in response.targets]
 
     def close(self) -> None:
@@ -1817,9 +1426,6 @@ class WorkerRuntimeClient:
             raise RuntimeError("RUNTIME_COORDINATOR_GENERATION must be a positive integer")
         return self._metadata_for_generation(generation)
 
-    def _token_metadata(self) -> tuple[tuple[str, str], ...]:
-        return ((_TOKEN_METADATA_KEY, self._token),)
-
     def _metadata_for_generation(self, generation: int) -> tuple[tuple[str, str], ...]:
         if generation < 1:
             raise ValueError("Runtime coordinator generation must be a positive integer")
@@ -1839,7 +1445,7 @@ class WorkerRuntimeClient:
             raise _rpc_error_from_grpc_error(exc, target=self._target) from exc
 
     def _call_with_reconnect(self, fn: Callable[[], _T], *, operation: str) -> _T:
-        """Retry idempotent runtime RPCs while the API reconnects.
+        """Retry an idempotent runtime RPC while the API reconnects.
 
         Callers must guarantee that repeated execution has the same durable
         effect, either through a lease generation or an explicit idempotency
@@ -1862,30 +1468,6 @@ class WorkerRuntimeClient:
                 )
                 time.sleep(min(delay, remaining))
                 delay = min(delay * 2, 2.0)
-
-    async def _call_with_reconnect_async(self, fn: Callable[[], Awaitable[_T]], *, operation: str) -> _T:
-        deadline = asyncio.get_running_loop().time() + _BUILD_LIFECYCLE_RETRY_SECONDS
-        delay = 0.25
-        while True:
-            try:
-                return await self._call_async(fn(), operation=operation)
-            except BackendWorkerRpcError as exc:
-                remaining = deadline - asyncio.get_running_loop().time()
-                if exc.error_code not in _TRANSIENT_RECONNECT_CODES or remaining <= 0:
-                    raise
-                logger.warning("%s unavailable; retrying runtime lifecycle RPC in %.2fs: %s", operation, min(delay, remaining), exc.error)
-                await asyncio.sleep(min(delay, remaining))
-                delay = min(delay * 2, 2.0)
-
-    def _call_registration(self, fn: Callable[[], _T], *, retry_seconds: float | None = None) -> _T:
-        deadline = time.monotonic() + (self._registration_retry_seconds if retry_seconds is None else max(retry_seconds, 0.0))
-        while True:
-            try:
-                return self._call(fn)
-            except BackendWorkerRpcError as exc:
-                if time.monotonic() >= deadline or exc.error_code not in {"UNAVAILABLE", "DEADLINE_EXCEEDED"}:
-                    raise
-                time.sleep(min(1.0, max(deadline - time.monotonic(), 0.05)))
 
 
 def run_worker_heartbeat_loop(
@@ -1976,46 +1558,35 @@ def run_worker_heartbeat_loop(
 
 def _rpc_error_from_grpc_error(exc: grpc.RpcError, *, target: str) -> BackendWorkerRpcError:
     code = exc.code()
-    details = exc.details() or f"Backend worker gRPC call to {target} failed"
     return BackendWorkerRpcError(
-        status_code=_grpc_status_number(code),
-        error=details,
+        status_code=_GRPC_HTTP_STATUS[code],
+        error=exc.details() or f"Backend worker gRPC call to {target} failed",
         error_code=code.name,
-        details={},
     )
 
 
-def _grpc_status_number(code: grpc.StatusCode) -> int:
-    return {
-        grpc.StatusCode.OK: 200,
-        grpc.StatusCode.CANCELLED: 499,
-        grpc.StatusCode.UNKNOWN: 500,
-        grpc.StatusCode.INVALID_ARGUMENT: 400,
-        grpc.StatusCode.DEADLINE_EXCEEDED: 504,
-        grpc.StatusCode.NOT_FOUND: 404,
-        grpc.StatusCode.ALREADY_EXISTS: 409,
-        grpc.StatusCode.PERMISSION_DENIED: 403,
-        grpc.StatusCode.RESOURCE_EXHAUSTED: 429,
-        grpc.StatusCode.FAILED_PRECONDITION: 412,
-        grpc.StatusCode.ABORTED: 409,
-        grpc.StatusCode.OUT_OF_RANGE: 400,
-        grpc.StatusCode.UNIMPLEMENTED: 501,
-        grpc.StatusCode.INTERNAL: 500,
-        grpc.StatusCode.UNAVAILABLE: 503,
-        grpc.StatusCode.DATA_LOSS: 500,
-        grpc.StatusCode.UNAUTHENTICATED: 401,
-    }[code]
+_GRPC_HTTP_STATUS = {
+    grpc.StatusCode.OK: 200,
+    grpc.StatusCode.CANCELLED: 499,
+    grpc.StatusCode.UNKNOWN: 500,
+    grpc.StatusCode.INVALID_ARGUMENT: 400,
+    grpc.StatusCode.DEADLINE_EXCEEDED: 504,
+    grpc.StatusCode.NOT_FOUND: 404,
+    grpc.StatusCode.ALREADY_EXISTS: 409,
+    grpc.StatusCode.PERMISSION_DENIED: 403,
+    grpc.StatusCode.RESOURCE_EXHAUSTED: 429,
+    grpc.StatusCode.FAILED_PRECONDITION: 412,
+    grpc.StatusCode.ABORTED: 409,
+    grpc.StatusCode.OUT_OF_RANGE: 400,
+    grpc.StatusCode.UNIMPLEMENTED: 501,
+    grpc.StatusCode.INTERNAL: 500,
+    grpc.StatusCode.UNAVAILABLE: 503,
+    grpc.StatusCode.DATA_LOSS: 500,
+    grpc.StatusCode.UNAUTHENTICATED: 401,
+}
 
 
-def _worker(worker_id: str) -> common_pb2.RuntimeWorkerRequest:
-    return common_pb2.RuntimeWorkerRequest(worker_id=worker_id, protocol_version=2)
-
-
-def _optional_str(message: Any, field: str) -> str | None:
-    return getattr(message, field) if message.HasField(field) else None
-
-
-def _optional_bool(message: Any, field: str) -> bool | None:
+def _optional_field(message: Any, field: str) -> Any:
     return getattr(message, field) if message.HasField(field) else None
 
 
@@ -2059,13 +1630,6 @@ def _required_mapping_str(payload: Mapping[str, object], key: str) -> str:
     return value
 
 
-def _required_mapping_bool(payload: Mapping[str, object], key: str) -> bool:
-    value = payload.get(key)
-    if not isinstance(value, bool):
-        raise RuntimeError(f"Payload missing boolean {key}: {payload!r}")
-    return value
-
-
 def _required_mapping_int(payload: Mapping[str, object], key: str) -> int:
     value = payload.get(key)
     if not isinstance(value, int) or isinstance(value, bool):
@@ -2082,28 +1646,6 @@ def _optional_mapping_float(payload: Mapping[str, object], key: str) -> float | 
     return float(value)
 
 
-def _optional_mapping_str(payload: Mapping[str, object], key: str) -> str | None:
-    value = payload.get(key)
-    if value is None:
-        return None
-    if not isinstance(value, str):
-        raise RuntimeError(f"Payload field {key} must be a string: {payload!r}")
-    return value
-
-
-def _compute_worker_run_entry_step_type(payload: Mapping[str, object]) -> enums_pb2.StepType | None:
-    value = payload.get("step_type")
-    if value is None:
-        metadata = payload.get("metadata")
-        if isinstance(metadata, Mapping):
-            value = metadata.get("step_type")
-    if value is None:
-        return None
-    if not isinstance(value, str):
-        raise RuntimeError(f"Engine run execution entry step_type must be a string: {payload!r}")
-    return cast(enums_pb2.StepType, enum_to_proto_value("STEP_TYPE", value))
-
-
 def _compute_worker_run_execution_entry_proto(payload: Mapping[str, object]) -> compute_pb2.ComputeWorkerRunExecutionEntry:
     entry = compute_pb2.ComputeWorkerRunExecutionEntry(
         key=_required_mapping_str(payload, "key"),
@@ -2111,37 +1653,27 @@ def _compute_worker_run_execution_entry_proto(payload: Mapping[str, object]) -> 
         category=enum_to_proto_value("COMPUTE_WORKER_RUN_EXECUTION_CATEGORY", _required_mapping_str(payload, "category")),
         order=_required_mapping_int(payload, "order"),
     )
-    duration_ms = _optional_mapping_float(payload, "duration_ms")
-    if duration_ms is not None:
-        entry.duration_ms = duration_ms
-    share_pct = _optional_mapping_float(payload, "share_pct")
-    if share_pct is not None:
-        entry.share_pct = share_pct
-    optimized_plan = _optional_mapping_str(payload, "optimized_plan")
-    if optimized_plan is not None:
-        entry.optimized_plan = optimized_plan
-    unoptimized_plan = _optional_mapping_str(payload, "unoptimized_plan")
-    if unoptimized_plan is not None:
-        entry.unoptimized_plan = unoptimized_plan
-    step_type = _compute_worker_run_entry_step_type(payload)
-    if step_type is not None:
-        entry.step_type = step_type
+    for field in ("duration_ms", "share_pct"):
+        number = _optional_mapping_float(payload, field)
+        if number is not None:
+            setattr(entry, field, number)
+    for field in ("optimized_plan", "unoptimized_plan"):
+        text = payload.get(field)
+        if text is None:
+            continue
+        if not isinstance(text, str):
+            raise RuntimeError(f"Payload field {field} must be a string: {payload!r}")
+        setattr(entry, field, text)
+    step_type = payload.get("step_type")
+    metadata = payload.get("metadata")
+    if step_type is None and isinstance(metadata, Mapping):
+        step_type = metadata.get("step_type")
+    if step_type is None:
+        return entry
+    if not isinstance(step_type, str):
+        raise RuntimeError(f"Engine run execution entry step_type must be a string: {payload!r}")
+    entry.step_type = enum_to_proto_value("STEP_TYPE", step_type)
     return entry
-
-
-def _datetime_field(value: object, *, key: str) -> datetime:
-    if isinstance(value, datetime):
-        return value
-    if isinstance(value, str):
-        return datetime.fromisoformat(value)
-    raise RuntimeError(f"Payload field {key} must be an ISO datetime string: {value!r}")
-
-
-def _mapping_dict_field(payload: Mapping[str, object], key: str) -> dict[str, object]:
-    value = payload.get(key)
-    if not isinstance(value, dict):
-        raise RuntimeError(f"Payload field {key} must be an object: {payload!r}")
-    return value
 
 
 def _engine_resource_config_proto(payload: Mapping[str, object]) -> compute_pb2.ComputeWorkerResourceConfig:
@@ -2155,21 +1687,9 @@ def _engine_resource_config_proto(payload: Mapping[str, object]) -> compute_pb2.
     return config
 
 
-def _engine_defaults_proto(payload: Mapping[str, object]) -> compute_pb2.ComputeWorkerDefaults:
-    return compute_pb2.ComputeWorkerDefaults(
-        max_threads=_required_mapping_int(payload, "max_threads"),
-        max_memory_mb=_required_mapping_int(payload, "max_memory_mb"),
-        streaming_chunk_size=_required_mapping_int(payload, "streaming_chunk_size"),
-    )
-
-
 def _compute_worker_status_result_proto(status_info: ComputeWorkerStatusInfo) -> compute_pb2.ComputeWorkerStatusResult:
-    if not isinstance(status_info.analysis_id, str):
-        raise RuntimeError(f"Engine status analysis_id must be a string: {status_info!r}")
-    if not isinstance(status_info.resource_id, str) or not status_info.resource_id:
+    if not status_info.resource_id:
         raise RuntimeError(f"Engine status resource_id must be a non-empty string: {status_info!r}")
-    if not isinstance(status_info.status, str):
-        raise RuntimeError(f"Engine status status must be a string: {status_info!r}")
     status = compute_pb2.ComputeWorkerStatusResult(
         analysis_id=status_info.analysis_id,
         resource_id=status_info.resource_id,
@@ -2187,80 +1707,61 @@ def _compute_worker_status_result_proto(status_info: ComputeWorkerStatusInfo) ->
         "supervisor_id",
         "owner_id",
         "docker_host",
+        "exit_code",
+        "oom_killed",
     ):
         value = getattr(status_info, field)
         if value is not None:
-            if not isinstance(value, str):
-                raise RuntimeError(f"Engine status field {field} must be a string: {status_info!r}")
             setattr(status, field, value)
     if status_info.current_compute_worker_run_id is not None:
         status.current_engine_run_id = status_info.current_compute_worker_run_id
-    exit_code = status_info.exit_code
-    if exit_code is not None:
-        if not isinstance(exit_code, int) or isinstance(exit_code, bool):
-            raise RuntimeError(f"Engine status exit_code must be an integer: {status_info!r}")
-        status.exit_code = exit_code
-    oom_killed = status_info.oom_killed
-    if oom_killed is not None:
-        if not isinstance(oom_killed, bool):
-            raise RuntimeError(f"Engine status oom_killed must be a boolean: {status_info!r}")
-        status.oom_killed = oom_killed
-    resource_config = status_info.resource_config
-    if isinstance(resource_config, Mapping):
-        status.resource_config.CopyFrom(_engine_resource_config_proto(resource_config))
-    effective_resources = status_info.effective_resources
-    if isinstance(effective_resources, Mapping):
-        status.effective_resources.CopyFrom(_engine_resource_config_proto(effective_resources))
-    defaults = status_info.defaults
-    if isinstance(defaults, Mapping):
-        status.defaults.CopyFrom(_engine_defaults_proto(defaults))
-    scope = status_info.scope
-    if scope is not None:
-        if not isinstance(scope, str):
-            raise RuntimeError(f"Engine status scope must be a string: {status_info!r}")
-        status.scope = enum_to_proto_value("COMPUTE_WORKER_SCOPE", scope)
-    reuse_policy = status_info.reuse_policy
-    if reuse_policy is not None:
-        if not isinstance(reuse_policy, str):
-            raise RuntimeError(f"Engine status reuse_policy must be a string: {status_info!r}")
-        status.reuse_policy = enum_to_proto_value("COMPUTE_WORKER_REUSE_POLICY", reuse_policy)
-    lifecycle_status = status_info.lifecycle_status
-    if lifecycle_status is not None:
-        if not isinstance(lifecycle_status, str):
-            raise RuntimeError(f"Engine lifecycle status must be a string: {status_info!r}")
-        status.lifecycle_status = enum_to_proto_value("COMPUTE_WORKER_INSTANCE_STATUS", lifecycle_status)
+    if status_info.resource_config is not None:
+        status.resource_config.CopyFrom(_engine_resource_config_proto(status_info.resource_config))
+    if status_info.effective_resources is not None:
+        status.effective_resources.CopyFrom(_engine_resource_config_proto(status_info.effective_resources))
+    status.defaults.CopyFrom(
+        compute_pb2.ComputeWorkerDefaults(
+            max_threads=_required_mapping_int(status_info.defaults, "max_threads"),
+            max_memory_mb=_required_mapping_int(status_info.defaults, "max_memory_mb"),
+            streaming_chunk_size=_required_mapping_int(status_info.defaults, "streaming_chunk_size"),
+        )
+    )
+    if status_info.scope is not None:
+        status.scope = enum_to_proto_value("COMPUTE_WORKER_SCOPE", status_info.scope)
+    if status_info.reuse_policy is not None:
+        status.reuse_policy = enum_to_proto_value("COMPUTE_WORKER_REUSE_POLICY", status_info.reuse_policy)
+    if status_info.lifecycle_status is not None:
+        status.lifecycle_status = enum_to_proto_value("COMPUTE_WORKER_INSTANCE_STATUS", status_info.lifecycle_status)
     return status
 
 
 def _compute_worker_run_update_proto(fields: Mapping[str, object]) -> worker_runtime_pb2.WorkerComputeWorkerRunUpdateFields:
     update = worker_runtime_pb2.WorkerComputeWorkerRunUpdateFields()
-    if "analysis_id" in fields:
-        update.analysis_id = _required_mapping_str(fields, "analysis_id")
-    if "datasource_id" in fields:
-        update.datasource_id = _required_mapping_str(fields, "datasource_id")
-    if "kind" in fields:
-        update.kind = enum_to_proto_value("COMPUTE_WORKER_RUN_KIND", _required_mapping_str(fields, "kind"))
-    if "status" in fields:
-        update.status = enum_to_proto_value("COMPUTE_WORKER_RUN_STATUS", _required_mapping_str(fields, "status"))
-    if "request_json" in fields:
-        update.request_json.CopyFrom(dict_to_struct(_mapping_dict_field(fields, "request_json")))
-    if "result_json" in fields:
-        update.result_json.CopyFrom(dict_to_struct(_mapping_dict_field(fields, "result_json")))
-    if "error_message" in fields:
-        update.error_message = _required_mapping_str(fields, "error_message")
+    for field in ("analysis_id", "datasource_id", "error_message", "query_plan", "triggered_by"):
+        if field in fields:
+            setattr(update, field, _required_mapping_str(fields, field))
+    for field, prefix in (("kind", "COMPUTE_WORKER_RUN_KIND"), ("status", "COMPUTE_WORKER_RUN_STATUS")):
+        if field in fields:
+            setattr(update, field, enum_to_proto_value(prefix, _required_mapping_str(fields, field)))
+    for field in ("request_json", "result_json"):
+        if field in fields:
+            getattr(update, field).CopyFrom(dict_to_struct(_required_mapping_dict(fields, field)))
     if "completed_at" in fields:
-        update.completed_at.CopyFrom(datetime_to_timestamp(_datetime_field(fields["completed_at"], key="completed_at")))
+        completed_at = fields["completed_at"]
+        if isinstance(completed_at, str):
+            completed_at = datetime.fromisoformat(completed_at)
+        if not isinstance(completed_at, datetime):
+            raise RuntimeError(f"Payload field completed_at must be an ISO datetime string: {completed_at!r}")
+        update.completed_at.CopyFrom(datetime_to_timestamp(completed_at))
     if "duration_ms" in fields:
         update.duration_ms = _required_mapping_int(fields, "duration_ms")
     if "step_timings" in fields:
-        step_timings = _mapping_dict_field(fields, "step_timings")
+        step_timings = _required_mapping_dict(fields, "step_timings")
         update.step_timings.SetInParent()
         for key, value in step_timings.items():
             if not isinstance(value, int | float) or isinstance(value, bool):
                 raise RuntimeError(f"Step timing value must be numeric: {fields!r}")
             update.step_timings.values[str(key)] = float(value)
-    if "query_plan" in fields:
-        update.query_plan = _required_mapping_str(fields, "query_plan")
     if "execution_entries" in fields:
         entries = fields.get("execution_entries")
         if not isinstance(entries, list):
@@ -2283,8 +1784,6 @@ def _compute_worker_run_update_proto(fields: Mapping[str, object]) -> worker_run
             update.current_step = value
         else:
             raise RuntimeError(f"Payload field current_step must be a string or null: {fields!r}")
-    if "triggered_by" in fields:
-        update.triggered_by = _required_mapping_str(fields, "triggered_by")
     return update
 
 
@@ -2303,86 +1802,35 @@ def _required_mapping_dict(payload: Mapping[str, object], key: str) -> dict[str,
     return value
 
 
-def _enum_name_from_token(enum_descriptor: Any, value: object) -> object:
-    if not isinstance(value, str) or value in enum_descriptor.values_by_name:
-        return value
-    prefixed_value = f"{_enum_prefix(enum_descriptor)}_{value}"
-    if prefixed_value in enum_descriptor.values_by_name:
-        return prefixed_value
-    for enum_value in enum_descriptor.values:
-        options = enum_value.GetOptions()
-        if not options.HasExtension(cast(Any, enums_pb2.dataforge_token)):
-            continue
-        token = options.Extensions[cast(Any, enums_pb2.dataforge_token)]
-        if token == value:
-            return enum_value.name
-    return value
-
-
-def _enum_prefix(enum_descriptor: Any) -> str:
-    chars: list[str] = []
-    for index, char in enumerate(enum_descriptor.name):
-        if char.isupper() and index > 0:
-            chars.append("_")
-        chars.append(char.upper())
-    return "".join(chars)
-
-
 def _enum_number_from_token(enum_descriptor: Any, value: object, *, field_name: str) -> Any:
-    enum_name = _enum_name_from_token(enum_descriptor, value)
-    if not isinstance(enum_name, str):
+    """Resolve a full enum name, an unprefixed name, or a ``dataforge_token`` option to its number."""
+    if not isinstance(value, str):
         raise ValueError(f"{field_name} must be a string enum token")
-    try:
-        return cast(int, enum_descriptor.values_by_name[enum_name].number)
-    except KeyError as exc:
-        raise ValueError(f"{field_name} is invalid") from exc
-
-
-def _optional_payload_int(payload: Mapping[str, object], key: str) -> int | None:
-    value = payload.get(key)
-    if value is None:
-        return None
-    if isinstance(value, bool) or not isinstance(value, int):
-        raise ValueError(f"{key} must be an integer")
-    return value
+    values_by_name = enum_descriptor.values_by_name
+    prefix = "".join(f"_{char}" if char.isupper() and index > 0 else char.upper() for index, char in enumerate(enum_descriptor.name))
+    enum_name = value if value in values_by_name else f"{prefix}_{value}"
+    if enum_name not in values_by_name:
+        token_extension = cast(Any, enums_pb2.dataforge_token)
+        enum_name = next(
+            (
+                enum_value.name
+                for enum_value in enum_descriptor.values
+                if enum_value.GetOptions().HasExtension(token_extension) and enum_value.GetOptions().Extensions[token_extension] == value
+            ),
+            value,
+        )
+    if enum_name not in values_by_name:
+        raise ValueError(f"{field_name} is invalid")
+    return cast(int, values_by_name[enum_name].number)
 
 
 def _build_resource_config_proto(payload: Mapping[str, object]) -> compute_pb2.BuildResourceConfigSummary:
     config = compute_pb2.BuildResourceConfigSummary()
     for key in ("max_threads", "max_memory_mb", "streaming_chunk_size"):
-        value = _optional_payload_int(payload, key)
+        value = _optional_event_int(payload, key)
         if value is not None:
             setattr(config, key, value)
     return config
-
-
-def _build_starter_payload(starter: compute_pb2.BuildStarter) -> dict[str, object]:
-    payload: dict[str, object] = {}
-    for key in ("user_id", "display_name", "email", "triggered_by"):
-        if starter.HasField(key):
-            payload[key] = getattr(starter, key)
-    return payload
-
-
-def _started_build_run_from_response(response: Any) -> StartedBuildRun | None:
-    if not response.HasField("run"):
-        return None
-    run = response.run
-    return StartedBuildRun(
-        id=run.id,
-        namespace=run.namespace,
-        analysis_id=run.analysis_id,
-        analysis_name=run.analysis_name,
-        analysis_pipeline=run.analysis_pipeline,
-        tab_id=_optional_str(run, "tab_id"),
-        starter_json=_build_starter_payload(run.build_starter),
-        current_kind=_optional_proto_enum_name(run, "current_kind", enums_pb2.ComputeWorkerRunKind, "COMPUTE_WORKER_RUN_KIND"),
-        current_datasource_id=_optional_str(run, "current_datasource_id"),
-        current_tab_id=_optional_str(run, "current_tab_id"),
-        current_tab_name=_optional_str(run, "current_tab_name"),
-        current_output_id=_optional_str(run, "current_output_id"),
-        current_output_name=_optional_str(run, "current_output_name"),
-    )
 
 
 def _required_event_str(payload: Mapping[str, object], key: str) -> str:
@@ -2518,44 +1966,33 @@ def _build_event_proto(namespace: str, payload: Mapping[str, object]) -> compute
         case "plan":
             message.plan.optimized_plan = _required_event_str(payload, "optimized_plan")
             message.plan.unoptimized_plan = _required_event_str(payload, "unoptimized_plan")
-        case "step_start":
-            message.step_started.build_step_index = _required_event_int(payload, "build_step_index")
-            message.step_started.step_index = _required_event_int(payload, "step_index")
-            message.step_started.step_id = _required_event_str(payload, "step_id")
-            message.step_started.step_name = _required_event_str(payload, "step_name")
-            message.step_started.total_steps = _required_event_int(payload, "total_steps")
-            message.step_started.step_kind.CopyFrom(_build_step_kind_proto(payload.get("step_type")))
-        case "step_complete":
-            message.step_completed.build_step_index = _required_event_int(payload, "build_step_index")
-            message.step_completed.step_index = _required_event_int(payload, "step_index")
-            message.step_completed.step_id = _required_event_str(payload, "step_id")
-            message.step_completed.step_name = _required_event_str(payload, "step_name")
-            message.step_completed.duration_ms = _required_event_int(payload, "duration_ms")
-            row_count = _optional_event_int(payload, "row_count")
-            if row_count is not None:
-                message.step_completed.row_count = row_count
-            message.step_completed.total_steps = _required_event_int(payload, "total_steps")
-            message.step_completed.step_kind.CopyFrom(_build_step_kind_proto(payload.get("step_type")))
-        case "step_failed":
-            message.step_failed.build_step_index = _required_event_int(payload, "build_step_index")
-            message.step_failed.step_index = _required_event_int(payload, "step_index")
-            message.step_failed.step_id = _required_event_str(payload, "step_id")
-            message.step_failed.step_name = _required_event_str(payload, "step_name")
-            message.step_failed.error = _required_event_str(payload, "error")
-            message.step_failed.total_steps = _required_event_int(payload, "total_steps")
-            message.step_failed.step_kind.CopyFrom(_build_step_kind_proto(payload.get("step_type")))
+        case ("step_start" | "step_complete" | "step_failed") as event_type:
+            # The three step messages share these fields but are distinct proto types.
+            step: Any = {"step_start": message.step_started, "step_complete": message.step_completed, "step_failed": message.step_failed}[event_type]
+            step.build_step_index = _required_event_int(payload, "build_step_index")
+            step.step_index = _required_event_int(payload, "step_index")
+            step.step_id = _required_event_str(payload, "step_id")
+            step.step_name = _required_event_str(payload, "step_name")
+            if event_type == "step_complete":
+                message.step_completed.duration_ms = _required_event_int(payload, "duration_ms")
+                row_count = _optional_event_int(payload, "row_count")
+                if row_count is not None:
+                    message.step_completed.row_count = row_count
+            if event_type == "step_failed":
+                message.step_failed.error = _required_event_str(payload, "error")
+            step.total_steps = _required_event_int(payload, "total_steps")
+            step.step_kind.CopyFrom(_build_step_kind_proto(payload.get("step_type")))
         case "progress":
             message.progress.progress = _required_event_float(payload, "progress")
             message.progress.elapsed_ms = _required_event_int(payload, "elapsed_ms")
-            estimated_remaining_ms = _optional_event_int(payload, "estimated_remaining_ms")
-            if estimated_remaining_ms is not None:
-                message.progress.estimated_remaining_ms = estimated_remaining_ms
-            current_step = _optional_event_str(payload, "current_step")
-            if current_step is not None:
-                message.progress.current_step = current_step
-            current_step_index = _optional_event_int(payload, "current_step_index")
-            if current_step_index is not None:
-                message.progress.current_step_index = current_step_index
+            optional_values: dict[str, object] = {
+                "estimated_remaining_ms": _optional_event_int(payload, "estimated_remaining_ms"),
+                "current_step": _optional_event_str(payload, "current_step"),
+                "current_step_index": _optional_event_int(payload, "current_step_index"),
+            }
+            for field, optional_value in optional_values.items():
+                if optional_value is not None:
+                    setattr(message.progress, field, optional_value)
             message.progress.total_steps = _required_event_int(payload, "total_steps")
         case "resources":
             message.resources.cpu_percent = _required_event_float(payload, "cpu_percent")
@@ -2574,12 +2011,9 @@ def _build_event_proto(namespace: str, payload: Mapping[str, object]) -> compute
                 value = _optional_event_str(payload, field)
                 if value is not None:
                     setattr(message.log, field, value)
-        case "complete":
-            message.completed.CopyFrom(_build_terminal_event_proto(payload))
-        case "failed":
-            message.failed.CopyFrom(_build_terminal_event_proto(payload))
-        case "cancelled":
-            message.cancelled.CopyFrom(_build_terminal_event_proto(payload))
+        case ("complete" | "failed" | "cancelled") as event_type:
+            terminal = {"complete": message.completed, "failed": message.failed, "cancelled": message.cancelled}[event_type]
+            terminal.CopyFrom(_build_terminal_event_proto(payload))
         case event_type:
             raise ValueError(f"Unsupported build event type: {event_type!r}")
     return message

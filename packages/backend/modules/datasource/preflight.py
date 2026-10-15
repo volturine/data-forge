@@ -13,13 +13,11 @@ from backend_core.sqlmodel_typing import col
 from dataforge_protocol import enums_pb2
 from modules.compute.executor_client import execute_excel_preflight
 
-_PREFLIGHT_TTL = storage_cleanup_service.PREFLIGHT_TTL
-
 
 def _string_list(value: object) -> list[str]:
     if not isinstance(value, list) or any(not isinstance(item, str) for item in value):
         raise ValueError('Excel metadata must contain a list of names')
-    return [item for item in value if isinstance(item, str)]
+    return list(value)
 
 
 @dataclass(frozen=True)
@@ -74,7 +72,7 @@ async def create_preflight(
 
 
 async def get_preflight(preflight_id: str) -> ExcelPreflight | None:
-    await _cleanup_expired()
+    await run_api_blocking(run_db, _expire_preflights)
     return await run_api_blocking(run_db, _load_preflight, preflight_id)
 
 
@@ -97,7 +95,7 @@ async def clear_preflight(preflight_id: str, *, delete_source: bool = True) -> N
 
 
 def _expire_preflights(session: Session) -> None:
-    before = datetime.now(UTC) - _PREFLIGHT_TTL
+    before = datetime.now(UTC) - storage_cleanup_service.PREFLIGHT_TTL
     rows = session.exec(
         select(ComputeRequest)
         .where(ComputeRequest.kind == enums_pb2.COMPUTE_REQUEST_KIND_DATASOURCE_PREFLIGHT)
@@ -123,10 +121,6 @@ def _expire_preflights(session: Session) -> None:
             )
         session.delete(row)
     session.commit()
-
-
-async def _cleanup_expired() -> None:
-    await run_api_blocking(run_db, _expire_preflights)
 
 
 def preview_rows(result: Mapping[str, object]) -> list[list[str | None]]:

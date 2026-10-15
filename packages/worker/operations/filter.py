@@ -149,37 +149,26 @@ class FilterCondition(BaseModel):
 
     def expression(self, schema: pl.Schema) -> pl.Expr:
         definition = FilterOperatorDefinition.require(self.operator)
-        left = self.left_expression(schema)
+        left = pl.col(self.column)
+        if dtype := schema.get(self.column):
+            left = self.normalize_datetime_column(left, dtype)
 
         if self.operator.is_null_check:
             return definition.apply(left, None)
 
         if self.uses_column_value:
-            return definition.apply_column(left, self.right_column_expression(schema))
+            if not self.compare_column:
+                raise ValueError("compare_column required when value_type is column")
+            right = pl.col(self.compare_column)
+            if self.compare_column in schema:
+                right = self.normalize_datetime_column(right, schema[self.compare_column])
+            return definition.apply_column(left, right)
 
-        coerced = self.coerced_value(schema)
+        value_type = self.value_type
+        if value_type == FilterValueType.DATETIME and isinstance(schema.get(self.column), pl.Datetime) and self.is_date_only_value():
+            value_type = FilterValueType.DATE
+        coerced = value_type.coerce(self.value, normalize_tz=settings.normalize_tz, timezone=settings.timezone)
         return definition.apply_value(left, coerced)
-
-    def left_expression(self, schema: pl.Schema) -> pl.Expr:
-        expr = pl.col(self.column)
-        if dtype := schema.get(self.column):
-            return self.normalize_datetime_column(expr, dtype)
-        return expr
-
-    def right_column_expression(self, schema: pl.Schema) -> pl.Expr:
-        if not self.compare_column:
-            raise ValueError("compare_column required when value_type is column")
-        expr = pl.col(self.compare_column)
-        if self.compare_column in schema:
-            return self.normalize_datetime_column(expr, schema[self.compare_column])
-        return expr
-
-    def coerced_value(self, schema: pl.Schema) -> Any:
-        value_type = FilterValueType.DATE if self.compares_date_only_datetime(schema) else self.value_type
-        return value_type.coerce(self.value, normalize_tz=settings.normalize_tz, timezone=settings.timezone)
-
-    def compares_date_only_datetime(self, schema: pl.Schema) -> bool:
-        return self.value_type == FilterValueType.DATETIME and isinstance(schema.get(self.column), pl.Datetime) and self.is_date_only_value()
 
     def is_date_only_value(self) -> bool:
         return isinstance(self.value, str) and len(self.value) == 10 and "-" in self.value and "T" not in self.value
@@ -214,22 +203,12 @@ class FilterParams(OperationParams):
 
 
 class FilterHandler(OperationHandler):
-    def __call__(
-        self,
-        lf: pl.LazyFrame,
-        params: dict,
-        **_,
-    ) -> pl.LazyFrame:
+    def __call__(self, lf: pl.LazyFrame, params: dict, **_) -> pl.LazyFrame:
         validated = FilterParams.model_validate(params)
         if not validated.conditions:
             return lf
 
         schema = lf.collect_schema()
-
         exprs = [condition.expression(schema) for condition in validated.conditions]
-
-        combiners: dict[str, Callable[[list[pl.Expr]], pl.Expr]] = {
-            "all": pl.all_horizontal,
-            "any": pl.any_horizontal,
-        }
-        return lf.filter(combiners[validated.logic.expression_combiner](exprs))
+        combiner = pl.all_horizontal if validated.logic == FilterLogic.AND else pl.any_horizontal
+        return lf.filter(combiner(exprs))

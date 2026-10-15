@@ -12,9 +12,8 @@ from typing import Any
 from fastapi import FastAPI
 
 from backend_core.namespace import normalize_namespace
-from modules.chat.sessions import session_store
+from modules.chat.sessions import MAX_MESSAGES, session_store
 from modules.chat.store import ChatClaimRevoked, ConfirmationPending, TurnClaim, chat_turn_store
-from modules.mcp.models import MCPToolDefinition
 from modules.mcp.registry import build_tool_registry
 
 _MAX_ACTIVE_TURNS = 4
@@ -28,20 +27,16 @@ _PROVIDER_EXECUTOR = ThreadPoolExecutor(max_workers=4, thread_name_prefix='chat-
 class TurnRuntime:
     """Mutable state for one consumer-owned turn, backed by fenced writes."""
 
-    def __init__(self, claim: TurnClaim, app: FastAPI, registry: tuple[MCPToolDefinition, ...], messages: list[dict[str, Any]]) -> None:
+    def __init__(self, claim: TurnClaim, app: FastAPI, messages: list[dict[str, Any]]) -> None:
         self.claim = claim
         self.app = app
-        self.registry = registry
         self.id = claim.session_id
         self.turn_id = claim.id
         self.user_id = claim.user_id
         self.provider = claim.provider
         self.model = claim.model
         self.api_key = claim.api_key
-        self.system_prompt = claim.system_prompt
-        self.session_token = claim.session_token
         self.namespace = normalize_namespace(claim.namespace)
-        self.tool_ids = list(claim.tool_ids)
         self.messages = ([{'role': 'system', 'content': claim.system_prompt}] if claim.system_prompt else []) + [
             message for message in messages if message.get('role') != 'system'
         ]
@@ -51,18 +46,13 @@ class TurnRuntime:
         self.turn_usage = dict(self.checkpoint.get('usage', {'prompt_tokens': 0, 'completion_tokens': 0, 'total_tokens': 0}))
         self.claim_token = claim.claim_token
         self.coordinator_generation = claim.coordinator_generation
-        self.confirmation_decision = claim.confirmation_decision
         self.owner_stopping = False
         self.stop_requested = False
         self.failed = False
         self._finished = False
 
-    async def _db[**P, T](self, function: Callable[P, T], *args: P.args, **kwargs: P.kwargs) -> T:
-        loop = asyncio.get_running_loop()
-        return await loop.run_in_executor(_DATABASE_EXECUTOR, partial(function, *args, **kwargs))
-
     async def append_message(self, message: dict[str, Any]) -> None:
-        await self._db(
+        await _database(
             chat_turn_store.append_message,
             turn_id=self.turn_id,
             claim_token=self.claim_token,
@@ -73,7 +63,7 @@ class TurnRuntime:
         _trim_messages(self.messages)
 
     async def push_event(self, event: dict[str, Any]) -> int:
-        return await self._db(
+        return await _database(
             chat_turn_store.append_event,
             turn_id=self.turn_id,
             claim_token=self.claim_token,
@@ -89,7 +79,7 @@ class TurnRuntime:
         clear_confirmation: bool = False,
     ) -> None:
         checkpoint = {**checkpoint, 'provider_turn': self.provider_turn, 'usage': dict(self.turn_usage), 'use_text_format': self.use_text_format}
-        await self._db(
+        await _database(
             chat_turn_store.set_checkpoint,
             turn_id=self.turn_id,
             claim_token=self.claim_token,
@@ -101,7 +91,7 @@ class TurnRuntime:
         self.checkpoint = checkpoint
 
     async def control_state(self) -> tuple[bool, bool | None]:
-        return await self._db(
+        return await _database(
             chat_turn_store.control_state,
             turn_id=self.turn_id,
             claim_token=self.claim_token,
@@ -115,14 +105,13 @@ class TurnRuntime:
                 self.stop_requested = True
                 raise asyncio.CancelledError
             if decision is not None:
-                self.confirmation_decision = decision
                 await self.set_checkpoint(
                     {**self.checkpoint, 'phase': 'tool_ready' if decision else 'provider_request'},
                     status='running',
                     clear_confirmation=True,
                 )
                 return decision
-            await self._db(
+            await _database(
                 chat_turn_store.release_confirmation,
                 turn_id=self.turn_id,
                 claim_token=self.claim_token,
@@ -162,7 +151,7 @@ class TurnRuntime:
     async def finish(self, status: str) -> None:
         if self._finished:
             return
-        await self._db(
+        await _database(
             chat_turn_store.finish,
             turn_id=self.turn_id,
             claim_token=self.claim_token,
@@ -173,8 +162,6 @@ class TurnRuntime:
 
 
 def _trim_messages(messages: list[dict[str, Any]]) -> None:
-    from modules.chat.sessions import MAX_MESSAGES
-
     if len(messages) <= MAX_MESSAGES:
         return
     system = [message for message in messages if message.get('role') == 'system']
@@ -182,9 +169,13 @@ def _trim_messages(messages: list[dict[str, Any]]) -> None:
     messages[:] = system + other[-(MAX_MESSAGES - len(system)) :]
 
 
-async def _load_turn(claim: TurnClaim, app: FastAPI, registry: tuple[MCPToolDefinition, ...]) -> TurnRuntime:
-    messages = await asyncio.get_running_loop().run_in_executor(_DATABASE_EXECUTOR, session_store.messages, claim.session_id)
-    return TurnRuntime(claim, app, registry, messages)
+async def _database[**P, T](function: Callable[P, T], *args: P.args, **kwargs: P.kwargs) -> T:
+    loop = asyncio.get_running_loop()
+    return await loop.run_in_executor(_DATABASE_EXECUTOR, partial(function, *args, **kwargs))
+
+
+async def _load_turn(claim: TurnClaim, app: FastAPI) -> TurnRuntime:
+    return TurnRuntime(claim, app, await _database(session_store.messages, claim.session_id))
 
 
 class ChatTurnConsumer:
@@ -209,7 +200,7 @@ class ChatTurnConsumer:
     async def run(self, stop_event: asyncio.Event) -> None:
         self._loop = asyncio.get_running_loop()
         self._wake_event = asyncio.Event()
-        await self._database(chat_turn_store.recover, generation=self.generation)
+        await _database(chat_turn_store.recover, generation=self.generation)
         active: set[asyncio.Task[None]] = set()
         self._stopping = False
         try:
@@ -220,7 +211,7 @@ class ChatTurnConsumer:
                     task.result()
                 capacity = _MAX_ACTIVE_TURNS - len(active)
                 if capacity:
-                    claims = await self._database(
+                    claims = await _database(
                         chat_turn_store.claim_batch,
                         generation=self.generation,
                         limit=min(capacity, _CLAIM_BATCH_SIZE),
@@ -241,13 +232,9 @@ class ChatTurnConsumer:
             self._loop = None
             self._wake_event = None
 
-    async def _database[**P, T](self, function: Callable[P, T], *args: P.args, **kwargs: P.kwargs) -> T:
-        loop = asyncio.get_running_loop()
-        return await loop.run_in_executor(_DATABASE_EXECUTOR, partial(function, *args, **kwargs))
-
     async def _run_claim(self, claim: TurnClaim) -> None:
         with contextlib.suppress(ChatClaimRevoked):
-            runtime = await _load_turn(claim, self.app, self.registry)
+            runtime = await _load_turn(claim, self.app)
             stop_requested, _decision = await runtime.control_state()
             if stop_requested:
                 runtime.stop_requested = True

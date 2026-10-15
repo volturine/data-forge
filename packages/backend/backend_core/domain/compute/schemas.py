@@ -16,7 +16,7 @@ from pydantic import (
 )
 
 from backend_core.domain.analysis.step_types import STEP_TYPES
-from backend_core.domain.api_enums import ApiEnumValue, api_token
+from backend_core.domain.api_enums import ApiEnumValue
 from backend_core.domain.compute_worker_runs.schemas import ComputeWorkerRunKind
 from dataforge_protocol import compute_pb2, enums_pb2
 
@@ -26,12 +26,8 @@ class ComputeWorkerStatus(ApiEnumValue):
     TERMINATED: ClassVar[Self]
 
 
-ComputeWorkerStatus.HEALTHY = ComputeWorkerStatus(
-    enums_pb2.COMPUTE_WORKER_STATUS_HEALTHY, api_token('ComputeWorkerStatus', enums_pb2.COMPUTE_WORKER_STATUS_HEALTHY)
-)
-ComputeWorkerStatus.TERMINATED = ComputeWorkerStatus(
-    enums_pb2.COMPUTE_WORKER_STATUS_TERMINATED, api_token('ComputeWorkerStatus', enums_pb2.COMPUTE_WORKER_STATUS_TERMINATED)
-)
+ComputeWorkerStatus.HEALTHY = ComputeWorkerStatus(enums_pb2.COMPUTE_WORKER_STATUS_HEALTHY)
+ComputeWorkerStatus.TERMINATED = ComputeWorkerStatus(enums_pb2.COMPUTE_WORKER_STATUS_TERMINATED)
 
 
 class ComputeWorkerScope(ApiEnumValue):
@@ -40,13 +36,9 @@ class ComputeWorkerScope(ApiEnumValue):
     BUILD: ClassVar[Self]
 
 
-ComputeWorkerScope.DATASOURCE_PREVIEW = ComputeWorkerScope(
-    enums_pb2.COMPUTE_WORKER_SCOPE_DATASOURCE_PREVIEW, api_token('ComputeWorkerScope', enums_pb2.COMPUTE_WORKER_SCOPE_DATASOURCE_PREVIEW)
-)
-ComputeWorkerScope.ANALYSIS_INTERACTIVE = ComputeWorkerScope(
-    enums_pb2.COMPUTE_WORKER_SCOPE_ANALYSIS_INTERACTIVE, api_token('ComputeWorkerScope', enums_pb2.COMPUTE_WORKER_SCOPE_ANALYSIS_INTERACTIVE)
-)
-ComputeWorkerScope.BUILD = ComputeWorkerScope(enums_pb2.COMPUTE_WORKER_SCOPE_BUILD, api_token('ComputeWorkerScope', enums_pb2.COMPUTE_WORKER_SCOPE_BUILD))
+ComputeWorkerScope.DATASOURCE_PREVIEW = ComputeWorkerScope(enums_pb2.COMPUTE_WORKER_SCOPE_DATASOURCE_PREVIEW)
+ComputeWorkerScope.ANALYSIS_INTERACTIVE = ComputeWorkerScope(enums_pb2.COMPUTE_WORKER_SCOPE_ANALYSIS_INTERACTIVE)
+ComputeWorkerScope.BUILD = ComputeWorkerScope(enums_pb2.COMPUTE_WORKER_SCOPE_BUILD)
 
 
 class ComputeWorkerReusePolicy(ApiEnumValue):
@@ -54,12 +46,8 @@ class ComputeWorkerReusePolicy(ApiEnumValue):
     EXCLUSIVE: ClassVar[Self]
 
 
-ComputeWorkerReusePolicy.SHARED = ComputeWorkerReusePolicy(
-    enums_pb2.COMPUTE_WORKER_REUSE_POLICY_SHARED, api_token('ComputeWorkerReusePolicy', enums_pb2.COMPUTE_WORKER_REUSE_POLICY_SHARED)
-)
-ComputeWorkerReusePolicy.EXCLUSIVE = ComputeWorkerReusePolicy(
-    enums_pb2.COMPUTE_WORKER_REUSE_POLICY_EXCLUSIVE, api_token('ComputeWorkerReusePolicy', enums_pb2.COMPUTE_WORKER_REUSE_POLICY_EXCLUSIVE)
-)
+ComputeWorkerReusePolicy.SHARED = ComputeWorkerReusePolicy(enums_pb2.COMPUTE_WORKER_REUSE_POLICY_SHARED)
+ComputeWorkerReusePolicy.EXCLUSIVE = ComputeWorkerReusePolicy(enums_pb2.COMPUTE_WORKER_REUSE_POLICY_EXCLUSIVE)
 
 
 class ComputeWorkerResourceConfig(BaseModel):
@@ -434,12 +422,12 @@ class ExportFormat(ApiEnumValue):
     EXCEL: ClassVar[Self]
 
 
-ExportFormat.CSV = ExportFormat(enums_pb2.EXPORT_FORMAT_CSV, api_token('ExportFormat', enums_pb2.EXPORT_FORMAT_CSV))
-ExportFormat.PARQUET = ExportFormat(enums_pb2.EXPORT_FORMAT_PARQUET, api_token('ExportFormat', enums_pb2.EXPORT_FORMAT_PARQUET))
-ExportFormat.JSON = ExportFormat(enums_pb2.EXPORT_FORMAT_JSON, api_token('ExportFormat', enums_pb2.EXPORT_FORMAT_JSON))
-ExportFormat.NDJSON = ExportFormat(enums_pb2.EXPORT_FORMAT_NDJSON, api_token('ExportFormat', enums_pb2.EXPORT_FORMAT_NDJSON))
-ExportFormat.DUCKDB = ExportFormat(enums_pb2.EXPORT_FORMAT_DUCKDB, api_token('ExportFormat', enums_pb2.EXPORT_FORMAT_DUCKDB))
-ExportFormat.EXCEL = ExportFormat(enums_pb2.EXPORT_FORMAT_EXCEL, api_token('ExportFormat', enums_pb2.EXPORT_FORMAT_EXCEL))
+ExportFormat.CSV = ExportFormat(enums_pb2.EXPORT_FORMAT_CSV)
+ExportFormat.PARQUET = ExportFormat(enums_pb2.EXPORT_FORMAT_PARQUET)
+ExportFormat.JSON = ExportFormat(enums_pb2.EXPORT_FORMAT_JSON)
+ExportFormat.NDJSON = ExportFormat(enums_pb2.EXPORT_FORMAT_NDJSON)
+ExportFormat.DUCKDB = ExportFormat(enums_pb2.EXPORT_FORMAT_DUCKDB)
+ExportFormat.EXCEL = ExportFormat(enums_pb2.EXPORT_FORMAT_EXCEL)
 
 
 class ExportDestination(ApiEnumValue):
@@ -447,10 +435,8 @@ class ExportDestination(ApiEnumValue):
     DATASOURCE: ClassVar[Self]
 
 
-ExportDestination.DOWNLOAD = ExportDestination(enums_pb2.EXPORT_DESTINATION_DOWNLOAD, api_token('ExportDestination', enums_pb2.EXPORT_DESTINATION_DOWNLOAD))
-ExportDestination.DATASOURCE = ExportDestination(
-    enums_pb2.EXPORT_DESTINATION_DATASOURCE, api_token('ExportDestination', enums_pb2.EXPORT_DESTINATION_DATASOURCE)
-)
+ExportDestination.DOWNLOAD = ExportDestination(enums_pb2.EXPORT_DESTINATION_DOWNLOAD)
+ExportDestination.DATASOURCE = ExportDestination(enums_pb2.EXPORT_DESTINATION_DATASOURCE)
 
 
 class IcebergExportOptions(BaseModel):
@@ -591,8 +577,8 @@ class BuildStatus(ApiEnumValue):
         return cls.read(value, default=cls.SUCCESS) or cls.SUCCESS
 
 
-BuildStatus.SUCCESS = BuildStatus(enums_pb2.BUILD_STATUS_SUCCESS, api_token('BuildStatus', enums_pb2.BUILD_STATUS_SUCCESS))
-BuildStatus.WARNING = BuildStatus(enums_pb2.BUILD_STATUS_WARNING, api_token('BuildStatus', enums_pb2.BUILD_STATUS_WARNING))
+BuildStatus.SUCCESS = BuildStatus(enums_pb2.BUILD_STATUS_SUCCESS)
+BuildStatus.WARNING = BuildStatus(enums_pb2.BUILD_STATUS_WARNING)
 
 
 class BuildTabStatus(ApiEnumValue):
@@ -600,8 +586,8 @@ class BuildTabStatus(ApiEnumValue):
     FAILED: ClassVar[Self]
 
 
-BuildTabStatus.SUCCESS = BuildTabStatus(enums_pb2.BUILD_TAB_STATUS_SUCCESS, api_token('BuildTabStatus', enums_pb2.BUILD_TAB_STATUS_SUCCESS))
-BuildTabStatus.FAILED = BuildTabStatus(enums_pb2.BUILD_TAB_STATUS_FAILED, api_token('BuildTabStatus', enums_pb2.BUILD_TAB_STATUS_FAILED))
+BuildTabStatus.SUCCESS = BuildTabStatus(enums_pb2.BUILD_TAB_STATUS_SUCCESS)
+BuildTabStatus.FAILED = BuildTabStatus(enums_pb2.BUILD_TAB_STATUS_FAILED)
 
 
 class ComputeRunStatus(ApiEnumValue):
@@ -609,8 +595,8 @@ class ComputeRunStatus(ApiEnumValue):
     FAILED: ClassVar[Self]
 
 
-ComputeRunStatus.SUCCESS = ComputeRunStatus(enums_pb2.COMPUTE_RUN_STATUS_SUCCESS, api_token('ComputeRunStatus', enums_pb2.COMPUTE_RUN_STATUS_SUCCESS))
-ComputeRunStatus.FAILED = ComputeRunStatus(enums_pb2.COMPUTE_RUN_STATUS_FAILED, api_token('ComputeRunStatus', enums_pb2.COMPUTE_RUN_STATUS_FAILED))
+ComputeRunStatus.SUCCESS = ComputeRunStatus(enums_pb2.COMPUTE_RUN_STATUS_SUCCESS)
+ComputeRunStatus.FAILED = ComputeRunStatus(enums_pb2.COMPUTE_RUN_STATUS_FAILED)
 
 
 class BuildTabResult(BaseModel):
@@ -633,11 +619,6 @@ class BuildRequest(BaseModel):
     def pipeline_payload(self) -> dict[str, object]:
         return {**self.analysis_pipeline.model_dump(mode='json'), 'tab_id': self.tab_id}
 
-    def is_schedule_ingest_request(self) -> bool:
-        if len(self.analysis_pipeline.tabs) != 1:
-            return False
-        return self.analysis_pipeline.tabs[0].datasource.source_type == 'schedule'
-
 
 class BuildLifecycleStatus(ApiEnumValue):
     QUEUED: ClassVar[Self]
@@ -655,26 +636,11 @@ class BuildLifecycleStatus(ApiEnumValue):
         return cls.read(value, default=cls.QUEUED) or cls.QUEUED
 
 
-BuildLifecycleStatus.QUEUED = BuildLifecycleStatus(
-    enums_pb2.BUILD_LIFECYCLE_STATUS_QUEUED,
-    api_token('BuildLifecycleStatus', enums_pb2.BUILD_LIFECYCLE_STATUS_QUEUED),
-)
-BuildLifecycleStatus.RUNNING = BuildLifecycleStatus(
-    enums_pb2.BUILD_LIFECYCLE_STATUS_RUNNING,
-    api_token('BuildLifecycleStatus', enums_pb2.BUILD_LIFECYCLE_STATUS_RUNNING),
-)
-BuildLifecycleStatus.COMPLETED = BuildLifecycleStatus(
-    enums_pb2.BUILD_LIFECYCLE_STATUS_COMPLETED,
-    api_token('BuildLifecycleStatus', enums_pb2.BUILD_LIFECYCLE_STATUS_COMPLETED),
-)
-BuildLifecycleStatus.FAILED = BuildLifecycleStatus(
-    enums_pb2.BUILD_LIFECYCLE_STATUS_FAILED,
-    api_token('BuildLifecycleStatus', enums_pb2.BUILD_LIFECYCLE_STATUS_FAILED),
-)
-BuildLifecycleStatus.CANCELLED = BuildLifecycleStatus(
-    enums_pb2.BUILD_LIFECYCLE_STATUS_CANCELLED,
-    api_token('BuildLifecycleStatus', enums_pb2.BUILD_LIFECYCLE_STATUS_CANCELLED),
-)
+BuildLifecycleStatus.QUEUED = BuildLifecycleStatus(enums_pb2.BUILD_LIFECYCLE_STATUS_QUEUED)
+BuildLifecycleStatus.RUNNING = BuildLifecycleStatus(enums_pb2.BUILD_LIFECYCLE_STATUS_RUNNING)
+BuildLifecycleStatus.COMPLETED = BuildLifecycleStatus(enums_pb2.BUILD_LIFECYCLE_STATUS_COMPLETED)
+BuildLifecycleStatus.FAILED = BuildLifecycleStatus(enums_pb2.BUILD_LIFECYCLE_STATUS_FAILED)
+BuildLifecycleStatus.CANCELLED = BuildLifecycleStatus(enums_pb2.BUILD_LIFECYCLE_STATUS_CANCELLED)
 
 
 class BuildStepState(ApiEnumValue):
@@ -685,11 +651,11 @@ class BuildStepState(ApiEnumValue):
     SKIPPED: ClassVar[Self]
 
 
-BuildStepState.PENDING = BuildStepState(enums_pb2.BUILD_STEP_STATE_PENDING, api_token('BuildStepState', enums_pb2.BUILD_STEP_STATE_PENDING))
-BuildStepState.RUNNING = BuildStepState(enums_pb2.BUILD_STEP_STATE_RUNNING, api_token('BuildStepState', enums_pb2.BUILD_STEP_STATE_RUNNING))
-BuildStepState.COMPLETED = BuildStepState(enums_pb2.BUILD_STEP_STATE_COMPLETED, api_token('BuildStepState', enums_pb2.BUILD_STEP_STATE_COMPLETED))
-BuildStepState.FAILED = BuildStepState(enums_pb2.BUILD_STEP_STATE_FAILED, api_token('BuildStepState', enums_pb2.BUILD_STEP_STATE_FAILED))
-BuildStepState.SKIPPED = BuildStepState(enums_pb2.BUILD_STEP_STATE_SKIPPED, api_token('BuildStepState', enums_pb2.BUILD_STEP_STATE_SKIPPED))
+BuildStepState.PENDING = BuildStepState(enums_pb2.BUILD_STEP_STATE_PENDING)
+BuildStepState.RUNNING = BuildStepState(enums_pb2.BUILD_STEP_STATE_RUNNING)
+BuildStepState.COMPLETED = BuildStepState(enums_pb2.BUILD_STEP_STATE_COMPLETED)
+BuildStepState.FAILED = BuildStepState(enums_pb2.BUILD_STEP_STATE_FAILED)
+BuildStepState.SKIPPED = BuildStepState(enums_pb2.BUILD_STEP_STATE_SKIPPED)
 
 
 class BuildLogLevel(ApiEnumValue):
@@ -702,9 +668,9 @@ class BuildLogLevel(ApiEnumValue):
         return cls.read(value, default=cls.INFO) or cls.INFO
 
 
-BuildLogLevel.INFO = BuildLogLevel(enums_pb2.BUILD_LOG_LEVEL_INFO, api_token('BuildLogLevel', enums_pb2.BUILD_LOG_LEVEL_INFO))
-BuildLogLevel.WARNING = BuildLogLevel(enums_pb2.BUILD_LOG_LEVEL_WARNING, api_token('BuildLogLevel', enums_pb2.BUILD_LOG_LEVEL_WARNING))
-BuildLogLevel.ERROR = BuildLogLevel(enums_pb2.BUILD_LOG_LEVEL_ERROR, api_token('BuildLogLevel', enums_pb2.BUILD_LOG_LEVEL_ERROR))
+BuildLogLevel.INFO = BuildLogLevel(enums_pb2.BUILD_LOG_LEVEL_INFO)
+BuildLogLevel.WARNING = BuildLogLevel(enums_pb2.BUILD_LOG_LEVEL_WARNING)
+BuildLogLevel.ERROR = BuildLogLevel(enums_pb2.BUILD_LOG_LEVEL_ERROR)
 
 
 class BuildStarter(BaseModel):
@@ -873,61 +839,17 @@ class BuildEventType(ApiEnumValue):
     FAILED: ClassVar[Self]
     CANCELLED: ClassVar[Self]
 
-    @property
-    def is_terminal(self) -> bool:
-        return self in {BuildEventType.COMPLETE, BuildEventType.FAILED, BuildEventType.CANCELLED}
 
-    @property
-    def step_state(self) -> BuildStepState | None:
-        match self:
-            case BuildEventType.STEP_START:
-                return BuildStepState.RUNNING
-            case BuildEventType.STEP_COMPLETE:
-                return BuildStepState.COMPLETED
-            case BuildEventType.STEP_FAILED:
-                return BuildStepState.FAILED
-            case _:
-                return None
-
-    @property
-    def terminal_build_status(self) -> BuildLifecycleStatus | None:
-        match self:
-            case BuildEventType.COMPLETE:
-                return BuildLifecycleStatus.COMPLETED
-            case BuildEventType.FAILED:
-                return BuildLifecycleStatus.FAILED
-            case BuildEventType.CANCELLED:
-                return BuildLifecycleStatus.CANCELLED
-            case _:
-                return None
-
-    @property
-    def terminal_error_message(self) -> str | None:
-        if self == BuildEventType.CANCELLED:
-            return 'Build cancelled'
-        return None
-
-    @property
-    def throttle_seconds(self) -> float | None:
-        if self == BuildEventType.PROGRESS:
-            return 0.1
-        if self == BuildEventType.RESOURCES:
-            return 0.5
-        if self == BuildEventType.LOG:
-            return 0.05
-        return None
-
-
-BuildEventType.PLAN = BuildEventType(enums_pb2.BUILD_EVENT_TYPE_PLAN, api_token('BuildEventType', enums_pb2.BUILD_EVENT_TYPE_PLAN))
-BuildEventType.STEP_START = BuildEventType(enums_pb2.BUILD_EVENT_TYPE_STEP_START, api_token('BuildEventType', enums_pb2.BUILD_EVENT_TYPE_STEP_START))
-BuildEventType.STEP_COMPLETE = BuildEventType(enums_pb2.BUILD_EVENT_TYPE_STEP_COMPLETE, api_token('BuildEventType', enums_pb2.BUILD_EVENT_TYPE_STEP_COMPLETE))
-BuildEventType.STEP_FAILED = BuildEventType(enums_pb2.BUILD_EVENT_TYPE_STEP_FAILED, api_token('BuildEventType', enums_pb2.BUILD_EVENT_TYPE_STEP_FAILED))
-BuildEventType.PROGRESS = BuildEventType(enums_pb2.BUILD_EVENT_TYPE_PROGRESS, api_token('BuildEventType', enums_pb2.BUILD_EVENT_TYPE_PROGRESS))
-BuildEventType.RESOURCES = BuildEventType(enums_pb2.BUILD_EVENT_TYPE_RESOURCES, api_token('BuildEventType', enums_pb2.BUILD_EVENT_TYPE_RESOURCES))
-BuildEventType.LOG = BuildEventType(enums_pb2.BUILD_EVENT_TYPE_LOG, api_token('BuildEventType', enums_pb2.BUILD_EVENT_TYPE_LOG))
-BuildEventType.COMPLETE = BuildEventType(enums_pb2.BUILD_EVENT_TYPE_COMPLETE, api_token('BuildEventType', enums_pb2.BUILD_EVENT_TYPE_COMPLETE))
-BuildEventType.FAILED = BuildEventType(enums_pb2.BUILD_EVENT_TYPE_FAILED, api_token('BuildEventType', enums_pb2.BUILD_EVENT_TYPE_FAILED))
-BuildEventType.CANCELLED = BuildEventType(enums_pb2.BUILD_EVENT_TYPE_CANCELLED, api_token('BuildEventType', enums_pb2.BUILD_EVENT_TYPE_CANCELLED))
+BuildEventType.PLAN = BuildEventType(enums_pb2.BUILD_EVENT_TYPE_PLAN)
+BuildEventType.STEP_START = BuildEventType(enums_pb2.BUILD_EVENT_TYPE_STEP_START)
+BuildEventType.STEP_COMPLETE = BuildEventType(enums_pb2.BUILD_EVENT_TYPE_STEP_COMPLETE)
+BuildEventType.STEP_FAILED = BuildEventType(enums_pb2.BUILD_EVENT_TYPE_STEP_FAILED)
+BuildEventType.PROGRESS = BuildEventType(enums_pb2.BUILD_EVENT_TYPE_PROGRESS)
+BuildEventType.RESOURCES = BuildEventType(enums_pb2.BUILD_EVENT_TYPE_RESOURCES)
+BuildEventType.LOG = BuildEventType(enums_pb2.BUILD_EVENT_TYPE_LOG)
+BuildEventType.COMPLETE = BuildEventType(enums_pb2.BUILD_EVENT_TYPE_COMPLETE)
+BuildEventType.FAILED = BuildEventType(enums_pb2.BUILD_EVENT_TYPE_FAILED)
+BuildEventType.CANCELLED = BuildEventType(enums_pb2.BUILD_EVENT_TYPE_CANCELLED)
 
 
 class BuildStreamEvent(BaseModel):

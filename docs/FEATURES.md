@@ -82,18 +82,18 @@
 - ✅ Filter and search across builds, schedules, and health checks
 - ✅ Expand individual runs to inspect the request payload, result, query plan, and per-step timings
 - ✅ Compare two runs side-by-side for row, schema, and timing differences
-- ✅ Build length tracking and time since last updated
-- ⬜ Live build preview — progress bar, current step indicator, per-step timings, ETA
-- ⬜ Query plan visualization during build execution
+- ✅ Build length tracking
+- ✅ Time since last updated — datasource details show the last data update as relative time
+- ✅ Live build preview — progress bar, current step indicator, per-step timings, ETA
+- ✅ Query plan visualization during build execution
 - ⬜ Resource monitoring (CPU, memory, threads) during builds
-- ⬜ Cancel build in progress
+- ✅ Cancel build in progress
 
 ## Lineage
 
 - ✅ Visual graph of all datasets and analyses and how they connect
 - ✅ Dependency edges show which analyses consume which datasources
 - ✅ Open a datasource panel directly from the lineage view to inspect or schedule it
-- ⬜ Lineage revamp — column-level lineage, impact analysis, clustering for large graphs, live build status on nodes
 
 ## Snapshot & Time-Travel
 
@@ -117,11 +117,11 @@
 - ✅ Connect to OpenRouter (remote)
 - ✅ Use AI inside the pipeline to assist with expressions and per-row LLM transformations
 - ✅ Test provider connectivity and browse available models from within the app
-- ⬜ In-app AI chat for conversational analysis assistance
+- ✅ In-app AI chat for conversational analysis assistance
 
 ## Namespaces & Branches
 
-- ✅ Multiple namespaces with fully isolated databases and data directories
+- ✅ Multiple namespaces with isolated PostgreSQL schemas and object-store buckets
 - ✅ Switch namespaces from the top-left corner; all operations follow the selected namespace
 - ✅ Branch-aware datasources — select a specific branch (e.g., master, dev) per input in a pipeline
 - ✅ Lineage filtered by output datasource and branch
@@ -147,8 +147,8 @@
 ## User Interface
 
 - ⬜ Mobile-first UI redesign — responsive layouts optimized for touch and small screens
-- ⬜ Settings page under profile — consolidated configuration in the user profile area
-- ⬜ SQL and Polars snippet export — copy generated code for external use
+- ✅ Settings page under profile — consolidated configuration in the user profile area
+- ✅ SQL and Polars snippet export — copy generated code for external use
 
 ## Deployment & Operations
 
@@ -156,7 +156,7 @@
 - ✅ Environment variable configuration — full reference of all configurable options
 - ⬜ Serve under a custom subdomain rather than `localhost:8000`
 - ⬜ All-in-one release script for streamlined builds and deploys
-- ⬜ Documentation updates — README, contribution guidelines, environment variables
+- ✅ Documentation updates — README, contribution guidelines, environment variables
 
 ## Code & Repository
 

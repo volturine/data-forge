@@ -30,6 +30,7 @@ from backend_core.persistence.datasource.models import DataSource
 from backend_core.persistence.udfs.models import Udf
 from backend_core.sqlmodel_typing import sa
 from modules.auth import commands as auth_commands, routes as auth_routes
+from modules.auth.commands import change_password, delete_user_account, revoke_session, unlink_provider, update_profile
 from modules.auth.dependencies import _resolve_user, get_current_user
 from modules.auth.models import (
     AuthProvider,
@@ -44,20 +45,15 @@ from modules.auth.schemas import UserPublic
 from modules.auth.service import (
     _DEFAULT_USER_LOCK_ID,
     _acquire_default_user_lock,
-    change_password,
     create_session,
     create_user,
     create_verification_token,
-    delete_user_account,
     ensure_default_user,
     find_or_create_oauth_user,
     get_user_by_email,
     get_user_by_id,
     hash_password,
     revoke_all_sessions,
-    revoke_session,
-    unlink_provider,
-    update_profile,
     validate_password,
     validate_session,
     validate_verification_token,

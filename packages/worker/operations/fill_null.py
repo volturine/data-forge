@@ -14,45 +14,13 @@ class FillNullParams(OperationParams):
     value_type: str | None = None
 
 
-_FILL_STRATEGIES: dict[FillNullStrategy, Callable[[pl.Expr], pl.Expr]] = {}
-
-
-def fill_strategy(strategy: FillNullStrategy) -> Callable[[Callable[[pl.Expr], pl.Expr]], Callable[[pl.Expr], pl.Expr]]:
-    def register(func: Callable[[pl.Expr], pl.Expr]) -> Callable[[pl.Expr], pl.Expr]:
-        _FILL_STRATEGIES[strategy] = func
-        return func
-
-    return register
-
-
-@fill_strategy(FillNullStrategy.FORWARD)
-def _forward_fill(col: pl.Expr) -> pl.Expr:
-    return col.forward_fill()
-
-
-@fill_strategy(FillNullStrategy.BACKWARD)
-def _backward_fill(col: pl.Expr) -> pl.Expr:
-    return col.backward_fill()
-
-
-@fill_strategy(FillNullStrategy.MEAN)
-def _mean_fill(col: pl.Expr) -> pl.Expr:
-    return col.fill_null(col.mean())
-
-
-@fill_strategy(FillNullStrategy.MEDIAN)
-def _median_fill(col: pl.Expr) -> pl.Expr:
-    return col.fill_null(col.median())
-
-
-@fill_strategy(FillNullStrategy.ZERO)
-def _zero_fill(col: pl.Expr) -> pl.Expr:
-    return col.fill_null(0)
-
-
-def get_fill_strategy(name: FillNullStrategy | str) -> Callable[[pl.Expr], pl.Expr] | None:
-    strategy = FillNullStrategy.read(name)
-    return _FILL_STRATEGIES.get(strategy) if strategy is not None else None
+_FILL_STRATEGIES: dict[FillNullStrategy, Callable[[pl.Expr], pl.Expr]] = {
+    FillNullStrategy.FORWARD: lambda col: col.forward_fill(),
+    FillNullStrategy.BACKWARD: lambda col: col.backward_fill(),
+    FillNullStrategy.MEAN: lambda col: col.fill_null(col.mean()),
+    FillNullStrategy.MEDIAN: lambda col: col.fill_null(col.median()),
+    FillNullStrategy.ZERO: lambda col: col.fill_null(0),
+}
 
 
 def _resolve_statistical_columns(
@@ -76,42 +44,26 @@ def _resolve_statistical_columns(
 
 
 class FillNullHandler(OperationHandler):
-    def __call__(
-        self,
-        lf: pl.LazyFrame,
-        params: dict,
-        **_,
-    ) -> pl.LazyFrame:
+    def __call__(self, lf: pl.LazyFrame, params: dict, **_) -> pl.LazyFrame:
         validated = FillNullParams.model_validate(params)
+        strategy = validated.strategy
         columns = validated.columns
 
-        if validated.strategy.uses_literal_value:
+        if strategy.drops_rows:
+            return lf.drop_nulls(subset=columns) if columns else lf.drop_nulls()
+
+        if strategy in (FillNullStrategy.MEAN, FillNullStrategy.MEDIAN):
+            fill = _FILL_STRATEGIES[strategy]
+            return lf.with_columns([fill(pl.col(col)) for col in _resolve_statistical_columns(lf, strategy, columns)])
+
+        target_columns = columns or lf.collect_schema().names()
+        if strategy.uses_literal_value:
             value = cast_value(validated.value, validated.value_type)
             dtype = get_polars_type(validated.value_type)
+            literal = pl.lit(value, dtype=dtype) if dtype is not None else value
+            return lf.with_columns([pl.col(col).fill_null(literal) for col in target_columns])
 
-            def build_expr(col: str) -> pl.Expr:
-                literal = pl.lit(value, dtype=dtype) if dtype is not None else value
-                return pl.col(col).fill_null(literal)
+        if column_fill := _FILL_STRATEGIES.get(strategy):
+            return lf.with_columns([column_fill(pl.col(col)) for col in target_columns])
 
-            if columns:
-                return lf.with_columns([build_expr(col) for col in columns])
-            return lf.with_columns([build_expr(col) for col in lf.collect_schema().names()])
-
-        if strategy := get_fill_strategy(validated.strategy):
-            if validated.strategy in (FillNullStrategy.MEAN, FillNullStrategy.MEDIAN):
-                statistical_columns = _resolve_statistical_columns(
-                    lf,
-                    validated.strategy,
-                    columns,
-                )
-                return lf.with_columns([strategy(pl.col(col)) for col in statistical_columns])
-            if columns:
-                return lf.with_columns([strategy(pl.col(col)) for col in columns])
-            return lf.with_columns([strategy(pl.col(col)) for col in lf.collect_schema().names()])
-
-        if validated.strategy.drops_rows:
-            if columns:
-                return lf.drop_nulls(subset=columns)
-            return lf.drop_nulls()
-
-        raise ValueError(f"Unsupported fill_null strategy: {validated.strategy}")
+        raise ValueError(f"Unsupported fill_null strategy: {strategy}")

@@ -538,7 +538,6 @@ class TestInferPatch:
         from modules.chat.routes import _infer_patch
 
         patch = _infer_patch(
-            'post_analysis',
             'POST',
             '/api/v1/analysis',
             {'ok': True, 'body': {'id': '123'}},
@@ -552,7 +551,6 @@ class TestInferPatch:
         from modules.chat.routes import _infer_patch
 
         patch = _infer_patch(
-            'get_analysis',
             'GET',
             '/api/v1/analysis/abc-123',
             {'ok': True, 'body': {'id': 'abc-123'}},
@@ -565,7 +563,6 @@ class TestInferPatch:
         from modules.chat.routes import _infer_patch
 
         patch = _infer_patch(
-            'post_step',
             'POST',
             '/api/v1/analysis/abc/tabs/t1/steps',
             {'ok': True, 'body': {'id': 's1'}},
@@ -577,13 +574,13 @@ class TestInferPatch:
     def test_failed_result_returns_none(self) -> None:
         from modules.chat.routes import _infer_patch
 
-        patch = _infer_patch('post_analysis', 'POST', '/api/v1/analysis', {'ok': False, 'status': 422})
+        patch = _infer_patch('POST', '/api/v1/analysis', {'ok': False, 'status': 422})
         assert patch is None
 
     def test_datasource_path(self) -> None:
         from modules.chat.routes import _infer_patch
 
-        patch = _infer_patch('delete_ds', 'DELETE', '/api/v1/datasource/xyz', {'ok': True, 'body': None})
+        patch = _infer_patch('DELETE', '/api/v1/datasource/xyz', {'ok': True, 'body': None})
         assert patch is not None
         assert patch['resource'] == 'datasource'
         assert patch['action'] == 'deleted'

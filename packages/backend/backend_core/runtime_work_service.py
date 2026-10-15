@@ -309,7 +309,7 @@ def refresh_pending_work(
         )
     update_ms = (time.perf_counter() - update_started) * 1000
     total_ms = (time.perf_counter() - started) * 1000
-    if max(scan_ms, update_ms, total_ms) >= _SLOW_WAKE_OPERATION_SECONDS * 1000:
+    if total_ms >= _SLOW_WAKE_OPERATION_SECONDS * 1000:
         logger.warning(
             'Slow durable runtime work refresh namespace=%s kind=%s '
             'queue_snapshot_ms=%.1f state_update_ms=%.1f '

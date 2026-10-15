@@ -19,6 +19,8 @@ from backend_core.application import (
     _resolve_uvicorn_limit_concurrency,
     _resolve_uvicorn_workers,
     app,
+    event_loop_lag_log_level,
+    event_loop_lag_loop,
 )
 
 
@@ -413,7 +415,25 @@ class TestUvicornSettings:
 
 
 def test_event_loop_lag_diagnostic_uses_info_until_warning_threshold() -> None:
-    import backend_core.application as application
+    assert event_loop_lag_log_level(0.9, 1.5) == logging.INFO
+    assert event_loop_lag_log_level(1.5, 1.5) == logging.WARNING
 
-    assert application._event_loop_lag_log_level(0.9, 1.5) == logging.INFO
-    assert application._event_loop_lag_log_level(1.5, 1.5) == logging.WARNING
+
+@pytest.mark.asyncio
+async def test_event_loop_lag_monitor_survives_failing_iteration() -> None:
+    stop_event = asyncio.Event()
+    ticks: list[int] = []
+
+    class FlakyWatchdog:
+        def tick(self) -> None:
+            ticks.append(len(ticks))
+            if len(ticks) == 1:
+                raise RuntimeError('task finished between all_tasks() and get_stack()')
+            stop_event.set()
+
+    await asyncio.wait_for(
+        event_loop_lag_loop(stop_event, interval_seconds=0.05, watchdog=FlakyWatchdog()),  # type: ignore[arg-type]
+        timeout=2,
+    )
+
+    assert len(ticks) == 2

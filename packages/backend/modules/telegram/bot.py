@@ -11,7 +11,7 @@ from backend_core.database import run_db
 from backend_core.telegram_store import add_subscriber, get_subscriber_by_chat
 from modules.telegram.store import require_generation
 
-_TELEGRAM_BASE_URL = 'https://api.telegram.org'
+TELEGRAM_BASE_URL = 'https://api.telegram.org'
 
 
 async def handle_update(client: httpx.AsyncClient, *, token: str, update: dict[str, object], generation: int) -> None:
@@ -26,27 +26,19 @@ async def handle_update(client: httpx.AsyncClient, *, token: str, update: dict[s
     title = str(chat.get('first_name') or chat.get('title') or chat.get('username') or chat_id)
     command = text.strip().lower()
     if command == '/subscribe':
-        await _subscribe(client, token=token, chat_id=chat_id, title=title, generation=generation)
+        try:
+            await run_api_blocking(run_db, _add_subscriber, chat_id, title, token, generation)
+        except SQLAlchemyError:
+            await _send_message(client, token=token, chat_id=chat_id, text='Failed to subscribe. Please try again.')
+            raise
+        await _send_message(client, token=token, chat_id=chat_id, text='Subscribed! You will receive build notifications.')
         return
     if command == '/unsubscribe':
-        await _unsubscribe(client, token=token, chat_id=chat_id, generation=generation)
+        await run_api_blocking(run_db, _deactivate_subscriber, chat_id, token, generation)
+        await _send_message(client, token=token, chat_id=chat_id, text='Unsubscribed. You will no longer receive notifications.')
         return
     if command == '/start':
         await _send_message(client, token=token, chat_id=chat_id, text='Welcome! Use /subscribe to receive build notifications.')
-
-
-async def _subscribe(client: httpx.AsyncClient, *, token: str, chat_id: str, title: str, generation: int) -> None:
-    try:
-        await run_api_blocking(run_db, _add_subscriber, chat_id, title, token, generation)
-    except SQLAlchemyError:
-        await _send_message(client, token=token, chat_id=chat_id, text='Failed to subscribe. Please try again.')
-        raise
-    await _send_message(client, token=token, chat_id=chat_id, text='Subscribed! You will receive build notifications.')
-
-
-async def _unsubscribe(client: httpx.AsyncClient, *, token: str, chat_id: str, generation: int) -> None:
-    await run_api_blocking(run_db, _deactivate_subscriber, chat_id, token, generation)
-    await _send_message(client, token=token, chat_id=chat_id, text='Unsubscribed. You will no longer receive notifications.')
 
 
 def _add_subscriber(session: Session, chat_id: str, title: str, token: str, generation: int) -> None:
@@ -67,7 +59,7 @@ def _deactivate_subscriber(session: Session, chat_id: str, token: str, generatio
 async def _send_message(client: httpx.AsyncClient, *, token: str, chat_id: str, text: str) -> None:
     async with asyncio.timeout(10.0):
         response = await client.post(
-            f'{_TELEGRAM_BASE_URL}/bot{token}/sendMessage',
+            f'{TELEGRAM_BASE_URL}/bot{token}/sendMessage',
             json={'chat_id': chat_id, 'text': text},
         )
     response.raise_for_status()

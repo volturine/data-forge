@@ -9,13 +9,7 @@ from modules.auth.service import ensure_default_user, get_default_user_id, valid
 
 
 def resolve_session_token(request: HTTPConnection) -> str | None:
-    cookie_token = request.cookies.get('session_token')
-    if cookie_token:
-        return cookie_token
-    header_token = request.headers.get('X-Session-Token')
-    if header_token:
-        return header_token
-    return None
+    return request.cookies.get('session_token') or request.headers.get('X-Session-Token') or None
 
 
 async def _resolve_user(request: HTTPConnection) -> User | None:

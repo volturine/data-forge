@@ -116,7 +116,7 @@ not encrypted by the application; the network must be private.
   existing lease expiry paths; nothing is lost durably.
 - Only one coordinator and one manager are active at a time. This gives
   availability, not more coordinator or manager throughput; see
-  [Capacity-First Runtime Optimization](prd/active/elastic-runtime-scale-out.md)
+  [Capacity-First Runtime Optimization](prd/implemented/capacity-first-runtime-optimization.md)
   for scale policy.
 - PostgreSQL and the object store are the real foundation. Their availability
   bounds the application's.

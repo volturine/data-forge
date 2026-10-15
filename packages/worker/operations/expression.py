@@ -176,12 +176,7 @@ def parse_expression(expr_str: str) -> pl.Expr:
 class ExpressionHandler(OperationHandler):
     """Create a new column using a Polars expression string."""
 
-    def __call__(
-        self,
-        lf: pl.LazyFrame,
-        params: dict,
-        **_,
-    ) -> pl.LazyFrame:
+    def __call__(self, lf: pl.LazyFrame, params: dict, **_) -> pl.LazyFrame:
         validated = ExpressionParams.model_validate(params)
 
         return lf.with_columns(parse_expression(validated.expression).alias(validated.column_name))

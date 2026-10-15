@@ -37,11 +37,7 @@ config = context.config
 config.set_main_option('sqlalchemy.url', settings.database_url)
 
 
-def _should_configure_logging() -> bool:
-    return bool(config.attributes.get('configure_logging', True))
-
-
-if config.config_file_name is not None and _should_configure_logging():
+if config.config_file_name is not None and config.attributes.get('configure_logging', True):
     fileConfig(config.config_file_name)
 
 _SHARED_TABLES = {

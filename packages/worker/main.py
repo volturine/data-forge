@@ -72,34 +72,6 @@ def worker_manager_id() -> str:
     return f"worker-manager:{uuid.uuid4()}"
 
 
-def _manager_heartbeat_loop(
-    stop_signal: threading.Event,
-    worker_id: str,
-    *,
-    client: WorkerRuntimeClient,
-    health: DispatcherHealth,
-    on_reconnected: Callable[[], None] | None = None,
-    heartbeat_seconds: float = 5.0,
-) -> None:
-    run_worker_heartbeat_loop(
-        client=client,
-        stop_signal=stop_signal,
-        worker_id=worker_id,
-        kind=RuntimeWorkerKind.COORDINATOR.value,
-        hostname=os.uname().nodename,
-        pid=os.getpid(),
-        capacity=settings.compute_workers,
-        heartbeat_seconds=heartbeat_seconds,
-        on_reconnected=on_reconnected,
-        on_registration_changed=health.registration_changed,
-    )
-
-
-def _configure_blocking_executor(*, max_workers: int, thread_name_prefix: str) -> None:
-    """Bound fallback ``asyncio.to_thread`` work outside the hot path."""
-    asyncio.get_running_loop().set_default_executor(ThreadPoolExecutor(max_workers=max_workers, thread_name_prefix=thread_name_prefix))
-
-
 async def _supervise_runtime_loop(
     stop_event: asyncio.Event,
     name: str,
@@ -138,27 +110,17 @@ async def run_worker_manager_runtime(
     owns_client = client is None
     runtime_client = client if client is not None else await async_client_from_env()
     worker_id = worker_manager_id()
+    # The manager process serves one health endpoint across standby, takeover
+    # and every coordinator generation; serve a private one only when standalone.
+    runtime_health = health if health is not None else manager_health(worker_id)
     try:
-        if health is not None:
-            # The manager process serves one health endpoint across standby,
-            # takeover and every coordinator generation.
+        async with contextlib.nullcontext() if health is not None else runtime_health.serve():
             await _run_worker_manager_runtime(
                 stop_event=stop_event,
                 coordinator_generation=coordinator_generation,
                 coordinator_guard=coordinator_guard,
                 worker_id=worker_id,
-                health=health,
-                client=runtime_client,
-            )
-            return
-        owned_health = manager_health(worker_id)
-        async with owned_health.serve():
-            await _run_worker_manager_runtime(
-                stop_event=stop_event,
-                coordinator_generation=coordinator_generation,
-                coordinator_guard=coordinator_guard,
-                worker_id=worker_id,
-                health=owned_health,
+                health=runtime_health,
                 client=runtime_client,
             )
     finally:
@@ -183,7 +145,8 @@ async def _run_worker_manager_runtime(
     health: DispatcherHealth,
     client: WorkerRuntimeClient,
 ) -> None:
-    _configure_blocking_executor(max_workers=_DEFAULT_EXECUTOR_WORKERS, thread_name_prefix="runtime-default")
+    # Bound fallback ``asyncio.to_thread`` work outside the hot path.
+    asyncio.get_running_loop().set_default_executor(ThreadPoolExecutor(max_workers=_DEFAULT_EXECUTOR_WORKERS, thread_name_prefix="runtime-default"))
     await run_control_in_thread(configure_logging)
     logger.info("Starting worker manager runtime...")
     await run_control_in_thread(validate_compute_worker_runtime_readiness)
@@ -204,25 +167,9 @@ async def _run_worker_manager_runtime(
     # Each queue only recovers namespaces with work of its own kind. Without
     # this filter, every idle build lane probes the build queue whenever any
     # preview is pending, multiplying control-plane claims by compute capacity.
-    compute_namespace_directory = RuntimeNamespaceDirectory(
-        client,
-        refresh_seconds=recovery_poll_seconds,
-        work_kinds=("compute",),
-    )
-    build_namespace_directory = RuntimeNamespaceDirectory(
-        client,
-        refresh_seconds=recovery_poll_seconds,
-        work_kinds=("build",),
-    )
-    datasource_delete_namespace_directory = RuntimeNamespaceDirectory(
-        client,
-        refresh_seconds=recovery_poll_seconds,
-        work_kinds=("datasource_delete",),
-    )
-    storage_cleanup_namespace_directory = RuntimeNamespaceDirectory(
-        client,
-        refresh_seconds=recovery_poll_seconds,
-        work_kinds=("storage_cleanup",),
+    compute_namespace_directory, build_namespace_directory, datasource_delete_namespace_directory, storage_cleanup_namespace_directory = (
+        RuntimeNamespaceDirectory(client, refresh_seconds=recovery_poll_seconds, work_kinds=(work_kind,))
+        for work_kind in ("compute", "build", "datasource_delete", "storage_cleanup")
     )
     compute_request_recovery = NamespaceRecovery(
         client.reconcile_expired_compute_requests_async,
@@ -292,13 +239,17 @@ async def _run_worker_manager_runtime(
 
     heartbeat_stop = threading.Event()
     heartbeat_thread = threading.Thread(
-        target=_manager_heartbeat_loop,
+        target=run_worker_heartbeat_loop,
         kwargs={
             "client": client,
             "stop_signal": heartbeat_stop,
             "worker_id": worker_id,
+            "kind": RuntimeWorkerKind.COORDINATOR.value,
+            "hostname": os.uname().nodename,
+            "pid": os.getpid(),
+            "capacity": settings.compute_workers,
             "on_reconnected": manager.resynchronize_snapshots,
-            "health": health,
+            "on_registration_changed": health.registration_changed,
         },
         daemon=True,
     )
@@ -435,13 +386,9 @@ async def _run_worker_manager_runtime(
 
 def install_stop_handlers(stop_event: asyncio.Event) -> None:
     loop = asyncio.get_running_loop()
-
-    def _stop() -> None:
-        stop_event.set()
-
     for sig in (signal.SIGINT, signal.SIGTERM):
         with contextlib.suppress(NotImplementedError):
-            loop.add_signal_handler(sig, _stop)
+            loop.add_signal_handler(sig, stop_event.set)
 
 
 async def _wait_for_coordinator_generation(stop_event: asyncio.Event, client: WorkerRuntimeClient) -> int | None:
