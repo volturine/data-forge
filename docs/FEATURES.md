@@ -83,7 +83,6 @@
 - ✅ Expand individual runs to inspect the request payload, result, query plan, and per-step timings
 - ✅ Compare two runs side-by-side for row, schema, and timing differences
 - ✅ Build length tracking
-- ⬜ Time since last updated — relative timestamps and freshness badges across list views (today only the datasource detail page shows its last data update as relative time)
 - ✅ Live build preview — progress bar, current step indicator, per-step timings, ETA
 - ✅ Query plan visualization during build execution
 - ⬜ Resource monitoring (CPU, memory, threads) during builds

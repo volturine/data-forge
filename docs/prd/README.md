@@ -62,5 +62,4 @@ The root [README](../../README.md) is the human-facing project overview. [AGENTS
 - [Namespace Credential Management](backlog/namespace-credential-management.md) — backend-owned namespace engine credentials (provisioning and worker serving shipped; rotation, revocation, and audit open)
 - [Snapshot Rollback](backlog/snapshot-rollback.md)
 - [Tauri Hybrid Desktop](backlog/tauri-hybrid-desktop.md)
-- [Time Since Last Updated](backlog/time-since-last-updated.md)
 - [UDF Execution Sandbox](backlog/udf-execution-sandbox.md) — replace the ineffective UDF `exec` blacklist with a real execution boundary
