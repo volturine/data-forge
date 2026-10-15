@@ -1,7 +1,7 @@
 # PRD: Time Since Last Updated
 
 > **Status (audited 2026-08-02): Backlog — not implemented.**
-> **Current truth:** A cross-product relative-time freshness surface is not fully shipped as described here.
+> **Current truth:** Only the datasource detail page shows its last data update as relative time (`RelativeTime.svelte`). Relative timestamps in list views, freshness badges, freshness sorting, and staleness thresholds are not implemented.
 > **Portfolio:** [PRD index](../README.md)
 
 
