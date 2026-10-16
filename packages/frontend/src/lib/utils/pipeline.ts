@@ -24,3 +24,8 @@ export function applySteps(steps: PipelineStep[]): PipelineStep[] {
 		return { ...step, depends_on: parentId ? [parentId] : [] };
 	});
 }
+
+export function stepsThroughTarget(steps: PipelineStep[], targetStepId: string): PipelineStep[] {
+	const targetIndex = steps.findIndex((step) => step.id === targetStepId);
+	return targetIndex === -1 ? [] : steps.slice(0, targetIndex + 1);
+}

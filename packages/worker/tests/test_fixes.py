@@ -2946,7 +2946,7 @@ class TestStepTimingLabels:
                     "depends_on": [],
                 },
             ]
-            _, timings, _read_duration_ms = _build_pipeline_details(config, steps, "job-1")
+            _, timings, _read_duration_ms, _cache_key = _build_pipeline_details(config, steps, "job-1")
             assert "select" in timings
             assert "id-abc123" not in timings
         finally:
@@ -2970,7 +2970,7 @@ class TestStepTimingLabels:
                     "depends_on": ["id-1"],
                 },
             ]
-            _, timings, _read_duration_ms = _build_pipeline_details(config, steps, "job-2")
+            _, timings, _read_duration_ms, _cache_key = _build_pipeline_details(config, steps, "job-2")
             assert "select" in timings
             assert "select_2" in timings
         finally:

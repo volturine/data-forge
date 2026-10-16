@@ -9,9 +9,12 @@
 	import { getStepSchema, throwIfAborted, type StepSchemaResponse } from '#lib/api/compute.js';
 	import { track } from '#lib/utils/audit-log.js';
 	import { normalizeConfig } from '#lib/utils/step-config-defaults.js';
-	import { buildAnalysisPipelinePayload } from '#lib/utils/analysis-pipeline.js';
+	import {
+		buildAnalysisPipelinePayload,
+		buildTargetPreviewPipelinePayload
+	} from '#lib/utils/analysis-pipeline.js';
 	import { cloneJson } from '#lib/utils/json.js';
-	import { applySteps } from '#lib/utils/pipeline.js';
+	import { applySteps, stepsThroughTarget } from '#lib/utils/pipeline.js';
 	import { hashPipeline } from '#lib/utils/hash.js';
 	import FilterConfig from '#lib/components/operations/FilterConfig.svelte';
 	import SelectConfig from '#lib/components/operations/SelectConfig.svelte';
@@ -215,11 +218,14 @@
 						}
 					: tab
 			);
-			const analysisPipeline = buildAnalysisPipelinePayload(
+			const fullAnalysisPipeline = buildAnalysisPipelinePayload(
 				analysis.id,
 				tabsWithDraftConfig,
 				datasourceStore.datasources
 			);
+			const analysisPipeline = fullAnalysisPipeline
+				? buildTargetPreviewPipelinePayload(fullAnalysisPipeline, activeTab.id, stepId)
+				: null;
 			if (!analysisPipeline) {
 				pivotApplyError = 'Could not load the pivot output columns for this pipeline.';
 				return;
@@ -270,7 +276,7 @@
 				stepId,
 				pivotSchema?.columns ?? [],
 				pivotSchema?.column_types,
-				hashPipeline(applySteps(analysisStore.pipeline))
+				hashPipeline(stepsThroughTarget(applySteps(analysisStore.pipeline), stepId))
 			);
 		}
 		onConfigApply?.();
@@ -282,19 +288,25 @@
 	function refreshStepSchema(stepId: string) {
 		const analysis = analysisStore.current;
 		if (!analysis?.id) return;
-		const analysisPipeline = buildAnalysisPipelinePayload(
+		const fullAnalysisPipeline = buildAnalysisPipelinePayload(
 			analysis.id,
 			analysisStore.tabs,
 			datasourceStore.datasources
 		);
+		const tabId = analysisStore.activeTab?.id ?? null;
+		const analysisPipeline = fullAnalysisPipeline
+			? buildTargetPreviewPipelinePayload(fullAnalysisPipeline, tabId, stepId)
+			: null;
 		if (!analysisPipeline) return;
 		const controller = startSchemaRequest();
-		const pipelineHash = hashPipeline(applySteps(analysisStore.pipeline));
+		const pipelineHash = hashPipeline(
+			stepsThroughTarget(applySteps(analysisStore.pipeline), stepId)
+		);
 		getStepSchema(
 			{
 				analysis_id: analysis.id,
 				analysis_pipeline: analysisPipeline,
-				tab_id: analysisStore.activeTab?.id ?? null,
+				tab_id: tabId,
 				target_step_id: stepId
 			},
 			{ signal: controller.signal }

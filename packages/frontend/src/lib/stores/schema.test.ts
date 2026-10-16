@@ -1,5 +1,7 @@
 import { describe, test, expect, vi, beforeEach } from 'vitest';
 import type { Schema } from '#lib/types/schema.js';
+import { hashPipeline } from '#lib/utils/hash.js';
+import { applySteps, stepsThroughTarget } from '#lib/utils/pipeline.js';
 
 let mockPipeline: Array<{
 	id: string;
@@ -286,6 +288,58 @@ describe('SchemaStore', () => {
 			store = new SchemaStore();
 
 			expect(store.getAllOutputs()).toHaveLength(2);
+		});
+
+		test('uses target-prefix hashes so later steps do not stale an upstream preview schema', () => {
+			mockActiveTab = { datasource: { id: 'ds-1' } };
+			mockActiveSchemaKey = 'ds-1';
+			mockSourceSchemas.set('ds-1', schema([col('id', 'Int64')]));
+			mockPipeline = [
+				{ id: 'step-1', type: 'filter', config: {}, depends_on: [], is_applied: true },
+				{ id: 'step-2', type: 'filter', config: {}, depends_on: ['step-1'], is_applied: true }
+			];
+
+			store = new SchemaStore();
+			const prefixHash = hashPipeline(stepsThroughTarget(applySteps(mockPipeline), 'step-1'));
+			store.setPreviewSchema('step-1', ['preview_id'], { preview_id: 'Int64' }, prefixHash);
+
+			expect(store.getOutput('step-1')?.columns.map((column) => column.name)).toEqual([
+				'preview_id'
+			]);
+		});
+
+		test('does not use an upstream preview schema after an ancestor changes', () => {
+			mockActiveTab = { datasource: { id: 'ds-1' } };
+			mockActiveSchemaKey = 'ds-1';
+			mockSourceSchemas.set('ds-1', schema([col('id', 'Int64')]));
+			mockPipeline = [
+				{
+					id: 'step-1',
+					type: 'filter',
+					config: { conditions: [] },
+					depends_on: [],
+					is_applied: true
+				},
+				{ id: 'step-2', type: 'filter', config: {}, depends_on: ['step-1'], is_applied: true }
+			];
+			const oldPrefixHash = hashPipeline(stepsThroughTarget(applySteps(mockPipeline), 'step-1'));
+
+			mockPipeline = [
+				{
+					id: 'step-1',
+					type: 'filter',
+					config: { conditions: [{ column: 'id' }] },
+					depends_on: [],
+					is_applied: true
+				},
+				{ id: 'step-2', type: 'filter', config: {}, depends_on: ['step-1'], is_applied: true }
+			];
+			store = new SchemaStore();
+			store.setPreviewSchema('step-1', ['stale_preview_column'], {}, oldPrefixHash);
+
+			expect(store.getOutput('step-1')?.columns.map((column) => column.name)).not.toContain(
+				'stale_preview_column'
+			);
 		});
 
 		test('no source schema yields empty input', () => {
