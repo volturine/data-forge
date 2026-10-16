@@ -2,7 +2,7 @@
 
 > A local-first, no-code data analysis platform for building visual data pipelines — powered by Polars, FastAPI, and SvelteKit.
 
-[![License: GPL v3](https://img.shields.io/badge/License-GPLv3-blue.svg)](LICENSE)
+[![License: MIT](https://img.shields.io/badge/License-MIT-yellow.svg)](LICENSE)
 [![CI](https://github.com/volturine/data-forge/actions/workflows/ci.yml/badge.svg)](https://github.com/volturine/data-forge/actions/workflows/ci.yml)
 [![Backend unit](https://github.com/volturine/data-forge/actions/workflows/backend-unit.yml/badge.svg)](https://github.com/volturine/data-forge/actions/workflows/backend-unit.yml)
 [![Backend integration](https://github.com/volturine/data-forge/actions/workflows/backend-integration.yml/badge.svg)](https://github.com/volturine/data-forge/actions/workflows/backend-integration.yml)
@@ -407,7 +407,7 @@ If you discover a security vulnerability, please report it privately to the proj
 
 ## License
 
-GPL-3.0 — see [LICENSE](LICENSE) for details.
+MIT — see [LICENSE](LICENSE) for details.
 
 ---
 
