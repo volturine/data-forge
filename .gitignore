@@ -8,7 +8,6 @@
 .env
 .env.local
 .env.*.local
-.opencode/opencode.jsonc
 .vscode/mcp.json
 
 # Test artifacts (package-local)
@@ -30,15 +29,12 @@ packages/frontend/src/lib/protocol/
 # Node/tool caches
 node_modules/
 .vite/
-.opencode/node_modules/
-.opencode/package-lock.json
 
 .runtime/
 .docker/
 .docker-home/
 
 *__pycache__/
-.reqtrace/
 pi-session-*.html
 
 # TLS client certificates for remote compute hosts (docker/compose.multi-host.yaml)

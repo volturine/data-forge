@@ -1,6 +1,6 @@
 # Style Guide
 
-**MANDATORY READ FOR AI ASSISTANTS** — OpenCode, Copilot, Claude Code must follow this guidance when working on this repository.
+**MANDATORY READ FOR AI ASSISTANTS** — every AI coding assistant working in this repository must follow this guidance; `AGENTS.md` is the assistant entry point.
 
 Code style standards for this repository. See `AGENTS.md` for project-specific patterns.
 

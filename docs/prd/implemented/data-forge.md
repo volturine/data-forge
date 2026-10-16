@@ -324,7 +324,7 @@ Build that tab (with lazyframe deps auto-resolved)
 ### 7.6 Namespace-Aware Data Handling
 
 1. **Environment Configuration**:
-   - Set `DATA_DIR` to base directory (e.g., `/home/kripso/workspace/polars-fastapi-svelte/data`).
+   - Set `DATA_DIR` to base directory (e.g., `~/data-forge/data`).
    - Set `DEFAULT_NAMESPACE` (e.g., `default`).
    - System derives upload/clean/export paths automatically.
 

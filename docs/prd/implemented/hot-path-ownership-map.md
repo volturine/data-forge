@@ -1,9 +1,9 @@
 # Hot-path ownership map
 
-> **Status (audited 2026-08-02): Implemented — current product-path ownership documented.**
+> **Status (audited 2026-10-16): Implemented — current product-path ownership documented.**
 > **Portfolio:** [PRD index](../README.md)
 
-_Last audited: 2026-08-02_
+_Last audited: 2026-10-16_
 
 This record maps the user-facing flows that can dominate E2E runtime to their
 current frontend, backend, and runtime owners. It is an ownership contract, not
@@ -19,7 +19,7 @@ a timing attribution. Direct profiling is published in the implemented
 | Analysis editor open | `packages/frontend/src/routes/analysis/[id]/+page.svelte` | `packages/backend/modules/compute/routes.py` | `packages/worker/runtime/compute_service.py` | Transient setup pages must not consume editor prewarm capacity. |
 | Inline preview | `packages/frontend/src/lib/components/pipeline/InlineDataTable.svelte` | `packages/backend/modules/compute/routes.py` | `packages/worker/runtime/compute_request_runtime.py` | Preview requests must remain bounded and lifecycle-fenced. |
 | Output build / rebuild | `packages/frontend/src/lib/components/pipeline/OutputNode.svelte` | `packages/backend/modules/analysis/routes.py` | `packages/worker/runtime/compute_service.py` and `packages/worker/datasources/execution.py` | Visible builds must not be starved by preview or helper traffic. |
-| Monitoring history / detail | `packages/frontend/src/routes/monitoring/+page.svelte` | `packages/backend/modules/engine_runs/routes.py` | `packages/backend/backend_core/engine_runs_service.py` | Preview and build semantics must remain distinct and current. |
+| Monitoring history / detail | `packages/frontend/src/routes/monitoring/+page.svelte` | `packages/backend/modules/compute/routes.py` and `packages/backend/modules/compute_worker_runs/routes.py` | `packages/backend/backend_core/build_runs_service.py` and `packages/backend/backend_core/compute_worker_runs_service.py` | Preview and build semantics must remain distinct and current. |
 | Namespace / profile remount | `packages/frontend/src/routes/profile/+page.svelte` and `SystemTab.svelte` | datasource and namespace routes | `packages/worker/datasources/datasource_loading.py` | Namespace-sensitive state must not leak or trade correctness for caching speed. |
 
 ## Scheduling ownership
@@ -28,7 +28,7 @@ a timing attribution. Direct profiling is published in the implemented
 | --- | --- | --- |
 | Compute request ordering | `packages/backend/backend_core/compute_requests_service.py` | Interactive work first, user datasource creation second, background ingest last. |
 | Compute request execution | `packages/worker/runtime/compute_request_runtime.py` | Blocking work stays off-loop in a bounded executor. |
-| Engine reuse | `packages/worker/runtime/compute_service.py` | Shared preview engines remain warm until cleanup; builds retain isolated identities. |
+| Compute-worker reuse | `packages/worker/runtime/compute_service.py` | Shared preview compute workers remain warm until cleanup; builds retain isolated identities. |
 | Mutation safety | `packages/worker/datasources/execution.py` and backend publication commands | Conflicting mutations use durable fenced claims. |
 
 ## Current observed state

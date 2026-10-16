@@ -18,8 +18,8 @@ Fixes # (issue number, if applicable)
 
 Describe the tests you ran to verify your changes. Include relevant details:
 
-- [ ] Backend unit tests (`just test`)
-- [ ] Frontend unit tests (`bun run test:unit`)
+- [ ] Backend unit tests (`just test-backend-unit`)
+- [ ] Frontend unit tests (`just test-frontend`)
 - [ ] End-to-end tests (`just test-e2e`)
 - [ ] Manual testing (describe steps)
 

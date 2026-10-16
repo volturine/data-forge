@@ -15,7 +15,7 @@ Data-Forge is currently desktop-only. The editor canvas (`PipelineCanvas`), step
 
 ## Design Reference
 
-All screens and interactions are defined in `/mobile-design-concept.html`. This PRD is derived directly from that mockup.
+All screens and interactions are defined in [`docs/mobile-design-concept.html`](../../mobile-design-concept.html). This PRD is derived directly from that mockup.
 
 ## Goals
 
