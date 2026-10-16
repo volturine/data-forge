@@ -269,6 +269,7 @@ message ViewConfig {
     gte: 1
     lte: 5000
   }];
+  optional bool cache_enabled = 2;
 }
 
 message ExportConfig {

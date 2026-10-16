@@ -1,4 +1,5 @@
 <script lang="ts">
+	import { useQueryClient } from '@tanstack/svelte-query';
 	import { onDestroy } from 'svelte';
 	import type { PipelineStep } from '#lib/types/analysis.js';
 	import type { Schema } from '#lib/types/schema.js';
@@ -16,6 +17,8 @@
 	import { cloneJson } from '#lib/utils/json.js';
 	import { applySteps, stepsThroughTarget } from '#lib/utils/pipeline.js';
 	import { hashPipeline } from '#lib/utils/hash.js';
+	import { isNamespaceReady, requireNamespace } from '#lib/stores/namespace.svelte.js';
+	import { stepPreviewQueryKey } from '#lib/utils/preview-query.js';
 	import FilterConfig from '#lib/components/operations/FilterConfig.svelte';
 	import SelectConfig from '#lib/components/operations/SelectConfig.svelte';
 	import GroupByConfig from '#lib/components/operations/GroupByConfig.svelte';
@@ -67,6 +70,7 @@
 		onConfigApply,
 		readOnly = false
 	}: Props = $props();
+	const queryClient = useQueryClient();
 	const stepLabel = $derived(step ? getStepTypeConfig(step.type).label : '');
 	let applyingPivotSchema = $state(false);
 	let pivotApplyError = $state('');
@@ -265,6 +269,19 @@
 			pivotSchema = result.value;
 			applyingPivotSchema = false;
 			schemaAbortController = null;
+		}
+
+		if (
+			step.type === 'view' &&
+			(step.config.cacheEnabled !== false) !== (appliedConfig.cacheEnabled !== false)
+		) {
+			const analysisId = analysisStore.current?.id;
+			if (analysisId && isNamespaceReady()) {
+				await queryClient.invalidateQueries({
+					queryKey: stepPreviewQueryKey(requireNamespace(), analysisId, stepId),
+					refetchType: 'none'
+				});
+			}
 		}
 
 		analysisStore.updateStepConfig(stepId, appliedConfig);

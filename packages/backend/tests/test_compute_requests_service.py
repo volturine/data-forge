@@ -211,6 +211,44 @@ def test_stage_shared_flight_request_reuses_completed_durable_response(test_db_s
     assert (flight.expires_at - completed.completed_at).total_seconds() == 300
 
 
+@pytest.mark.parametrize('legacy_completed_cache', [False, True])
+def test_view_cache_toggles_reach_worker_and_keep_active_flight_sharing(test_db_session, monkeypatch, legacy_completed_cache: bool) -> None:
+    request_ids = []
+    for cache_enabled in (True, False, True, False):
+        command = command_from_payload(enums_pb2.COMPUTE_REQUEST_KIND_PREVIEW, _preview_payload())
+        command.preview.target_step_id = 'view-1'
+        step = command.preview.analysis_pipeline.tabs[0].steps.add(id='view-1', step_type=enums_pb2.STEP_TYPE_VIEW)
+        step.config.view.cache_enabled = cache_enabled
+        leader, created = compute_requests_service.stage_shared_flight_request(
+            test_db_session, namespace='default', kind=enums_pb2.COMPUTE_REQUEST_KIND_PREVIEW, command=command
+        )
+        assert created is True
+        request_ids.append(leader.id)
+        test_db_session.commit()
+
+        worker_id, claim_token, lease_generation = _claim_identity(test_db_session, leader)
+        follower, created = compute_requests_service.stage_shared_flight_request(
+            test_db_session, namespace='default', kind=enums_pb2.COMPUTE_REQUEST_KIND_PREVIEW, command=command
+        )
+        assert created is False
+        assert follower.id == leader.id
+
+        with monkeypatch.context() as legacy:
+            if legacy_completed_cache:
+                legacy.setattr(compute_requests_service, '_cache_completed_flight', lambda _: True)
+            completed = compute_requests_service.mark_request_completed(
+                test_db_session,
+                leader.id,
+                worker_id=worker_id,
+                claim_token=claim_token,
+                lease_generation=lease_generation,
+                response_envelope=_response(leader, {'step_id': 'view-1', 'columns': [], 'data': [], 'total_rows': 0, 'page': 1, 'page_size': 100}),
+            )
+        assert completed is not None
+
+    assert len(set(request_ids)) == 4
+
+
 def test_list_terminal_requests_returns_batched_detached_response_fields(test_db_session) -> None:
     request = _create_request(
         test_db_session,

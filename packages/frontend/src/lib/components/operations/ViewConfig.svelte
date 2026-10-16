@@ -1,14 +1,15 @@
 <script lang="ts">
 	import type { Schema } from '#lib/types/schema.js';
 	import type { ViewConfigData } from '#lib/types/operation-config.js';
-	import { css, input, stepConfig } from '#lib/styles/panda.js';
+	import { css, input, label, stepConfig } from '#lib/styles/panda.js';
 
 	interface Props {
 		schema: Schema;
 		config?: ViewConfigData;
 	}
 
-	let { schema: _schema, config = $bindable({ rowLimit: 100 }) }: Props = $props();
+	let { schema: _schema, config = $bindable({ rowLimit: 100, cacheEnabled: true }) }: Props =
+		$props();
 </script>
 
 <div class={stepConfig()}>
@@ -56,6 +57,33 @@
 			})}
 		>
 			Number of rows to display (10-1000)
+		</p>
+	</div>
+	<div class={css({ marginBottom: '0', paddingTop: '2' })}>
+		<label class={label({ variant: 'checkbox' })}>
+			<input
+				id="view-cache-enabled"
+				data-testid="view-cache-enabled-checkbox"
+				type="checkbox"
+				checked={config.cacheEnabled !== false}
+				onchange={(event) => (config.cacheEnabled = event.currentTarget.checked)}
+				aria-describedby="view-cache-enabled-help"
+			/>
+			<span>Cache full result</span>
+		</label>
+		<p
+			id="view-cache-enabled-help"
+			class={css({
+				marginTop: '2',
+				marginBottom: '0',
+				fontSize: 'sm',
+				fontWeight: 'normal',
+				color: 'fg.tertiary',
+				lineHeight: 'relaxed'
+			})}
+		>
+			Keep all rows in this compute worker for later previews. Turn off to release this Preview’s
+			cached result.
 		</p>
 	</div>
 </div>

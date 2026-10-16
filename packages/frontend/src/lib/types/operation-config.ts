@@ -221,6 +221,7 @@ export interface StringMethodsConfigData {
 
 export interface ViewConfigData {
 	rowLimit: Field<ProtocolViewConfigJson, 'rowLimit'>;
+	cacheEnabled: Field<ProtocolViewConfigJson, 'cacheEnabled'>;
 }
 
 export interface SampleConfigData {

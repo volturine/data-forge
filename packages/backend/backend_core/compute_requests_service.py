@@ -303,6 +303,7 @@ def _reusable_flight_request(request: ComputeRequest | None, flight: ComputeRequ
         and request.response_envelope is not None
         and flight.expires_at is not None
         and flight.expires_at > now
+        and _cache_completed_flight(request)
     )
     return request if cached else None
 
@@ -605,6 +606,10 @@ def _is_shared_flight_request(request: ComputeRequest) -> bool:
 
 
 def _cache_completed_flight(request: ComputeRequest) -> bool:
+    if request.kind == enums_pb2.COMPUTE_REQUEST_KIND_PREVIEW:
+        command = command_envelope_for_request(request).command
+        # View cache controls must reach the worker, including repeated toggles.
+        return not any(step.config.WhichOneof('config') == 'view' for tab in command.preview.analysis_pipeline.tabs for step in tab.steps)
     if request.kind != enums_pb2.COMPUTE_REQUEST_KIND_DATASOURCE_SCHEMA:
         return True
     command = command_envelope_for_request(request).command

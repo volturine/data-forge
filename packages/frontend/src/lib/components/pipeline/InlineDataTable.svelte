@@ -2,6 +2,7 @@
 	import { createQuery } from '@tanstack/svelte-query';
 	import { onDestroy } from 'svelte';
 	import { previewStepData, throwIfAborted, type StepPreviewResponse } from '#lib/api/compute.js';
+	import { stepPreviewQueryKey } from '#lib/utils/preview-query.js';
 	import { applySteps, stepsThroughTarget } from '#lib/utils/pipeline.js';
 	import { toComputeError } from '#lib/utils/compute-error.js';
 	import { hashPipeline } from '#lib/utils/hash.js';
@@ -83,9 +84,13 @@
 	const query = createQuery(() => ({
 		// Cache and execute from the exact target command in the key. Later steps
 		// in this tab cannot change this preview; other tabs remain for sources.
-		queryKey: ['step-preview', namespace, analysisId, datasourceId, previewRequestState] as const,
+		queryKey: [
+			...stepPreviewQueryKey(namespace, analysisId, stepId),
+			datasourceId,
+			previewRequestState
+		] as const,
 		queryFn: async ({ queryKey }): Promise<StepPreviewResponse> => {
-			const state = queryKey[4];
+			const state = queryKey[5];
 			if (!state) throw new Error('Preview command is not ready');
 			const { request } = state;
 			const signal = previewSignal(request);
@@ -99,7 +104,8 @@
 		},
 		staleTime: Infinity,
 		gcTime: Infinity,
-		refetchOnMount: false,
+		// Cache-option Apply invalidates this target's variants; fresh navigation entries stay cached.
+		refetchOnMount: true,
 		retry: false,
 		enabled: isActiveStep && !!namespace && !!previewRequestState && !analysisStore.previews.paused
 	}));

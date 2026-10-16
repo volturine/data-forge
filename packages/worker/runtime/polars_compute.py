@@ -50,30 +50,7 @@ def _build_pipeline_details(
     progress_callback: Callable[[dict[str, object]], None] | None = None,
     preview_cache: PreviewCache | None = None,
 ) -> tuple[pl.LazyFrame, dict[str, float], float, str | None]:
-    read_started = time.perf_counter()
-    source_key: str | None = None
-    if preview_cache is not None:
-        datasource_config, source_key = preview_cache.source(datasource_config)
-    right_configs: dict[str, dict] = {}
-    right_keys: dict[str, str | None] = {}
-    for ds_id, ds_config in (additional_datasources or {}).items():
-        try:
-            right_configs[ds_id], right_keys[ds_id] = preview_cache.source(ds_config) if preview_cache is not None else (ds_config, None)
-        except Exception as e:
-            logger.error(f"Failed to load additional datasource {ds_id}: {e}", exc_info=True)
-            raise PipelineValidationError(
-                f"Failed to load datasource {ds_id}: {e}",
-                details={"datasource_id": ds_id},
-            ) from e
-    read_duration_ms = (time.perf_counter() - read_started) * 1000
-
     steps = apply_steps(steps)
-
-    if not steps:
-        read_started = time.perf_counter()
-        cached = preview_cache.get(source_key) if preview_cache is not None else None
-        lf = cached.lazy() if cached is not None else load_datasource(datasource_config)
-        return lf, {}, read_duration_ms + (time.perf_counter() - read_started) * 1000, source_key
 
     step_map: dict[str, dict] = {}
     for step in steps:
@@ -124,8 +101,6 @@ def _build_pipeline_details(
         raise PipelineValidationError("Pipeline contains a cycle. Remove cyclic dependencies to continue.")
 
     backend_steps: dict[str, BackendStep] = {}
-    step_keys: dict[str, str | None] = {}
-    cached_frames: dict[str, pl.DataFrame] = {}
     for idx, step in enumerate(ordered_steps):
         step_id = step["id"]
         try:
@@ -137,12 +112,43 @@ def _build_pipeline_details(
                 step_id=str(step.get("id") or ""),
                 details={"operation": step.get("type")},
             ) from e
-        parent_id = dependency_map[step_id]
-        parent_key = step_keys[parent_id] if parent_id is not None else source_key
-        step_keys[step_id] = preview_cache.step_key(parent_key, backend_steps[step_id], right_keys) if preview_cache is not None else None
-        cached = preview_cache.get(step_keys[step_id]) if preview_cache is not None else None
-        if cached is not None:
-            cached_frames[step_id] = cached
+
+    source_key: str | None = None
+    right_configs = dict(additional_datasources or {})
+    step_keys: dict[str, str | None] = dict.fromkeys(step_map)
+    cached_frames: dict[str, pl.DataFrame] = {}
+    read_started = time.perf_counter()
+    if preview_cache is not None:
+        for step_id, backend_step in backend_steps.items():
+            if backend_step.operation == "view" and not backend_step.params.get("cache_enabled", True):
+                preview_cache.discard(step_id)
+        try:
+            pinned_config, source_key = preview_cache.source(datasource_config)
+            pinned_right = {source_id: preview_cache.source(config) for source_id, config in right_configs.items()}
+            right_keys = {source_id: key for source_id, (_config, key) in pinned_right.items()}
+            for step in ordered_steps:
+                step_id = step["id"]
+                parent_id = dependency_map[step_id]
+                parent_key = step_keys[parent_id] if parent_id is not None else source_key
+                step_keys[step_id] = preview_cache.step_key(parent_key, backend_steps[step_id], right_keys)
+        except OSError, TypeError, ValueError:
+            # Cache identity is optional; the normal loader owns source errors.
+            preview_cache = None
+            source_key = None
+            step_keys = dict.fromkeys(step_map)
+        else:
+            datasource_config = pinned_config
+            right_configs = {source_id: config for source_id, (config, _key) in pinned_right.items()}
+            preview_cache.invalidate("source", source_key)
+            for step_id, key in step_keys.items():
+                preview_cache.invalidate(step_id, key)
+                cached = preview_cache.get(key)
+                if cached is not None:
+                    cached_frames[step_id] = cached
+                    backend_step = backend_steps[step_id]
+                    if backend_step.operation == "view" and backend_step.params.get("cache_enabled", True):
+                        preview_cache.materialize(key, cached.lazy(), owner_id=step_id)
+    read_duration_ms = (time.perf_counter() - read_started) * 1000
 
     # Each branch stops at its nearest materialized ancestor. Other branches,
     # including side effects, still execute even when one branch is cached.
@@ -159,7 +165,7 @@ def _build_pipeline_details(
 
     read_started = time.perf_counter()
     lf = pl.LazyFrame()
-    if any(dependency_map[step_id] is None and step_id not in cached_frames for step_id in required_steps):
+    if not ordered_steps or any(dependency_map[step_id] is None and step_id not in cached_frames for step_id in required_steps):
         cached = preview_cache.get(source_key) if preview_cache is not None else None
         lf = cached.lazy() if cached is not None else load_datasource(datasource_config)
     required_sources: set[str] = set()
@@ -182,11 +188,16 @@ def _build_pipeline_details(
             raise PipelineValidationError(f"Failed to load datasource {ds_id}: {e}", details={"datasource_id": ds_id}) from e
     read_duration_ms += (time.perf_counter() - read_started) * 1000
 
-    schema_map: dict[str, pl.LazyFrame] = {}
+    if not ordered_steps:
+        return lf, {}, read_duration_ms, source_key
+
+    schema_map = {step_id: frame.lazy() for step_id, frame in cached_frames.items()}
     total_steps = len(ordered_steps)
     step_timings: dict[str, float] = {}
     for idx, step in enumerate(ordered_steps):
         step_id = step["id"]
+        if step_id not in required_steps or step_id in cached_frames:
+            continue
         step_type = step.get("type") or ""
         backend_step = backend_steps[step_id]
         progress = (idx + 1) / total_steps
@@ -210,18 +221,17 @@ def _build_pipeline_details(
                 }
             )
         try:
-            if step_id in cached_frames:
-                schema_map[step_id] = cached_frames[step_id].lazy()
-            elif step_id in required_steps:
-                parent_id = dependency_map[step_id]
-                parent_frame = schema_map[parent_id] if parent_id is not None else lf
-                schema_map[step_id] = apply_step(
-                    parent_frame,
-                    backend_step,
-                    step_id=str(step_id),
-                    right_sources=right_sources,
-                    right_lf=right_lf,
-                )
+            parent_id = dependency_map[step_id]
+            parent_frame = schema_map[parent_id] if parent_id is not None else lf
+            schema_map[step_id] = apply_step(
+                parent_frame,
+                backend_step,
+                step_id=str(step_id),
+                right_sources=right_sources,
+                right_lf=right_lf,
+            )
+            if preview_cache is not None and backend_step.operation == "view" and backend_step.params.get("cache_enabled", True):
+                schema_map[step_id] = preview_cache.materialize(step_keys[step_id], schema_map[step_id], owner_id=step_id)
         except Exception as exc:
             if progress_callback is not None:
                 progress_callback(
@@ -340,7 +350,10 @@ def execute_preview(
     schema = {col: str(dtype) for col, dtype in schema_obj.items()}
     collect_started = time.perf_counter()
     if metadata is None:
-        raw_page = _PREVIEW_CACHE.collect(cache_key, preview_lf, offset, row_limit)
+        last_step = next((step for step in reversed(steps) if step.get("is_applied") is not False), None)
+        is_view = last_step is not None and STEP_TYPES.normalized(str(last_step.get("type") or "")) == STEP_TYPES.view.value
+        owner_id = str(last_step["id"]) if last_step is not None else "source"
+        raw_page = _PREVIEW_CACHE.collect(None if is_view else cache_key, preview_lf, offset, row_limit, owner_id=owner_id)
         preview_df = normalize_timezones(raw_page.lazy(), schema_obj).collect()
     else:
         preview_df = normalize_timezones(preview_lf, schema_obj).slice(offset, row_limit).collect()

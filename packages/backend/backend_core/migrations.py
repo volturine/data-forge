@@ -13,7 +13,8 @@ from sqlalchemy import create_engine, pool, text
 from backend_core.config import settings
 from backend_core.namespace import namespace_database_schema
 
-_SCHEMA_REVISION = 'runtime_schema_baseline'
+_BASELINE_REVISION = 'runtime_schema_baseline'
+_SCHEMA_REVISION = 'view_cache_enabled'
 _LEGACY_REVISIONS = {
     'public': {
         '0020_runtime_wakes',
@@ -116,9 +117,9 @@ def _upgrade_schema(*, scope: str, schema: str) -> None:
 
 def _upgrade_legacy_schema(*, scope: str, schema: str, revision: str) -> None:
     config = _alembic_config(scope=scope, schema=schema)
-    baseline = ScriptDirectory.from_config(config).get_revision(_SCHEMA_REVISION)
+    baseline = ScriptDirectory.from_config(config).get_revision(_BASELINE_REVISION)
     if baseline is None:
-        raise RuntimeError(f'Missing migration baseline {_SCHEMA_REVISION}')
+        raise RuntimeError(f'Missing migration baseline {_BASELINE_REVISION}')
 
     engine = create_engine(settings.database_url, poolclass=pool.NullPool)
     try:
@@ -139,7 +140,7 @@ def _upgrade_legacy_schema(*, scope: str, schema: str, revision: str) -> None:
                 baseline.module.upgrade()
             result = connection.execute(
                 text(f'UPDATE {quoted_schema}.alembic_version SET version_num = :revision'),
-                {'revision': _SCHEMA_REVISION},
+                {'revision': _BASELINE_REVISION},
             )
             if result.rowcount != 1:
                 raise RuntimeError(f'Expected one {schema}.alembic_version row while adopting {revision}; found {result.rowcount}')
@@ -152,6 +153,10 @@ def _migrate_scope(*, scope: str, schema: str) -> None:
     if revision == _SCHEMA_REVISION:
         return
 
+    if revision == _BASELINE_REVISION:
+        _upgrade_schema(scope=scope, schema=schema)
+        return
+
     if revision is None:
         if scope == 'tenant' and not _schema_is_empty(schema):
             raise RuntimeError(f'Unsupported existing tenant schema without a migration revision: {schema}')
@@ -160,9 +165,12 @@ def _migrate_scope(*, scope: str, schema: str) -> None:
 
     if revision in _LEGACY_REVISIONS[scope]:
         _upgrade_legacy_schema(scope=scope, schema=schema, revision=revision)
+        _upgrade_schema(scope=scope, schema=schema)
         return
 
-    raise RuntimeError(f'Unsupported existing {scope} schema revision: {revision}. Expected {_SCHEMA_REVISION} or a managed pre-squash revision.')
+    raise RuntimeError(
+        f'Unsupported existing {scope} schema revision: {revision}. Expected {_SCHEMA_REVISION}, {_BASELINE_REVISION}, or a managed pre-squash revision.'
+    )
 
 
 def migrate_runtime(namespaces: list[str]) -> None:

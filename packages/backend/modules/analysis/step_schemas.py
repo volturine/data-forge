@@ -292,6 +292,7 @@ class ViewConfig(BaseModel):
     model_config = ConfigDict(extra='forbid')
 
     row_limit: int | None = Field(100, alias='rowLimit', description='Max rows to preview')
+    cache_enabled: bool = Field(True, alias='cacheEnabled', description='Reuse complete preview results')
 
 
 class ExportConfig(BaseModel):

@@ -1,0 +1,36 @@
+{
+  "source_release": "preview-cache-control",
+  "source_note": "Curated from the cache-enabled view config schema epoch.",
+  "pipeline_definition": {
+    "tabs": [
+      {
+        "id": "tab-preview",
+        "name": "Preview",
+        "datasource": {
+          "id": "datasource-preview",
+          "config": { "branch": "master" }
+        },
+        "output": {
+          "result_id": "cache-control-preview",
+          "datasource_type": "iceberg",
+          "format": "parquet",
+          "filename": "preview"
+        },
+        "steps": [
+          {
+            "id": "view-preview",
+            "type": "view",
+            "config": { "rowLimit": 100, "cacheEnabled": true },
+            "depends_on": []
+          },
+          {
+            "id": "view-uncached",
+            "type": "view",
+            "config": { "rowLimit": 100, "cacheEnabled": false },
+            "depends_on": ["view-preview"]
+          }
+        ]
+      }
+    ]
+  }
+}

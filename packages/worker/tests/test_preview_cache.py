@@ -1,12 +1,12 @@
 from __future__ import annotations
 
+import os
 from pathlib import Path
 
 import polars as pl
 import pytest
 
 from operations.step_converter import BackendStep
-from runtime import preview_cache as preview_cache_module
 from runtime.config import settings
 from runtime.domain.datasource.source_types import DataSourceLoadType
 from runtime.namespace import namespace_paths
@@ -17,8 +17,8 @@ def _frame(row_count: int = 12) -> pl.DataFrame:
     return pl.DataFrame({"row": range(row_count), "label": [f"row-{row}" for row in range(row_count)]})
 
 
-def test_collect_caches_complete_frame_and_serves_later_pages() -> None:
-    cache = PreviewCache(max_bytes=1_000_000, max_rows=100, max_entries=4)
+def test_collect_materializes_full_result_and_serves_later_pages() -> None:
+    cache = PreviewCache()
     source = _frame()
 
     first_page = cache.collect("source", source.lazy(), 2, 3)
@@ -31,140 +31,175 @@ def test_collect_caches_complete_frame_and_serves_later_pages() -> None:
     assert second_page["row"].to_list() == [8, 9]
 
 
-def test_collect_uses_native_slice_for_pages_beyond_cache_row_budget(monkeypatch: pytest.MonkeyPatch) -> None:
-    source = _frame(100)
-    cache = PreviewCache(max_bytes=1_000_000, max_rows=5, max_entries=4)
+def test_collect_caches_result_over_former_row_and_byte_limits() -> None:
+    row_count = 100_001
+    payload = "x" * 1024
+    source = pl.DataFrame(
+        {
+            "row": range(row_count),
+            "payload": pl.Series("payload", [payload] * row_count, dtype=pl.String),
+        }
+    )
+    cache = PreviewCache()
 
-    def unexpected_probe(*_args, **_kwargs):
-        pytest.fail("Deep pagination must preserve Polars slice pushdown")
+    page = cache.collect("large", source.lazy(), 100_000, 1, owner_id="large-preview")
+    cached = cache.get("large")
 
-    monkeypatch.setattr(pl.LazyFrame, "sink_batches", unexpected_probe)
-    page = cache.collect("large", source.lazy(), 50, 4)
+    assert page["row"].to_list() == [100_000]
+    assert cached is not None
+    assert cached.height == 100_001
+    assert cached.estimated_size() > 64 * 1024 * 1024
+    assert len(cached["payload"][0]) == 1024
 
-    assert page["row"].to_list() == [50, 51, 52, 53]
-    assert cache.get("large") is None
+
+def test_cache_retains_more_than_sixteen_owned_checkpoints() -> None:
+    cache = PreviewCache()
+
+    for index in range(20):
+        cache.put(f"preview-{index}", f"key-{index}", pl.DataFrame({"value": [index]}))
+
+    assert len(cache._frames) == 20
+    for index in range(20):
+        cached = cache.get(f"key-{index}")
+        assert cached is not None
+        assert cached["value"][0] == index
 
 
-def test_collect_stops_opportunistic_fill_after_time_budget(monkeypatch: pytest.MonkeyPatch) -> None:
-    source = _frame(100)
-    cache = PreviewCache(max_bytes=1_000_000, max_rows=1_000, max_entries=4)
-    elapsed_times = iter((0.0, 0.1, 0.3))
+def test_owners_share_frames_and_replacement_prunes_only_unowned_frames() -> None:
+    cache = PreviewCache()
+    shared = pl.DataFrame({"value": [1, 2]})
+    replacement = pl.DataFrame({"value": [3, 4]})
+    cache.put("preview-a", "shared", shared)
+    cache.put("preview-b", "shared", shared)
+
+    cache.put("preview-a", "replacement", replacement)
+
+    shared_result = cache.get("shared")
+    replacement_result = cache.get("replacement")
+    assert shared_result is not None
+    assert replacement_result is not None
+    assert shared_result["value"].to_list() == [1, 2]
+    assert replacement_result["value"].to_list() == [3, 4]
+    assert cache._owners == {"preview-b": "shared", "preview-a": "replacement"}
+
+    cache.invalidate("preview-a", "replacement")
+    assert cache.get("replacement") is not None
+    cache.invalidate("preview-a", "changed-key")
+
+    assert cache.get("replacement") is None
+    assert cache.get("shared") is not None
+    cache.discard("preview-b")
+    assert cache.get("shared") is None
+
+
+def test_discard_and_invalidate_preserve_frames_owned_by_another_preview() -> None:
+    cache = PreviewCache()
+    frame = pl.DataFrame({"value": [1]})
+    cache.put("preview-a", "same", frame)
+    cache.put("preview-b", "same", frame)
+
+    cache.discard("preview-a")
+    assert cache.get("same") is not None
+
+    cache.invalidate("preview-b", None)
+    assert cache.get("same") is None
+
+
+def test_materialize_uses_shared_full_frame_and_associates_each_owner() -> None:
+    cache = PreviewCache()
+    source = _frame()
+
+    materialized = cache.materialize("frame", source.lazy(), owner_id="preview-a")
+    shared = cache.materialize("frame", _frame(1).lazy(), owner_id="preview-b")
+
+    assert materialized.collect()["row"].to_list() == list(range(12))
+    assert shared.collect()["row"].to_list() == list(range(12))
+    assert cache._owners == {"preview-a": "frame", "preview-b": "frame"}
+
+
+def test_materialize_falls_back_to_original_lazy_frame_after_polars_error() -> None:
+    source = pl.DataFrame({"value": ["1", "2", "bad"]}).lazy().with_columns(pl.col("value").cast(pl.Int64))
+    cache = PreviewCache()
+
+    materialized = cache.materialize("cast", source, owner_id="preview")
+
+    assert materialized is source
+    assert materialized.slice(0, 2).collect()["value"].to_list() == [1, 2]
+    assert cache.get("cast") is None
+    assert cache._owners == {}
+
+
+def test_materialize_falls_back_to_original_lazy_frame_after_os_error(monkeypatch: pytest.MonkeyPatch) -> None:
+    source = _frame().lazy()
+    cache = PreviewCache()
+
+    def raise_os_error(self, **kwargs):
+        raise OSError("source unavailable")
 
     with monkeypatch.context() as context:
-        context.setattr(preview_cache_module.time, "perf_counter", lambda: next(elapsed_times))
-        first_page = cache.collect("slow-fill", source.lazy(), 0, 2)
+        context.setattr(pl.LazyFrame, "collect", raise_os_error)
+        materialized = cache.materialize("io-error", source, owner_id="preview")
 
-    assert cache.get("slow-fill") is None
-    next_page = cache.collect("slow-fill", source.lazy(), 20, 3)
-
-    assert first_page["row"].to_list() == [0, 1]
-    assert next_page["row"].to_list() == [20, 21, 22]
+    assert materialized is source
+    assert cache.get("io-error") is None
+    assert cache._owners == {}
 
 
-def test_collect_does_not_store_a_page_as_a_complete_frame() -> None:
-    source = _frame(100)
-    cache = PreviewCache(max_bytes=1_000_000, max_rows=5, max_entries=4)
+def test_keyless_collect_slices_without_changing_checkpoint_ownership() -> None:
+    cache = PreviewCache()
+    cached_frame = pl.DataFrame({"row": [1, 2, 3]})
+    cache.put("preview", "checkpoint", cached_frame)
 
-    page = cache.collect("incomplete", source.lazy(), 10, 3)
-    next_result = cache.collect("incomplete", source.filter(pl.col("row") > 90).lazy(), 0, 20)
+    page = cache.collect(None, pl.DataFrame({"row": [8, 9, 10]}).lazy(), 1, 1, owner_id="preview")
 
-    assert page["row"].to_list() == [10, 11, 12]
-    assert next_result["row"].to_list() == list(range(91, 100))
-    assert cache.get("incomplete") is None
-
-
-def test_collect_respects_byte_and_entry_budgets_with_lru_promotion() -> None:
-    source = pl.DataFrame({"value": range(8)})
-    size_bytes = int(source.estimated_size())
-    cache = PreviewCache(max_bytes=size_bytes * 2 - 1, max_rows=100, max_entries=2)
-
-    cache.collect("first", source.lazy(), 0, 1)
-    cache.collect("second", source.lazy(), 0, 1)
-
-    assert cache.get("first") is None
-    assert cache.get("second") is not None
-    assert cache._total_bytes <= cache.max_bytes
-
-    entry_limited = PreviewCache(max_bytes=1_000_000, max_rows=100, max_entries=2)
-    entry_limited.collect("first", source.lazy(), 0, 1)
-    entry_limited.collect("second", source.lazy(), 0, 1)
-    assert entry_limited.get("first") is not None
-    entry_limited.collect("third", source.lazy(), 0, 1)
-
-    assert entry_limited.get("first") is not None
-    assert entry_limited.get("second") is None
-    assert entry_limited.get("third") is not None
+    assert page["row"].to_list() == [9]
+    checkpoint = cache.get("checkpoint")
+    assert checkpoint is not None
+    assert checkpoint["row"].to_list() == [1, 2, 3]
+    assert cache._owners == {"preview": "checkpoint"}
 
 
-def test_collect_preserves_schema_for_empty_complete_frame() -> None:
-    source = pl.DataFrame(schema={"row": pl.Int64, "label": pl.String})
-    cache = PreviewCache(max_bytes=1_000_000, max_rows=100, max_entries=4)
-
-    page = cache.collect("empty", source.lazy(), 0, 10)
-    cached = cache.get("empty")
-
-    assert page.is_empty()
-    assert page.schema == source.schema
-    assert cached is not None
-    assert cached.schema == source.schema
-
-
-def test_collect_never_caches_candidate_frames_when_sink_fails(monkeypatch: pytest.MonkeyPatch) -> None:
-    cache = PreviewCache(max_bytes=1_000_000, max_rows=100, max_entries=4)
-
-    def fail_after_partial_batch(self, callback, **kwargs):
-        callback(pl.DataFrame({"row": [0, 1]}))
-        raise RuntimeError("stream failed")
-
-    monkeypatch.setattr(pl.LazyFrame, "sink_batches", fail_after_partial_batch)
-
-    with pytest.raises(RuntimeError, match="stream failed"):
-        cache.collect("failed", _frame().lazy(), 0, 2)
-
-    assert cache.get("failed") is None
-
-
-def test_collect_falls_back_to_original_page_when_cache_probe_hits_later_bad_row() -> None:
-    source = pl.DataFrame({"value": ["1", "2", "bad"]}).lazy().with_columns(pl.col("value").cast(pl.Int64))
-    cache = PreviewCache(max_bytes=1_000_000, max_rows=100, max_entries=4)
-
-    first_page = cache.collect("cast", source, 0, 2)
-
-    assert first_page["value"].to_list() == [1, 2]
-    assert cache.get("cast") is None
-    with pytest.raises(pl.exceptions.PolarsError):
-        cache.collect("cast", source, 2, 1)
-
-
-def test_collect_with_disabled_cache_uses_requested_slice() -> None:
-    source = _frame()
-    cache = PreviewCache(max_bytes=0, max_rows=100, max_entries=4)
-
-    page = cache.collect("disabled", source.lazy(), 4, 3)
-
-    assert page["row"].to_list() == [4, 5, 6]
-    assert cache.get("disabled") is None
-
-
-def test_source_fingerprints_regular_local_files_without_mutating_config(tmp_path: Path) -> None:
+def test_source_fingerprints_same_size_local_rewrite_and_preserves_config(tmp_path: Path) -> None:
     file_path = tmp_path / "source.csv"
     file_path.write_text("row\n1\n", encoding="utf-8")
+    original_stat = file_path.stat()
     config = {"source_type": DataSourceLoadType.FILE.value, "file_path": str(file_path), "file_type": "csv", "options": {"delimiter": ","}}
-    cache = PreviewCache(max_bytes=1_000_000)
+    cache = PreviewCache()
 
     copied_config, first_key = cache.source(config)
-    file_path.write_text("row\n10\n", encoding="utf-8")
+    file_path.write_text("row\n2\n", encoding="utf-8")
+    os.utime(file_path, ns=(original_stat.st_atime_ns, original_stat.st_mtime_ns + 1_000_000_000))
     _updated_config, second_key = cache.source(config)
 
     assert copied_config == config
     assert config["file_path"] == str(file_path)
     assert first_key is not None
     assert second_key is not None
+    assert file_path.stat().st_size == original_stat.st_size
     assert first_key != second_key
 
 
+def test_distinct_sources_and_namespace_config_have_distinct_keys(tmp_path: Path) -> None:
+    first_path = tmp_path / "first.csv"
+    second_path = tmp_path / "second.csv"
+    first_path.write_text("row\n1\n", encoding="utf-8")
+    second_path.write_text("row\n1\n", encoding="utf-8")
+    cache = PreviewCache()
+    first_config = {"source_type": "file", "file_path": str(first_path), "file_type": "csv", "namespace_name": "alpha"}
+    second_config = {"source_type": "file", "file_path": str(second_path), "file_type": "csv", "namespace_name": "alpha"}
+    other_namespace_config = {**first_config, "namespace_name": "beta"}
+
+    _first_copy, first_key = cache.source(first_config)
+    _second_copy, second_key = cache.source(second_config)
+    _namespace_copy, namespace_key = cache.source(other_namespace_config)
+
+    assert first_key is not None and second_key is not None and namespace_key is not None
+    assert first_key != second_key
+    assert first_key != namespace_key
+
+
 def test_source_bypasses_globs_directories_and_remote_file_urls(tmp_path: Path) -> None:
-    cache = PreviewCache(max_bytes=1_000_000)
+    cache = PreviewCache()
     directory = tmp_path / "parts"
     directory.mkdir()
 
@@ -180,7 +215,7 @@ def test_source_fingerprints_file_uri_using_local_path(tmp_path: Path) -> None:
     file_path.write_text("row\n1\n", encoding="utf-8")
     config = {"source_type": "file", "file_path": file_path.as_uri(), "file_type": "csv"}
 
-    copied_config, key = PreviewCache(max_bytes=1_000_000).source(config)
+    copied_config, key = PreviewCache().source(config)
 
     assert copied_config == config
     assert key is not None
@@ -195,7 +230,7 @@ def test_iceberg_source_pins_branch_metadata_and_invalidates_snapshot(tmp_path: 
     second_metadata.parent.mkdir(parents=True)
     first_metadata.write_text("{}", encoding="utf-8")
     second_metadata.write_text("{}", encoding="utf-8")
-    cache = PreviewCache(max_bytes=1_000_000)
+    cache = PreviewCache()
     original = {
         "source_type": DataSourceLoadType.ICEBERG.value,
         "metadata_path": str(table_path),
@@ -217,19 +252,8 @@ def test_iceberg_source_pins_branch_metadata_and_invalidates_snapshot(tmp_path: 
     assert "secret" not in main_key
 
 
-def test_default_memory_budget_uses_finite_cgroup_limit(monkeypatch: pytest.MonkeyPatch) -> None:
-    def fake_read_text(path: Path, *, encoding: str | None = None) -> str:
-        if str(path) == "/sys/fs/cgroup/memory.max":
-            return str(32 * 1024 * 1024)
-        raise FileNotFoundError(path)
-
-    monkeypatch.setattr(Path, "read_text", fake_read_text)
-
-    assert PreviewCache().max_bytes == 4 * 1024 * 1024
-
-
 def test_step_keys_cover_transparent_and_deterministic_operations() -> None:
-    cache = PreviewCache(max_bytes=1_000_000)
+    cache = PreviewCache()
     filter_step = BackendStep(name="Filter", operation="filter", params={"conditions": [], "logic": "AND"})
     other_filter_step = BackendStep(name="Filter", operation="filter", params={"conditions": [{"column": "x"}], "logic": "AND"})
 
@@ -242,7 +266,7 @@ def test_step_keys_cover_transparent_and_deterministic_operations() -> None:
 
 
 def test_step_keys_include_only_referenced_additional_sources() -> None:
-    cache = PreviewCache(max_bytes=1_000_000)
+    cache = PreviewCache()
     join = BackendStep(name="Join", operation="join", params={"right_source": "right", "how": "inner"})
     union = BackendStep(name="Union", operation="union_by_name", params={"sources": ["right"], "allow_missing": True})
 
@@ -258,7 +282,7 @@ def test_step_keys_include_only_referenced_additional_sources() -> None:
 
 
 def test_step_keys_reject_unsafe_barriers_and_udf_expressions() -> None:
-    cache = PreviewCache(max_bytes=1_000_000)
+    cache = PreviewCache()
     for operation in ("ai", "notification", "datasource", "expression", "unknown"):
         step = BackendStep(name=operation, operation=operation, params={})
         assert cache.step_key("parent", step, {}) is None

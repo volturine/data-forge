@@ -495,6 +495,38 @@ describe('buildTargetPreviewPipelinePayload', () => {
 		expect(changedAncestor).not.toBe(baseline);
 		expect(changedSourceConfig).not.toBe(baseline);
 	});
+
+	test('includes cacheEnabled in its target key without changing upstream target keys', () => {
+		const upstreamView: PipelineStep = {
+			id: 'view-1',
+			type: 'view',
+			config: { rowLimit: 100, cacheEnabled: true },
+			depends_on: []
+		};
+		const filter: PipelineStep = {
+			id: 'filter-1',
+			type: 'filter',
+			config: { conditions: [], logic: 'AND' },
+			depends_on: ['view-1']
+		};
+		const downstreamView: PipelineStep = {
+			id: 'view-2',
+			type: 'view',
+			config: { rowLimit: 100, cacheEnabled: true },
+			depends_on: ['filter-1']
+		};
+		const downstreamViewWithoutCache = {
+			...downstreamView,
+			config: { ...downstreamView.config, cacheEnabled: false }
+		};
+
+		expect(previewCommandKey([upstreamView, filter, downstreamView], 'view-1')).toBe(
+			previewCommandKey([upstreamView, filter, downstreamViewWithoutCache], 'view-1')
+		);
+		expect(previewCommandKey([upstreamView, filter, downstreamView], 'view-2')).not.toBe(
+			previewCommandKey([upstreamView, filter, downstreamViewWithoutCache], 'view-2')
+		);
+	});
 });
 
 // ── buildDatasourceConfig ───────────────────────────────────────────────────

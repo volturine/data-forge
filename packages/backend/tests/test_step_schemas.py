@@ -209,12 +209,31 @@ def test_pipeline_protocol_normalization_removes_http_aliases() -> None:
                     {
                         'id': 'view-1',
                         'type': 'view',
-                        'config': {'row_limit': 100},
+                        'config': {'row_limit': 100, 'cache_enabled': True},
                     }
                 ],
             }
         ],
     }
+
+
+def test_view_cache_config_defaults_on_and_preserves_explicit_off_in_protocol() -> None:
+    default_config = normalize_step_config('view', {'rowLimit': 100})
+    assert default_config == {'rowLimit': 100, 'cacheEnabled': True}
+
+    default_protocol_config = normalize_step_config_for_protocol('view', {'rowLimit': 100})
+    default_message = json_format.ParseDict({'view': default_protocol_config}, analysis_pb2.StepConfig())
+    assert default_message.view.HasField('cache_enabled')
+    assert default_message.view.cache_enabled is True
+
+    disabled_config = normalize_step_config('view', {'rowLimit': 100, 'cacheEnabled': False})
+    assert disabled_config == {'rowLimit': 100, 'cacheEnabled': False}
+
+    disabled_protocol_config = normalize_step_config_for_protocol('view', disabled_config)
+    disabled_message = json_format.ParseDict({'view': disabled_protocol_config}, analysis_pb2.StepConfig())
+    assert disabled_message.view.HasField('cache_enabled')
+    assert disabled_message.view.cache_enabled is False
+    assert json_format.MessageToDict(disabled_message, preserving_proto_field_name=True) == {'view': {'row_limit': 100, 'cache_enabled': False}}
 
 
 @pytest.mark.parametrize(
