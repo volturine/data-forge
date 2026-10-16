@@ -10,7 +10,7 @@ Provide a production-grade Docker release for Data-Forge built around one produc
 
 The release artifacts are:
 
-- `docker/docker-compose.yml`
+- `docker/compose.yaml`
 - `docker/env/prod.env`
 - published images in GitHub Container Registry
 
@@ -43,7 +43,7 @@ For this release, Docker should be opinionated and simple:
 
 | # | Goal | Success Metric |
 |---|------|----------------|
-| G-1 | Single production compose | `docker/docker-compose.yml` is the only production compose file used by both customers and maintainers |
+| G-1 | Single production compose | `docker/compose.yaml` is the only production compose file used by both customers and maintainers |
 | G-2 | Single production env | `docker/env/prod.env` is the only production env file |
 | G-3 | No source build for customers | Customer install is `docker compose pull && docker compose up -d` |
 | G-4 | Fixed-role runtime release | Published images exist for `api`, `scheduler`, and `worker` |
@@ -66,7 +66,7 @@ For this release, Docker should be opinionated and simple:
 
 **Acceptance Criteria:**
 
-1. Customer copies `docker/docker-compose.yml` and `docker/env/prod.env`.
+1. Customer copies `docker/compose.yaml` and `docker/env/prod.env`.
 2. Customer renames `docker/env/prod.env` to `.env` or passes it as the compose env file.
 3. Customer edits only env values such as passwords, secrets, and image tags.
 4. Customer runs:
@@ -86,7 +86,7 @@ For this release, Docker should be opinionated and simple:
 **Acceptance Criteria:**
 
 1. `just docker-prod` builds local role images.
-2. `just docker-prod` still runs `docker/docker-compose.yml`.
+2. `just docker-prod` still runs `docker/compose.yaml`.
 3. `just docker-prod` still reads `docker/env/prod.env`.
 4. `just docker-prod` overrides only image names/tags at runtime to point to locally built images.
 5. No extra production compose file or production env file is introduced for local smoke testing.
@@ -134,7 +134,7 @@ Notes:
 
 ### Compose Contract
 
-`docker/docker-compose.yml` is the only production compose file.
+`docker/compose.yaml` is the only production compose file.
 
 Requirements:
 
@@ -202,7 +202,7 @@ DF_SETTINGS_ENCRYPTION_KEY=replace-with-long-random-secret
 
 ## Acceptance Criteria
 
-- [x] `docker/docker-compose.yml` is the only production compose file in the repository
+- [x] `docker/compose.yaml` is the only production compose file in the repository
 - [x] `docker/env/prod.env` is the only production env file in the repository
 - [x] Customer install requires only `docker compose pull` and `docker compose up -d`
 - [x] Customer install does not require source build

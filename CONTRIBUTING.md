@@ -90,7 +90,8 @@ We recommend VS Code with the following extensions:
 - **ESLint** — JavaScript/TypeScript linting
 - **Prettier** — Code formatting
 - **Ruff** — Python linting and formatting
-- **Pylance** — Python language server
+
+The repo's `.vscode/settings.json` intentionally sets `python.languageServer` to `None`; Python type checking runs through mypy in `just check` instead.
 
 ## How to Contribute
 

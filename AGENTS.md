@@ -2,7 +2,7 @@
 
 Local-first no-code data analysis: visual Polars pipelines, Iceberg storage, scheduled builds.
 
-**Stack:** Python 3.14 + FastAPI + uv · SvelteKit 5 (runes) + Bun · Panda CSS · PostgreSQL · Iceberg · protobuf (`packages/protocol`)
+**Stack:** Python 3.14 + FastAPI + uv · SvelteKit 3 + Svelte 5 (runes) + Bun · Panda CSS · PostgreSQL · Iceberg · protobuf (`packages/protocol`)
 
 ## Commands
 

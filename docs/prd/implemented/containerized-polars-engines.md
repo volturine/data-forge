@@ -400,15 +400,15 @@ Expected primary areas:
 
 - `packages/protocol/proto/dataforge_protocol/` — engine RPC, status, errors, generated contracts
 - `packages/worker/runtime/compute_manager.py` — preserved identity and lifecycle ownership
-- `packages/worker/runtime/compute_engine.py` — job runner extraction and subprocess removal
+- `packages/worker/compute_worker_main.py` — container compute-worker entrypoint and job execution
 - `packages/worker/runtime/compute_service.py` — artifact staging boundary
-- `packages/worker/runtime/` — executor, container client, engine server, reconciliation, credential bootstrap
-- `packages/backend/backend_core/engine_instances_service.py` — container-native snapshots
-- `packages/backend/backend_core/persistence/` — engine status and lifecycle persistence
-- `packages/frontend/src/lib/` — generated status types and engine monitoring
-- `docker/Dockerfile` — engine image target
-- `docker/docker-compose.yml` — Docker access and runtime network
-- `.github/workflows/` — engine image build and publication
+- `packages/worker/runtime/` — executor, container client, worker server, reconciliation, credential bootstrap
+- `packages/backend/backend_core/compute_worker_instances_service.py` — container-native worker instance snapshots
+- `packages/backend/backend_core/persistence/` — compute-worker status and lifecycle persistence
+- `packages/frontend/src/lib/` — generated status types and compute-worker monitoring
+- `docker/Dockerfile` — compute-worker image target
+- `docker/compose.yaml` — Docker access and runtime network
+- `.github/workflows/` — compute-worker image build and publication
 - `docs/ENV_VARIABLES.md` and `docs/DEPLOYMENT.md` — runtime and security configuration
 
 Exact new filenames should follow the existing package boundaries and keep Docker control, RPC transport, job execution, and credential provisioning as separate concerns.

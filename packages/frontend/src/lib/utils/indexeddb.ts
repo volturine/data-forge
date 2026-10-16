@@ -7,6 +7,9 @@ type DbConfig = {
 };
 
 const defaultConfig: DbConfig = {
+	// Legacy database name from the project's original codename. Kept so existing
+	// browsers keep their stored client identity and cache state; renaming would
+	// orphan every user's local data.
 	name: 'polars-fastapi-svelte',
 	store: 'cache',
 	version: 1

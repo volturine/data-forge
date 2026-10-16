@@ -86,7 +86,7 @@
 - ✅ Time since last updated — datasource details show the last data update as relative time
 - ✅ Live build preview — progress bar, current step indicator, per-step timings, ETA
 - ✅ Query plan visualization during build execution
-- ⬜ Resource monitoring (CPU, memory, threads) during builds
+- ✅ Resource monitoring (CPU, memory, threads) during builds
 - ✅ Cancel build in progress
 
 ## Lineage

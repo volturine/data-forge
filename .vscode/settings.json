@@ -36,16 +36,10 @@
       "pythonPath": "${workspaceFolder}/packages/scheduler/.venv/bin/python"
     },
     {
-      "workspace": "${workspaceFolder}/packages/shared",
+      "workspace": "${workspaceFolder}/packages/worker",
       "envManager": "venv",
-      "pythonPath": "${workspaceFolder}/packages/shared/.venv/bin/python"
-    },
-    {
-      "workspace": "${workspaceFolder}/packages/worker-manager",
-      "envManager": "venv",
-      "pythonPath": "${workspaceFolder}/packages/worker-manager/.venv/bin/python"
+      "pythonPath": "${workspaceFolder}/packages/worker/.venv/bin/python"
     }
   ],
-  "projectManager.hg.ignoredFolders": ["out", "typings", "test", ".haxelib"],
   "python.languageServer": "None"
 }

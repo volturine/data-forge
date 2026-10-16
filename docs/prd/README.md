@@ -9,6 +9,8 @@ docs/prd/
 └── backlog/      # approved future work and product decisions
 ```
 
+The `active/` directory exists only while work-in-progress PRDs are present; it is absent today because every tracked PRD is either implemented or backlog.
+
 The root [README](../../README.md) is the human-facing project overview. [AGENTS.md](../../AGENTS.md) defines repository workflow and the documentation maintenance rule. PRDs carry detailed feature requirements only.
 
 ## Implemented
