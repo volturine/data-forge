@@ -7,6 +7,7 @@ from runtime.domain.compute.base import OperationHandler, OperationParams
 
 class ViewParams(OperationParams):
     row_limit: int | None = None
+    cache_enabled: bool = True
 
 
 class ViewHandler(OperationHandler):

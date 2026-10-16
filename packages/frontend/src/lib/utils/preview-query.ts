@@ -2,6 +2,10 @@ import { previewStepData, throwIfAborted } from '#lib/api/compute.js';
 import type { StepPreviewRequest, StepPreviewResponse } from '#lib/api/compute.js';
 import { toComputeError } from '#lib/utils/compute-error.js';
 
+export function stepPreviewQueryKey(namespace: string | null, analysisId: string, stepId: string) {
+	return ['step-preview', namespace, analysisId, stepId] as const;
+}
+
 export async function fetchPreviewQueryData(
 	request: StepPreviewRequest,
 	signal: AbortSignal,

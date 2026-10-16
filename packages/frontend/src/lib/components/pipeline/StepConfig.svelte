@@ -1,4 +1,5 @@
 <script lang="ts">
+	import { useQueryClient } from '@tanstack/svelte-query';
 	import { onDestroy } from 'svelte';
 	import type { PipelineStep } from '#lib/types/analysis.js';
 	import type { Schema } from '#lib/types/schema.js';
@@ -9,10 +10,15 @@
 	import { getStepSchema, throwIfAborted, type StepSchemaResponse } from '#lib/api/compute.js';
 	import { track } from '#lib/utils/audit-log.js';
 	import { normalizeConfig } from '#lib/utils/step-config-defaults.js';
-	import { buildAnalysisPipelinePayload } from '#lib/utils/analysis-pipeline.js';
+	import {
+		buildAnalysisPipelinePayload,
+		buildTargetPreviewPipelinePayload
+	} from '#lib/utils/analysis-pipeline.js';
 	import { cloneJson } from '#lib/utils/json.js';
-	import { applySteps } from '#lib/utils/pipeline.js';
+	import { applySteps, stepsThroughTarget } from '#lib/utils/pipeline.js';
 	import { hashPipeline } from '#lib/utils/hash.js';
+	import { isNamespaceReady, requireNamespace } from '#lib/stores/namespace.svelte.js';
+	import { stepPreviewQueryKey } from '#lib/utils/preview-query.js';
 	import FilterConfig from '#lib/components/operations/FilterConfig.svelte';
 	import SelectConfig from '#lib/components/operations/SelectConfig.svelte';
 	import GroupByConfig from '#lib/components/operations/GroupByConfig.svelte';
@@ -64,6 +70,7 @@
 		onConfigApply,
 		readOnly = false
 	}: Props = $props();
+	const queryClient = useQueryClient();
 	const stepLabel = $derived(step ? getStepTypeConfig(step.type).label : '');
 	let applyingPivotSchema = $state(false);
 	let pivotApplyError = $state('');
@@ -215,11 +222,14 @@
 						}
 					: tab
 			);
-			const analysisPipeline = buildAnalysisPipelinePayload(
+			const fullAnalysisPipeline = buildAnalysisPipelinePayload(
 				analysis.id,
 				tabsWithDraftConfig,
 				datasourceStore.datasources
 			);
+			const analysisPipeline = fullAnalysisPipeline
+				? buildTargetPreviewPipelinePayload(fullAnalysisPipeline, activeTab.id, stepId)
+				: null;
 			if (!analysisPipeline) {
 				pivotApplyError = 'Could not load the pivot output columns for this pipeline.';
 				return;
@@ -261,6 +271,19 @@
 			schemaAbortController = null;
 		}
 
+		if (
+			step.type === 'view' &&
+			(step.config.cacheEnabled !== false) !== (appliedConfig.cacheEnabled !== false)
+		) {
+			const analysisId = analysisStore.current?.id;
+			if (analysisId && isNamespaceReady()) {
+				await queryClient.invalidateQueries({
+					queryKey: stepPreviewQueryKey(requireNamespace(), analysisId, stepId),
+					refetchType: 'none'
+				});
+			}
+		}
+
 		analysisStore.updateStepConfig(stepId, appliedConfig);
 		if (step.is_applied === false) {
 			analysisStore.updateStep(stepId, { is_applied: true } as Partial<PipelineStep>);
@@ -270,7 +293,7 @@
 				stepId,
 				pivotSchema?.columns ?? [],
 				pivotSchema?.column_types,
-				hashPipeline(applySteps(analysisStore.pipeline))
+				hashPipeline(stepsThroughTarget(applySteps(analysisStore.pipeline), stepId))
 			);
 		}
 		onConfigApply?.();
@@ -282,19 +305,25 @@
 	function refreshStepSchema(stepId: string) {
 		const analysis = analysisStore.current;
 		if (!analysis?.id) return;
-		const analysisPipeline = buildAnalysisPipelinePayload(
+		const fullAnalysisPipeline = buildAnalysisPipelinePayload(
 			analysis.id,
 			analysisStore.tabs,
 			datasourceStore.datasources
 		);
+		const tabId = analysisStore.activeTab?.id ?? null;
+		const analysisPipeline = fullAnalysisPipeline
+			? buildTargetPreviewPipelinePayload(fullAnalysisPipeline, tabId, stepId)
+			: null;
 		if (!analysisPipeline) return;
 		const controller = startSchemaRequest();
-		const pipelineHash = hashPipeline(applySteps(analysisStore.pipeline));
+		const pipelineHash = hashPipeline(
+			stepsThroughTarget(applySteps(analysisStore.pipeline), stepId)
+		);
 		getStepSchema(
 			{
 				analysis_id: analysis.id,
 				analysis_pipeline: analysisPipeline,
-				tab_id: analysisStore.activeTab?.id ?? null,
+				tab_id: tabId,
 				target_step_id: stepId
 			},
 			{ signal: controller.signal }

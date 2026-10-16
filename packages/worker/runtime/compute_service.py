@@ -1276,8 +1276,8 @@ def preview_step(
     execution_started = time.perf_counter()
     try:
         # The durable request layer owns active deduplication and the short
-        # completed-response cache. The worker executes only the admitted
-        # leader; it does not keep a second, weaker semantic result cache.
+        # completed-response cache. Only the admitted leader executes; its
+        # isolated compute worker may reuse versioned materialized prefixes.
         phase_started = time.perf_counter()
         with manager.acquire_engine(resolved_compute_worker_identity, resource_config=resource_config) as engine:
             execution_phases["engine_acquire_ms"] = (time.perf_counter() - phase_started) * 1000

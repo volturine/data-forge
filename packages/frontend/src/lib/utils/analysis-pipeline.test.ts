@@ -1,8 +1,9 @@
 import { describe, test, expect } from 'vitest';
-import type { AnalysisTab } from '#lib/types/analysis.js';
+import type { AnalysisTab, PipelineStep } from '#lib/types/analysis.js';
 import type { DataSource } from '#lib/types/datasource.js';
 import {
 	buildAnalysisPipelinePayload,
+	buildTargetPreviewPipelinePayload,
 	buildDatasourceConfig,
 	buildDatasourcePipelinePayload,
 	buildDatasourcePreviewPipelinePayload,
@@ -373,6 +374,158 @@ describe('buildAnalysisPipelinePayload', () => {
 		expect(config.snapshot_timestamp_ms).toBe(1700000000000);
 		expect(config.time_travel_snapshot_id).toBeUndefined();
 		expect(config.time_travel_ui).toBeUndefined();
+	});
+});
+
+describe('buildTargetPreviewPipelinePayload', () => {
+	function previewCommandKey(
+		steps: AnalysisTab['steps'],
+		targetStepId: string,
+		tabDatasourceConfig: AnalysisTab['datasource']['config'] = { branch: 'main' }
+	): string {
+		const activeTab = tab({
+			datasource: { id: 'ds-1', analysis_tab_id: null, config: tabDatasourceConfig },
+			steps
+		});
+		const fullPipeline = buildAnalysisPipelinePayload('a-1', [activeTab], [datasource()]);
+		if (!fullPipeline) throw new Error('expected pipeline payload');
+		const targetPipeline = buildTargetPreviewPipelinePayload(
+			fullPipeline,
+			activeTab.id,
+			targetStepId
+		);
+		if (!targetPipeline) throw new Error('expected target pipeline payload');
+		return JSON.stringify({
+			analysis_id: 'a-1',
+			analysis_pipeline: targetPipeline,
+			tab_id: activeTab.id,
+			target_step_id: targetStepId,
+			row_limit: 100,
+			page: 1,
+			resource_config: { max_threads: 2 }
+		});
+	}
+
+	test('keeps only the selected tab prefix and preserves other tabs as sources', () => {
+		const upstream = tab({
+			steps: [
+				{ id: 'upstream-view', type: 'view', config: {}, depends_on: [] },
+				{
+					id: 'upstream-filter',
+					type: 'filter',
+					config: { conditions: [], logic: 'AND' },
+					depends_on: ['upstream-view']
+				}
+			]
+		});
+		const derived = tab({
+			id: 'tab-2',
+			name: 'Derived',
+			datasource: { id: 'out-1', analysis_tab_id: 'tab-1', config: { branch: 'main' } },
+			output: { result_id: 'out-2', format: 'parquet', filename: 'derived', build_mode: 'full' },
+			steps: [
+				{ id: 'derived-view', type: 'view', config: {}, depends_on: [] },
+				{ id: 'derived-filter', type: 'filter', config: {}, depends_on: ['derived-view'] }
+			]
+		});
+		const fullPipeline = buildAnalysisPipelinePayload('a-1', [upstream, derived], [datasource()]);
+		expect(fullPipeline).not.toBeNull();
+
+		const result = buildTargetPreviewPipelinePayload(fullPipeline!, 'tab-1', 'upstream-view');
+		expect(result?.tabs[0].steps.map((step) => step.id)).toEqual(['upstream-view']);
+		expect(result?.tabs[1]).toEqual(fullPipeline!.tabs[1]);
+	});
+
+	test('keeps an upstream target key stable when later steps are added or changed', () => {
+		const upstreamView: PipelineStep = { id: 'view-1', type: 'view', config: {}, depends_on: [] };
+		const filter: PipelineStep = {
+			id: 'filter-1',
+			type: 'filter',
+			config: { conditions: [], logic: 'AND' },
+			depends_on: ['view-1']
+		};
+		const downstreamView: PipelineStep = {
+			id: 'view-2',
+			type: 'view',
+			config: {},
+			depends_on: ['filter-1']
+		};
+
+		const before = previewCommandKey([upstreamView, filter], 'view-1');
+		const afterAppend = previewCommandKey([upstreamView, filter, downstreamView], 'view-1');
+		const afterDownstreamEdit = previewCommandKey(
+			[
+				upstreamView,
+				{ ...filter, config: { conditions: [{ column: 'age' }], logic: 'AND' } },
+				downstreamView
+			],
+			'view-1'
+		);
+
+		expect(afterAppend).toBe(before);
+		expect(afterDownstreamEdit).toBe(before);
+	});
+
+	test('changes a downstream target key when its ancestors or datasource config change', () => {
+		const upstreamView: PipelineStep = { id: 'view-1', type: 'view', config: {}, depends_on: [] };
+		const filter: PipelineStep = {
+			id: 'filter-1',
+			type: 'filter',
+			config: { conditions: [], logic: 'AND' },
+			depends_on: ['view-1']
+		};
+		const downstreamView: PipelineStep = {
+			id: 'view-2',
+			type: 'view',
+			config: {},
+			depends_on: ['filter-1']
+		};
+		const targetSteps = [upstreamView, filter, downstreamView];
+		const baseline = previewCommandKey(targetSteps, 'view-2');
+		const changedAncestor = previewCommandKey(
+			[
+				upstreamView,
+				{ ...filter, config: { conditions: [{ column: 'age' }], logic: 'AND' } },
+				downstreamView
+			],
+			'view-2'
+		);
+		const changedSourceConfig = previewCommandKey(targetSteps, 'view-2', { branch: 'dev' });
+
+		expect(changedAncestor).not.toBe(baseline);
+		expect(changedSourceConfig).not.toBe(baseline);
+	});
+
+	test('includes cacheEnabled in its target key without changing upstream target keys', () => {
+		const upstreamView: PipelineStep = {
+			id: 'view-1',
+			type: 'view',
+			config: { rowLimit: 100, cacheEnabled: true },
+			depends_on: []
+		};
+		const filter: PipelineStep = {
+			id: 'filter-1',
+			type: 'filter',
+			config: { conditions: [], logic: 'AND' },
+			depends_on: ['view-1']
+		};
+		const downstreamView: PipelineStep = {
+			id: 'view-2',
+			type: 'view',
+			config: { rowLimit: 100, cacheEnabled: true },
+			depends_on: ['filter-1']
+		};
+		const downstreamViewWithoutCache = {
+			...downstreamView,
+			config: { ...downstreamView.config, cacheEnabled: false }
+		};
+
+		expect(previewCommandKey([upstreamView, filter, downstreamView], 'view-1')).toBe(
+			previewCommandKey([upstreamView, filter, downstreamViewWithoutCache], 'view-1')
+		);
+		expect(previewCommandKey([upstreamView, filter, downstreamView], 'view-2')).not.toBe(
+			previewCommandKey([upstreamView, filter, downstreamViewWithoutCache], 'view-2')
+		);
 	});
 });
 

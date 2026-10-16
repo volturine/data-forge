@@ -95,7 +95,7 @@ def test_build_pipeline_skips_disabled_step(mock_apply_step: MagicMock, mock_loa
         },
     ]
 
-    result, _timings, _read_duration_ms = _build_pipeline_details({}, steps, "job-1")
+    result, _timings, _read_duration_ms, _cache_key = _build_pipeline_details({}, steps, "job-1")
     assert result == fake_lf
     assert mock_apply_step.call_count == 2
     called_ops = [call.args[1].operation for call in mock_apply_step.call_args_list]

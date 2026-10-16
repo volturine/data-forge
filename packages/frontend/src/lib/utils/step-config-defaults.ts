@@ -128,7 +128,8 @@ const defaultConfigs: Record<string, StepConfig> = {
 	} satisfies TopKConfigData,
 
 	view: {
-		rowLimit: 100
+		rowLimit: 100,
+		cacheEnabled: true
 	} satisfies ViewConfigData,
 
 	export: {

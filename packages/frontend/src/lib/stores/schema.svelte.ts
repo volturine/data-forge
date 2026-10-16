@@ -10,7 +10,7 @@ import {
 import { resolveColumnType } from '#lib/utils/column-types.js';
 import { isChartStep } from '#lib/components/pipeline/utils.js';
 import { hashPipeline } from '#lib/utils/hash.js';
-import { applySteps } from '#lib/utils/pipeline.js';
+import { applySteps, stepsThroughTarget } from '#lib/utils/pipeline.js';
 import { SvelteMap } from 'svelte/reactivity';
 
 export interface StepSchemas {
@@ -48,9 +48,10 @@ export class SchemaStore {
 
 		const schemaKey = analysisStore.activeSchemaKey;
 		const sourceSchema = schemaKey ? (analysisStore.sourceSchemas.get(schemaKey) ?? null) : null;
-		const currentHash = hashPipeline(applySteps(this.steps));
+		const appliedSteps = applySteps(this.steps);
 
 		for (const step of this.steps) {
+			const currentHash = hashPipeline(stepsThroughTarget(appliedSteps, step.id));
 			const input =
 				currentSchema ??
 				(sourceSchema ? { columns: sourceSchema.columns, row_count: null } : emptySchema());
@@ -62,8 +63,6 @@ export class SchemaStore {
 			const entry = this.previewSchemas.get(step.id);
 			if (!isApplied) {
 				output = input;
-			} else if (entry && (step.type === 'pivot' || step.type === 'unpivot')) {
-				output = entry.schema;
 			} else if (entry?.hash !== null && entry?.hash === currentHash && !isChartStep(step.type)) {
 				output = entry.schema;
 			} else if (step.type === 'join') {

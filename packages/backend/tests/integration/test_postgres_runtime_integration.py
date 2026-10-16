@@ -1645,7 +1645,7 @@ def test_postgres_shared_flight_followers_do_not_block_completion(monkeypatch, t
 
     from backend_core import compute_requests_service, database
     from backend_core.config import settings
-    from backend_core.domain.compute_requests.models import command_from_payload
+    from backend_core.domain.compute_requests.models import command_envelope, command_from_payload
     from backend_core.namespace import reset_namespace, set_namespace_context
     from backend_core.persistence.compute_requests.models import ComputeRequest, ComputeRequestFlight
     from backend_core.persistence.datasource.models import DataSource
@@ -1661,6 +1661,33 @@ def test_postgres_shared_flight_followers_do_not_block_completion(monkeypatch, t
         database.set_settings_engine_override(database._create_public_engine())
         asyncio.run(database.init_db())
 
+        datasource_id = 'shared-flight-race-datasource'
+        command = command_from_payload(
+            enums_pb2.COMPUTE_REQUEST_KIND_PREVIEW,
+            {
+                'analysis_id': 'shared-flight-race-analysis',
+                'target_step_id': 'source',
+                'row_limit': 100,
+                'page': 1,
+                'analysis_pipeline': {
+                    'analysis_id': 'shared-flight-race-analysis',
+                    'tabs': [
+                        {
+                            'id': 'shared-flight-race-tab',
+                            'datasource': {
+                                'id': datasource_id,
+                                'analysis_tab_id': 'shared-flight-race-tab',
+                                'source_type': 'file',
+                                'config': {'branch': 'main'},
+                            },
+                            'output': {'result_id': 'shared-flight-race-output', 'filename': 'result.csv', 'format': 'csv'},
+                            'steps': [],
+                        }
+                    ],
+                },
+            },
+        )
+
         now = datetime.now(UTC)
         flight_specs = (
             ('active', enums_pb2.COMPUTE_REQUEST_STATUS_RUNNING, None, None),
@@ -1672,7 +1699,9 @@ def test_postgres_shared_flight_followers_do_not_block_completion(monkeypatch, t
                 namespace='default',
                 kind=enums_pb2.COMPUTE_REQUEST_KIND_PREVIEW,
                 status=status,
-                command_envelope=b'{}',
+                command_envelope=command_envelope(
+                    kind=enums_pb2.COMPUTE_REQUEST_KIND_PREVIEW, command=command, request_id=f'shared-flight-{suffix}'
+                ).SerializeToString(deterministic=True),
                 response_envelope=response,
                 max_attempts=3,
                 created_at=now,
@@ -1737,32 +1766,6 @@ def test_postgres_shared_flight_followers_do_not_block_completion(monkeypatch, t
             follower_session.close()
             follower_session = None
 
-            datasource_id = 'shared-flight-race-datasource'
-            command = command_from_payload(
-                enums_pb2.COMPUTE_REQUEST_KIND_PREVIEW,
-                {
-                    'analysis_id': 'shared-flight-race-analysis',
-                    'target_step_id': 'source',
-                    'row_limit': 100,
-                    'page': 1,
-                    'analysis_pipeline': {
-                        'analysis_id': 'shared-flight-race-analysis',
-                        'tabs': [
-                            {
-                                'id': 'shared-flight-race-tab',
-                                'datasource': {
-                                    'id': datasource_id,
-                                    'analysis_tab_id': 'shared-flight-race-tab',
-                                    'source_type': 'file',
-                                    'config': {'branch': 'main'},
-                                },
-                                'output': {'result_id': 'shared-flight-race-output', 'filename': 'result.csv', 'format': 'csv'},
-                                'steps': [],
-                            }
-                        ],
-                    },
-                },
-            )
             command_bytes = command.SerializeToString(deterministic=True)
             with Session(database._get_tenant_engine()) as session:
                 session.add(

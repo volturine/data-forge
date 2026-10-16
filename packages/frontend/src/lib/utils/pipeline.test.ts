@@ -1,6 +1,6 @@
 import { describe, test, expect } from 'vitest';
 import type { PipelineStep } from '#lib/types/analysis.js';
-import { applySteps } from './pipeline';
+import { applySteps, stepsThroughTarget } from './pipeline';
 
 function step(overrides: Partial<PipelineStep> = {}): PipelineStep {
 	return {
@@ -160,5 +160,17 @@ describe('applySteps', () => {
 		const result = applySteps(steps);
 		const join = result.find((s) => s.id === 'join');
 		expect(join?.depends_on).toEqual(['root']);
+	});
+});
+
+describe('stepsThroughTarget', () => {
+	test('keeps the target and its ordered prefix only', () => {
+		const steps = [step({ id: 'view' }), step({ id: 'filter' }), step({ id: 'later-view' })];
+
+		expect(stepsThroughTarget(steps, 'filter').map(({ id }) => id)).toEqual(['view', 'filter']);
+	});
+
+	test('returns empty when the target is not in the applied pipeline', () => {
+		expect(stepsThroughTarget([step({ id: 'view' })], 'unapplied-filter')).toEqual([]);
 	});
 });

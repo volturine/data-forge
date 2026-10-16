@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import contextlib
 import logging
 import time
 from collections import deque
@@ -15,8 +16,10 @@ from runtime.compute_utils import apply_steps, normalize_timezones
 from runtime.domain.analysis.step_types import STEP_TYPES
 from runtime.exceptions import IcebergMetadataPathNotFoundError, PipelineValidationError
 from runtime.export_formats import get_export_format
+from runtime.preview_cache import PreviewCache
 
 logger = logging.getLogger(__name__)
+_PREVIEW_CACHE = PreviewCache()
 
 
 def classify_engine_error(exc: Exception) -> tuple[str, dict[str, object]]:
@@ -46,26 +49,9 @@ def _build_pipeline_details(
     job_id: str,
     additional_datasources: dict[str, dict] | None = None,
     progress_callback: Callable[[dict[str, object]], None] | None = None,
-) -> tuple[pl.LazyFrame, dict[str, float], float]:
-    read_started = time.perf_counter()
-    lf = load_datasource(datasource_config)
-    read_duration_ms = (time.perf_counter() - read_started) * 1000
-
-    right_sources: dict[str, pl.LazyFrame] = {}
-    for ds_id, ds_config in (additional_datasources or {}).items():
-        try:
-            right_sources[ds_id] = load_datasource(ds_config)
-        except Exception as e:
-            logger.error(f"Failed to load additional datasource {ds_id}: {e}", exc_info=True)
-            raise PipelineValidationError(
-                f"Failed to load datasource {ds_id}: {e}",
-                details={"datasource_id": ds_id},
-            ) from e
-
+    preview_cache: PreviewCache | None = None,
+) -> tuple[pl.LazyFrame, dict[str, float], float, str | None]:
     steps = apply_steps(steps)
-
-    if not steps:
-        return lf, {}, read_duration_ms
 
     step_map: dict[str, dict] = {}
     for step in steps:
@@ -115,37 +101,125 @@ def _build_pipeline_details(
     if len(ordered_steps) != len(step_map):
         raise PipelineValidationError("Pipeline contains a cycle. Remove cyclic dependencies to continue.")
 
-    schema_map: dict[str, pl.LazyFrame] = {}
+    backend_steps: dict[str, BackendStep] = {}
+    for step in ordered_steps:
+        with contextlib.suppress(Exception):
+            backend_steps[step["id"]] = convert_step_format(step)
+
+    source_key: str | None = None
+    right_configs = dict(additional_datasources or {})
+    right_keys: dict[str, str | None] = dict.fromkeys(right_configs)
+    step_keys: dict[str, str | None] = dict.fromkeys(step_map)
+    cached_frames: dict[str, pl.DataFrame] = {}
+    read_started = time.perf_counter()
+    if preview_cache is not None:
+        for step_id, backend_step in backend_steps.items():
+            if backend_step.operation == "view" and not backend_step.params.get("cache_enabled", True):
+                preview_cache.discard(step_id)
+        try:
+            datasource_config, source_key = preview_cache.source(datasource_config)
+        except OSError, TypeError, ValueError:
+            source_key = None
+        for source_id, config in list(right_configs.items()):
+            try:
+                right_configs[source_id], right_keys[source_id] = preview_cache.source(config)
+            except OSError, TypeError, ValueError:
+                right_keys[source_id] = None
+        for step in ordered_steps:
+            step_id = step["id"]
+            backend_step_candidate = backend_steps.get(step_id)
+            if backend_step_candidate is None:
+                step_keys[step_id] = None
+                continue
+            parent_id = dependency_map[step_id]
+            parent_key = step_keys[parent_id] if parent_id is not None else source_key
+            try:
+                step_keys[step_id] = preview_cache.step_key(parent_key, backend_step_candidate, right_keys)
+            except OSError, TypeError, ValueError:
+                step_keys[step_id] = None
+
+        preview_cache.invalidate("source", source_key)
+        for step_id, key in step_keys.items():
+            preview_cache.invalidate(step_id, key)
+            cached = preview_cache.get(key)
+            if cached is not None:
+                cached_frames[step_id] = cached
+                backend_step_candidate = backend_steps.get(step_id)
+                if (
+                    backend_step_candidate is not None
+                    and backend_step_candidate.operation == "view"
+                    and backend_step_candidate.params.get("cache_enabled", True)
+                ):
+                    preview_cache.materialize(key, cached.lazy(), owner_id=step_id)
+    read_duration_ms = (time.perf_counter() - read_started) * 1000
+
+    # Each branch stops at its nearest materialized ancestor. Other branches,
+    # including side effects, still execute even when one branch is cached.
+    required_steps: set[str] = set()
+    for step_id in step_map:
+        if dependents.get(step_id):
+            continue
+        ancestor_id: str | None = step_id
+        while ancestor_id is not None and ancestor_id not in required_steps:
+            required_steps.add(ancestor_id)
+            if ancestor_id in cached_frames:
+                break
+            ancestor_id = dependency_map[ancestor_id]
+
+    read_started = time.perf_counter()
+    lf = pl.LazyFrame()
+    if not ordered_steps or any(dependency_map[step_id] is None and step_id not in cached_frames for step_id in required_steps):
+        cached = preview_cache.get(source_key) if preview_cache is not None else None
+        lf = cached.lazy() if cached is not None else load_datasource(datasource_config)
+    required_sources: set[str] = set()
+    for step_id in required_steps - cached_frames.keys():
+        backend_step_candidate = backend_steps.get(step_id)
+        if backend_step_candidate is None:
+            continue
+        params = backend_step_candidate.params
+        right_source = params.get("right_source")
+        if isinstance(right_source, str):
+            required_sources.add(right_source)
+        sources = params.get("sources")
+        if isinstance(sources, list):
+            required_sources.update(source for source in sources if isinstance(source, str))
+    right_sources: dict[str, pl.LazyFrame] = {}
+    for ds_id, ds_config in right_configs.items():
+        if preview_cache is not None and ds_id not in required_sources:
+            continue
+        try:
+            cached = preview_cache.get(right_keys[ds_id]) if preview_cache is not None else None
+            right_sources[ds_id] = cached.lazy() if cached is not None else load_datasource(ds_config)
+        except Exception as e:
+            raise PipelineValidationError(f"Failed to load datasource {ds_id}: {e}", details={"datasource_id": ds_id}) from e
+    read_duration_ms += (time.perf_counter() - read_started) * 1000
+
+    if not ordered_steps:
+        return lf, {}, read_duration_ms, source_key
+
+    schema_map = {step_id: frame.lazy() for step_id, frame in cached_frames.items()}
     total_steps = len(ordered_steps)
     step_timings: dict[str, float] = {}
-
     for idx, step in enumerate(ordered_steps):
-        # Convert frontend format to backend format
+        step_id = step["id"]
+        if step_id not in required_steps or step_id in cached_frames:
+            continue
         step_type = step.get("type") or ""
-        try:
-            backend_step = convert_step_format(step)
-        except Exception as e:
-            logger.error(f"Failed to convert step {idx}: {e}", exc_info=True)
-            raise PipelineValidationError(
-                f"Step conversion failed: {e!s}",
-                step_id=str(step.get("id") or ""),
-                details={"operation": step.get("type")},
-            ) from e
+        backend_step_resolved = backend_steps.get(step_id)
+        if backend_step_resolved is None:
+            try:
+                backend_step_resolved = convert_step_format(step)
+            except Exception as e:
+                logger.error(f"Failed to convert step {idx}: {e}", exc_info=True)
+                raise PipelineValidationError(
+                    f"Step conversion failed: {e!s}",
+                    step_id=str(step.get("id") or ""),
+                    details={"operation": step.get("type")},
+                ) from e
+        backend_step = backend_step_resolved
         progress = (idx + 1) / total_steps
         step_name = backend_step.name or f"Step {idx + 1}"
         logger.debug(f"Job {job_id}: Processing {step_name} ({progress:.0%})")
-
-        step_id = step.get("id")
-        if not step_id:
-            raise ValueError("Each pipeline step must include an id")
-
-        parent_id = dependency_map.get(step_id)
-        if parent_id is not None:
-            parent_frame = schema_map.get(parent_id)
-            if parent_frame is None:
-                raise ValueError(f"Missing parent frame for step {step_id}")
-        else:
-            parent_frame = lf
 
         right_source_raw = backend_step.params.get("right_source")
         right_source_id = right_source_raw if isinstance(right_source_raw, str) else None
@@ -164,6 +238,8 @@ def _build_pipeline_details(
                 }
             )
         try:
+            parent_id = dependency_map[step_id]
+            parent_frame = schema_map[parent_id] if parent_id is not None else lf
             schema_map[step_id] = apply_step(
                 parent_frame,
                 backend_step,
@@ -171,6 +247,8 @@ def _build_pipeline_details(
                 right_sources=right_sources,
                 right_lf=right_lf,
             )
+            if preview_cache is not None and backend_step.operation == "view" and backend_step.params.get("cache_enabled", True):
+                schema_map[step_id] = preview_cache.materialize(step_keys[step_id], schema_map[step_id], owner_id=step_id)
         except Exception as exc:
             if progress_callback is not None:
                 progress_callback(
@@ -207,7 +285,8 @@ def _build_pipeline_details(
                 }
             )
 
-    return schema_map[ordered_steps[-1]["id"]], step_timings, read_duration_ms
+    result_id = ordered_steps[-1]["id"]
+    return schema_map[result_id], step_timings, read_duration_ms, step_keys[result_id]
 
 
 def _build_pipeline_with_plans(
@@ -216,13 +295,16 @@ def _build_pipeline_with_plans(
     job_id: str,
     additional_datasources: dict[str, dict] | None,
     progress_callback: Callable[[dict[str, object]], None] | None,
-) -> tuple[pl.LazyFrame, dict[str, float], float, dict[str, str]]:
+    preview_cache: PreviewCache | None = None,
+) -> tuple[pl.LazyFrame, dict[str, float], float, dict[str, str], str | None]:
     """Build the pipeline frame and report its optimized/unoptimized query plans."""
-    lf, step_timings, read_duration_ms = _build_pipeline_details(datasource_config, steps, job_id, additional_datasources, progress_callback)
+    lf, step_timings, read_duration_ms, cache_key = _build_pipeline_details(
+        datasource_config, steps, job_id, additional_datasources, progress_callback, preview_cache
+    )
     query_plans = {"optimized": lf.explain(optimized=True), "unoptimized": lf.explain(optimized=False)}
     if progress_callback is not None:
         progress_callback({"type": "plan", "optimized_plan": query_plans["optimized"], "unoptimized_plan": query_plans["unoptimized"]})
-    return lf, step_timings, read_duration_ms, query_plans
+    return lf, step_timings, read_duration_ms, query_plans, cache_key
 
 
 def _resolve_chart_preview(
@@ -274,18 +356,24 @@ def execute_preview(
     progress_callback: Callable[[dict[str, object]], None] | None = None,
 ) -> dict:
     """Execute pipeline and return limited rows for preview."""
-    lf, step_timings, read_duration_ms, query_plans = _build_pipeline_with_plans(datasource_config, steps, job_id, additional_datasources, progress_callback)
+    lf, step_timings, read_duration_ms, query_plans, cache_key = _build_pipeline_with_plans(
+        datasource_config, steps, job_id, additional_datasources, progress_callback, _PREVIEW_CACHE
+    )
 
     preview_lf, metadata = _resolve_chart_preview(lf, steps, row_limit, offset)
 
     # Get schema from lazy frame (no collection needed)
     schema_obj = preview_lf.collect_schema()
     schema = {col: str(dtype) for col, dtype in schema_obj.items()}
-    preview_lf = normalize_timezones(preview_lf, schema_obj)
-
-    # Collect only the rows we need for preview
     collect_started = time.perf_counter()
-    preview_df = preview_lf.slice(offset, row_limit).collect()
+    if metadata is None:
+        last_step = next((step for step in reversed(steps) if step.get("is_applied") is not False), None)
+        is_view = last_step is not None and STEP_TYPES.normalized(str(last_step.get("type") or "")) == STEP_TYPES.view.value
+        owner_id = str(last_step["id"]) if last_step is not None else "source"
+        raw_page = _PREVIEW_CACHE.collect(None if is_view else cache_key, preview_lf, offset, row_limit, owner_id=owner_id)
+        preview_df = normalize_timezones(raw_page.lazy(), schema_obj).collect()
+    else:
+        preview_df = normalize_timezones(preview_lf, schema_obj).slice(offset, row_limit).collect()
     collect_duration_ms = (time.perf_counter() - collect_started) * 1000
 
     result: dict = {
@@ -315,7 +403,9 @@ def execute_export(
     progress_callback: Callable[[dict[str, object]], None] | None = None,
 ) -> dict:
     """Execute pipeline and write full results to file."""
-    lf, step_timings, read_duration_ms, query_plans = _build_pipeline_with_plans(datasource_config, steps, job_id, additional_datasources, progress_callback)
+    lf, step_timings, read_duration_ms, query_plans, _cache_key = _build_pipeline_with_plans(
+        datasource_config, steps, job_id, additional_datasources, progress_callback
+    )
 
     fmt = get_export_format(export_format)
     schema = {col: str(dtype) for col, dtype in lf.collect_schema().items()}
@@ -351,7 +441,9 @@ def execute_schema(
     progress_callback: Callable[[dict[str, object]], None] | None = None,
 ) -> dict:
     """Execute pipeline and return schema without collecting full data."""
-    lf, step_timings, read_duration_ms, query_plans = _build_pipeline_with_plans(datasource_config, steps, job_id, additional_datasources, progress_callback)
+    lf, step_timings, read_duration_ms, query_plans, _cache_key = _build_pipeline_with_plans(
+        datasource_config, steps, job_id, additional_datasources, progress_callback
+    )
     # Get schema from lazy frame (no full collection needed)
     schema = {col: str(dtype) for col, dtype in lf.collect_schema().items()}
 
@@ -373,7 +465,9 @@ def execute_row_count(
     progress_callback: Callable[[dict[str, object]], None] | None = None,
 ) -> dict:
     """Execute pipeline and return row count without collecting full data."""
-    lf, step_timings, read_duration_ms, query_plans = _build_pipeline_with_plans(datasource_config, steps, job_id, additional_datasources, progress_callback)
+    lf, step_timings, read_duration_ms, query_plans, _cache_key = _build_pipeline_with_plans(
+        datasource_config, steps, job_id, additional_datasources, progress_callback
+    )
 
     collect_started = time.perf_counter()
     row_count = lf.select(pl.len()).collect().item()

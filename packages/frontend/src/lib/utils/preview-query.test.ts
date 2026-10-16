@@ -4,7 +4,7 @@ import { err, okAsync, ResultAsync, type Result } from 'neverthrow';
 import type { ApiError } from '#lib/api/client.js';
 import type { StepPreviewRequest, StepPreviewResponse } from '#lib/api/compute.js';
 import * as computeApi from '#lib/api/compute.js';
-import { fetchPreviewQueryData } from './preview-query';
+import { fetchPreviewQueryData, stepPreviewQueryKey } from './preview-query';
 
 const previewStepData = vi.spyOn(computeApi, 'previewStepData');
 
@@ -30,6 +30,23 @@ function makePreviewResponse(): StepPreviewResponse {
 		page_size: 100
 	};
 }
+
+describe('stepPreviewQueryKey', () => {
+	test('returns a stable prefix for one step across all command variants', () => {
+		expect(stepPreviewQueryKey('default', 'analysis-1', 'view-1')).toEqual([
+			'step-preview',
+			'default',
+			'analysis-1',
+			'view-1'
+		]);
+	});
+
+	test('keeps different target steps in separate invalidation prefixes', () => {
+		expect(stepPreviewQueryKey('default', 'analysis-1', 'view-1')).not.toEqual(
+			stepPreviewQueryKey('default', 'analysis-1', 'view-2')
+		);
+	});
+});
 
 describe('fetchPreviewQueryData', () => {
 	test('a cancelled query is not cached as an error and can refetch when active again', async () => {

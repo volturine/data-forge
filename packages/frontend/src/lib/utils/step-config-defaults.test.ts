@@ -81,7 +81,14 @@ describe('getDefaultConfig', () => {
 	});
 
 	test('returns view defaults', () => {
-		expect(getDefaultConfig('view')).toEqual({ rowLimit: 100 });
+		expect(getDefaultConfig('view')).toEqual({ rowLimit: 100, cacheEnabled: true });
+	});
+
+	test('preserves an explicitly disabled view cache in normalized config', () => {
+		expect(normalizeConfig('view', { rowLimit: 100, cacheEnabled: false })).toEqual({
+			rowLimit: 100,
+			cacheEnabled: false
+		});
 	});
 
 	test('returns export defaults', () => {

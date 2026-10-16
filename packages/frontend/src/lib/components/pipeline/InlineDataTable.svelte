@@ -2,14 +2,18 @@
 	import { createQuery } from '@tanstack/svelte-query';
 	import { onDestroy } from 'svelte';
 	import { previewStepData, throwIfAborted, type StepPreviewResponse } from '#lib/api/compute.js';
-	import { applySteps } from '#lib/utils/pipeline.js';
+	import { stepPreviewQueryKey } from '#lib/utils/preview-query.js';
+	import { applySteps, stepsThroughTarget } from '#lib/utils/pipeline.js';
 	import { toComputeError } from '#lib/utils/compute-error.js';
 	import { hashPipeline } from '#lib/utils/hash.js';
 	import { analysisStore } from '#lib/stores/analysis.svelte.js';
 	import { datasourceStore } from '#lib/stores/datasource.svelte.js';
 	import { schemaStore } from '#lib/stores/schema.svelte.js';
 	import { isNamespaceReady, requireNamespace } from '#lib/stores/namespace.svelte.js';
-	import { buildAnalysisPipelinePayload } from '#lib/utils/analysis-pipeline.js';
+	import {
+		buildAnalysisPipelinePayload,
+		buildTargetPreviewPipelinePayload
+	} from '#lib/utils/analysis-pipeline.js';
 	import DataTable from '#lib/components/common/DataTable.svelte';
 	import { css } from '#lib/styles/panda.js';
 
@@ -48,22 +52,25 @@
 
 	const activePipeline = $derived(applySteps(pipeline));
 	const isActiveStep = $derived(activePipeline.some((step) => step.id === stepId));
-	const pipelineKey = $derived(hashPipeline(activePipeline));
+	const targetSteps = $derived(stepsThroughTarget(activePipeline, stepId));
+	const pipelineKey = $derived(hashPipeline(targetSteps));
 	const namespace = $derived(isNamespaceReady() ? requireNamespace() : null);
-	const analysisPipeline = $derived.by(() => {
+	const targetAnalysisPipeline = $derived.by(() => {
 		if (!analysisId) return null;
-		return buildAnalysisPipelinePayload(
+		const pipeline = buildAnalysisPipelinePayload(
 			analysisId,
 			analysisStore.tabs,
 			datasourceStore.datasources
 		);
+		if (!pipeline) return null;
+		return buildTargetPreviewPipelinePayload(pipeline, analysisStore.activeTab?.id ?? null, stepId);
 	});
 	const previewRequestState = $derived.by(() => {
-		if (!analysisPipeline) return null;
+		if (!targetAnalysisPipeline) return null;
 		return {
 			request: {
 				analysis_id: analysisId,
-				analysis_pipeline: analysisPipeline,
+				analysis_pipeline: targetAnalysisPipeline,
 				tab_id: analysisStore.activeTab?.id ?? null,
 				target_step_id: stepId,
 				row_limit: rowLimit,
@@ -75,11 +82,15 @@
 	});
 
 	const query = createQuery(() => ({
-		// Cache and execute from the exact command in the key. A pipeline-only
-		// hash omits tab, resource settings, and other result-changing inputs.
-		queryKey: ['step-preview', namespace, analysisId, datasourceId, previewRequestState] as const,
+		// Cache and execute from the exact target command in the key. Later steps
+		// in this tab cannot change this preview; other tabs remain for sources.
+		queryKey: [
+			...stepPreviewQueryKey(namespace, analysisId, stepId),
+			datasourceId,
+			previewRequestState
+		] as const,
 		queryFn: async ({ queryKey }): Promise<StepPreviewResponse> => {
-			const state = queryKey[4];
+			const state = queryKey[5];
 			if (!state) throw new Error('Preview command is not ready');
 			const { request } = state;
 			const signal = previewSignal(request);
@@ -93,7 +104,8 @@
 		},
 		staleTime: Infinity,
 		gcTime: Infinity,
-		refetchOnMount: false,
+		// Cache-option Apply invalidates this target's variants; fresh navigation entries stay cached.
+		refetchOnMount: true,
 		retry: false,
 		enabled: isActiveStep && !!namespace && !!previewRequestState && !analysisStore.previews.paused
 	}));
@@ -104,7 +116,7 @@
 	const errorMessage = $derived(error instanceof Error ? error.message : '');
 	const previewState = $derived.by(() => {
 		if (!isActiveStep) return 'inactive';
-		if (!analysisPipeline) return 'waiting-for-payload';
+		if (!targetAnalysisPipeline) return 'waiting-for-payload';
 		if (error) return 'error';
 		if (analysisStore.previews.paused) return 'paused';
 		if (isLoading) return 'loading';

@@ -5,9 +5,12 @@ import { schemaStore } from '#lib/stores/schema.svelte.js';
 import { getDatasourceSchema } from '#lib/api/datasource.js';
 import type { DataSource } from '#lib/types/datasource.js';
 import { getStepSchema } from '#lib/api/compute.js';
-import { buildAnalysisPipelinePayload } from '#lib/utils/analysis-pipeline.js';
+import {
+	buildAnalysisPipelinePayload,
+	buildTargetPreviewPipelinePayload
+} from '#lib/utils/analysis-pipeline.js';
 import { hashPipeline } from '#lib/utils/hash.js';
-import { applySteps } from '#lib/utils/pipeline.js';
+import { applySteps, stepsThroughTarget } from '#lib/utils/pipeline.js';
 import { createAsyncGate } from '#lib/utils/async-gate.js';
 import { track } from '#lib/utils/audit-log.js';
 import { isUuid } from '#lib/utils/analysis-tab.js';
@@ -42,21 +45,35 @@ export function setupInferredSchemaHydrationEffect(
 		const controller = new AbortController();
 		controllers.add(controller);
 
-		const targets = pipeline.filter(
-			(step) =>
-				(step.type === 'expression' || step.type === 'with_columns') && step.is_applied !== false
-		);
+		const appliedPipeline = applySteps(pipeline);
+		const targets = pipeline
+			.filter(
+				(step) =>
+					(step.type === 'expression' || step.type === 'with_columns') && step.is_applied !== false
+			)
+			.flatMap((step) => {
+				const targetPipeline = buildTargetPreviewPipelinePayload(analysisPayload, tab.id, step.id);
+				if (!targetPipeline) return [];
+				return [
+					{
+						step,
+						pipeline: targetPipeline,
+						hash: hashPipeline(stepsThroughTarget(appliedPipeline, step.id))
+					}
+				];
+			});
 		let remaining = targets.length;
 		const release = () => {
 			remaining -= 1;
 			if (remaining <= 0) controllers.delete(controller);
 		};
 		if (remaining === 0) controllers.delete(controller);
-		for (const step of targets) {
+		for (const target of targets) {
+			const { step } = target;
 			getStepSchema(
 				{
 					analysis_id: id,
-					analysis_pipeline: analysisPayload,
+					analysis_pipeline: target.pipeline,
 					tab_id: tab.id,
 					target_step_id: step.id
 				},
@@ -70,7 +87,7 @@ export function setupInferredSchemaHydrationEffect(
 					}
 					if (!inferredSchemaGate.isCurrent(requestToken)) return;
 					if (analysisStore.activeTab?.id !== tab.id) return;
-					schemaStore.syncPreviewSchema(step.id, res, pipelineHash);
+					schemaStore.syncPreviewSchema(step.id, res, target.hash);
 				},
 				(err) => {
 					release();

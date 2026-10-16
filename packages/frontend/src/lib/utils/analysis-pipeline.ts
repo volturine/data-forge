@@ -168,6 +168,48 @@ export function buildAnalysisPipelinePayload(
 	return { analysis_id: analysisId, tabs: tabsPayload };
 }
 
+/**
+ * Build the pipeline sent for a target preview. The selected tab only needs
+ * steps through the target; the other tabs remain available as cross-tab
+ * sources and analysis outputs.
+ */
+export function buildTargetPreviewPipelinePayload(
+	pipeline: AnalysisPipelinePayload,
+	tabId: string | null,
+	targetStepId: string
+): AnalysisPipelinePayload | null {
+	let selected = tabId ? (pipeline.tabs.find((tab) => tab.id === tabId) ?? null) : null;
+	if (
+		selected &&
+		targetStepId !== 'source' &&
+		!selected.steps.some((step) => step.id === targetStepId)
+	) {
+		selected = null;
+	}
+	if (!selected && targetStepId !== 'source') {
+		selected =
+			pipeline.tabs.find((tab) => tab.steps.some((step) => step.id === targetStepId)) ?? null;
+	}
+	if (!selected) {
+		selected = pipeline.tabs.find((tab) => tab.steps.length > 0) ?? pipeline.tabs[0] ?? null;
+	}
+	if (!selected) return null;
+
+	const selectedId = selected.id;
+	const targetIndex =
+		targetStepId === 'source' ? -1 : selected.steps.findIndex((step) => step.id === targetStepId);
+	if (targetStepId !== 'source' && targetIndex === -1) return null;
+
+	return {
+		...pipeline,
+		tabs: pipeline.tabs.map((tab) =>
+			tab.id === selectedId
+				? { ...tab, steps: targetIndex === -1 ? [] : tab.steps.slice(0, targetIndex + 1) }
+				: tab
+		)
+	};
+}
+
 export function buildDatasourceConfig(args: {
 	analysisId: string | null;
 	tab: AnalysisTab | null;

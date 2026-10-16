@@ -12,7 +12,7 @@
 		downloadStep,
 		type StepPreviewResponse
 	} from '#lib/api/compute.js';
-	import { applySteps } from '#lib/utils/pipeline.js';
+	import { applySteps, stepsThroughTarget } from '#lib/utils/pipeline.js';
 	import { hashPipeline } from '#lib/utils/hash.js';
 	import { toComputeError } from '#lib/utils/compute-error.js';
 	import { GripVertical, Hash, RefreshCw, Copy, Trash2 } from '@lucide/svelte';
@@ -22,7 +22,8 @@
 	import { getStepTypeConfig, isChartStep } from '#lib/components/pipeline/utils.js';
 	import {
 		buildAnalysisPipelinePayload,
-		buildDatasourceConfig
+		buildDatasourceConfig,
+		buildTargetPreviewPipelinePayload
 	} from '#lib/utils/analysis-pipeline.js';
 	import { SvelteMap } from 'svelte/reactivity';
 	import { css, spinner } from '#lib/styles/panda.js';
@@ -87,12 +88,20 @@
 			datasourceStore.datasources
 		);
 	});
+	const targetAnalysisPipeline = $derived.by(() => {
+		if (!analysisPipeline) return null;
+		return buildTargetPreviewPipelinePayload(
+			analysisPipeline,
+			analysisStore.activeTab?.id ?? null,
+			step.id
+		);
+	});
 	const chartConfigured = $derived(((step.config?.x_column as string | undefined) ?? '') !== '');
 	const chartPreviewRequest = $derived.by(() => {
-		if (!analysisPipeline || !analysisId) return null;
+		if (!targetAnalysisPipeline || !analysisId) return null;
 		return {
 			analysis_id: analysisId,
-			analysis_pipeline: analysisPipeline,
+			analysis_pipeline: targetAnalysisPipeline,
 			tab_id: analysisStore.activeTab?.id ?? null,
 			target_step_id: step.id,
 			row_limit: 5000,
@@ -133,7 +142,7 @@
 	}));
 	const chartPreviewState = $derived.by(() => {
 		if (!isChart || !isApplied || !chartConfigured) return 'inactive';
-		if (!analysisPipeline || !datasourceId || !analysisId) return 'waiting-for-payload';
+		if (!targetAnalysisPipeline || !datasourceId || !analysisId) return 'waiting-for-payload';
 		if (chartQuery.error) return 'error';
 		if (analysisStore.previews.paused || chartQuery.isFetching) return 'loading';
 		if (chartQuery.data) return 'ready';
@@ -148,8 +157,9 @@
 	const rowCountLoads = new SvelteMap<string, boolean>();
 	const rowCountErrors = new SvelteMap<string, string>();
 
-	const rowCountPipeline = $derived(applySteps(allSteps));
+	const rowCountPipeline = $derived(stepsThroughTarget(applySteps(allSteps), step.id));
 	const rowCountPipelineKey = $derived(hashPipeline(rowCountPipeline));
+	const targetPipelineKey = $derived(JSON.stringify(targetAnalysisPipeline ?? {}));
 	const rowCountDatasourceConfig = $derived.by(() => {
 		const config = buildDatasourceConfig({
 			analysisId: analysisId ?? null,
@@ -157,14 +167,19 @@
 			tabs: analysisStore.tabs,
 			datasources: datasourceStore.datasources
 		});
-		if (config) return config;
+		if (config) {
+			if (targetAnalysisPipeline && 'analysis_pipeline' in config) {
+				return { ...config, analysis_pipeline: targetAnalysisPipeline };
+			}
+			return config;
+		}
 		const active = analysisStore.activeTab;
 		if (!active) return {};
 		return active.datasource.config;
 	});
 	const rowCountKey = $derived.by(() => {
 		const configKey = JSON.stringify(rowCountDatasourceConfig ?? {});
-		return `${analysisId ?? ''}:${datasourceId ?? ''}:${step.id}:${rowCountPipelineKey}:${configKey}`;
+		return `${analysisId ?? ''}:${datasourceId ?? ''}:${step.id}:${rowCountPipelineKey}:${targetPipelineKey}:${configKey}`;
 	});
 	const rowCount = $derived(rowCounts.get(rowCountKey) ?? null);
 	const isLoadingRowCount = $derived(rowCountLoads.get(rowCountKey) ?? false);
@@ -177,7 +192,7 @@
 		typeof step.config?.rowLimit === 'number' ? step.config.rowLimit : 100
 	);
 	const tableResetKey = $derived(
-		`${analysisId ?? ''}:${datasourceId ?? ''}:${step.id}:${previewRowLimit}:${rowCountPipelineKey}:${JSON.stringify(rowCountDatasourceConfig)}`
+		`${analysisId ?? ''}:${datasourceId ?? ''}:${step.id}:${previewRowLimit}:${rowCountPipelineKey}:${targetPipelineKey}:${JSON.stringify(rowCountDatasourceConfig)}`
 	);
 	let rowCountAbortController: AbortController | null = null;
 
@@ -194,10 +209,10 @@
 	}
 
 	async function calculateRowCount() {
-		if (!analysisId || !analysisPipeline) return;
+		if (!analysisId || !targetAnalysisPipeline) return;
 		if (isLoadingRowCount) return;
 		const requestKey = rowCountKey;
-		const requestPipeline = analysisPipeline;
+		const requestPipeline = targetAnalysisPipeline;
 		const requestTabId = analysisStore.activeTab?.id ?? null;
 		const controller = new AbortController();
 		rowCountAbortController?.abort();
@@ -745,7 +760,7 @@
 						_disabled: { cursor: 'not-allowed', opacity: '0.7' }
 					})}
 					onclick={calculateRowCount}
-					disabled={isLoadingRowCount || !analysisPipeline}
+					disabled={isLoadingRowCount || !targetAnalysisPipeline}
 					type="button"
 					aria-label="Calculate row count"
 					data-action="count-rows"
