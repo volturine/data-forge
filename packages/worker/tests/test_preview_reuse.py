@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import os
 from collections import Counter
 from pathlib import Path
 
@@ -160,6 +161,9 @@ def test_changed_transparent_view_reuses_cached_filter_prefix(monkeypatch: pytes
 
 def test_changed_local_source_version_invalidates_cached_descendants(monkeypatch: pytest.MonkeyPatch, tmp_path: Path) -> None:
     source_config = _source_config(tmp_path)
+    file_path = Path(str(source_config["file_path"]))
+    file_path.write_text("value\n100\n", encoding="utf-8")
+    original_stat = file_path.stat()
     versions = [pl.DataFrame({"value": range(5)}), pl.DataFrame({"value": range(100, 105)})]
     load_calls = 0
     step_calls = _count_steps(monkeypatch)
@@ -174,13 +178,43 @@ def test_changed_local_source_version_invalidates_cached_descendants(monkeypatch
     monkeypatch.setattr(polars_compute, "load_datasource", load_datasource)
 
     first = polars_compute.execute_preview(source_config, [_filter("filter", 1)], 10, 0, "first")
-    Path(str(source_config["file_path"])).write_text("value\n100\n", encoding="utf-8")
+    file_path.write_text("value\n200\n", encoding="utf-8")
+    os.utime(file_path, ns=(original_stat.st_atime_ns, original_stat.st_mtime_ns + 1_000_000_000))
+    assert file_path.stat().st_size == original_stat.st_size
     second = polars_compute.execute_preview(source_config, [_filter("filter", 1)], 10, 0, "second")
 
     assert [row["value"] for row in first["data"]] == [2, 3, 4]
     assert [row["value"] for row in second["data"]] == list(range(100, 105))
     assert load_calls == 2
     assert step_calls["filter"] == 2
+
+
+def test_distinct_sources_and_namespaces_with_identical_steps_never_share_cached_preview(monkeypatch: pytest.MonkeyPatch, tmp_path: Path) -> None:
+    first_config = {**_source_config(tmp_path, "first"), "namespace_name": "alpha"}
+    second_config = {**_source_config(tmp_path, "second"), "namespace_name": "alpha"}
+    beta_config = {**first_config, "namespace_name": "beta"}
+    Path(str(first_config["file_path"])).write_text("value\n10\n", encoding="utf-8")
+    Path(str(second_config["file_path"])).write_text("value\n20\n", encoding="utf-8")
+    _install_cache(monkeypatch)
+    load_calls = 0
+    original_load = polars_compute.load_datasource
+
+    def load_datasource(config: dict) -> pl.LazyFrame:
+        nonlocal load_calls
+        load_calls += 1
+        return original_load(config)
+
+    monkeypatch.setattr(polars_compute, "load_datasource", load_datasource)
+    steps = [_filter("filter", 0), _view("preview", ["filter"])]
+
+    first = polars_compute.execute_preview(first_config, steps, 10, 0, "first")
+    second = polars_compute.execute_preview(second_config, steps, 10, 0, "second")
+    beta = polars_compute.execute_preview(beta_config, steps, 10, 0, "beta")
+
+    assert [row["value"] for row in first["data"]] == [10]
+    assert [row["value"] for row in second["data"]] == [20]
+    assert [row["value"] for row in beta["data"]] == [10]
+    assert load_calls == 3
 
 
 def test_changed_transform_parameters_invalidate_cached_descendants(monkeypatch: pytest.MonkeyPatch, tmp_path: Path) -> None:
@@ -204,6 +238,36 @@ def test_changed_transform_parameters_invalidate_cached_descendants(monkeypatch:
     assert [row["value"] for row in second["data"]] == [8, 9]
     assert load_calls == 2
     assert step_calls["filter"] == 2
+
+
+def test_eviction_through_execute_preview_recomputes_when_returning_to_previous_step(monkeypatch: pytest.MonkeyPatch, tmp_path: Path) -> None:
+    source_config = _source_config(tmp_path)
+    frame = pl.DataFrame({"value": range(10)})
+    load_calls = 0
+    step_calls = _count_steps(monkeypatch)
+    cache = _install_cache(monkeypatch)
+
+    def load_datasource(_config: dict[str, object]) -> pl.LazyFrame:
+        nonlocal load_calls
+        load_calls += 1
+        return frame.lazy()
+
+    monkeypatch.setattr(polars_compute, "load_datasource", load_datasource)
+
+    first = polars_compute.execute_preview(source_config, [_filter("filter", 2), _view("preview", ["filter"])], 10, 0, "first")
+    first_key = cache._owners["preview"]
+    assert cache.get(first_key) is not None
+
+    second = polars_compute.execute_preview(source_config, [_filter("filter", 7), _view("preview", ["filter"])], 10, 0, "second")
+    assert cache.get(first_key) is None
+
+    third = polars_compute.execute_preview(source_config, [_filter("filter", 2), _view("preview", ["filter"])], 10, 0, "third")
+
+    assert [row["value"] for row in first["data"]] == list(range(3, 10))
+    assert [row["value"] for row in second["data"]] == [8, 9]
+    assert [row["value"] for row in third["data"]] == list(range(3, 10))
+    assert load_calls == 3
+    assert step_calls["filter"] == 3
 
 
 def test_changed_join_source_recomputes_join_but_reuses_cached_input_view(monkeypatch: pytest.MonkeyPatch, tmp_path: Path) -> None:
@@ -359,6 +423,31 @@ def test_invalid_step_config_reports_validation_before_execution(tmp_path: Path)
 
     assert error.value.details["step_id"] == "invalid"
     assert events == []
+
+
+def test_invalid_downstream_step_config_raises_mid_run_after_upstream_progress(monkeypatch: pytest.MonkeyPatch, tmp_path: Path) -> None:
+    source_config = _source_config(tmp_path)
+    _install_cache(monkeypatch)
+    events: list[dict[str, object]] = []
+
+    with pytest.raises(PipelineValidationError) as error:
+        polars_compute.execute_preview(
+            source_config,
+            [
+                _filter("valid-filter", -1),
+                _step("invalid", "select", {"columns": "not-a-list"}, ["valid-filter"]),
+            ],
+            10,
+            0,
+            "invalid-mid-run",
+            progress_callback=events.append,
+        )
+
+    assert error.value.details["step_id"] == "invalid"
+    assert [(event["type"], event["step_id"]) for event in events if "step_id" in event] == [
+        ("step_start", "valid-filter"),
+        ("step_complete", "valid-filter"),
+    ]
 
 
 def test_failing_first_page_is_never_cached(monkeypatch: pytest.MonkeyPatch, tmp_path: Path) -> None:

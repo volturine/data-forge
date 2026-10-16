@@ -54,55 +54,59 @@ class PreviewCache:
 
     def source(self, config: Mapping[str, object]) -> tuple[dict[str, object], str | None]:
         """Return a pinned copy and a stable key for cacheable datasource configs."""
-        copied_config = dict(config)
+        original_config = dict(config)
+        copied_config = dict(original_config)
         source_type = config.get("source_type")
 
-        if source_type == DataSourceType.ICEBERG.value:
-            metadata_path = config.get("metadata_path")
-            if not isinstance(metadata_path, str):
+        try:
+            if source_type == DataSourceType.ICEBERG.value:
+                metadata_path = config.get("metadata_path")
+                if not isinstance(metadata_path, str):
+                    return copied_config, None
+                branch = config.get("branch")
+                namespace_name = config.get("namespace_name")
+                metadata_file = config.get("metadata_file")
+                resolved_path = resolve_iceberg_branch_metadata_path(
+                    metadata_path,
+                    branch if isinstance(branch, str) else None,
+                    namespace_name=namespace_name if isinstance(namespace_name, str) else None,
+                    fallback_file=metadata_file if isinstance(metadata_file, str) else None,
+                )
+                copied_config["metadata_path"] = resolved_path
+                return copied_config, _canonical_hash(copied_config)
+
+            if source_type != DataSourceType.FILE.value:
                 return copied_config, None
-            branch = config.get("branch")
-            namespace_name = config.get("namespace_name")
-            metadata_file = config.get("metadata_file")
-            resolved_path = resolve_iceberg_branch_metadata_path(
-                metadata_path,
-                branch if isinstance(branch, str) else None,
-                namespace_name=namespace_name if isinstance(namespace_name, str) else None,
-                fallback_file=metadata_file if isinstance(metadata_file, str) else None,
-            )
-            copied_config["metadata_path"] = resolved_path
-            return copied_config, _canonical_hash(copied_config)
 
-        if source_type != DataSourceType.FILE.value:
-            return copied_config, None
-
-        file_path = config.get("file_path")
-        if not isinstance(file_path, str):
-            return copied_config, None
-
-        parsed_path = urlparse(file_path)
-        if parsed_path.scheme and parsed_path.scheme.lower() != "file":
-            return copied_config, None
-        if parsed_path.scheme.lower() == "file":
-            if parsed_path.netloc not in {"", "localhost"}:
+            file_path = config.get("file_path")
+            if not isinstance(file_path, str):
                 return copied_config, None
-            local_path = Path(unquote(parsed_path.path))
-        else:
-            if glob.has_magic(file_path):
-                return copied_config, None
-            local_path = Path(file_path)
-        if glob.has_magic(str(local_path)) or not local_path.is_file():
-            return copied_config, None
 
-        stat = local_path.stat()
-        file_identity = {
-            "st_mtime_ns": stat.st_mtime_ns,
-            "st_ctime_ns": stat.st_ctime_ns,
-            "st_size": stat.st_size,
-            "st_ino": stat.st_ino,
-            "st_dev": stat.st_dev,
-        }
-        return copied_config, _canonical_hash({"config": copied_config, "file": file_identity})
+            parsed_path = urlparse(file_path)
+            if parsed_path.scheme and parsed_path.scheme.lower() != "file":
+                return copied_config, None
+            if parsed_path.scheme.lower() == "file":
+                if parsed_path.netloc not in {"", "localhost"}:
+                    return copied_config, None
+                local_path = Path(unquote(parsed_path.path))
+            else:
+                if glob.has_magic(file_path):
+                    return copied_config, None
+                local_path = Path(file_path)
+            if glob.has_magic(str(local_path)) or not local_path.is_file():
+                return copied_config, None
+
+            stat = local_path.stat()
+            file_identity = {
+                "st_mtime_ns": stat.st_mtime_ns,
+                "st_ctime_ns": stat.st_ctime_ns,
+                "st_size": stat.st_size,
+                "st_ino": stat.st_ino,
+                "st_dev": stat.st_dev,
+            }
+            return copied_config, _canonical_hash({"config": copied_config, "file": file_identity})
+        except OSError, TypeError, ValueError:
+            return original_config, None
 
     def step_key(self, parent_key: str | None, step: BackendStep, source_keys: dict[str, str | None]) -> str | None:
         operation = step.operation
@@ -138,14 +142,17 @@ class PreviewCache:
                 return None
             referenced_keys[source_id] = source_key
 
-        return _canonical_hash(
-            {
-                "operation": operation,
-                "params": step.params,
-                "parent": parent_key,
-                "sources": referenced_keys,
-            }
-        )
+        try:
+            return _canonical_hash(
+                {
+                    "operation": operation,
+                    "params": step.params,
+                    "parent": parent_key,
+                    "sources": referenced_keys,
+                }
+            )
+        except OSError, TypeError, ValueError:
+            return None
 
     def get(self, key: str | None) -> pl.DataFrame | None:
         if key is None:

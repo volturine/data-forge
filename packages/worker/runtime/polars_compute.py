@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import contextlib
 import logging
 import time
 from collections import deque
@@ -101,20 +102,13 @@ def _build_pipeline_details(
         raise PipelineValidationError("Pipeline contains a cycle. Remove cyclic dependencies to continue.")
 
     backend_steps: dict[str, BackendStep] = {}
-    for idx, step in enumerate(ordered_steps):
-        step_id = step["id"]
-        try:
-            backend_steps[step_id] = convert_step_format(step)
-        except Exception as e:
-            logger.error(f"Failed to convert step {idx}: {e}", exc_info=True)
-            raise PipelineValidationError(
-                f"Step conversion failed: {e!s}",
-                step_id=str(step.get("id") or ""),
-                details={"operation": step.get("type")},
-            ) from e
+    for step in ordered_steps:
+        with contextlib.suppress(Exception):
+            backend_steps[step["id"]] = convert_step_format(step)
 
     source_key: str | None = None
     right_configs = dict(additional_datasources or {})
+    right_keys: dict[str, str | None] = dict.fromkeys(right_configs)
     step_keys: dict[str, str | None] = dict.fromkeys(step_map)
     cached_frames: dict[str, pl.DataFrame] = {}
     read_started = time.perf_counter()
@@ -123,31 +117,40 @@ def _build_pipeline_details(
             if backend_step.operation == "view" and not backend_step.params.get("cache_enabled", True):
                 preview_cache.discard(step_id)
         try:
-            pinned_config, source_key = preview_cache.source(datasource_config)
-            pinned_right = {source_id: preview_cache.source(config) for source_id, config in right_configs.items()}
-            right_keys = {source_id: key for source_id, (_config, key) in pinned_right.items()}
-            for step in ordered_steps:
-                step_id = step["id"]
-                parent_id = dependency_map[step_id]
-                parent_key = step_keys[parent_id] if parent_id is not None else source_key
-                step_keys[step_id] = preview_cache.step_key(parent_key, backend_steps[step_id], right_keys)
+            datasource_config, source_key = preview_cache.source(datasource_config)
         except OSError, TypeError, ValueError:
-            # Cache identity is optional; the normal loader owns source errors.
-            preview_cache = None
             source_key = None
-            step_keys = dict.fromkeys(step_map)
-        else:
-            datasource_config = pinned_config
-            right_configs = {source_id: config for source_id, (config, _key) in pinned_right.items()}
-            preview_cache.invalidate("source", source_key)
-            for step_id, key in step_keys.items():
-                preview_cache.invalidate(step_id, key)
-                cached = preview_cache.get(key)
-                if cached is not None:
-                    cached_frames[step_id] = cached
-                    backend_step = backend_steps[step_id]
-                    if backend_step.operation == "view" and backend_step.params.get("cache_enabled", True):
-                        preview_cache.materialize(key, cached.lazy(), owner_id=step_id)
+        for source_id, config in list(right_configs.items()):
+            try:
+                right_configs[source_id], right_keys[source_id] = preview_cache.source(config)
+            except OSError, TypeError, ValueError:
+                right_keys[source_id] = None
+        for step in ordered_steps:
+            step_id = step["id"]
+            backend_step_candidate = backend_steps.get(step_id)
+            if backend_step_candidate is None:
+                step_keys[step_id] = None
+                continue
+            parent_id = dependency_map[step_id]
+            parent_key = step_keys[parent_id] if parent_id is not None else source_key
+            try:
+                step_keys[step_id] = preview_cache.step_key(parent_key, backend_step_candidate, right_keys)
+            except OSError, TypeError, ValueError:
+                step_keys[step_id] = None
+
+        preview_cache.invalidate("source", source_key)
+        for step_id, key in step_keys.items():
+            preview_cache.invalidate(step_id, key)
+            cached = preview_cache.get(key)
+            if cached is not None:
+                cached_frames[step_id] = cached
+                backend_step_candidate = backend_steps.get(step_id)
+                if (
+                    backend_step_candidate is not None
+                    and backend_step_candidate.operation == "view"
+                    and backend_step_candidate.params.get("cache_enabled", True)
+                ):
+                    preview_cache.materialize(key, cached.lazy(), owner_id=step_id)
     read_duration_ms = (time.perf_counter() - read_started) * 1000
 
     # Each branch stops at its nearest materialized ancestor. Other branches,
@@ -170,7 +173,10 @@ def _build_pipeline_details(
         lf = cached.lazy() if cached is not None else load_datasource(datasource_config)
     required_sources: set[str] = set()
     for step_id in required_steps - cached_frames.keys():
-        params = backend_steps[step_id].params
+        backend_step_candidate = backend_steps.get(step_id)
+        if backend_step_candidate is None:
+            continue
+        params = backend_step_candidate.params
         right_source = params.get("right_source")
         if isinstance(right_source, str):
             required_sources.add(right_source)
@@ -199,7 +205,18 @@ def _build_pipeline_details(
         if step_id not in required_steps or step_id in cached_frames:
             continue
         step_type = step.get("type") or ""
-        backend_step = backend_steps[step_id]
+        backend_step_resolved = backend_steps.get(step_id)
+        if backend_step_resolved is None:
+            try:
+                backend_step_resolved = convert_step_format(step)
+            except Exception as e:
+                logger.error(f"Failed to convert step {idx}: {e}", exc_info=True)
+                raise PipelineValidationError(
+                    f"Step conversion failed: {e!s}",
+                    step_id=str(step.get("id") or ""),
+                    details={"operation": step.get("type")},
+                ) from e
+        backend_step = backend_step_resolved
         progress = (idx + 1) / total_steps
         step_name = backend_step.name or f"Step {idx + 1}"
         logger.debug(f"Job {job_id}: Processing {step_name} ({progress:.0%})")

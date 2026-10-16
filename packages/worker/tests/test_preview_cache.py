@@ -188,14 +188,42 @@ def test_distinct_sources_and_namespace_config_have_distinct_keys(tmp_path: Path
     first_config = {"source_type": "file", "file_path": str(first_path), "file_type": "csv", "namespace_name": "alpha"}
     second_config = {"source_type": "file", "file_path": str(second_path), "file_type": "csv", "namespace_name": "alpha"}
     other_namespace_config = {**first_config, "namespace_name": "beta"}
+    identical_step = BackendStep(name="Filter", operation="filter", params={"conditions": [{"column": "row", "operator": ">", "value": 0}], "logic": "AND"})
 
     _first_copy, first_key = cache.source(first_config)
     _second_copy, second_key = cache.source(second_config)
     _namespace_copy, namespace_key = cache.source(other_namespace_config)
+    first_step_key = cache.step_key(first_key, identical_step, {})
+    second_step_key = cache.step_key(second_key, identical_step, {})
+    namespace_step_key = cache.step_key(namespace_key, identical_step, {})
 
     assert first_key is not None and second_key is not None and namespace_key is not None
     assert first_key != second_key
     assert first_key != namespace_key
+    assert first_step_key is not None and second_step_key is not None and namespace_step_key is not None
+    assert first_step_key != second_step_key
+    assert first_step_key != namespace_step_key
+
+
+def test_source_and_step_key_return_none_on_serialization_or_stat_errors(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
+    file_path = tmp_path / "source.csv"
+    file_path.write_text("row\n1\n", encoding="utf-8")
+    cache = PreviewCache()
+
+    unserializable_config = {"source_type": "file", "file_path": str(file_path), "file_type": "csv", "bad": object()}
+    copied_config, key = cache.source(unserializable_config)
+    assert copied_config == unserializable_config
+    assert key is None
+
+    unserializable_step = BackendStep(name="Filter", operation="filter", params={"bad": object()})
+    assert cache.step_key("parent", unserializable_step, {}) is None
+
+    with monkeypatch.context() as context:
+        context.setattr(Path, "stat", lambda _self, **_kwargs: (_ for _ in ()).throw(FileNotFoundError("gone")))
+        stat_config = {"source_type": "file", "file_path": str(file_path), "file_type": "csv"}
+        copied_stat_config, stat_key = cache.source(stat_config)
+        assert copied_stat_config == stat_config
+        assert stat_key is None
 
 
 def test_source_bypasses_globs_directories_and_remote_file_urls(tmp_path: Path) -> None:
