@@ -184,6 +184,55 @@
 		void idbSet('sidebar_collapsed', sidebarCollapsed);
 	}
 
+	// Collapse chip plugs into the sidebar's right border line: fillet webs
+	// painted in the chip's surface color arc the line into the chip's top and
+	// bottom edges so the seam reads as one fluid shape.
+	const chipSurfaceColor = 'var(--colors-bg-hover)';
+	const chipFilletCss = `radial-gradient(circle 5px at 100% 0px, transparent 4.4px, ${chipSurfaceColor} 5px)`;
+	const sidebarCollapseChipClass = $derived(
+		css({
+			position: 'absolute',
+			top: '2',
+			right: '-31px',
+			width: '8',
+			height: '8',
+			padding: '2',
+			zIndex: 'popover',
+			display: 'flex',
+			alignItems: 'center',
+			justifyContent: 'center',
+			cursor: 'pointer',
+			backgroundColor: 'bg.hover',
+			borderTopRightRadius: 'sm2',
+			borderBottomRightRadius: 'sm2',
+			color: 'fg.secondary',
+			opacity: sidebarHovered ? 1 : 0,
+			pointerEvents: sidebarHovered ? 'auto' : 'none',
+			transitionProperty: 'opacity, color',
+			transitionDuration: '160ms',
+			transitionTimingFunction: 'ease',
+			_hover: { color: 'fg.primary' },
+			_before: {
+				content: '""',
+				position: 'absolute',
+				left: '0',
+				top: '-5px',
+				width: '5px',
+				height: '5px',
+				background: chipFilletCss
+			},
+			_after: {
+				content: '""',
+				position: 'absolute',
+				left: '0',
+				top: '100%',
+				width: '5px',
+				height: '5px',
+				background: `radial-gradient(circle 5px at 100% 100%, transparent 4.4px, ${chipSurfaceColor} 5px)`
+			}
+		})
+	);
+
 	const sidebarGripClass = css({
 		position: 'absolute',
 		top: '3rem',
@@ -468,26 +517,7 @@
 
 				{#if !sidebarCollapsed}
 					<button
-						class={css({
-							position: 'absolute',
-							top: '2.25',
-							right: '-8',
-							zIndex: 'popover',
-							display: 'flex',
-							alignItems: 'center',
-							justifyContent: 'center',
-							cursor: 'pointer',
-							backgroundColor: 'bg.hover',
-							borderRadius: 'sm2',
-							boxShadow: 'popup',
-							padding: '1.5',
-							color: 'fg.secondary',
-							opacity: sidebarHovered ? 1 : 0,
-							transitionProperty: 'opacity, color, background-color',
-							transitionDuration: '160ms',
-							transitionTimingFunction: 'ease',
-							_hover: { color: 'fg.primary', backgroundColor: 'bg.accent' }
-						})}
+						class={sidebarCollapseChipClass}
 						onclick={toggleSidebar}
 						aria-label="Collapse sidebar"
 						title="Collapse sidebar"
