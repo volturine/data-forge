@@ -470,8 +470,8 @@
 					<button
 						class={css({
 							position: 'absolute',
-							top: '2.5',
-							right: '1.5',
+							top: '2.25',
+							right: '-8',
 							zIndex: 'popover',
 							display: 'flex',
 							alignItems: 'center',
