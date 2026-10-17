@@ -37,6 +37,31 @@
 	let sidebarCollapsed = $state(false);
 	let sidebarHovered = $state(false);
 	let shellInteractive = $state(false);
+
+	// Manual sidebar resizing (drag the grip seam between sidebar and content).
+	const SIDEBAR_MIN_WIDTH = 180;
+	const SIDEBAR_DEFAULT_WIDTH = 220; // matches the `sidebarExpanded` token
+	const SIDEBAR_MAX_WIDTH = 480;
+	const SIDEBAR_COLLAPSED_WIDTH = 56; // matches the `sidebarCollapsed` token
+	let sidebarWidth = $state(SIDEBAR_DEFAULT_WIDTH);
+	let sidebarResizing = $state(false);
+	let sidebarGripHovered = $state(false);
+	let sidebarPortEl = $state<HTMLElement | null>(null);
+
+	function clampSidebarWidth(value: unknown): number {
+		if (typeof value !== 'number' || !Number.isFinite(value)) return SIDEBAR_DEFAULT_WIDTH;
+		return Math.min(SIDEBAR_MAX_WIDTH, Math.max(SIDEBAR_MIN_WIDTH, Math.round(value)));
+	}
+	const sidebarPortClass = $derived(
+		css({
+			position: 'relative',
+			flexShrink: 0,
+			transitionProperty: 'width',
+			transitionDuration: sidebarResizing ? '0ms' : '200ms',
+			transitionTimingFunction: 'ease'
+		})
+	);
+
 	const currentPath = $derived(page.url.pathname);
 	const namespaceState = useNamespace();
 
@@ -75,6 +100,11 @@
 		void idbGet<boolean>('sidebar_collapsed').then((value) => {
 			if (value === null) return;
 			sidebarCollapsed = value;
+		});
+
+		void idbGet<number>('sidebar_width').then((value) => {
+			if (value === null) return;
+			sidebarWidth = clampSidebarWidth(value);
 		});
 	}
 
@@ -152,6 +182,79 @@
 	function toggleSidebar() {
 		sidebarCollapsed = !sidebarCollapsed;
 		void idbSet('sidebar_collapsed', sidebarCollapsed);
+	}
+
+	const sidebarGripClass = css({
+		position: 'absolute',
+		top: '3rem',
+		bottom: '0',
+		right: '-4px',
+		width: '8px',
+		zIndex: 'nav',
+		cursor: 'col-resize',
+		display: 'flex',
+		alignItems: 'stretch',
+		justifyContent: 'center',
+		touchAction: 'none'
+	});
+
+	const sidebarGripLineClass = css({
+		width: '2px',
+		height: '100%',
+		backgroundColor: 'accent.primary',
+		opacity: '0',
+		transitionProperty: 'opacity',
+		transitionDuration: '160ms',
+		transitionTimingFunction: 'ease'
+	});
+
+	const sidebarGripLineActiveClass = css({
+		opacity: '1'
+	});
+
+	function startSidebarResize(event: PointerEvent): void {
+		if (event.button !== 0) return;
+		event.preventDefault();
+		sidebarResizing = true;
+		document.body.style.cursor = 'col-resize';
+		document.body.style.userSelect = 'none';
+		if (event.currentTarget instanceof Element) {
+			// Keep stream events during fast drags outside the 8px hit zone; the
+			// pointer may already be disengaged when the event is replayed manually.
+			try {
+				event.currentTarget.setPointerCapture(event.pointerId);
+			} catch {
+				// Fall back to plain hover-bound movement.
+			}
+		}
+	}
+
+	function moveSidebarResize(event: PointerEvent): void {
+		if (!sidebarResizing) return;
+		if (event.buttons === 0) {
+			endSidebarResize();
+			return;
+		}
+		if (!sidebarPortEl) return;
+		const left = sidebarPortEl.getBoundingClientRect().left;
+		sidebarWidth = clampSidebarWidth(event.clientX - left);
+	}
+
+	function endSidebarResize(): void {
+		if (!sidebarResizing) return;
+		sidebarResizing = false;
+		document.body.style.cursor = '';
+		document.body.style.userSelect = '';
+		void idbSet('sidebar_width', sidebarWidth);
+	}
+
+	function nudgeSidebarWidth(event: KeyboardEvent): void {
+		if (event.key !== 'ArrowLeft' && event.key !== 'ArrowRight') return;
+		const step = event.shiftKey ? 32 : 16;
+		const direction = event.key === 'ArrowLeft' ? -1 : 1;
+		sidebarWidth = clampSidebarWidth(sidebarWidth + direction * step);
+		void idbSet('sidebar_width', sidebarWidth);
+		event.preventDefault();
 	}
 
 	let namespaceOpen = $state(false);
@@ -341,7 +444,9 @@
 	{:else}
 		<div class={css({ display: 'flex', height: '100vh' })} {@attach enableShell}>
 			<div
-				class={css({ position: 'relative', flexShrink: 0 })}
+				bind:this={sidebarPortEl}
+				class={sidebarPortClass}
+				style="width: {sidebarCollapsed ? SIDEBAR_COLLAPSED_WIDTH : sidebarWidth}px"
 				onmouseenter={() => (sidebarHovered = true)}
 				onmouseleave={() => (sidebarHovered = false)}
 				role="presentation"
@@ -372,10 +477,12 @@
 							alignItems: 'center',
 							justifyContent: 'center',
 							cursor: 'pointer',
-							backgroundColor: 'transparent',
-							padding: '3',
+							backgroundColor: 'bg.secondary',
 							borderWidth: '1',
+							borderColor: 'border.primary',
 							borderRadius: 'sm',
+							boxShadow: 'popup',
+							padding: '3',
 							color: 'fg.muted',
 							opacity: sidebarHovered ? 1 : 0,
 							transitionProperty: 'opacity, color',
@@ -389,6 +496,34 @@
 					>
 						<PanelLeftClose size={16} />
 					</button>
+				{/if}
+
+				{#if !sidebarCollapsed}
+					<div
+						role="slider"
+						aria-orientation="vertical"
+						aria-label="Resize sidebar"
+						aria-controls="app-sidebar"
+						aria-valuenow={Math.round(sidebarWidth)}
+						aria-valuemin={SIDEBAR_MIN_WIDTH}
+						aria-valuemax={SIDEBAR_MAX_WIDTH}
+						tabindex="0"
+						class={sidebarGripClass}
+						onmouseenter={() => (sidebarGripHovered = true)}
+						onmouseleave={() => (sidebarGripHovered = false)}
+						onpointerdown={startSidebarResize}
+						onpointermove={moveSidebarResize}
+						onpointerup={endSidebarResize}
+						onpointercancel={endSidebarResize}
+						onkeydown={nudgeSidebarWidth}
+					>
+						<div
+							class={[
+								sidebarGripLineClass,
+								(sidebarGripHovered || sidebarResizing) && sidebarGripLineActiveClass
+							]}
+						></div>
+					</div>
 				{/if}
 			</div>
 
