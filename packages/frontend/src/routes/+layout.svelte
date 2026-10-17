@@ -470,28 +470,27 @@
 					<button
 						class={css({
 							position: 'absolute',
-							top: '0.5',
-							right: '-8',
+							top: '2.5',
+							right: '1.5',
 							zIndex: 'popover',
 							display: 'flex',
 							alignItems: 'center',
 							justifyContent: 'center',
 							cursor: 'pointer',
-							backgroundColor: 'bg.secondary',
-							borderWidth: '1',
-							borderColor: 'border.primary',
-							borderRadius: 'sm',
+							backgroundColor: 'bg.hover',
+							borderRadius: 'sm2',
 							boxShadow: 'popup',
-							padding: '3',
-							color: 'fg.muted',
+							padding: '1.5',
+							color: 'fg.secondary',
 							opacity: sidebarHovered ? 1 : 0,
-							transitionProperty: 'opacity, color',
+							transitionProperty: 'opacity, color, background-color',
 							transitionDuration: '160ms',
 							transitionTimingFunction: 'ease',
-							_hover: { color: 'fg.primary' }
+							_hover: { color: 'fg.primary', backgroundColor: 'bg.accent' }
 						})}
 						onclick={toggleSidebar}
 						aria-label="Collapse sidebar"
+						title="Collapse sidebar"
 						type="button"
 					>
 						<PanelLeftClose size={16} />
