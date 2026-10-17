@@ -188,7 +188,11 @@
 	// painted in the chip's surface color arc the line into the chip's top and
 	// bottom edges so the seam reads as one fluid shape.
 	const chipSurfaceColor = 'var(--colors-bg-hover)';
-	const chipFilletCss = `radial-gradient(circle 8px at 100% 0px, transparent 7.4px, ${chipSurfaceColor} 8px)`;
+	// Top fillet keeps a 2px visible line run-in above the arc (the tangent
+	// point sits below the page top edge); the bottom one reaches to the row
+	// boundary. Sweeps are drawn wider than tall (14px x 8px) so the line flows
+	// tangentially into the chip edges with a long pronounced swoop.
+	const chipFilletCss = `radial-gradient(ellipse 14px 6px at 100% 0px, transparent 0 92%, ${chipSurfaceColor} 100%)`;
 	const sidebarCollapseChipClass = $derived(
 		css({
 			position: 'absolute',
@@ -216,9 +220,9 @@
 				content: '""',
 				position: 'absolute',
 				left: '0',
-				top: '-8px',
-				width: '8px',
-				height: '8px',
+				top: '-6px',
+				width: '15px',
+				height: '6px',
 				background: chipFilletCss
 			},
 			_after: {
@@ -226,9 +230,9 @@
 				position: 'absolute',
 				left: '0',
 				top: '100%',
-				width: '8px',
+				width: '15px',
 				height: '8px',
-				background: `radial-gradient(circle 8px at 100% 100%, transparent 7.4px, ${chipSurfaceColor} 8px)`
+				background: `radial-gradient(ellipse 14px 8px at 100% 100%, transparent 0 92%, ${chipSurfaceColor} 100%)`
 			}
 		})
 	);
