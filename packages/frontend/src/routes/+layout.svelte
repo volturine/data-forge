@@ -188,7 +188,7 @@
 	// painted in the chip's surface color arc the line into the chip's top and
 	// bottom edges so the seam reads as one fluid shape.
 	const chipSurfaceColor = 'var(--colors-bg-hover)';
-	const chipFilletCss = `radial-gradient(circle 5px at 100% 0px, transparent 4.4px, ${chipSurfaceColor} 5px)`;
+	const chipFilletCss = `radial-gradient(circle 8px at 100% 0px, transparent 7.4px, ${chipSurfaceColor} 8px)`;
 	const sidebarCollapseChipClass = $derived(
 		css({
 			position: 'absolute',
@@ -216,9 +216,9 @@
 				content: '""',
 				position: 'absolute',
 				left: '0',
-				top: '-5px',
-				width: '5px',
-				height: '5px',
+				top: '-8px',
+				width: '8px',
+				height: '8px',
 				background: chipFilletCss
 			},
 			_after: {
@@ -226,9 +226,9 @@
 				position: 'absolute',
 				left: '0',
 				top: '100%',
-				width: '5px',
-				height: '5px',
-				background: `radial-gradient(circle 5px at 100% 100%, transparent 4.4px, ${chipSurfaceColor} 5px)`
+				width: '8px',
+				height: '8px',
+				background: `radial-gradient(circle 8px at 100% 100%, transparent 7.4px, ${chipSurfaceColor} 8px)`
 			}
 		})
 	);
