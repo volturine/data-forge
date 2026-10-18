@@ -90,10 +90,7 @@
 			borderRightWidth: '1',
 			zIndex: 'nav',
 			flexShrink: 0,
-			width: collapsed ? 'sidebarCollapsed' : 'sidebarExpanded',
-			transitionProperty: 'width',
-			transitionDuration: '200ms',
-			transitionTimingFunction: 'ease',
+			width: '100%',
 			overflow: 'visible'
 		})
 	);
@@ -170,6 +167,7 @@
 </script>
 
 <aside
+	id="app-sidebar"
 	class={sidebarClass}
 	aria-label="Main navigation"
 	data-shell-interactive={interactive ? 'true' : 'false'}
