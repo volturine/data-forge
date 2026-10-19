@@ -141,6 +141,34 @@ class TestRouterLevelAuth:
 
         assert mcp_routes(direct_app) == mcp_routes(aggregate_app)
 
+    def test_direct_mount_expands_included_websocket_routes(self, monkeypatch: pytest.MonkeyPatch) -> None:
+        from fastapi import APIRouter, FastAPI, WebSocket
+        from starlette.routing import WebSocketRoute
+
+        from api.router import include_api_routes
+
+        api_router_module = importlib.import_module('api.router')
+        versioned_router = APIRouter()
+
+        @versioned_router.websocket('/socket', name='included-socket')
+        async def socket_endpoint(websocket: WebSocket) -> None:
+            await websocket.accept()
+
+        root_router = APIRouter(prefix='/api')
+        root_router.include_router(versioned_router, prefix='/v1')
+        monkeypatch.setattr(api_router_module, 'router', root_router)
+
+        direct_app = FastAPI()
+        include_api_routes(direct_app)
+
+        [route] = [route for route in direct_app.routes if isinstance(route, WebSocketRoute)]
+        assert route.path == '/api/v1/socket'
+        assert route.name == 'included-socket'
+
+        client = TestClient(direct_app)
+        with client.websocket_connect(route.path):
+            pass
+
     def test_api_route_dispatcher_preserves_path_and_method_matching(self) -> None:
         from fastapi import FastAPI
 

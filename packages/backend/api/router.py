@@ -97,7 +97,7 @@ def include_api_routes(app: FastAPI) -> None:
     for route_context in iter_route_contexts(router.routes):
         path = route_context.path
         effective_route = getattr(route_context, '_effective_route', None)
-        starlette_route = getattr(effective_route, 'starlette_route', None)
+        starlette_route = effective_route if isinstance(effective_route, BaseRoute) else getattr(effective_route, 'starlette_route', None)
         path = path or getattr(starlette_route, 'path', None)
         if not path:
             raise RuntimeError(f'API route path could not be resolved for {route_context.name!r}')
@@ -140,8 +140,8 @@ def include_api_routes(app: FastAPI) -> None:
             app.router.add_api_websocket_route(
                 path,
                 original_route.endpoint,
-                name=starlette_route.name,
-                dependencies=starlette_route.dependencies,
+                name=route_context.name,
+                dependencies=route_context.dependencies,
             )
         else:
             raise RuntimeError(f'Unsupported API route type {type(original_route).__name__} at {path!r}')
