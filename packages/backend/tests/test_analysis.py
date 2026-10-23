@@ -19,6 +19,7 @@ from dataforge_protocol import compute_pb2
 from modules.analysis import routes as analysis_routes, service as analysis_service
 from modules.analysis.schemas import AnalysisResponseSchema
 from modules.compute import executor_client
+from tests.harness.analysis_payloads import tab_payload
 from tests.http_client import TestClient
 
 
@@ -102,26 +103,6 @@ def _use_current_analysis_revision(client: TestClient) -> None:
     client.headers['If-Match'] = '1'
 
 
-def _schema_enum_values(schema: dict, field_name: str) -> list[str]:
-    field_schema = schema.get('properties', {}).get(field_name, {})
-    if field_schema.get('type') == 'array':
-        item_schema = field_schema.get('items', {})
-        enum_values = item_schema.get('enum')
-        if enum_values is not None:
-            return enum_values
-        ref = item_schema.get('$ref')
-        if isinstance(ref, str):
-            return schema.get('$defs', {}).get(ref.split('/')[-1], {}).get('enum', [])
-        return []
-    enum_values = field_schema.get('enum')
-    if enum_values is not None:
-        return enum_values
-    ref = field_schema.get('$ref')
-    if isinstance(ref, str):
-        return schema.get('$defs', {}).get(ref.split('/')[-1], {}).get('enum', [])
-    return []
-
-
 def _filter_config(column: str, operator: str, value: object) -> dict[str, object]:
     return {
         'conditions': [
@@ -175,22 +156,9 @@ class TestAnalysisCreate:
             'name': 'New Analysis',
             'description': 'Test analysis description',
             'tabs': [
-                {
-                    'id': 'tab1',
-                    'name': 'Source',
-                    'parent_id': None,
-                    'datasource': {
-                        'id': sample_datasource.id,
-                        'analysis_tab_id': None,
-                        'config': {'branch': 'master'},
-                    },
-                    'output': {
-                        'result_id': str(uuid.uuid4()),
-                        'datasource_type': 'iceberg',
-                        'format': 'parquet',
-                        'filename': 'source_1',
-                    },
-                    'steps': [
+                tab_payload(
+                    sample_datasource.id,
+                    steps=[
                         {
                             'id': 'step1',
                             'type': 'filter',
@@ -198,7 +166,7 @@ class TestAnalysisCreate:
                             'depends_on': [],
                         },
                     ],
-                },
+                ),
             ],
         }
 
@@ -222,23 +190,7 @@ class TestAnalysisCreate:
         payload = {
             'name': 'Blank Step ID',
             'tabs': [
-                {
-                    'id': 'tab1',
-                    'name': 'Source',
-                    'parent_id': None,
-                    'datasource': {
-                        'id': sample_datasource.id,
-                        'analysis_tab_id': None,
-                        'config': {'branch': 'master'},
-                    },
-                    'output': {
-                        'result_id': str(uuid.uuid4()),
-                        'datasource_type': 'iceberg',
-                        'format': 'parquet',
-                        'filename': 'blank_step_id',
-                    },
-                    'steps': [{'id': '   ', 'type': 'select', 'config': {'columns': 'not-a-list'}}],
-                },
+                tab_payload(sample_datasource.id, steps=[{'id': '   ', 'type': 'select', 'config': {'columns': 'not-a-list'}}]),
             ],
         }
 
@@ -254,22 +206,11 @@ class TestAnalysisCreate:
             'name': 'Multi-Source Analysis',
             'description': 'Analysis with multiple datasources',
             'tabs': [
-                {
-                    'id': 'tab-left',
-                    'name': 'Left Source',
-                    'parent_id': None,
-                    'datasource': {
-                        'id': datasource_ids[0],
-                        'analysis_tab_id': None,
-                        'config': {'branch': 'master'},
-                    },
-                    'output': {
-                        'result_id': str(uuid.uuid4()),
-                        'datasource_type': 'iceberg',
-                        'format': 'parquet',
-                        'filename': 'left_source',
-                    },
-                    'steps': [
+                tab_payload(
+                    datasource_ids[0],
+                    tab_id='tab-left',
+                    name='Left Source',
+                    steps=[
                         {
                             'id': 'step1',
                             'type': 'join',
@@ -277,24 +218,8 @@ class TestAnalysisCreate:
                             'depends_on': [],
                         },
                     ],
-                },
-                {
-                    'id': 'tab-right',
-                    'name': 'Right Source',
-                    'parent_id': None,
-                    'datasource': {
-                        'id': datasource_ids[1],
-                        'analysis_tab_id': None,
-                        'config': {'branch': 'master'},
-                    },
-                    'output': {
-                        'result_id': str(uuid.uuid4()),
-                        'datasource_type': 'iceberg',
-                        'format': 'parquet',
-                        'filename': 'right_source',
-                    },
-                    'steps': [],
-                },
+                ),
+                tab_payload(datasource_ids[1], tab_id='tab-right', name='Right Source'),
             ],
         }
 
@@ -311,23 +236,7 @@ class TestAnalysisCreate:
             'name': 'Invalid Analysis',
             'description': 'Test',
             'tabs': [
-                {
-                    'id': 'tab1',
-                    'name': 'Source',
-                    'parent_id': None,
-                    'datasource': {
-                        'id': str(uuid.uuid4()),
-                        'analysis_tab_id': None,
-                        'config': {'branch': 'master'},
-                    },
-                    'output': {
-                        'result_id': str(uuid.uuid4()),
-                        'datasource_type': 'iceberg',
-                        'format': 'parquet',
-                        'filename': 'source_2',
-                    },
-                    'steps': [],
-                },
+                tab_payload(str(uuid.uuid4())),
             ],
         }
 
@@ -359,23 +268,7 @@ class TestAnalysisCreate:
             'name': 'Hidden Input Analysis',
             'description': 'Hidden datasources are outside the analysis input catalog',
             'tabs': [
-                {
-                    'id': 'tab1',
-                    'name': 'Source',
-                    'parent_id': None,
-                    'datasource': {
-                        'id': hidden.id,
-                        'analysis_tab_id': None,
-                        'config': {'branch': 'master'},
-                    },
-                    'output': {
-                        'result_id': str(uuid.uuid4()),
-                        'datasource_type': 'iceberg',
-                        'format': 'parquet',
-                        'filename': 'source_hidden',
-                    },
-                    'steps': [],
-                },
+                tab_payload(hidden.id),
             ],
         }
 
@@ -389,23 +282,7 @@ class TestAnalysisCreate:
         payload = {
             'name': 'Analysis Without Description',
             'tabs': [
-                {
-                    'id': 'tab1',
-                    'name': 'Source',
-                    'parent_id': None,
-                    'datasource': {
-                        'id': sample_datasource.id,
-                        'analysis_tab_id': None,
-                        'config': {'branch': 'master'},
-                    },
-                    'output': {
-                        'result_id': str(uuid.uuid4()),
-                        'datasource_type': 'iceberg',
-                        'format': 'parquet',
-                        'filename': 'source_3',
-                    },
-                    'steps': [],
-                },
+                tab_payload(sample_datasource.id),
             ],
         }
 
@@ -423,22 +300,9 @@ class TestAnalysisCreate:
             'name': 'Complex Pipeline Analysis',
             'description': 'Multi-step pipeline',
             'tabs': [
-                {
-                    'id': 'tab1',
-                    'name': 'Source',
-                    'parent_id': None,
-                    'datasource': {
-                        'id': sample_datasource.id,
-                        'analysis_tab_id': None,
-                        'config': {'branch': 'master'},
-                    },
-                    'output': {
-                        'result_id': str(uuid.uuid4()),
-                        'datasource_type': 'iceberg',
-                        'format': 'parquet',
-                        'filename': 'source_4',
-                    },
-                    'steps': [
+                tab_payload(
+                    sample_datasource.id,
+                    steps=[
                         {
                             'id': 'step1',
                             'type': 'filter',
@@ -458,7 +322,7 @@ class TestAnalysisCreate:
                             'depends_on': ['step2'],
                         },
                     ],
-                },
+                ),
             ],
         }
 
@@ -471,29 +335,18 @@ class TestAnalysisCreate:
         assert result['pipeline_definition']['tabs'][0]['steps'][1]['depends_on'] == ['step1']
         assert result['pipeline_definition']['tabs'][0]['steps'][2]['depends_on'] == ['step2']
 
-    def test_create_analysis_rejects_pipeline_steps(self, client, sample_datasource: DataSource):
+    @pytest.mark.parametrize(
+        'extra_fields',
+        [
+            pytest.param({'status': 'draft'}, id='status'),
+            pytest.param({'pipeline_steps': [{'id': 'step1', 'type': 'filter', 'config': {}}]}, id='pipeline_steps'),
+        ],
+    )
+    def test_create_analysis_rejects_unsupported_fields(self, client, sample_datasource: DataSource, extra_fields: dict[str, object]):
         payload = {
             'name': 'Unsupported Payload',
-            'pipeline_steps': [{'id': 'step1', 'type': 'filter', 'config': {}}],
-            'tabs': [
-                {
-                    'id': 'tab1',
-                    'name': 'Source',
-                    'parent_id': None,
-                    'datasource': {
-                        'id': sample_datasource.id,
-                        'analysis_tab_id': None,
-                        'config': {'branch': 'master'},
-                    },
-                    'output': {
-                        'result_id': str(uuid.uuid4()),
-                        'datasource_type': 'iceberg',
-                        'format': 'parquet',
-                        'filename': 'source_unsupported',
-                    },
-                    'steps': [],
-                },
-            ],
+            'tabs': [tab_payload(sample_datasource.id)],
+            **extra_fields,
         }
 
         response = client.post('/api/v1/analysis', json=payload)
@@ -506,40 +359,14 @@ class TestAnalysisCreate:
             'name': 'Derived Tab Analysis',
             'description': 'Tab-2 derives from tab-1 output',
             'tabs': [
-                {
-                    'id': 'tab1',
-                    'name': 'Source',
-                    'parent_id': None,
-                    'datasource': {
-                        'id': sample_datasource.id,
-                        'analysis_tab_id': None,
-                        'config': {'branch': 'master'},
-                    },
-                    'output': {
-                        'result_id': tab1_result_id,
-                        'datasource_type': 'iceberg',
-                        'format': 'parquet',
-                        'filename': 'derived_source',
-                    },
-                    'steps': [],
-                },
-                {
-                    'id': 'tab2',
-                    'name': 'Derived',
-                    'parent_id': 'tab1',
-                    'datasource': {
-                        'id': tab1_result_id,
-                        'analysis_tab_id': 'tab1',
-                        'config': {'branch': 'master'},
-                    },
-                    'output': {
-                        'result_id': str(uuid.uuid4()),
-                        'datasource_type': 'iceberg',
-                        'format': 'parquet',
-                        'filename': 'derived_output',
-                    },
-                    'steps': [],
-                },
+                tab_payload(sample_datasource.id, result_id=tab1_result_id),
+                tab_payload(
+                    tab1_result_id,
+                    tab_id='tab2',
+                    name='Derived',
+                    parent_id='tab1',
+                    analysis_tab_id='tab1',
+                ),
             ],
         }
 
@@ -560,23 +387,7 @@ class TestAnalysisCreate:
         payload = {
             'name': 'Output Placeholder Analysis',
             'tabs': [
-                {
-                    'id': 'tab1',
-                    'name': 'Source',
-                    'parent_id': None,
-                    'datasource': {
-                        'id': sample_datasource.id,
-                        'analysis_tab_id': None,
-                        'config': {'branch': 'master'},
-                    },
-                    'output': {
-                        'result_id': output_id,
-                        'datasource_type': 'iceberg',
-                        'format': 'parquet',
-                        'filename': 'placeholder_out',
-                    },
-                    'steps': [],
-                },
+                tab_payload(sample_datasource.id, result_id=output_id),
             ],
         }
 
@@ -597,23 +408,7 @@ class TestAnalysisCreate:
         payload = {
             'name': 'Owned Analysis',
             'tabs': [
-                {
-                    'id': 'tab1',
-                    'name': 'Source',
-                    'parent_id': None,
-                    'datasource': {
-                        'id': sample_datasource.id,
-                        'analysis_tab_id': None,
-                        'config': {'branch': 'master'},
-                    },
-                    'output': {
-                        'result_id': str(uuid.uuid4()),
-                        'datasource_type': 'iceberg',
-                        'format': 'parquet',
-                        'filename': 'owned_source',
-                    },
-                    'steps': [],
-                },
+                tab_payload(sample_datasource.id),
             ],
         }
 
@@ -633,23 +428,7 @@ class TestAnalysisCreate:
         payload = {
             'name': 'Persisted Analysis',
             'tabs': [
-                {
-                    'id': 'tab1',
-                    'name': 'Source',
-                    'parent_id': None,
-                    'datasource': {
-                        'id': sample_datasource.id,
-                        'analysis_tab_id': None,
-                        'config': {'branch': 'master'},
-                    },
-                    'output': {
-                        'result_id': str(uuid.uuid4()),
-                        'datasource_type': 'iceberg',
-                        'format': 'parquet',
-                        'filename': 'persisted_source',
-                    },
-                    'steps': [],
-                },
+                tab_payload(sample_datasource.id),
             ],
         }
 
@@ -936,23 +715,7 @@ class TestAnalysisImport:
             'datasource_remap': {imported_source_id: sample_datasource.id},
             'pipeline': {
                 'tabs': [
-                    {
-                        'id': 'tab-imported',
-                        'name': 'Imported Source',
-                        'parent_id': None,
-                        'datasource': {
-                            'id': imported_source_id,
-                            'analysis_tab_id': None,
-                            'config': {'branch': 'master'},
-                        },
-                        'output': {
-                            'result_id': str(uuid.uuid4()),
-                            'datasource_type': 'iceberg',
-                            'format': 'parquet',
-                            'filename': 'imported_source',
-                        },
-                        'steps': [],
-                    },
+                    tab_payload(imported_source_id, tab_id='tab-imported', name='Imported Source'),
                 ],
             },
         }
@@ -968,19 +731,7 @@ class TestAnalysisImport:
         payload: dict[str, Any] = {
             'pipeline': {
                 'tabs': [
-                    {
-                        'id': 'tab-imported',
-                        'name': 'Imported Source',
-                        'parent_id': None,
-                        'datasource': {'id': sample_datasource.id, 'analysis_tab_id': None, 'config': {'branch': 'master'}},
-                        'output': {
-                            'result_id': str(uuid.uuid4()),
-                            'datasource_type': 'iceberg',
-                            'format': 'parquet',
-                            'filename': 'imported_source',
-                        },
-                        'steps': [],
-                    },
+                    tab_payload(sample_datasource.id, tab_id='tab-imported', name='Imported Source'),
                 ],
             },
         }
@@ -998,22 +749,11 @@ class TestAnalysisImport:
             'datasource_remap': {imported_source_id: sample_datasource.id},
             'pipeline': {
                 'tabs': [
-                    {
-                        'id': 'tab-imported',
-                        'name': 'Imported Source',
-                        'parent_id': None,
-                        'datasource': {
-                            'id': imported_source_id,
-                            'analysis_tab_id': None,
-                            'config': {'branch': 'master'},
-                        },
-                        'output': {
-                            'result_id': str(uuid.uuid4()),
-                            'datasource_type': 'iceberg',
-                            'format': 'parquet',
-                            'filename': 'imported_join_source',
-                        },
-                        'steps': [
+                    tab_payload(
+                        imported_source_id,
+                        tab_id='tab-imported',
+                        name='Imported Source',
+                        steps=[
                             {
                                 'id': 'join-1',
                                 'type': 'join',
@@ -1027,7 +767,7 @@ class TestAnalysisImport:
                                 'is_applied': True,
                             }
                         ],
-                    },
+                    ),
                 ],
             },
         }
@@ -1092,23 +832,14 @@ class TestAnalysisDuplicate:
             }
         )
         derived_output_id = str(uuid.uuid4())
-        derived_tab = {
-            'id': 'tab-derived',
-            'name': 'Derived',
-            'parent_id': source_tab['id'],
-            'datasource': {
-                'id': source_tab['output']['result_id'],
-                'analysis_tab_id': source_tab['id'],
-                'config': {'branch': 'master'},
-            },
-            'output': {
-                'result_id': derived_output_id,
-                'datasource_type': 'iceberg',
-                'format': 'parquet',
-                'filename': 'derived_output',
-            },
-            'steps': [],
-        }
+        derived_tab = tab_payload(
+            source_tab['output']['result_id'],
+            tab_id='tab-derived',
+            name='Derived',
+            parent_id=source_tab['id'],
+            analysis_tab_id=source_tab['id'],
+            result_id=derived_output_id,
+        )
         sample_analysis.pipeline_definition = {'tabs': [source_tab, derived_tab]}
         test_db_session.add(sample_analysis)
         test_db_session.commit()
@@ -1203,6 +934,7 @@ class TestAnalysisUpdate:
         assert 'locked by another owner' in response.json()['detail']
 
     def test_update_analysis_name(self, client, sample_analysis: Analysis):
+        original_updated_at = client.get(f'/api/v1/analysis/{sample_analysis.id}').json()['updated_at']
         payload = {
             'name': 'Updated Analysis Name',
             'tabs': sample_analysis.pipeline_definition['tabs'],
@@ -1215,6 +947,7 @@ class TestAnalysisUpdate:
 
         assert result['name'] == 'Updated Analysis Name'
         assert result['description'] == sample_analysis.description
+        assert result['updated_at'] != original_updated_at
 
     def test_update_analysis_description(self, client, sample_analysis: Analysis):
         payload = {
@@ -1254,22 +987,10 @@ class TestAnalysisUpdate:
     def test_update_analysis_tab_steps(self, client, sample_analysis: Analysis):
         payload = {
             'tabs': [
-                {
-                    'id': 'tab-updated',
-                    'name': 'Source',
-                    'parent_id': None,
-                    'datasource': {
-                        'id': sample_analysis.pipeline_definition['tabs'][0]['datasource']['id'],
-                        'analysis_tab_id': None,
-                        'config': {'branch': 'master'},
-                    },
-                    'output': {
-                        'result_id': str(uuid.uuid4()),
-                        'datasource_type': 'iceberg',
-                        'format': 'parquet',
-                        'filename': 'source_5',
-                    },
-                    'steps': [
+                tab_payload(
+                    sample_analysis.pipeline_definition['tabs'][0]['datasource']['id'],
+                    tab_id='tab-updated',
+                    steps=[
                         {
                             'id': 'new_step',
                             'type': 'groupby',
@@ -1277,7 +998,7 @@ class TestAnalysisUpdate:
                             'depends_on': [],
                         },
                     ],
-                },
+                ),
             ],
         }
 
@@ -1291,10 +1012,17 @@ class TestAnalysisUpdate:
         assert result['pipeline_definition']['tabs'][0]['steps'][0]['type'] == 'groupby'
         assert result['pipeline_definition']['tabs']
 
-    def test_update_analysis_rejects_status(self, client, sample_analysis: Analysis):
-        payload = {
-            'status': 'completed',
+    @pytest.mark.parametrize(
+        'extra_fields',
+        [
+            pytest.param({'status': 'completed'}, id='status'),
+            pytest.param({'pipeline_steps': [{'id': 'step1', 'type': 'filter', 'config': {}}]}, id='pipeline_steps'),
+        ],
+    )
+    def test_update_analysis_rejects_unsupported_fields(self, client, sample_analysis: Analysis, extra_fields: dict[str, object]):
+        payload: dict[str, object] = {
             'tabs': sample_analysis.pipeline_definition['tabs'],
+            **extra_fields,
         }
 
         response = client.put(f'/api/v1/analysis/{sample_analysis.id}', json=payload)
@@ -1341,16 +1069,6 @@ class TestAnalysisUpdate:
         assert result['name'] == sample_analysis.name
         assert result['description'] == sample_analysis.description
 
-    def test_update_analysis_rejects_pipeline_steps(self, client, sample_analysis: Analysis):
-        payload: dict[str, object] = {
-            'tabs': sample_analysis.pipeline_definition['tabs'],
-            'pipeline_steps': [{'id': 'step1', 'type': 'filter', 'config': {}}],
-        }
-
-        response = client.put(f'/api/v1/analysis/{sample_analysis.id}', json=payload)
-
-        assert response.status_code == 422
-
     def test_update_analysis_derived_tab_no_new_datasource_rows(self, client, sample_analysis: Analysis, test_db_session):
         from sqlalchemy import select as sa_select
 
@@ -1364,40 +1082,15 @@ class TestAnalysisUpdate:
 
         payload = {
             'tabs': [
-                {
-                    'id': 'tab1',
-                    'name': 'Source',
-                    'parent_id': None,
-                    'datasource': {
-                        'id': datasource_id,
-                        'analysis_tab_id': None,
-                        'config': {'branch': 'master'},
-                    },
-                    'output': {
-                        'result_id': tab1_result_id,
-                        'datasource_type': 'iceberg',
-                        'format': 'parquet',
-                        'filename': 'upd_source',
-                    },
-                    'steps': [],
-                },
-                {
-                    'id': 'tab2',
-                    'name': 'Derived',
-                    'parent_id': 'tab1',
-                    'datasource': {
-                        'id': tab1_result_id,
-                        'analysis_tab_id': 'tab1',
-                        'config': {'branch': 'master'},
-                    },
-                    'output': {
-                        'result_id': tab2_result_id,
-                        'datasource_type': 'iceberg',
-                        'format': 'parquet',
-                        'filename': 'upd_derived',
-                    },
-                    'steps': [],
-                },
+                tab_payload(datasource_id, result_id=tab1_result_id),
+                tab_payload(
+                    tab1_result_id,
+                    tab_id='tab2',
+                    name='Derived',
+                    parent_id='tab1',
+                    analysis_tab_id='tab1',
+                    result_id=tab2_result_id,
+                ),
             ],
         }
 
@@ -1792,23 +1485,7 @@ class TestAnalysisValidate:
         payload = {
             'name': 'Validate Test',
             'tabs': [
-                {
-                    'id': 'tab1',
-                    'name': 'Source',
-                    'parent_id': None,
-                    'datasource': {
-                        'id': sample_datasource.id,
-                        'analysis_tab_id': None,
-                        'config': {'branch': 'master'},
-                    },
-                    'output': {
-                        'result_id': str(uuid.uuid4()),
-                        'datasource_type': 'iceberg',
-                        'format': 'parquet',
-                        'filename': 'out_validate',
-                    },
-                    'steps': [],
-                },
+                tab_payload(sample_datasource.id),
             ],
         }
 
@@ -1825,23 +1502,7 @@ class TestAnalysisValidate:
         payload = {
             'name': 'Validate Test',
             'tabs': [
-                {
-                    'id': 'tab1',
-                    'name': 'Source',
-                    'parent_id': None,
-                    'datasource': {
-                        'id': str(uuid.uuid4()),
-                        'analysis_tab_id': None,
-                        'config': {'branch': 'master'},
-                    },
-                    'output': {
-                        'result_id': str(uuid.uuid4()),
-                        'datasource_type': 'iceberg',
-                        'format': 'parquet',
-                        'filename': 'out_validate_bad',
-                    },
-                    'steps': [],
-                },
+                tab_payload(str(uuid.uuid4())),
             ],
         }
 
@@ -1854,23 +1515,7 @@ class TestAnalysisValidate:
         payload = {
             'name': 'Validate No Persist',
             'tabs': [
-                {
-                    'id': 'tab1',
-                    'name': 'Source',
-                    'parent_id': None,
-                    'datasource': {
-                        'id': sample_datasource.id,
-                        'analysis_tab_id': None,
-                        'config': {'branch': 'master'},
-                    },
-                    'output': {
-                        'result_id': str(uuid.uuid4()),
-                        'datasource_type': 'iceberg',
-                        'format': 'parquet',
-                        'filename': 'out_no_persist',
-                    },
-                    'steps': [],
-                },
+                tab_payload(sample_datasource.id),
             ],
         }
 
@@ -2010,30 +1655,6 @@ class TestStepValidation:
         # Hidden is outside the input catalog — same as missing.
         assert response.status_code == 404
         assert 'not found' in response.json()['detail'].lower()
-
-    def test_accepts_valid_steps(self, client, sample_datasource: DataSource):
-        payload = self._make_payload(
-            sample_datasource.id,
-            [
-                {
-                    'id': 's1',
-                    'type': 'filter',
-                    'config': {
-                        'conditions': [{'column': 'age', 'operator': '>', 'value': 25}],
-                        'logic': 'AND',
-                    },
-                    'depends_on': [],
-                },
-                {
-                    'id': 's2',
-                    'type': 'select',
-                    'config': {'columns': ['name']},
-                    'depends_on': ['s1'],
-                },
-            ],
-        )
-        response = client.post('/api/v1/analysis', json=payload)
-        assert response.status_code == 200
 
     def test_add_step_rejects_bad_dependency(self, client, sample_analysis: Analysis):
         tab_id = sample_analysis.pipeline_definition['tabs'][0]['id']

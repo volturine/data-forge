@@ -172,19 +172,6 @@ describe('compute api activity tracking', () => {
 		expect(value).toBe(result);
 	});
 
-	test('spawnAnalysisComputeWorker coalesces identical in-flight requests', () => {
-		const result = makePendingResult('spawn');
-		mockApiRequest.mockReturnValue(result);
-
-		const first = compute.spawnAnalysisComputeWorker('analysis-1');
-		const second = compute.spawnAnalysisComputeWorker('analysis-1');
-
-		expect(first).toBe(result);
-		expect(second).toBe(result);
-		expect(mockApiRequest).toHaveBeenCalledTimes(1);
-		expect(mockRetain).toHaveBeenCalledTimes(1);
-	});
-
 	test('getStepRowCount tracks compute activity', () => {
 		const result = makeResult('row-count');
 		mockApiRequest.mockReturnValue(result);

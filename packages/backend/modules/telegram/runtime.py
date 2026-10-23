@@ -136,16 +136,18 @@ class TelegramIntegrationRuntime:
         claim = await self._database(store.claim_detection, generation=self.generation)
         if claim is not None:
             await self._process_detection(client, claim)
-            wake_version = self._wake_hub.version()
-            if stop_event.is_set():
-                return wake_version
+            # Wakeups for requests queued meanwhile were absorbed while this one
+            # ran, so claim again before waiting for the next signal.
+            return self._wake_hub.version()
 
         settings = await self._database(store.read_settings)
         current_version = self._wake_hub.version()
         if current_version != wake_version:
             return current_version
         if not settings.enabled or not settings.token:
-            return await self._wait_for_signal(stop_event, wake_version, timeout=1.0)
+            # Settings changes and detection requests NOTIFY this actor; while the bot
+            # is off, the timed cycle only times out expired detection requests.
+            return await self._wait_for_signal(stop_event, wake_version, timeout=_RECOVERY_SECONDS)
 
         fingerprint = store.token_fingerprint(settings.token)
         offset = await self._database(store.get_next_update_id, fingerprint)

@@ -8,6 +8,7 @@ export class AuthStore {
 	loading = $state(false);
 	error = $state<string | null>(null);
 	private operationVersion = 0;
+	private resolvePending: Promise<void> | null = null;
 
 	private beginOperation(): number {
 		const version = ++this.operationVersion;
@@ -34,35 +35,42 @@ export class AuthStore {
 		return this.status === 'failed';
 	}
 
-	async resolve(): Promise<void> {
-		if (this.status !== 'unknown') return;
+	resolve(): Promise<void> {
+		if (this.resolvePending) return this.resolvePending;
+		if (this.status !== 'unknown' && !this.bootstrapFailed) return Promise.resolve();
+
 		const version = this.beginOperation();
-		const result = await getMe();
-		// A public auth form may be submitted while this optional session probe is
-		// still in flight. Never let its late 401/5xx response overwrite the
-		// registration or login that superseded it.
-		if (version !== this.operationVersion) return;
-		result.match(
-			(user) => {
-				this.user = user;
-				this.status = 'authenticated';
-				this.error = null;
-			},
-			(err) => {
-				this.user = null;
-				// Unauthenticated session is a normal terminal state. Network /
-				// timeout / 5xx leave bootstrap in a failed state so the shell
-				// can show an error instead of hanging or false-login-redirect.
-				if (err.status === 401 || err.status === 403) {
-					this.status = 'unauthenticated';
+		const request = (async () => {
+			const result = await getMe();
+			// A public auth form may be submitted while this optional session probe
+			// is in flight. Never let its late response overwrite that operation.
+			if (version !== this.operationVersion) return;
+			result.match(
+				(user) => {
+					this.user = user;
+					this.status = 'authenticated';
 					this.error = null;
-				} else {
-					this.status = 'failed';
-					this.error = err.message;
+				},
+				(err) => {
+					this.user = null;
+					// Unauthenticated session is a normal terminal state. Network /
+					// timeout / 5xx leave bootstrap in a failed state for retry.
+					if (err.status === 401 || err.status === 403) {
+						this.status = 'unauthenticated';
+						this.error = null;
+					} else {
+						this.status = 'failed';
+						this.error = err.message;
+					}
 				}
-			}
-		);
-		this.finishOperation(version);
+			);
+		})().finally(() => {
+			if (this.resolvePending === request) this.resolvePending = null;
+			this.finishOperation(version);
+		});
+
+		this.resolvePending = request;
+		return request;
 	}
 
 	async login(email: string, password: string): Promise<boolean> {

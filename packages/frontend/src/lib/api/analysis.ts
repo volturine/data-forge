@@ -2,13 +2,8 @@ import type {
 	Analysis,
 	AnalysisCreate,
 	AnalysisGalleryItem,
-	AnalysisTemplateDetail,
-	AnalysisTemplateSummary,
 	AnalysisUpdate,
-	DuplicateAnalysisRequest,
-	GenerateAnalysisRequest,
-	GeneratedAnalysisResponse,
-	ImportAnalysisRequest
+	DuplicateAnalysisRequest
 } from '#lib/types/analysis.js';
 import { apiRequest, apiConditionalRequestWithHeaders, apiRequestWithHeaders } from './client';
 import { errAsync, okAsync, type ResultAsync } from 'neverthrow';
@@ -34,33 +29,11 @@ export const listFavoriteAnalyses = (
 ): ResultAsync<AnalysisGalleryItem[], ApiError> =>
 	apiRequest<AnalysisGalleryItem[]>('/v1/analysis/favorites', options);
 
-export const listAnalysisTemplates = (): ResultAsync<AnalysisTemplateSummary[], ApiError> =>
-	apiRequest<AnalysisTemplateSummary[]>('/v1/analysis/templates');
-
-export const getAnalysisTemplate = (
-	templateId: string
-): ResultAsync<AnalysisTemplateDetail, ApiError> =>
-	apiRequest<AnalysisTemplateDetail>(`/v1/analysis/templates/${templateId}`);
-
-export const generateAnalysis = (
-	data: GenerateAnalysisRequest
-): ResultAsync<GeneratedAnalysisResponse, ApiError> =>
-	apiRequest<GeneratedAnalysisResponse>('/v1/analysis/generate', {
-		method: 'POST',
-		body: JSON.stringify(data)
-	});
-
 export const duplicateAnalysis = (
 	id: string,
 	data: DuplicateAnalysisRequest
 ): ResultAsync<Analysis, ApiError> =>
 	apiRequest<Analysis>(`/v1/analysis/${id}/duplicate`, {
-		method: 'POST',
-		body: JSON.stringify(data)
-	});
-
-export const importAnalysis = (data: ImportAnalysisRequest): ResultAsync<Analysis, ApiError> =>
-	apiRequest<Analysis>('/v1/analysis/import', {
 		method: 'POST',
 		body: JSON.stringify(data)
 	});
@@ -193,17 +166,6 @@ export type CodeExportResponse = {
 	format: CodeExportFormat;
 	tab_id?: string | null;
 };
-
-export const validateAnalysis = (
-	data: AnalysisCreate
-): ResultAsync<{ valid: boolean; payload: { tabs: AnalysisCreate['tabs'] } }, ApiError> =>
-	apiRequest<{ valid: boolean; payload: { tabs: AnalysisCreate['tabs'] } }>(
-		'/v1/analysis/validate',
-		{
-			method: 'POST',
-			body: JSON.stringify(data)
-		}
-	);
 
 export const exportAnalysisCode = (
 	analysisId: string,

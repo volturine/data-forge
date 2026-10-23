@@ -13,16 +13,13 @@ from functools import partial
 from typing import Any, Never, cast
 
 import grpc
-import pyarrow as pa  # type: ignore[import-untyped]
 from google.protobuf.message import Message
 from google.protobuf.timestamp_pb2 import Timestamp
 from protovalidate import ValidationError, Validator
-from pyiceberg.table import StaticTable
 
 from dataforge_protocol import common_pb2, iceberg_pb2, iceberg_pb2_grpc, object_store_pb2, object_store_pb2_grpc
-from runtime import compute_service, iceberg_metadata, iceberg_snapshot_reader, object_store
+from runtime import compute_service, object_store
 from runtime.config import settings
-from runtime.json_values import dict_to_struct
 from runtime.worker_runtime_client import BackendWorkerRpcError
 
 logger = logging.getLogger(__name__)
@@ -166,31 +163,6 @@ class _WorkerRequestValidationInterceptor(grpc.aio.ServerInterceptor):
         )
 
 
-def _object_store_storage_options_proto(payload: dict[str, object]) -> object_store_pb2.ObjectStoreStorageOptions:
-    return object_store_pb2.ObjectStoreStorageOptions(
-        endpoint_url=_required_str(payload, "s3.endpoint"),
-        access_key_id=_required_str(payload, "s3.access-key-id"),
-        secret_access_key=_required_str(payload, "s3.secret-access-key"),
-        region=_required_str(payload, "s3.region"),
-        force_virtual_addressing=_required_bool(payload, "s3.force-virtual-addressing"),
-        py_io_impl=_required_str(payload, "py-io-impl"),
-    )
-
-
-def _required_str(payload: dict[str, object], key: str) -> str:
-    value = payload.get(key)
-    if not isinstance(value, str) or not value:
-        raise ValueError(f"object storage option {key} must be a non-empty string")
-    return value
-
-
-def _required_bool(payload: dict[str, object], key: str) -> bool:
-    value = payload.get(key)
-    if not isinstance(value, bool):
-        raise ValueError(f"object storage option {key} must be a boolean")
-    return value
-
-
 class ThreadedDataPlaneServer:
     def __init__(self, *, loop: asyncio.AbstractEventLoop, server: grpc.aio.Server, thread: threading.Thread) -> None:
         self._loop = loop
@@ -249,21 +221,6 @@ class ObjectStoreServicer(object_store_pb2_grpc.ObjectStoreServiceServicer):
                 bucket=request.bucket if request.HasField("bucket") else None,
                 namespace=request.namespace if request.HasField("namespace") else None,
             )
-        )
-
-    async def JoinUrl(self, request: object_store_pb2.ObjectStoreJoinRequest, context: grpc.aio.ServicerContext) -> object_store_pb2.ObjectStoreUrl:
-        await _require_internal_token(context)
-        return object_store_pb2.ObjectStoreUrl(url=object_store.join_object_store_url(request.base.url, *request.parts))
-
-    async def StorageOptions(
-        self,
-        request: common_pb2.EmptyRequest,
-        context: grpc.aio.ServicerContext,
-    ) -> object_store_pb2.ObjectStoreStorageOptionsResponse:
-        del request
-        await _require_internal_token(context)
-        return object_store_pb2.ObjectStoreStorageOptionsResponse(
-            storage_options=_object_store_storage_options_proto(object_store.object_store_storage_options())
         )
 
     async def EnsureBucket(self, request: object_store_pb2.ObjectStoreBucket, context: grpc.aio.ServicerContext) -> common_pb2.EmptyRequest:
@@ -374,64 +331,8 @@ class ObjectStoreServicer(object_store_pb2_grpc.ObjectStoreServiceServicer):
         files = await _run_blocking(_OBJECT_STORE_LANE, object_store.list_metadata_files, request.url)
         return object_store_pb2.ObjectStoreMetadataFilesResponse(files=[object_store_pb2.ObjectStoreUrl(url=file) for file in files])
 
-    async def DeletePrefix(self, request: object_store_pb2.ObjectStoreUrl, context: grpc.aio.ServicerContext) -> common_pb2.EmptyRequest:
-        await _require_internal_token(context)
-        if not object_store.is_managed_object_store_url(request.url):
-            await context.abort(grpc.StatusCode.PERMISSION_DENIED, "Prefix is outside the worker-managed storage prefix")
-        await _run_blocking(_OBJECT_STORE_LANE, object_store.delete_prefix, request.url)
-        return common_pb2.EmptyRequest()
-
 
 class IcebergServicer(iceberg_pb2_grpc.IcebergServiceServicer):
-    async def ResolveMetadataPath(
-        self,
-        request: iceberg_pb2.IcebergTableRef,
-        context: grpc.aio.ServicerContext,
-    ) -> iceberg_pb2.IcebergMetadataPathResponse:
-        await _require_internal_token(context)
-        if not request.HasField("metadata_path"):
-            await context.abort(grpc.StatusCode.INVALID_ARGUMENT, "metadata_path is required")
-        path = await _run_blocking(
-            _ICEBERG_LANE,
-            iceberg_metadata.resolve_iceberg_metadata_path,
-            request.metadata_path,
-            namespace_name=request.namespace,
-        )
-        return iceberg_pb2.IcebergMetadataPathResponse(metadata_path=path)
-
-    async def ResolveBranchMetadataPath(
-        self,
-        request: iceberg_pb2.IcebergTableRef,
-        context: grpc.aio.ServicerContext,
-    ) -> iceberg_pb2.IcebergMetadataPathResponse:
-        await _require_internal_token(context)
-        if not request.HasField("metadata_path"):
-            await context.abort(grpc.StatusCode.INVALID_ARGUMENT, "metadata_path is required")
-        branch = request.branch if request.HasField("branch") else None
-        path = await _run_blocking(
-            _ICEBERG_LANE,
-            iceberg_metadata.resolve_iceberg_branch_metadata_path,
-            request.metadata_path,
-            branch,
-            namespace_name=request.namespace,
-        )
-        return iceberg_pb2.IcebergMetadataPathResponse(metadata_path=path)
-
-    async def SyncSchema(self, request: iceberg_pb2.IcebergSchemaSyncRequest, context: grpc.aio.ServicerContext) -> common_pb2.EmptyRequest:
-        await _require_internal_token(context)
-        try:
-            schema = _arrow_schema_from_proto(request.arrow_schema)
-        except (TypeError, ValueError) as exc:
-            await context.abort(grpc.StatusCode.INVALID_ARGUMENT, str(exc))
-        table = await _run_blocking(
-            _ICEBERG_LANE,
-            StaticTable.from_metadata,
-            request.metadata_path,
-            properties=object_store.object_store_storage_options(),
-        )
-        await _run_blocking(_ICEBERG_LANE, iceberg_metadata.sync_iceberg_schema, table, schema)
-        return common_pb2.EmptyRequest()
-
     async def ListSnapshots(
         self,
         request: iceberg_pb2.IcebergTableRef,
@@ -466,25 +367,6 @@ class IcebergServicer(iceberg_pb2_grpc.IcebergServiceServicer):
             ],
         )
 
-    async def ScanSnapshot(
-        self,
-        request: iceberg_pb2.IcebergSnapshotScanRequest,
-        context: grpc.aio.ServicerContext,
-    ) -> iceberg_pb2.IcebergSnapshotScanResponse:
-        await _require_internal_token(context)
-        try:
-            snapshot_id = int(request.snapshot_id)
-        except ValueError:
-            await context.abort(grpc.StatusCode.INVALID_ARGUMENT, "snapshot_id must be an integer")
-        limit = request.limit if request.HasField("limit") else None
-
-        def scan_and_serialize() -> iceberg_pb2.IcebergSnapshotScanResponse:
-            frame = iceberg_snapshot_reader.scan_iceberg_snapshot(request.metadata_path, snapshot_id, None)
-            rows = frame.limit(limit).collect().to_dicts() if limit is not None else frame.collect().to_dicts()
-            return iceberg_pb2.IcebergSnapshotScanResponse(rows=dict_to_struct({"rows": rows}))
-
-        return await _run_blocking(_ICEBERG_LANE, scan_and_serialize)
-
     async def DeleteSnapshot(
         self,
         request: iceberg_pb2.IcebergSnapshotDeleteRequest,
@@ -508,18 +390,6 @@ def _timestamp_from_ms(timestamp_ms: int) -> Any:
     stamp = Timestamp()
     stamp.FromDatetime(datetime.fromtimestamp(timestamp_ms / 1000, UTC))
     return stamp
-
-
-def _arrow_schema_from_proto(payload: iceberg_pb2.ArrowSchemaIpc) -> pa.Schema:
-    if not payload.payload:
-        raise ValueError("arrow_schema.payload is required")
-    try:
-        schema = pa.ipc.read_schema(pa.BufferReader(bytes(payload.payload)))
-    except Exception as exc:
-        raise ValueError("arrow_schema.payload must contain a serialized Arrow schema") from exc
-    if not isinstance(schema, pa.Schema):
-        raise TypeError("arrow_schema.payload did not decode to a pyarrow.Schema")
-    return schema
 
 
 async def start_data_plane_grpc_server() -> grpc.aio.Server:

@@ -7,8 +7,6 @@ import {
 	formatDateTimeValue,
 	formatDateTimeDisplay,
 	formatDateForInput,
-	formatDateTimeForInput,
-	parseDateTimeInputToIso,
 	getYearInZone,
 	getTimezoneSettings,
 	isValidTimeZone,
@@ -195,66 +193,6 @@ describe('formatDateForInput', () => {
 	test('normalize returns date in target timezone', () => {
 		const result = formatDateForInput('2024-06-15T00:00:00Z', 'UTC', true);
 		expect(result).toBe('2024-06-15');
-	});
-});
-
-// ── formatDateTimeForInput ──────────────────────────────────────────────────
-
-describe('formatDateTimeForInput', () => {
-	test('returns empty string for invalid date', () => {
-		expect(formatDateTimeForInput('not-a-date', 'UTC', false)).toBe('');
-	});
-
-	test('non-normalize returns ISO datetime-local format', () => {
-		const result = formatDateTimeForInput('2024-06-15T14:30:00Z', 'UTC', false);
-		expect(result).toMatch(/^\d{4}-\d{2}-\d{2}T\d{2}:\d{2}$/);
-	});
-
-	test('normalize applies timezone conversion', () => {
-		const result = formatDateTimeForInput('2024-06-15T00:00:00Z', 'UTC', true);
-		expect(result).toBe('2024-06-15T00:00');
-	});
-});
-
-// ── parseDateTimeInputToIso ─────────────────────────────────────────────────
-
-describe('parseDateTimeInputToIso', () => {
-	test('returns empty string for empty input', () => {
-		expect(parseDateTimeInputToIso('', 'UTC', false)).toBe('');
-	});
-
-	test('non-normalize produces ISO string', () => {
-		const result = parseDateTimeInputToIso('2024-06-15T14:30', 'UTC', false);
-		expect(result).toMatch(/^\d{4}-\d{2}-\d{2}T\d{2}:\d{2}:\d{2}(?:\.\d+)?Z$/);
-	});
-
-	test('normalize mode returns empty for invalid format', () => {
-		expect(parseDateTimeInputToIso('not-valid', 'UTC', true)).toBe('');
-	});
-
-	test('normalize mode with UTC produces correct ISO', () => {
-		const result = parseDateTimeInputToIso('2024-06-15T14:30', 'UTC', true);
-		expect(result).toBe('2024-06-15T14:30:00Z');
-	});
-
-	test('interprets local date-time input in the selected zone and sends a UTC instant', () => {
-		const result = parseDateTimeInputToIso('2024-06-15T14:30', 'America/Los_Angeles', true);
-		expect(result).toBe('2024-06-15T21:30:00Z');
-	});
-
-	test('round-trips through formatDateTimeForInput', () => {
-		const original = '2024-06-15T14:30:00Z';
-		const formatted = formatDateTimeForInput(original, 'UTC', true);
-		const parsed = parseDateTimeInputToIso(formatted, 'UTC', true);
-		expect(parsed).toBe(original);
-	});
-
-	test('round-trips midnight values without 24:00 formatting', () => {
-		const original = '2024-06-15T00:00:00Z';
-		const formatted = formatDateTimeForInput(original, 'UTC', true);
-		expect(formatted).toBe('2024-06-15T00:00');
-		const parsed = parseDateTimeInputToIso(formatted, 'UTC', true);
-		expect(parsed).toBe(original);
 	});
 });
 

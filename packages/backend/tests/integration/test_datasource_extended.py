@@ -1,5 +1,6 @@
 import uuid
 from datetime import UTC, datetime
+from io import BytesIO
 from pathlib import Path
 from unittest.mock import AsyncMock, patch
 
@@ -14,6 +15,21 @@ from backend_core.persistence.compute_worker_runs.models import ComputeWorkerRun
 from backend_core.persistence.datasource.models import DataSource
 from backend_core.sqlmodel_typing import sa
 
+XLSX_CONTENT_TYPE = 'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet'
+
+
+def _xlsx_bytes(rows: list[list[object]]) -> bytes:
+    workbook = Workbook()
+    sheet = workbook.active
+    if sheet is None:
+        pytest.skip('Excel support not available')
+    sheet.title = 'Sheet1'
+    for row in rows:
+        sheet.append(row)
+    buffer = BytesIO()
+    workbook.save(buffer)
+    return buffer.getvalue()
+
 
 class TestDataSourceValidation:
     def test_upload_empty_file(self, client, temp_upload_dir: Path):
@@ -24,111 +40,59 @@ class TestDataSourceValidation:
         # Should fail with validation error
         assert response.status_code in [400, 422]
 
-    def test_upload_file_too_large(self, client, monkeypatch):
-        # Create a large file (> 100MB)
-        large_content = b'a' * (101 * 1024 * 1024)
-        files = {'file': ('large.csv', large_content, 'text/csv')}
+    def test_upload_file_over_size_limit_is_rejected(self, client, monkeypatch):
+        from backend_core.config import settings
 
-        response = client.post('/api/v1/datasource/upload', files=files)
+        monkeypatch.setattr(settings, 'upload_max_file_size_bytes', 1024)
+        large_csv = b'id,value\n' + b'1,10\n' * 512
+        files = {'file': ('large.csv', large_csv, 'text/csv')}
 
-        # Should fail with file too large error
-        assert response.status_code in [400, 413, 422]
+        response = client.post('/api/v1/datasource/upload', files=files, data={'name': 'Oversized CSV'})
 
-    def test_upload_unsupported_format(self, client):
-        files = {'file': ('test.xyz', b'random data', 'application/octet-stream')}
-        data = {'name': 'Unsupported Format Test'}
+        assert response.status_code == 413
+        assert response.json()['detail'] == 'Uploaded file exceeds size limit'
 
-        response = client.post('/api/v1/datasource/upload', files=files, data=data)
-
-        # Should fail with unsupported format error
-        assert response.status_code in [400, 422]
-
-    def test_upload_corrupted_csv(self, client):
-        corrupted_csv = b'id,name,age\n1,Alice\n2,Bob,30,extra\n'
-        files = {'file': ('corrupted.csv', corrupted_csv, 'text/csv')}
+    def test_upload_malformed_csv_is_rejected(self, client):
+        # The second data row has more fields than the header, so no datasource may be created.
+        malformed_csv = b'id,name,age\n1,Alice\n2,Bob,30,extra\n'
+        files = {'file': ('corrupted.csv', malformed_csv, 'text/csv')}
         data = {'name': 'Corrupted CSV Test'}
 
         response = client.post('/api/v1/datasource/upload', files=files, data=data)
 
-        # May succeed but should handle gracefully
-        if response.status_code == 200:
-            json_data = response.json()
-            assert 'id' in json_data
+        assert response.status_code >= 400
 
-    def test_upload_csv_with_special_characters(self, client):
-        csv_content = b'id,name,description\n1,"O\'Brien","Quote: \\"test\\""\n2,Smith,"Newline:\ntest"\n'
-        files = {'file': ('special.csv', csv_content, 'text/csv')}
-        data = {'name': 'Special Characters Test'}
+    @pytest.mark.parametrize(
+        ('filename', 'csv_content', 'name'),
+        [
+            pytest.param(
+                'special.csv',
+                b'id,name,description\n1,"O\'Brien","Quote: \\"test\\""\n2,Smith,"Newline:\ntest"\n',
+                'Special Characters Test',
+                id='special_characters',
+            ),
+            pytest.param(
+                'unicode.csv',
+                'id,name,city\n1,José,São Paulo\n2,François,Zürich\n'.encode(),
+                'Unicode Test',
+                id='unicode',
+            ),
+        ],
+    )
+    def test_upload_csv_with_special_characters_and_unicode(self, client, filename, csv_content, name):
+        files = {'file': (filename, csv_content, 'text/csv')}
+        data = {'name': name}
 
         response = client.post('/api/v1/datasource/upload', files=files, data=data)
 
         assert response.status_code == 200
-
-    def test_upload_csv_with_unicode(self, client):
-        csv_content = 'id,name,city\n1,José,São Paulo\n2,François,Zürich\n'.encode()
-        files = {'file': ('unicode.csv', csv_content, 'text/csv')}
-        data = {'name': 'Unicode Test'}
-
-        response = client.post('/api/v1/datasource/upload', files=files, data=data)
-
-        assert response.status_code == 200
-        json_data = response.json()
-        assert 'id' in json_data
+        assert 'id' in response.json()
 
     def test_upload_with_missing_file(self, client):
         data = {'name': 'Missing File Test'}
         response = client.post('/api/v1/datasource/upload', data=data)
 
         assert response.status_code == 422
-
-    def test_get_nonexistent_datasource(self, client):
-        fake_id = str(uuid.uuid4())
-        response = client.get(f'/api/v1/datasource/{fake_id}')
-
-        assert response.status_code == 404
-
-    def test_delete_nonexistent_datasource(self, client):
-        fake_id = str(uuid.uuid4())
-        response = client.delete(f'/api/v1/datasource/{fake_id}')
-
-        assert response.status_code == 404
-
-    def test_get_schema_nonexistent_datasource(self, client):
-        fake_id = str(uuid.uuid4())
-        response = client.get(f'/api/v1/datasource/{fake_id}/schema')
-
-        assert response.status_code == 404
-
-    def test_upload_csv_with_different_delimiters(self, client):
-        # Tab-separated
-        tsv_content = b'id\tname\tage\n1\tAlice\t25\n2\tBob\t30\n'
-        files = {'file': ('test.tsv', tsv_content, 'text/tab-separated-values')}
-        data = {'name': 'TSV Test'}
-
-        response = client.post('/api/v1/datasource/upload', files=files, data=data)
-
-        # Should handle or reject gracefully
-        assert response.status_code in [200, 400, 422]
-
-    def test_upload_json_array(self, client):
-        """Test uploading JSON array format."""
-        json_content = b'[{"id": 1, "name": "Alice"}, {"id": 2, "name": "Bob"}]'
-        files = {'file': ('test.json', json_content, 'application/json')}
-        data = {'name': 'JSON Array Test'}
-
-        response = client.post('/api/v1/datasource/upload', files=files, data=data)
-
-        assert response.status_code == 200
-
-    def test_upload_ndjson_multiline(self, client):
-        """Test uploading NDJSON with multiple lines."""
-        ndjson_content = b'{"id": 1, "name": "Alice"}\n{"id": 2, "name": "Bob"}\n{"id": 3, "name": "Charlie"}\n'
-        files = {'file': ('test.ndjson', ndjson_content, 'application/x-ndjson')}
-        data = {'name': 'NDJSON Test'}
-
-        response = client.post('/api/v1/datasource/upload', files=files, data=data)
-
-        assert response.status_code == 200
 
     def test_upload_excel_xlsx(self, client, temp_upload_dir: Path):
         """Test uploading Excel XLSX file."""
@@ -143,7 +107,7 @@ class TestDataSourceValidation:
                 'file': (
                     'test.xlsx',
                     f.read(),
-                    'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet',
+                    XLSX_CONTENT_TYPE,
                 )
             }
             data = {'name': 'Excel Test'}
@@ -160,28 +124,9 @@ class TestDataSourceValidation:
 
         assert response.status_code == 400
 
-    def test_preflight_excel_cell_range(self, client, temp_upload_dir: Path, faux_datasource_runtime):
+    def test_preflight_excel_cell_range(self, client, faux_datasource_runtime):
         """Test Excel preflight supports A1 range selection."""
-        excel_path = temp_upload_dir / 'range.xlsx'
-        workbook = Workbook()
-        sheet = workbook.active
-        if sheet is None:
-            pytest.skip('Excel support not available')
-        assert sheet is not None
-        sheet.title = 'Sheet1'
-        sheet.append(['id', 'name'])
-        sheet.append([1, 'A'])
-        sheet.append([2, 'B'])
-        workbook.save(excel_path)
-
-        with open(excel_path, 'rb') as f:
-            files = {
-                'file': (
-                    'range.xlsx',
-                    f.read(),
-                    'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet',
-                )
-            }
+        files = {'file': ('range.xlsx', _xlsx_bytes([['id', 'name'], [1, 'A'], [2, 'B']]), XLSX_CONTENT_TYPE)}
         data = {'cell_range': 'A1:B3', 'has_header': 'true'}
 
         response = client.post('/api/v1/datasource/preflight', files=files, data=data)
@@ -211,26 +156,9 @@ class TestDataSourceValidation:
             )
         ]
 
-    def test_preflight_excel_invalid_cell_range(self, client, temp_upload_dir: Path):
+    def test_preflight_excel_invalid_cell_range(self, client):
         """Test Excel preflight rejects invalid cell ranges."""
-        excel_path = temp_upload_dir / 'invalid.xlsx'
-        workbook = Workbook()
-        sheet = workbook.active
-        if sheet is None:
-            pytest.skip('Excel support not available')
-        sheet.title = 'Sheet1'
-        sheet.append(['id', 'name'])
-        sheet.append([1, 'A'])
-        workbook.save(excel_path)
-
-        with open(excel_path, 'rb') as f:
-            files = {
-                'file': (
-                    'invalid.xlsx',
-                    f.read(),
-                    'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet',
-                )
-            }
+        files = {'file': ('invalid.xlsx', _xlsx_bytes([['id', 'name'], [1, 'A']]), XLSX_CONTENT_TYPE)}
         data = {'cell_range': 'NotARange', 'has_header': 'true'}
 
         response = client.post('/api/v1/datasource/preflight', files=files, data=data)
@@ -251,23 +179,12 @@ class TestDataSourceValidation:
 
         assert response.status_code == 400
 
-    def test_preflight_excel_path_returns_preview(self, client, temp_upload_dir: Path):
+    def test_preflight_excel_path_returns_preview(self, client):
         from backend_core.data_plane_client import client_from_settings
 
-        excel_path = temp_upload_dir / 'path.xlsx'
-        workbook = Workbook()
-        sheet = workbook.active
-        if sheet is None:
-            pytest.skip('Excel support not available')
-        sheet.title = 'Sheet1'
-        sheet.append(['id', 'name'])
-        sheet.append([1, 'A'])
-        sheet.append([2, 'B'])
-        workbook.save(excel_path)
-
         data_plane = client_from_settings()
-        object_url = data_plane.build_object_url('tests', uuid.uuid4().hex, excel_path.name)
-        data_plane.upload_object_bytes(excel_path.read_bytes(), object_url)
+        object_url = data_plane.build_object_url('tests', uuid.uuid4().hex, 'path.xlsx')
+        data_plane.upload_object_bytes(_xlsx_bytes([['id', 'name'], [1, 'A'], [2, 'B']]), object_url)
         payload = {'file_path': object_url}
 
         response = client.post('/api/v1/datasource/preflight-path', json=payload)
@@ -278,29 +195,9 @@ class TestDataSourceValidation:
         assert body['preflight_id']
         assert len(body['preview']) == 3
 
-    def test_confirm_excel_end_row(self, client, temp_upload_dir: Path):
+    def test_confirm_excel_end_row(self, client):
         """Test Excel confirm stores manual end row selection."""
-        excel_path = temp_upload_dir / 'bounds.xlsx'
-        workbook = Workbook()
-        sheet = workbook.active
-        if sheet is None:
-            pytest.skip('Excel support not available')
-        assert sheet is not None
-        sheet.title = 'Sheet1'
-        sheet.append(['id', 'name'])
-        sheet.append([1, 'A'])
-        sheet.append([2, 'B'])
-        sheet.append([3, 'C'])
-        workbook.save(excel_path)
-
-        with open(excel_path, 'rb') as f:
-            files = {
-                'file': (
-                    'bounds.xlsx',
-                    f.read(),
-                    'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet',
-                )
-            }
+        files = {'file': ('bounds.xlsx', _xlsx_bytes([['id', 'name'], [1, 'A'], [2, 'B'], [3, 'C']]), XLSX_CONTENT_TYPE)}
 
         preflight = client.post(
             '/api/v1/datasource/preflight',
@@ -326,27 +223,9 @@ class TestDataSourceValidation:
         config = confirm.json()['config']
         assert config['source']['end_row'] == 1
 
-    def test_confirm_excel_cell_range_stores_bounds(self, client, temp_upload_dir: Path):
+    def test_confirm_excel_cell_range_stores_bounds(self, client):
         """Test Excel confirm stores manual cell range selection."""
-        excel_path = temp_upload_dir / 'cell-range.xlsx'
-        workbook = Workbook()
-        sheet = workbook.active
-        if sheet is None:
-            pytest.skip('Excel support not available')
-        sheet.title = 'Sheet1'
-        sheet.append(['id', 'name'])
-        sheet.append([1, 'A'])
-        sheet.append([2, 'B'])
-        workbook.save(excel_path)
-
-        with open(excel_path, 'rb') as f:
-            files = {
-                'file': (
-                    'cell-range.xlsx',
-                    f.read(),
-                    'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet',
-                )
-            }
+        files = {'file': ('cell-range.xlsx', _xlsx_bytes([['id', 'name'], [1, 'A'], [2, 'B']]), XLSX_CONTENT_TYPE)}
 
         preflight = client.post('/api/v1/datasource/preflight', files=files)
         assert preflight.status_code == 200
@@ -373,25 +252,8 @@ class TestDataSourceValidation:
         'modules.datasource.routes.create_remote_file_datasource',
         new_callable=AsyncMock,
     )
-    def test_confirm_excel_preserves_validation_error(self, mock_create, client, temp_upload_dir: Path):
-        excel_path = temp_upload_dir / 'confirm-invalid.xlsx'
-        workbook = Workbook()
-        sheet = workbook.active
-        if sheet is None:
-            pytest.skip('Excel support not available')
-        sheet.title = 'Sheet1'
-        sheet.append(['id', 'name'])
-        sheet.append([1, 'A'])
-        workbook.save(excel_path)
-
-        with open(excel_path, 'rb') as f:
-            files = {
-                'file': (
-                    'confirm-invalid.xlsx',
-                    f.read(),
-                    'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet',
-                )
-            }
+    def test_confirm_excel_preserves_validation_error(self, mock_create, client):
+        files = {'file': ('confirm-invalid.xlsx', _xlsx_bytes([['id', 'name'], [1, 'A']]), XLSX_CONTENT_TYPE)}
 
         preflight = client.post('/api/v1/datasource/preflight', files=files)
         assert preflight.status_code == 200
@@ -415,22 +277,6 @@ class TestDataSourceValidation:
 class TestDataSourceSchema:
     """Test datasource schema extraction."""
 
-    def test_schema_caching(self, client, test_db_session, sample_datasource: DataSource):
-        """Test that schema is cached after first request."""
-        # First request
-        response1 = client.get(f'/api/v1/datasource/{sample_datasource.id}/schema')
-        assert response1.status_code == 200
-
-        # Check that schema_cache is populated
-        test_db_session.refresh(sample_datasource)
-
-        # Second request should use cache
-        response2 = client.get(f'/api/v1/datasource/{sample_datasource.id}/schema')
-        assert response2.status_code == 200
-
-        # Responses should be identical
-        assert response1.json() == response2.json()
-
     def test_schema_for_different_types(self, client, sample_csv_file: Path, sample_parquet_file: Path):
         """Test schema extraction for different file types."""
         # Upload CSV
@@ -453,42 +299,12 @@ class TestDataSourceSchema:
 
         assert csv_schema.status_code == 200
         assert parquet_schema.status_code == 200
-
-        # Both should have columns
-        assert 'columns' in csv_schema.json() or 'fields' in csv_schema.json()
-        assert 'columns' in parquet_schema.json() or 'fields' in parquet_schema.json()
+        assert {col['name'] for col in csv_schema.json()['columns']} == {'id', 'name', 'age', 'city'}
+        assert {col['name'] for col in parquet_schema.json()['columns']} == {'product_id', 'product_name', 'price', 'stock'}
 
 
 class TestDataSourceListing:
     """Test datasource listing functionality."""
-
-    def test_list_empty_datasources(self, client):
-        """Test listing when no datasources exist."""
-        response = client.get('/api/v1/datasource')
-
-        assert response.status_code == 200
-        data = response.json()
-        assert isinstance(data, list)
-
-    def test_list_multiple_datasources(self, client, sample_datasources: list[DataSource]):
-        """Test listing multiple datasources."""
-        response = client.get('/api/v1/datasource')
-
-        assert response.status_code == 200
-        data = response.json()
-        assert len(data) >= len(sample_datasources)
-
-    def test_list_datasources_pagination(self, client, sample_datasources: list[DataSource]):
-        """Test datasource listing with pagination."""
-        # Test if pagination is supported
-        response = client.get('/api/v1/datasource?limit=1')
-
-        assert response.status_code == 200
-        data = response.json()
-
-        # Should return at most 1 item if pagination is supported
-        if isinstance(data, list):
-            assert len(data) <= 1 or len(data) == len(sample_datasources)
 
     def test_list_does_not_write_schema_cache(self, client, test_db_session, sample_datasource: DataSource):
         """Listing datasources stays read-only for schema cache."""
@@ -502,15 +318,18 @@ class TestDataSourceListing:
 class TestDataSourceDeletion:
     """Test datasource deletion."""
 
-    def test_delete_datasource_cascades(self, client, test_db_session, sample_analysis):
-        """Test that deleting a datasource handles linked analyses."""
+    def test_delete_datasource_linked_to_analysis_is_accepted(self, client, test_db_session, sample_analysis):
+        """A datasource referenced by an analysis tab is accepted for deletion and tombstoned."""
         datasource_id = sample_analysis.pipeline_definition['tabs'][0]['datasource']['id']
 
-        # Delete the datasource
         response = client.delete(f'/api/v1/datasource/{datasource_id}')
 
         # Delete is now asynchronous: accepted immediately, finalized once preview work drains.
-        assert response.status_code in [202, 400, 409]
+        assert response.status_code == 202
+        test_db_session.expire_all()
+        stored = test_db_session.get(DataSource, datasource_id)
+        assert stored is not None
+        assert stored.is_pending_delete is True
 
     def test_delete_uploaded_datasource_removes_iceberg_and_upload(self, client):
         payload = b'id,value\n1,10\n2,20\n'

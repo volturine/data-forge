@@ -27,27 +27,6 @@ message ObjectStorePathParts {
   optional string namespace = 3 [(buf.validate.field).string.min_len = 1];
 }
 
-message ObjectStoreJoinRequest {
-  ObjectStoreUrl base = 1 [(buf.validate.field).required = true];
-  repeated string parts = 2 [(buf.validate.field).repeated.min_items = 1];
-}
-
-message ObjectStoreStorageOptions {
-  string endpoint_url = 1 [(buf.validate.field).string.uri = true];
-  string access_key_id = 2 [(buf.validate.field).string.min_len = 1];
-  string secret_access_key = 3 [(buf.validate.field).string.min_len = 1];
-  string region = 4 [(buf.validate.field).string.min_len = 1];
-  bool force_virtual_addressing = 5;
-  string py_io_impl = 6 [(buf.validate.field).string.min_len = 1];
-}
-
-message ObjectStoreStorageOptionsResponse {
-  reserved 1;
-  reserved "options";
-
-  ObjectStoreStorageOptions storage_options = 2 [(buf.validate.field).required = true];
-}
-
 message ObjectStoreUploadStart {
   ObjectStoreUrl target = 1 [(buf.validate.field).required = true];
   optional string content_type = 2;
@@ -94,8 +73,6 @@ message ObjectStoreMetadataFilesResponse {
 service ObjectStoreService {
   rpc ClassifyUrl(ObjectStoreUrlClassificationRequest) returns (ObjectStoreUrlClassificationResponse);
   rpc BuildUrl(ObjectStorePathParts) returns (ObjectStoreUrl);
-  rpc JoinUrl(ObjectStoreJoinRequest) returns (ObjectStoreUrl);
-  rpc StorageOptions(EmptyRequest) returns (ObjectStoreStorageOptionsResponse);
   rpc EnsureBucket(ObjectStoreBucket) returns (EmptyRequest);
   rpc UploadObject(stream ObjectStoreUploadRequest) returns (ObjectStoreUrl);
   rpc DownloadObject(ObjectStoreUrl) returns (stream ObjectStoreTransferChunk);
@@ -103,5 +80,4 @@ service ObjectStoreService {
   rpc Exists(ObjectStoreUrl) returns (ObjectStoreExistsResponse);
   rpc ListPrefixes(ObjectStoreUrl) returns (ObjectStorePrefixesResponse);
   rpc ListMetadataFiles(ObjectStoreUrl) returns (ObjectStoreMetadataFilesResponse);
-  rpc DeletePrefix(ObjectStoreUrl) returns (EmptyRequest);
 }

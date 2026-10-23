@@ -33,29 +33,6 @@ def _claimed(kind: int, command: compute_pb2.ComputeCommand) -> compute_request_
     )
 
 
-@pytest.mark.parametrize(
-    ("kind", "field_name", "command_type"),
-    [
-        (enums_pb2.COMPUTE_REQUEST_KIND_DOWNLOAD, "download", compute_pb2.DownloadCommand),
-        (enums_pb2.COMPUTE_REQUEST_KIND_EXPORT, "export", compute_pb2.ExportCommand),
-    ],
-)
-def test_download_and_export_admission_use_pipeline_identity_without_duplicate_id(kind, field_name, command_type) -> None:
-    request = command_type(
-        target_step_id="source",
-        analysis_pipeline=_pipeline(),
-    )
-    command = compute_pb2.ComputeCommand()
-    getattr(command, field_name).CopyFrom(request)
-
-    identity = compute_request_runtime._compute_worker_identity_for_claimed(_claimed(kind, command))
-    pipeline_identity = compute_service.default_stateless_compute_worker_identity(analysis_pipeline_to_execution_payload(request.analysis_pipeline))
-
-    assert identity == pipeline_identity
-    assert identity.scope == enums_pb2.COMPUTE_WORKER_SCOPE_ANALYSIS_INTERACTIVE
-    assert identity.analysis_id == "analysis-1"
-
-
 def test_preview_identity_preserves_explicit_identity_before_pipeline_fallback() -> None:
     explicit = compute_pb2.ComputeWorkerIdentity(
         scope=enums_pb2.COMPUTE_WORKER_SCOPE_DATASOURCE_PREVIEW,

@@ -2,28 +2,22 @@ import { describe, expect, test } from 'vitest';
 import { getEditorAccessState, isEditorReadOnly } from './analysis-lock-state';
 
 describe('analysis lock state', () => {
-	test('treats pending access as read-only', () => {
-		expect(getEditorAccessState('pending')).toBe('pending');
-		expect(isEditorReadOnly('pending')).toBe(true);
-	});
-
-	test('treats owned access as editable', () => {
-		expect(getEditorAccessState('owned')).toBe('editable');
-		expect(isEditorReadOnly('owned')).toBe(false);
-	});
-
-	test('treats another owner as locked', () => {
-		expect(getEditorAccessState('other')).toBe('locked');
-		expect(isEditorReadOnly('other')).toBe(true);
-	});
-
-	test('treats handshake failures as unavailable', () => {
-		expect(getEditorAccessState('error')).toBe('unavailable');
-		expect(isEditorReadOnly('error')).toBe(true);
-	});
-
-	test('treats a manually released editor as read-only', () => {
-		expect(getEditorAccessState('released')).toBe('released');
-		expect(isEditorReadOnly('released')).toBe(true);
+	test('maps each editor access state to its access label and read-only flag', () => {
+		const cases = [
+			// pending access is read-only
+			{ access: 'pending', state: 'pending', readOnly: true },
+			// owned access is editable
+			{ access: 'owned', state: 'editable', readOnly: false },
+			// another owner means locked
+			{ access: 'other', state: 'locked', readOnly: true },
+			// handshake failures are unavailable
+			{ access: 'error', state: 'unavailable', readOnly: true },
+			// a manually released editor is read-only
+			{ access: 'released', state: 'released', readOnly: true }
+		] as const;
+		for (const { access, state, readOnly } of cases) {
+			expect(getEditorAccessState(access)).toBe(state);
+			expect(isEditorReadOnly(access)).toBe(readOnly);
+		}
 	});
 });

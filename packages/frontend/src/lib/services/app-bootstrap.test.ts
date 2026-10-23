@@ -23,6 +23,14 @@ const mockAuth = {
 let namespaceStatus: 'pending' | 'ready' | 'failed' = 'pending';
 let namespaceError: string | null = null;
 
+function createDeferred<T>() {
+	let resolve!: (value: T) => void;
+	const promise = new Promise<T>((resolvePromise) => {
+		resolve = resolvePromise;
+	});
+	return { promise, resolve };
+}
+
 vi.mock('#lib/stores/config.svelte.js', () => ({
 	configStore: mockConfig
 }));
@@ -102,9 +110,144 @@ describe('AppBootstrap', () => {
 	test('start is idempotent', async () => {
 		await bootstrap.start();
 		await bootstrap.start();
+		await bootstrap.retry();
 		expect(mockFetch).toHaveBeenCalledTimes(1);
 		expect(mockResolve).toHaveBeenCalledTimes(1);
 		expect(mockInitNamespace).toHaveBeenCalledTimes(1);
+	});
+
+	test('retry recovers a failed configuration probe', async () => {
+		mockFetch
+			.mockImplementationOnce(async () => {
+				mockConfig.config = null;
+				mockConfig.error = 'config down';
+				mockConfig.settled = true;
+			})
+			.mockImplementationOnce(async () => {
+				mockConfig.config = { auth_required: true, default_namespace: 'default' };
+				mockConfig.error = null;
+				mockConfig.settled = true;
+			});
+
+		await bootstrap.start();
+		expect(bootstrap.phase(false)).toBe('error');
+		expect(bootstrap.error).toBe('config down');
+
+		await bootstrap.retry();
+
+		expect(bootstrap.appReady).toBe(true);
+		expect(bootstrap.phase(false)).toBe('app');
+		expect(bootstrap.error).toBeNull();
+		expect(mockFetch).toHaveBeenCalledTimes(2);
+		expect(mockInitNamespace).toHaveBeenCalledTimes(1);
+	});
+
+	test('retry during initial bootstrap joins the startup attempt', async () => {
+		const configStart = createDeferred<void>();
+		mockFetch.mockImplementationOnce(async () => {
+			await configStart.promise;
+			mockConfig.config = { auth_required: true, default_namespace: 'default' };
+			mockConfig.error = null;
+			mockConfig.settled = true;
+		});
+
+		const startup = bootstrap.start();
+		const retry = bootstrap.retry();
+		await Promise.resolve();
+
+		expect(mockFetch).toHaveBeenCalledTimes(1);
+		expect(mockResolve).toHaveBeenCalledTimes(1);
+		expect(bootstrap.retrying).toBe(true);
+
+		configStart.resolve();
+		await Promise.all([startup, retry]);
+
+		expect(mockInitNamespace).toHaveBeenCalledTimes(1);
+		expect(bootstrap.appReady).toBe(true);
+	});
+
+	test('concurrent retries join the same in-flight attempt', async () => {
+		mockFetch.mockImplementationOnce(async () => {
+			mockConfig.config = null;
+			mockConfig.error = 'config down';
+			mockConfig.settled = true;
+		});
+		const configRetry = createDeferred<void>();
+		mockFetch.mockImplementationOnce(async () => {
+			await configRetry.promise;
+			mockConfig.config = { auth_required: true, default_namespace: 'default' };
+			mockConfig.error = null;
+			mockConfig.settled = true;
+		});
+
+		await bootstrap.start();
+		const firstRetry = bootstrap.retry();
+		const secondRetry = bootstrap.retry();
+		await Promise.resolve();
+
+		expect(mockFetch).toHaveBeenCalledTimes(2);
+		expect(mockResolve).toHaveBeenCalledTimes(2);
+		expect(bootstrap.retrying).toBe(true);
+
+		configRetry.resolve();
+		await Promise.all([firstRetry, secondRetry]);
+
+		expect(mockInitNamespace).toHaveBeenCalledTimes(1);
+		expect(bootstrap.retrying).toBe(false);
+		expect(bootstrap.appReady).toBe(true);
+	});
+
+	test('repeated retry failures keep the latest error actionable', async () => {
+		mockFetch
+			.mockImplementationOnce(async () => {
+				mockConfig.config = null;
+				mockConfig.error = 'first failure';
+				mockConfig.settled = true;
+			})
+			.mockImplementationOnce(async () => {
+				mockConfig.config = null;
+				mockConfig.error = 'second failure';
+				mockConfig.settled = true;
+			})
+			.mockImplementationOnce(async () => {
+				mockConfig.config = { auth_required: true, default_namespace: 'default' };
+				mockConfig.error = null;
+				mockConfig.settled = true;
+			});
+
+		await bootstrap.start();
+		expect(bootstrap.error).toBe('first failure');
+
+		await bootstrap.retry();
+		expect(bootstrap.error).toBe('second failure');
+		expect(bootstrap.retrying).toBe(false);
+
+		await bootstrap.retry();
+		expect(bootstrap.appReady).toBe(true);
+		expect(bootstrap.error).toBeNull();
+		expect(mockFetch).toHaveBeenCalledTimes(3);
+	});
+
+	test('retry re-runs failed namespace initialization without clearing auth', async () => {
+		mockInitNamespace
+			.mockImplementationOnce(async () => {
+				namespaceStatus = 'failed';
+				namespaceError = 'namespace unavailable';
+			})
+			.mockImplementationOnce(async () => {
+				namespaceStatus = 'ready';
+				namespaceError = null;
+			});
+
+		await bootstrap.start();
+		expect(bootstrap.error).toBe('namespace unavailable');
+		expect(mockAuth.authenticated).toBe(true);
+
+		await bootstrap.retry();
+
+		expect(bootstrap.appReady).toBe(true);
+		expect(mockAuth.authenticated).toBe(true);
+		expect(mockInitNamespace).toHaveBeenCalledTimes(2);
 	});
 
 	test('skips namespace when config fails', async () => {

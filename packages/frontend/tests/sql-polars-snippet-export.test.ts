@@ -158,50 +158,14 @@ async function createUnsupportedAnalysis(
 test.describe('Analyses – SQL/Polars snippet export', () => {
 	test.describe.configure({ mode: 'serial' });
 
-	test('toolbar export renders both Polars and SQL snippets for pipeline steps', async ({
+	test('toolbar and tab context exports render Polars and SQL snippets, copy, and download', async ({
 		page,
 		request,
 		sharedDatasource,
 		sharedAuxDatasource
 	}) => {
-		const id = uid();
-		const analysisName = `E2E Snippet Toolbar ${id}`;
-		const analysisId = await createSnippetAnalysis(
-			request,
-			analysisName,
-			sharedDatasource.id,
-			sharedAuxDatasource.id
-		);
-		try {
-			await gotoAnalysisEditor(page, analysisId);
-			const exportBtn = page.getByTestId('analysis-export-toolbar-button');
-			await expect(exportBtn).toBeEnabled({ timeout: 15_000 });
-			await exportBtn.click();
-
-			const code = page.getByTestId('analysis-export-code');
-			await expect(code).toBeVisible({ timeout: 15_000 });
-			await expect(code).not.toBeEmpty({ timeout: 15_000 });
-			await expect(code).toContainText('import polars as pl');
-			await expect(code).toContainText('.join(');
-			await expect(code).toContainText('.group_by(');
-			await expect(code).toContainText('.sort(');
-
-			await page.getByTestId('analysis-export-format-sql').click();
-			await expect(code).toContainText('WITH');
-			await expect(code).toContainText('JOIN');
-			await expect(code).toContainText('GROUP BY');
-			await expect(code).toContainText('ORDER BY');
-		} finally {
-			await deleteAnalysisViaUI(page, analysisName);
-		}
-	});
-
-	test('tab context export supports copy/download and tab-scoped filename', async ({
-		page,
-		request,
-		sharedDatasource,
-		sharedAuxDatasource
-	}) => {
+		// Registered before the first navigation so the stub is in place for the
+		// whole journey, including the copy step below.
 		await page.addInitScript(() => {
 			Object.defineProperty(navigator, 'clipboard', {
 				configurable: true,
@@ -215,7 +179,7 @@ test.describe('Analyses – SQL/Polars snippet export', () => {
 		});
 
 		const id = uid();
-		const analysisName = `E2E Snippet Context ${id}`;
+		const analysisName = `E2E Snippet Export ${id}`;
 		const analysisId = await createSnippetAnalysis(
 			request,
 			analysisName,
@@ -223,38 +187,63 @@ test.describe('Analyses – SQL/Polars snippet export', () => {
 			sharedAuxDatasource.id
 		);
 		try {
-			await gotoAnalysisEditor(page, analysisId);
+			await test.step('toolbar export renders both Polars and SQL snippets for pipeline steps', async () => {
+				await gotoAnalysisEditor(page, analysisId);
+				const exportBtn = page.getByTestId('analysis-export-toolbar-button');
+				await expect(exportBtn).toBeEnabled({ timeout: 15_000 });
+				await exportBtn.click();
 
-			const leftTabButton = page.locator('button[data-tab-name="Left Source"]');
-			await expect(leftTabButton).toBeVisible({ timeout: 5_000 });
-			await leftTabButton.click({ button: 'right' });
-			await page.getByTestId('analysis-tab-context-export').click();
+				const code = page.getByTestId('analysis-export-code');
+				await expect(code).toBeVisible({ timeout: 15_000 });
+				await expect(code).not.toBeEmpty({ timeout: 15_000 });
+				await expect(code).toContainText('import polars as pl');
+				await expect(code).toContainText('.join(');
+				await expect(code).toContainText('.group_by(');
+				await expect(code).toContainText('.sort(');
 
-			const code = page.getByTestId('analysis-export-code');
-			await expect(code).not.toBeEmpty({ timeout: 5_000 });
-			await expect(code).toContainText('SOURCE_RIGHT_SOURCE_PATH');
-			await expect(code).toContainText('SOURCE_LEFT_SOURCE_PATH');
+				await page.getByTestId('analysis-export-format-sql').click();
+				await expect(code).toContainText('WITH');
+				await expect(code).toContainText('JOIN');
+				await expect(code).toContainText('GROUP BY');
+				await expect(code).toContainText('ORDER BY');
+			});
 
-			await page.getByTestId('analysis-export-copy').click();
-			const copied = await page.evaluate(
-				() => (window as Window & { __copied_export?: string }).__copied_export ?? ''
-			);
-			expect(copied.length).toBeGreaterThan(20);
-			expect(copied).toContain('import polars as pl');
+			await test.step('tab context export supports copy/download and tab-scoped filename', async () => {
+				// Close the toolbar export modal left open by the previous step; the
+				// analysis editor stays on this page for the tab context export.
+				await page.getByRole('button', { name: 'Close export modal' }).click();
 
-			const [pyDownload] = await Promise.all([
-				page.waitForEvent('download'),
-				page.getByTestId('analysis-export-download').click()
-			]);
-			expect(pyDownload.suggestedFilename()).toMatch(/_left_source\.py$/);
+				const leftTabButton = page.locator('button[data-tab-name="Left Source"]');
+				await expect(leftTabButton).toBeVisible({ timeout: 5_000 });
+				await leftTabButton.click({ button: 'right' });
+				await page.getByTestId('analysis-tab-context-export').click();
 
-			await page.getByTestId('analysis-export-format-sql').click();
-			await expect(code).toContainText('WITH');
-			const [sqlDownload] = await Promise.all([
-				page.waitForEvent('download'),
-				page.getByTestId('analysis-export-download').click()
-			]);
-			expect(sqlDownload.suggestedFilename()).toMatch(/_left_source\.sql$/);
+				const code = page.getByTestId('analysis-export-code');
+				await expect(code).not.toBeEmpty({ timeout: 5_000 });
+				await expect(code).toContainText('SOURCE_RIGHT_SOURCE_PATH');
+				await expect(code).toContainText('SOURCE_LEFT_SOURCE_PATH');
+
+				await page.getByTestId('analysis-export-copy').click();
+				const copied = await page.evaluate(
+					() => (window as Window & { __copied_export?: string }).__copied_export ?? ''
+				);
+				expect(copied.length).toBeGreaterThan(20);
+				expect(copied).toContain('import polars as pl');
+
+				const [pyDownload] = await Promise.all([
+					page.waitForEvent('download'),
+					page.getByTestId('analysis-export-download').click()
+				]);
+				expect(pyDownload.suggestedFilename()).toMatch(/_left_source\.py$/);
+
+				await page.getByTestId('analysis-export-format-sql').click();
+				await expect(code).toContainText('WITH');
+				const [sqlDownload] = await Promise.all([
+					page.waitForEvent('download'),
+					page.getByTestId('analysis-export-download').click()
+				]);
+				expect(sqlDownload.suggestedFilename()).toMatch(/_left_source\.sql$/);
+			});
 		} finally {
 			await deleteAnalysisViaUI(page, analysisName);
 		}

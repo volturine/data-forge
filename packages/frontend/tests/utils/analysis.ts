@@ -8,17 +8,6 @@ function remainingTimeout(deadline: number): number {
 	return Math.max(deadline - Date.now(), MIN_REMAINING_MS);
 }
 
-async function findVisibleLocator(locator: Locator): Promise<Locator | null> {
-	const count = await locator.count();
-	for (let index = 0; index < count; index += 1) {
-		const candidate = locator.nth(index);
-		if (await candidate.isVisible().catch(() => false)) {
-			return candidate;
-		}
-	}
-	return null;
-}
-
 /**
  * Wait for the analysis editor to be fully interactive. Ensures:
  *  1. `[role="application"]` has mounted (analysis query resolved).
@@ -60,30 +49,25 @@ async function waitForAnalysisEditor(
 	});
 
 	const stepButtons = page.locator('button[data-step]');
-	let anyStepButton = await findVisibleLocator(stepButtons);
-	const alreadyVisible = anyStepButton !== null;
+	const visibleStepButton = stepButtons.filter({ visible: true }).first();
+	const alreadyVisible = await visibleStepButton.isVisible().catch(() => false);
 
 	if (!alreadyVisible) {
-		const expandBtn = await findVisibleLocator(
-			page.locator('button[aria-label="Expand operations"]')
-		);
-		if (expandBtn) {
-			await expandBtn.click();
+		const expandButton = page
+			.locator('button[aria-label="Expand operations"]')
+			.filter({ visible: true })
+			.first();
+		if (await expandButton.isVisible().catch(() => false)) {
+			await expandButton.click();
 		}
 	}
 
-	await expect(stepButtons.filter({ visible: true }).first()).toBeVisible({
-		timeout: remaining()
-	});
-	anyStepButton = await findVisibleLocator(stepButtons);
-	if (!anyStepButton) {
-		throw new Error('Analysis editor step library did not render a visible step button');
-	}
+	await expect(visibleStepButton).toBeVisible({ timeout: remaining() });
 	if (accessState === 'editable') {
-		await expect(anyStepButton).toBeEnabled({ timeout: remaining() });
+		await expect(visibleStepButton).toBeEnabled({ timeout: remaining() });
 		return;
 	}
-	await expect(anyStepButton).toBeDisabled({ timeout: remaining() });
+	await expect(visibleStepButton).toBeDisabled({ timeout: remaining() });
 }
 
 async function waitForCurrentAnalysisId(page: Page, deadline: number): Promise<string> {
@@ -143,7 +127,6 @@ export async function gotoAnalysisEditor(
 	await expect(page).toHaveURL(`/analysis/${analysisId}`, {
 		timeout: remainingTimeout(deadline)
 	});
-	await waitForLayoutReady(page, remainingTimeout(deadline));
 	await waitForAnalysisEditor(page, deadline, 'editable');
 }
 
@@ -157,7 +140,6 @@ export async function gotoReadOnlyAnalysisEditor(
 	await expect(page).toHaveURL(`/analysis/${analysisId}`, {
 		timeout: remainingTimeout(deadline)
 	});
-	await waitForLayoutReady(page, remainingTimeout(deadline));
 	await waitForAnalysisEditor(page, deadline, 'locked');
 }
 
@@ -180,7 +162,14 @@ export async function addStepAndOpenConfig(
 	stepType: string
 ): Promise<Locator> {
 	await gotoAnalysisEditor(page, analysisId);
+	return addStepToOpenEditor(page, stepType);
+}
 
+/**
+ * Add a step from the library of the already-open editor, click "edit" on the
+ * new canvas node and return its config panel.
+ */
+export async function addStepToOpenEditor(page: Page, stepType: string): Promise<Locator> {
 	const stepBtn = page.locator(`button[data-step="${stepType}"]`);
 	await expect(stepBtn).toBeEnabled({ timeout: 5_000 });
 	await stepBtn.click();

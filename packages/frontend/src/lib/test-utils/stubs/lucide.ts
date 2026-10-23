@@ -6,6 +6,7 @@ export const Binary = IconStub;
 export const Calendar = IconStub;
 export const ToggleLeft = IconStub;
 export const Layers = IconStub;
+export const PanelLeft = IconStub;
 export const CircleQuestionMark = IconStub;
 export const File = IconStub;
 export const FileSpreadsheet = IconStub;

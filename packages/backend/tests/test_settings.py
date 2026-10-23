@@ -85,7 +85,7 @@ class TestGetSettings:
     def test_returns_saved_values(self, client: TestClient, monkeypatch) -> None:
         monkeypatch.setenv('SETTINGS_ENCRYPTION_KEY', 'test-key')
         # First save some values
-        client.put(
+        saved = client.put(
             '/api/v1/settings',
             json={
                 'smtp_host': 'mail.example.com',
@@ -97,6 +97,12 @@ class TestGetSettings:
                 'public_idb_debug': True,
             },
         )
+        assert saved.status_code == 200
+        assert saved.json()['smtp_host'] == 'mail.example.com'
+        assert saved.json()['smtp_user'] == 'user@example.com'
+        assert saved.json()['smtp_password'] == MASKED_SECRET
+        assert saved.json()['telegram_bot_token'] == MASKED_SECRET
+        assert saved.json()['public_idb_debug'] is True
         resp = client.get('/api/v1/settings')
         assert resp.status_code == 200
         data = resp.json()
@@ -201,61 +207,9 @@ class TestUpdateSettings:
         assert response.status_code == 200
         assert response.json()['openrouter_default_model'] == 'e2e-model'
 
-    def test_update_smtp(self, client: TestClient, monkeypatch) -> None:
-        monkeypatch.setenv('SETTINGS_ENCRYPTION_KEY', 'test-key')
-        resp = client.put(
-            '/api/v1/settings',
-            json={
-                'smtp_host': 'smtp.test.com',
-                'smtp_port': 587,
-                'smtp_user': 'test@test.com',
-                'smtp_password': 'pw',
-                'telegram_bot_token': '',
-                'telegram_bot_enabled': True,
-                'public_idb_debug': False,
-            },
-        )
-        assert resp.status_code == 200
-        data = resp.json()
-        assert data['smtp_host'] == 'smtp.test.com'
-        assert data['smtp_user'] == 'test@test.com'
-        assert data['smtp_password'] == MASKED_SECRET
-
-    def test_update_telegram(self, client: TestClient, monkeypatch) -> None:
-        monkeypatch.setenv('SETTINGS_ENCRYPTION_KEY', 'test-key')
-        resp = client.put(
-            '/api/v1/settings',
-            json={
-                'smtp_host': '',
-                'smtp_port': 587,
-                'smtp_user': '',
-                'smtp_password': '',
-                'telegram_bot_token': 'bot999:xyz',
-                'telegram_bot_enabled': False,
-                'public_idb_debug': False,
-            },
-        )
-        assert resp.status_code == 200
-        assert resp.json()['telegram_bot_token'] == MASKED_SECRET
-
-    def test_update_idb_debug(self, client: TestClient, monkeypatch) -> None:
-        monkeypatch.setenv('SETTINGS_ENCRYPTION_KEY', 'test-key')
-        resp = client.put(
-            '/api/v1/settings',
-            json={
-                'smtp_host': '',
-                'smtp_port': 587,
-                'smtp_user': '',
-                'smtp_password': '',
-                'telegram_bot_token': '',
-                'telegram_bot_enabled': False,
-                'public_idb_debug': True,
-            },
-        )
-        assert resp.status_code == 200
-        assert resp.json()['public_idb_debug'] is True
-
     def test_preserves_masked_secrets_on_partial_update(self, client: TestClient, monkeypatch) -> None:
+        from backend_core.database import run_settings_db
+        from backend_core.persistence.settings.models import AppSettings
         from backend_core.settings_projection import (
             get_resolved_openrouter_key,
             get_resolved_smtp,
@@ -276,6 +230,18 @@ class TestUpdateSettings:
                 'public_idb_debug': False,
             },
         )
+
+        def _read(session: Session) -> AppSettings | None:
+            return session.get(AppSettings, 1)
+
+        row = run_settings_db(_read)
+        assert row is not None
+        assert row.smtp_password != 'pw'
+        assert row.telegram_bot_token != 'bot999:xyz'
+        assert row.openrouter_api_key != 'sk-live'
+        assert row.smtp_password.startswith('enc:v1:')
+        assert row.telegram_bot_token.startswith('enc:v1:')
+        assert row.openrouter_api_key.startswith('enc:v1:')
 
         resp = client.put(
             '/api/v1/settings',
@@ -324,37 +290,6 @@ class TestUpdateSettings:
         assert reread.json()['openrouter_api_key'] == MASKED_SECRET
         assert get_resolved_openrouter_key() == 'sk-or-user'
         assert run_settings_db(_stored_key) == 'sk-or-user'
-
-    def test_encrypts_settings_secrets_at_rest(self, client: TestClient, monkeypatch) -> None:
-        from backend_core.database import run_settings_db
-        from backend_core.persistence.settings.models import AppSettings
-
-        monkeypatch.setenv('SETTINGS_ENCRYPTION_KEY', 'test-key')
-        client.put(
-            '/api/v1/settings',
-            json={
-                'smtp_host': 'smtp.test.com',
-                'smtp_port': 587,
-                'smtp_user': 'test@test.com',
-                'smtp_password': 'pw',
-                'telegram_bot_token': 'bot999:xyz',
-                'telegram_bot_enabled': True,
-                'openrouter_api_key': 'sk-live',
-                'public_idb_debug': False,
-            },
-        )
-
-        def _read(session: Session) -> AppSettings | None:
-            return session.get(AppSettings, 1)
-
-        row = run_settings_db(_read)
-        assert row is not None
-        assert row.smtp_password != 'pw'
-        assert row.telegram_bot_token != 'bot999:xyz'
-        assert row.openrouter_api_key != 'sk-live'
-        assert row.smtp_password.startswith('enc:v1:')
-        assert row.telegram_bot_token.startswith('enc:v1:')
-        assert row.openrouter_api_key.startswith('enc:v1:')
 
     def test_get_rejects_unsupported_secret_storage_format(self, client: TestClient, monkeypatch) -> None:
         from backend_core.database import run_settings_db
@@ -765,57 +700,59 @@ class TestTestTelegram:
 class TestConfigEndpointWithDbSettings:
     """GET /v1/config — should reflect DB settings for smtp/telegram enabled."""
 
-    def test_config_reflects_db_settings(self, client: TestClient, monkeypatch) -> None:
+    @pytest.mark.parametrize(
+        ('saved', 'auth_required', 'verify_email_address', 'expected'),
+        [
+            pytest.param(
+                {
+                    'smtp_host': 'mail.example.com',
+                    'smtp_port': 587,
+                    'smtp_user': 'user@example.com',
+                    'smtp_password': 'pw',
+                    'telegram_bot_token': 'botXYZ',
+                    'telegram_bot_enabled': False,
+                    'public_idb_debug': True,
+                },
+                True,
+                True,
+                {'auth_required': True, 'verify_email_address': True, 'smtp_enabled': True, 'telegram_enabled': False, 'public_idb_debug': True},
+                id='configured-smtp',
+            ),
+            pytest.param(
+                {
+                    'smtp_host': '',
+                    'smtp_port': 587,
+                    'smtp_user': '',
+                    'smtp_password': '',
+                    'telegram_bot_token': '',
+                    'telegram_bot_enabled': False,
+                    'public_idb_debug': False,
+                },
+                False,
+                False,
+                {'auth_required': False, 'verify_email_address': False, 'smtp_enabled': False, 'telegram_enabled': False, 'public_idb_debug': False},
+                id='empty',
+            ),
+        ],
+    )
+    def test_config_reflects_saved_settings(
+        self,
+        client: TestClient,
+        monkeypatch,
+        saved: dict[str, object],
+        auth_required: bool,
+        verify_email_address: bool,
+        expected: dict[str, bool],
+    ) -> None:
         monkeypatch.setenv('SETTINGS_ENCRYPTION_KEY', 'test-key')
-        monkeypatch.setattr('backend_core.auth_config.settings.auth_required', True)
-        # Save SMTP settings
-        client.put(
-            '/api/v1/settings',
-            json={
-                'smtp_host': 'mail.example.com',
-                'smtp_port': 587,
-                'smtp_user': 'user@example.com',
-                'smtp_password': 'pw',
-                'telegram_bot_token': 'botXYZ',
-                'telegram_bot_enabled': False,
-                'public_idb_debug': True,
-            },
-        )
+        monkeypatch.setattr('backend_core.auth_config.settings.auth_required', auth_required)
+        monkeypatch.setattr('backend_core.auth_config.settings.verify_email_address', verify_email_address)
+        client.put('/api/v1/settings', json=saved)
 
         resp = client.get('/api/v1/config')
         assert resp.status_code == 200
         data = resp.json()
-        assert data['auth_required'] is True
-        assert data['verify_email_address'] is True
-        assert data['smtp_enabled'] is True
-        assert data['telegram_enabled'] is False
-        assert data['public_idb_debug'] is True
-
-    def test_config_reflects_empty_settings(self, client: TestClient, monkeypatch) -> None:
-        monkeypatch.setenv('SETTINGS_ENCRYPTION_KEY', 'test-key')
-        monkeypatch.setattr('backend_core.auth_config.settings.auth_required', False)
-        monkeypatch.setattr('backend_core.auth_config.settings.verify_email_address', False)
-        client.put(
-            '/api/v1/settings',
-            json={
-                'smtp_host': '',
-                'smtp_port': 587,
-                'smtp_user': '',
-                'smtp_password': '',
-                'telegram_bot_token': '',
-                'telegram_bot_enabled': False,
-                'public_idb_debug': False,
-            },
-        )
-
-        resp = client.get('/api/v1/config')
-        assert resp.status_code == 200
-        data = resp.json()
-        assert data['auth_required'] is False
-        assert data['verify_email_address'] is False
-        assert data['smtp_enabled'] is False
-        assert data['telegram_enabled'] is False
-        assert data['public_idb_debug'] is False
+        assert {key: data[key] for key in expected} == expected
 
 
 class TestGenerateUuid:

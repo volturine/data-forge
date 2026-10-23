@@ -1,6 +1,5 @@
 import type {
 	ComputeWorkerDefaultsJson as ProtocolComputeWorkerDefaultsJson,
-	ComputeWorkerIdentityJson as ProtocolComputeWorkerIdentityJson,
 	ComputeWorkerResourceConfigJson as ProtocolComputeWorkerResourceConfigJson,
 	ComputeWorkerStatusResultJson as ProtocolComputeWorkerStatusResultJson
 } from '#lib/protocol/dataforge_protocol/compute_pb.js';
@@ -68,13 +67,4 @@ export interface ComputeWorkerStatusResponse {
 		ProtocolComputeWorkerStatusResultJson,
 		'currentEngineRunId'
 	>;
-}
-
-export interface ComputeWorkerIdentityPayload {
-	scope: ComputeWorkerScope;
-	reuse_policy: ComputeWorkerReusePolicy;
-	resource_id: StringField<ProtocolComputeWorkerIdentityJson, 'resourceId'>;
-	analysis_id?: OptionalStringField<ProtocolComputeWorkerIdentityJson, 'analysisId'>;
-	datasource_id?: OptionalStringField<ProtocolComputeWorkerIdentityJson, 'datasourceId'>;
-	build_id?: OptionalStringField<ProtocolComputeWorkerIdentityJson, 'buildId'>;
 }

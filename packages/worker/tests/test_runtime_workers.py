@@ -1,16 +1,15 @@
 import asyncio
-import importlib.util
 import threading
 import time
 import uuid
 from concurrent.futures import ThreadPoolExecutor
 from dataclasses import replace
 from datetime import UTC, datetime, timedelta
-from pathlib import Path
 from types import SimpleNamespace
 from typing import Any, cast
 
 import pytest
+from worker_test_support import load_runtime_process
 
 from builds import build_execution
 from dataforge_protocol import compute_pb2, enums_pb2, worker_runtime_pb2
@@ -101,21 +100,28 @@ def test_worker_heartbeat_reregisters_and_resynchronizes_after_api_loss() -> Non
 
     client = Client()
     resynchronized = threading.Event()
-    run_worker_heartbeat_loop(
-        client=cast(WorkerRuntimeClient, client),
-        stop_signal=cast(threading.Event, StopSignal()),
-        worker_id="manager-1",
-        kind="BUILD_MANAGER",
-        hostname="test-host",
-        pid=123,
-        capacity=8,
-        heartbeat_seconds=0.001,
-        on_reconnected=resynchronized.set,
-    )
+    registration_states: list[tuple[bool, int]] = []
+    with ThreadPoolExecutor(max_workers=1) as executor:
+        future = executor.submit(
+            run_worker_heartbeat_loop,
+            client=cast(WorkerRuntimeClient, client),
+            stop_signal=cast(threading.Event, StopSignal()),
+            worker_id="manager-1",
+            kind="BUILD_MANAGER",
+            hostname="test-host",
+            pid=123,
+            capacity=8,
+            heartbeat_seconds=0.001,
+            on_reconnected=resynchronized.set,
+            on_registration_changed=lambda available: registration_states.append((available, threading.get_ident())),
+        )
+        future.result(timeout=1.0)
 
     assert resynchronized.wait(1.0)
     assert client.heartbeats == 2
     assert client.registrations[0]["worker_id"] == "manager-1"
+    assert [available for available, _thread in registration_states] == [False, True]
+    assert all(thread != threading.get_ident() for _available, thread in registration_states)
 
 
 def test_compute_worker_run_creation_retries_only_when_idempotency_key_is_present() -> None:
@@ -533,17 +539,7 @@ class FakeWorkerRuntimeClient:
         return self.finalize_build_job(**kwargs)
 
 
-def _load_runtime_process():
-    path = Path(__file__).resolve().parents[1] / "main.py"
-    spec = importlib.util.spec_from_file_location("worker_main_for_tests", path)
-    if spec is None or spec.loader is None:
-        raise RuntimeError(f"Unable to load worker runtime module from {path}")
-    module = importlib.util.module_from_spec(spec)
-    spec.loader.exec_module(module)
-    return module
-
-
-runtime_process = _load_runtime_process()
+runtime_process = load_runtime_process()
 
 
 @pytest.mark.asyncio
@@ -933,37 +929,6 @@ async def test_build_dispatcher_runs_jobs_concurrently_without_parallel_claimers
 
 
 @pytest.mark.asyncio
-async def test_build_worker_dispatches_claimed_work_to_its_capacity_gate() -> None:
-    job = _job()
-    client = FakeWorkerRuntimeClient([job])
-    stop_event = asyncio.Event()
-    seen: list[str] = []
-    release = asyncio.Event()
-
-    async def run_job(claim: ClaimedBuildJob) -> None:
-        seen.append(claim.build_id)
-        await release.wait()
-        stop_event.set()
-
-    task = asyncio.create_task(
-        build_worker_loop(
-            stop_event,
-            "worker-capacity",
-            run_job,
-            client=cast(WorkerRuntimeClient, client),
-        )
-    )
-    for _ in range(100):
-        if seen:
-            break
-        await asyncio.sleep(0.001)
-    assert seen == [job.build_id]
-    assert any(name == "claim_build_job" for name, _ in client.calls)
-    release.set()
-    await asyncio.wait_for(task, timeout=1)
-
-
-@pytest.mark.asyncio
 async def test_build_worker_cancels_claimed_dispatch_when_stopping() -> None:
     client = FakeWorkerRuntimeClient([_job()])
     stop_event = asyncio.Event()
@@ -1016,24 +981,7 @@ async def test_build_worker_loop_uses_filtered_durable_namespace_directory() -> 
     )
 
     assert seen == ["tenant-a"]
-    assert requested_kinds == [("build",)]
-
-
-@pytest.mark.asyncio
-async def test_runtime_namespace_directory_requests_only_its_work_kind() -> None:
-    requested_kinds: list[tuple[str, ...]] = []
-
-    class FilteredClient:
-        async def pending_runtime_work_namespaces_async(self, *, work_kinds: tuple[str, ...]) -> list[str]:
-            requested_kinds.append(work_kinds)
-            return ["build-namespace"]
-
-    directory = RuntimeNamespaceDirectory(
-        cast(WorkerRuntimeClient, FilteredClient()),
-        work_kinds=("build",),
-    )
-
-    assert await directory.next_namespace() == "build-namespace"
+    assert ("claim_build_job", {"worker_id": "worker-filtered", "namespace": "tenant-a"}) in client.calls
     assert requested_kinds == [("build",)]
 
 

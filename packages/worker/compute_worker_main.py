@@ -13,7 +13,6 @@ def _load_bootstrap_if_present() -> None:
         read_env(
             "COMPUTE_WORKER_BOOTSTRAP_PATH",
             "/run/dataforge-secrets/compute-worker.json",
-            legacy_names=("ENGINE_BOOTSTRAP_PATH",),
         )
     )
     try:

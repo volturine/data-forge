@@ -42,6 +42,7 @@
 	import { getDurationStats } from '#lib/api/compute-worker-runs.js';
 	import { formatDateTimeDisplay, toEpochDisplay } from '#lib/utils/datetime.js';
 	import { elapsedSince, formatDuration } from '#lib/utils/format-duration.js';
+	import { subscribeVisibleClock } from '#lib/utils/visible-clock.js';
 	import { endOfDayEpoch, startOfDayEpoch } from '#lib/utils/temporal.js';
 	import { onDestroy, onMount } from 'svelte';
 	import { SvelteMap, SvelteSet } from 'svelte/reactivity';
@@ -657,16 +658,23 @@
 		buildsStore.load(queryParams);
 	});
 
+	const hasActiveRuns = $derived(
+		runs.some((run) => canCancelBuildLifecycleStatus(currentStatus(run)))
+	);
+	// Elapsed labels need a browser clock only while a visible build is active.
+	$effect(() => {
+		if (!hasActiveRuns) return;
+		return subscribeVisibleClock(1000, (tick) => {
+			nowMs = tick;
+		});
+	});
+
 	onMount(() => {
 		historyStreamMounted = true;
 		startHistoryStream();
-		const elapsed = setInterval(() => {
-			nowMs = Date.now();
-		}, 1000);
 		return () => {
 			historyStreamMounted = false;
 			stopHistoryStream();
-			clearInterval(elapsed);
 			buildsStore.close();
 		};
 	});

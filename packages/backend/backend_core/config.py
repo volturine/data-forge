@@ -120,9 +120,6 @@ class Settings(EnvFileSettings):
     # Maximum connections per worker
     worker_connections: int = Field(default=4096, alias='WORKER_CONNECTIONS')
 
-    engine_idle_ttl_seconds: int = Field(default=300, ge=1, alias='ENGINE_IDLE_TTL_SECONDS')
-    engine_idle_reap_interval_seconds: int = Field(default=30, ge=1, alias='ENGINE_IDLE_REAP_INTERVAL_SECONDS')
-
     object_store_endpoint: str = Field(default='http://127.0.0.1:9000', alias='OBJECT_STORE_ENDPOINT')
     object_store_region: str = Field(default='us-east-1', alias='OBJECT_STORE_REGION')
     object_store_access_key: str = Field(default='rustfsadmin', alias='OBJECT_STORE_ACCESS_KEY')
@@ -253,8 +250,6 @@ class Settings(EnvFileSettings):
 
     @model_validator(mode='after')
     def _validate_runtime_mode(self) -> Settings:
-        if self.engine_idle_reap_interval_seconds >= self.engine_idle_ttl_seconds:
-            raise ValueError('ENGINE_IDLE_REAP_INTERVAL_SECONDS must be < ENGINE_IDLE_TTL_SECONDS')
         for name in ('endpoint', 'region', 'access_key', 'secret_key'):
             if not getattr(self, f'object_store_{name}').strip():
                 raise ValueError(f'OBJECT_STORE_{name.upper()} must not be empty')

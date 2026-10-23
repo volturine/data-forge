@@ -18,7 +18,9 @@ from modules.mcp.registry import build_tool_registry
 
 _MAX_ACTIVE_TURNS = 4
 _CLAIM_BATCH_SIZE = 4
-_RECOVERY_SECONDS = 1.0
+# Enqueue, confirmation and stop commits NOTIFY the coordinator, which wakes this
+# loop (and again after every LISTEN reconnect). The timed claim is only a backstop.
+_RECOVERY_SECONDS = 5.0
 _CONTROL_POLL_SECONDS = 0.5
 _DATABASE_EXECUTOR = ThreadPoolExecutor(max_workers=2, thread_name_prefix='chat-database')
 _PROVIDER_EXECUTOR = ThreadPoolExecutor(max_workers=4, thread_name_prefix='chat-provider')

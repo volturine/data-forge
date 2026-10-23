@@ -26,6 +26,10 @@ def test_single_production_compose_has_no_build_directive() -> None:
     assert 'image: ${DF_SCHEDULER_IMAGE}' in text
     assert 'image: ${DF_RUNTIME_IMAGE}' in text
     assert 'image: ${DF_WORKER_IMAGE}' in text
+    # Durable stores must come back after a daemon restart along with the app roles.
+    for service, following in (('postgres', 'rustfs'), ('rustfs', 'api')):
+        block = text.split(f'\n  {service}:\n', 1)[1].split(f'\n  {following}:\n', 1)[0]
+        assert 'restart: unless-stopped' in block
 
 
 def test_compose_wires_worker_data_plane_across_containers() -> None:
@@ -118,6 +122,8 @@ def test_prod_and_dev_stacks_do_not_collide() -> None:
     # Distinct compose project names.
     assert '-p dataforge-prod' in justfile
     assert '-p dataforge-dev' in justfile
+    # The production project owns durable volumes; no recipe may delete them.
+    assert not [line for line in justfile.splitlines() if '-p dataforge-prod' in line and 'down -v' in line]
 
     # Distinct per-stack engine networks driven by the env files.
     assert 'DF_COMPUTE_WORKER_DOCKER_NETWORK=dataforge-prod-compute-worker-runtime' in prod
@@ -163,7 +169,6 @@ def test_publish_workflow_is_multi_arch_and_tag_triggered() -> None:
     assert 'data-forge-scheduler' in text
     assert 'data-forge-runtime' in text
     assert 'data-forge-compute-worker' in text
-    assert 'data-forge-polars-engine' in text  # one-release compatibility image alias
     assert 'ghcr.io' in text
 
 

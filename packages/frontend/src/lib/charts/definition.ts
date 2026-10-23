@@ -47,6 +47,7 @@ import {
 	formatTimeTick,
 	groupSort,
 	needsRotatedTicks,
+	overlaySeriesLabel,
 	readNumber,
 	readString,
 	referenceLinesOf,
@@ -281,14 +282,6 @@ function overlayData(overlay: ChartRow): ChartRow[] {
 	return raw
 		.filter((item) => item && typeof item === 'object')
 		.map((row) => ({ ...(row as ChartRow), series: overlaySeriesLabel(overlay) }));
-}
-
-function overlaySeriesLabel(overlay: ChartRow): string {
-	const yCol = readString(overlay, 'y_column');
-	const agg = readString(overlay, 'aggregation');
-	if (!yCol) return 'Overlay';
-	if (!agg) return yCol;
-	return `${agg.charAt(0).toUpperCase()}${agg.slice(1)} of ${yCol}`;
 }
 
 function overlayChartType(overlay: ChartRow): 'line' | 'area' | 'bar' | 'scatter' {

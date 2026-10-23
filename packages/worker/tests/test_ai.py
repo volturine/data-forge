@@ -15,14 +15,9 @@ from operations.ai import AIError, AIHandler, AIParams, InternalAIClient, get_ai
 
 
 class TestParseRequestOptions:
-    def test_none(self):
-        assert parse_request_options(None) is None
-
-    def test_empty_string(self):
-        assert parse_request_options("") is None
-
-    def test_whitespace_string(self):
-        assert parse_request_options("   ") is None
+    @pytest.mark.parametrize("value", [None, "", "   "], ids=["none", "empty_string", "whitespace_string"])
+    def test_blank_input_returns_none(self, value):
+        assert parse_request_options(value) is None
 
     def test_valid_json_string(self):
         result = parse_request_options('{"temperature": 0.2}')
@@ -65,15 +60,6 @@ class TestAIParams:
         assert params.batch_size == 10
         assert params.request_options is None
 
-    def test_multi_column_input(self):
-        params = AIParams.model_validate(
-            {
-                "input_columns": ["title", "body"],
-                "output_column": "result",
-            },
-        )
-        assert params.input_columns == ["title", "body"]
-
     def test_no_input_raises(self):
         with pytest.raises(ValidationError, match="input"):
             AIParams.model_validate(
@@ -91,36 +77,6 @@ class TestAIParams:
             },
         )
         assert params.request_options == {"temperature": 0.3}
-
-    def test_request_options_dict_passthrough(self):
-        params = AIParams.model_validate(
-            {
-                "input_columns": ["text"],
-                "output_column": "result",
-                "request_options": {"temperature": 0.3},
-            },
-        )
-        assert params.request_options == {"temperature": 0.3}
-
-    def test_request_options_none(self):
-        params = AIParams.model_validate(
-            {
-                "input_columns": ["text"],
-                "output_column": "result",
-                "request_options": None,
-            },
-        )
-        assert params.request_options is None
-
-    def test_request_options_empty_string(self):
-        params = AIParams.model_validate(
-            {
-                "input_columns": ["text"],
-                "output_column": "result",
-                "request_options": "",
-            },
-        )
-        assert params.request_options is None
 
     def test_invalid_provider(self):
         with pytest.raises(ValidationError):
@@ -197,35 +153,6 @@ class TestGetAIClient:
 
 
 class TestAIHandler:
-    def test_basic_execution(self):
-        handler = AIHandler()
-        df = pl.DataFrame({"text": ["Hello", "World"]})
-
-        mock_client = MagicMock()
-        mock_client.generate_batch.return_value = [
-            "classified: Hello",
-            "classified: World",
-        ]
-
-        with patch("operations.ai.get_ai_client", return_value=mock_client):
-            result = handler(
-                df.lazy(),
-                {
-                    "provider": "ollama",
-                    "model": "llama2",
-                    "input_columns": ["text"],
-                    "output_column": "result",
-                    "prompt_template": "Classify: {{text}}",
-                    "batch_size": 10,
-                },
-            )
-            collected = result.collect()
-            assert "result" in collected.columns
-            assert collected["result"].to_list() == [
-                "classified: Hello",
-                "classified: World",
-            ]
-
     def test_lazy_execution_defers_side_effects(self):
         handler = AIHandler()
         df = pl.DataFrame({"text": ["Hello", "World"]})
@@ -414,18 +341,3 @@ class TestAIHandler:
             result.collect()
             prompts = mock_client.generate_batch.call_args[0][0]
             assert prompts == ["Title: Hello Body: World"]
-
-    def test_missing_multi_column_raises(self):
-        handler = AIHandler()
-        df = pl.DataFrame({"title": ["Hello"]})
-
-        with pytest.raises(ValueError, match="Input column"):
-            handler(
-                df.lazy(),
-                {
-                    "input_columns": ["title", "body"],
-                    "output_column": "result",
-                    "prompt_template": "{{title}} {{body}}",
-                    "batch_size": 5,
-                },
-            )

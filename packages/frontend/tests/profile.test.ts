@@ -26,107 +26,6 @@ async function expandSystemExportGroup(page: import('@playwright/test').Page, sc
 }
 
 // ────────────────────────────────────────────────────────────────────────────────
-// Profile page – tabbed interface
-// ────────────────────────────────────────────────────────────────────────────────
-
-test.describe('Profile – tabbed interface', () => {
-	test('profile page renders with Account tab active by default', async ({ page }) => {
-		await gotoProfile(page);
-
-		await expect(page.getByRole('heading', { name: 'Profile', level: 1 })).toBeVisible();
-		await expect(page.getByText('Manage your account and application settings')).toBeVisible();
-
-		// All five tabs visible
-		await expect(page.getByRole('tab', { name: 'Account' })).toBeVisible();
-		await expect(page.getByRole('tab', { name: 'Preferences' })).toBeVisible();
-		await expect(page.getByRole('tab', { name: 'Notifications' })).toBeVisible();
-		await expect(page.getByRole('tab', { name: 'AI Providers' })).toBeVisible();
-		await expect(page.getByRole('tab', { name: 'System' })).toBeVisible();
-
-		// Account tab is selected by default
-		await expect(page.getByRole('tab', { name: 'Account' })).toHaveAttribute(
-			'aria-selected',
-			'true'
-		);
-
-		await screenshot(page, 'profile', 'tabbed-default');
-	});
-
-	test('profile page shows Account tab content', async ({ page }) => {
-		await gotoProfile(page);
-
-		const panel = page.locator('#panel-account');
-		await expect(panel).toBeVisible();
-		await expect(panel.locator('#email')).toBeVisible();
-		await expect(panel.locator('#name')).toBeVisible();
-
-		await screenshot(page, 'profile', 'account-tab');
-	});
-});
-
-// ────────────────────────────────────────────────────────────────────────────────
-// Profile – deep-linkable tabs via URL hash
-// ────────────────────────────────────────────────────────────────────────────────
-
-test.describe('Profile – deep-link tabs', () => {
-	test('navigating to /profile#preferences opens Preferences tab', async ({ page }) => {
-		await gotoProfile(page, 'preferences');
-
-		await expect(page.getByRole('tab', { name: 'Preferences' })).toHaveAttribute(
-			'aria-selected',
-			'true'
-		);
-		await expect(page.locator('#panel-preferences')).toBeVisible();
-		await expect(page.getByLabel('Time zone')).toBeVisible();
-	});
-
-	test('navigating to /profile#notifications opens Notifications tab', async ({ page }) => {
-		await gotoProfile(page, 'notifications');
-
-		await expect(page.getByRole('tab', { name: 'Notifications' })).toHaveAttribute(
-			'aria-selected',
-			'true'
-		);
-		await expect(page.locator('#panel-notifications')).toBeVisible();
-
-		await screenshot(page, 'profile', 'notifications-deeplink');
-	});
-
-	test('navigating to /profile#ai-providers opens AI Providers tab', async ({ page }) => {
-		await gotoProfile(page, 'ai-providers');
-
-		await expect(page.getByRole('tab', { name: 'AI Providers' })).toHaveAttribute(
-			'aria-selected',
-			'true'
-		);
-		await expect(page.locator('#panel-ai-providers')).toBeVisible();
-
-		await screenshot(page, 'profile', 'ai-providers-deeplink');
-	});
-
-	test('navigating to /profile#system opens System tab', async ({ page }) => {
-		await gotoProfile(page, 'system');
-
-		await expect(page.getByRole('tab', { name: 'System' })).toHaveAttribute(
-			'aria-selected',
-			'true'
-		);
-		await expect(page.locator('#panel-system')).toBeVisible();
-
-		await screenshot(page, 'profile', 'system-deeplink');
-	});
-
-	test('invalid hash defaults to Account tab', async ({ page }) => {
-		await gotoProfile(page, 'nonexistent');
-
-		await expect(page.getByRole('tab', { name: 'Account' })).toHaveAttribute(
-			'aria-selected',
-			'true'
-		);
-	});
-});
-
-// ────────────────────────────────────────────────────────────────────────────────
 // Profile – tab switching
 // ────────────────────────────────────────────────────────────────────────────────
 
@@ -180,55 +79,130 @@ test.describe('Profile – tab switching', () => {
 		await expect(page.locator('#panel-account')).toBeVisible();
 
 		await screenshot(page, 'profile', 'tab-switching');
+
+		// Deep links must open their tab on a fresh document load, not on a hash change
+		// within the page above, so each case leaves the profile page first.
+		const deepLinks = [
+			{ hash: 'preferences', tab: 'Preferences', panel: '#panel-preferences' },
+			{
+				hash: 'notifications',
+				tab: 'Notifications',
+				panel: '#panel-notifications',
+				shot: 'notifications-deeplink'
+			},
+			{
+				hash: 'ai-providers',
+				tab: 'AI Providers',
+				panel: '#panel-ai-providers',
+				shot: 'ai-providers-deeplink'
+			},
+			{ hash: 'system', tab: 'System', panel: '#panel-system', shot: 'system-deeplink' },
+			// An unknown hash falls back to the Account tab
+			{ hash: 'nonexistent', tab: 'Account' }
+		];
+		for (const { hash, tab, panel, shot } of deepLinks) {
+			await test.step(`navigating to /profile#${hash} opens ${tab} tab`, async () => {
+				await page.goto('about:blank');
+				await gotoProfile(page, hash);
+
+				await expect(page.getByRole('tab', { name: tab })).toHaveAttribute('aria-selected', 'true');
+				if (panel) await expect(page.locator(panel)).toBeVisible();
+				if (hash === 'preferences') await expect(page.getByLabel('Time zone')).toBeVisible();
+				if (shot) await screenshot(page, 'profile', shot);
+			});
+		}
 	});
 
 	test('keyboard navigation between tabs works (ArrowRight, ArrowLeft)', async ({ page }) => {
-		await gotoProfile(page);
+		await test.step('keyboard navigation between tabs works (ArrowRight, ArrowLeft)', async () => {
+			await gotoProfile(page);
 
-		const accountTab = page.getByRole('tab', { name: 'Account' });
-		await accountTab.focus();
+			const accountTab = page.getByRole('tab', { name: 'Account' });
+			await accountTab.focus();
 
-		// ArrowRight → Preferences
-		await page.keyboard.press('ArrowRight');
-		await expect(page.getByRole('tab', { name: 'Preferences' })).toHaveAttribute(
-			'aria-selected',
-			'true'
-		);
+			// ArrowRight → Preferences
+			await page.keyboard.press('ArrowRight');
+			await expect(page.getByRole('tab', { name: 'Preferences' })).toHaveAttribute(
+				'aria-selected',
+				'true'
+			);
 
-		// ArrowRight → Notifications
-		await page.keyboard.press('ArrowRight');
-		await expect(page.getByRole('tab', { name: 'Notifications' })).toHaveAttribute(
-			'aria-selected',
-			'true'
-		);
+			// ArrowRight → Notifications
+			await page.keyboard.press('ArrowRight');
+			await expect(page.getByRole('tab', { name: 'Notifications' })).toHaveAttribute(
+				'aria-selected',
+				'true'
+			);
 
-		// ArrowRight → AI Providers
-		await page.keyboard.press('ArrowRight');
-		await expect(page.getByRole('tab', { name: 'AI Providers' })).toHaveAttribute(
-			'aria-selected',
-			'true'
-		);
+			// ArrowRight → AI Providers
+			await page.keyboard.press('ArrowRight');
+			await expect(page.getByRole('tab', { name: 'AI Providers' })).toHaveAttribute(
+				'aria-selected',
+				'true'
+			);
 
-		// ArrowRight → System
-		await page.keyboard.press('ArrowRight');
-		await expect(page.getByRole('tab', { name: 'System' })).toHaveAttribute(
-			'aria-selected',
-			'true'
-		);
+			// ArrowRight → System
+			await page.keyboard.press('ArrowRight');
+			await expect(page.getByRole('tab', { name: 'System' })).toHaveAttribute(
+				'aria-selected',
+				'true'
+			);
 
-		// ArrowRight wraps → Account
-		await page.keyboard.press('ArrowRight');
-		await expect(page.getByRole('tab', { name: 'Account' })).toHaveAttribute(
-			'aria-selected',
-			'true'
-		);
+			// ArrowRight wraps → Account
+			await page.keyboard.press('ArrowRight');
+			await expect(page.getByRole('tab', { name: 'Account' })).toHaveAttribute(
+				'aria-selected',
+				'true'
+			);
 
-		// ArrowLeft wraps → System
-		await page.keyboard.press('ArrowLeft');
-		await expect(page.getByRole('tab', { name: 'System' })).toHaveAttribute(
-			'aria-selected',
-			'true'
-		);
+			// ArrowLeft wraps → System
+			await page.keyboard.press('ArrowLeft');
+			await expect(page.getByRole('tab', { name: 'System' })).toHaveAttribute(
+				'aria-selected',
+				'true'
+			);
+		});
+
+		await test.step('tab panel has correct ARIA attributes', async () => {
+			await gotoProfile(page);
+
+			// Tablist has aria-label
+			await expect(page.getByRole('tablist', { name: 'Profile sections' })).toBeVisible();
+
+			// Active tab has aria-selected=true and controls the panel
+			const accountTab = page.getByRole('tab', { name: 'Account' });
+			await expect(accountTab).toHaveAttribute('aria-selected', 'true');
+			await expect(accountTab).toHaveAttribute('aria-controls', 'panel-account');
+
+			// Inactive tabs have aria-selected=false
+			const notifTab = page.getByRole('tab', { name: 'Notifications' });
+			await expect(notifTab).toHaveAttribute('aria-selected', 'false');
+
+			// Panel has role=tabpanel and aria-labelledby
+			const panel = page.locator('#panel-account');
+			await expect(panel).toHaveAttribute('role', 'tabpanel');
+			await expect(panel).toHaveAttribute('aria-labelledby', 'tab-account');
+		});
+
+		await test.step('Home and End keys navigate to first and last tab', async () => {
+			await gotoProfile(page);
+
+			// Focus Account tab and press End
+			const accountTab = page.getByRole('tab', { name: 'Account' });
+			await accountTab.focus();
+			await page.keyboard.press('End');
+			await expect(page.getByRole('tab', { name: 'System' })).toHaveAttribute(
+				'aria-selected',
+				'true'
+			);
+
+			// Press Home
+			await page.keyboard.press('Home');
+			await expect(page.getByRole('tab', { name: 'Account' })).toHaveAttribute(
+				'aria-selected',
+				'true'
+			);
+		});
 	});
 });
 
@@ -237,52 +211,85 @@ test.describe('Profile – tab switching', () => {
 // ────────────────────────────────────────────────────────────────────────────────
 
 test.describe('Profile – Account tab', () => {
-	test('account tab shows email (read-only), display name, and save button', async ({ page }) => {
-		await gotoProfile(page, 'account');
+	test('Account tab shows default state, account fields, password form, and connected accounts', async ({
+		page
+	}) => {
+		await test.step('profile page renders with Account tab active by default', async () => {
+			await gotoProfile(page);
 
-		const panel = page.locator('#panel-account');
-		const emailInput = panel.locator('#email');
-		await expect(emailInput).toBeVisible();
-		await expect(emailInput).toBeDisabled();
+			await expect(page.getByRole('heading', { name: 'Profile', level: 1 })).toBeVisible();
+			await expect(page.getByText('Manage your account and application settings')).toBeVisible();
 
-		const nameInput = panel.locator('#name');
-		await expect(nameInput).toBeVisible();
+			// All five tabs visible
+			await expect(page.getByRole('tab', { name: 'Account' })).toBeVisible();
+			await expect(page.getByRole('tab', { name: 'Preferences' })).toBeVisible();
+			await expect(page.getByRole('tab', { name: 'Notifications' })).toBeVisible();
+			await expect(page.getByRole('tab', { name: 'AI Providers' })).toBeVisible();
+			await expect(page.getByRole('tab', { name: 'System' })).toBeVisible();
 
-		await screenshot(page, 'profile', 'account-fields');
-	});
+			// Account tab is selected by default
+			await expect(page.getByRole('tab', { name: 'Account' })).toHaveAttribute(
+				'aria-selected',
+				'true'
+			);
 
-	test('account tab shows password change form', async ({ page }) => {
-		await gotoProfile(page, 'account');
+			await screenshot(page, 'profile', 'tabbed-default');
+		});
 
-		const panel = page.locator('#panel-account');
-		await expect(panel.locator('#current')).toBeVisible();
-		await expect(panel.locator('#fresh')).toBeVisible();
-		await expect(panel.locator('#confirm')).toBeVisible();
-		await expect(panel.getByRole('button', { name: 'Change password' })).toBeVisible();
-	});
+		await test.step('profile page shows Account tab content', async () => {
+			await gotoProfile(page);
 
-	test('account tab shows connected accounts section', async ({ page }) => {
-		await gotoProfile(page, 'account');
+			const panel = page.locator('#panel-account');
+			await expect(panel).toBeVisible();
+			await expect(panel.locator('#email')).toBeVisible();
+			await expect(panel.locator('#name')).toBeVisible();
 
-		const panel = page.locator('#panel-account');
-		await expect(panel.getByText('Connected accounts')).toBeVisible();
-		await expect(panel.getByText('GitHub')).toBeVisible();
-		await expect(panel.getByText('Google')).toHaveCount(0);
-	});
+			await screenshot(page, 'profile', 'account-tab');
+		});
 
-	test('profile save shows success feedback on 200', async ({ page }) => {
-		await gotoProfile(page, 'account');
+		await test.step('account tab shows email (read-only), display name, and save button', async () => {
+			await gotoProfile(page, 'account');
 
-		const panel = page.locator('#panel-account');
-		const nameInput = panel.locator('#name');
-		const currentValue = await nameInput.inputValue();
+			const panel = page.locator('#panel-account');
+			const emailInput = panel.locator('#email');
+			await expect(emailInput).toBeVisible();
+			await expect(emailInput).toBeDisabled();
 
-		// Type the same value to trigger save without actually changing
-		await nameInput.fill(currentValue || 'Test User');
-		await panel.getByRole('button', { name: 'Save' }).click();
-		await expect(panel.getByText('Profile updated')).toBeVisible({ timeout: 5_000 });
+			const nameInput = panel.locator('#name');
+			await expect(nameInput).toBeVisible();
 
-		await screenshot(page, 'profile', 'account-save-success');
+			await screenshot(page, 'profile', 'account-fields');
+		});
+
+		await test.step('account tab shows password change form', async () => {
+			await gotoProfile(page, 'account');
+
+			const panel = page.locator('#panel-account');
+			await expect(panel.locator('#current')).toBeVisible();
+			await expect(panel.locator('#fresh')).toBeVisible();
+			await expect(panel.locator('#confirm')).toBeVisible();
+			await expect(panel.getByRole('button', { name: 'Change password' })).toBeVisible();
+		});
+
+		await test.step('account tab shows connected accounts section', async () => {
+			await gotoProfile(page, 'account');
+
+			const panel = page.locator('#panel-account');
+			await expect(panel.getByText('Connected accounts')).toBeVisible();
+			await expect(panel.getByText('GitHub')).toBeVisible();
+			await expect(panel.getByText('Google')).toHaveCount(0);
+		});
+
+		await test.step('GitHub connect button is present when not connected', async () => {
+			await gotoProfile(page, 'account');
+
+			const panel = page.locator('#panel-account');
+
+			// Since e2e worker registers via email, OAuth should not be connected.
+			// Look for Connect buttons in the connected-accounts section.
+			const connectButtons = panel.getByRole('button', { name: 'Connect' });
+			await expect(connectButtons).toHaveCount(1);
+		});
 	});
 });
 
@@ -304,36 +311,6 @@ test.describe('Profile – Notifications tab', () => {
 
 		await screenshot(page, 'profile', 'notifications-tab');
 	});
-
-	test('notifications tab SMTP test button exists', async ({ page }) => {
-		await gotoProfile(page, 'notifications');
-		await waitForProfileTab(page, 'Notifications');
-
-		await expect(page.locator('[data-testid="settings-smtp-test-button"]')).toBeVisible();
-		await expect(page.locator('[data-testid="settings-smtp-test-recipient"]')).toBeVisible();
-	});
-
-	test('notifications tab has Telegram toggle', async ({ page }) => {
-		await gotoProfile(page, 'notifications');
-		await waitForProfileTab(page, 'Notifications');
-
-		// Expand Telegram section
-		await page.getByRole('button', { name: /Telegram/i }).click();
-		await expect(page.locator('#telegram-bot-token')).toBeVisible();
-		await expect(page.getByRole('switch', { name: 'Toggle Telegram bot' })).toBeVisible();
-	});
-
-	test('notifications save shows success feedback on 200', async ({ page }) => {
-		await gotoProfile(page, 'notifications');
-		await waitForProfileTab(page, 'Notifications');
-
-		await page.getByRole('button', { name: 'Save' }).click();
-		await expect(page.getByText('Notification settings saved')).toBeVisible({
-			timeout: 15_000
-		});
-
-		await screenshot(page, 'profile', 'notifications-save-success');
-	});
 });
 
 // ────────────────────────────────────────────────────────────────────────────────
@@ -348,27 +325,9 @@ test.describe('Profile – AI Providers tab', () => {
 		await expect(page.getByText('OpenRouter')).toBeVisible();
 		await expect(page.getByText('Ollama')).toBeVisible();
 		await expect(page.getByText('OpenAI')).toHaveCount(0);
+		await expect(page.getByRole('button', { name: 'Test OpenAI' })).toHaveCount(0);
 
 		await screenshot(page, 'profile', 'ai-providers-tab');
-	});
-
-	test('ai providers tab has test buttons for each provider', async ({ page }) => {
-		await gotoProfile(page, 'ai-providers');
-		await waitForProfileTab(page, 'AI Providers');
-
-		await expect(page.getByRole('button', { name: 'Test OpenRouter' })).toBeVisible();
-		await expect(page.getByRole('button', { name: 'Test Ollama' })).toBeVisible();
-		await expect(page.getByRole('button', { name: 'Test OpenAI' })).toHaveCount(0);
-	});
-
-	test('ai providers save shows success feedback on 200', async ({ page }) => {
-		await gotoProfile(page, 'ai-providers');
-		await waitForProfileTab(page, 'AI Providers');
-
-		await page.getByRole('button', { name: 'Save' }).click();
-		await expect(page.getByText('AI provider settings saved')).toBeVisible({ timeout: 5_000 });
-
-		await screenshot(page, 'profile', 'ai-providers-save-success');
 	});
 });
 
@@ -380,112 +339,118 @@ test.describe('Profile – System tab', () => {
 	test.afterEach(async ({ page }) => {
 		await restoreDefaultNamespace(page);
 	});
-	test('system tab shows debug section with IndexedDB toggle', async ({ page }) => {
-		await gotoProfile(page, 'system');
-		await waitForProfileTab(page, 'System');
-
-		await expect(page.getByRole('heading', { name: 'Debug' })).toBeVisible();
-		await expect(page.getByText('IndexedDB Inspector', { exact: true })).toBeVisible();
-		await expect(page.getByRole('switch', { name: 'Toggle IndexedDB inspector' })).toBeVisible();
-
-		await screenshot(page, 'profile', 'system-tab');
-	});
-
 	test('IndexedDB toggle persists after save and reload', async ({ page }) => {
-		await gotoProfile(page, 'system');
-		await waitForProfileTab(page, 'System');
+		await test.step('system tab shows debug section with IndexedDB toggle', async () => {
+			await gotoProfile(page, 'system');
+			await waitForProfileTab(page, 'System');
 
-		const toggle = page.getByRole('switch', { name: 'Toggle IndexedDB inspector' });
-		const wasEnabled = (await toggle.getAttribute('aria-checked')) === 'true';
+			await expect(page.getByRole('heading', { name: 'Debug' })).toBeVisible();
+			await expect(page.getByText('IndexedDB Inspector', { exact: true })).toBeVisible();
+			await expect(page.getByRole('switch', { name: 'Toggle IndexedDB inspector' })).toBeVisible();
 
-		// Toggle to the opposite state
-		await toggle.click();
-		await expect(toggle).toHaveAttribute('aria-checked', String(!wasEnabled), { timeout: 3_000 });
-
-		await page.getByRole('button', { name: 'Save' }).click();
-		await expect(page.getByText('System settings saved')).toBeVisible({
-			timeout: 15_000
+			await screenshot(page, 'profile', 'system-tab');
 		});
 
-		// Verify toggle state is correct immediately after save (before reload)
-		await expect(toggle).toHaveAttribute('aria-checked', String(!wasEnabled), { timeout: 5_000 });
+		await test.step('IndexedDB toggle persists after save and reload', async () => {
+			await gotoProfile(page, 'system');
+			await waitForProfileTab(page, 'System');
 
-		await page.reload();
-		await waitForProfileTab(page, 'System');
-		await expect(toggle).toHaveAttribute('aria-checked', String(!wasEnabled), { timeout: 5_000 });
+			const toggle = page.getByRole('switch', { name: 'Toggle IndexedDB inspector' });
+			const wasEnabled = (await toggle.getAttribute('aria-checked')) === 'true';
 
-		// Restore original state
-		await toggle.click();
-		await expect(toggle).toHaveAttribute('aria-checked', String(wasEnabled), { timeout: 3_000 });
-		await page.getByRole('button', { name: 'Save' }).click();
-		await expect(page.getByText('System settings saved')).toBeVisible({
-			timeout: 15_000
+			// Toggle to the opposite state
+			await toggle.click();
+			await expect(toggle).toHaveAttribute('aria-checked', String(!wasEnabled), { timeout: 3_000 });
+
+			await page.getByRole('button', { name: 'Save' }).click();
+			await expect(page.getByText('System settings saved')).toBeVisible({
+				timeout: 15_000
+			});
+
+			await screenshot(page, 'profile', 'system-save-success');
+
+			// Verify toggle state is correct immediately after save (before reload)
+			await expect(toggle).toHaveAttribute('aria-checked', String(!wasEnabled), { timeout: 5_000 });
+
+			await page.reload();
+			await waitForProfileTab(page, 'System');
+			await expect(toggle).toHaveAttribute('aria-checked', String(!wasEnabled), { timeout: 5_000 });
+
+			// Restore original state
+			await toggle.click();
+			await expect(toggle).toHaveAttribute('aria-checked', String(wasEnabled), { timeout: 3_000 });
+			await page.getByRole('button', { name: 'Save' }).click();
+			await expect(page.getByText('System settings saved')).toBeVisible({
+				timeout: 15_000
+			});
 		});
-	});
-
-	test('system tab shows collapsible schema groups for export options', async ({ page }) => {
-		await gotoProfile(page, 'system');
-		await waitForProfileTab(page, 'System');
-
-		await expect(page.getByText('What you can export')).toBeVisible();
-		await expect(page.getByText('Namespace tables: default')).toBeVisible();
-		await expect(
-			page.locator('[data-testid="system-export-group-toggle"][data-schema-name="public"]')
-		).toContainText('App tables');
-		const defaultToggle = page.locator(
-			'[data-testid="system-export-group-toggle"][data-schema-name="default"]'
-		);
-		await expect(defaultToggle).toBeVisible();
-		await expect(defaultToggle).toHaveAttribute('aria-expanded', 'false');
-		await expect(
-			page.locator('[data-testid="internal-table-onboard-switch"]').first()
-		).not.toBeVisible();
-
-		await defaultToggle.click();
-		await expect(defaultToggle).toHaveAttribute('aria-expanded', 'true');
-		await expect(
-			page.locator('[data-testid="internal-table-onboard-switch"]').first()
-		).toBeVisible();
-
-		await defaultToggle.click();
-		await expect(defaultToggle).toHaveAttribute('aria-expanded', 'false');
 	});
 
 	test('system internal postgres switch persists on refresh and can toggle off again', async ({
 		page
 	}) => {
-		await gotoProfile(page, 'system');
-		await waitForProfileTab(page, 'System');
+		await test.step('system tab shows collapsible schema groups for export options', async () => {
+			await gotoProfile(page, 'system');
+			await waitForProfileTab(page, 'System');
 
-		await expandSystemExportGroup(page, 'default');
+			await expect(page.getByText('What you can export')).toBeVisible();
+			await expect(page.getByText('Namespace tables: default')).toBeVisible();
+			await expect(
+				page.locator('[data-testid="system-export-group-toggle"][data-schema-name="public"]')
+			).toContainText('App tables');
+			const defaultToggle = page.locator(
+				'[data-testid="system-export-group-toggle"][data-schema-name="default"]'
+			);
+			await expect(defaultToggle).toBeVisible();
+			await expect(defaultToggle).toHaveAttribute('aria-expanded', 'false');
+			await expect(
+				page.locator('[data-testid="internal-table-onboard-switch"]').first()
+			).not.toBeVisible();
 
-		const switchControl = page.locator(
-			'[data-testid="internal-table-onboard-switch"][data-internal-table-key="default.analyses"]'
-		);
-		await expect(switchControl).toBeVisible({ timeout: 15_000 });
+			await defaultToggle.click();
+			await expect(defaultToggle).toHaveAttribute('aria-expanded', 'true');
+			await expect(
+				page.locator('[data-testid="internal-table-onboard-switch"]').first()
+			).toBeVisible();
 
-		if ((await switchControl.getAttribute('aria-checked')) !== 'true') {
-			await switchControl.click();
+			await defaultToggle.click();
+			await expect(defaultToggle).toHaveAttribute('aria-expanded', 'false');
+		});
+
+		await test.step('system internal postgres switch persists on refresh and can toggle off again', async () => {
+			await gotoProfile(page, 'system');
+			await waitForProfileTab(page, 'System');
+
+			await expandSystemExportGroup(page, 'default');
+
+			const switchControl = page.locator(
+				'[data-testid="internal-table-onboard-switch"][data-internal-table-key="default.analyses"]'
+			);
+			await expect(switchControl).toBeVisible({ timeout: 15_000 });
+
+			if ((await switchControl.getAttribute('aria-checked')) !== 'true') {
+				await switchControl.click();
+				await expect(switchControl).toHaveAttribute('aria-checked', 'true', {
+					timeout: 15_000
+				});
+				await expect(switchControl).toBeEnabled({ timeout: 15_000 });
+			}
+
+			await page.reload();
+			await waitForProfileTabs(page);
+			await waitForProfileTab(page, 'System');
+			await expandSystemExportGroup(page, 'default');
 			await expect(switchControl).toHaveAttribute('aria-checked', 'true', {
 				timeout: 15_000
 			});
 			await expect(switchControl).toBeEnabled({ timeout: 15_000 });
-		}
 
-		await page.reload();
-		await waitForProfileTabs(page);
-		await waitForProfileTab(page, 'System');
-		await expandSystemExportGroup(page, 'default');
-		await expect(switchControl).toHaveAttribute('aria-checked', 'true', {
-			timeout: 15_000
+			await switchControl.click();
+			await expect(switchControl).toHaveAttribute('aria-checked', 'false', {
+				timeout: 15_000
+			});
+			await expect(switchControl).toBeEnabled({ timeout: 15_000 });
 		});
-		await expect(switchControl).toBeEnabled({ timeout: 15_000 });
-
-		await switchControl.click();
-		await expect(switchControl).toHaveAttribute('aria-checked', 'false', {
-			timeout: 15_000
-		});
-		await expect(switchControl).toBeEnabled({ timeout: 15_000 });
 	});
 
 	test('system tab preserves hash and reloads onboard state when namespace changes', async ({
@@ -564,18 +529,6 @@ test.describe('Profile – System tab', () => {
 		await expect(page.getByText('Data Forge namespace: default')).toBeVisible();
 		await expect(page.getByText('df$tenant$public')).toHaveCount(0);
 	});
-
-	test('system save shows success feedback on 200', async ({ page }) => {
-		await gotoProfile(page, 'system');
-		await waitForProfileTab(page, 'System');
-
-		await page.getByRole('button', { name: 'Save' }).click();
-		await expect(page.getByText('System settings saved')).toBeVisible({
-			timeout: 15_000
-		});
-
-		await screenshot(page, 'profile', 'system-save-success');
-	});
 });
 
 // ────────────────────────────────────────────────────────────────────────────────
@@ -596,53 +549,6 @@ test.describe('Profile – sidebar navigation', () => {
 		);
 
 		await screenshot(page, 'profile', 'sidebar-profile-navigation');
-	});
-});
-
-// ────────────────────────────────────────────────────────────────────────────────
-// Profile – accessibility
-// ────────────────────────────────────────────────────────────────────────────────
-
-test.describe('Profile – accessibility', () => {
-	test('tab panel has correct ARIA attributes', async ({ page }) => {
-		await gotoProfile(page);
-
-		// Tablist has aria-label
-		await expect(page.getByRole('tablist', { name: 'Profile sections' })).toBeVisible();
-
-		// Active tab has aria-selected=true and controls the panel
-		const accountTab = page.getByRole('tab', { name: 'Account' });
-		await expect(accountTab).toHaveAttribute('aria-selected', 'true');
-		await expect(accountTab).toHaveAttribute('aria-controls', 'panel-account');
-
-		// Inactive tabs have aria-selected=false
-		const notifTab = page.getByRole('tab', { name: 'Notifications' });
-		await expect(notifTab).toHaveAttribute('aria-selected', 'false');
-
-		// Panel has role=tabpanel and aria-labelledby
-		const panel = page.locator('#panel-account');
-		await expect(panel).toHaveAttribute('role', 'tabpanel');
-		await expect(panel).toHaveAttribute('aria-labelledby', 'tab-account');
-	});
-
-	test('Home and End keys navigate to first and last tab', async ({ page }) => {
-		await gotoProfile(page);
-
-		// Focus Account tab and press End
-		const accountTab = page.getByRole('tab', { name: 'Account' });
-		await accountTab.focus();
-		await page.keyboard.press('End');
-		await expect(page.getByRole('tab', { name: 'System' })).toHaveAttribute(
-			'aria-selected',
-			'true'
-		);
-
-		// Press Home
-		await page.keyboard.press('Home');
-		await expect(page.getByRole('tab', { name: 'Account' })).toHaveAttribute(
-			'aria-selected',
-			'true'
-		);
 	});
 });
 
@@ -669,50 +575,52 @@ test.describe('Profile – Account tab functional', () => {
 		await expect(panel.locator('#confirm')).toHaveValue('');
 	});
 
-	test('password change with wrong current password shows error', async ({ page }) => {
-		await gotoProfile(page, 'account');
-
-		const panel = page.locator('#panel-account');
-		await panel.locator('#current').fill('WrongPassword123!');
-		await panel.locator('#fresh').fill('NewValidPass123!');
-		await panel.locator('#confirm').fill('NewValidPass123!');
-
-		await panel.getByRole('button', { name: 'Change password' }).click();
-
-		// Backend returns "Invalid email or password" for wrong current password
-		await expect(panel.getByText(/Invalid email or password/i)).toBeVisible({ timeout: 5_000 });
-	});
-
-	test('password change with mismatched new passwords shows error', async ({ page }) => {
-		await gotoProfile(page, 'account');
-
-		const panel = page.locator('#panel-account');
-		await panel.locator('#current').fill(E2E_PASSWORD);
-		await panel.locator('#fresh').fill('NewValidPass123!');
-		await panel.locator('#confirm').fill('DifferentPass123!');
-
-		await panel.getByRole('button', { name: 'Change password' }).click();
-
-		await expect(panel.getByText(/Passwords do not match/i)).toBeVisible({ timeout: 5_000 });
-	});
-
-	test('password change with short new password is blocked by HTML5 validation', async ({
+	test('password change rejects a wrong current password, mismatched new passwords, and a short new password', async ({
 		page
 	}) => {
-		await gotoProfile(page, 'account');
+		await test.step('password change with wrong current password shows error', async () => {
+			await gotoProfile(page, 'account');
 
-		const panel = page.locator('#panel-account');
-		await panel.locator('#current').fill(E2E_PASSWORD);
-		await panel.locator('#fresh').fill('short');
-		await panel.locator('#confirm').fill('short');
+			const panel = page.locator('#panel-account');
+			await panel.locator('#current').fill('WrongPassword123!');
+			await panel.locator('#fresh').fill('NewValidPass123!');
+			await panel.locator('#confirm').fill('NewValidPass123!');
 
-		// The #fresh input has minlength=8, so browser blocks submission before JS runs
-		await expect(panel.locator('#fresh')).toHaveAttribute('minlength', '8');
+			await panel.getByRole('button', { name: 'Change password' }).click();
 
-		// Clicking submit should not navigate away or show a success message
-		await panel.getByRole('button', { name: 'Change password' }).click();
-		await expect(page).toHaveURL('/profile#account');
-		await expect(panel.getByText('Password changed')).not.toBeVisible();
+			// Backend returns "Invalid email or password" for wrong current password
+			await expect(panel.getByText(/Invalid email or password/i)).toBeVisible({ timeout: 5_000 });
+		});
+
+		await test.step('password change with mismatched new passwords shows error', async () => {
+			await gotoProfile(page, 'account');
+
+			const panel = page.locator('#panel-account');
+			await panel.locator('#current').fill(E2E_PASSWORD);
+			await panel.locator('#fresh').fill('NewValidPass123!');
+			await panel.locator('#confirm').fill('DifferentPass123!');
+
+			await panel.getByRole('button', { name: 'Change password' }).click();
+
+			await expect(panel.getByText(/Passwords do not match/i)).toBeVisible({ timeout: 5_000 });
+		});
+
+		await test.step('password change with short new password is blocked by HTML5 validation', async () => {
+			await gotoProfile(page, 'account');
+
+			const panel = page.locator('#panel-account');
+			await panel.locator('#current').fill(E2E_PASSWORD);
+			await panel.locator('#fresh').fill('short');
+			await panel.locator('#confirm').fill('short');
+
+			// The #fresh input has minlength=8, so browser blocks submission before JS runs
+			await expect(panel.locator('#fresh')).toHaveAttribute('minlength', '8');
+
+			// Clicking submit should not navigate away or show a success message
+			await panel.getByRole('button', { name: 'Change password' }).click();
+			await expect(page).toHaveURL('/profile#account');
+			await expect(panel.getByText('Password changed')).not.toBeVisible();
+		});
 	});
 
 	test('display name can be edited and persists after save and reload', async ({ page }) => {
@@ -723,6 +631,8 @@ test.describe('Profile – Account tab functional', () => {
 		await panel.locator('#name').fill(newName);
 		await panel.getByRole('button', { name: 'Save' }).click();
 		await expect(panel.getByText('Profile updated')).toBeVisible({ timeout: 5_000 });
+
+		await screenshot(page, 'profile', 'account-save-success');
 
 		// Verify display name is correct immediately after save (before reload)
 		await expect(panel.locator('#name')).toHaveValue(newName);
@@ -779,6 +689,8 @@ test.describe('Profile – AI Providers tab functional', () => {
 		await page.getByRole('button', { name: 'Save' }).click();
 		await expect(page.getByText('AI provider settings saved')).toBeVisible({ timeout: 5_000 });
 
+		await screenshot(page, 'profile', 'ai-providers-save-success');
+
 		// Verify model value is correct immediately after save (before reload)
 		await expect(modelInput).toHaveValue(testModel);
 
@@ -817,14 +729,6 @@ test.describe('Profile – AI Providers tab functional', () => {
 // ────────────────────────────────────────────────────────────────────────────────
 
 test.describe('Profile – Notifications tab functional', () => {
-	test('SMTP test button is disabled when recipient is empty', async ({ page }) => {
-		await gotoProfile(page, 'notifications');
-		await waitForProfileTab(page, 'Notifications');
-
-		const testBtn = page.locator('[data-testid="settings-smtp-test-button"]');
-		await expect(testBtn).toBeDisabled();
-	});
-
 	test('SMTP test with recipient triggers feedback', async ({ page }) => {
 		await gotoProfile(page, 'notifications');
 		await waitForProfileTab(page, 'Notifications');
@@ -844,6 +748,8 @@ test.describe('Profile – Notifications tab functional', () => {
 
 		const testBtn = page.locator('[data-testid="settings-smtp-test-button"]');
 		const recipient = page.locator('[data-testid="settings-smtp-test-recipient"]');
+		await expect(testBtn).toBeVisible();
+		await expect(recipient).toBeVisible();
 
 		// Initially disabled
 		await expect(testBtn).toBeDisabled();
@@ -881,6 +787,8 @@ test.describe('Profile – Notifications tab functional', () => {
 			timeout: 15_000
 		});
 
+		await screenshot(page, 'profile', 'notifications-save-success');
+
 		// Verify toggle state is correct immediately after save (before reload)
 		await expect(toggle).toHaveAttribute('aria-checked', 'true', { timeout: 5_000 });
 
@@ -898,22 +806,5 @@ test.describe('Profile – Notifications tab functional', () => {
 		await expect(page.getByText('Notification settings saved')).toBeVisible({
 			timeout: 15_000
 		});
-	});
-});
-
-// ────────────────────────────────────────────────────────────────────────────────
-// Profile – Connected accounts functional
-// ────────────────────────────────────────────────────────────────────────────────
-
-test.describe('Profile – Connected accounts', () => {
-	test('GitHub connect button is present when not connected', async ({ page }) => {
-		await gotoProfile(page, 'account');
-
-		const panel = page.locator('#panel-account');
-
-		// Since e2e worker registers via email, OAuth should not be connected.
-		// Look for Connect buttons in the connected-accounts section.
-		const connectButtons = panel.getByRole('button', { name: 'Connect' });
-		await expect(connectButtons).toHaveCount(1);
 	});
 });

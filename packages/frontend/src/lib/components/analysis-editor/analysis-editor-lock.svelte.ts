@@ -186,5 +186,3 @@ export function createEditorLockController(deps: EditorLockControllerDeps) {
 		stop
 	};
 }
-
-export type EditorLockController = ReturnType<typeof createEditorLockController>;

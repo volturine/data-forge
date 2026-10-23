@@ -134,10 +134,12 @@ describe('timeAgo', () => {
 		expect(timeAgo(Number.POSITIVE_INFINITY)).toBe('Unknown time');
 	});
 
-	test('handles timestamps at midnight boundary', () => {
-		const midnight = Temporal.Instant.from('2025-06-15T00:00:00.000Z').epochMilliseconds;
-		const result = timeAgo(midnight);
-		expect(result).toMatch(/\d{1,2}:\d{2}/);
+	test('updates the local date label when the supplied display clock crosses midnight', () => {
+		const timestamp = new Date(2025, 5, 15, 23, 58).getTime();
+		const beforeMidnight = new Date(2025, 5, 15, 23, 59).getTime();
+		const afterMidnight = new Date(2025, 5, 16, 0, 0).getTime();
+		expect(timeAgo(timestamp, beforeMidnight)).not.toContain('Yesterday');
+		expect(timeAgo(timestamp, afterMidnight)).toContain('Yesterday');
 	});
 
 	test('accepts floating-point millisecond timestamps', () => {

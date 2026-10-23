@@ -130,8 +130,11 @@
 	// do not read the published datasource for that tab's result_id.
 	const isDerived = $derived(!!activeTab?.datasource?.analysis_tab_id);
 	const sourceDatasourceId = $derived(datasource?.id ?? activeTab?.datasource?.id ?? null);
+	const knownDatasource = $derived(
+		datasource ?? (sourceDatasourceId ? datasourceStore.getDatasource(sourceDatasourceId) : null)
+	);
 	const canQueryDatasource = $derived(
-		!!sourceDatasourceId && !isDerived && !datasource && datasourceStore.loaded
+		!!sourceDatasourceId && !isDerived && !knownDatasource && datasourceStore.loaded
 	);
 	const datasourceQuery = createQuery(() => ({
 		queryKey: ['datasource', ns.value, sourceDatasourceId] as const,
@@ -144,7 +147,7 @@
 		},
 		enabled: canQueryDatasource
 	}));
-	const resolvedDatasource = $derived(datasource ?? datasourceQuery.data);
+	const resolvedDatasource = $derived(knownDatasource ?? datasourceQuery.data);
 	const showSnapshotBuildPreviews = $derived.by(() => {
 		if (!resolvedDatasource) return false;
 		return (

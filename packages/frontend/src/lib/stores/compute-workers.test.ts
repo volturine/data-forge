@@ -104,6 +104,7 @@ describe('ComputeWorkersStore', () => {
 
 	afterEach(() => {
 		store.reset();
+		vi.restoreAllMocks();
 		vi.useRealTimers();
 	});
 
@@ -240,18 +241,29 @@ describe('ComputeWorkersStore', () => {
 		expect(mockConnectComputeWorkersStream).toHaveBeenCalledTimes(1);
 	});
 
-	test('unexpected close schedules reconnect', () => {
-		const first = mockStreamConnection();
-
+	test('reconnects with capped jittered backoff and resets after a snapshot', () => {
+		vi.spyOn(Math, 'random').mockReturnValue(0);
+		const stream = mockStreamConnection();
 		store.startStream();
-		first.emitClose();
 
+		for (const [attempt, delay] of [500, 1_000, 2_000, 4_000, 8_000, 15_000, 15_000].entries()) {
+			stream.emitClose();
+			stream.emitClose(); // Duplicate notifications must not add timers or advance backoff.
+			expect(vi.getTimerCount()).toBe(1);
+			vi.advanceTimersByTime(delay - 1);
+			expect(mockConnectComputeWorkersStream).toHaveBeenCalledTimes(attempt + 1);
+			vi.advanceTimersByTime(1);
+			expect(mockConnectComputeWorkersStream).toHaveBeenCalledTimes(attempt + 2);
+		}
 		expect(store.status).toBe('connecting');
-		expect(mockConnectComputeWorkersStream).toHaveBeenCalledTimes(1);
+		stream.emitSnapshot([makeComputeWorker()]);
+		stream.emitClose();
+		vi.advanceTimersByTime(500);
+		expect(mockConnectComputeWorkersStream).toHaveBeenCalledTimes(9);
 
-		vi.advanceTimersByTime(1_000);
-		expect(mockConnectComputeWorkersStream).toHaveBeenCalledTimes(2);
-		expect(store.status).toBe('connecting');
+		stream.emitClose();
+		store.reset();
+		expect(vi.getTimerCount()).toBe(0);
 	});
 
 	test('stopStream holds the socket until engines drain', () => {

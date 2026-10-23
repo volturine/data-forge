@@ -275,13 +275,23 @@
 		return datasourceIsIceberg(ds);
 	}
 
-	function markDirty() {
+	// Bumped by every edit so a save clears the dirty state only when nothing was
+	// edited while its request was in flight.
+	let editGeneration = 0;
+
+	function markEdited() {
 		hasChanges = true;
+		editGeneration += 1;
+	}
+
+	function markDirty() {
+		markEdited();
 		configDirty = true;
 	}
 
 	async function handleSave() {
 		if (!datasourceQuery.data) return;
+		const savedGeneration = editGeneration;
 
 		const update: {
 			name: string;
@@ -345,8 +355,10 @@
 		}
 
 		await updateMutation.mutateAsync(update);
-		hasChanges = false;
-		configDirty = false;
+		if (editGeneration === savedGeneration) {
+			hasChanges = false;
+			configDirty = false;
+		}
 
 		const ds = datasourceQuery.data;
 		if (update.config && datasourceNeedsExternalIngest(ds)) {
@@ -619,7 +631,7 @@
 				{isRefreshing}
 				{refreshActionLabel}
 				{refreshBusyLabel}
-				onDirty={() => (hasChanges = true)}
+				onDirty={markEdited}
 				onIngest={handleIngest}
 				onSave={handleSave}
 			/>

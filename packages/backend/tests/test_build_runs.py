@@ -1,4 +1,3 @@
-import asyncio
 import threading
 import uuid
 from concurrent.futures import ThreadPoolExecutor
@@ -10,7 +9,6 @@ from sqlmodel import Session, select
 
 from backend_core import build_jobs_service, build_runs_service as build_run_service
 from backend_core.domain.build_jobs.models import BuildJobStatus
-from backend_core.domain.build_runs.live import BuildNotification, BuildNotificationHub
 from backend_core.domain.build_runs.models import BuildRunStatus
 from backend_core.domain.compute import schemas as compute_schemas
 from backend_core.domain.compute_worker_runs.schemas import ComputeWorkerRunKind
@@ -154,16 +152,6 @@ def test_append_nonterminal_build_event_notifies_after_lock_without_outbox(test_
             'latest_sequence': 1,
         }
     ]
-
-
-async def test_build_notification_hub_keeps_the_highest_sequence_when_delivery_is_reordered() -> None:
-    hub = BuildNotificationHub()
-    await hub.publish(BuildNotification(namespace='default', build_id='build-1', latest_sequence=5))
-    await hub.publish(BuildNotification(namespace='default', build_id='build-1', latest_sequence=3))
-
-    latest = await asyncio.wait_for(hub.wait_for_build('build-1', last_sequence=4), timeout=0.1)
-
-    assert latest.latest_sequence == 5
 
 
 def test_concurrent_build_event_producers_receive_one_total_order_and_consistent_projection(test_engine, test_db_session, monkeypatch) -> None:

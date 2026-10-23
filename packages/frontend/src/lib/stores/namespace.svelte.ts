@@ -45,10 +45,6 @@ export function isNamespaceReady(): boolean {
 	return status === 'ready' && isValid(namespace);
 }
 
-export function isNamespaceSwitching(): boolean {
-	return switching;
-}
-
 export function getNamespaceStatus(): NamespaceStatus {
 	return status;
 }

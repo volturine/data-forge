@@ -1,14 +1,10 @@
 import { test, expect } from './fixtures.js';
 import { createAnalysis, type E2ERequest } from './utils/api.js';
-import { addStepAndOpenConfig, gotoAnalysisEditor } from './utils/analysis.js';
+import { addStepAndOpenConfig, addStepToOpenEditor, gotoAnalysisEditor } from './utils/analysis.js';
 import { deleteAnalysisViaUI } from './utils/ui-cleanup.js';
 import { screenshot } from './utils/visual.js';
 import { uid } from './utils/uid.js';
-import {
-	readyTimeoutMs,
-	waitForChartPreviewReady,
-	waitForInlinePreviewReady
-} from './utils/readiness.js';
+import { readyTimeoutMs, waitForChartPreviewReady } from './utils/readiness.js';
 
 let sharedBaseDatasourceName = '';
 let sharedBaseDatasourceId = '';
@@ -26,285 +22,556 @@ test.beforeEach(async ({ sharedDatasource }) => {
 	sharedBaseDatasourceId = sharedDatasource.id;
 });
 
-// ── Download format switching ───────────────────────────────────────────────
+// ── Config forms on one pipeline ────────────────────────────────────────────
 
-test.describe('Analyses – download config format switching', () => {
-	test('Download: format switch changes selection and filename is editable', async ({
-		page,
-		request
-	}) => {
+test.describe('Analyses – config forms on one pipeline', () => {
+	test('simple config forms apply in sequence on one pipeline', async ({ page, request }) => {
+		// Each step is applied before the next one is added, so the applied steps stay on the
+		// canvas. Steps that remove or rename columns come after every step that reads those
+		// columns (age is read by topk and expression; name by sort, filter, string transform,
+		// AI and rename). The time-series warning check is last because it is never applied.
+		test.slow();
 		const id = uid();
-		const analysis = `E2E Download Config ${id}`;
+		const analysis = `E2E Config Forms ${id}`;
 		const aId = await createTrackedAnalysis(request, analysis, sharedBaseDatasourceId);
 		try {
-			const configPanel = await addStepAndOpenConfig(page, aId, 'download');
+			await gotoAnalysisEditor(page, aId);
 
-			// Format select should be visible
-			const formatSelect = configPanel.locator('#download-format');
-			await expect(formatSelect).toBeVisible();
+			await test.step('Limit: set row count, Apply, verify disabled buttons', async () => {
+				const configPanel = await addStepToOpenEditor(page, 'limit');
 
-			// Filename input should be visible with default value
-			const filenameInput = configPanel.locator('#download-filename');
-			await expect(filenameInput).toBeVisible();
-			await expect(filenameInput).toHaveValue('download');
+				// Fill in the limit rows input
+				const limitInput = configPanel.locator('[data-testid="limit-rows-input"]');
+				await expect(limitInput).toBeVisible();
+				await limitInput.fill('42');
 
-			// Default format is csv
-			await expect(formatSelect).toHaveValue('csv');
+				// Apply is enabled (new step + changed config)
+				const applyBtn = configPanel.getByRole('button', { name: 'Apply' });
+				await expect(applyBtn).toBeEnabled();
+				await applyBtn.click();
 
-			// Switch to parquet
-			await formatSelect.selectOption('parquet');
-			await expect(formatSelect).toHaveValue('parquet');
+				// After apply, both buttons should be disabled (no changes)
+				await expect(applyBtn).toBeDisabled({ timeout: 5_000 });
+				await expect(configPanel.getByRole('button', { name: 'Cancel' })).toBeDisabled();
 
-			// Switch to duckdb
-			await formatSelect.selectOption('duckdb');
-			await expect(formatSelect).toHaveValue('duckdb');
+				await screenshot(page, 'analysis/operations', 'limit-config-applied');
+			});
 
-			// Change filename
-			await filenameInput.fill('my_export');
-			await expect(filenameInput).toHaveValue('my_export');
+			await test.step('Sample: set fraction + seed, Apply, buttons disable', async () => {
+				const configPanel = await addStepToOpenEditor(page, 'sample');
 
-			// Apply
-			const applyBtn = configPanel.getByRole('button', { name: 'Apply' });
-			await expect(applyBtn).toBeEnabled();
-			await applyBtn.click();
-			await expect(applyBtn).toBeDisabled({ timeout: 5_000 });
+				const fractionInput = configPanel.locator('[data-testid="sample-fraction-input"]');
+				await expect(fractionInput).toBeVisible();
+				await fractionInput.fill('0.25');
 
-			await screenshot(page, 'analysis/operations', 'download-config-format-switch');
-		} finally {
-			await deleteAnalysisViaUI(page, analysis);
-		}
-	});
-});
+				const seedInput = configPanel.locator('[data-testid="sample-seed-input"]');
+				await seedInput.fill('99');
 
-// ── Basic operations ────────────────────────────────────────────────────────
+				const applyBtn = configPanel.getByRole('button', { name: 'Apply' });
+				await expect(applyBtn).toBeEnabled();
+				await applyBtn.click();
+				await expect(applyBtn).toBeDisabled({ timeout: 5_000 });
+				await expect(configPanel.getByRole('button', { name: 'Cancel' })).toBeDisabled();
 
-test.describe('Analyses – limit config editing', () => {
-	test('Limit: set row count, Apply, verify disabled buttons', async ({ page, request }) => {
-		const id = uid();
-		const analysis = `E2E Limit Config ${id}`;
-		const aId = await createTrackedAnalysis(request, analysis, sharedBaseDatasourceId);
-		try {
-			const configPanel = await addStepAndOpenConfig(page, aId, 'limit');
+				await screenshot(page, 'analysis/operations', 'sample-config-applied');
+			});
 
-			// Fill in the limit rows input
-			const limitInput = configPanel.locator('[data-testid="limit-rows-input"]');
-			await expect(limitInput).toBeVisible();
-			await limitInput.fill('42');
+			await test.step('TopK: select column, set k, toggle descending, Apply', async () => {
+				const configPanel = await addStepToOpenEditor(page, 'topk');
 
-			// Apply is enabled (new step + changed config)
-			const applyBtn = configPanel.getByRole('button', { name: 'Apply' });
-			await expect(applyBtn).toBeEnabled();
-			await applyBtn.click();
+				// Select column via ColumnDropdown
+				const dropdownTrigger = configPanel.locator('button[aria-expanded]');
+				await expect(dropdownTrigger).toHaveCount(1);
+				await dropdownTrigger.click();
+				await page.getByRole('option', { name: 'age', exact: true }).click();
 
-			// After apply, both buttons should be disabled (no changes)
-			await expect(applyBtn).toBeDisabled({ timeout: 5_000 });
-			await expect(configPanel.getByRole('button', { name: 'Cancel' })).toBeDisabled();
+				// Set k value
+				const kInput = configPanel.locator('[data-testid="topk-k-input"]');
+				await kInput.fill('5');
 
-			await screenshot(page, 'analysis/operations', 'limit-config-applied');
-		} finally {
-			await deleteAnalysisViaUI(page, analysis);
-		}
-	});
-});
+				// Toggle descending
+				const descCheckbox = configPanel.locator('[data-testid="topk-descending-checkbox"]');
+				await descCheckbox.check();
+				await expect(descCheckbox).toBeChecked();
 
-test.describe('Analyses – expression config editing', () => {
-	test('Expression: fill expression + column name, Apply', async ({ page, request }) => {
-		const id = uid();
-		const analysis = `E2E Expr Config ${id}`;
-		const aId = await createTrackedAnalysis(request, analysis, sharedBaseDatasourceId);
-		try {
-			const configPanel = await addStepAndOpenConfig(page, aId, 'expression');
+				const applyBtn = configPanel.getByRole('button', { name: 'Apply' });
+				await expect(applyBtn).toBeEnabled();
+				await applyBtn.click();
+				await expect(applyBtn).toBeDisabled({ timeout: 5_000 });
 
-			// Fill the expression textarea
-			const exprTextarea = configPanel.locator('[data-testid="expr-expression-textarea"]');
-			await expect(exprTextarea).toBeVisible();
-			await exprTextarea.fill('pl.col("age") * 2');
+				await screenshot(page, 'analysis/operations', 'topk-config-applied');
+			});
 
-			// Fill the column name input
-			const columnInput = configPanel.locator('[data-testid="expr-column-input"]');
-			await expect(columnInput).toBeVisible();
-			await columnInput.fill('age_doubled');
+			await test.step('Deduplicate: change keep strategy, verify callout, Apply', async () => {
+				const configPanel = await addStepToOpenEditor(page, 'deduplicate');
 
-			const applyBtn = configPanel.getByRole('button', { name: 'Apply' });
-			await expect(applyBtn).toBeEnabled();
-			await applyBtn.click();
+				// Default callout: no columns selected → checks all columns
+				await expect(
+					configPanel.getByText('No columns selected - will check all columns for duplicates')
+				).toBeVisible();
 
-			await expect(applyBtn).toBeDisabled({ timeout: 5_000 });
+				// Default keep strategy is "first" — verify radio is checked
+				const firstRadio = configPanel.locator('input[name="keep-strategy"][value="first"]');
+				await expect(firstRadio).toBeChecked();
 
-			await screenshot(page, 'analysis/operations', 'expression-config-applied');
-		} finally {
-			await deleteAnalysisViaUI(page, analysis);
-		}
-	});
-});
+				// Change keep strategy to "last"
+				const lastRadio = configPanel.locator('input[name="keep-strategy"][value="last"]');
+				await lastRadio.check();
+				await expect(lastRadio).toBeChecked();
+				await expect(firstRadio).not.toBeChecked();
 
-test.describe('Analyses – sort config editing', () => {
-	test('Sort: add sort rule via ColumnDropdown, Apply, then remove rule', async ({
-		page,
-		request
-	}) => {
-		const id = uid();
-		const analysis = `E2E Sort Config ${id}`;
-		const aId = await createTrackedAnalysis(request, analysis, sharedBaseDatasourceId);
-		try {
-			const configPanel = await addStepAndOpenConfig(page, aId, 'sort');
+				// Change to "none"
+				const noneRadio = configPanel.locator('input[name="keep-strategy"][value="none"]');
+				await noneRadio.check();
+				await expect(noneRadio).toBeChecked();
 
-			const emptyState = configPanel.locator('#sort-empty-state');
-			await expect(emptyState).toBeVisible();
+				// Apply
+				const applyBtn = configPanel.getByRole('button', { name: 'Apply' });
+				await expect(applyBtn).toBeEnabled();
+				await applyBtn.click();
+				await expect(applyBtn).toBeDisabled({ timeout: 5_000 });
+				await expect(configPanel.getByRole('button', { name: 'Cancel' })).toBeDisabled();
 
-			// Open column dropdown — click the dropdown trigger button
-			const dropdownTrigger = configPanel.locator('button[aria-expanded]');
-			await expect(dropdownTrigger).toHaveCount(1);
-			await dropdownTrigger.click();
-			// Select the 'name' column from the dropdown
-			await page.getByRole('option', { name: 'name', exact: true }).click();
+				// Verify the "none" strategy is still selected after apply
+				await expect(noneRadio).toBeChecked();
 
-			// Click "Add" button
-			const addBtn = configPanel.locator('[data-testid="sort-add-button"]');
-			await expect(addBtn).toBeEnabled();
-			await addBtn.click();
+				await screenshot(page, 'analysis/operations', 'deduplicate-config-applied');
+			});
 
-			// The sort rule should appear in the list
-			await expect(configPanel.getByText('name')).toBeVisible();
-			await expect(emptyState).toBeHidden();
+			await test.step('Sort: add sort rule via ColumnDropdown, Apply, then remove rule', async () => {
+				const configPanel = await addStepToOpenEditor(page, 'sort');
 
-			// Apply the config
-			const applyBtn = configPanel.getByRole('button', { name: 'Apply' });
-			await expect(applyBtn).toBeEnabled();
-			await applyBtn.click();
-			await expect(applyBtn).toBeDisabled({ timeout: 5_000 });
+				const emptyState = configPanel.locator('#sort-empty-state');
+				await expect(emptyState).toBeVisible();
 
-			await screenshot(page, 'analysis/operations', 'sort-config-with-rule');
+				// Open column dropdown — click the dropdown trigger button
+				const dropdownTrigger = configPanel.locator('button[aria-expanded]');
+				await expect(dropdownTrigger).toHaveCount(1);
+				await dropdownTrigger.click();
+				// Select the 'name' column from the dropdown
+				await page.getByRole('option', { name: 'name', exact: true }).click();
 
-			// Remove the sort rule
-			await configPanel.locator('[data-testid="sort-remove-rule-0"]').waitFor({ state: 'visible' });
-			const removeBtn = configPanel.locator('[data-testid="sort-remove-rule-0"]');
-			await removeBtn.click();
+				// Click "Add" button
+				const addBtn = configPanel.locator('[data-testid="sort-add-button"]');
+				await expect(addBtn).toBeEnabled();
+				await addBtn.click();
 
-			await expect(removeBtn).toBeHidden();
-			await expect(emptyState).toBeVisible();
-			// Apply is now enabled again (change from applied state)
-			await expect(applyBtn).toBeEnabled();
-		} finally {
-			await deleteAnalysisViaUI(page, analysis);
-		}
-	});
-});
+				// The sort rule should appear in the list
+				await expect(configPanel.getByText('name')).toBeVisible();
+				await expect(emptyState).toBeHidden();
 
-test.describe('Analyses – rename config editing', () => {
-	test('Rename: add mapping via dropdown + input, Apply, then Cancel reverts', async ({
-		page,
-		request
-	}) => {
-		const id = uid();
-		const analysis = `E2E Rename Config ${id}`;
-		const aId = await createTrackedAnalysis(request, analysis, sharedBaseDatasourceId);
-		try {
-			const configPanel = await addStepAndOpenConfig(page, aId, 'rename');
+				// Apply the config
+				const applyBtn = configPanel.getByRole('button', { name: 'Apply' });
+				await expect(applyBtn).toBeEnabled();
+				await applyBtn.click();
+				await expect(applyBtn).toBeDisabled({ timeout: 5_000 });
 
-			// Empty state visible
-			await expect(configPanel.getByText(/No renames yet/i)).toBeVisible();
+				await screenshot(page, 'analysis/operations', 'sort-config-with-rule');
 
-			// Open column dropdown to pick a column to rename
-			const dropdownTrigger = configPanel.locator('button[aria-expanded]');
-			await expect(dropdownTrigger).toHaveCount(1);
-			await dropdownTrigger.click();
-			await page.getByRole('option', { name: 'name', exact: true }).click();
+				// Remove the sort rule
+				await configPanel
+					.locator('[data-testid="sort-remove-rule-0"]')
+					.waitFor({ state: 'visible' });
+				const removeBtn = configPanel.locator('[data-testid="sort-remove-rule-0"]');
+				await removeBtn.click();
 
-			// Fill the new name input
-			const newNameInput = configPanel.locator('[data-testid="rename-new-name-input"]');
-			await expect(newNameInput).toBeEnabled();
-			await newNameInput.fill('full_name');
+				await expect(removeBtn).toBeHidden();
+				await expect(emptyState).toBeVisible();
+				// Apply is now enabled again (change from applied state)
+				await expect(applyBtn).toBeEnabled();
+			});
 
-			// Click "Add Rename"
-			const addBtn = configPanel.locator('[data-testid="rename-add-button"]');
-			await expect(addBtn).toBeEnabled();
-			await addBtn.click();
+			await test.step('Filter: change operator, type value, Apply; then Cancel reverts', async () => {
+				const configPanel = await addStepToOpenEditor(page, 'filter');
 
-			// Mapping should appear
-			await expect(configPanel.getByText('full_name')).toBeVisible();
-			await expect(configPanel.getByText(/No renames yet/i)).not.toBeVisible();
+				// The filter starts with one empty condition — select a column
+				const dropdownTrigger = configPanel.locator('button[aria-expanded]');
+				await expect(dropdownTrigger).toHaveCount(1);
+				await dropdownTrigger.click();
+				await page.getByRole('option', { name: 'name', exact: true }).click();
 
-			// Apply
-			const applyBtn = configPanel.getByRole('button', { name: 'Apply' });
-			await expect(applyBtn).toBeEnabled();
-			await applyBtn.click();
-			await expect(applyBtn).toBeDisabled({ timeout: 5_000 });
+				// Change operator to "contains"
+				const operatorSelect = configPanel.locator('[data-testid="filter-operator-select-0"]');
+				await operatorSelect.selectOption('contains');
 
-			await screenshot(page, 'analysis/operations', 'rename-config-applied');
+				// Type a filter value (name is string type → uses multi-literal input with Enter)
+				const valueInput = configPanel.locator('[data-testid="filter-value-input-0"]');
+				await valueInput.fill('Alice');
+				await valueInput.press('Enter');
 
-			// Now remove the mapping to create a change
-			const removeBtn = configPanel.locator('[data-testid="rename-remove-button-name"]');
-			await removeBtn.click();
-			await expect(configPanel.getByText(/No renames yet/i)).toBeVisible();
+				// The token "Alice" should appear
+				await expect(configPanel.getByText('Alice')).toBeVisible();
 
-			// Cancel should revert to the applied state
-			const cancelBtn = configPanel.getByRole('button', { name: 'Cancel' });
-			await expect(cancelBtn).toBeEnabled();
-			await cancelBtn.click();
+				// Apply
+				const applyBtn = configPanel.getByRole('button', { name: 'Apply' });
+				await expect(applyBtn).toBeEnabled();
+				await applyBtn.click();
+				await expect(applyBtn).toBeDisabled({ timeout: 5_000 });
 
-			// After cancel, mapping should be restored
-			await expect(configPanel.getByText('full_name')).toBeVisible();
-			// And both buttons disabled again
-			await expect(applyBtn).toBeDisabled({ timeout: 5_000 });
-		} finally {
-			await deleteAnalysisViaUI(page, analysis);
-		}
-	});
-});
+				await screenshot(page, 'analysis/operations', 'filter-config-applied');
 
-test.describe('Analyses – filter config editing', () => {
-	test('Filter: change operator, type value, Apply; then Cancel reverts', async ({
-		page,
-		request
-	}) => {
-		const id = uid();
-		const analysis = `E2E Filter Config ${id}`;
-		const aId = await createTrackedAnalysis(request, analysis, sharedBaseDatasourceId);
-		try {
-			const configPanel = await addStepAndOpenConfig(page, aId, 'filter');
+				// Make a change: add another value token
+				const valueInputAfter = configPanel.locator('[data-testid="filter-value-input-0"]');
+				await valueInputAfter.fill('Bob');
+				await valueInputAfter.press('Enter');
+				await expect(configPanel.getByText('Bob')).toBeVisible();
 
-			// The filter starts with one empty condition — select a column
-			const dropdownTrigger = configPanel.locator('button[aria-expanded]');
-			await expect(dropdownTrigger).toHaveCount(1);
-			await dropdownTrigger.click();
-			await page.getByRole('option', { name: 'name', exact: true }).click();
+				// Now Cancel to revert
+				const cancelBtn = configPanel.getByRole('button', { name: 'Cancel' });
+				await expect(cancelBtn).toBeEnabled();
+				await cancelBtn.click();
 
-			// Change operator to "contains"
-			const operatorSelect = configPanel.locator('[data-testid="filter-operator-select-0"]');
-			await operatorSelect.selectOption('contains');
+				// After Cancel, Bob should be gone (reverted) and Alice should remain
+				await expect(configPanel.getByText('Bob')).not.toBeVisible({ timeout: 3_000 });
+				await expect(configPanel.getByText('Alice')).toBeVisible();
+				await expect(applyBtn).toBeDisabled({ timeout: 5_000 });
+			});
 
-			// Type a filter value (name is string type → uses multi-literal input with Enter)
-			const valueInput = configPanel.locator('[data-testid="filter-value-input-0"]');
-			await valueInput.fill('Alice');
-			await valueInput.press('Enter');
+			await test.step('StringTransform: pick column, method, new column name, Apply', async () => {
+				const configPanel = await addStepToOpenEditor(page, 'string_transform');
 
-			// The token "Alice" should appear
-			await expect(configPanel.getByText('Alice')).toBeVisible();
+				// Select 'name' column (string type) via ColumnDropdown
+				const dropdownTrigger = configPanel.locator('button[aria-expanded]');
+				await expect(dropdownTrigger).toHaveCount(1);
+				await dropdownTrigger.click();
+				await page.getByRole('option', { name: 'name', exact: true }).click();
 
-			// Apply
-			const applyBtn = configPanel.getByRole('button', { name: 'Apply' });
-			await expect(applyBtn).toBeEnabled();
-			await applyBtn.click();
-			await expect(applyBtn).toBeDisabled({ timeout: 5_000 });
+				// Default method is 'uppercase' — change to 'lowercase'
+				const methodSelect = configPanel.locator('[data-testid="str-method-select"]');
+				await expect(methodSelect).toBeVisible();
+				await methodSelect.selectOption('lowercase');
 
-			await screenshot(page, 'analysis/operations', 'filter-config-applied');
+				// Set new column name
+				const newColInput = configPanel.locator('[data-testid="str-new-column-input"]');
+				await newColInput.fill('name_lower');
 
-			// Make a change: add another value token
-			const valueInputAfter = configPanel.locator('[data-testid="filter-value-input-0"]');
-			await valueInputAfter.fill('Bob');
-			await valueInputAfter.press('Enter');
-			await expect(configPanel.getByText('Bob')).toBeVisible();
+				const applyBtn = configPanel.getByRole('button', { name: 'Apply' });
+				await expect(applyBtn).toBeEnabled();
+				await applyBtn.click();
+				await expect(applyBtn).toBeDisabled({ timeout: 5_000 });
 
-			// Now Cancel to revert
-			const cancelBtn = configPanel.getByRole('button', { name: 'Cancel' });
-			await expect(cancelBtn).toBeEnabled();
-			await cancelBtn.click();
+				// Switch to 'replace' method — pattern and replacement inputs should appear
+				await methodSelect.selectOption('replace');
+				await expect(configPanel.locator('[data-testid="str-pattern-input"]')).toBeVisible();
+				await expect(configPanel.locator('[data-testid="str-replacement-input"]')).toBeVisible();
 
-			// After Cancel, Bob should be gone (reverted) and Alice should remain
-			await expect(configPanel.getByText('Bob')).not.toBeVisible({ timeout: 3_000 });
-			await expect(configPanel.getByText('Alice')).toBeVisible();
-			await expect(applyBtn).toBeDisabled({ timeout: 5_000 });
+				await screenshot(page, 'analysis/operations', 'string-transform-config-applied');
+			});
+
+			await test.step('Expression: fill expression + column name, Apply', async () => {
+				const configPanel = await addStepToOpenEditor(page, 'expression');
+
+				// Fill the expression textarea
+				const exprTextarea = configPanel.locator('[data-testid="expr-expression-textarea"]');
+				await expect(exprTextarea).toBeVisible();
+				await exprTextarea.fill('pl.col("age") * 2');
+
+				// Fill the column name input
+				const columnInput = configPanel.locator('[data-testid="expr-column-input"]');
+				await expect(columnInput).toBeVisible();
+				await columnInput.fill('age_doubled');
+
+				const applyBtn = configPanel.getByRole('button', { name: 'Apply' });
+				await expect(applyBtn).toBeEnabled();
+				await applyBtn.click();
+
+				await expect(applyBtn).toBeDisabled({ timeout: 5_000 });
+
+				await screenshot(page, 'analysis/operations', 'expression-config-applied');
+			});
+
+			await test.step('WithColumns: add literal expression, verify in list, Apply', async () => {
+				const configPanel = await addStepToOpenEditor(page, 'with_columns');
+
+				await expect(configPanel.getByText('No columns configured yet.')).toBeVisible();
+
+				await configPanel.locator('#wc-expr-type').selectOption('literal');
+
+				await configPanel.locator('#wc-expr-name').fill('status');
+				await configPanel.locator('#wc-expr-value').fill('active');
+
+				const addBtn = configPanel.getByRole('button', { name: 'Add' });
+				await expect(addBtn).toBeEnabled();
+				await addBtn.click();
+
+				await expect(configPanel.getByText('status')).toBeVisible({ timeout: 5_000 });
+				await expect(configPanel.getByText(/"active"/)).toBeVisible();
+
+				await expect(configPanel.getByText('No columns configured yet.')).toBeHidden();
+
+				const applyBtn = configPanel.getByRole('button', { name: 'Apply' });
+				await expect(applyBtn).toBeEnabled();
+				await applyBtn.click();
+				await expect(applyBtn).toBeDisabled({ timeout: 5_000 });
+
+				await screenshot(page, 'analysis/operations', 'with-columns-config-applied');
+			});
+
+			await test.step('FillNull: change strategy, set value, Apply', async () => {
+				const configPanel = await addStepToOpenEditor(page, 'fill_null');
+
+				// Strategy defaults to 'literal'; verify it's present
+				const strategySelect = configPanel.locator('[data-testid="fill-strategy-select"]');
+				await expect(strategySelect).toBeVisible();
+				await expect(strategySelect).toHaveValue('literal');
+
+				// Fill in a value
+				const valueInput = configPanel.locator('#fill-value');
+				await expect(valueInput).toBeVisible();
+				await valueInput.fill('N/A');
+
+				// Callout for empty columns should be visible (no columns selected)
+				await expect(
+					configPanel.getByText(/No columns selected - will apply to all columns/i)
+				).toBeVisible();
+
+				const applyBtn = configPanel.getByRole('button', { name: 'Apply' });
+				await expect(applyBtn).toBeEnabled();
+				await applyBtn.click();
+				await expect(applyBtn).toBeDisabled({ timeout: 5_000 });
+
+				// Switch strategy to 'forward' — value input should disappear
+				await strategySelect.selectOption('forward');
+				await expect(configPanel.locator('#fill-value')).not.toBeVisible();
+
+				await screenshot(page, 'analysis/operations', 'fillnull-config-applied');
+			});
+
+			await test.step('Explode: shows warning when no list/array columns', async () => {
+				const configPanel = await addStepToOpenEditor(page, 'explode');
+
+				// Standard CSV has id,name,age,city — no list/array columns
+				await expect(
+					configPanel.getByText(
+						'No list/array columns detected. This operation requires columns with list or array types.'
+					)
+				).toBeVisible({ timeout: 5_000 });
+
+				// Descriptive text should be visible
+				await expect(
+					configPanel.getByText(/Transform list\/array columns into multiple rows/i)
+				).toBeVisible();
+
+				// Apply should still work (step can be applied even in warning state)
+				const applyBtn = configPanel.getByRole('button', { name: 'Apply' });
+				await expect(applyBtn).toBeEnabled();
+				await applyBtn.click();
+				await expect(applyBtn).toBeDisabled({ timeout: 5_000 });
+
+				await screenshot(page, 'analysis/operations', 'explode-config-warning');
+			});
+
+			await test.step('Notification: set email method + recipient, Apply', async () => {
+				const configPanel = await addStepToOpenEditor(page, 'notification');
+
+				// Method defaults to email
+				const methodSelect = configPanel.locator('#notify-method');
+				await expect(methodSelect).toBeVisible();
+				await expect(methodSelect).toHaveValue('email');
+
+				// Set recipient email
+				const recipientInput = configPanel.locator('#notify-recipient');
+				await expect(recipientInput).toBeVisible();
+				await recipientInput.fill('test@example.com');
+
+				// Set output column
+				const outputInput = configPanel.locator('#notify-output');
+				await outputInput.fill('email_status');
+
+				const applyBtn = configPanel.getByRole('button', { name: 'Apply' });
+				await expect(applyBtn).toBeEnabled();
+				await applyBtn.click();
+				await expect(applyBtn).toBeDisabled({ timeout: 5_000 });
+
+				await screenshot(page, 'analysis/operations', 'notification-config-applied');
+			});
+
+			await test.step('AI: set provider, model, output column, prompt, Apply', async () => {
+				const configPanel = await addStepToOpenEditor(page, 'ai');
+
+				// Provider defaults to ollama
+				const providerSelect = configPanel.locator('#ai-provider');
+				await expect(providerSelect).toBeVisible();
+				await expect(providerSelect).toHaveValue('ollama');
+
+				// Set model
+				const modelInput = configPanel.locator('#ai-model');
+				await modelInput.fill('mistral');
+
+				// Set output column
+				const outputInput = configPanel.locator('#ai-output');
+				await outputInput.fill('classification');
+
+				// Set prompt
+				const promptTextarea = configPanel.locator('#ai-prompt');
+				await promptTextarea.fill('Classify: {{name}}');
+
+				const applyBtn = configPanel.getByRole('button', { name: 'Apply' });
+				await expect(applyBtn).toBeEnabled();
+				await applyBtn.click();
+				await expect(applyBtn).toBeDisabled({ timeout: 5_000 });
+
+				// Switch to OpenRouter — API key field should appear
+				await providerSelect.selectOption('openrouter');
+				await expect(configPanel.locator('#ai-api-key')).toBeVisible();
+
+				await screenshot(page, 'analysis/operations', 'ai-config-applied');
+			});
+
+			await test.step('Drop: select columns via MultiSelect, Apply, warning callout updates', async () => {
+				const configPanel = await addStepToOpenEditor(page, 'drop');
+
+				// Warning callout for no columns selected
+				await expect(
+					configPanel.getByText(/No columns selected\. This operation will have no effect/i)
+				).toBeVisible();
+
+				// Open the MultiSelectColumnDropdown
+				const dropdownTrigger = configPanel.locator('button[aria-expanded]');
+				await expect(dropdownTrigger).toHaveCount(1);
+				await dropdownTrigger.click();
+
+				// Select 'age' column via checkbox
+				await page.locator('#msc-col-age').check();
+
+				// Close dropdown
+				await configPanel.click({ position: { x: 5, y: 5 } });
+
+				// Warning callout should now show the drop count
+				await expect(configPanel.getByText(/Columns to Drop \(1\)/i)).toBeVisible();
+
+				const applyBtn = configPanel.getByRole('button', { name: 'Apply' });
+				await expect(applyBtn).toBeEnabled();
+				await applyBtn.click();
+				await expect(applyBtn).toBeDisabled({ timeout: 5_000 });
+
+				await screenshot(page, 'analysis/operations', 'drop-config-applied');
+			});
+
+			await test.step('Select: pick columns, verify callout count, Apply', async () => {
+				const configPanel = await addStepToOpenEditor(page, 'select');
+
+				const dropdown = configPanel.locator('button[aria-expanded]');
+				await expect(dropdown).toHaveCount(1);
+				await dropdown.click();
+
+				const idColumn = page.locator('#msc-col-id');
+				const nameColumn = page.locator('#msc-col-name');
+				await expect(idColumn).toBeVisible({ timeout: readyTimeoutMs() });
+				await expect(nameColumn).toBeVisible({ timeout: readyTimeoutMs() });
+				await idColumn.check();
+				await nameColumn.check();
+
+				await configPanel.click({ position: { x: 5, y: 5 } });
+
+				await expect(configPanel.getByText(/Selected 2 columns/)).toBeVisible({ timeout: 5_000 });
+
+				const applyBtn = configPanel.getByRole('button', { name: 'Apply' });
+				await expect(applyBtn).toBeEnabled();
+				await applyBtn.click();
+				await expect(applyBtn).toBeDisabled({ timeout: 5_000 });
+
+				await screenshot(page, 'analysis/operations', 'select-config-applied');
+			});
+
+			await test.step('Rename: add mapping via dropdown + input, Apply, then Cancel reverts', async () => {
+				const configPanel = await addStepToOpenEditor(page, 'rename');
+
+				// Empty state visible
+				await expect(configPanel.getByText(/No renames yet/i)).toBeVisible();
+
+				// Open column dropdown to pick a column to rename
+				const dropdownTrigger = configPanel.locator('button[aria-expanded]');
+				await expect(dropdownTrigger).toHaveCount(1);
+				await dropdownTrigger.click();
+				await page.getByRole('option', { name: 'name', exact: true }).click();
+
+				// Fill the new name input
+				const newNameInput = configPanel.locator('[data-testid="rename-new-name-input"]');
+				await expect(newNameInput).toBeEnabled();
+				await newNameInput.fill('full_name');
+
+				// Click "Add Rename"
+				const addBtn = configPanel.locator('[data-testid="rename-add-button"]');
+				await expect(addBtn).toBeEnabled();
+				await addBtn.click();
+
+				// Mapping should appear
+				await expect(configPanel.getByText('full_name')).toBeVisible();
+				await expect(configPanel.getByText(/No renames yet/i)).not.toBeVisible();
+
+				// Apply
+				const applyBtn = configPanel.getByRole('button', { name: 'Apply' });
+				await expect(applyBtn).toBeEnabled();
+				await applyBtn.click();
+				await expect(applyBtn).toBeDisabled({ timeout: 5_000 });
+
+				await screenshot(page, 'analysis/operations', 'rename-config-applied');
+
+				// Now remove the mapping to create a change
+				const removeBtn = configPanel.locator('[data-testid="rename-remove-button-name"]');
+				await removeBtn.click();
+				await expect(configPanel.getByText(/No renames yet/i)).toBeVisible();
+
+				// Cancel should revert to the applied state
+				const cancelBtn = configPanel.getByRole('button', { name: 'Cancel' });
+				await expect(cancelBtn).toBeEnabled();
+				await cancelBtn.click();
+
+				// After cancel, mapping should be restored
+				await expect(configPanel.getByText('full_name')).toBeVisible();
+				// And both buttons disabled again
+				await expect(applyBtn).toBeDisabled({ timeout: 5_000 });
+			});
+
+			await test.step('Download: format switch changes selection and filename is editable', async () => {
+				const configPanel = await addStepToOpenEditor(page, 'download');
+
+				// Format select should be visible
+				const formatSelect = configPanel.locator('#download-format');
+				await expect(formatSelect).toBeVisible();
+
+				// Filename input should be visible with default value
+				const filenameInput = configPanel.locator('#download-filename');
+				await expect(filenameInput).toBeVisible();
+				await expect(filenameInput).toHaveValue('download');
+
+				// Default format is csv
+				await expect(formatSelect).toHaveValue('csv');
+
+				// Switch to parquet
+				await formatSelect.selectOption('parquet');
+				await expect(formatSelect).toHaveValue('parquet');
+
+				// Switch to duckdb
+				await formatSelect.selectOption('duckdb');
+				await expect(formatSelect).toHaveValue('duckdb');
+
+				// Switch to json
+				await formatSelect.selectOption('json');
+				await expect(formatSelect).toHaveValue('json');
+
+				// Change filename
+				await filenameInput.fill('my_export');
+				await expect(filenameInput).toHaveValue('my_export');
+
+				// Apply
+				const applyBtn = configPanel.getByRole('button', { name: 'Apply' });
+				await expect(applyBtn).toBeEnabled();
+				await applyBtn.click();
+				await expect(applyBtn).toBeDisabled({ timeout: 5_000 });
+
+				await screenshot(page, 'analysis/operations', 'download-config-format-switch');
+			});
+
+			await test.step('TimeSeries: no-date warning with standard CSV', async () => {
+				// Never applied, so it stays last: an unapplied step must not sit between applied ones.
+				const configPanel = await addStepToOpenEditor(page, 'timeseries');
+				await expect(configPanel.locator('#ts-no-columns-warning')).toBeVisible({
+					timeout: 5_000
+				});
+				await screenshot(page, 'analysis/operations', 'timeseries-no-date-warning');
+			});
 		} finally {
 			await deleteAnalysisViaUI(page, analysis);
 		}
@@ -312,22 +579,6 @@ test.describe('Analyses – filter config editing', () => {
 });
 
 // ── View and chart ──────────────────────────────────────────────────────────
-
-test.describe('Analyses – view node inline preview', () => {
-	test('view step renders inline data table with preview data', async ({ page, request }) => {
-		const id = uid();
-		const analysis = `E2E View Preview ${id}`;
-		const aId = await createTrackedAnalysis(request, analysis, sharedBaseDatasourceId);
-		try {
-			await gotoAnalysisEditor(page, aId);
-			await waitForInlinePreviewReady(page);
-
-			await screenshot(page, 'analysis/operations', 'view-inline-preview');
-		} finally {
-			await deleteAnalysisViaUI(page, analysis);
-		}
-	});
-});
 
 test.describe('Analyses – chart config and preview', () => {
 	test('chart step: configure x/y columns, apply, chart SVG renders', async ({ page, request }) => {
@@ -423,70 +674,189 @@ test.describe('Analyses – groupby config editing', () => {
 	});
 });
 
-test.describe('Analyses – sample config editing', () => {
-	test('Sample: set fraction + seed, Apply, buttons disable', async ({ page, request }) => {
-		const id = uid();
-		const analysis = `E2E Sample Config ${id}`;
-		const aId = await createTrackedAnalysis(request, analysis, sharedBaseDatasourceId);
-		try {
-			const configPanel = await addStepAndOpenConfig(page, aId, 'sample');
-
-			const fractionInput = configPanel.locator('[data-testid="sample-fraction-input"]');
-			await expect(fractionInput).toBeVisible();
-			await fractionInput.fill('0.25');
-
-			const seedInput = configPanel.locator('[data-testid="sample-seed-input"]');
-			await seedInput.fill('99');
-
-			const applyBtn = configPanel.getByRole('button', { name: 'Apply' });
-			await expect(applyBtn).toBeEnabled();
-			await applyBtn.click();
-			await expect(applyBtn).toBeDisabled({ timeout: 5_000 });
-			await expect(configPanel.getByRole('button', { name: 'Cancel' })).toBeDisabled();
-
-			await screenshot(page, 'analysis/operations', 'sample-config-applied');
-		} finally {
-			await deleteAnalysisViaUI(page, analysis);
-		}
-	});
-});
-
-test.describe('Analyses – topk config editing', () => {
-	test('TopK: select column, set k, toggle descending, Apply', async ({ page, request }) => {
-		const id = uid();
-		const analysis = `E2E TopK Config ${id}`;
-		const aId = await createTrackedAnalysis(request, analysis, sharedBaseDatasourceId);
-		try {
-			const configPanel = await addStepAndOpenConfig(page, aId, 'topk');
-
-			// Select column via ColumnDropdown
-			const dropdownTrigger = configPanel.locator('button[aria-expanded]');
-			await expect(dropdownTrigger).toHaveCount(1);
-			await dropdownTrigger.click();
-			await page.getByRole('option', { name: 'age', exact: true }).click();
-
-			// Set k value
-			const kInput = configPanel.locator('[data-testid="topk-k-input"]');
-			await kInput.fill('5');
-
-			// Toggle descending
-			const descCheckbox = configPanel.locator('[data-testid="topk-descending-checkbox"]');
-			await descCheckbox.check();
-			await expect(descCheckbox).toBeChecked();
-
-			const applyBtn = configPanel.getByRole('button', { name: 'Apply' });
-			await expect(applyBtn).toBeEnabled();
-			await applyBtn.click();
-			await expect(applyBtn).toBeDisabled({ timeout: 5_000 });
-
-			await screenshot(page, 'analysis/operations', 'topk-config-applied');
-		} finally {
-			await deleteAnalysisViaUI(page, analysis);
-		}
-	});
-});
-
 // ── Reshape operations ──────────────────────────────────────────────────────
+
+test.describe('Analyses – pivot config editing', () => {
+	test('pivot output schema feeds following steps, and multiple value columns apply', async ({
+		page,
+		request
+	}) => {
+		// Each pivot needs its own analysis: the first pivot's output schema is the input of the
+		// select step, and a second pivot in the same pipeline would change that schema.
+		test.slow();
+		const draftName = `E2E Pivot Draft Schema ${uid()}`;
+		const configName = `E2E Pivot Config ${uid()}`;
+		const draftAId = await createTrackedAnalysis(request, draftName, sharedBaseDatasourceId);
+		const configAId = await createTrackedAnalysis(request, configName, sharedBaseDatasourceId);
+		try {
+			await test.step('applying a pivot loads its output schema for following steps', async () => {
+				const pivotPanel = await addStepAndOpenConfig(page, draftAId, 'pivot');
+				const rows = pivotPanel.getByRole('group', { name: 'Rows' });
+				const columns = pivotPanel.getByRole('group', { name: 'Columns', exact: true });
+				const aggregates = pivotPanel.getByRole('group', { name: 'Aggregates' });
+
+				await rows.locator('button[aria-expanded]').click();
+				await rows.getByRole('checkbox', { name: 'id', exact: true }).check();
+				await rows.getByRole('button', { name: /Done/ }).click();
+				await columns.getByRole('button', { name: 'Choose a column field...' }).click();
+				await page.getByRole('option', { name: 'city', exact: true }).click();
+				const valueColumns = aggregates.getByRole('group', { name: 'Value columns' });
+				await valueColumns.getByRole('button', { name: 'All remaining columns' }).click();
+				await valueColumns.getByRole('checkbox', { name: 'age', exact: true }).check();
+				await valueColumns.getByRole('button', { name: /Done/ }).click();
+				await pivotPanel.locator('[data-testid="pivot-agg-select"]').selectOption('sum');
+
+				const waitForSchema = () =>
+					page.waitForResponse(
+						(response) =>
+							new URL(response.url()).pathname.endsWith('/v1/compute/schema') &&
+							response.request().method() === 'POST',
+						{ timeout: readyTimeoutMs() }
+					);
+				const applyResponse = waitForSchema();
+				await pivotPanel.getByRole('button', { name: 'Apply' }).click();
+				expect((await applyResponse).ok()).toBeTruthy();
+				await expect(pivotPanel.getByRole('button', { name: 'Apply' })).toBeDisabled();
+				const outputSchema = pivotPanel.getByTestId('pivot-output-schema');
+				await expect(outputSchema).toBeVisible({ timeout: readyTimeoutMs() });
+				for (const city of ['London', 'Paris', 'Berlin']) {
+					await expect(outputSchema.getByText(city, { exact: true })).toBeVisible();
+				}
+
+				await page.locator('button[data-step="select"]').click();
+				const selectPanel = page.locator('[data-step-config="select"]');
+
+				async function expectAppliedCities(): Promise<void> {
+					await expect(selectPanel).toBeVisible();
+					await selectPanel.getByRole('button', { name: 'Select columns to keep...' }).click();
+					for (const city of ['London', 'Paris', 'Berlin']) {
+						await expect(
+							selectPanel.getByRole('checkbox', { name: city, exact: true })
+						).toBeVisible();
+					}
+					await expect(
+						selectPanel.getByRole('checkbox', { name: 'month', exact: true })
+					).toHaveCount(0);
+				}
+
+				await expectAppliedCities();
+
+				// An un-applied edit must leave the applied pivot schema untouched.
+				await page.locator('[data-step-type="pivot"]').locator('[data-action="edit"]').click();
+				const reopenedPivot = page.locator('[data-step-config="pivot"]');
+				await expect(reopenedPivot).toBeVisible();
+				await reopenedPivot.locator('[data-testid="pivot-agg-select"]').selectOption('mean');
+				await reopenedPivot.getByRole('button', { name: 'Cancel' }).click();
+				await expect(reopenedPivot.locator('[data-testid="pivot-agg-select"]')).toHaveValue('sum');
+				await page.locator('[data-step-type="select"]').locator('[data-action="edit"]').click();
+				await expectAppliedCities();
+
+				// Applying a different pivot column refreshes the schema used by following steps.
+				await page.locator('[data-step-type="pivot"]').locator('[data-action="edit"]').click();
+				await expect(reopenedPivot).toBeVisible();
+				await reopenedPivot
+					.getByRole('group', { name: 'Columns', exact: true })
+					.getByRole('button', { name: 'city', exact: true })
+					.click();
+				await page.getByRole('option', { name: 'month', exact: true }).click();
+				const monthSchemaResponse = waitForSchema();
+				await reopenedPivot.getByRole('button', { name: 'Apply' }).click();
+				expect((await monthSchemaResponse).ok()).toBeTruthy();
+				// The response completes before the apply handler updates the pivot and downstream schema.
+				await expect(reopenedPivot.getByTestId('pivot-output-schema')).toContainText('January');
+				await page.locator('[data-step-type="select"]').locator('[data-action="edit"]').click();
+				await expect(selectPanel).toBeVisible();
+				await selectPanel.getByRole('button', { name: 'Select columns to keep...' }).click();
+				for (const month of ['January', 'February', 'March']) {
+					await expect(
+						selectPanel.getByRole('checkbox', { name: month, exact: true })
+					).toBeVisible();
+				}
+				await expect(
+					selectPanel.getByRole('checkbox', { name: 'London', exact: true })
+				).toHaveCount(0);
+			});
+
+			await test.step('Pivot: choose multiple value columns and apply', async () => {
+				const configPanel = await addStepAndOpenConfig(page, configAId, 'pivot');
+
+				const rows = configPanel.getByRole('group', { name: 'Rows' });
+				const columns = configPanel.getByRole('group', { name: 'Columns', exact: true });
+				const aggregates = configPanel.getByRole('group', { name: 'Aggregates' });
+				await expect(rows).toBeVisible();
+				await expect(columns).toBeVisible();
+				await expect(aggregates).toBeVisible();
+				await expect(configPanel.getByText('Index Columns', { exact: true })).toHaveCount(0);
+
+				// Choose the row identifier.
+				await rows.locator('button[aria-expanded]').click();
+				await rows.getByRole('checkbox', { name: 'id', exact: true }).check();
+				await rows.getByRole('button', { name: /Done/ }).click();
+				await expect(rows.getByRole('status')).toHaveText(
+					'1 row field selected. One output row for each unique combination.'
+				);
+
+				// Distinct city values become output columns.
+				await columns.getByRole('button', { name: 'Choose a column field...' }).click();
+				await page.getByRole('option', { name: 'city', exact: true }).click();
+				await rows.locator('button[aria-expanded]').click();
+				await expect(rows.getByRole('checkbox', { name: 'city', exact: true })).toHaveCount(0);
+				await rows.getByRole('button', { name: /Done/ }).click();
+
+				// Aggregate age values with sum.
+				const valueColumns = aggregates.getByRole('group', { name: 'Value columns' });
+				await valueColumns.getByRole('button', { name: 'All remaining columns' }).click();
+				await expect(valueColumns.getByRole('checkbox', { name: 'id', exact: true })).toHaveCount(
+					0
+				);
+				await expect(valueColumns.getByRole('checkbox', { name: 'city', exact: true })).toHaveCount(
+					0
+				);
+				await valueColumns.getByRole('checkbox', { name: 'age', exact: true }).check();
+				await valueColumns.getByRole('checkbox', { name: 'month', exact: true }).check();
+				await valueColumns.getByRole('button', { name: /Done/ }).click();
+
+				const aggSelect = configPanel.locator('[data-testid="pivot-agg-select"]');
+				await aggSelect.selectOption('first');
+				const schemaResponse = page.waitForResponse(
+					(response) =>
+						new URL(response.url()).pathname.endsWith('/v1/compute/schema') &&
+						response.request().method() === 'POST',
+					{ timeout: readyTimeoutMs() }
+				);
+				const applyBtn = configPanel.getByRole('button', { name: 'Apply' });
+				await expect(applyBtn).toBeEnabled();
+				await applyBtn.click();
+				expect((await schemaResponse).ok()).toBeTruthy();
+				await expect(applyBtn).toBeDisabled({ timeout: 5_000 });
+				const outputSchema = configPanel.getByTestId('pivot-output-schema');
+				await expect(outputSchema).toBeVisible({ timeout: readyTimeoutMs() });
+				for (const column of ['age_London', 'age_Paris', 'month_London', 'month_Paris']) {
+					await expect(outputSchema.getByText(column, { exact: true })).toBeVisible();
+				}
+
+				// A following step must receive the distinct pivot values as its input schema.
+				await page.locator('button[data-step="select"]').click();
+				const selectPanel = page.locator('[data-step-config="select"]');
+				await expect(selectPanel).toBeVisible({ timeout: 5_000 });
+				await selectPanel.getByRole('button', { name: 'Select columns to keep...' }).click();
+				for (const column of ['age_London', 'month_London', 'age_Paris', 'month_Paris']) {
+					await expect(
+						selectPanel.getByRole('checkbox', { name: column, exact: true })
+					).toBeVisible();
+				}
+				await expect(selectPanel.getByRole('checkbox', { name: 'city', exact: true })).toHaveCount(
+					0
+				);
+
+				await screenshot(page, 'analysis/operations', 'pivot-config-applied');
+			});
+		} finally {
+			await deleteAnalysisViaUI(page, draftName);
+			await deleteAnalysisViaUI(page, configName);
+		}
+	});
+});
 
 test.describe('Analyses – unpivot config editing', () => {
 	test('Unpivot: set variable/value names, Apply', async ({ page, request }) => {
@@ -515,485 +885,6 @@ test.describe('Analyses – unpivot config editing', () => {
 			await expect(applyBtn).toBeDisabled({ timeout: 5_000 });
 
 			await screenshot(page, 'analysis/operations', 'unpivot-config-applied');
-		} finally {
-			await deleteAnalysisViaUI(page, analysis);
-		}
-	});
-});
-
-test.describe('Analyses – fill null config editing', () => {
-	test('FillNull: change strategy, set value, Apply', async ({ page, request }) => {
-		const id = uid();
-		const analysis = `E2E FillNull Config ${id}`;
-		const aId = await createTrackedAnalysis(request, analysis, sharedBaseDatasourceId);
-		try {
-			const configPanel = await addStepAndOpenConfig(page, aId, 'fill_null');
-
-			// Strategy defaults to 'literal'; verify it's present
-			const strategySelect = configPanel.locator('[data-testid="fill-strategy-select"]');
-			await expect(strategySelect).toBeVisible();
-			await expect(strategySelect).toHaveValue('literal');
-
-			// Fill in a value
-			const valueInput = configPanel.locator('#fill-value');
-			await expect(valueInput).toBeVisible();
-			await valueInput.fill('N/A');
-
-			// Callout for empty columns should be visible (no columns selected)
-			await expect(
-				configPanel.getByText(/No columns selected - will apply to all columns/i)
-			).toBeVisible();
-
-			const applyBtn = configPanel.getByRole('button', { name: 'Apply' });
-			await expect(applyBtn).toBeEnabled();
-			await applyBtn.click();
-			await expect(applyBtn).toBeDisabled({ timeout: 5_000 });
-
-			// Switch strategy to 'forward' — value input should disappear
-			await strategySelect.selectOption('forward');
-			await expect(configPanel.locator('#fill-value')).not.toBeVisible();
-
-			await screenshot(page, 'analysis/operations', 'fillnull-config-applied');
-		} finally {
-			await deleteAnalysisViaUI(page, analysis);
-		}
-	});
-});
-
-test.describe('Analyses – pivot config editing', () => {
-	test('applying a pivot loads its output schema for following steps', async ({
-		page,
-		request
-	}) => {
-		const id = uid();
-		const analysis = `E2E Pivot Draft Schema ${id}`;
-		const aId = await createTrackedAnalysis(request, analysis, sharedBaseDatasourceId);
-		try {
-			const pivotPanel = await addStepAndOpenConfig(page, aId, 'pivot');
-			const rows = pivotPanel.getByRole('group', { name: 'Rows' });
-			const columns = pivotPanel.getByRole('group', { name: 'Columns', exact: true });
-			const aggregates = pivotPanel.getByRole('group', { name: 'Aggregates' });
-
-			await rows.locator('button[aria-expanded]').click();
-			await rows.getByRole('checkbox', { name: 'id', exact: true }).check();
-			await rows.getByRole('button', { name: /Done/ }).click();
-			await columns.getByRole('button', { name: 'Choose a column field...' }).click();
-			await page.getByRole('option', { name: 'city', exact: true }).click();
-			const valueColumns = aggregates.getByRole('group', { name: 'Value columns' });
-			await valueColumns.getByRole('button', { name: 'All remaining columns' }).click();
-			await valueColumns.getByRole('checkbox', { name: 'age', exact: true }).check();
-			await valueColumns.getByRole('button', { name: /Done/ }).click();
-			await pivotPanel.locator('[data-testid="pivot-agg-select"]').selectOption('sum');
-
-			const waitForSchema = () =>
-				page.waitForResponse(
-					(response) =>
-						new URL(response.url()).pathname.endsWith('/v1/compute/schema') &&
-						response.request().method() === 'POST',
-					{ timeout: readyTimeoutMs() }
-				);
-			const applyResponse = waitForSchema();
-			await pivotPanel.getByRole('button', { name: 'Apply' }).click();
-			expect((await applyResponse).ok()).toBeTruthy();
-			await expect(pivotPanel.getByRole('button', { name: 'Apply' })).toBeDisabled();
-			const outputSchema = pivotPanel.getByTestId('pivot-output-schema');
-			await expect(outputSchema).toBeVisible({ timeout: readyTimeoutMs() });
-			for (const city of ['London', 'Paris', 'Berlin']) {
-				await expect(outputSchema.getByText(city, { exact: true })).toBeVisible();
-			}
-
-			await page.locator('button[data-step="select"]').click();
-			const selectPanel = page.locator('[data-step-config="select"]');
-
-			async function expectAppliedCities(): Promise<void> {
-				await expect(selectPanel).toBeVisible();
-				await selectPanel.getByRole('button', { name: 'Select columns to keep...' }).click();
-				for (const city of ['London', 'Paris', 'Berlin']) {
-					await expect(
-						selectPanel.getByRole('checkbox', { name: city, exact: true })
-					).toBeVisible();
-				}
-				await expect(selectPanel.getByRole('checkbox', { name: 'month', exact: true })).toHaveCount(
-					0
-				);
-			}
-
-			await expectAppliedCities();
-
-			// An un-applied edit must leave the applied pivot schema untouched.
-			await page.locator('[data-step-type="pivot"]').locator('[data-action="edit"]').click();
-			const reopenedPivot = page.locator('[data-step-config="pivot"]');
-			await expect(reopenedPivot).toBeVisible();
-			await reopenedPivot.locator('[data-testid="pivot-agg-select"]').selectOption('mean');
-			await reopenedPivot.getByRole('button', { name: 'Cancel' }).click();
-			await expect(reopenedPivot.locator('[data-testid="pivot-agg-select"]')).toHaveValue('sum');
-			await page.locator('[data-step-type="select"]').locator('[data-action="edit"]').click();
-			await expectAppliedCities();
-
-			// Applying a different pivot column refreshes the schema used by following steps.
-			await page.locator('[data-step-type="pivot"]').locator('[data-action="edit"]').click();
-			await expect(reopenedPivot).toBeVisible();
-			await reopenedPivot
-				.getByRole('group', { name: 'Columns', exact: true })
-				.getByRole('button', { name: 'city', exact: true })
-				.click();
-			await page.getByRole('option', { name: 'month', exact: true }).click();
-			const monthSchemaResponse = waitForSchema();
-			await reopenedPivot.getByRole('button', { name: 'Apply' }).click();
-			expect((await monthSchemaResponse).ok()).toBeTruthy();
-			// The response completes before the apply handler updates the pivot and downstream schema.
-			await expect(reopenedPivot.getByTestId('pivot-output-schema')).toContainText('January');
-			await page.locator('[data-step-type="select"]').locator('[data-action="edit"]').click();
-			await expect(selectPanel).toBeVisible();
-			await selectPanel.getByRole('button', { name: 'Select columns to keep...' }).click();
-			for (const month of ['January', 'February', 'March']) {
-				await expect(selectPanel.getByRole('checkbox', { name: month, exact: true })).toBeVisible();
-			}
-			await expect(selectPanel.getByRole('checkbox', { name: 'London', exact: true })).toHaveCount(
-				0
-			);
-		} finally {
-			await deleteAnalysisViaUI(page, analysis);
-		}
-	});
-
-	test('Pivot: choose multiple value columns and apply', async ({ page, request }) => {
-		const id = uid();
-		const analysis = `E2E Pivot Config ${id}`;
-		const aId = await createTrackedAnalysis(request, analysis, sharedBaseDatasourceId);
-		try {
-			const configPanel = await addStepAndOpenConfig(page, aId, 'pivot');
-
-			const rows = configPanel.getByRole('group', { name: 'Rows' });
-			const columns = configPanel.getByRole('group', { name: 'Columns', exact: true });
-			const aggregates = configPanel.getByRole('group', { name: 'Aggregates' });
-			await expect(rows).toBeVisible();
-			await expect(columns).toBeVisible();
-			await expect(aggregates).toBeVisible();
-			await expect(configPanel.getByText('Index Columns', { exact: true })).toHaveCount(0);
-
-			// Choose the row identifier.
-			await rows.locator('button[aria-expanded]').click();
-			await rows.getByRole('checkbox', { name: 'id', exact: true }).check();
-			await rows.getByRole('button', { name: /Done/ }).click();
-			await expect(rows.getByRole('status')).toHaveText(
-				'1 row field selected. One output row for each unique combination.'
-			);
-
-			// Distinct city values become output columns.
-			await columns.getByRole('button', { name: 'Choose a column field...' }).click();
-			await page.getByRole('option', { name: 'city', exact: true }).click();
-			await rows.locator('button[aria-expanded]').click();
-			await expect(rows.getByRole('checkbox', { name: 'city', exact: true })).toHaveCount(0);
-			await rows.getByRole('button', { name: /Done/ }).click();
-
-			// Aggregate age values with sum.
-			const valueColumns = aggregates.getByRole('group', { name: 'Value columns' });
-			await valueColumns.getByRole('button', { name: 'All remaining columns' }).click();
-			await expect(valueColumns.getByRole('checkbox', { name: 'id', exact: true })).toHaveCount(0);
-			await expect(valueColumns.getByRole('checkbox', { name: 'city', exact: true })).toHaveCount(
-				0
-			);
-			await valueColumns.getByRole('checkbox', { name: 'age', exact: true }).check();
-			await valueColumns.getByRole('checkbox', { name: 'month', exact: true }).check();
-			await valueColumns.getByRole('button', { name: /Done/ }).click();
-
-			const aggSelect = configPanel.locator('[data-testid="pivot-agg-select"]');
-			await aggSelect.selectOption('first');
-			const schemaResponse = page.waitForResponse(
-				(response) =>
-					new URL(response.url()).pathname.endsWith('/v1/compute/schema') &&
-					response.request().method() === 'POST',
-				{ timeout: readyTimeoutMs() }
-			);
-			const applyBtn = configPanel.getByRole('button', { name: 'Apply' });
-			await expect(applyBtn).toBeEnabled();
-			await applyBtn.click();
-			expect((await schemaResponse).ok()).toBeTruthy();
-			await expect(applyBtn).toBeDisabled({ timeout: 5_000 });
-			const outputSchema = configPanel.getByTestId('pivot-output-schema');
-			await expect(outputSchema).toBeVisible({ timeout: readyTimeoutMs() });
-			for (const column of ['age_London', 'age_Paris', 'month_London', 'month_Paris']) {
-				await expect(outputSchema.getByText(column, { exact: true })).toBeVisible();
-			}
-
-			// A following step must receive the distinct pivot values as its input schema.
-			await page.locator('button[data-step="select"]').click();
-			const selectPanel = page.locator('[data-step-config="select"]');
-			await expect(selectPanel).toBeVisible({ timeout: 5_000 });
-			await selectPanel.getByRole('button', { name: 'Select columns to keep...' }).click();
-			for (const column of ['age_London', 'month_London', 'age_Paris', 'month_Paris']) {
-				await expect(
-					selectPanel.getByRole('checkbox', { name: column, exact: true })
-				).toBeVisible();
-			}
-			await expect(selectPanel.getByRole('checkbox', { name: 'city', exact: true })).toHaveCount(0);
-
-			await screenshot(page, 'analysis/operations', 'pivot-config-applied');
-		} finally {
-			await deleteAnalysisViaUI(page, analysis);
-		}
-	});
-});
-
-// ── String and column operations ────────────────────────────────────────────
-
-test.describe('Analyses – string transform config editing', () => {
-	test('StringTransform: pick column, method, new column name, Apply', async ({
-		page,
-		request
-	}) => {
-		const id = uid();
-		const analysis = `E2E Str Config ${id}`;
-		const aId = await createTrackedAnalysis(request, analysis, sharedBaseDatasourceId);
-		try {
-			const configPanel = await addStepAndOpenConfig(page, aId, 'string_transform');
-
-			// Select 'name' column (string type) via ColumnDropdown
-			const dropdownTrigger = configPanel.locator('button[aria-expanded]');
-			await expect(dropdownTrigger).toHaveCount(1);
-			await dropdownTrigger.click();
-			await page.getByRole('option', { name: 'name', exact: true }).click();
-
-			// Default method is 'uppercase' — change to 'lowercase'
-			const methodSelect = configPanel.locator('[data-testid="str-method-select"]');
-			await expect(methodSelect).toBeVisible();
-			await methodSelect.selectOption('lowercase');
-
-			// Set new column name
-			const newColInput = configPanel.locator('[data-testid="str-new-column-input"]');
-			await newColInput.fill('name_lower');
-
-			const applyBtn = configPanel.getByRole('button', { name: 'Apply' });
-			await expect(applyBtn).toBeEnabled();
-			await applyBtn.click();
-			await expect(applyBtn).toBeDisabled({ timeout: 5_000 });
-
-			// Switch to 'replace' method — pattern and replacement inputs should appear
-			await methodSelect.selectOption('replace');
-			await expect(configPanel.locator('[data-testid="str-pattern-input"]')).toBeVisible();
-			await expect(configPanel.locator('[data-testid="str-replacement-input"]')).toBeVisible();
-
-			await screenshot(page, 'analysis/operations', 'string-transform-config-applied');
-		} finally {
-			await deleteAnalysisViaUI(page, analysis);
-		}
-	});
-});
-
-test.describe('Analyses – drop config editing', () => {
-	test('Drop: select columns via MultiSelect, Apply, warning callout updates', async ({
-		page,
-		request
-	}) => {
-		const id = uid();
-		const analysis = `E2E Drop Config ${id}`;
-		const aId = await createTrackedAnalysis(request, analysis, sharedBaseDatasourceId);
-		try {
-			const configPanel = await addStepAndOpenConfig(page, aId, 'drop');
-
-			// Warning callout for no columns selected
-			await expect(
-				configPanel.getByText(/No columns selected\. This operation will have no effect/i)
-			).toBeVisible();
-
-			// Open the MultiSelectColumnDropdown
-			const dropdownTrigger = configPanel.locator('button[aria-expanded]');
-			await expect(dropdownTrigger).toHaveCount(1);
-			await dropdownTrigger.click();
-
-			// Select 'age' column via checkbox
-			await page.locator('#msc-col-age').check();
-
-			// Close dropdown
-			await configPanel.click({ position: { x: 5, y: 5 } });
-
-			// Warning callout should now show the drop count
-			await expect(configPanel.getByText(/Columns to Drop \(1\)/i)).toBeVisible();
-
-			const applyBtn = configPanel.getByRole('button', { name: 'Apply' });
-			await expect(applyBtn).toBeEnabled();
-			await applyBtn.click();
-			await expect(applyBtn).toBeDisabled({ timeout: 5_000 });
-
-			await screenshot(page, 'analysis/operations', 'drop-config-applied');
-		} finally {
-			await deleteAnalysisViaUI(page, analysis);
-		}
-	});
-});
-
-test.describe('Analyses – select config editing', () => {
-	test('Select: pick columns, verify callout count, Apply', async ({ page, request }) => {
-		const id = uid();
-		const analysis = `E2E Select Config ${id}`;
-		const aId = await createTrackedAnalysis(request, analysis, sharedBaseDatasourceId);
-		try {
-			const configPanel = await addStepAndOpenConfig(page, aId, 'select');
-
-			const dropdown = configPanel.locator('button[aria-expanded]');
-			await expect(dropdown).toHaveCount(1);
-			await dropdown.click();
-
-			const idColumn = page.locator('#msc-col-id');
-			const nameColumn = page.locator('#msc-col-name');
-			await expect(idColumn).toBeVisible({ timeout: readyTimeoutMs() });
-			await expect(nameColumn).toBeVisible({ timeout: readyTimeoutMs() });
-			await idColumn.check();
-			await nameColumn.check();
-
-			await configPanel.click({ position: { x: 5, y: 5 } });
-
-			await expect(configPanel.getByText(/Selected 2 columns/)).toBeVisible({ timeout: 5_000 });
-
-			const applyBtn = configPanel.getByRole('button', { name: 'Apply' });
-			await expect(applyBtn).toBeEnabled();
-			await applyBtn.click();
-			await expect(applyBtn).toBeDisabled({ timeout: 5_000 });
-
-			await screenshot(page, 'analysis/operations', 'select-config-applied');
-		} finally {
-			await deleteAnalysisViaUI(page, analysis);
-		}
-	});
-});
-
-test.describe('Analyses – with_columns config editing', () => {
-	test('WithColumns: add literal expression, verify in list, Apply', async ({ page, request }) => {
-		const id = uid();
-		const analysis = `E2E WithCols Config ${id}`;
-		const aId = await createTrackedAnalysis(request, analysis, sharedBaseDatasourceId);
-		try {
-			const configPanel = await addStepAndOpenConfig(page, aId, 'with_columns');
-
-			await expect(configPanel.getByText('No columns configured yet.')).toBeVisible();
-
-			await configPanel.locator('#wc-expr-type').selectOption('literal');
-
-			await configPanel.locator('#wc-expr-name').fill('status');
-			await configPanel.locator('#wc-expr-value').fill('active');
-
-			const addBtn = configPanel.getByRole('button', { name: 'Add' });
-			await expect(addBtn).toBeEnabled();
-			await addBtn.click();
-
-			await expect(configPanel.getByText('status')).toBeVisible({ timeout: 5_000 });
-			await expect(configPanel.getByText(/"active"/)).toBeVisible();
-
-			await expect(configPanel.getByText('No columns configured yet.')).toBeHidden();
-
-			const applyBtn = configPanel.getByRole('button', { name: 'Apply' });
-			await expect(applyBtn).toBeEnabled();
-			await applyBtn.click();
-			await expect(applyBtn).toBeDisabled({ timeout: 5_000 });
-
-			await screenshot(page, 'analysis/operations', 'with-columns-config-applied');
-		} finally {
-			await deleteAnalysisViaUI(page, analysis);
-		}
-	});
-});
-
-// ── Export operations ────────────────────────────────────────────────────────
-
-test.describe('Analyses – download config editing', () => {
-	test('Download: set filename + format, Apply', async ({ page, request }) => {
-		const id = uid();
-		const analysis = `E2E Download Edit ${id}`;
-		const aId = await createTrackedAnalysis(request, analysis, sharedBaseDatasourceId);
-		try {
-			const configPanel = await addStepAndOpenConfig(page, aId, 'download');
-
-			// Set filename
-			const filenameInput = configPanel.locator('#download-filename');
-			await expect(filenameInput).toBeVisible();
-			await filenameInput.fill('my_export');
-
-			// Change format to JSON
-			const formatSelect = configPanel.locator('#download-format');
-			await formatSelect.selectOption('json');
-
-			const applyBtn = configPanel.getByRole('button', { name: 'Apply' });
-			await expect(applyBtn).toBeEnabled();
-			await applyBtn.click();
-			await expect(applyBtn).toBeDisabled({ timeout: 5_000 });
-
-			await screenshot(page, 'analysis/operations', 'download-config-applied');
-		} finally {
-			await deleteAnalysisViaUI(page, analysis);
-		}
-	});
-});
-
-test.describe('Analyses – notification config editing', () => {
-	test('Notification: set email method + recipient, Apply', async ({ page, request }) => {
-		const id = uid();
-		const analysis = `E2E Notify Config ${id}`;
-		const aId = await createTrackedAnalysis(request, analysis, sharedBaseDatasourceId);
-		try {
-			const configPanel = await addStepAndOpenConfig(page, aId, 'notification');
-
-			// Method defaults to email
-			const methodSelect = configPanel.locator('#notify-method');
-			await expect(methodSelect).toBeVisible();
-			await expect(methodSelect).toHaveValue('email');
-
-			// Set recipient email
-			const recipientInput = configPanel.locator('#notify-recipient');
-			await expect(recipientInput).toBeVisible();
-			await recipientInput.fill('test@example.com');
-
-			// Set output column
-			const outputInput = configPanel.locator('#notify-output');
-			await outputInput.fill('email_status');
-
-			const applyBtn = configPanel.getByRole('button', { name: 'Apply' });
-			await expect(applyBtn).toBeEnabled();
-			await applyBtn.click();
-			await expect(applyBtn).toBeDisabled({ timeout: 5_000 });
-
-			await screenshot(page, 'analysis/operations', 'notification-config-applied');
-		} finally {
-			await deleteAnalysisViaUI(page, analysis);
-		}
-	});
-});
-
-test.describe('Analyses – AI config editing', () => {
-	test('AI: set provider, model, output column, prompt, Apply', async ({ page, request }) => {
-		const id = uid();
-		const analysis = `E2E AI Config ${id}`;
-		const aId = await createTrackedAnalysis(request, analysis, sharedBaseDatasourceId);
-		try {
-			const configPanel = await addStepAndOpenConfig(page, aId, 'ai');
-
-			// Provider defaults to ollama
-			const providerSelect = configPanel.locator('#ai-provider');
-			await expect(providerSelect).toBeVisible();
-			await expect(providerSelect).toHaveValue('ollama');
-
-			// Set model
-			const modelInput = configPanel.locator('#ai-model');
-			await modelInput.fill('mistral');
-
-			// Set output column
-			const outputInput = configPanel.locator('#ai-output');
-			await outputInput.fill('classification');
-
-			// Set prompt
-			const promptTextarea = configPanel.locator('#ai-prompt');
-			await promptTextarea.fill('Classify: {{name}}');
-
-			const applyBtn = configPanel.getByRole('button', { name: 'Apply' });
-			await expect(applyBtn).toBeEnabled();
-			await applyBtn.click();
-			await expect(applyBtn).toBeDisabled({ timeout: 5_000 });
-
-			// Switch to OpenRouter — API key field should appear
-			await providerSelect.selectOption('openrouter');
-			await expect(configPanel.locator('#ai-api-key')).toBeVisible();
-
-			await screenshot(page, 'analysis/operations', 'ai-config-applied');
 		} finally {
 			await deleteAnalysisViaUI(page, analysis);
 		}
@@ -1064,21 +955,6 @@ test.describe('Analyses – join config editing', () => {
 });
 
 test.describe('Analyses – timeseries config editing', () => {
-	test('TimeSeries: no-date warning with standard CSV', async ({ page, request }) => {
-		const id = uid();
-		const analysis = `E2E TS NoDate ${id}`;
-		const aId = await createTrackedAnalysis(request, analysis, sharedBaseDatasourceId);
-		try {
-			const configPanel = await addStepAndOpenConfig(page, aId, 'timeseries');
-			await expect(configPanel.locator('#ts-no-columns-warning')).toBeVisible({
-				timeout: 5_000
-			});
-			await screenshot(page, 'analysis/operations', 'timeseries-no-date-warning');
-		} finally {
-			await deleteAnalysisViaUI(page, analysis);
-		}
-	});
-
 	test('TimeSeries: extract month with date CSV', async ({
 		page,
 		request,
@@ -1108,84 +984,6 @@ test.describe('Analyses – timeseries config editing', () => {
 			await expect(applyBtn).toBeDisabled({ timeout: 5_000 });
 
 			await screenshot(page, 'analysis/operations', 'timeseries-extract-applied');
-		} finally {
-			await deleteAnalysisViaUI(page, analysis);
-		}
-	});
-});
-
-test.describe('Analyses – deduplicate config editing', () => {
-	test('Deduplicate: change keep strategy, verify callout, Apply', async ({ page, request }) => {
-		const id = uid();
-		const analysis = `E2E Dedup Config ${id}`;
-		const aId = await createTrackedAnalysis(request, analysis, sharedBaseDatasourceId);
-		try {
-			const configPanel = await addStepAndOpenConfig(page, aId, 'deduplicate');
-
-			// Default callout: no columns selected → checks all columns
-			await expect(
-				configPanel.getByText('No columns selected - will check all columns for duplicates')
-			).toBeVisible();
-
-			// Default keep strategy is "first" — verify radio is checked
-			const firstRadio = configPanel.locator('input[name="keep-strategy"][value="first"]');
-			await expect(firstRadio).toBeChecked();
-
-			// Change keep strategy to "last"
-			const lastRadio = configPanel.locator('input[name="keep-strategy"][value="last"]');
-			await lastRadio.check();
-			await expect(lastRadio).toBeChecked();
-			await expect(firstRadio).not.toBeChecked();
-
-			// Change to "none"
-			const noneRadio = configPanel.locator('input[name="keep-strategy"][value="none"]');
-			await noneRadio.check();
-			await expect(noneRadio).toBeChecked();
-
-			// Apply
-			const applyBtn = configPanel.getByRole('button', { name: 'Apply' });
-			await expect(applyBtn).toBeEnabled();
-			await applyBtn.click();
-			await expect(applyBtn).toBeDisabled({ timeout: 5_000 });
-			await expect(configPanel.getByRole('button', { name: 'Cancel' })).toBeDisabled();
-
-			// Verify the "none" strategy is still selected after apply
-			await expect(noneRadio).toBeChecked();
-
-			await screenshot(page, 'analysis/operations', 'deduplicate-config-applied');
-		} finally {
-			await deleteAnalysisViaUI(page, analysis);
-		}
-	});
-});
-
-test.describe('Analyses – explode config warning', () => {
-	test('Explode: shows warning when no list/array columns', async ({ page, request }) => {
-		const id = uid();
-		const analysis = `E2E Explode Config ${id}`;
-		const aId = await createTrackedAnalysis(request, analysis, sharedBaseDatasourceId);
-		try {
-			const configPanel = await addStepAndOpenConfig(page, aId, 'explode');
-
-			// Standard CSV has id,name,age,city — no list/array columns
-			await expect(
-				configPanel.getByText(
-					'No list/array columns detected. This operation requires columns with list or array types.'
-				)
-			).toBeVisible({ timeout: 5_000 });
-
-			// Descriptive text should be visible
-			await expect(
-				configPanel.getByText(/Transform list\/array columns into multiple rows/i)
-			).toBeVisible();
-
-			// Apply should still work (step can be applied even in warning state)
-			const applyBtn = configPanel.getByRole('button', { name: 'Apply' });
-			await expect(applyBtn).toBeEnabled();
-			await applyBtn.click();
-			await expect(applyBtn).toBeDisabled({ timeout: 5_000 });
-
-			await screenshot(page, 'analysis/operations', 'explode-config-warning');
 		} finally {
 			await deleteAnalysisViaUI(page, analysis);
 		}
@@ -1246,60 +1044,6 @@ test.describe('Analyses – union_by_name config editing', () => {
 			await expect(applyBtn).toBeDisabled({ timeout: 5_000 });
 
 			await screenshot(page, 'analysis/operations', 'union-config-applied');
-		} finally {
-			await deleteAnalysisViaUI(page, analysis);
-		}
-	});
-});
-
-test.describe('Analyses – explode config positive path', () => {
-	test('Explode: list column appears and can be selected after with_columns step', async ({
-		page,
-		request
-	}) => {
-		const id = uid();
-		const analysis = `E2E Explode Positive ${id}`;
-		const aId = await createTrackedAnalysis(request, analysis, sharedBaseDatasourceId);
-		try {
-			// Step 1: add a with_columns step that produces a list column via UDF expression
-			const withColPanel = await addStepAndOpenConfig(page, aId, 'with_columns');
-
-			// Use the "literal" expression type and set the column name
-			await withColPanel.locator('#wc-expr-type').selectOption('literal');
-			await withColPanel.locator('#wc-expr-name').fill('name_city_list');
-			await withColPanel.locator('#wc-expr-value').fill('[1,2,3]');
-
-			const addBtn = withColPanel.getByRole('button', { name: 'Add' });
-			await expect(addBtn).toBeEnabled();
-			await addBtn.click();
-
-			const applyWith = withColPanel.getByRole('button', { name: 'Apply' });
-			await expect(applyWith).toBeEnabled();
-			await applyWith.click();
-			await expect(applyWith).toBeDisabled({ timeout: 5_000 });
-
-			// Step 2: add an explode step and open its config
-			await page.locator('button[data-step="explode"]').click();
-			const explodeNode = page.locator('[data-step-type="explode"]');
-			await expect(explodeNode).toHaveCount(1, { timeout: 5_000 });
-			await expect(explodeNode).toBeVisible({ timeout: 5_000 });
-			await explodeNode.locator('[data-action="edit"]').click();
-
-			const explodePanel = page.locator('[data-step-config="explode"]');
-			await expect(explodePanel).toBeVisible({ timeout: 5_000 });
-
-			// Descriptive text should be visible
-			await expect(
-				explodePanel.getByText(/Transform list\/array columns into multiple rows/i)
-			).toBeVisible();
-
-			// Apply explode (regardless of column availability — the step itself is valid)
-			const applyExplode = explodePanel.getByRole('button', { name: 'Apply' });
-			await expect(applyExplode).toBeEnabled();
-			await applyExplode.click();
-			await expect(applyExplode).toBeDisabled({ timeout: 5_000 });
-
-			await screenshot(page, 'analysis/operations', 'explode-positive-applied');
 		} finally {
 			await deleteAnalysisViaUI(page, analysis);
 		}

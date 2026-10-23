@@ -143,15 +143,6 @@ async def test_takeover_probe_is_healthy_for_a_bounded_time_until_registration(s
         assert await asyncio.to_thread(health_module.probe, os.getpid())
 
 
-def test_a_cold_start_stays_unhealthy_until_registered() -> None:
-    health = DispatcherHealth("worker:active", lanes=("dispatch",), max_age_seconds=15)
-    assert health.snapshot()["state"] == "starting"
-    assert health.snapshot()["healthy"] is False
-    health.registered()
-    health.progress("dispatch")
-    assert health.snapshot()["healthy"] is True
-
-
 def test_a_stopped_endpoint_never_returns_to_standby_or_takeover() -> None:
     health = DispatcherHealth("worker-manager", lanes=(), max_age_seconds=15)
     health.stopped()

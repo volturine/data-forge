@@ -1,5 +1,5 @@
 import { expect, type Page } from '@playwright/test';
-import { readyTimeoutMs, waitForAppShell, waitForDatasourceList } from './readiness.js';
+import { readyTimeoutMs, waitForAppShell } from './readiness.js';
 
 const SIDEBAR = 'aside[aria-label="Main navigation"]';
 
@@ -81,13 +81,4 @@ export async function restoreDefaultNamespace(page: Page): Promise<void> {
 	const picker = page.getByRole('button', { name: 'Select namespace' });
 	if ((await picker.textContent())?.trim() === target) return;
 	await switchNamespace(page, target);
-}
-
-/**
- * Switch namespace while on the datasources page and wait for the list to refresh.
- */
-export async function switchNamespaceAndGoToDatasources(page: Page, name: string): Promise<void> {
-	await waitForAppShell(page);
-	await switchNamespace(page, name);
-	await waitForDatasourceList(page);
 }

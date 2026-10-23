@@ -9,9 +9,10 @@
 	interface Props {
 		msg: ChatMessage;
 		grouped: boolean;
+		now: number;
 	}
 
-	let { msg, grouped }: Props = $props();
+	let { msg, grouped, now }: Props = $props();
 
 	let copiedId = $state<string | null>(null);
 	let copiedTimer: ReturnType<typeof setTimeout> | null = null;
@@ -164,7 +165,7 @@
 					})
 				]}
 			>
-				{timeAgo(msg.ts)}
+				{timeAgo(msg.ts, now)}
 			</span>
 		</div>
 	</div>

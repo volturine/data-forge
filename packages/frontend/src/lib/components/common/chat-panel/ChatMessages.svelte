@@ -18,6 +18,7 @@
 	import { timelineDateSeparator, timelineEntriesAreGrouped } from '#lib/chat/presentation.js';
 	import { timeAgo } from '#lib/utils/markdown.js';
 	import { nowEpochMs } from '#lib/utils/temporal.js';
+	import { subscribeVisibleClock } from '#lib/utils/visible-clock.js';
 	import ChatMessageBubble from './ChatMessageBubble.svelte';
 	import ToolCallCard from './ToolCallCard.svelte';
 
@@ -124,12 +125,17 @@
 		'What tools are available?'
 	];
 
+	let timestampTick = $state(nowEpochMs());
+	onMount(() => subscribeVisibleClock(60_000, (tick) => (timestampTick = tick)));
+
 	let elapsedTick = $state(nowEpochMs());
-	onMount(() => {
-		const iv = setInterval(() => {
-			elapsedTick = nowEpochMs();
-		}, 1000);
-		return () => clearInterval(iv);
+	const hasRunningTools = $derived(chatStore.toolCalls.some((tool) => tool.status === 'running'));
+	// Elapsed tool labels need timer side effects only while a tool is running.
+	$effect(() => {
+		if (!hasRunningTools) return;
+		return subscribeVisibleClock(1000, (tick) => {
+			elapsedTick = tick;
+		});
 	});
 
 	function collapseAllTools() {
@@ -346,7 +352,7 @@
 											fontFamily: 'mono'
 										})}
 									>
-										{session.model} · {timeAgo(session.created_at)}
+										{session.model} · {timeAgo(session.created_at, timestampTick)}
 									</span>
 								</button>
 								<button
@@ -433,7 +439,7 @@
 			</div>
 		{/if}
 		{#if entry.kind === 'message'}
-			<ChatMessageBubble msg={entry.item} {grouped} />
+			<ChatMessageBubble msg={entry.item} {grouped} now={timestampTick} />
 		{:else}
 			<ToolCallCard tc={entry.item} tick={elapsedTick} />
 		{/if}

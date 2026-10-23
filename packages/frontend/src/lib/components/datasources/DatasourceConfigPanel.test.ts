@@ -1,5 +1,6 @@
 import { describe, test, expect, vi, beforeEach } from 'vitest';
 import { render, screen, fireEvent } from '@testing-library/svelte';
+import { tick } from 'svelte';
 import DatasourceConfigPanel from './DatasourceConfigPanel.svelte';
 import type { DataSource, SchemaInfo } from '#lib/types/datasource.js';
 
@@ -85,6 +86,7 @@ let datasourceQueryState = makeQueryResult();
 let schemaQueryState = makeQueryResult();
 
 const mockInvalidateQueries = vi.fn();
+const mockMutateAsync = vi.fn();
 const mockSetQueryData = vi.fn();
 const mockSetQueriesData = vi.fn();
 
@@ -97,7 +99,7 @@ vi.mock('@tanstack/svelte-query', () => ({
 		return makeQueryResult();
 	},
 	createMutation: () => ({
-		mutateAsync: vi.fn(),
+		mutateAsync: (...args: unknown[]) => mockMutateAsync(...args),
 		mutate: vi.fn(),
 		isPending: false,
 		isError: false,
@@ -155,6 +157,7 @@ beforeEach(() => {
 	mockBuildClose.mockReset();
 	mockBuildReset.mockReset();
 	mockInvalidateQueries.mockReset();
+	mockMutateAsync.mockReset();
 	mockSetQueryData.mockReset();
 	mockSetQueriesData.mockReset();
 	mockBuilds = [];
@@ -166,6 +169,26 @@ beforeEach(() => {
 });
 
 describe('DatasourceConfigPanel', () => {
+	test('keeps an edit made while a save is in flight dirty', async () => {
+		let finishSave = () => {};
+		mockMutateAsync.mockImplementationOnce(
+			() => new Promise<void>((resolve) => (finishSave = resolve))
+		);
+		renderPanel();
+		const nameInput = screen.getByLabelText('Name');
+
+		await fireEvent.input(nameInput, { target: { value: 'Saved name' } });
+		await fireEvent.click(screen.getByRole('button', { name: 'Save Changes' }));
+		await fireEvent.input(nameInput, { target: { value: 'Edited during save' } });
+		finishSave();
+
+		// Let the save's continuation run before asserting.
+		await new Promise((resolve) => setTimeout(resolve, 0));
+		await tick();
+		expect(mockMutateAsync).toHaveBeenCalledTimes(1);
+		expect(screen.getByRole('button', { name: 'Save Changes' })).toBeTruthy();
+	});
+
 	test('does not eagerly load run history on initial render', () => {
 		renderPanel();
 

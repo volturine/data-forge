@@ -398,20 +398,6 @@ function canonicalTypes(): ColumnTypeConfig[] {
 	});
 }
 
-export function getColumnTypesByCategory(): Record<ColumnTypeCategory, ColumnTypeConfig[]> {
-	const grouped: Record<ColumnTypeCategory, ColumnTypeConfig[]> = {
-		string: [],
-		integer: [],
-		float: [],
-		temporal: [],
-		boolean: [],
-		complex: [],
-		other: []
-	};
-	for (const config of canonicalTypes()) grouped[config.category].push(config);
-	return grouped;
-}
-
 export function getAllColumnTypes(): ColumnTypeConfig[] {
 	return canonicalTypes();
 }

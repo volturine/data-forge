@@ -84,75 +84,6 @@ def _filter_config(column: str, operator: str, value: object) -> dict[str, objec
     }
 
 
-def _register_sqlmodel_metadata() -> None:
-    from backend_core.persistence.analysis.models import Analysis, AnalysisDataSource, AnalysisFavorite
-    from backend_core.persistence.analysis_versions.models import AnalysisVersion
-    from backend_core.persistence.build_jobs.models import BuildJob
-    from backend_core.persistence.build_runs.models import BuildEvent, BuildRun, BuildRunDatasource
-    from backend_core.persistence.compute_worker_instances.models import ComputeWorkerInstance
-    from backend_core.persistence.compute_worker_runs.models import ComputeWorkerRun
-    from backend_core.persistence.datasource.models import DataSource, DataSourceColumnMetadata
-    from backend_core.persistence.healthchecks.models import HealthCheck, HealthCheckResult
-    from backend_core.persistence.locks.models import ResourceLock
-    from backend_core.persistence.mcp_pending.models import McpPendingAction
-    from backend_core.persistence.namespaces.models import RuntimeNamespace
-    from backend_core.persistence.runtime_events.models import NotificationDeliveryReceipt, RuntimeOutboxEvent
-    from backend_core.persistence.runtime_workers.models import RuntimeWorker
-    from backend_core.persistence.scheduler.models import Schedule
-    from backend_core.persistence.settings.models import AppSettings
-    from backend_core.persistence.telegram.models import TelegramListener, TelegramSubscriber
-    from backend_core.persistence.udfs.models import Udf
-
-    del Analysis
-    del AnalysisDataSource
-    del AnalysisFavorite
-    del AnalysisVersion
-    del AppSettings
-    del BuildEvent
-    del BuildJob
-    del BuildRun
-    del BuildRunDatasource
-    del DataSource
-    del DataSourceColumnMetadata
-    del ComputeWorkerInstance
-    del ComputeWorkerRun
-    del HealthCheck
-    del HealthCheckResult
-    del McpPendingAction
-    del ResourceLock
-    del RuntimeNamespace
-    del NotificationDeliveryReceipt
-    del RuntimeOutboxEvent
-    del RuntimeWorker
-    del Schedule
-    del TelegramListener
-    del TelegramSubscriber
-    del Udf
-
-
-def _settings_tables() -> list[Any]:
-    from backend_core.persistence.compute_worker_instances.models import ComputeWorkerInstance
-    from backend_core.persistence.mcp_pending.models import McpPendingAction
-    from backend_core.persistence.namespaces.models import RuntimeNamespace
-    from backend_core.persistence.runtime_workers.models import RuntimeWorker
-    from backend_core.persistence.settings.models import AppSettings
-
-    table_names = {
-        AppSettings.__tablename__,
-        ComputeWorkerInstance.__tablename__,
-        McpPendingAction.__tablename__,
-        RuntimeWorker.__tablename__,
-        RuntimeNamespace.__tablename__,
-    }
-    return [table for table in AppSettings.metadata.sorted_tables if table.name in table_names]
-
-
-def _reset_settings_state(engine: Engine) -> None:
-    with engine.begin() as conn:
-        for table in reversed(_settings_tables()):
-            conn.execute(table.delete())
-
-
 @pytest.fixture(scope='session')
 def rustfs_container() -> Generator[RustfsContainer]:
     require_docker()
@@ -179,27 +110,6 @@ def _schema_engine(database_url: str, schema: str) -> Engine:
     with engine.begin() as connection:
         connection.execute(text(f'CREATE SCHEMA IF NOT EXISTS "{schema}"'))
     return engine
-
-
-@pytest.fixture(scope='function')
-def test_engine(postgres_container: PostgresContainer):
-    schema = f'test_{uuid.uuid4().hex}'
-    engine = _schema_engine(postgres_container.url, schema)
-    _register_sqlmodel_metadata()
-    from backend_core import database
-
-    with engine.begin() as connection:
-        connection.execute(text(f'SET search_path TO "{schema}", public'))
-        tenant_tables = database._tenant_tables()
-        tenant_metadata = tenant_tables[0].metadata if tenant_tables else None
-        if tenant_metadata is not None:
-            tenant_metadata.create_all(connection, tables=tenant_tables)
-    try:
-        yield engine
-    finally:
-        with postgres_container.connect() as pg_connection, pg_connection.cursor() as cursor:
-            cursor.execute(f'DROP SCHEMA IF EXISTS "{schema}" CASCADE')
-        engine.dispose()
 
 
 @pytest.fixture(scope='function')
@@ -315,22 +225,6 @@ class _TestWorkerDataPlaneClient:
         resolved_bucket = bucket or self._namespace_bucket(namespace)
         return f's3://{resolved_bucket}/{key}'
 
-    def join_object_url(self, base_url: str, *parts: str) -> str:
-        bucket, key = self._parse_object_url(base_url)
-        suffix = '/'.join(part.strip('/') for part in parts if part.strip('/'))
-        return f's3://{bucket}/{"/".join(part for part in (key.rstrip("/"), suffix) if part)}'
-
-    def read_object_store_storage_options(self) -> dict[str, object]:
-        settings = self._settings()
-        return {
-            's3.endpoint': settings.object_store_endpoint,
-            's3.access-key-id': settings.object_store_access_key,
-            's3.secret-access-key': settings.object_store_secret_key,
-            's3.region': settings.object_store_region,
-            's3.force-virtual-addressing': False,
-            'py-io-impl': 'pyiceberg.io.pyarrow.PyArrowFileIO',
-        }
-
     def ensure_object_store_bucket(self, name: str) -> None:
         self._ensure_bucket_exists(name)
 
@@ -341,29 +235,6 @@ class _TestWorkerDataPlaneClient:
         if content_type is not None:
             kwargs['ContentType'] = content_type
         self._s3().put_object(**kwargs)
-        return target_url
-
-    def upload_object_file(
-        self,
-        path: Path,
-        target_url: str,
-        *,
-        max_bytes: int,
-        content_type: str | None = None,
-    ) -> str:
-        from backend_core.data_plane_client import _MAX_OBJECT_TRANSFER_BYTES
-
-        bounded_limit = min(max_bytes or _MAX_OBJECT_TRANSFER_BYTES, _MAX_OBJECT_TRANSFER_BYTES)
-        bucket, key = self._parse_object_url(target_url)
-        extra_args: dict[str, str] = {}
-        if content_type is not None:
-            extra_args['ContentType'] = content_type
-
-        with path.open('rb') as source:
-            if os.fstat(source.fileno()).st_size > bounded_limit:
-                raise ValueError(f'object upload exceeds {bounded_limit} byte limit')
-            self._ensure_bucket_exists(bucket)
-            self._s3().upload_fileobj(source, bucket, key, ExtraArgs=extra_args)
         return target_url
 
     def upload_object_fileobj(
@@ -444,68 +315,6 @@ class _TestWorkerDataPlaneClient:
                     results.append(f's3://{bucket}/{object_key}')
         return sorted(results)
 
-    def delete_managed_prefix(self, prefix_url: str) -> None:
-        bucket, key = self._parse_object_url(prefix_url)
-        prefix = key.rstrip('/')
-        if prefix:
-            prefix = prefix + '/'
-        paginator = self._s3().get_paginator('list_objects_v2')
-        batch: list[dict[str, str]] = []
-        for page in paginator.paginate(Bucket=bucket, Prefix=prefix):
-            for item in page.get('Contents') or []:
-                object_key = item.get('Key') if isinstance(item, dict) else None
-                if not isinstance(object_key, str):
-                    continue
-                batch.append({'Key': object_key})
-                if len(batch) == 1000:
-                    self._s3().delete_objects(Bucket=bucket, Delete={'Objects': batch})
-                    batch = []
-        if batch:
-            self._s3().delete_objects(Bucket=bucket, Delete={'Objects': batch})
-
-    def resolve_metadata_path(self, *, namespace: str, metadata_path: str, datasource_id: str | None = None) -> str:
-        del namespace, datasource_id
-        if metadata_path.endswith('.metadata.json'):
-            if not self.object_exists(metadata_path):
-                raise ValueError(f'Iceberg metadata_path not found: {metadata_path}')
-            return metadata_path
-        files = self.list_metadata_files(metadata_path)
-        if not files:
-            raise ValueError(f'Iceberg metadata_path not found: {metadata_path}')
-        return files[-1]
-
-    def resolve_branch_metadata_path(
-        self,
-        *,
-        namespace: str,
-        metadata_path: str,
-        datasource_id: str | None = None,
-        branch: str | None = None,
-    ) -> str:
-        del namespace, datasource_id
-        if metadata_path.endswith('.metadata.json'):
-            return self.resolve_metadata_path(metadata_path=metadata_path, namespace='test')
-        if branch:
-            branch_url = self.join_object_url(metadata_path, branch)
-            if self.list_metadata_files(branch_url):
-                return self.resolve_metadata_path(metadata_path=branch_url, namespace='test')
-        return self.resolve_metadata_path(metadata_path=metadata_path, namespace='test')
-
-    def scan_snapshot(self, *, metadata_path: str, snapshot_id: str, limit: int | None = None) -> list[dict[str, object]]:
-        import polars as pl
-        from pyiceberg.table import StaticTable
-
-        table = StaticTable.from_metadata(metadata_path, properties=self.read_object_store_storage_options())
-        frame = pl.from_arrow(table.scan(snapshot_id=int(snapshot_id)).to_arrow())
-        if isinstance(frame, pl.Series):
-            frame = frame.to_frame()
-        if limit is not None:
-            frame = frame.head(limit)
-        return frame.to_dicts()
-
-    def sync_table_schema(self, *, metadata_path: str, schema_payload: dict[str, object]) -> None:
-        del metadata_path, schema_payload
-
     def list_snapshots(self, *, namespace: str, datasource_id: str, branch: str | None = None):
         from backend_core.data_plane_client import IcebergSnapshots
 
@@ -524,34 +333,6 @@ def use_test_worker_data_plane(monkeypatch, isolate_data_dir) -> Generator[None]
 
     monkeypatch.setattr(data_plane_client, 'WorkerDataPlaneClient', lambda: client)
     yield
-
-
-@pytest.fixture(autouse=True, scope='function')
-def isolate_settings_engine(
-    request: pytest.FixtureRequest, tmp_path: Path, isolate_data_dir, postgres_container: PostgresContainer
-) -> Generator[Engine | None]:
-    if '/backend/tests/' in request.node.path.as_posix():
-        yield None
-        return
-
-    from backend_core import database
-    from backend_core.persistence.settings.models import AppSettings
-
-    schema = f'settings_{uuid.uuid4().hex}'
-    engine = _schema_engine(postgres_container.url, schema)
-    AppSettings.metadata.create_all(engine, tables=_settings_tables())
-    original = database.settings_engine
-    database.settings_engine = engine
-    database.clear_settings_engine_override()
-    try:
-        yield engine
-    finally:
-        database.clear_settings_engine_override()
-        _reset_settings_state(engine)
-        database.settings_engine = original
-        with postgres_container.connect() as pg_connection, pg_connection.cursor() as cursor:
-            cursor.execute(f'DROP SCHEMA IF EXISTS "{schema}" CASCADE')
-        engine.dispose()
 
 
 @pytest.fixture(autouse=True, scope='function')

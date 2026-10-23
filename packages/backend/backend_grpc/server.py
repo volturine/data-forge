@@ -30,7 +30,6 @@ from backend_core import (
     compute_worker_instances_service as compute_worker_instance_service,
     compute_worker_runs_service as compute_worker_run_service,
     datasource_delete_service,
-    runtime_outbox_service,
     runtime_work_service,
     runtime_workers_service as runtime_worker_service,
     storage_cleanup_service,
@@ -66,7 +65,6 @@ from backend_core.persistence.datasource.models import DataSource
 from backend_core.persistence.healthchecks.models import HealthCheck, HealthCheckResult
 from backend_core.persistence.telegram.models import TelegramListener, TelegramSubscriber
 from backend_core.persistence.udfs.models import Udf
-from backend_core.settings_projection import get_resolved_telegram_settings
 from backend_core.sqlmodel_typing import col, sa
 from dataforge_protocol import (
     common_pb2,
@@ -923,10 +921,6 @@ def _settle_build_job(
     return worker_runtime_pb2.BoolResponse(value=result is not None)
 
 
-def _notification_attachments(request: worker_runtime_pb2.WorkerSendEmailRequest | worker_runtime_pb2.WorkerSendTelegramRequest) -> list[dict[str, object]]:
-    return [{'filename': item.filename, 'content_base64': item.content_base64, 'content_type': item.content_type} for item in request.attachments]
-
-
 class WorkerRuntimeServicer(worker_runtime_pb2_grpc.WorkerRuntimeServiceServicer):
     @_general_rpc
     def RegisterWorker(self, request: worker_runtime_pb2.RuntimeWorkerRegisterRequest, metadata: RpcMetadata) -> common_pb2.RuntimeWorkerResponse:
@@ -1627,21 +1621,6 @@ class WorkerRuntimeServicer(worker_runtime_pb2_grpc.WorkerRuntimeServiceServicer
         return _settle_build_job(request, build_commands.finalize_build_job, 'completion')
 
     @_general_rpc
-    def ReleaseBuildWorkerJobs(self, request: common_pb2.RuntimeWorkerRequest, metadata: RpcMetadata) -> worker_runtime_pb2.CountResponse:
-        if not request.target_namespace:
-            raise _ThreadedRpcAbort(grpc.StatusCode.INVALID_ARGUMENT, 'Build worker release must target a namespace')
-        with namespace_scope(request.target_namespace):
-            released = run_db(build_job_service.release_worker_jobs, worker_id=request.worker_id)
-        return worker_runtime_pb2.CountResponse(count=len(released))
-
-    @_general_rpc
-    def GetQueuedBuildJobCount(self, request: common_pb2.EmptyRequest, metadata: RpcMetadata) -> worker_runtime_pb2.CountResponse:
-        if not request.namespace:
-            raise _ThreadedRpcAbort(grpc.StatusCode.INVALID_ARGUMENT, 'Queued build count must target a namespace')
-        with namespace_scope(request.namespace):
-            return worker_runtime_pb2.CountResponse(count=run_db(build_job_service.queued_job_count))
-
-    @_general_rpc
     def ReconcileExpiredBuildJobs(self, request: common_pb2.EmptyRequest, metadata: RpcMetadata) -> worker_runtime_pb2.CountResponse:
         if not request.namespace:
             raise _ThreadedRpcAbort(grpc.StatusCode.INVALID_ARGUMENT, 'Build job reconciliation must target a namespace')
@@ -1654,11 +1633,6 @@ class WorkerRuntimeServicer(worker_runtime_pb2_grpc.WorkerRuntimeServiceServicer
             raise _ThreadedRpcAbort(grpc.StatusCode.INVALID_ARGUMENT, 'Compute request reconciliation must target a namespace')
         with namespace_scope(request.namespace):
             return worker_runtime_pb2.CountResponse(count=run_db(compute_requests_service.reconcile_expired_requests, namespace=request.namespace))
-
-    @_general_rpc
-    def GetIdleBuildWorkerPids(self, request: common_pb2.EmptyRequest, metadata: RpcMetadata) -> worker_runtime_pb2.WorkerIdlePidsResponse:
-        workers = run_settings_db(runtime_worker_service.list_workers, kind=RuntimeWorkerKind.BUILD_WORKER)
-        return worker_runtime_pb2.WorkerIdlePidsResponse(pids=[worker.pid for worker in workers if worker.stopped_at is None and worker.active_jobs == 0])
 
     @_general_rpc
     def ListPendingRuntimeWorkNamespaces(
@@ -1865,39 +1839,6 @@ class WorkerRuntimeServicer(worker_runtime_pb2_grpc.WorkerRuntimeServiceServicer
         with _tenant_session(request.namespace) as session:
             deleted = datasource_delete_service.finalize_delete(session, request.datasource_id)
         return worker_runtime_pb2.WorkerFinalizeDatasourceDeleteResponse(deleted=deleted)
-
-    @_general_rpc
-    def GetTelegramSettings(self, request: common_pb2.EmptyRequest, metadata: RpcMetadata) -> worker_runtime_pb2.WorkerTelegramSettingsResponse:
-        resolved = get_resolved_telegram_settings()
-        return worker_runtime_pb2.WorkerTelegramSettingsResponse(enabled=bool(resolved.get('enabled')))
-
-    @_general_rpc
-    def SendEmail(self, request: worker_runtime_pb2.WorkerSendEmailRequest, metadata: RpcMetadata) -> worker_runtime_pb2.BoolResponse:
-        if not request.to:
-            return worker_runtime_pb2.BoolResponse(value=False)
-        payload: dict[str, object] = {
-            'kind': EMAIL_DELIVERY_KIND,
-            'to': request.to,
-            'subject': request.subject,
-            'body': request.body,
-            'attachments': _notification_attachments(request),
-        }
-        with namespace_scope(request.namespace):
-            run_db(runtime_outbox_service.enqueue_notification_delivery_command, payload)
-        return worker_runtime_pb2.BoolResponse(value=True)
-
-    @_general_rpc
-    def SendTelegram(self, request: worker_runtime_pb2.WorkerSendTelegramRequest, metadata: RpcMetadata) -> worker_runtime_pb2.BoolResponse:
-        payload: dict[str, object] = {
-            'kind': TELEGRAM_DELIVERY_KIND,
-            'chat_id': request.chat_id,
-            'message': request.message,
-            'attachments': _notification_attachments(request),
-            **_present_fields(request, ('bot_token',)),
-        }
-        with namespace_scope(request.namespace):
-            run_db(runtime_outbox_service.enqueue_notification_delivery_command, payload)
-        return worker_runtime_pb2.BoolResponse(value=True)
 
     @_external_io_rpc
     def GenerateAI(self, request: worker_runtime_pb2.WorkerGenerateAIRequest, metadata: RpcMetadata) -> worker_runtime_pb2.WorkerGenerateAIResponse:

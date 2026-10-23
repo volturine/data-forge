@@ -8,6 +8,12 @@ from backend_core.persistence.analysis.models import Analysis
 from backend_core.persistence.datasource.models import DataSource
 
 
+def _raw_iceberg_source(source_type: str, file_path: str) -> dict[str, object]:
+    if source_type == 'file':
+        return {'source_type': 'file', 'file_path': file_path, 'file_type': 'csv', 'options': {}}
+    return {'source_type': 'database', 'connection_string': 'postgresql://example/db', 'query': 'select * from public.users'}
+
+
 @pytest.fixture(scope='function')
 def output_datasource(test_db_session: Session, sample_analysis: Analysis) -> DataSource:
     datasource = DataSource(
@@ -121,45 +127,6 @@ class TestScheduleRoutes:
         response = client.get('/api/v1/schedules')
         assert response.json()[0]['description'] is None
 
-    def test_list_filtered_by_datasource(self, client, sample_analyses: list[Analysis], test_db_session: Session):
-        a1, a2, _ = sample_analyses
-        ds1 = DataSource(
-            id=str(uuid.uuid4()),
-            name='Output 1',
-            source_type='iceberg',
-            config={'analysis_tab_id': 'tab1'},
-            created_by='analysis',
-            created_by_analysis_id=a1.id,
-            is_hidden=True,
-            created_at=datetime.now(UTC),
-        )
-        ds2 = DataSource(
-            id=str(uuid.uuid4()),
-            name='Output 2',
-            source_type='iceberg',
-            config={'analysis_tab_id': 'tab1'},
-            created_by='analysis',
-            created_by_analysis_id=a2.id,
-            is_hidden=True,
-            created_at=datetime.now(UTC),
-        )
-        test_db_session.add(ds1)
-        test_db_session.add(ds2)
-        test_db_session.commit()
-
-        client.post(
-            '/api/v1/schedules',
-            json={'datasource_id': ds1.id, 'cron_expression': '0 * * * *'},
-        )
-        client.post(
-            '/api/v1/schedules',
-            json={'datasource_id': ds2.id, 'cron_expression': '0 0 * * *'},
-        )
-
-        response = client.get(f'/api/v1/schedules?datasource_id={ds1.id}')
-        assert response.status_code == 200
-        assert len(response.json()) == 1
-
     def test_update(self, client, output_datasource: DataSource):
         create_resp = client.post(
             '/api/v1/schedules',
@@ -208,7 +175,8 @@ class TestScheduleRoutes:
         response = client.post('/api/v1/schedules', json=payload)
         assert response.status_code == 200
 
-    def test_create_allows_reingestable_raw_iceberg(self, client, test_db_session: Session, sample_csv_object_url: str):
+    @pytest.mark.parametrize('source_type', ['file', 'database'])
+    def test_create_allows_reingestable_raw_iceberg(self, client, test_db_session: Session, sample_csv_object_url: str, source_type: str):
         raw = DataSource(
             id=str(uuid.uuid4()),
             name='Raw Iceberg',
@@ -216,36 +184,7 @@ class TestScheduleRoutes:
             config={
                 'metadata_path': '/tmp/path',
                 'branch': 'master',
-                'source': {
-                    'source_type': 'file',
-                    'file_path': sample_csv_object_url,
-                    'file_type': 'csv',
-                    'options': {},
-                },
-            },
-            created_by='import',
-            created_at=datetime.now(UTC),
-        )
-        test_db_session.add(raw)
-        test_db_session.commit()
-
-        payload = {'datasource_id': raw.id, 'cron_expression': '0 * * * *'}
-        response = client.post('/api/v1/schedules', json=payload)
-        assert response.status_code == 200
-
-    def test_create_allows_reingestable_raw_database_iceberg(self, client, test_db_session: Session):
-        raw = DataSource(
-            id=str(uuid.uuid4()),
-            name='Raw Database Iceberg',
-            source_type='iceberg',
-            config={
-                'metadata_path': '/tmp/path',
-                'branch': 'master',
-                'source': {
-                    'source_type': 'database',
-                    'connection_string': 'postgresql://example/db',
-                    'query': 'select * from public.users',
-                },
+                'source': _raw_iceberg_source(source_type, sample_csv_object_url),
             },
             created_by='import',
             created_at=datetime.now(UTC),

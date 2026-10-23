@@ -14,7 +14,7 @@ from fastapi import FastAPI, Request
 from fastapi.responses import Response, StreamingResponse
 
 from backend_core import logging as backend_logging
-from backend_core.logging import DatabaseLogWriter, RequestLoggingMiddleware, RequestTimingMiddleware, redact_logged_body
+from backend_core.logging import DatabaseLogWriter, RequestLoggingMiddleware, RequestTimingMiddleware, flush_request_logs, redact_logged_body
 from tests.http_client import TestClient
 
 
@@ -369,6 +369,38 @@ class TestRequestLoggingMiddleware:
             await asyncio.gather(request_task, return_exceptions=True)
 
         writer.wait_for_write()
+
+    @pytest.mark.parametrize(('path', 'persisted'), [('/health/ready', False), ('/health', False), ('/api/v1/config', True)])
+    def test_health_probes_are_not_persisted(self, path: str, persisted: bool) -> None:
+        writer = _InMemoryWriter()
+        sent: list[dict[str, object]] = []
+
+        async def receive() -> dict[str, object]:
+            return {'type': 'http.request', 'body': b'', 'more_body': False}
+
+        async def send(message: dict[str, object]) -> None:
+            sent.append(message)
+
+        async def app(_scope, _receive, send_for_app) -> None:
+            await send_for_app({'type': 'http.response.start', 'status': 200, 'headers': []})
+            await send_for_app({'type': 'http.response.body', 'body': b'ok', 'more_body': False})
+
+        scope = {
+            'type': 'http',
+            'method': 'GET',
+            'path': path,
+            'raw_path': path.encode(),
+            'query_string': b'',
+            'headers': [],
+            'scheme': 'http',
+            'client': ('testclient', 1234),
+            'server': ('testserver', 80),
+        }
+        asyncio.run(RequestLoggingMiddleware(app, writer=writer)(scope, receive, send))
+        flush_request_logs()
+
+        assert sent[-1]['body'] == b'ok'
+        assert [payload['path'] for payload in writer.payloads] == ([path] if persisted else [])
 
     def test_lazy_writer_initialization_runs_off_event_loop(self, monkeypatch) -> None:
         app = FastAPI()

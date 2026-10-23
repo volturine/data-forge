@@ -1,9 +1,4 @@
 import type {
-	ComputeWorkerRun,
-	ComputeWorkerRunExecutionEntry,
-	ListComputeWorkerRunsParams
-} from '#lib/api/compute-worker-runs.js';
-import type {
 	BuildRunDetailJson as ProtocolBuildRunDetailJson,
 	BuildRunListResponseJson as ProtocolBuildRunListResponseJson,
 	BuildRunSummaryJson as ProtocolBuildRunSummaryJson,
@@ -408,7 +403,6 @@ export type BuildStatus =
 
 export type BuildStatusTone = 'accent' | 'success' | 'warning' | 'error';
 export type BuildLifecycleStatusTone = 'success' | 'active' | 'warning' | 'error';
-export type MonitoringStatusFilter = 'all' | 'running' | 'completed' | 'failed' | 'cancelled';
 
 export type StepInfo = {
 	buildStepIndex: number;
@@ -445,7 +439,6 @@ const BUILD_STEP_STATES = new Set<BuildStepState>([
 	'failed',
 	'skipped'
 ]);
-const BUILD_TAB_STATUSES = new Set<BuildTabResult['status']>(['success', 'failed']);
 const BUILD_STATUS_TONES: Record<BuildStatus, BuildStatusTone> = {
 	connecting: 'accent',
 	queued: 'accent',
@@ -544,19 +537,6 @@ export function canCancelBuildLifecycleStatus(status: BuildLifecycleStatus): boo
 	return status === 'queued' || status === 'running';
 }
 
-export function computeWorkerRunStatusToBuildLifecycleStatus(
-	status: ComputeWorkerRun['status']
-): Exclude<BuildLifecycleStatus, 'queued'> {
-	return status === 'success' ? 'completed' : status;
-}
-
-export function computeWorkerRunStatusFilterValue(
-	status: MonitoringStatusFilter
-): ListComputeWorkerRunsParams['status'] {
-	if (status === 'all') return undefined;
-	return status === 'completed' ? 'success' : status;
-}
-
 export function computeWorkerRunDisplayKind(
 	kind: ComputeWorkerRunKind | string
 ): ComputeWorkerRunKind | string {
@@ -571,47 +551,10 @@ export function computeWorkerRunKindLabel(kind: ComputeWorkerRunKind | string): 
 	return parsed === null ? kind : COMPUTE_WORKER_RUN_KIND_LABELS[parsed];
 }
 
-export function readBuildTabStatus(value: unknown): BuildTabResult['status'] | null {
-	return typeof value === 'string' && BUILD_TAB_STATUSES.has(value as BuildTabResult['status'])
-		? (value as BuildTabResult['status'])
-		: null;
-}
-
 export function buildTabStatusLabel(status: BuildTabResult['status']): string {
 	return BUILD_TAB_STATUS_LABELS[status];
 }
 
 export function buildTabStatusTone(status: BuildTabResult['status']): 'success' | 'error' {
 	return BUILD_TAB_STATUS_TONES[status];
-}
-
-export function isPlanExecutionEntry(
-	entry: Pick<ComputeWorkerRunExecutionEntry, 'category'>
-): boolean {
-	return entry.category === 'plan';
-}
-
-export function buildStepTypeFromExecutionEntry(
-	entry: Pick<ComputeWorkerRunExecutionEntry, 'category' | 'metadata'>
-): string {
-	const stepType = entry.metadata?.step_type;
-	if (typeof stepType === 'string' && stepType.length > 0) return stepType;
-	switch (entry.category) {
-		case 'read':
-		case 'write':
-			return entry.category;
-		default:
-			return 'unknown';
-	}
-}
-
-export function buildStepStateFromComputeWorkerRunStatus(
-	status: ComputeWorkerRun['status'],
-	options: { isLastStep: boolean }
-): BuildStepState {
-	return status === 'failed' && options.isLastStep ? 'failed' : 'completed';
-}
-
-export function countComputeWorkerRunSteps(entries: ComputeWorkerRunExecutionEntry[]): number {
-	return entries.filter((entry) => !isPlanExecutionEntry(entry)).length;
 }

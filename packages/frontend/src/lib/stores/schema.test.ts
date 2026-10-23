@@ -64,11 +64,8 @@ describe('SchemaStore', () => {
 	});
 
 	describe('initial state', () => {
-		test('joinSchemas is empty', () => {
+		test('joinSchemas and previewSchemas are empty', () => {
 			expect(store.joinSchemas.size).toBe(0);
-		});
-
-		test('previewSchemas is empty', () => {
 			expect(store.previewSchemas.size).toBe(0);
 		});
 	});

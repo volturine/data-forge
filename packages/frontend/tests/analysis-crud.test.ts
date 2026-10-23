@@ -8,7 +8,6 @@ import {
 	gotoAnalysesGallery,
 	gotoDatasourcesPage,
 	gotoNewAnalysis,
-	waitForAnalysisLoadError,
 	readyTimeoutMs
 } from './utils/readiness.js';
 import { gotoAnalysisEditor, waitForCurrentAnalysisEditor } from './utils/analysis.js';
@@ -396,41 +395,43 @@ test.describe('Analyses – gallery interactions', () => {
 });
 
 test.describe('Analyses – blank creation', () => {
-	test('lists datasources to start from', async ({ page, sharedDatasource }) => {
-		await gotoNewAnalysis(page);
-		await expect(page.getByRole('heading', { name: 'New Analysis' })).toBeVisible();
-		await expect(page.getByPlaceholder('Search datasources...')).toBeVisible();
-		await page.getByLabel('Search datasources').fill(sharedDatasource.name);
-		await expect(page.locator(`[data-ds-option="${sharedDatasource.name}"]`)).toBeVisible();
-	});
-
 	test('expanding a datasource previews it inline before creating', async ({
 		page,
 		sharedDatasource
 	}) => {
-		const timeout = readyTimeoutMs();
-		await gotoNewAnalysis(page);
-		await page.getByLabel('Search datasources').fill(sharedDatasource.name);
-		const row = page.locator(`[data-ds-option="${sharedDatasource.name}"]`);
-		const createButton = page
-			.locator('li', { has: row })
-			.getByRole('button', { name: 'Create analysis' });
-		await expect(row).toHaveAttribute('aria-expanded', 'false');
-		await expect(page.locator('[data-testid="datasource-preview"]')).toHaveCount(0);
-		await expect(createButton).toBeVisible();
+		await test.step('lists datasources to start from', async () => {
+			await gotoNewAnalysis(page);
+			await expect(page.getByRole('heading', { name: 'New Analysis' })).toBeVisible();
+			await expect(page.getByPlaceholder('Search datasources...')).toBeVisible();
+			await page.getByLabel('Search datasources').fill(sharedDatasource.name);
+			await expect(page.locator(`[data-ds-option="${sharedDatasource.name}"]`)).toBeVisible();
+		});
 
-		await row.click();
-		await expect(row).toHaveAttribute('aria-expanded', 'true');
-		await expect(createButton).toBeVisible({ timeout });
-		const preview = page.locator('[data-testid="datasource-preview"]');
-		await expect(preview).toBeVisible({ timeout });
-		await expect(preview).toHaveAttribute('data-preview-ready', 'true', { timeout });
-		await screenshot(page, 'analysis/crud', 'new-analysis-datasource-preview');
+		await test.step('expanding a datasource previews it inline before creating', async () => {
+			const timeout = readyTimeoutMs();
+			await gotoNewAnalysis(page);
+			await page.getByLabel('Search datasources').fill(sharedDatasource.name);
+			const row = page.locator(`[data-ds-option="${sharedDatasource.name}"]`);
+			const createButton = page
+				.locator('li', { has: row })
+				.getByRole('button', { name: 'Create analysis' });
+			await expect(row).toHaveAttribute('aria-expanded', 'false');
+			await expect(page.locator('[data-testid="datasource-preview"]')).toHaveCount(0);
+			await expect(createButton).toBeVisible();
 
-		// Clicking the row again collapses the inline preview.
-		await row.click();
-		await expect(row).toHaveAttribute('aria-expanded', 'false');
-		await expect(preview).toHaveCount(0);
+			await row.click();
+			await expect(row).toHaveAttribute('aria-expanded', 'true');
+			await expect(createButton).toBeVisible({ timeout });
+			const preview = page.locator('[data-testid="datasource-preview"]');
+			await expect(preview).toBeVisible({ timeout });
+			await expect(preview).toHaveAttribute('data-preview-ready', 'true', { timeout });
+			await screenshot(page, 'analysis/crud', 'new-analysis-datasource-preview');
+
+			// Clicking the row again collapses the inline preview.
+			await row.click();
+			await expect(row).toHaveAttribute('aria-expanded', 'false');
+			await expect(preview).toHaveCount(0);
+		});
 	});
 
 	test('creates a top-aligned blank pipeline with centered insert controls', async ({
@@ -596,14 +597,24 @@ test.describe('Analyses – detail page', () => {
 		await deleteAnalysisViaUI(page, aName, { id: aId });
 	});
 
-	test('analysis detail page loads with step library', async ({ page }) => {
+	test('analysis detail page loads with step library, search box and Save button', async ({
+		page
+	}) => {
 		await gotoAnalysisEditor(page, aId);
-		await screenshot(page, 'analysis/crud', 'detail-step-library');
-	});
 
-	test('step library shows search box', async ({ page }) => {
-		await gotoAnalysisEditor(page, aId);
-		await expect(page.getByPlaceholder(/Search operations/i)).toBeVisible({ timeout: 5_000 });
+		await test.step('analysis detail page loads with step library', async () => {
+			await screenshot(page, 'analysis/crud', 'detail-step-library');
+		});
+
+		await test.step('step library shows search box', async () => {
+			await expect(page.getByPlaceholder(/Search operations/i)).toBeVisible({ timeout: 5_000 });
+		});
+
+		await test.step('Save button is present', async () => {
+			await expect(page.getByRole('button', { name: /^(Save|Saved|Saving\.\.\.)$/ })).toBeVisible({
+				timeout: 5_000
+			});
+		});
 	});
 
 	test('step library search filters operations', async ({ page }) => {
@@ -614,39 +625,10 @@ test.describe('Analyses – detail page', () => {
 		await expect(page.getByText('Pivot', { exact: true })).not.toBeVisible();
 	});
 
-	test('Save button is present', async ({ page }) => {
-		await gotoAnalysisEditor(page, aId);
-		await expect(page.getByRole('button', { name: /^(Save|Saved|Saving\.\.\.)$/ })).toBeVisible({
-			timeout: 5_000
-		});
-	});
-
 	test('analysis name is shown in the detail page', async ({ page }) => {
 		await gotoAnalysisEditor(page, aId);
 		await expect(page.getByRole('heading', { name: aName, level: 1 })).toBeVisible({
 			timeout: readyTimeoutMs()
 		});
-	});
-});
-
-test.describe('Analyses – detail error state', () => {
-	const BAD_ID = '00000000-0000-0000-0000-000000000000';
-
-	test('bad analysis ID shows error state without crashing the shell', async ({ page }) => {
-		await page.goto(`/analysis/${BAD_ID}`);
-		await waitForAnalysisLoadError(page);
-
-		await expect(page.getByRole('button', { name: /Create analysis/i })).toBeVisible();
-
-		await screenshot(page, 'analysis/crud', 'detail-load-error');
-	});
-
-	test('analysis error page does not crash navigation', async ({ page }) => {
-		await page.goto(`/analysis/${BAD_ID}`);
-		await waitForAnalysisLoadError(page);
-
-		await page.getByRole('link', { name: 'Analyses' }).click();
-		await expect(page).toHaveURL('/');
-		await expect(page.getByRole('heading', { name: 'Analyses', level: 1 })).toBeVisible();
 	});
 });

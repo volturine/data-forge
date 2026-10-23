@@ -31,3 +31,11 @@ Rules:
   Resource caps apply to
   this invocation; concurrent invocations each have their own caps and still
   share the host's finite CPU and memory.
+- On memory-constrained Docker VMs, use `PW_E2E_WORKERS=1 just test-e2e`
+  to run one normal browser worker per shard instead of two. This only changes
+  browser-test scheduling: it does not reduce API/compute capacity, skip tests,
+  or change the separate 50-tab concurrency probe. Prefer this to overcommitting
+  the enclave or weakening the application's capacity settings.
+- For worker-replacement or validation failures, use `LOG_LEVEL=info just test-e2e`
+  to include API process lifecycle and ordinary 4xx validation messages in the
+  exported service logs. The default warning level omits these diagnostics.

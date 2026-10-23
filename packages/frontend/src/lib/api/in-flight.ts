@@ -1,4 +1,10 @@
 import { err, ResultAsync, type Result } from 'neverthrow';
+import { isNamespaceReady, requireNamespace } from '#lib/stores/namespace.svelte.js';
+
+export function namespaceKey(): string {
+	if (!isNamespaceReady()) return '';
+	return requireNamespace();
+}
 
 export interface SharedInFlight<T, E> {
 	result: ResultAsync<T, E>;

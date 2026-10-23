@@ -1,5 +1,7 @@
 from datetime import UTC, datetime
 
+import pytest
+
 from backend_core.domain.analysis.models import AnalysisStatus
 from backend_core.persistence.analysis.models import Analysis, AnalysisDataSource
 from backend_core.persistence.datasource.models import DataSource
@@ -93,48 +95,18 @@ def _get_lineage(client, **params):
     return response.json()
 
 
-def test_lineage_node_classification(test_db_session, client):
+def test_lineage_node_classification_and_edge_types(test_db_session, client):
     ids = _seed_rich_lineage_graph(test_db_session)
 
     payload = _get_lineage(client, include_internals=True, mode='full')
     nodes = {node['id']: node for node in payload['nodes']}
+    edges = {(edge['from'], edge['to'], edge['type']) for edge in payload['edges']}
 
     assert nodes[f'datasource:{ids["ds_source_a"]}']['node_kind'] == 'source'
     assert nodes[f'datasource:{ids["ds_source_b"]}']['node_kind'] == 'source'
     assert nodes[f'datasource:{ids["ds_output_1"]}']['node_kind'] == 'output'
     assert nodes[f'datasource:{ids["ds_output_2"]}']['node_kind'] == 'output'
     assert nodes[f'datasource:{ids["ds_intermediate"]}']['node_kind'] == 'internal'
-
-
-def test_lineage_hides_internals_by_default(test_db_session, client):
-    ids = _seed_rich_lineage_graph(test_db_session)
-
-    payload = _get_lineage(client)
-    node_ids = {node['id'] for node in payload['nodes']}
-    edge_types = {edge['type'] for edge in payload['edges']}
-
-    assert f'datasource:{ids["ds_intermediate"]}' not in node_ids
-    assert 'chains' not in edge_types
-    assert 'consumes_internal' not in edge_types
-
-
-def test_lineage_shows_internals_when_requested(test_db_session, client):
-    ids = _seed_rich_lineage_graph(test_db_session)
-
-    payload = _get_lineage(client, include_internals=True)
-    node_ids = {node['id'] for node in payload['nodes']}
-    edge_types = {edge['type'] for edge in payload['edges']}
-
-    assert f'datasource:{ids["ds_intermediate"]}' in node_ids
-    assert 'chains' in edge_types
-    assert 'consumes_internal' in edge_types
-
-
-def test_lineage_edge_types(test_db_session, client):
-    ids = _seed_rich_lineage_graph(test_db_session)
-
-    payload = _get_lineage(client, include_internals=True)
-    edges = {(edge['from'], edge['to'], edge['type']) for edge in payload['edges']}
 
     assert (
         f'datasource:{ids["ds_source_a"]}',
@@ -156,6 +128,29 @@ def test_lineage_edge_types(test_db_session, client):
         f'analysis:{ids["analysis_1"]}',
         'consumes_internal',
     ) in edges
+
+
+@pytest.mark.parametrize(
+    ('params', 'internals_visible'),
+    [
+        pytest.param({}, False, id='hidden-by-default'),
+        pytest.param({'include_internals': True}, True, id='shown-when-requested'),
+    ],
+)
+def test_lineage_internals_visibility(test_db_session, client, params, internals_visible):
+    ids = _seed_rich_lineage_graph(test_db_session)
+
+    payload = _get_lineage(client, **params)
+    node_ids = {node['id'] for node in payload['nodes']}
+    edges = {(edge['from'], edge['to'], edge['type']) for edge in payload['edges']}
+    edge_types = {edge['type'] for edge in payload['edges']}
+
+    assert f'datasource:{ids["ds_source_a"]}' in node_ids
+    assert f'analysis:{ids["analysis_1"]}' in node_ids
+    assert (f'datasource:{ids["ds_source_a"]}', f'analysis:{ids["analysis_1"]}', 'uses') in edges
+    assert (f'datasource:{ids["ds_intermediate"]}' in node_ids) is internals_visible
+    assert ('chains' in edge_types) is internals_visible
+    assert ('consumes_internal' in edge_types) is internals_visible
 
 
 def test_lineage_upstream_mode(test_db_session, client):
@@ -196,26 +191,3 @@ def test_lineage_target_not_found(client):
     payload = _get_lineage(client, target_datasource_id='missing-datasource-id', mode='upstream')
 
     assert payload == {'nodes': [], 'edges': []}
-
-
-def test_existing_basic_lineage(test_db_session, client):
-    datasource_id = 'ds-lineage-1'
-    analysis_id = 'analysis-lineage-1'
-
-    datasource = _create_datasource(datasource_id, 'Source A', 'file')
-    analysis = _create_analysis(analysis_id, 'Analysis A')
-
-    test_db_session.add(datasource)
-    test_db_session.add(analysis)
-    test_db_session.commit()
-    test_db_session.add(AnalysisDataSource(analysis_id=analysis_id, datasource_id=datasource_id))
-    test_db_session.commit()
-
-    payload = _get_lineage(client)
-
-    node_ids = {node['id'] for node in payload['nodes']}
-    edges = {(edge['from'], edge['to'], edge['type']) for edge in payload['edges']}
-
-    assert f'datasource:{datasource_id}' in node_ids
-    assert f'analysis:{analysis_id}' in node_ids
-    assert (f'datasource:{datasource_id}', f'analysis:{analysis_id}', 'uses') in edges

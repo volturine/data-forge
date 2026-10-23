@@ -112,31 +112,13 @@ describe('ChatStore — pure local logic', () => {
 	});
 
 	describe('initial state', () => {
-		test('open is false', () => {
+		test('starts closed with plan mode, default model, disconnected and zero usage', () => {
 			expect(store.open).toBe(false);
-		});
-
-		test('sessionId is null', () => {
 			expect(store.sessionId).toBeNull();
-		});
-
-		test('mode defaults to plan', () => {
 			expect(store.mode).toBe('plan');
-		});
-
-		test('model defaults to openai/gpt-4o-mini', () => {
 			expect(store.model).toBe('openai/gpt-4o-mini');
-		});
-
-		test('loading is false', () => {
 			expect(store.loading).toBe(false);
-		});
-
-		test('connection is disconnected', () => {
 			expect(store.connection).toBe('disconnected');
-		});
-
-		test('sessionUsage starts at zero', () => {
 			expect(store.sessionUsage).toEqual({
 				prompt_tokens: 0,
 				completion_tokens: 0,

@@ -41,7 +41,6 @@ from runtime.object_store import delete_object, download_file, object_store_url,
 logger = logging.getLogger(__name__)
 
 _COMPUTE_WORKER_TOKEN_METADATA_KEY = "x-compute-worker-token"
-_LEGACY_ENGINE_TOKEN_METADATA_KEY = "x-engine-token"
 _COMPUTE_WORKER_APPLICATION_VERSION = "compute-worker"
 _COORDINATOR_GENERATION_LABEL = "io.dataforge.coordinator-generation"
 _MIB = 1024 * 1024
@@ -837,10 +836,7 @@ class DockerComputeWorker(ComputeWorker):
         return host
 
     def _metadata(self) -> tuple[tuple[str, str], ...]:
-        return (
-            (_COMPUTE_WORKER_TOKEN_METADATA_KEY, self._token),
-            (_LEGACY_ENGINE_TOKEN_METADATA_KEY, self._token),
-        )
+        return ((_COMPUTE_WORKER_TOKEN_METADATA_KEY, self._token),)
 
     def _initialize(self, *, resources: dict[str, int], credentials: ObjectStoreCredentials) -> None:
         assert self._stub is not None
@@ -859,9 +855,7 @@ class DockerComputeWorker(ComputeWorker):
         try:
             resp = self._stub.Initialize(req, timeout=2.0)
         except grpc.RpcError as exc:
-            if exc.code() == grpc.StatusCode.FAILED_PRECONDITION and str(exc.details()).startswith(
-                ("Compute worker already initialized", "Engine already initialized")
-            ):
+            if exc.code() == grpc.StatusCode.FAILED_PRECONDITION and str(exc.details()).startswith("Compute worker already initialized"):
                 raise RuntimeError(
                     f"Compute worker identity collision for {self.identity.resource_id} at {self._rpc_target} (container {self._container_id}): {exc.details()}"
                 ) from exc
@@ -1334,13 +1328,7 @@ class DockerComputeWorker(ComputeWorker):
                         timeout=settings.compute_worker_shutdown_grace_seconds,
                         metadata=self._metadata(),
                     )
-            deadline = time.monotonic() + settings.compute_worker_shutdown_grace_seconds
-            while time.monotonic() < deadline:
-                with contextlib.suppress(Exception):
-                    container.reload()
-                    if container.status != "running":
-                        break
-                time.sleep(0.1)
+            _wait_until_not_running(container, deadline=time.monotonic() + settings.compute_worker_shutdown_grace_seconds)
             with contextlib.suppress(Exception):
                 container.reload()
                 if container.status == "running":
@@ -1363,6 +1351,26 @@ class DockerComputeWorker(ComputeWorker):
         for _local_path, artifact_url in transfers:
             with contextlib.suppress(Exception):
                 delete_object(artifact_url)
+
+
+def _wait_until_not_running(container: Any, *, deadline: float) -> None:
+    """Block until the container leaves ``running`` or the grace deadline passes.
+
+    Docker's wait endpoint returns on the state change, avoiding a reload per
+    poll. If it fails early, read-only polling continues within the same deadline.
+    """
+    remaining = deadline - time.monotonic()
+    if remaining <= 0:
+        return
+    with contextlib.suppress(Exception):
+        container.wait(timeout=remaining, condition="not-running")
+        return
+    while time.monotonic() < deadline:
+        with contextlib.suppress(Exception):
+            container.reload()
+            if container.status != "running":
+                return
+        time.sleep(0.1)
 
 
 def _result_from_message(message: compute_worker_runtime_pb2.ComputeWorkerJobResult) -> ComputeWorkerResult:

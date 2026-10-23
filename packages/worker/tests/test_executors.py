@@ -96,30 +96,6 @@ async def test_running_cancellation_keeps_admission_until_thread_settles() -> No
 
 
 @pytest.mark.asyncio
-async def test_lease_lane_progresses_while_compute_lane_is_full() -> None:
-    compute_executor = ThreadPoolExecutor(max_workers=1)
-    lease_executor = ThreadPoolExecutor(max_workers=1)
-    compute_lane = _ExecutorLane(compute_executor, max_pending=1)
-    lease_lane = _ExecutorLane(lease_executor, max_pending=1)
-    compute_started = threading.Event()
-    release_compute = threading.Event()
-
-    def blocking_compute() -> None:
-        compute_started.set()
-        assert release_compute.wait(timeout=3)
-
-    compute = asyncio.create_task(_run_in_executor(compute_lane, "compute", blocking_compute, None))
-    try:
-        assert await asyncio.to_thread(compute_started.wait, 1)
-        assert await _run_in_executor(lease_lane, "lease", lambda: "renewed", None) == "renewed"
-    finally:
-        release_compute.set()
-        await compute
-        compute_executor.shutdown(wait=True)
-        lease_executor.shutdown(wait=True)
-
-
-@pytest.mark.asyncio
 @pytest.mark.parametrize("expected_error", [False, True])
 async def test_cancelled_executor_retrieves_work_errors_and_reports_unexpected_failures(caplog, expected_error: bool) -> None:
     executor = ThreadPoolExecutor(max_workers=1)

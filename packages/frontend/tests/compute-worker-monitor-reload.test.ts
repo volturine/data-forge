@@ -73,7 +73,9 @@ test('the compute worker monitor keeps its snapshot after an analysis page reloa
 		await search.fill('no-worker-can-match-this-search');
 		await expect(popupBefore.getByText('No compute workers match your filters')).toBeVisible();
 		await dialog.getByRole('combobox', { name: 'Activity' }).selectOption('busy');
-		await closeComputeWorkersPopup(page);
+		// Exercise the close button here; teardown uses geometry-independent Escape.
+		await dialog.getByRole('button', { name: 'Close compute workers', exact: true }).click();
+		await expect(dialog).toBeHidden();
 		await expect(page.getByRole('button', { name: 'Compute workers', exact: true })).toBeFocused();
 
 		await page.getByRole('link', { name: 'Analyses', exact: true }).click();

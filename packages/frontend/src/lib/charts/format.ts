@@ -31,7 +31,6 @@ export const CHART_THEME = {
 	background: 'transparent'
 } as const;
 
-export const FG_MUTED = 'var(--colors-fg-muted)';
 export const FG_SECONDARY = 'var(--colors-fg-secondary)';
 
 export function readString(config: ChartConfig, key: string): string {
@@ -162,6 +161,14 @@ export function overlayRowsOf(metadata: Record<string, unknown> | null | undefin
 	const raw = metadata?.overlays;
 	if (!Array.isArray(raw)) return [];
 	return raw.filter((item) => item && typeof item === 'object') as ChartRow[];
+}
+
+export function overlaySeriesLabel(overlay: ChartRow): string {
+	const yCol = readString(overlay, 'y_column');
+	const agg = readString(overlay, 'aggregation');
+	if (!yCol) return 'Overlay';
+	if (!agg) return yCol;
+	return `${agg.charAt(0).toUpperCase()}${agg.slice(1)} of ${yCol}`;
 }
 
 export function referenceLinesOf(metadata: Record<string, unknown> | null | undefined): ChartRow[] {

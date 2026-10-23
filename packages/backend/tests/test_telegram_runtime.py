@@ -263,6 +263,37 @@ async def test_failed_update_does_not_advance_offset(monkeypatch) -> None:
 
 
 @pytest.mark.asyncio
+async def test_queued_detection_requests_are_claimed_back_to_back_while_disabled(monkeypatch) -> None:
+    stop = asyncio.Event()
+    actor = runtime.TelegramIntegrationRuntime(7)
+    deadline = datetime.now(UTC) + timedelta(seconds=20)
+    fingerprint = store.token_fingerprint('secret')
+    queued = [TelegramDetectionClaim(f'request-{index}', 'secret', fingerprint, 'user-1', 'tenant-a', 7, deadline) for index in (1, 2)]
+    processed: list[str] = []
+
+    async def database(function, *args, **kwargs):
+        if function is store.claim_detection:
+            return queued.pop(0) if queued else None
+        if function is store.read_settings:
+            return TelegramSettings(enabled=False, token='')
+        return None
+
+    async def process_detection(_client, claim: TelegramDetectionClaim) -> None:
+        processed.append(claim.request_id)
+        if len(processed) == 2:
+            stop.set()
+
+    monkeypatch.setattr(actor, '_database', database)
+    monkeypatch.setattr(actor, '_process_detection', process_detection)
+    # The second request must not wait for the idle backstop.
+    monkeypatch.setattr(runtime, '_RECOVERY_SECONDS', 30.0)
+
+    await asyncio.wait_for(actor.run(stop), timeout=2)
+
+    assert processed == ['request-1', 'request-2']
+
+
+@pytest.mark.asyncio
 async def test_detection_and_main_poll_never_overlap(monkeypatch) -> None:
     stop = asyncio.Event()
     poll_started = asyncio.Event()

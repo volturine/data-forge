@@ -141,7 +141,7 @@ class BuildEvent(SQLModel, table=True):  # type: ignore[call-arg, assignment]
 
 
 class BuildRunDatasource(SQLModel, table=True):  # type: ignore[call-arg, assignment]
-    """Immutable external datasource dependencies for a durable build run."""
+    """Immutable datasources a durable build run reads or publishes."""
 
     __tablename__ = 'build_run_datasources'  # type: ignore[assignment]
     __table_args__ = (Index('ix_build_run_datasources_namespace_source', 'namespace', 'datasource_id', 'build_id'),)

@@ -1,4 +1,4 @@
-import type { APIRequestContext, Browser, BrowserContext, Locator, Page } from '@playwright/test';
+import type { APIRequestContext, BrowserContext, Locator, Page } from '@playwright/test';
 import { expect, request as playwrightRequest } from '@playwright/test';
 import {
 	findAnalysisIdByName,
@@ -16,7 +16,6 @@ import {
 	gotoAuthedRoute,
 	gotoAnalysesGallery,
 	gotoUdfLibrary,
-	gotoMonitoringTab,
 	readyTimeoutMs,
 	waitForDatasourceList,
 	waitForUdfList,
@@ -52,24 +51,6 @@ async function shutdownComputeWorkerForCleanup(
 			`Failed to shut down ${scope} compute worker ${resourceId}: ${(await responseFailure(response)).message}`
 		);
 	}
-}
-
-/**
- * Dismiss the Build Preview modal if open so shell controls (Compute workers) are
- * clickable. freeWarm must not fight a full-screen BaseModal backdrop.
- */
-export async function closeBuildPreviewIfOpen(page: Page): Promise<void> {
-	if (page.isClosed()) return;
-	const preview = page.locator('[data-testid="build-preview"]');
-	if (!(await preview.isVisible().catch(() => false))) return;
-
-	const closeBtn = page.getByRole('button', { name: 'Close build preview' });
-	if (await closeBtn.isVisible().catch(() => false)) {
-		await closeBtn.click({ timeout: 5_000 });
-	} else {
-		await page.keyboard.press('Escape');
-	}
-	await expect(preview).toBeHidden({ timeout: 5_000 });
 }
 
 /**
@@ -122,7 +103,7 @@ export async function openComputeWorkersPopup(page: Page): Promise<Locator> {
 export async function closeComputeWorkersPopup(page: Page): Promise<void> {
 	const popup = page.locator('[data-compute-workers-popup="true"]');
 	if (!(await popup.isVisible().catch(() => false))) return;
-	await popup.getByLabel('Close compute workers').click({ timeout: 1_000 });
+	await page.keyboard.press('Escape');
 	await expect(popup).toBeHidden({ timeout: 2_000 });
 }
 
@@ -168,49 +149,7 @@ function confirmDialog(page: Page, heading: string | RegExp): Locator {
 }
 
 async function closeFloatingPanels(page: Page): Promise<void> {
-	const computeWorkersPopup = page.locator('[data-compute-workers-popup="true"]');
-	if (await computeWorkersPopup.isVisible().catch(() => false)) {
-		await computeWorkersPopup.getByLabel('Close compute workers').click({ timeout: 1_000 });
-		await expect(computeWorkersPopup).toBeHidden({ timeout: 2_000 });
-	}
-}
-
-async function waitForHealthChecksList(page: Page, timeout: number): Promise<void> {
-	const panel = page.locator('#panel-health');
-	await expect(panel).toBeVisible({ timeout });
-	const terminal = panel.locator(
-		'[data-healthcheck-row], :text("No health checks configured."), :text("No health checks match your search."), :text("Failed to load health checks.")'
-	);
-	await expect
-		.poll(
-			async () => {
-				const count = await terminal.count();
-				for (let index = 0; index < count; index += 1) {
-					if (
-						await terminal
-							.nth(index)
-							.isVisible()
-							.catch(() => false)
-					) {
-						return true;
-					}
-				}
-				return false;
-			},
-			{ timeout }
-		)
-		.toBe(true);
-}
-
-export async function createCleanupPage(browser: Browser, sessionState: E2EStorageState) {
-	const context = await browser.newContext({
-		baseURL: e2eBaseURL(),
-		storageState: structuredClone(sessionState)
-	});
-	rememberCleanupSessionState(context, sessionState);
-	installE2eContextGuards(context);
-	const page = await context.newPage();
-	return { page, context };
+	await closeComputeWorkersPopup(page);
 }
 
 type CleanupSession = {
@@ -644,38 +583,6 @@ export async function deleteUdfViaUI(
 	});
 }
 
-async function deleteScheduleViaUIOnPage(
-	page: Page,
-	cronOrName: string,
-	options?: { id?: string }
-): Promise<void> {
-	await gotoMonitoringTab(page, 'schedules', 1_500);
-	const row = options?.id
-		? page.locator(`[data-schedule-row="${options.id}"]`)
-		: page
-				.locator('tr')
-				.filter({ has: page.getByLabel('Delete schedule') })
-				.filter({ hasText: cronOrName })
-				.first();
-	await row.waitFor({ state: 'visible', timeout: 1_500 });
-	await row.getByLabel('Delete schedule').click({ timeout: 5_000 });
-	const dialog = confirmDialog(page, 'Delete Schedule');
-	await dialog.getByRole('button', { name: /^Delete$/ }).click({ timeout: 5_000 });
-	await expect(row)
-		.toBeHidden({ timeout: 1_500 })
-		.catch(() => undefined);
-}
-
-export async function deleteScheduleViaUI(
-	page: Page,
-	cronOrName: string,
-	options?: { id?: string }
-): Promise<void> {
-	await runCleanupWithFallback(page, 'deleteScheduleViaUI', cronOrName, async (cleanupPage) => {
-		await deleteScheduleViaUIOnPage(cleanupPage, cronOrName, options);
-	});
-}
-
 /** Delete exactly the schedule created by the current test. */
 export async function deleteScheduleById(page: Page, scheduleId: string): Promise<void> {
 	const response = await page
@@ -688,25 +595,6 @@ export async function deleteScheduleById(page: Page, scheduleId: string): Promis
 			`Failed to delete schedule ${scheduleId}: ${(await responseFailure(response)).message}`
 		);
 	}
-}
-
-async function deleteHealthCheckViaUIOnPage(page: Page, name: string): Promise<void> {
-	await gotoMonitoringTab(page, 'health', 1_500);
-	await waitForHealthChecksList(page, 1_500).catch(() => undefined);
-	const row = page.locator(`[data-healthcheck-name="${name}"]`);
-	await row.waitFor({ state: 'visible', timeout: 1_500 });
-	await row.getByLabel('Delete check').click({ timeout: 5_000 });
-	const dialog = confirmDialog(page, 'Delete Health Check');
-	await dialog.getByRole('button', { name: /^Delete$/ }).click({ timeout: 5_000 });
-	await expect(row)
-		.toBeHidden({ timeout: 1_500 })
-		.catch(() => undefined);
-}
-
-export async function deleteHealthCheckViaUI(page: Page, name: string): Promise<void> {
-	await runCleanupWithFallback(page, 'deleteHealthCheckViaUI', name, async (cleanupPage) => {
-		await deleteHealthCheckViaUIOnPage(cleanupPage, name);
-	});
 }
 
 /** Delete exactly the health check created by the current test. */

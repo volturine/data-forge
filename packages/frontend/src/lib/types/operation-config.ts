@@ -26,7 +26,6 @@ import type {
 	RenameConfigJson as ProtocolRenameConfigJson,
 	SampleConfigJson as ProtocolSampleConfigJson,
 	SelectConfigJson as ProtocolSelectConfigJson,
-	SortConfigJson as ProtocolSortConfigJson,
 	StringListJson as ProtocolStringListJson,
 	StringTransformConfigJson as ProtocolStringTransformConfigJson,
 	TimeSeriesConfigJson as ProtocolTimeSeriesConfigJson,
@@ -120,11 +119,6 @@ export interface GroupByConfigData {
 	aggregations: Field<ProtocolGroupByConfigJson, 'aggregations'> extends unknown[]
 		? Aggregation[]
 		: never;
-}
-
-export interface SortConfigData {
-	columns: Field<ProtocolSortConfigJson, 'columns'>;
-	descending: Field<ProtocolSortConfigJson, 'descending'> | boolean;
 }
 
 export interface RenameConfigData {

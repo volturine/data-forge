@@ -300,7 +300,7 @@ def _enqueue_schedule_build(
         current_output_id=output_id or schedule.datasource_id,
         current_output_name=output_name or tab_name,
         total_tabs=len(request.analysis_pipeline.tabs),
-        datasource_ids=datasource_ids,
+        datasource_ids=build_datasource_dependencies.build_datasource_ids(request.analysis_pipeline),
         created_at=now,
         started_at=now,
     )

@@ -222,28 +222,12 @@ just dev
 | `CORS_ORIGINS`                         | `http://localhost:3000,http://127.0.0.1:3000,http://localhost:5173,http://127.0.0.1:5173` | Comma-separated allowed browser origins. Required in dev (Vite server is cross-origin). In prod (single port) same-origin applies and this can be left unset.                                                                                                    |
 | `UPLOAD_MAX_FILE_SIZE_BYTES`           | `2147483648`                                                                              | Configurable upload size limit in bytes, from `0` to `2147483648` (2 GiB). Values above 2 GiB are rejected because the worker data-plane transport has a hard 2 GiB ceiling. `0` disables the configurable soft cap but does not disable that transport ceiling. |
 
-### One-release compute-worker environment aliases
+### Renamed compute-worker variables
 
-The worker service accepts the old names in this table for one release. The
-new name wins when both are set; reading a deprecated name emits a warning that
-identifies the old key. Remove old keys from deployment files after that
-release.
-
-| Current name | Deprecated one-release alias |
-| --- | --- |
-| `DF_COMPUTE_WORKER_IMAGE` | `DF_ENGINE_IMAGE`, `ENGINE_IMAGE` |
-| `DF_COMPUTE_WORKER_DOCKER_HOST` | `DF_ENGINE_DOCKER_HOST`, `ENGINE_DOCKER_HOST` |
-| `DF_COMPUTE_WORKER_DOCKER_HOSTS` | `DF_ENGINE_DOCKER_HOSTS`, `ENGINE_DOCKER_HOSTS` |
-| `DF_COMPUTE_WORKER_DOCKER_HOST_HEALTH_INTERVAL_SECONDS` | `DF_ENGINE_DOCKER_HOST_HEALTH_INTERVAL_SECONDS`, `ENGINE_DOCKER_HOST_HEALTH_INTERVAL_SECONDS` |
-| `DF_COMPUTE_WORKER_DOCKER_NETWORK` | `DF_ENGINE_DOCKER_NETWORK`, `ENGINE_DOCKER_NETWORK` |
-| `DF_COMPUTE_WORKER_CONNECT_HOST` | `DF_ENGINE_CONNECT_HOST`, `ENGINE_CONNECT_HOST` |
-| `DF_COMPUTE_WORKER_RPC_PORT` | `DF_ENGINE_RPC_PORT`, `ENGINE_RPC_PORT` |
-| `DF_COMPUTE_WORKER_START_TIMEOUT_SECONDS` | `DF_ENGINE_START_TIMEOUT_SECONDS`, `ENGINE_START_TIMEOUT_SECONDS` |
-| `DF_COMPUTE_WORKER_SHUTDOWN_GRACE_SECONDS` | `DF_ENGINE_SHUTDOWN_GRACE_SECONDS`, `ENGINE_SHUTDOWN_GRACE_SECONDS` |
-| `DF_COMPUTE_WORKER_HEARTBEAT_INTERVAL_SECONDS` | `DF_ENGINE_HEARTBEAT_INTERVAL_SECONDS`, `ENGINE_HEARTBEAT_INTERVAL_SECONDS` |
-| `COMPUTE_WORKER_OBJECT_STORE_ENDPOINT` | `DF_ENGINE_OBJECT_STORE_ENDPOINT`, `ENGINE_OBJECT_STORE_ENDPOINT` |
-| `COMPUTE_WORKER_IDLE_TTL_SECONDS` | `ENGINE_IDLE_TTL_SECONDS` |
-| `COMPUTE_WORKER_IDLE_REAP_INTERVAL_SECONDS` | `ENGINE_IDLE_REAP_INTERVAL_SECONDS` |
+v0.5.0 renamed the `DF_ENGINE_*` and `ENGINE_*` worker variables to
+`DF_COMPUTE_WORKER_*` / `COMPUTE_WORKER_*`. The old names are no longer read;
+`just docker-check` reports any that remain in an env file together with the
+current name.
 
 ### Object storage
 

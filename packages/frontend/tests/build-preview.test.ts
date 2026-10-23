@@ -58,59 +58,42 @@ test.describe('Build Preview – real build lifecycle', () => {
 		let buildId: string | undefined;
 		try {
 			await gotoAnalysisEditor(page, aId);
-			buildId = await startBuildAndCaptureId(page);
 
-			const preview = page.locator('[data-testid="build-preview"]');
-			await expect(preview).not.toBeVisible();
+			await test.step('clicking Build queues the run and the preview opens only from the engine status control', async () => {
+				buildId = await startBuildAndCaptureId(page);
 
-			const openPreviewBtn = page.locator('[data-testid="output-build-preview-trigger"]');
-			await expectVisibleEventually(openPreviewBtn);
-			await openPreviewBtn.click();
+				const preview = page.locator('[data-testid="build-preview"]');
+				await expect(preview).not.toBeVisible();
 
-			await expectVisibleEventually(preview);
+				const openPreviewBtn = page.locator('[data-testid="output-build-preview-trigger"]');
+				await expectVisibleEventually(openPreviewBtn);
+				await openPreviewBtn.click();
 
-			const closeBtn = page.locator('[aria-label="Close build preview"]');
-			await expect(closeBtn).toBeVisible();
+				await expectVisibleEventually(preview);
 
-			// Progress bar is always present; status may already be terminal under load.
-			const progressBar = page.locator('[data-testid="build-progress-bar"]');
-			await expect(progressBar).toBeVisible({ timeout: 5_000 });
-			await expect(
-				preview.getByText(/Complete|Running|Queued|Failed|Cancelled/i).first()
-			).toBeVisible({ timeout: readyTimeoutMs() });
+				const closeBtn = page.locator('[aria-label="Close build preview"]');
+				await expect(closeBtn).toBeVisible();
 
-			await screenshot(page, 'build-preview', 'real-build-terminal');
-		} finally {
-			await cleanupBuildPreviewResources(page, aName, aId, buildId);
-		}
-	});
+				// Progress bar is always present; status may already be terminal under load.
+				const progressBar = page.locator('[data-testid="build-progress-bar"]');
+				await expect(progressBar).toBeVisible({ timeout: 5_000 });
+				await expect(
+					preview.getByText(/Complete|Running|Queued|Failed|Cancelled/i).first()
+				).toBeVisible({ timeout: readyTimeoutMs() });
 
-	test('close button dismisses the Build Preview modal', async ({
-		page,
-		request,
-		sharedDatasource
-	}) => {
-		const aName = `E2E BPrev Close ${uid()}`;
-		const aId = await createAnalysis(request, aName, sharedDatasource.id);
-		let buildId: string | undefined;
-		try {
-			await gotoAnalysisEditor(page, aId);
-			buildId = await startBuildAndCaptureId(page);
+				await screenshot(page, 'build-preview', 'real-build-terminal');
+			});
 
-			const openPreviewBtn = page.locator('[data-testid="output-build-preview-trigger"]');
-			await expectVisibleEventually(openPreviewBtn);
-			await openPreviewBtn.click();
+			// Reuses the single build above: the preview is still open from the previous step.
+			await test.step('close button dismisses the Build Preview modal', async () => {
+				const preview = page.locator('[data-testid="build-preview"]');
+				const closeBtn = page.locator('[aria-label="Close build preview"]');
+				await closeBtn.click();
 
-			const preview = page.locator('[data-testid="build-preview"]');
-			await expectVisibleEventually(preview);
+				await expect(preview).not.toBeVisible({ timeout: 5_000 });
 
-			const closeBtn = page.locator('[aria-label="Close build preview"]');
-			await expect(closeBtn).toBeVisible();
-			await closeBtn.click();
-
-			await expect(preview).not.toBeVisible({ timeout: 5_000 });
-
-			await screenshot(page, 'build-preview', 'real-build-modal-closed');
+				await screenshot(page, 'build-preview', 'real-build-modal-closed');
+			});
 		} finally {
 			await cleanupBuildPreviewResources(page, aName, aId, buildId);
 		}

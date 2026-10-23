@@ -1,3 +1,5 @@
+import { isRecord } from '#lib/utils/json.js';
+
 export interface ColumnSchema {
 	name: string;
 	dtype: string;
@@ -73,12 +75,6 @@ export interface AnalysisDataSourceConfig {
 
 export type SourceType = 'file' | 'database' | 'iceberg' | 'analysis';
 
-export type DataSourceConfig =
-	| FileDataSourceConfig
-	| DatabaseDataSourceConfig
-	| IcebergDataSourceConfig
-	| AnalysisDataSourceConfig;
-
 interface DataSourceBase {
 	id: string;
 	name: string;
@@ -138,10 +134,6 @@ const DATASOURCE_FILE_TYPES = new Set<DataSourceFileType>([
 	'ndjson',
 	'excel'
 ]);
-
-function isRecord(value: unknown): value is Record<string, unknown> {
-	return typeof value === 'object' && value !== null && !Array.isArray(value);
-}
 
 export function readSourceType(value: unknown): SourceType | null {
 	return typeof value === 'string' && SOURCE_TYPES.has(value as SourceType)

@@ -2,7 +2,7 @@ import uuid
 from datetime import datetime, timedelta
 from typing import Any, cast
 
-from sqlalchemy import and_, desc, func, or_, select, update
+from sqlalchemy import and_, desc, or_, select, update
 from sqlalchemy.engine import CursorResult
 from sqlmodel import Session
 
@@ -411,43 +411,3 @@ def stage_job_cancelled(session: Session, job_id: str) -> BuildJob:
 
 
 mark_job_cancelled = committed(stage_job_cancelled, refresh=True)
-
-
-def queued_job_count(session: Session) -> int:
-    now = database_now(session)
-    table = BuildJob.metadata.tables[BuildJob.__tablename__]
-    stmt = (
-        select(func.count())
-        .select_from(table)
-        .where(
-            or_(
-                table.c.status == BuildJobStatus.QUEUED,
-                and_(
-                    table.c.status.in_([status for status in BuildJobStatus.members() if status.is_reclaimable]),
-                    table.c.lease_expires_at <= now,
-                    table.c.attempts < table.c.max_attempts,
-                ),
-            )
-        )
-    )
-    return session.execute(stmt).scalar_one()
-
-
-def release_worker_jobs(session: Session, *, worker_id: str) -> list[BuildJob]:
-    now = database_now(session)
-    table = BuildJob.metadata.tables[BuildJob.__tablename__]
-    stmt = (
-        select(BuildJob)
-        .where(sa(BuildJob.lease_owner == worker_id))
-        .where(table.c.status.in_([status for status in BuildJobStatus.members() if status.is_reclaimable]))
-    )
-    jobs = list(session.execute(with_for_update_skip_locked(session, stmt)).scalars().all())
-    for job in jobs:
-        job.status = BuildJobStatus.QUEUED
-        job.clear_lease()
-        job.updated_at = now
-        session.add(job)
-    session.commit()
-    for job in jobs:
-        session.refresh(job)
-    return jobs

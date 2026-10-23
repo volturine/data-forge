@@ -80,14 +80,6 @@ def mark_worker_stopped(session: Session, *, worker_id: str, now: datetime | Non
     return worker
 
 
-def list_workers(session: Session, *, kind: RuntimeWorkerKind | None = None) -> list[RuntimeWorker]:
-    stmt = select(RuntimeWorker)
-    if kind is not None:
-        stmt = stmt.where(sa(RuntimeWorker.kind == kind))
-    stmt = stmt.order_by(sa(RuntimeWorker.started_at), sa(RuntimeWorker.id))
-    return list(session.execute(stmt).scalars().all())
-
-
 def reclaimable_worker_ids(session: Session, *, kind: RuntimeWorkerKind, heartbeat_seconds: float = 15.0) -> set[str]:
     cutoff = _utcnow() - timedelta(seconds=heartbeat_seconds)
     statement = (

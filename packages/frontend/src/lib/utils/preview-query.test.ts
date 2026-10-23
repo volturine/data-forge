@@ -1,10 +1,15 @@
 import { afterEach, describe, expect, test, vi } from 'vitest';
-import { CancelledError, QueryClient } from '@tanstack/svelte-query';
+import { CancelledError, QueryClient, QueryObserver } from '@tanstack/svelte-query';
 import { err, okAsync, ResultAsync, type Result } from 'neverthrow';
 import type { ApiError } from '#lib/api/client.js';
 import type { StepPreviewRequest, StepPreviewResponse } from '#lib/api/compute.js';
 import * as computeApi from '#lib/api/compute.js';
-import { fetchPreviewQueryData, stepPreviewQueryKey } from './preview-query';
+import {
+	createPreviewRequestCancellation,
+	fetchPreviewQueryData,
+	PREVIEW_QUERY_GC_TIME,
+	stepPreviewQueryKey
+} from './preview-query';
 
 const previewStepData = vi.spyOn(computeApi, 'previewStepData');
 
@@ -45,6 +50,70 @@ describe('stepPreviewQueryKey', () => {
 		expect(stepPreviewQueryKey('default', 'analysis-1', 'view-1')).not.toEqual(
 			stepPreviewQueryKey('default', 'analysis-1', 'view-2')
 		);
+	});
+});
+
+describe('createPreviewRequestCancellation', () => {
+	test('reuses a signal for the same command and aborts it when the command changes', () => {
+		const cancellation = createPreviewRequestCancellation();
+		const request = makePreviewRequest();
+		const firstSignal = cancellation.signalFor(request);
+
+		expect(cancellation.signalFor(makePreviewRequest())).toBe(firstSignal);
+
+		const nextSignal = cancellation.signalFor({ ...request, target_step_id: 'view-1' });
+		expect(firstSignal.aborted).toBe(true);
+		expect(nextSignal.aborted).toBe(false);
+		cancellation.dispose();
+	});
+
+	test('recreates an aborted signal for the same command and aborts it on disposal', () => {
+		const cancellation = createPreviewRequestCancellation();
+		const request = makePreviewRequest();
+		const firstSignal = cancellation.signalFor(request);
+
+		cancellation.dispose();
+		expect(firstSignal.aborted).toBe(true);
+
+		const nextSignal = cancellation.signalFor(request);
+		expect(nextSignal).not.toBe(firstSignal);
+		expect(nextSignal.aborted).toBe(false);
+
+		cancellation.dispose();
+		expect(nextSignal.aborted).toBe(true);
+	});
+});
+
+describe('preview query cache retention', () => {
+	test('keeps observed data and garbage-collects it after the inactive retention window', async () => {
+		vi.useFakeTimers();
+		const client = new QueryClient();
+		const response = makePreviewResponse();
+		const queryKey = ['step-preview', 'default', 'analysis-1', 'view-1'] as const;
+		const observer = new QueryObserver(client, {
+			queryKey,
+			queryFn: async () => response,
+			staleTime: Infinity,
+			gcTime: PREVIEW_QUERY_GC_TIME
+		});
+		client.setQueryData(queryKey, response);
+		const unsubscribe = observer.subscribe(() => {});
+
+		try {
+			await vi.advanceTimersByTimeAsync(PREVIEW_QUERY_GC_TIME);
+			expect(client.getQueryData(queryKey)).toEqual(response);
+
+			unsubscribe();
+			await vi.advanceTimersByTimeAsync(PREVIEW_QUERY_GC_TIME - 1);
+			expect(client.getQueryData(queryKey)).toEqual(response);
+
+			await vi.advanceTimersByTimeAsync(1);
+			expect(client.getQueryData(queryKey)).toBeUndefined();
+		} finally {
+			unsubscribe();
+			client.clear();
+			vi.useRealTimers();
+		}
 	});
 });
 
