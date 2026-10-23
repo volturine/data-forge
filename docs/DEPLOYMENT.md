@@ -106,7 +106,13 @@ compose files mirror this directory's topology and follow the same registry.
 
 ### Configure and start
 
-1. Review `docker/env/prod.env` and replace every `replace-with-...` value.
+1. Run `just docker-init` to write `docker/env/prod.local.env` (git-ignored,
+   mode 600) from `docker/env/prod.env`. It generates the PostgreSQL password
+   (also placed in `DF_DATABASE_URL`), internal token, object-store keys, admin
+   password and settings encryption key, pins the compute-worker image to the
+   release tag, and on Linux sets `DF_DOCKER_GID` from the Docker socket. It
+   never overwrites an existing file. To configure by hand instead, copy the
+   template and replace every `replace-with-...` value.
 2. Set the five image variables to tags published from the same release. The checked deploy path pulls the worker's resolved `COMPUTE_WORKER_IMAGE` before the worker manager starts. Pin it to a `repository@sha256:<digest>` reference when compute workers must stay byte-identical across launches; tags remain accepted for custom compute-worker images with extra libraries.
 3. Set `DF_AUTH_FRONTEND_URL` and `DF_CORS_ORIGINS` to the public HTTPS origin.
    GitHub OAuth derives its callback from the incoming request host, so register
@@ -117,8 +123,8 @@ compose files mirror this directory's topology and follow the same registry.
 5. Resolve and validate the configuration, then start the stack:
 
 ```bash
-just docker-check docker/env/prod.env dataforge-prod
-just docker-up docker/env/prod.env dataforge-prod
+just docker-check docker/env/prod.local.env dataforge-prod
+just docker-up docker/env/prod.local.env dataforge-prod
 ```
 
 `docker-check` renders and validates the Compose configuration without changing

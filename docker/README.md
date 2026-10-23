@@ -96,11 +96,14 @@ two dev modes are mutually exclusive by design: run either one, not both.
 
 ## Production compose
 
-Use the checked self-host path with `docker/env/prod.env`:
+Use the checked self-host path. `docker-init` writes a git-ignored
+`env/prod.local.env` from `env/prod.env` with generated secrets; pass a
+hand-edited copy of the template instead if you prefer:
 
 ```bash
-just docker-check docker/env/prod.env dataforge-prod
-just docker-up docker/env/prod.env dataforge-prod
+just docker-init
+just docker-check docker/env/prod.local.env dataforge-prod
+just docker-up docker/env/prod.local.env dataforge-prod
 ```
 
 `docker-check` resolves the Compose file and checks that role images, required

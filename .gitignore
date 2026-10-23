@@ -8,6 +8,7 @@
 .env
 .env.local
 .env.*.local
+docker/env/*.local.env
 .vscode/mcp.json
 
 # Test artifacts (package-local)

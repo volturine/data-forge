@@ -2,7 +2,9 @@ from __future__ import annotations
 
 import argparse
 import json
+import os
 import re
+import secrets
 import subprocess
 import sys
 from collections.abc import Sequence
@@ -52,6 +54,58 @@ def _renamed_engine_key(name: str) -> str:
     return prefixed if '${' + prefixed in compose else f'COMPUTE_WORKER_{suffix}'
 
 
+def _admin_password() -> str:
+    # AuthSettings requires upper- and lowercase letters and a digit.
+    while True:
+        password = secrets.token_urlsafe(18)
+        if any(c.isupper() for c in password) and any(c.islower() for c in password) and any(c.isdigit() for c in password):
+            return password
+
+
+def _initialize_env_file(target: Path) -> int:
+    """Write ``target`` from the production template with generated secrets."""
+    if target.exists():
+        print(f'{target} already exists; refusing to overwrite it.', file=sys.stderr)
+        return 2
+    database_password = secrets.token_urlsafe(24)
+    generated = {
+        'DF_POSTGRES_PASSWORD': database_password,
+        'DF_INTERNAL_API_TOKEN': secrets.token_urlsafe(32),
+        # RustFS accepts S3-style keys: at most 20 characters for the access key.
+        'DF_OBJECT_STORE_ACCESS_KEY': f'dataforge{secrets.token_hex(5)}',
+        'DF_OBJECT_STORE_SECRET_KEY': secrets.token_hex(20),
+        'DF_DEFAULT_USER_PASSWORD': _admin_password(),
+        'DF_SETTINGS_ENCRYPTION_KEY': secrets.token_urlsafe(32),
+    }
+    template = (REPOSITORY_ROOT / 'docker' / 'env' / 'prod.env').read_text(encoding='utf-8')
+    api_image = re.search(r'^DF_API_IMAGE=\S+:(\S+)$', template, re.MULTILINE)
+    socket = re.search(r'^DF_DOCKER_SOCKET_PATH=(\S+)$', template, re.MULTILINE)
+    # The worker manager joins the socket's group. Docker Desktop's socket lives
+    # in its VM, so only a Linux host path reflects the group the container sees.
+    if sys.platform.startswith('linux') and socket and Path(socket.group(1)).exists():
+        generated['DF_DOCKER_GID'] = str(Path(socket.group(1)).stat().st_gid)
+    lines: list[str] = []
+    for line in template.splitlines():
+        key, separator, value = line.partition('=')
+        if separator and key in generated:
+            line = f'{key}={generated[key]}'
+        elif key == 'DF_DATABASE_URL':
+            line = line.replace('replace-with-strong-password', database_password)
+        elif key == 'DF_COMPUTE_WORKER_IMAGE' and '@sha256:replace-with-' in value and api_image:
+            line = f'{key}={value.split("@", 1)[0]}:{api_image.group(1)}'
+        lines.append(line)
+    target.parent.mkdir(parents=True, exist_ok=True)
+    descriptor = os.open(target, os.O_WRONLY | os.O_CREAT | os.O_EXCL, 0o600)
+    with os.fdopen(descriptor, 'w', encoding='utf-8') as handle:
+        handle.write('\n'.join(lines) + '\n')
+    print(
+        f'Wrote {target} with generated secrets (mode 600). Sign in as DF_DEFAULT_USER_EMAIL with the '
+        'DF_DEFAULT_USER_PASSWORD stored there, and set DF_AUTH_FRONTEND_URL and DF_CORS_ORIGINS to your public origin. '
+        f'Then run: just docker-up {target}'
+    )
+    return 0
+
+
 def _positive_int(value: str) -> int:
     try:
         parsed = int(value)
@@ -67,6 +121,7 @@ def _arguments(argv: Sequence[str] | None) -> argparse.Namespace:
     parser.add_argument('--env-file', default='docker/env/prod.env', help='Compose environment file')
     parser.add_argument('--project', default='dataforge-prod', help='Compose project name')
     parser.add_argument('--check', action='store_true', help='resolve and validate without Docker mutations')
+    parser.add_argument('--init', action='store_true', help='write --env-file from the production template with generated secrets')
     parser.add_argument(
         '--wait-timeout',
         type=_positive_int,
@@ -179,8 +234,10 @@ def _compose_base(env_file: Path, project: str) -> list[str]:
 def main(argv: Sequence[str] | None = None) -> int:
     arguments = _arguments(argv)
     env_file = _resolve_env_file(arguments.env_file)
+    if arguments.init:
+        return _initialize_env_file(env_file)
     if not env_file.is_file():
-        print(f'Environment file not found: {env_file}', file=sys.stderr)
+        print(f'Environment file not found: {env_file}. Run `just docker-init` to create one.', file=sys.stderr)
         return 2
 
     compose = _compose_base(env_file, arguments.project)

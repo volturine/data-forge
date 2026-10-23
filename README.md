@@ -100,14 +100,16 @@ postgres + RustFS + api + runtime coordinator + scheduler + worker
 
 The API container serves both the backend API and the built frontend on port 8000.
 The checked startup commands below require Docker Engine 25+ with Compose v2,
-Python 3, and `just`. Without `just`, use `python3 scripts/deploy.py --check` and then
-`python3 scripts/deploy.py`.
+Python 3, and `just`. Without `just`, run `python3 scripts/deploy.py` with
+`--init --env-file docker/env/prod.local.env`, then `--check`, then no flag.
 
 ```bash
-# 1) Edit docker/env/prod.env and set image tags, passwords, and secrets.
+# 1) Write docker/env/prod.local.env (git-ignored) with generated secrets, then
+#    review its image tags, admin e-mail and public URL settings.
+just docker-init
 # 2) Validate the resolved configuration, then pull and start the stack.
-just docker-check
-just docker-up
+just docker-check docker/env/prod.local.env
+just docker-up docker/env/prod.local.env
 
 # Open the application.
 open http://localhost:8000

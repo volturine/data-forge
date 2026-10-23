@@ -478,6 +478,11 @@ docker-dev-down:
 docker-dev-logs:
     docker compose --env-file docker/env/dev.env -p dataforge-dev -f docker/compose.yaml -f docker/compose.dev.yaml logs -f
 
+# Write a git-ignored production env file from docker/env/prod.env with
+# generated passwords, tokens and keys. Refuses to overwrite an existing file.
+docker-init env_file='docker/env/prod.local.env':
+    python3 scripts/deploy.py --init --env-file {{quote(env_file)}}
+
 # Resolve and validate the self-hosted production Compose configuration without
 # changing the Docker daemon. `docker-up` performs the checked deployment.
 docker-check env_file='docker/env/prod.env' project='dataforge-prod':

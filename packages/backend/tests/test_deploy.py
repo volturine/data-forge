@@ -137,6 +137,28 @@ class DeployContractTests(unittest.TestCase):
         )
         self.assertIn('Deployment is healthy', stdout.getvalue())
 
+    def test_init_writes_private_env_file_with_consistent_generated_secrets(self) -> None:
+        with tempfile.TemporaryDirectory() as temporary_directory:
+            target = Path(temporary_directory) / 'prod.local.env'
+            with redirect_stdout(StringIO()):
+                self.assertEqual(deploy.main(['--init', '--env-file', str(target)]), 0)
+            with redirect_stderr(StringIO()) as stderr:
+                self.assertEqual(deploy.main(['--init', '--env-file', str(target)]), 2)
+            values = dict(line.split('=', 1) for line in target.read_text(encoding='utf-8').splitlines() if line.startswith('DF_'))
+            mode = target.stat().st_mode & 0o777
+
+        self.assertEqual(mode, 0o600)
+        self.assertIn('refusing to overwrite', stderr.getvalue())
+        self.assertFalse([key for key, value in values.items() if 'replace-with-' in value])
+        self.assertIn(f':{values["DF_POSTGRES_PASSWORD"]}@postgres:', values['DF_DATABASE_URL'])
+        self.assertLessEqual(len(values['DF_OBJECT_STORE_ACCESS_KEY']), 20)
+        configuration = resolved_configuration()
+        services = configuration['services']
+        assert isinstance(services, dict) and isinstance(services['api'], dict) and isinstance(services['api']['environment'], dict)
+        services['api']['environment']['DEFAULT_USER_PASSWORD'] = values['DF_DEFAULT_USER_PASSWORD']
+        errors, _image = deploy._configuration_errors(configuration)
+        self.assertEqual(errors, [])
+
     def test_invalid_configuration_names_missing_values_without_echoing_them(self) -> None:
         configuration = resolved_configuration()
         services = configuration['services']
