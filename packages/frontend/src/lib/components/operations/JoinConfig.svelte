@@ -16,20 +16,12 @@
 
 	const _uid = $props.id();
 
-	const defaultConfig: JoinConfigData = {
-		how: 'inner',
-		right_source: '',
-		join_columns: [],
-		right_columns: [],
-		suffix: '_right'
-	};
-
 	interface Props {
 		schema: Schema;
-		config?: JoinConfigData;
+		config: JoinConfigData;
 	}
 
-	let { schema, config = $bindable(defaultConfig) }: Props = $props();
+	let { schema, config = $bindable() }: Props = $props();
 
 	let rightSchema = $state<Schema | null>(null);
 	let rightSchemaLoading = $state(false);

@@ -1013,7 +1013,7 @@ async def ingest_datasource(
     return await json_response(response)
 
 
-@router.delete('/{datasource_id}', status_code=202, mcp=True)
+@router.delete('/{datasource_id}', status_code=202, mcp=True, mcp_confirm_required=True)
 @handle_errors(operation='delete datasource')
 async def delete_datasource(datasource_id: DataSourceId):
     """Queue datasource deletion and finalize it once the preview engine is fully drained."""

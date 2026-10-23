@@ -8,10 +8,10 @@
 
 	interface Props {
 		schema: Schema;
-		config?: DeduplicateConfigData;
+		config: DeduplicateConfigData;
 	}
 
-	let { schema, config = $bindable({ subset: [], keep: 'first' }) }: Props = $props();
+	let { schema, config = $bindable() }: Props = $props();
 
 	const keepStrategies = [
 		{ value: 'first', label: 'Keep First' },

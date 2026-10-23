@@ -1,7 +1,7 @@
 import polars as pl
 from pydantic import ConfigDict, Field, model_validator
 
-from operations.enums import NotificationMethod
+from operations.enums import NotificationMethod, RecipientSource
 from operations.template_placeholders import render_template_placeholders
 from runtime.domain.compute.base import OperationHandler, OperationParams
 from runtime.notification_delivery import encode_staged_deliveries, staged_column_name
@@ -11,6 +11,9 @@ class NotificationParams(OperationParams):
     model_config = ConfigDict(extra="forbid")
 
     method: NotificationMethod = NotificationMethod.EMAIL
+    # Stored for the editor's recipient mode; the editor keeps `recipient` and
+    # `recipient_column` mutually exclusive, so the rows below already follow it.
+    recipient_source: RecipientSource = RecipientSource.MANUAL
     recipient: str = ""
     subscriber_ids: list[str] = Field(default_factory=list)
     bot_token: str = ""

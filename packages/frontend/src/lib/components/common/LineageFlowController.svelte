@@ -2,12 +2,10 @@
 	import { untrack } from 'svelte';
 	import { useSvelteFlow } from '@xyflow/svelte';
 
-	export interface LineageFlowApi {
-		zoomIn: () => void;
-		zoomOut: () => void;
-		fitView: () => void;
-		getZoom: () => number;
-	}
+	export type LineageFlowApi = Pick<
+		ReturnType<typeof useSvelteFlow>,
+		'zoomIn' | 'zoomOut' | 'fitView' | 'getZoom'
+	>;
 
 	type Props = {
 		onready: (api: LineageFlowApi) => void;
@@ -19,12 +17,6 @@
 
 	// The api object is exposed exactly once at initialization; onready is not
 	// read reactively on purpose.
-	untrack(() =>
-		onready({
-			zoomIn: () => void flow.zoomIn(),
-			zoomOut: () => void flow.zoomOut(),
-			fitView: () => void flow.fitView(),
-			getZoom: () => flow.getZoom()
-		})
-	);
+	// Pass the flow helpers through unchanged so callers can await their transitions.
+	untrack(() => onready(flow));
 </script>

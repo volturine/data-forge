@@ -12,27 +12,13 @@
 	import { css, input, label, stepConfig } from '#lib/styles/panda.js';
 
 	interface Props {
-		config?: NotificationConfigData;
+		config: NotificationConfigData;
 		schema: Schema;
 		configFlags?: { smtpEnabled: boolean; telegramEnabled: boolean };
 	}
 
-	const defaultConfig: NotificationConfigData = {
-		method: 'email',
-		recipient: '',
-		subscriber_ids: [],
-		bot_token: '',
-		recipient_source: 'manual',
-		recipient_column: '',
-		input_columns: [],
-		output_column: 'notification_status',
-		message_template: '{{message}}',
-		subject_template: 'Notification',
-		batch_size: 10
-	};
-
 	let {
-		config = $bindable(defaultConfig),
+		config = $bindable(),
 		schema,
 		configFlags = { smtpEnabled: true, telegramEnabled: true }
 	}: Props = $props();

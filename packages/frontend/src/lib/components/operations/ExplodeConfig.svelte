@@ -8,10 +8,10 @@
 
 	interface Props {
 		schema: Schema;
-		config?: ExplodeConfigData;
+		config: ExplodeConfigData;
 	}
 
-	let { schema, config = $bindable({ columns: [] }) }: Props = $props();
+	let { schema, config = $bindable() }: Props = $props();
 
 	const hasListColumns = $derived(
 		schema.columns.some(

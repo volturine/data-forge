@@ -1,7 +1,7 @@
 from datetime import datetime
 from typing import Annotated, ClassVar, Literal, Self
 
-from pydantic import BaseModel, ConfigDict, Field, TypeAdapter, field_validator
+from pydantic import BaseModel, ConfigDict, Field, TypeAdapter
 
 from dataforge_protocol import enums_pb2
 from runtime.domain.compute_worker_runs.schemas import ComputeWorkerRunKind
@@ -35,82 +35,6 @@ class ComputeWorkerReusePolicy(DomainEnumValue):
 
 ComputeWorkerReusePolicy.SHARED = ComputeWorkerReusePolicy(enums_pb2.COMPUTE_WORKER_REUSE_POLICY_SHARED)
 ComputeWorkerReusePolicy.EXCLUSIVE = ComputeWorkerReusePolicy(enums_pb2.COMPUTE_WORKER_REUSE_POLICY_EXCLUSIVE)
-
-
-class ComputeWorkerResourceConfig(BaseModel):
-    """Optional resource overrides for compute engine.
-
-    All fields are optional - None means use default from settings/env vars.
-    Value of 0 means auto-detect/unlimited (same as settings).
-    """
-
-    model_config = ConfigDict(from_attributes=True)
-
-    max_threads: int | None = None  # CPU threads per engine (0 = auto-detect)
-    max_memory_mb: int | None = None  # Memory limit in MB (0 = unlimited)
-    streaming_chunk_size: int | None = None  # Streaming chunk size (0 = auto)
-
-    @field_validator("max_threads")
-    @classmethod
-    def validate_max_threads(cls, v: int | None) -> int | None:
-        if v is not None and v < 0:
-            raise ValueError("max_threads must be non-negative (0 = auto)")
-        if v is not None and v > 64:
-            raise ValueError("max_threads must be at most 64")
-        return v
-
-    @field_validator("max_memory_mb")
-    @classmethod
-    def validate_max_memory(cls, v: int | None) -> int | None:
-        if v is not None and v < 0:
-            raise ValueError("max_memory_mb must be non-negative (0 = unlimited)")
-        if v is not None and v > 0 and v < 256:
-            raise ValueError("max_memory_mb must be at least 256 MB when set")
-        return v
-
-    @field_validator("streaming_chunk_size")
-    @classmethod
-    def validate_streaming_chunk_size(cls, v: int | None) -> int | None:
-        if v is not None and v < 0:
-            raise ValueError("streaming_chunk_size must be non-negative (0 = auto)")
-        return v
-
-
-class ComputeWorkerDefaults(BaseModel):
-    """Default engine resource settings from environment."""
-
-    model_config = ConfigDict(from_attributes=True)
-
-    max_threads: int  # 0 = auto-detect
-    max_memory_mb: int  # 0 = unlimited
-    streaming_chunk_size: int  # 0 = auto
-
-
-class ComputeWorkerStatusSchema(BaseModel):
-    model_config = ConfigDict(from_attributes=True)
-
-    analysis_id: str
-    resource_id: str
-    status: ComputeWorkerStatus
-    container_id: str | None = None
-    image_digest: str | None = None
-    lifecycle_status: str | None = None
-    termination_reason: str | None = None
-    exit_code: int | None = None
-    oom_killed: bool | None = None
-    supervisor_id: str | None = None
-    owner_id: str | None = None
-    last_activity: str | None = None
-    current_job_id: str | None = None
-    resource_config: ComputeWorkerResourceConfig | None = None  # Overrides provided by user
-    effective_resources: ComputeWorkerResourceConfig | None = None  # Actual values being used
-    defaults: ComputeWorkerDefaults | None = None  # Default values from env vars
-    scope: ComputeWorkerScope | None = None
-    reuse_policy: ComputeWorkerReusePolicy | None = None
-    datasource_id: str | None = None
-    build_id: str | None = None
-    current_build_id: str | None = None
-    current_compute_worker_run_id: str | None = None
 
 
 class StepPreviewResponse(BaseModel):

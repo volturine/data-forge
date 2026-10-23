@@ -134,12 +134,7 @@
 			if (result.isErr()) throw new Error(result.error.message);
 			return result.value;
 		},
-		onSuccess: (created) => {
-			const listKey = ['healthchecks', ns.value, datasourceId ?? 'all'];
-			queryClient.setQueryData<HealthCheckItem[]>(listKey, (current) => {
-				const next = current ?? [];
-				return [...next, { ...created, critical: !!(created as { critical?: boolean }).critical }];
-			});
+		onSuccess: () => {
 			queryClient.invalidateQueries({ queryKey: ['healthchecks'] });
 			queryClient.invalidateQueries({ queryKey: ['healthcheck-results'] });
 			creating = false;
@@ -156,20 +151,16 @@
 		},
 		onMutate: async (payload) => {
 			await queryClient.cancelQueries({ queryKey: ['healthchecks'] });
-			const listKey = ['healthchecks', ns.value, datasourceId ?? 'all'];
-			const previous = queryClient.getQueryData<HealthCheckItem[]>(listKey);
-			if (previous) {
-				queryClient.setQueryData<HealthCheckItem[]>(
-					listKey,
-					previous.map((c) => (c.id === payload.id ? { ...c, ...payload.update } : c))
-				);
-			}
-			return { previous, listKey };
+			// The list key also carries search and page, so update every page by prefix.
+			const listFilter = { queryKey: ['healthchecks', ns.value, datasourceId ?? 'all'] };
+			const previous = queryClient.getQueriesData<HealthCheckItem[]>(listFilter);
+			queryClient.setQueriesData<HealthCheckItem[]>(listFilter, (current) =>
+				current?.map((c) => (c.id === payload.id ? { ...c, ...payload.update } : c))
+			);
+			return { previous };
 		},
 		onError: (_err, _payload, context) => {
-			if (context?.previous) {
-				queryClient.setQueryData(context.listKey, context.previous);
-			}
+			for (const [key, data] of context?.previous ?? []) queryClient.setQueryData(key, data);
 		},
 		onSettled: () => {
 			queryClient.invalidateQueries({ queryKey: ['healthchecks'] });

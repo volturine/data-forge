@@ -319,10 +319,8 @@ def _tab_output_config(analysis_pipeline: dict, tab_id: str | None) -> dict:
 
 
 def _output_timeout_warning_ms(analysis_pipeline: dict, tab_id: str | None) -> int | None:
-    raw = _tab_output_config(analysis_pipeline, tab_id).get("build_timeout_warning_ms")
-    if isinstance(raw, bool) or not isinstance(raw, (int, float)) or int(raw) <= 0:
-        return None
-    return int(raw)
+    # The protocol requires a positive value and the pipeline decoder keeps it an int.
+    return _tab_output_config(analysis_pipeline, tab_id).get("build_timeout_warning_ms")
 
 
 def _build_subscriber_message(context: BuildContext) -> str:

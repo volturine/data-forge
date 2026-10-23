@@ -2,10 +2,10 @@
 	import { css, input, label, stepConfig } from '#lib/styles/panda.js';
 
 	interface Props {
-		config?: { n?: number };
+		config: { n?: number };
 	}
 
-	let { config = $bindable({ n: 10 }) }: Props = $props();
+	let { config = $bindable() }: Props = $props();
 </script>
 
 <div class={stepConfig()} role="region" aria-label="Limit configuration">

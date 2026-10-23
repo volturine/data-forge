@@ -634,7 +634,7 @@ def test_compute_worker_run_finalization_uses_the_existing_typed_update() -> Non
 
 
 def test_compute_worker_status_result_proto_uses_typed_snapshot_fields() -> None:
-    status = worker_runtime_client._compute_worker_status_result_proto(
+    status = worker_runtime_client.compute_worker_status_result_proto(
         ComputeWorkerStatusInfo(
             analysis_id="analysis-1",
             resource_id="datasource-1",
@@ -650,7 +650,8 @@ def test_compute_worker_status_result_proto_uses_typed_snapshot_fields() -> None
             last_activity=datetime.now(UTC).isoformat(),
             current_job_id="job-1",
             resource_config={"max_threads": 2},
-            effective_resources={"max_threads": 2, "max_memory_mb": 1024},
+            # Effective resources reflect the host and may exceed user override limits.
+            effective_resources={"max_threads": 128, "max_memory_mb": 1024},
             defaults={"max_threads": 2, "max_memory_mb": 1024, "streaming_chunk_size": 500},
             scope="datasource_preview",
             reuse_policy="shared",
@@ -663,6 +664,7 @@ def test_compute_worker_status_result_proto_uses_typed_snapshot_fields() -> None
 
     assert status.status == enums_pb2.COMPUTE_WORKER_STATUS_HEALTHY
     assert status.resource_config.max_threads == 2
+    assert status.effective_resources.max_threads == 128
     assert status.effective_resources.max_memory_mb == 1024
     assert status.defaults.streaming_chunk_size == 500
     assert status.scope == enums_pb2.COMPUTE_WORKER_SCOPE_DATASOURCE_PREVIEW
@@ -840,6 +842,18 @@ def test_analysis_pipeline_protocol_view_config_uses_worker_service_key() -> Non
     steps = cast(list[dict[str, object]], tabs[0]["steps"])
     step_config = steps[0]["config"]
     assert step_config == {"row_limit": 100}
+
+
+def test_build_timeout_warning_reaches_the_build_as_an_integer() -> None:
+    pipeline = _single_step_pipeline(
+        analysis_pb2.AnalysisPipelineStep(id="view-1", step_type=enums_pb2.STEP_TYPE_VIEW, config=analysis_pb2.StepConfig(view=analysis_pb2.ViewConfig()))
+    )
+    pipeline.tabs[0].output.build_timeout_warning_ms = 1500
+
+    payload = analysis_pipeline_to_execution_payload(pipeline)
+
+    # int64 decodes to a JSON string; the build must still compare it as a number.
+    assert compute_service._output_timeout_warning_ms(payload, "tab-1") == 1500
 
 
 def test_analysis_pipeline_protocol_step_type_drives_service_step_type() -> None:
@@ -2503,35 +2517,22 @@ class TestStepTimingLabels:
 
 
 # ---------------------------------------------------------------------------
-# ChartParams sort_by / group_sort_by coercion
+# ChartParams sort_by / group_sort_by parsing
 # ---------------------------------------------------------------------------
 
 
-class TestChartParamsSortByCoercion:
-    def test_invalid_sort_by_coerces_to_none(self):
-        params = ChartParams.model_validate({"chart_type": "bar", "x_column": "cat", "sort_by": "rank"})
-        assert params.sort_by is None
-
-    def test_invalid_group_sort_by_coerces_to_none(self):
-        params = ChartParams.model_validate({"chart_type": "bar", "x_column": "cat", "group_sort_by": "total"})
-        assert params.group_sort_by is None
-
-    def test_valid_sort_by_preserved(self):
-        params = ChartParams.model_validate({"chart_type": "bar", "x_column": "cat", "sort_by": "y"})
+class TestChartParamsSortBy:
+    @pytest.mark.parametrize("sort_by", ["y", enums_pb2.SORT_BY_Y], ids=["token", "protocol-int"])
+    def test_sort_by_accepts_tokens_and_protocol_integers(self, sort_by):
+        # Protocol step configs carry enums as integers; they must not be dropped.
+        params = ChartParams.model_validate({"chart_type": "bar", "x_column": "cat", "sort_by": sort_by, "group_sort_by": enums_pb2.GROUP_SORT_BY_VALUE})
         assert params.sort_by == enums_pb2.SORT_BY_Y
+        assert params.group_sort_by == enums_pb2.GROUP_SORT_BY_VALUE
 
-    def test_invalid_sort_by_does_not_raise_in_compute(self):
-        lf = pl.DataFrame({"cat": ["A", "B"], "val": [1.0, 2.0]}).lazy()
-        result = compute_chart_data(
-            lf,
-            {
-                "chart_type": "bar",
-                "x_column": "cat",
-                "y_column": "val",
-                "sort_by": "rank",
-            },
-        ).collect()
-        assert result.height == 2
+    @pytest.mark.parametrize("field", ["sort_by", "group_sort_by"])
+    def test_unknown_sort_tokens_are_rejected(self, field):
+        with pytest.raises(ValidationError):
+            ChartParams.model_validate({"chart_type": "bar", "x_column": "cat", field: "rank"})
 
 
 # ---------------------------------------------------------------------------

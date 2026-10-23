@@ -6,21 +6,10 @@
 
 	interface Props {
 		schema: Schema;
-		config?: TimeSeriesConfigData;
+		config: TimeSeriesConfigData;
 	}
 
-	let {
-		schema,
-		config = $bindable({
-			column: '',
-			operation_type: 'extract',
-			new_column: '',
-			component: 'year',
-			value: 1,
-			unit: 'days',
-			column2: ''
-		})
-	}: Props = $props();
+	let { schema, config = $bindable() }: Props = $props();
 
 	const operations = [
 		{ value: 'extract', label: 'Extract Component' },

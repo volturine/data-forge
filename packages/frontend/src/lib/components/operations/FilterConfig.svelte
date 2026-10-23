@@ -17,7 +17,7 @@
 
 	interface Props {
 		schema: Schema;
-		config?: FilterConfigData;
+		config: FilterConfigData;
 	}
 
 	const defaultCondition: Condition = {
@@ -27,8 +27,7 @@
 		value_type: 'string'
 	};
 
-	let { schema, config = $bindable({ conditions: [defaultCondition], logic: 'AND' }) }: Props =
-		$props();
+	let { schema, config = $bindable() }: Props = $props();
 
 	const conditions = $derived(config.conditions ?? [defaultCondition]);
 

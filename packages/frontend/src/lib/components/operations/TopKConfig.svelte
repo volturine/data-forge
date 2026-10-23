@@ -5,10 +5,10 @@
 
 	interface Props {
 		schema: Schema;
-		config?: { column?: string; k?: number; descending?: boolean };
+		config: { column?: string; k?: number; descending?: boolean };
 	}
 
-	let { schema, config = $bindable({ column: '', k: 10, descending: false }) }: Props = $props();
+	let { schema, config = $bindable() }: Props = $props();
 
 	function setK(value: string) {
 		const num = parseInt(value, 10);

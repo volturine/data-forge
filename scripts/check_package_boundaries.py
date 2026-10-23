@@ -252,10 +252,12 @@ COMPUTE_ENVELOPE_FORBIDDEN_TOKENS = {
     'response.dynamic_response.CopyFrom': 'compute responses must use typed protocol oneof variants',
     'envelope.response.dynamic_response.CopyFrom': 'compute responses must use typed protocol oneof variants',
 }
+# Each entry lists the tokens that satisfy it; the worker builds status replies
+# through the shared typed converter.
 COMPUTE_ENVELOPE_REQUIRED_TOKENS = {
-    'compute_pb2.ComputeErrorResult': 'compute failures must use typed protocol error responses',
-    'compute_pb2.ComputeWorkerStatusResult': 'compute worker lifecycle responses must use typed protocol status responses',
-    'compute_pb2.ComputeAckResult': 'acknowledgement responses must use typed protocol ack responses',
+    ('compute_pb2.ComputeErrorResult',): 'compute failures must use typed protocol error responses',
+    ('compute_pb2.ComputeWorkerStatusResult', 'compute_worker_status_result_proto('): 'compute worker lifecycle responses must use typed protocol status responses',
+    ('compute_pb2.ComputeAckResult',): 'acknowledgement responses must use typed protocol ack responses',
 }
 PROTOCOL_FORBIDDEN_TOKENS = {
     'deprecated = true': 'deprecated protocol compatibility fields must be removed, not carried forward',
@@ -625,9 +627,9 @@ def main() -> int:
         for token, reason in COMPUTE_ENVELOPE_FORBIDDEN_TOKENS.items():
             if token in content:
                 errors.append(f'{rel_path} contains {reason}: {token}')
-        for token, reason in COMPUTE_ENVELOPE_REQUIRED_TOKENS.items():
-            if token not in content:
-                errors.append(f'{rel_path} is missing {reason}: {token}')
+        for tokens, reason in COMPUTE_ENVELOPE_REQUIRED_TOKENS.items():
+            if not any(token in content for token in tokens):
+                errors.append(f'{rel_path} is missing {reason}: {" or ".join(tokens)}')
 
     for rel_path in (
         Path('packages/backend/backend_grpc/server.py'),

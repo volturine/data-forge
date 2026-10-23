@@ -7,7 +7,9 @@ import pyarrow as pa  # type: ignore[import-untyped]
 import pytest
 from pydantic import ValidationError
 
+from dataforge_protocol import analysis_pb2, enums_pb2
 from operations.notification import NotificationHandler, NotificationParams
+from operations.step_converter import analysis_pipeline_to_execution_payload, convert_step_format
 from operations.template_placeholders import render_template_placeholders
 from runtime.compute_service import _prepare_pipeline_notifications
 from runtime.notification_delivery import (
@@ -24,6 +26,20 @@ class MockSubscriber:
     bot_token: str
 
 
+def _pipeline_with(step: analysis_pb2.AnalysisPipelineStep) -> analysis_pb2.AnalysisPipelinePayload:
+    return analysis_pb2.AnalysisPipelinePayload(
+        analysis_id="analysis-1",
+        tabs=[
+            analysis_pb2.AnalysisPipelineTab(
+                id="tab-1",
+                datasource=analysis_pb2.AnalysisPipelineDatasource(id="datasource-1", source_type=enums_pb2.DATA_SOURCE_TYPE_FILE),
+                output=analysis_pb2.AnalysisPipelineOutput(result_id="result-1", filename="result.csv", format=enums_pb2.EXPORT_FORMAT_CSV),
+                steps=[step],
+            )
+        ],
+    )
+
+
 def _collect(params: dict[str, object], frame: pl.DataFrame | None = None) -> pl.DataFrame:
     source = frame if frame is not None else pl.DataFrame({"body": ["hello"]})
     return NotificationHandler()(source.lazy(), params, step_id="step-1").collect()
@@ -35,6 +51,25 @@ class TestNotificationParams:
             NotificationParams.model_validate({"method": "email", "input_columns": ["body"]})
         with pytest.raises(ValidationError, match="input_columns"):
             NotificationParams.model_validate({"method": "email", "recipient": "a@example.com"})
+
+    def test_accepts_protocol_step_config_with_recipient_source(self) -> None:
+        # Every stored notification config carries recipient_source (backend default).
+        step = analysis_pb2.AnalysisPipelineStep(
+            id="notify",
+            step_type=enums_pb2.STEP_TYPE_NOTIFICATION,
+            config=analysis_pb2.StepConfig(
+                notification=analysis_pb2.NotificationConfig(
+                    method=enums_pb2.NOTIFICATION_METHOD_EMAIL,
+                    recipient="a@example.com",
+                    recipient_source=enums_pb2.RECIPIENT_SOURCE_MANUAL,
+                    input_columns=["body"],
+                    batch_size=10,
+                )
+            ),
+        )
+        converted = convert_step_format(analysis_pipeline_to_execution_payload(_pipeline_with(step))["tabs"][0]["steps"][0])
+
+        assert converted.params["recipient_source"] == enums_pb2.RECIPIENT_SOURCE_MANUAL
 
     def test_recipient_column_is_an_explicit_recipient_source(self) -> None:
         params = NotificationParams.model_validate({"method": "telegram", "recipient_column": "chat_id", "input_columns": ["body"]})

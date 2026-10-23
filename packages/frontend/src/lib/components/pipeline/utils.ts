@@ -179,11 +179,11 @@ const stepTypes = {
 		icon: Repeat2,
 		typeLabel: 'unpivot',
 		summary: (c) => {
-			const on = c.on as string[];
+			const valueVars = c.value_vars as string[] | undefined;
 			const varName = (c.variable_name as string) || 'variable';
 			const valName = (c.value_name as string) || 'value';
-			if (!on?.length) return 'not configured';
-			return `${truncate(on, 2)} → (${varName}, ${valName})`;
+			if (!valueVars?.length) return 'not configured';
+			return `${truncate(valueVars, 2)} → (${varName}, ${valName})`;
 		}
 	},
 	fill_null: {
@@ -267,11 +267,10 @@ const stepTypes = {
 		typeLabel: 'sample',
 		summary: (c) => {
 			const frac = c.fraction as number | undefined;
-			const seed = c.seed as number | undefined;
+			const seed = c.seed as number | null | undefined;
 			if (frac === undefined) return 'not configured';
 			const base = `${(frac * 100).toFixed(0)}%`;
-			const extras = seed !== undefined ? `seed: ${seed}` : '';
-			return extras ? `${base} (${extras})` : base;
+			return seed === null || seed === undefined ? base : `${base} (seed: ${seed})`;
 		}
 	},
 	limit: {

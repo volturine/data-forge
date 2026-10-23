@@ -180,8 +180,8 @@
 	let tabContextMenu = $state<{ tabId: string; x: number; y: number } | null>(null);
 
 	function bindPaneMedia(): () => void {
-		const narrow = window.matchMedia('max-width: 900px');
-		const mobile = window.matchMedia('max-width: 600px');
+		const narrow = window.matchMedia('(max-width: 900px)');
+		const mobile = window.matchMedia('(max-width: 600px)');
 		const onNarrow = () => {
 			if (narrow.matches) leftPaneCollapsed = true;
 		};

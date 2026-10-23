@@ -7,10 +7,10 @@
 
 	interface Props {
 		schema: Schema;
-		config?: ExpressionConfigData;
+		config: ExpressionConfigData;
 	}
 
-	let { schema, config = $bindable({ expression: '', column_name: '' }) }: Props = $props();
+	let { schema, config = $bindable() }: Props = $props();
 
 	function insertColumn(columnName: string) {
 		if (!columnName) return;
