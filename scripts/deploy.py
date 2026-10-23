@@ -306,7 +306,11 @@ def main(argv: Sequence[str] | None = None) -> int:
         if result.returncode:
             return result.returncode
 
-    print('Deployment is healthy.')
+    services = configuration.get('services') if isinstance(configuration, dict) else None
+    api = services.get('api') if isinstance(services, dict) else None
+    environment = api.get('environment') if isinstance(api, dict) else None
+    url = environment.get('AUTH_FRONTEND_URL') if isinstance(environment, dict) else None
+    print(f'Deployment is healthy. Open {url}' if isinstance(url, str) and url.strip() else 'Deployment is healthy.')
     return 0
 
 

@@ -38,6 +38,7 @@ def resolved_configuration() -> dict[str, object]:
                     'OBJECT_STORE_ACCESS_KEY': 'store-access-secret',
                     'OBJECT_STORE_SECRET_KEY': 'store-secret-secret',
                     'DEFAULT_USER_PASSWORD': 'ValidUserPassword123',
+                    'AUTH_FRONTEND_URL': 'https://data.example',
                 },
             },
             'runtime': {'image': 'registry.example/data-forge-runtime:custom'},
@@ -135,7 +136,7 @@ class DeployContractTests(unittest.TestCase):
                 [*compose, 'up', '-d', '--wait', '--wait-timeout', '240'],
             ],
         )
-        self.assertIn('Deployment is healthy', stdout.getvalue())
+        self.assertIn('Deployment is healthy. Open https://data.example', stdout.getvalue())
 
     def test_init_writes_private_env_file_with_consistent_generated_secrets(self) -> None:
         with tempfile.TemporaryDirectory() as temporary_directory:
