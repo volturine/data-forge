@@ -20,7 +20,6 @@ from backend_core.persistence.runtime_events.models import (
 )
 from backend_core.runtime_work_service import RuntimeWorkKind
 from backend_core.sqlmodel_typing import col, sa
-from backend_core.transactions import committed
 
 _SENSITIVE_ERROR_FIELDS = frozenset(
     {
@@ -132,9 +131,6 @@ def _notify_dispatcher(session: Session, *, namespace: str) -> None:
 def list_pending_outbox_namespaces(session: Session) -> list[str]:
     """Read only namespaces with durable outbox work, using the public index."""
     return runtime_work_service.list_pending_namespaces(session, kinds=(RuntimeWorkKind.OUTBOX,))
-
-
-enqueue_notification_delivery_command = committed(enqueue_notification_delivery, refresh=True)
 
 
 def enqueue_api_build_notification(session: Session, *, namespace: str, build_id: str, latest_sequence: int) -> RuntimeOutboxEvent:

@@ -142,7 +142,7 @@ class FauxDatasourceRuntime:
             metadata_root = data_plane.build_object_url('clean', uuid.uuid4().hex, 'master', namespace=get_namespace())
             data_plane.upload_object_bytes(
                 b'{"metadata":"placeholder"}',
-                data_plane.join_object_url(metadata_root, 'metadata', '00000-placeholder.metadata.json'),
+                f'{metadata_root}/metadata/00000-placeholder.metadata.json',
             )
 
             datasource = DataSource(

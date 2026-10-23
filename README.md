@@ -99,8 +99,8 @@ postgres + RustFS + api + runtime coordinator + scheduler + worker
 ```
 
 The API container serves both the backend API and the built frontend on port 8000.
-The checked startup commands below require Docker Compose v2, Python 3, and
-`just`. Without `just`, use `python3 scripts/deploy.py --check` and then
+The checked startup commands below require Docker Engine 25+ with Compose v2,
+Python 3, and `just`. Without `just`, use `python3 scripts/deploy.py --check` and then
 `python3 scripts/deploy.py`.
 
 ```bash

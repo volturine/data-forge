@@ -2,6 +2,7 @@ from __future__ import annotations
 
 import argparse
 import json
+import re
 import subprocess
 import sys
 from collections.abc import Sequence
@@ -33,6 +34,22 @@ COMPOSE_ENV_KEYS = (
     'DF_OBJECT_STORE_SECRET_KEY',
     'DF_POSTGRES_PASSWORD',
 )
+
+
+# Compose only warns for an unset `${VAR}` and substitutes an empty string,
+# which the services then reject at startup. The warning names the variable
+# but never its value.
+_UNSET_VARIABLE = re.compile(r'The \\?"(\w+)\\?" variable is not set')
+# v0.5.0 renamed the ENGINE_* deployment keys; the aliases have been removed, so
+# an old key would be ignored and its service would fall back to defaults.
+_REMOVED_ENGINE_KEY = re.compile(r'^\s*(?:export\s+)?((?:DF_)?ENGINE_\w+)\s*=', re.MULTILINE)
+
+
+def _renamed_engine_key(name: str) -> str:
+    suffix = name.removeprefix('DF_').removeprefix('ENGINE_')
+    compose = (REPOSITORY_ROOT / 'docker' / 'compose.yaml').read_text(encoding='utf-8')
+    prefixed = f'DF_COMPUTE_WORKER_{suffix}'
+    return prefixed if '${' + prefixed in compose else f'COMPUTE_WORKER_{suffix}'
 
 
 def _positive_int(value: str) -> int:
@@ -193,6 +210,12 @@ def main(argv: Sequence[str] | None = None) -> int:
         return 2
 
     errors, compute_worker_image = _configuration_errors(configuration)
+    unset = sorted(set(_UNSET_VARIABLE.findall(resolved.stderr or '')))
+    errors = [f'{name} is not set in {env_file.name}' for name in unset] + errors
+    errors = [
+        f'{name} in {env_file.name} was renamed to {_renamed_engine_key(name)}'
+        for name in sorted(set(_REMOVED_ENGINE_KEY.findall(env_file.read_text(encoding='utf-8'))))
+    ] + errors
     if errors:
         print('Deployment configuration needs attention:', file=sys.stderr)
         for error in errors:

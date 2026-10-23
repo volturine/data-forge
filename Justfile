@@ -512,8 +512,10 @@ docker-prod:
         -f docker/compose.yaml \
         up -d "$@"
 
+# Stops the stack but keeps its volumes: this project is also the default
+# `docker-up` deployment, so `-v` would delete production data.
 docker-prod-down:
-    docker compose --env-file docker/env/prod.env -p dataforge-prod -f docker/compose.yaml down -v --remove-orphans
+    docker compose --env-file docker/env/prod.env -p dataforge-prod -f docker/compose.yaml down --remove-orphans
 
 docker-prod-logs:
     docker compose --env-file docker/env/prod.env -p dataforge-prod -f docker/compose.yaml logs -f

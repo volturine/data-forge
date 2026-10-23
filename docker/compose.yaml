@@ -2,6 +2,15 @@
 # services use 2048; supporting services use lower weights. Each compute
 # container uses 128, so infrastructure wins contention while idle CPU remains
 # available to compute.
+#
+# Health checks probe every 2s while a container starts, then every 30s
+# (`start_interval` needs Docker Engine 25+). Container logs rotate at 3 x 10 MB.
+x-logging: &logging
+  driver: json-file
+  options:
+    max-size: 10m
+    max-file: "3"
+
 services:
   postgres:
     image: postgres:18-alpine
@@ -14,9 +23,13 @@ services:
       - pg-data:/var/lib/postgresql
     healthcheck:
       test: ["CMD-SHELL", "pg_isready -U ${DF_POSTGRES_USER} -d ${DF_POSTGRES_DB}"]
-      interval: 5s
+      interval: 30s
+      start_interval: 2s
+      start_period: 100s
       timeout: 5s
-      retries: 20
+      retries: 3
+    logging: *logging
+    restart: unless-stopped
 
   rustfs:
     image: rustfs/rustfs:1.0.0-rc.1
@@ -30,6 +43,8 @@ services:
     networks:
       - default
       - compute-worker-runtime
+    logging: *logging
+    restart: unless-stopped
 
   api:
     image: ${DF_API_IMAGE}
@@ -94,9 +109,12 @@ services:
           "CMD-SHELL",
           "python -c \"import sys,urllib.request; sys.exit(0 if urllib.request.urlopen('http://localhost:8000/health/ready').status==200 else 1)\"",
         ]
-      interval: 5s
+      interval: 30s
+      start_interval: 2s
+      start_period: 150s
       timeout: 5s
-      retries: 30
+      retries: 3
+    logging: *logging
     restart: unless-stopped
 
   runtime:
@@ -121,10 +139,12 @@ services:
       # Healthy as the active coordinator (gRPC answers with its generation) or
       # as a standby waiting for the lease; see backend_core/coordinator_health.py.
       test: ["CMD", "python3", "-m", "backend_core.coordinator_health"]
-      interval: 5s
+      interval: 30s
+      start_interval: 2s
+      start_period: 150s
       timeout: 5s
-      retries: 30
-      start_period: 10s
+      retries: 3
+    logging: *logging
     restart: unless-stopped
 
   worker:
@@ -177,31 +197,6 @@ services:
       COMPUTE_WORKER_HEARTBEAT_INTERVAL_SECONDS: ${DF_COMPUTE_WORKER_HEARTBEAT_INTERVAL_SECONDS:-}
       COMPUTE_WORKER_IDLE_TTL_SECONDS: ${COMPUTE_WORKER_IDLE_TTL_SECONDS:-}
       COMPUTE_WORKER_IDLE_REAP_INTERVAL_SECONDS: ${COMPUTE_WORKER_IDLE_REAP_INTERVAL_SECONDS:-}
-      # One-release aliases; runtime.config warns when it reads an old value.
-      DF_ENGINE_DOCKER_HOST: ${DF_ENGINE_DOCKER_HOST:-}
-      DF_ENGINE_DOCKER_HOSTS: ${DF_ENGINE_DOCKER_HOSTS:-}
-      DF_ENGINE_DOCKER_HOST_HEALTH_INTERVAL_SECONDS: ${DF_ENGINE_DOCKER_HOST_HEALTH_INTERVAL_SECONDS:-}
-      DF_ENGINE_DOCKER_NETWORK: ${DF_ENGINE_DOCKER_NETWORK:-}
-      DF_ENGINE_IMAGE: ${DF_ENGINE_IMAGE:-}
-      DF_ENGINE_OBJECT_STORE_ENDPOINT: ${DF_ENGINE_OBJECT_STORE_ENDPOINT:-}
-      DF_ENGINE_CONNECT_HOST: ${DF_ENGINE_CONNECT_HOST:-}
-      DF_ENGINE_RPC_PORT: ${DF_ENGINE_RPC_PORT:-}
-      DF_ENGINE_START_TIMEOUT_SECONDS: ${DF_ENGINE_START_TIMEOUT_SECONDS:-}
-      DF_ENGINE_SHUTDOWN_GRACE_SECONDS: ${DF_ENGINE_SHUTDOWN_GRACE_SECONDS:-}
-      DF_ENGINE_HEARTBEAT_INTERVAL_SECONDS: ${DF_ENGINE_HEARTBEAT_INTERVAL_SECONDS:-}
-      ENGINE_DOCKER_HOST: ${ENGINE_DOCKER_HOST:-}
-      ENGINE_DOCKER_HOSTS: ${ENGINE_DOCKER_HOSTS:-}
-      ENGINE_DOCKER_HOST_HEALTH_INTERVAL_SECONDS: ${ENGINE_DOCKER_HOST_HEALTH_INTERVAL_SECONDS:-}
-      ENGINE_DOCKER_NETWORK: ${ENGINE_DOCKER_NETWORK:-}
-      ENGINE_IMAGE: ${ENGINE_IMAGE:-}
-      ENGINE_OBJECT_STORE_ENDPOINT: ${ENGINE_OBJECT_STORE_ENDPOINT:-}
-      ENGINE_CONNECT_HOST: ${ENGINE_CONNECT_HOST:-}
-      ENGINE_RPC_PORT: ${ENGINE_RPC_PORT:-}
-      ENGINE_START_TIMEOUT_SECONDS: ${ENGINE_START_TIMEOUT_SECONDS:-}
-      ENGINE_SHUTDOWN_GRACE_SECONDS: ${ENGINE_SHUTDOWN_GRACE_SECONDS:-}
-      ENGINE_HEARTBEAT_INTERVAL_SECONDS: ${ENGINE_HEARTBEAT_INTERVAL_SECONDS:-}
-      ENGINE_IDLE_TTL_SECONDS: ${ENGINE_IDLE_TTL_SECONDS:-}
-      ENGINE_IDLE_REAP_INTERVAL_SECONDS: ${ENGINE_IDLE_REAP_INTERVAL_SECONDS:-}
       DATAFORGE_DEPLOYMENT_ID: ${DF_DEPLOYMENT_ID}
       LOG_LEVEL: ${DF_LOG_LEVEL}
     volumes:
@@ -216,10 +211,12 @@ services:
     cpus: ${DF_WORKER_CPUS:-0}
     healthcheck:
       test: ["CMD", "python3", "-m", "runtime.dispatcher_health"]
-      interval: 5s
+      interval: 30s
+      start_interval: 2s
+      start_period: 150s
       timeout: 5s
-      retries: 30
-      start_period: 10s
+      retries: 3
+    logging: *logging
     restart: unless-stopped
 
   scheduler:
@@ -256,6 +253,7 @@ services:
       - data:/app/data
     mem_limit: ${DF_SCHEDULER_MEM_LIMIT:-1g}
     cpus: ${DF_SCHEDULER_CPUS:-0}
+    logging: *logging
     restart: unless-stopped
 
 volumes:
@@ -268,4 +266,4 @@ volumes:
 
 networks:
   compute-worker-runtime:
-    name: ${DF_COMPUTE_WORKER_DOCKER_NETWORK:-${DF_ENGINE_DOCKER_NETWORK:-dataforge-prod-compute-worker-runtime}}
+    name: ${DF_COMPUTE_WORKER_DOCKER_NETWORK:-dataforge-prod-compute-worker-runtime}

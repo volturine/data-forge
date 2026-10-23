@@ -112,7 +112,7 @@ FORBIDDEN_PACKAGE_COUPLING = {
         'packages/backend:$PWD/packages/worker': 'backend and worker source paths must not share a Python process',
     },
     Path('docker/Dockerfile'): {
-        'uv pip install --python /app/packages/backend/.venv/bin/python /app/packages/worker': 'worker dependencies must stay in the worker image',
+        'uv pip install --python /opt/venv/bin/python /app/packages/worker': 'worker dependencies must stay in the worker image',
         'PYTHONPATH="/app/packages/worker:/app/packages/backend"': 'backend and worker source paths must not share a Python process',
     },
     Path('docker/compose.dev.yaml'): {
@@ -303,7 +303,6 @@ PROTO_STRUCT_ALLOWLIST = {
     'proto/dataforge_protocol/datasource.proto:ColumnStatsResult.top_values': 'top-value stats contain arbitrary value/count records by column type',
     'proto/dataforge_protocol/errors.proto:ErrorInfo.details': 'error details are intentionally extensible diagnostics',
     'proto/dataforge_protocol/compute_worker_runtime.proto:ComputeWorkerJobResult.step_timings': 'compute worker timing keys are derived from user-defined pipeline step types',
-    'proto/dataforge_protocol/iceberg.proto:IcebergSnapshotScanResponse.rows': 'Iceberg snapshot scans return arbitrary row objects',
     'proto/dataforge_protocol/worker_runtime.proto:WorkerDatasourceMetadataResponse.config': 'datasource metadata exposes provider/user-defined config JSON',
     'proto/dataforge_protocol/worker_runtime.proto:WorkerUpdateBuildResultRequest.result': 'build result is persisted runtime JSON at the database boundary',
     'proto/dataforge_protocol/worker_runtime.proto:WorkerUpsertOutputDatasourceRequest.config': 'output datasource config is provider/user-defined JSON',

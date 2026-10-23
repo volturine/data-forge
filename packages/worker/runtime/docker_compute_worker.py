@@ -41,7 +41,6 @@ from runtime.object_store import delete_object, download_file, object_store_url,
 logger = logging.getLogger(__name__)
 
 _COMPUTE_WORKER_TOKEN_METADATA_KEY = "x-compute-worker-token"
-_LEGACY_ENGINE_TOKEN_METADATA_KEY = "x-engine-token"
 _COMPUTE_WORKER_APPLICATION_VERSION = "compute-worker"
 _COORDINATOR_GENERATION_LABEL = "io.dataforge.coordinator-generation"
 _MIB = 1024 * 1024
@@ -837,10 +836,7 @@ class DockerComputeWorker(ComputeWorker):
         return host
 
     def _metadata(self) -> tuple[tuple[str, str], ...]:
-        return (
-            (_COMPUTE_WORKER_TOKEN_METADATA_KEY, self._token),
-            (_LEGACY_ENGINE_TOKEN_METADATA_KEY, self._token),
-        )
+        return ((_COMPUTE_WORKER_TOKEN_METADATA_KEY, self._token),)
 
     def _initialize(self, *, resources: dict[str, int], credentials: ObjectStoreCredentials) -> None:
         assert self._stub is not None
@@ -859,9 +855,7 @@ class DockerComputeWorker(ComputeWorker):
         try:
             resp = self._stub.Initialize(req, timeout=2.0)
         except grpc.RpcError as exc:
-            if exc.code() == grpc.StatusCode.FAILED_PRECONDITION and str(exc.details()).startswith(
-                ("Compute worker already initialized", "Engine already initialized")
-            ):
+            if exc.code() == grpc.StatusCode.FAILED_PRECONDITION and str(exc.details()).startswith("Compute worker already initialized"):
                 raise RuntimeError(
                     f"Compute worker identity collision for {self.identity.resource_id} at {self._rpc_target} (container {self._container_id}): {exc.details()}"
                 ) from exc

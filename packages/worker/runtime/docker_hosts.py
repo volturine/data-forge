@@ -30,6 +30,7 @@ import docker
 logger = logging.getLogger(__name__)
 
 _HOST_NAME_RE = re.compile(r"^[a-z0-9][a-z0-9_.-]{0,62}$")
+_HOST_FIELDS = frozenset({"name", "docker_host", "connect_host", "compute_worker_network", "object_store_endpoint", "max_workers", "tls_cert_path"})
 _LOCAL_SCHEMES = ("unix://", "npipe://", "http+unix://")
 _SUPPORTED_SCHEMES = (*_LOCAL_SCHEMES, "tcp://", "ssh://", "http://", "https://")
 DEFAULT_HOST_NAME = "local"
@@ -130,8 +131,8 @@ def parse_docker_hosts(
     """Parse ``COMPUTE_WORKER_DOCKER_HOSTS``; empty input yields the local host.
 
     The single-host variables remain the defaults for every entry that omits a
-    field. The old ``engine_network`` JSON key is accepted for one release and
-    logs a deprecation warning.
+    field. Unknown fields are rejected so a misspelled or renamed key cannot
+    silently fall back to a default.
     """
     text = raw.strip()
     if not text:
@@ -155,6 +156,9 @@ def parse_docker_hosts(
     for index, entry in enumerate(payload):
         if not isinstance(entry, dict):
             raise DockerHostConfigError(f"COMPUTE_WORKER_DOCKER_HOSTS[{index}] must be an object")
+        unknown = sorted(set(entry) - _HOST_FIELDS)
+        if unknown:
+            raise DockerHostConfigError(f"COMPUTE_WORKER_DOCKER_HOSTS[{index}] has unknown fields: {', '.join(unknown)}")
         name = _read_str(entry, "name", default=DEFAULT_HOST_NAME if len(payload) == 1 else "")
         if not _HOST_NAME_RE.fullmatch(name):
             raise DockerHostConfigError(f"COMPUTE_WORKER_DOCKER_HOSTS[{index}] needs a name matching {_HOST_NAME_RE.pattern}")
@@ -167,21 +171,11 @@ def parse_docker_hosts(
         max_workers_raw = entry.get("max_workers", 0)
         if isinstance(max_workers_raw, bool) or not isinstance(max_workers_raw, int) or max_workers_raw < 0:
             raise DockerHostConfigError(f"COMPUTE_WORKER_DOCKER_HOSTS[{name}] max_workers must be a non-negative integer")
-        if "compute_worker_network" in entry:
-            compute_worker_network = _read_str(entry, "compute_worker_network") or default_compute_worker_network
-        elif "engine_network" in entry:
-            logger.warning(
-                "Deprecated compute-worker host field engine_network is in use; use compute_worker_network instead. "
-                "The compatibility alias will be removed after this release."
-            )
-            compute_worker_network = _read_str(entry, "engine_network") or default_compute_worker_network
-        else:
-            compute_worker_network = default_compute_worker_network
         spec = DockerHostSpec(
             name=name,
             docker_host=docker_host,
             connect_host=_read_str(entry, "connect_host", default=default_connect_host),
-            compute_worker_network=compute_worker_network,
+            compute_worker_network=_read_str(entry, "compute_worker_network") or default_compute_worker_network,
             object_store_endpoint=_read_str(entry, "object_store_endpoint") or default_object_store_endpoint,
             max_workers=max_workers_raw,
             tls_cert_path=_read_str(entry, "tls_cert_path"),

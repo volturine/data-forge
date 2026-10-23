@@ -564,7 +564,11 @@ class RequestLoggingMiddleware:
         self.max_body_size = settings.log_max_body_size if max_body_size is None else max(0, max_body_size)
 
     async def __call__(self, scope: dict[str, Any], receive: AsgiReceive, send: AsgiSend) -> None:
-        if scope.get('type') != 'http':
+        path = str(scope.get('path') or '')
+        # Container health probes repeat for the life of every deployment. Keep
+        # them out of the persisted request log so an idle stack does not write
+        # probe rows to PostgreSQL; slow probes are still reported separately.
+        if scope.get('type') != 'http' or path == '/health' or path.startswith('/health/'):
             await self.app(scope, receive, send)
             return
 

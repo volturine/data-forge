@@ -81,8 +81,8 @@ CI publishes every role image to GHCR on two channels:
 
 Dev-channel images feed PR-preview deployments; release images are pinned in
 production. Keep all five `DF_*_IMAGE` values on the same channel and commit.
-The old `data-forge-polars-engine` image name is published as a compatibility
-alias for one release; new manifests use `data-forge-compute-worker`.
+The compute-worker image is `data-forge-compute-worker`; the old
+`data-forge-polars-engine` name is no longer published.
 
 ### Naming, ports, and collision rules
 
@@ -123,13 +123,20 @@ just docker-up docker/env/prod.env dataforge-prod
 
 `docker-check` renders and validates the Compose configuration without changing
 the Docker daemon. It reports affected services and environment keys without
-printing resolved values. `docker-up` repeats the check, pulls the compute
+printing resolved values, including any `DF_*` variable missing from the env
+file (Compose would otherwise start that service with an empty value). `docker-up` repeats the check, pulls the compute
 image, runs Compose `pull`, then starts the services with `up -d --wait` and a
 180-second health-check timeout. Arguments are positional: for a different
 positive timeout, use `just docker-up docker/env/prod.env dataforge-prod 240`.
 The compute-image pull targets the Docker CLI's selected daemon. Prepare any
 remote compute hosts separately as described in [Compute hosts](COMPUTE_HOSTS.md);
 this command does not provision their images or networks.
+
+The stack needs Docker Engine 25 or later: health checks probe every 2 seconds
+while a container starts and every 30 seconds afterwards. PostgreSQL, RustFS
+and the application roles restart with the Docker daemon, and each Compose
+service keeps at most 3 × 10 MB of JSON logs. Compute-worker containers use the
+daemon's default logging driver and are removed when they stop.
 
 For a raw Compose deployment, keep the same order: capture the resolved worker
 compute image without displaying the full configuration, pull it, pull Compose
@@ -147,11 +154,8 @@ docker pull "$compute_image"
 The helper also checks for sample passwords, unresolved placeholders, and
 missing required values. Raw Compose commands do not perform those checks.
 
-The old `DF_ENGINE_*` and `ENGINE_*` environment names are accepted for one
-release. The worker manager logs a deprecation warning when it reads one; new
-names take precedence. Remove old keys from deployment files during this
-release. `data-forge-polars-engine` is also published as a compatibility image
-alias for this release only.
+The old `DF_ENGINE_*` and `ENGINE_*` environment names are no longer read.
+`just docker-check` names any that remain and their replacements.
 
 Inspect status and logs:
 

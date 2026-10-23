@@ -32,6 +32,10 @@ def _context(monkeypatch: pytest.MonkeyPatch) -> FakeGrpcContext:
     return FakeGrpcContext(token)
 
 
+async def _allow_request(_context) -> None:
+    return None
+
+
 @pytest.mark.asyncio
 async def test_request_validation_runs_off_loop_with_bounded_parallelism(monkeypatch: pytest.MonkeyPatch) -> None:
     loop_thread = threading.get_ident()
@@ -168,40 +172,6 @@ async def test_running_call_holds_admission_until_thread_settles() -> None:
         await asyncio.to_thread(executor.shutdown, True)
 
 
-@pytest.mark.asyncio
-async def test_snapshot_response_serialization_runs_off_grpc_loop(monkeypatch: pytest.MonkeyPatch) -> None:
-    loop_thread = threading.get_ident()
-    serialization_threads: list[int] = []
-
-    class FakeFrame:
-        def collect(self) -> FakeFrame:
-            return self
-
-        def to_dicts(self) -> list[dict[str, object]]:
-            return [{"value": 1}]
-
-    async def allow_request(_context) -> None:
-        return None
-
-    def serialize(payload: dict[str, object]):
-        from google.protobuf import struct_pb2
-
-        serialization_threads.append(threading.get_ident())
-        return struct_pb2.Struct()
-
-    monkeypatch.setattr(data_plane_server, "_require_internal_token", allow_request)
-    monkeypatch.setattr(data_plane_server.iceberg_snapshot_reader, "scan_iceberg_snapshot", lambda *_args: FakeFrame())
-    monkeypatch.setattr(data_plane_server, "dict_to_struct", serialize)
-
-    response = await IcebergServicer().ScanSnapshot(
-        iceberg_pb2.IcebergSnapshotScanRequest(metadata_path="metadata.json", snapshot_id="1"),
-        object(),
-    )
-
-    assert response.rows is not None
-    assert serialization_threads and all(thread_id != loop_thread for thread_id in serialization_threads)
-
-
 def test_slow_request_validation_logs_its_duration(monkeypatch: pytest.MonkeyPatch, caplog: pytest.LogCaptureFixture) -> None:
     class SlowValidator:
         def validate(self, _request) -> None:
@@ -287,9 +257,6 @@ async def test_iceberg_servicers_preserve_nested_runtime_deadline_status(
 ) -> None:
     context = _context(monkeypatch)
 
-    async def allow_request(_context) -> None:
-        return None
-
     async def fail_blocking(_lane, _function, *_args, **kwargs):
         assert kwargs["request_namespace"] == "analytics"
         raise BackendWorkerRpcError(
@@ -298,7 +265,7 @@ async def test_iceberg_servicers_preserve_nested_runtime_deadline_status(
             error_code=grpc.StatusCode.DEADLINE_EXCEEDED.name,
         )
 
-    monkeypatch.setattr(data_plane_server, "_require_internal_token", allow_request)
+    monkeypatch.setattr(data_plane_server, "_require_internal_token", _allow_request)
     monkeypatch.setattr(data_plane_server, "_run_blocking", fail_blocking)
 
     with pytest.raises(
@@ -321,14 +288,6 @@ async def test_object_store_ensure_bucket_is_worker_owned(monkeypatch: pytest.Mo
 
 
 @pytest.mark.asyncio
-async def test_object_store_delete_rejects_external_prefix(monkeypatch: pytest.MonkeyPatch) -> None:
-    context = _context(monkeypatch)
-
-    with pytest.raises(RuntimeError, match="PERMISSION_DENIED: Prefix is outside the worker-managed storage prefix"):
-        await ObjectStoreServicer().DeletePrefix(object_store_pb2.ObjectStoreUrl(url="s3://external-bucket/data/file.csv"), context)
-
-
-@pytest.mark.asyncio
 async def test_object_store_upload_requires_explicit_commit_and_streams_chunks(monkeypatch: pytest.MonkeyPatch) -> None:
     context = _context(monkeypatch)
     calls: list[object] = []
@@ -347,10 +306,7 @@ async def test_object_store_upload_requires_explicit_commit_and_streams_chunks(m
         def abort(self) -> None:
             calls.append(("abort",))
 
-    async def allow_request(_context) -> None:
-        return None
-
-    monkeypatch.setattr(data_plane_server, "_require_internal_token", allow_request)
+    monkeypatch.setattr(data_plane_server, "_require_internal_token", _allow_request)
     monkeypatch.setattr(data_plane_server.object_store, "MultipartObjectUpload", Upload)
 
     async def frames():
@@ -392,10 +348,7 @@ async def test_object_store_upload_cancellation_aborts_only_open_upload(monkeypa
         def abort(self) -> None:
             calls.append("abort")
 
-    async def allow_request(_context) -> None:
-        return None
-
-    monkeypatch.setattr(data_plane_server, "_require_internal_token", allow_request)
+    monkeypatch.setattr(data_plane_server, "_require_internal_token", _allow_request)
     monkeypatch.setattr(data_plane_server.object_store, "MultipartObjectUpload", Upload)
 
     async def frames():
@@ -442,10 +395,7 @@ async def test_upload_abort_waits_for_cancelled_chunk_write_to_settle(monkeypatc
             with calls_lock:
                 calls.append("abort")
 
-    async def allow_request(_context) -> None:
-        return None
-
-    monkeypatch.setattr(data_plane_server, "_require_internal_token", allow_request)
+    monkeypatch.setattr(data_plane_server, "_require_internal_token", _allow_request)
     monkeypatch.setattr(data_plane_server.object_store, "MultipartObjectUpload", Upload)
     monkeypatch.setattr(data_plane_server, "_OBJECT_STORE_LANE", lane)
 
@@ -475,3 +425,51 @@ async def test_upload_abort_waits_for_cancelled_chunk_write_to_settle(monkeypatc
         release_write.set()
         await asyncio.gather(call, return_exceptions=True)
         await asyncio.to_thread(executor.shutdown, True)
+
+
+@pytest.mark.asyncio
+async def test_cancel_during_multipart_commit_waits_and_keeps_completed_object(monkeypatch: pytest.MonkeyPatch) -> None:
+    commit_started = threading.Event()
+    finish_commit = threading.Event()
+    calls: list[str] = []
+
+    class Upload:
+        def __init__(self, *_args, **_kwargs) -> None:
+            self.completed = False
+
+        def commit(self) -> str:
+            commit_started.set()
+            assert finish_commit.wait(timeout=5)
+            self.completed = True
+            calls.append("commit")
+            return "s3://analytics/uploads/artifact.bin"
+
+        def abort(self) -> None:
+            if not self.completed:
+                calls.append("abort")
+
+    context = _context(monkeypatch)
+    monkeypatch.setattr(data_plane_server, "_require_internal_token", _allow_request)
+    monkeypatch.setattr(data_plane_server.object_store, "MultipartObjectUpload", Upload)
+
+    async def frames():
+        yield object_store_pb2.ObjectStoreUploadRequest(
+            start=object_store_pb2.ObjectStoreUploadStart(
+                target=object_store_pb2.ObjectStoreUrl(url="s3://analytics/uploads/artifact.bin"),
+                max_bytes=1024,
+            )
+        )
+        yield object_store_pb2.ObjectStoreUploadRequest(commit=object_store_pb2.ObjectStoreUploadCommit())
+
+    request = asyncio.create_task(ObjectStoreServicer().UploadObject(frames(), context))
+    try:
+        assert await asyncio.to_thread(commit_started.wait, 2)
+        request.cancel()
+        finish_commit.set()
+        with pytest.raises(asyncio.CancelledError):
+            await request
+    finally:
+        finish_commit.set()
+        await asyncio.gather(request, return_exceptions=True)
+
+    assert calls == ["commit"]

@@ -156,16 +156,21 @@ class DeployContractTests(unittest.TestCase):
         api['environment']['DEFAULT_USER_PASSWORD'] = 'ChangeMe123'
         postgres['environment']['POSTGRES_PASSWORD'] = ''
         worker['environment']['COMPUTE_WORKER_IMAGE'] = ''
-        result = completed([], stdout=json.dumps(configuration))
+        unset_warning = 'level=warning msg="The \\"DF_WORKERS\\" variable is not set. Defaulting to a blank string."\n'
+        result = completed([], stdout=json.dumps(configuration), stderr=unset_warning * 2)
         stdout = StringIO()
         stderr = StringIO()
 
-        with patch.object(deploy.subprocess, 'run', return_value=result) as run, redirect_stdout(stdout), redirect_stderr(stderr):
-            exit_code = deploy.main(['--env-file', 'docker/env/prod.env'])
+        with tempfile.TemporaryDirectory() as temporary_directory:
+            env_file = Path(temporary_directory) / 'upgrade.env'
+            env_file.write_text('DF_ENGINE_IMAGE=old-private-image\n', encoding='utf-8')
+            with patch.object(deploy.subprocess, 'run', return_value=result) as run, redirect_stdout(stdout), redirect_stderr(stderr):
+                exit_code = deploy.main(['--env-file', str(env_file)])
 
         self.assertEqual(exit_code, 2)
         run.assert_called_once()
         output = stdout.getvalue() + stderr.getvalue()
+        self.assertIn('DF_ENGINE_IMAGE in upgrade.env was renamed to DF_COMPUTE_WORKER_IMAGE', output)
         self.assertIn('services.api.image', output)
         self.assertIn('services.api.environment.DATABASE_URL', output)
         self.assertIn('services.api.environment.INTERNAL_API_TOKEN', output)
@@ -174,6 +179,7 @@ class DeployContractTests(unittest.TestCase):
         self.assertIn('services.api.environment.DEFAULT_USER_PASSWORD', output)
         self.assertIn('services.postgres.environment.POSTGRES_PASSWORD', output)
         self.assertIn('services.worker.environment.COMPUTE_WORKER_IMAGE', output)
+        self.assertEqual(output.count('DF_WORKERS is not set in upgrade.env'), 1)
         self.assertNotIn('private-image', output)
         self.assertNotIn('do-not-print', output)
         self.assertNotIn('ChangeMe123', output)

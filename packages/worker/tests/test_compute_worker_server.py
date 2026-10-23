@@ -1,7 +1,6 @@
 from __future__ import annotations
 
 import json
-import logging
 import subprocess
 import sys
 import threading
@@ -105,18 +104,11 @@ def test_compute_worker_server_submits_and_streams_progress_and_result(engine_st
     assert json.loads(events[1].result.data_json) == {"rows": [], "as_of": "2026-08-10"}
 
 
-def test_compute_worker_server_rejects_invalid_token(engine_stub) -> None:
+@pytest.mark.parametrize("metadata", [(("x-compute-worker-token", "invalid"),), (("x-engine-token", "token"),)], ids=["invalid-token", "removed-legacy-key"])
+def test_compute_worker_server_rejects_invalid_token(engine_stub, metadata) -> None:
     with pytest.raises(grpc.RpcError) as exc_info:
-        engine_stub.Health(compute_worker_runtime_pb2.ComputeWorkerHealthRequest(), metadata=(("x-compute-worker-token", "invalid"),))
+        engine_stub.Health(compute_worker_runtime_pb2.ComputeWorkerHealthRequest(), metadata=metadata)
     assert exc_info.value.code() == grpc.StatusCode.UNAUTHENTICATED
-
-
-def test_legacy_engine_token_metadata_is_accepted_with_a_warning(engine_stub, caplog) -> None:
-    with caplog.at_level(logging.WARNING):
-        health = engine_stub.Health(compute_worker_runtime_pb2.ComputeWorkerHealthRequest(), metadata=(("x-engine-token", "token"),))
-
-    assert health.ready
-    assert "Deprecated gRPC metadata key x-engine-token" in caplog.text
 
 
 def test_export_stages_artifact_in_object_store(monkeypatch, tmp_path) -> None:
