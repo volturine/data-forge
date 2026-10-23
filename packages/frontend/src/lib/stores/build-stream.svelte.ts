@@ -28,9 +28,8 @@ const MAX_LOGS = 500;
 const MAX_RESOURCE_HISTORY = 120;
 const RECONNECT_DELAY_MS = 1_000;
 const MAX_RECONNECT_ATTEMPTS = 5;
-// WebSocket events are the immediate update path. This REST poll is only a
-// durable-state reconciliation fallback and must not turn every open build
-// preview into four full-detail requests per second.
+// The stream supplies both the initial snapshot and live updates. Read full
+// durable detail only after this much silence, or immediately on disconnect.
 const BUILD_REFRESH_MS = 5_000;
 
 export class BuildStreamStore {
@@ -91,13 +90,12 @@ export class BuildStreamStore {
 		this.pendingError = null;
 		this.retainActivity();
 		this.status = 'connecting';
-		this.scheduleRefresh(generation);
 		void startRuntimeBuild(request).match(
 			(build) => {
 				if (generation !== this.generation) return;
 				this.applySnapshot(build);
 				this.targetBuildId = build.build_id;
-				void this.refreshBuildDetail(build.build_id, generation);
+				if (this.done) return;
 				this.scheduleRefresh(generation);
 				this.openConnection(build.build_id, generation);
 			},
@@ -122,7 +120,6 @@ export class BuildStreamStore {
 		this.targetBuildId = buildId;
 		this.buildId = buildId;
 		this.status = 'connecting';
-		void this.refreshBuildDetail(buildId, generation);
 		this.scheduleRefresh(generation);
 		this.openConnection(buildId, generation);
 	}
@@ -191,12 +188,14 @@ export class BuildStreamStore {
 				this.reconnectAttempts = 0;
 				this.pendingError = null;
 				this.applySnapshot(snapshot.build, snapshot.last_sequence);
+				this.scheduleRefresh(generation);
 			},
 			onEvent: (event: BuildEvent) => {
 				if (generation !== this.generation) return;
 				this.reconnectAttempts = 0;
 				this.pendingError = null;
 				this.applyEvent(event);
+				this.scheduleRefresh(generation);
 				if (!this.done) this.error = null;
 			},
 			onError: (msg: string) => {
@@ -239,7 +238,8 @@ export class BuildStreamStore {
 	}
 
 	private scheduleRefresh(generation: number): void {
-		if (this.refreshTimer !== null) return;
+		this.clearRefreshTimer();
+		if (generation !== this.generation || this.done || !this.shouldReconnect) return;
 		this.refreshTimer = setTimeout(() => {
 			this.refreshTimer = null;
 			void this.runRefresh(generation);
@@ -265,10 +265,14 @@ export class BuildStreamStore {
 	}
 
 	private async refreshBuildDetail(buildId: string, generation: number): Promise<boolean> {
+		const sequence = this.lastSequence;
 		return getRuntimeBuild(buildId).match(
 			(build) => {
 				if (generation !== this.generation) return false;
 				if (this.buildId !== buildId) return false;
+				// A live event supersedes the REST snapshot captured before it. Its
+				// sequence is not carried by REST, so it cannot safely overwrite the stream.
+				if (this.lastSequence !== sequence) return false;
 				this.pendingError = null;
 				this.applySnapshot(build);
 				return true;

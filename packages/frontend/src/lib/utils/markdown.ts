@@ -13,9 +13,8 @@ export function renderMarkdown(text: string): string {
 	return DOMPurify.sanitize(raw);
 }
 
-export function timeAgo(ts: number): string {
+export function timeAgo(ts: number, now = nowEpochMs()): string {
 	if (!Number.isFinite(ts)) return 'Unknown time';
-	const now = nowEpochMs();
 	const time = formatEpoch(ts, { hour: '2-digit', minute: '2-digit' });
 	if (isSameLocalDay(ts, now)) return time;
 	if (isYesterday(ts, now)) return `Yesterday ${time}`;

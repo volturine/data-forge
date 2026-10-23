@@ -6,7 +6,7 @@
 	import { onMount } from 'svelte';
 	import { idbGet, idbSet } from '#lib/utils/indexeddb.js';
 	import favicon from '#lib/assets/favicon.svg';
-	import { css, spinner } from '#lib/styles/panda.js';
+	import { button, css, spinner } from '#lib/styles/panda.js';
 	import { PanelLeftClose } from '@lucide/svelte';
 	import NamespacePickerModal from '#lib/components/common/NamespacePickerModal.svelte';
 	import IndexedDbButton from '#lib/components/common/IndexedDbButton.svelte';
@@ -488,9 +488,15 @@
 			<p class={css({ fontSize: 'sm', color: 'fg.muted', margin: '0', maxWidth: 'md' })}>
 				{bootstrapError}
 			</p>
-			<p class={css({ fontSize: 'xs', color: 'fg.muted', margin: '0' })}>
-				Reload the page once the API is reachable.
-			</p>
+			<button
+				class={button({ variant: 'primary' })}
+				disabled={appBootstrap.retrying}
+				aria-busy={appBootstrap.retrying}
+				onclick={() => void appBootstrap.retry()}
+				type="button"
+			>
+				{appBootstrap.retrying ? 'Retrying…' : 'Retry'}
+			</button>
 		</div>
 	{:else if shellPhase === 'auth'}
 		{@render children()}

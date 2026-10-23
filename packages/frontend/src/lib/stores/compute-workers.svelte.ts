@@ -9,6 +9,7 @@ import { SvelteSet } from 'svelte/reactivity';
 import { computeWorkerIdentityKey } from '#lib/representations/compute-worker.js';
 
 const RECONNECT_DELAY_MS = 1_000;
+const RECONNECT_MAX_DELAY_MS = 30_000;
 const SNAPSHOT_REFRESH_COOLDOWN_MS = 15_000;
 
 export type ComputeWorkersConnectionStatus = 'disconnected' | 'connecting' | 'connected' | 'error';
@@ -25,7 +26,7 @@ export class ComputeWorkersStore {
 	private snapshotGeneration = 0;
 	private snapshotRequested = false;
 	private lastSnapshotAt: number | null = null;
-	private reconnect = new ReconnectionManager(RECONNECT_DELAY_MS);
+	private reconnect = new ReconnectionManager(RECONNECT_DELAY_MS, RECONNECT_MAX_DELAY_MS);
 	private shouldReconnect = false;
 	private subscribers = 0;
 	private holdUntilEmpty = false;
@@ -100,6 +101,7 @@ export class ComputeWorkersStore {
 		this.subscribers++;
 		this.holdUntilEmpty = false;
 		if (this.shouldReconnect) return;
+		this.reconnect.reset();
 		this.shouldReconnect = true;
 		this.openConnection(true);
 	}
@@ -181,6 +183,7 @@ export class ComputeWorkersStore {
 		this.cancelSnapshot();
 		this.snapshotRequested = false;
 		this.lastSnapshotAt = null;
+		this.reconnect.reset();
 		this.holdUntilEmpty = false;
 		this.shouldReconnect = false;
 		this.subscribers = 0;
@@ -234,6 +237,7 @@ export class ComputeWorkersStore {
 	}
 
 	private applySnapshot(computeWorkers: ComputeWorkerStatusResponse[]): void {
+		this.reconnect.reset();
 		this.snapshotRequested = true;
 		this.lastSnapshotAt = Date.now();
 		for (const key of this.shuttingDown) {

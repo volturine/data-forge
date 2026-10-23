@@ -25,6 +25,10 @@
 		buildDatasourceConfig,
 		buildTargetPreviewPipelinePayload
 	} from '#lib/utils/analysis-pipeline.js';
+	import {
+		createPreviewRequestCancellation,
+		PREVIEW_QUERY_GC_TIME
+	} from '#lib/utils/preview-query.js';
 	import { SvelteMap } from 'svelte/reactivity';
 	import { css, spinner } from '#lib/styles/panda.js';
 
@@ -110,8 +114,7 @@
 		};
 	});
 	// The query can start synchronously, so its cancellation state must already exist.
-	let previewRequestKey: string | null = null;
-	let previewRequestController = new AbortController();
+	const previewRequestCancellation = createPreviewRequestCancellation();
 
 	const chartQuery = createQuery(() => ({
 		// The request captured in the cache key is also the request executed;
@@ -120,14 +123,14 @@
 		queryFn: async ({ queryKey }): Promise<StepPreviewResponse> => {
 			const request = queryKey[2];
 			if (!request) throw new Error('Chart preview command is not ready');
-			const signal = previewSignal(request);
+			const signal = previewRequestCancellation.signalFor(request);
 			const result = await previewStepData(request, { signal });
 			throwIfAborted(signal);
 			if (result.isErr()) throw toComputeError(result.error);
 			return result.value;
 		},
 		staleTime: Infinity,
-		gcTime: Infinity,
+		gcTime: PREVIEW_QUERY_GC_TIME,
 		refetchOnMount: false,
 		retry: false,
 		enabled:
@@ -196,18 +199,6 @@
 	);
 	let rowCountAbortController: AbortController | null = null;
 
-	function previewSignal(request: Parameters<typeof previewStepData>[0]): AbortSignal {
-		const nextKey = JSON.stringify(request);
-		if (previewRequestKey !== nextKey || previewRequestController.signal.aborted) {
-			if (previewRequestKey !== null && !previewRequestController.signal.aborted) {
-				previewRequestController.abort();
-			}
-			previewRequestKey = nextKey;
-			previewRequestController = new AbortController();
-		}
-		return previewRequestController.signal;
-	}
-
 	async function calculateRowCount() {
 		if (!analysisId || !targetAnalysisPipeline) return;
 		if (isLoadingRowCount) return;
@@ -267,7 +258,7 @@
 	}
 
 	onDestroy(() => {
-		previewRequestController.abort();
+		previewRequestCancellation.dispose();
 		rowCountAbortController?.abort();
 		if (copyTimer !== null) window.clearTimeout(copyTimer);
 	});

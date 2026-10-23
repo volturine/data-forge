@@ -122,7 +122,7 @@ export async function openComputeWorkersPopup(page: Page): Promise<Locator> {
 export async function closeComputeWorkersPopup(page: Page): Promise<void> {
 	const popup = page.locator('[data-compute-workers-popup="true"]');
 	if (!(await popup.isVisible().catch(() => false))) return;
-	await popup.getByLabel('Close compute workers').click({ timeout: 1_000 });
+	await page.keyboard.press('Escape');
 	await expect(popup).toBeHidden({ timeout: 2_000 });
 }
 
@@ -168,11 +168,7 @@ function confirmDialog(page: Page, heading: string | RegExp): Locator {
 }
 
 async function closeFloatingPanels(page: Page): Promise<void> {
-	const computeWorkersPopup = page.locator('[data-compute-workers-popup="true"]');
-	if (await computeWorkersPopup.isVisible().catch(() => false)) {
-		await computeWorkersPopup.getByLabel('Close compute workers').click({ timeout: 1_000 });
-		await expect(computeWorkersPopup).toBeHidden({ timeout: 2_000 });
-	}
+	await closeComputeWorkersPopup(page);
 }
 
 async function waitForHealthChecksList(page: Page, timeout: number): Promise<void> {

@@ -19,8 +19,23 @@ function mainNavigation(page: Page): Locator {
 	return page.locator('[aria-label="Main navigation"]').first();
 }
 
-function appRoute(page: Page): string {
-	return new URL(page.url()).pathname;
+async function waitForCurrentRouteConsistency(page: Page, timeout: number): Promise<void> {
+	await expect
+		.poll(
+			() =>
+				page.evaluate(() => {
+					const currentPath = window.location.pathname;
+					const renderedPath =
+						document.querySelector('main[data-app-route]')?.getAttribute('data-app-route') ?? null;
+					return {
+						currentPath,
+						renderedPath,
+						isConsistent: renderedPath === currentPath
+					};
+				}),
+			{ timeout }
+		)
+		.toMatchObject({ isConsistent: true });
 }
 
 async function waitForAnyVisible(locator: Locator, timeout: number): Promise<void> {
@@ -96,11 +111,7 @@ type MonitoringTabKey = 'builds' | 'schedules' | 'health';
 export async function waitForAppShell(page: Page, timeout = readyTimeoutMs()): Promise<void> {
 	await expect(mainNavigation(page)).toBeVisible({ timeout });
 	await expect(page.locator('[data-shell-interactive="true"]')).toBeVisible({ timeout });
-	await expect(page.locator('main[data-app-route]').first()).toHaveAttribute(
-		'data-app-route',
-		appRoute(page),
-		{ timeout }
-	);
+	await waitForCurrentRouteConsistency(page, timeout);
 }
 
 /**
@@ -127,11 +138,7 @@ export async function waitForLayoutReady(page: Page, timeout = readyTimeoutMs())
 	}
 	await expect(page.locator('[data-shell-interactive="true"]')).toBeVisible({ timeout });
 	await waitForAnyVisible(page.locator('main'), timeout);
-	await expect(page.locator('main[data-app-route]').first()).toHaveAttribute(
-		'data-app-route',
-		appRoute(page),
-		{ timeout }
-	);
+	await waitForCurrentRouteConsistency(page, timeout);
 }
 
 async function gotoAndWaitForLayout(page: Page, path: string, timeout: number): Promise<void> {

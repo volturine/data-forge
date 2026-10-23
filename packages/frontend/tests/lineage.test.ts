@@ -9,86 +9,57 @@ import { screenshot } from './utils/visual.js';
  * E2E tests for the /lineage page — data lineage graph and sidebar.
  */
 test.describe('Lineage – page structure', () => {
-	test('renders Data Lineage heading', async ({ page }) => {
+	// These are one unchanged page contract, not six separate bootstrap journeys.
+	test('renders the heading, selectors, layout controls and default sidebar without errors', async ({
+		page
+	}) => {
 		await page.goto('/lineage');
 		await waitForLineageToolbar(page);
 		await expect(page.getByRole('heading', { name: 'Data Lineage' })).toBeVisible();
-	});
-
-	test('shows datasource and branch selectors', async ({ page }) => {
-		await page.goto('/lineage');
-		await waitForLineageToolbar(page);
 		await expect(page.getByLabel('Output datasource')).toBeVisible();
 		await expect(page.getByLabel('Branch')).toBeVisible();
-	});
-
-	test('shows layout toolbar buttons', async ({ page }) => {
-		await page.goto('/lineage');
-		await waitForLineageToolbar(page);
+		await expect(page.getByLabel('Branch')).toBeDisabled();
 		await expect(page.locator('button[title="Horizontal tree layout"]')).toBeVisible();
 		await expect(page.locator('button[title="Vertical tree layout"]')).toBeVisible();
 		await expect(page.locator('button[title="Grid layout"]')).toBeVisible();
-	});
-
-	test('shows zoom controls', async ({ page }) => {
-		await page.goto('/lineage');
-		await waitForLineageToolbar(page);
 		await expect(page.locator('button[title="Zoom in"]')).toBeVisible();
 		await expect(page.locator('button[title="Zoom out"]')).toBeVisible();
 		await expect(page.locator('button[title="Reset view"]')).toBeVisible();
-	});
-
-	test('sidebar shows "Select a node" prompt by default', async ({ page }) => {
-		await page.goto('/lineage');
-		await waitForLineageToolbar(page);
-		// Exact match: Svelte Flow injects a visually hidden a11y hint that also
-		// contains the phrase "select a node".
+		// Exact match excludes Svelte Flow's visually hidden accessibility hint.
 		await expect(page.getByText('Select a node', { exact: true })).toBeVisible();
 		await expect(page.getByText('Click a node to view details and schedules.')).toBeVisible();
+		await expect(page.getByText('Loading lineage...')).not.toBeVisible({ timeout: 5_000 });
+		await expect(page.getByText('Failed to load lineage.')).not.toBeVisible();
 		await screenshot(page, 'lineage', 'default-state');
-	});
-
-	test('branch selector is disabled when no datasource is selected', async ({ page }) => {
-		await page.goto('/lineage');
-		await waitForLineageToolbar(page);
-		await expect(page.getByLabel('Branch')).toBeDisabled();
 	});
 });
 
 test.describe('Lineage – layout switching', () => {
-	test('clicking Vertical layout button switches to vertical mode', async ({ page }) => {
+	test('recovers from a worker failure and switches layouts in one journey', async ({
+		page,
+		sharedDatasource
+	}) => {
+		await page.route('**/elk-worker.min.*.js', (route) => route.abort(), { times: 1 });
 		await page.goto('/lineage');
 		await waitForLineageToolbar(page);
-		const verticalBtn = page.locator('button[title="Vertical tree layout"]');
-		await verticalBtn.click();
+		const fallback = page.getByText(
+			'Layered layout failed; showing grid. Choose horizontal or vertical to retry.'
+		);
+		await expect(fallback).toBeVisible();
+		await expect(
+			page.getByRole('button', { name: `source ${sharedDatasource.name}` })
+		).toBeVisible();
+		await page.locator('button[title="Vertical tree layout"]').click();
 		await expect(page.getByRole('button', { name: 'Vertical', exact: true })).toBeVisible();
-	});
-
-	test('clicking Grid layout button switches to grid mode', async ({ page }) => {
-		await page.goto('/lineage');
-		await waitForLineageToolbar(page);
-		const gridBtn = page.locator('button[title="Grid layout"]');
-		await gridBtn.click();
-		await expect(page.getByRole('button', { name: 'Grid', exact: true })).toBeVisible();
-	});
-
-	test('clicking Horizontal layout button restores horizontal mode', async ({ page }) => {
-		await page.goto('/lineage');
-		await waitForLineageToolbar(page);
+		await expect(fallback).not.toBeVisible();
 		await page.locator('button[title="Grid layout"]').click();
+		await expect(page.getByRole('button', { name: 'Grid', exact: true })).toBeVisible();
 		await page.locator('button[title="Horizontal tree layout"]').click();
 		await expect(page.getByRole('button', { name: 'Horizontal', exact: true })).toBeVisible();
 	});
 });
 
 test.describe('Lineage – graph interaction', () => {
-	test('zoom percentage is displayed', async ({ page }) => {
-		await page.goto('/lineage');
-		await waitForLineageToolbar(page);
-		// The zoom label renders as "{zoomPercent}%" – match the specific pattern
-		await expect(page.getByText(/^\d+%$/)).toBeVisible();
-	});
-
 	test('zoom in and out changes zoom percentage', async ({ page }) => {
 		await page.goto('/lineage');
 		await waitForLineageToolbar(page);
@@ -105,14 +76,6 @@ test.describe('Lineage – graph interaction', () => {
 		await page.locator('button[title="Zoom out"]').click();
 		await expect(zoomLabel).not.toHaveText(afterIn ?? '', { timeout: 5_000 });
 	});
-
-	test('lineage graph loads without error state', async ({ page }) => {
-		await page.goto('/lineage');
-		await waitForLineageToolbar(page);
-		// Wait for the loading state to clear first, then verify no error
-		await expect(page.getByText('Loading lineage...')).not.toBeVisible({ timeout: 5_000 });
-		await expect(page.getByText('Failed to load lineage.')).not.toBeVisible();
-	});
 });
 
 test.describe('Lineage – with datasource data', () => {
@@ -124,7 +87,11 @@ test.describe('Lineage – with datasource data', () => {
 		const aName = `E2E Lineage ${uid()}`;
 		await createAnalysis(request, aName, sharedDatasource.id);
 		try {
+			const workerResponse = page.waitForResponse((response) =>
+				/\/elk-worker\.min\.[^/]+\.js$/.test(new URL(response.url()).pathname)
+			);
 			await page.goto('/lineage');
+			expect((await workerResponse).ok()).toBe(true);
 			await waitForLineageToolbar(page);
 			// The lineage graph area should not show the error state
 			await expect(page.getByText('Failed to load lineage.')).not.toBeVisible();

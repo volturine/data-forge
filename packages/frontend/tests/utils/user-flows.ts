@@ -279,7 +279,11 @@ export async function createHealthCheckViaUi(
 		page.getByRole('button', { name: 'Save Check' }).click()
 	]);
 	if (!response.ok()) {
-		throw new Error(`Health check create failed: HTTP ${response.status()}`);
+		throw new Error(
+			`Health check create failed: HTTP ${response.status()}; requested datasource ${datasourceId}; ` +
+				`submitted ${(response.request().postData() ?? '').slice(0, 2_000)}; ` +
+				`response ${(await response.text()).slice(0, 2_000)}`
+		);
 	}
 	const payload = (await response.json()) as { id: string };
 	return payload.id;

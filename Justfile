@@ -478,6 +478,14 @@ docker-dev-down:
 docker-dev-logs:
     docker compose --env-file docker/env/dev.env -p dataforge-dev -f docker/compose.yaml -f docker/compose.dev.yaml logs -f
 
+# Resolve and validate the self-hosted production Compose configuration without
+# changing the Docker daemon. `docker-up` performs the checked deployment.
+docker-check env_file='docker/env/prod.env' project='dataforge-prod':
+    python3 scripts/deploy.py --env-file {{quote(env_file)}} --project {{quote(project)}} --check
+
+docker-up env_file='docker/env/prod.env' project='dataforge-prod' wait_timeout='180':
+    python3 scripts/deploy.py --env-file {{quote(env_file)}} --project {{quote(project)}} --wait-timeout {{quote(wait_timeout)}}
+
 # Build local fixed-role images and smoke-test the production compose topology.
 # Overrides only DF_*_IMAGE tags and the host port; still uses
 # docker/compose.yaml + docker/env/prod.env.

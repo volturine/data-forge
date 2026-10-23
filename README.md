@@ -99,14 +99,15 @@ postgres + RustFS + api + runtime coordinator + scheduler + worker
 ```
 
 The API container serves both the backend API and the built frontend on port 8000.
+The checked startup commands below require Docker Compose v2, Python 3, and
+`just`. Without `just`, use `python3 scripts/deploy.py --check` and then
+`python3 scripts/deploy.py`.
 
 ```bash
 # 1) Edit docker/env/prod.env and set image tags, passwords, and secrets.
-# 2) Pull and start the production stack.
-docker compose --env-file docker/env/prod.env \
-  -p dataforge-prod -f docker/compose.yaml pull
-docker compose --env-file docker/env/prod.env \
-  -p dataforge-prod -f docker/compose.yaml up -d
+# 2) Validate the resolved configuration, then pull and start the stack.
+just docker-check
+just docker-up
 
 # Open the application.
 open http://localhost:8000
@@ -160,9 +161,13 @@ Production Docker deployments use `docker/compose.yaml` with `docker/env/prod.en
 The API serves both the backend API and the pre-built frontend on port 8000.
 
 ```bash
-docker compose --env-file docker/env/prod.env \
-  -p dataforge-prod -f docker/compose.yaml up -d
+just docker-check docker/env/prod.env dataforge-prod
+just docker-up docker/env/prod.env dataforge-prod
 ```
+
+`docker-check` resolves the Compose configuration without changing the Docker
+daemon. `docker-up` pulls the worker's compute image, pulls the Compose images,
+then starts the services and waits up to 180 seconds for health checks.
 
 The repository defaults are tuned for concurrent clients:
 

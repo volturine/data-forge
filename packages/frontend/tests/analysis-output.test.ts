@@ -665,7 +665,15 @@ test.describe('Analyses – output node persistence', () => {
 			);
 
 			// Save
-			await page.getByRole('button', { name: 'Save' }).click();
+			const [saveResponse] = await Promise.all([
+				page.waitForResponse(
+					(response) =>
+						response.url().endsWith(`/api/v1/analysis/${aId}`) &&
+						response.request().method() === 'PUT'
+				),
+				page.getByRole('button', { name: 'Save' }).click()
+			]);
+			expect(saveResponse.ok()).toBeTruthy();
 			await expect(page.getByRole('button', { name: 'Saved' })).toBeVisible({ timeout: 5_000 });
 
 			// Verify table name is still correct immediately after save (before reload)

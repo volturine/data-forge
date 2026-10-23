@@ -247,6 +247,7 @@ describe('BuildStreamStore', () => {
 		expect(MockWebSocket.instances).toHaveLength(1);
 		const socket = MockWebSocket.instances[0];
 		expect(socket.url).toContain('/v1/compute/ws/builds/build-1');
+		expect(mockGetRuntimeBuild).not.toHaveBeenCalled();
 	});
 
 	test('watch connects to an existing build detail stream', () => {
@@ -260,18 +261,42 @@ describe('BuildStreamStore', () => {
 		expect(store.status).toBe('connecting');
 	});
 
-	test('uses durable detail polling as a bounded fallback', async () => {
+	test('uses durable detail reads only after stream silence and stops on close', async () => {
 		const store = new BuildStreamStore();
 		store.watch('build-2');
-		await flushAsyncWork();
+		expect(mockGetRuntimeBuild).not.toHaveBeenCalled();
+		const socket = MockWebSocket.instances[0];
+		msg(socket, {
+			type: 'snapshot',
+			build: makeDetail({ build_id: 'build-2' }),
+			last_sequence: 1
+		});
 
-		expect(mockGetRuntimeBuild).toHaveBeenCalledTimes(1);
+		for (let sequence = 2; sequence <= 5; sequence++) {
+			await vi.advanceTimersByTimeAsync(4_000);
+			msg(socket, {
+				build_id: 'build-2',
+				type: 'progress',
+				sequence,
+				progress: 0.5,
+				elapsed_ms: sequence * 4_000,
+				estimated_remaining_ms: 1000,
+				current_step: 'Loading',
+				current_step_index: 0,
+				total_steps: 3
+			});
+		}
+		expect(mockGetRuntimeBuild).not.toHaveBeenCalled();
 		await vi.advanceTimersByTimeAsync(4_999);
-		expect(mockGetRuntimeBuild).toHaveBeenCalledTimes(1);
+		expect(mockGetRuntimeBuild).not.toHaveBeenCalled();
 		await vi.advanceTimersByTimeAsync(1);
+		expect(mockGetRuntimeBuild).toHaveBeenCalledTimes(1);
+		await vi.advanceTimersByTimeAsync(5_000);
 		expect(mockGetRuntimeBuild).toHaveBeenCalledTimes(2);
 
 		store.close();
+		await vi.advanceTimersByTimeAsync(10_000);
+		expect(mockGetRuntimeBuild).toHaveBeenCalledTimes(2);
 	});
 
 	test('watch replaces the previous connection', () => {
@@ -1020,6 +1045,39 @@ describe('BuildStreamStore', () => {
 		expect(MockWebSocket.instances[1].url).toContain('/v1/compute/ws/builds/build-1');
 	});
 
+	test('ignores a delayed REST snapshot when the live stream advanced', async () => {
+		let finishDetail: ((build: BuildRunDetail) => void) | undefined;
+		mockGetRuntimeBuild.mockReturnValue({
+			match: (onOk: (build: BuildRunDetail) => boolean) =>
+				new Promise<boolean>((resolve) => {
+					finishDetail = (build) => resolve(onOk(build));
+				})
+		});
+		const store = new BuildStreamStore();
+		store.start(MINIMAL_BUILD_REQUEST);
+		await vi.advanceTimersByTimeAsync(5_000);
+		expect(mockGetRuntimeBuild).toHaveBeenCalledTimes(1);
+
+		msg(MockWebSocket.instances[0], {
+			type: 'progress',
+			sequence: 5,
+			progress: 0.8,
+			elapsed_ms: 10_000,
+			estimated_remaining_ms: 1000,
+			current_step: 'Newer step',
+			current_step_index: 2,
+			total_steps: 3
+		});
+		if (!finishDetail) throw new Error('Expected an in-flight detail request');
+		finishDetail(makeDetail({ progress: 0.2, current_step: 'Stale step' }));
+		await flushAsyncWork();
+
+		expect(store.progress).toBe(0.8);
+		expect(store.currentStep).toBe('Newer step');
+		expect(store.elapsed).toBe(10_000);
+		store.close();
+	});
+
 	test('polls build-run detail while build remains non-terminal', async () => {
 		const store = new BuildStreamStore();
 		store.start(MINIMAL_BUILD_REQUEST);
@@ -1041,7 +1099,7 @@ describe('BuildStreamStore', () => {
 		expect(store.done).toBe(true);
 	});
 
-	test('continues polling until build id becomes available from delayed start response', async () => {
+	test('starts the silence fallback only after the delayed start response', async () => {
 		mockStartRuntimeBuild.mockReturnValue({
 			match: (onOk: (build: BuildRunDetail) => void) => {
 				setTimeout(() => onOk(makeDetail()), 500);
@@ -1059,9 +1117,11 @@ describe('BuildStreamStore', () => {
 
 		await vi.advanceTimersByTimeAsync(500);
 		await flushAsyncWork();
-
-		expect(mockGetRuntimeBuild).toHaveBeenCalledWith('build-1');
+		expect(mockGetRuntimeBuild).not.toHaveBeenCalled();
 		expect(store.buildId).toBe('build-1');
+		await vi.advanceTimersByTimeAsync(4_750);
+		expect(mockGetRuntimeBuild).toHaveBeenCalledWith('build-1');
+		store.close();
 	});
 
 	test('hydrates terminal build detail after socket close before final event arrives', async () => {

@@ -26,9 +26,23 @@ import { waitForBuildPreview, waitForBuildPreviewId } from './utils/builds.js';
  * and primary navigation links work.
  */
 test.describe('Navigation – page load smoke tests', () => {
-	test('home page renders Analyses heading', async ({ page }) => {
+	test('home page recovers from a startup failure without reloading', async ({ page }) => {
+		await page.route(
+			'**/api/v1/config',
+			(route) => route.fulfill({ status: 503, json: { detail: 'Temporarily unavailable' } }),
+			{ times: 1 }
+		);
 		await page.goto('/');
+		await expect(page.getByRole('heading', { name: 'Unable to start the app' })).toBeVisible();
+		const documentStarted = await page.evaluate(() => performance.timeOrigin);
+		await page.getByRole('button', { name: 'Retry', exact: true }).click();
+		// The previous failure remains visible while Retry is in flight. Wait for
+		// recovery before using the normal fail-fast bootstrap readiness helper.
+		await expect(page.getByRole('heading', { name: 'Unable to start the app' })).toBeHidden({
+			timeout: readyTimeoutMs()
+		});
 		await waitForLayoutReady(page);
+		expect(await page.evaluate(() => performance.timeOrigin)).toBe(documentStarted);
 		await expect(page.getByRole('heading', { name: 'Analyses', level: 1 })).toBeVisible();
 		await expect(page.getByRole('link', { name: /New Analysis/i })).toBeVisible();
 		await screenshot(page, 'navigation', 'home-page');

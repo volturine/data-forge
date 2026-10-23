@@ -2,7 +2,11 @@
 	import { createQuery } from '@tanstack/svelte-query';
 	import { onDestroy } from 'svelte';
 	import { previewStepData, throwIfAborted, type StepPreviewResponse } from '#lib/api/compute.js';
-	import { stepPreviewQueryKey } from '#lib/utils/preview-query.js';
+	import {
+		createPreviewRequestCancellation,
+		PREVIEW_QUERY_GC_TIME,
+		stepPreviewQueryKey
+	} from '#lib/utils/preview-query.js';
 	import { applySteps, stepsThroughTarget } from '#lib/utils/pipeline.js';
 	import { toComputeError } from '#lib/utils/compute-error.js';
 	import { hashPipeline } from '#lib/utils/hash.js';
@@ -33,22 +37,9 @@
 	let { analysisId, datasourceId, pipeline, stepId, rowLimit = 100 }: Props = $props();
 	let currentPage = $state(1);
 	let columnSearch = $state('');
-	let previewRequestKey: string | null = null;
-	let previewRequestController = new AbortController();
+	const previewRequestCancellation = createPreviewRequestCancellation();
 
-	function previewSignal(request: Parameters<typeof previewStepData>[0]): AbortSignal {
-		const nextKey = JSON.stringify(request);
-		if (previewRequestKey !== nextKey || previewRequestController.signal.aborted) {
-			if (previewRequestKey !== null && !previewRequestController.signal.aborted) {
-				previewRequestController.abort();
-			}
-			previewRequestKey = nextKey;
-			previewRequestController = new AbortController();
-		}
-		return previewRequestController.signal;
-	}
-
-	onDestroy(() => previewRequestController.abort());
+	onDestroy(() => previewRequestCancellation.dispose());
 
 	const activePipeline = $derived(applySteps(pipeline));
 	const isActiveStep = $derived(activePipeline.some((step) => step.id === stepId));
@@ -93,7 +84,7 @@
 			const state = queryKey[5];
 			if (!state) throw new Error('Preview command is not ready');
 			const { request } = state;
-			const signal = previewSignal(request);
+			const signal = previewRequestCancellation.signalFor(request);
 			const result = await previewStepData(request, { signal });
 			throwIfAborted(signal);
 			if (result.isErr()) {
@@ -103,7 +94,7 @@
 			return result.value;
 		},
 		staleTime: Infinity,
-		gcTime: Infinity,
+		gcTime: PREVIEW_QUERY_GC_TIME,
 		// Cache-option Apply invalidates this target's variants; fresh navigation entries stay cached.
 		refetchOnMount: true,
 		retry: false,

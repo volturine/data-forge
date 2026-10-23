@@ -2,6 +2,7 @@
 
 import asyncio
 import threading
+import time
 from concurrent.futures import ThreadPoolExecutor
 
 import pytest
@@ -11,13 +12,22 @@ from backend_core.config import settings
 
 class TestHealthEndpoints:
     def test_health_liveness(self, client):
+        started = time.perf_counter()
         response = client.get('/health')
-
+        # Preserve the liveness latency guard without a second identical request.
+        assert time.perf_counter() - started < 1.0
         assert response.status_code == 200
         data = response.json()
         assert data['status'] == 'healthy'
         assert data['version'] == settings.app_version
         assert data['service'] == settings.app_name
+        assert 'application/json' in response.headers['content-type']
+        assert response.headers['x-content-type-options'] == 'nosniff'
+        assert response.headers['x-frame-options'] == 'DENY'
+        assert response.headers['x-xss-protection'] == '0'
+        assert response.headers['referrer-policy'] == 'strict-origin-when-cross-origin'
+        assert response.headers['permissions-policy'] == 'camera=(), microphone=(), geolocation=()'
+        assert response.headers['strict-transport-security'] == 'max-age=63072000; includeSubDomains'
 
     def test_health_readiness(self, client):
         response = client.get('/health/ready')
@@ -40,34 +50,6 @@ class TestHealthEndpoints:
         data = response.json()
         assert data['message'] == settings.app_name
         assert data['version'] == settings.app_version
-
-    def test_health_check_response_time(self, client):
-        import time
-
-        start = time.time()
-        response = client.get('/health')
-        duration = time.time() - start
-
-        assert response.status_code == 200
-        assert duration < 1.0
-
-    def test_multiple_health_checks(self, client):
-        for _ in range(5):
-            response = client.get('/health')
-            assert response.status_code == 200
-
-    def test_health_check_headers(self, client):
-        response = client.get('/health')
-
-        assert response.status_code == 200
-        assert 'content-type' in response.headers
-        assert 'application/json' in response.headers['content-type']
-        assert response.headers['x-content-type-options'] == 'nosniff'
-        assert response.headers['x-frame-options'] == 'DENY'
-        assert response.headers['x-xss-protection'] == '0'
-        assert response.headers['referrer-policy'] == 'strict-origin-when-cross-origin'
-        assert response.headers['permissions-policy'] == 'camera=(), microphone=(), geolocation=()'
-        assert response.headers['strict-transport-security'] == 'max-age=63072000; includeSubDomains'
 
     def test_security_headers_skip_hsts_in_debug(self, client, monkeypatch):
         monkeypatch.setattr(settings, 'debug', True, raising=False)

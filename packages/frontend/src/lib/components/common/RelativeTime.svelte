@@ -1,7 +1,7 @@
 <script lang="ts">
-	import { onMount } from 'svelte';
 	import { formatDateDisplay, formatDateTimeDisplay, toEpochDisplay } from '#lib/utils/datetime.js';
 	import { formatRelativeTime } from '#lib/utils/relative-time.js';
+	import { subscribeVisibleClock } from '#lib/utils/visible-clock.js';
 	import { css } from '#lib/styles/panda.js';
 
 	interface Props {
@@ -14,12 +14,12 @@
 
 	let now = $state(Date.now());
 
-	onMount(() => {
+	// Subscribe to a shared browser timer; derived state cannot own timer cleanup.
+	$effect(() => {
 		if (!live) return;
-		const interval = setInterval(() => {
-			now = Date.now();
-		}, refreshMs);
-		return () => clearInterval(interval);
+		return subscribeVisibleClock(refreshMs, (tick) => {
+			now = tick;
+		});
 	});
 
 	const epoch = $derived(toEpochDisplay(timestamp));

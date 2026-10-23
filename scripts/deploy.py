@@ -1,0 +1,234 @@
+from __future__ import annotations
+
+import argparse
+import json
+import subprocess
+import sys
+from collections.abc import Sequence
+from pathlib import Path
+
+REPOSITORY_ROOT = Path(__file__).resolve().parents[1]
+SAMPLE_PASSWORD = 'ChangeMe123'
+REQUIRED_IMAGES = ('api', 'runtime', 'scheduler', 'worker')
+REQUIRED_ENVIRONMENT = (
+    ('api', 'DATABASE_URL'),
+    ('api', 'INTERNAL_API_TOKEN'),
+    ('api', 'SETTINGS_ENCRYPTION_KEY'),
+    ('api', 'DEFAULT_USER_PASSWORD'),
+    ('api', 'OBJECT_STORE_ACCESS_KEY'),
+    ('api', 'OBJECT_STORE_SECRET_KEY'),
+    ('postgres', 'POSTGRES_PASSWORD'),
+    ('worker', 'COMPUTE_WORKER_IMAGE'),
+)
+COMPOSE_ENV_KEYS = (
+    'DF_API_IMAGE',
+    'DF_RUNTIME_IMAGE',
+    'DF_SCHEDULER_IMAGE',
+    'DF_WORKER_IMAGE',
+    'DF_COMPUTE_WORKER_IMAGE',
+    'DF_DATABASE_URL',
+    'DF_INTERNAL_API_TOKEN',
+    'DF_SETTINGS_ENCRYPTION_KEY',
+    'DF_OBJECT_STORE_ACCESS_KEY',
+    'DF_OBJECT_STORE_SECRET_KEY',
+    'DF_POSTGRES_PASSWORD',
+)
+
+
+def _positive_int(value: str) -> int:
+    try:
+        parsed = int(value)
+    except ValueError as error:
+        raise argparse.ArgumentTypeError('must be a positive integer') from error
+    if parsed <= 0:
+        raise argparse.ArgumentTypeError('must be a positive integer')
+    return parsed
+
+
+def _arguments(argv: Sequence[str] | None) -> argparse.Namespace:
+    parser = argparse.ArgumentParser(description='Validate or deploy the self-hosted Docker Compose stack.')
+    parser.add_argument('--env-file', default='docker/env/prod.env', help='Compose environment file')
+    parser.add_argument('--project', default='dataforge-prod', help='Compose project name')
+    parser.add_argument('--check', action='store_true', help='resolve and validate without Docker mutations')
+    parser.add_argument(
+        '--wait-timeout',
+        type=_positive_int,
+        default=180,
+        help='seconds to wait for Compose services to become healthy (default: 180)',
+    )
+    arguments = parser.parse_args(argv)
+    if not arguments.project.strip():
+        parser.error('--project must not be empty')
+    return arguments
+
+
+def _resolve_env_file(value: str) -> Path:
+    path = Path(value).expanduser()
+    if not path.is_absolute():
+        path = REPOSITORY_ROOT / path
+    return path.resolve()
+
+
+def _configuration_errors(configuration: object) -> tuple[list[str], str | None]:
+    errors: list[str] = []
+    if not isinstance(configuration, dict):
+        return ['resolved Compose configuration is not an object'], None
+    services = configuration.get('services')
+    if not isinstance(services, dict):
+        return ['services is missing from resolved Compose configuration'], None
+
+    def check_text(value: object, path: str) -> None:
+        if not isinstance(value, str):
+            return
+        if 'replace-with-' in value.casefold():
+            errors.append(f'{path} contains an unresolved replace-with- placeholder')
+        if SAMPLE_PASSWORD in value:
+            errors.append(f'{path} still uses the known sample password')
+
+    for service_name, service_config in services.items():
+        if not isinstance(service_config, dict):
+            continue
+        image = service_config.get('image')
+        check_text(image, f'services.{service_name}.image')
+        environment = service_config.get('environment')
+        if not isinstance(environment, dict):
+            continue
+        for key, value in environment.items():
+            check_text(value, f'services.{service_name}.environment.{key}')
+
+    for service in REQUIRED_IMAGES:
+        service_config = services.get(service)
+        image = service_config.get('image') if isinstance(service_config, dict) else None
+        if not isinstance(image, str) or not image.strip():
+            errors.append(f'services.{service}.image is missing or empty')
+
+    for service, key in REQUIRED_ENVIRONMENT:
+        service_config = services.get(service)
+        environment = service_config.get('environment') if isinstance(service_config, dict) else None
+        value = environment.get(key) if isinstance(environment, dict) else None
+        if not isinstance(value, str) or not value.strip():
+            errors.append(f'services.{service}.environment.{key} is missing or empty')
+
+    # Mirror AuthSettings' startup checks without importing the application's
+    # dependencies or initializing its environment on the deployment host.
+    api_config = services.get('api')
+    api_environment = api_config.get('environment') if isinstance(api_config, dict) else None
+    if isinstance(api_environment, dict):
+        password = api_environment.get('DEFAULT_USER_PASSWORD')
+        if isinstance(password, str) and password:
+            if len(password) < 8 or not all((any(c.isupper() for c in password), any(c.islower() for c in password), any(c.isdigit() for c in password))):
+                errors.append('services.api.environment.DEFAULT_USER_PASSWORD must have at least 8 characters, uppercase and lowercase letters, and a digit')
+            if password.strip().lower() in {'changeme123', 'changeme123!', 'replaceme123', 'replace-with-strong-password'}:
+                errors.append('services.api.environment.DEFAULT_USER_PASSWORD still uses a production placeholder')
+        encryption_key = api_environment.get('SETTINGS_ENCRYPTION_KEY')
+        if isinstance(encryption_key, str) and encryption_key.strip() == 'your-encryption-key-here':
+            errors.append('services.api.environment.SETTINGS_ENCRYPTION_KEY still uses a production placeholder')
+
+    worker_config = services.get('worker')
+    worker_environment = worker_config.get('environment') if isinstance(worker_config, dict) else None
+    worker_image = worker_environment.get('COMPUTE_WORKER_IMAGE') if isinstance(worker_environment, dict) else None
+    return errors, worker_image if isinstance(worker_image, str) and worker_image.strip() else None
+
+
+def _invoke(command: list[str], *, capture_output: bool = False) -> subprocess.CompletedProcess[str] | None:
+    try:
+        return subprocess.run(
+            command,
+            check=False,
+            text=True,
+            capture_output=capture_output,
+        )
+    except FileNotFoundError:
+        print("Required tool 'docker' was not found in PATH.", file=sys.stderr)
+        return None
+    except OSError:
+        print('Could not run Docker; check the Docker CLI and daemon access.', file=sys.stderr)
+        return None
+
+
+def _compose_base(env_file: Path, project: str) -> list[str]:
+    return [
+        'docker',
+        'compose',
+        '--env-file',
+        str(env_file),
+        '-p',
+        project,
+        '-f',
+        str(REPOSITORY_ROOT / 'docker' / 'compose.yaml'),
+    ]
+
+
+def main(argv: Sequence[str] | None = None) -> int:
+    arguments = _arguments(argv)
+    env_file = _resolve_env_file(arguments.env_file)
+    if not env_file.is_file():
+        print(f'Environment file not found: {env_file}', file=sys.stderr)
+        return 2
+
+    compose = _compose_base(env_file, arguments.project)
+    resolved = _invoke([*compose, 'config', '--format', 'json'], capture_output=True)
+    if resolved is None:
+        return 127
+    if resolved.returncode:
+        failure_details = (resolved.stderr or '').casefold()
+        if "'compose' is not a docker command" in failure_details or 'unknown command: compose' in failure_details:
+            print('Docker Compose v2 is unavailable; install the Docker Compose plugin.', file=sys.stderr)
+            return resolved.returncode
+
+        failed_keys = [key for key in COMPOSE_ENV_KEYS if key.casefold() in failure_details]
+        key_names = ', '.join(failed_keys or COMPOSE_ENV_KEYS)
+        print(
+            'Docker Compose could not resolve the deployment configuration. '
+            f'Check the Compose file and required environment keys: {key_names}. '
+            'Command output was suppressed because it can contain credentials.',
+            file=sys.stderr,
+        )
+        return resolved.returncode
+
+    try:
+        configuration = json.loads(resolved.stdout)
+    except json.JSONDecodeError:
+        print('Docker Compose returned invalid configuration JSON.', file=sys.stderr)
+        return 2
+
+    errors, compute_worker_image = _configuration_errors(configuration)
+    if errors:
+        print('Deployment configuration needs attention:', file=sys.stderr)
+        for error in errors:
+            print(f'  - {error}', file=sys.stderr)
+        return 2
+
+    if arguments.check:
+        print('Docker Compose configuration is valid.')
+        return 0
+
+    if compute_worker_image is None:
+        print('services.worker.environment.COMPUTE_WORKER_IMAGE is missing or empty', file=sys.stderr)
+        return 2
+
+    commands: list[list[str]] = [
+        ['docker', 'pull', compute_worker_image],
+        [*compose, 'pull'],
+        [
+            *compose,
+            'up',
+            '-d',
+            '--wait',
+            '--wait-timeout',
+            str(arguments.wait_timeout),
+        ],
+    ]
+    for command in commands:
+        result = _invoke(command)
+        if result is None:
+            return 127
+        if result.returncode:
+            return result.returncode
+
+    print('Deployment is healthy.')
+    return 0
+
+
+if __name__ == '__main__':
+    raise SystemExit(main())

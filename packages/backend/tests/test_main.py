@@ -1,4 +1,5 @@
 import asyncio
+import gzip
 import logging
 import threading
 import time
@@ -6,7 +7,8 @@ from concurrent.futures import ThreadPoolExecutor
 
 import pytest
 from fastapi.middleware.cors import CORSMiddleware
-from fastapi.responses import FileResponse
+from fastapi.responses import FileResponse, Response
+from starlette.requests import Request
 
 from backend_core.api_execution_budget import ApiDatabaseBudget
 from backend_core.application import (
@@ -22,6 +24,24 @@ from backend_core.application import (
     event_loop_lag_log_level,
     event_loop_lag_loop,
 )
+
+
+def _frontend_request(accept_encoding: str | None = None, path: str = '/') -> Request:
+    headers = [] if accept_encoding is None else [(b'accept-encoding', accept_encoding.encode('ascii'))]
+    return Request(
+        {
+            'type': 'http',
+            'http_version': '1.1',
+            'method': 'GET',
+            'scheme': 'http',
+            'path': path,
+            'raw_path': path.encode('ascii'),
+            'query_string': b'',
+            'headers': headers,
+            'server': ('testserver', 80),
+            'client': ('testclient', 123),
+        }
+    )
 
 
 class TestUvicornSettings:
@@ -284,7 +304,7 @@ class TestUvicornSettings:
         monkeypatch.setattr(application.settings, 'prod_mode_enabled', True, raising=False)
         monkeypatch.setattr(application, 'frontend_build_dir', tmp_path)
 
-        response = await application.serve_static_or_index('login')
+        response = await application.serve_static_or_index('login', _frontend_request(path='/login'))
 
         assert isinstance(response, FileResponse)
         assert response.path == str(tmp_path / 'login.html')
@@ -300,11 +320,107 @@ class TestUvicornSettings:
         monkeypatch.setattr(application, 'frontend_build_dir', tmp_path)
 
         application._load_frontend_asset_cache()
-        response = await application.serve_static_or_index('_app/immutable/entry.js')
+        response = await application.serve_static_or_index('_app/immutable/entry.js', _frontend_request(path='/_app/immutable/entry.js'))
 
         assert not isinstance(response, FileResponse)
         assert response.body == b'console.log("cached");'
         assert response.headers['cache-control'] == 'public, max-age=31536000, immutable'
+        assert response.headers['vary'] == 'Accept-Encoding'
+        excluded = await application.serve_static_or_index('_app/immutable/entry.js', _frontend_request('identity;q=0', '/_app/immutable/entry.js'))
+        assert excluded.status_code == 406
+
+    @pytest.mark.asyncio
+    @pytest.mark.parametrize(
+        ('accept_encoding', 'encoding'),
+        [
+            ('gzip', 'gzip'),
+            ('GZip;Q=0.5', 'gzip'),
+            ('*;q=1', 'gzip'),
+            ('gzip;q=0, *;q=1', 'identity'),
+            ('gzip;q=0.0, *;q=1', 'identity'),
+            ('br', 'identity'),
+            ('xgzip', 'identity'),
+            (None, 'identity'),
+            ('gzip, identity;q=0', 'gzip'),
+            ('gzip;q=0, identity;q=0', None),
+            ('*;q=0', None),
+            ('*;q=0, identity;q=1', 'identity'),
+        ],
+    )
+    async def test_static_route_negotiates_prepared_gzip(self, monkeypatch, tmp_path, accept_encoding: str | None, encoding: str | None) -> None:
+        import backend_core.application as application
+
+        asset = tmp_path / '_app' / 'immutable' / 'entry.js'
+        asset.parent.mkdir(parents=True)
+        content = b'export const repeated = "data-forge frontend asset";\n' * 512
+        asset.write_bytes(content)
+        monkeypatch.setattr(application.settings, 'prod_mode_enabled', True, raising=False)
+        monkeypatch.setattr(application, 'frontend_build_dir', tmp_path)
+
+        application._load_frontend_asset_cache()
+        cached_gzip = application._FRONTEND_ASSET_CACHE['_app/immutable/entry.js'][1]
+        assert cached_gzip is not None
+        application._load_frontend_asset_cache()
+        assert application._FRONTEND_ASSET_CACHE['_app/immutable/entry.js'][1] == cached_gzip
+        monkeypatch.setattr(application.gzip, 'compress', lambda *_args, **_kwargs: pytest.fail('compressed during request'))
+
+        response = await application.serve_static_or_index('_app/immutable/entry.js', _frontend_request(accept_encoding, '/_app/immutable/entry.js'))
+
+        assert response.headers['vary'] == 'Accept-Encoding'
+        if encoding is None:
+            assert response.status_code == 406
+            assert response.body == b''
+            assert response.headers['cache-control'] == 'no-store'
+            return
+        assert response.status_code == 200
+        if encoding == 'gzip':
+            assert response.headers['content-encoding'] == 'gzip'
+            assert gzip.decompress(response.body) == content
+            assert len(response.body) < len(content)
+            return
+        assert 'content-encoding' not in response.headers
+        assert response.body == content
+
+    @pytest.mark.asyncio
+    async def test_root_route_negotiates_gzip_and_version_metadata_is_not_immutable(self, monkeypatch, tmp_path) -> None:
+        import backend_core.application as application
+
+        index = tmp_path / 'index.html'
+        index_content = b'<html><body>data-forge frontend page</body></html>\n' * 128
+        index.write_bytes(index_content)
+        version = tmp_path / '_app' / 'version.json'
+        version.parent.mkdir(parents=True)
+        version.write_text('{"version":"test"}', encoding='utf8')
+        monkeypatch.setattr(application.settings, 'prod_mode_enabled', True, raising=False)
+        monkeypatch.setattr(application, 'frontend_build_dir', tmp_path)
+
+        application._load_frontend_asset_cache()
+        page_response = await application.root(_frontend_request('gzip'))
+        version_response = await application.serve_static_or_index('_app/version.json', _frontend_request(path='/_app/version.json'))
+
+        assert isinstance(page_response, Response)
+        assert page_response.headers['content-encoding'] == 'gzip'
+        assert page_response.headers['vary'] == 'Accept-Encoding'
+        assert page_response.headers['cache-control'] == 'no-cache'
+        assert gzip.decompress(page_response.body) == index_content
+        assert version_response.headers['cache-control'] == 'no-cache'
+        assert 'immutable' not in version_response.headers['cache-control']
+        assert 'content-encoding' not in version_response.headers
+
+    def test_frontend_asset_cache_skips_tiny_and_binary_gzip_candidates(self, monkeypatch, tmp_path) -> None:
+        import backend_core.application as application
+
+        tiny = tmp_path / 'tiny.js'
+        tiny.write_bytes(b'console.log(1);')
+        binary = tmp_path / 'image.bin'
+        binary.write_bytes(b'\x00' * 4096)
+        monkeypatch.setattr(application.settings, 'prod_mode_enabled', True, raising=False)
+        monkeypatch.setattr(application, 'frontend_build_dir', tmp_path)
+
+        application._load_frontend_asset_cache()
+
+        assert application._FRONTEND_ASSET_CACHE['tiny.js'][1] is None
+        assert application._FRONTEND_ASSET_CACHE['image.bin'][1] is None
 
     @pytest.mark.asyncio
     async def test_frontend_asset_cache_supports_symlinked_build_root(self, monkeypatch, tmp_path) -> None:
@@ -324,7 +440,7 @@ class TestUvicornSettings:
         monkeypatch.setattr(application, '_FRONTEND_ASSET_CACHE_SOURCE', None)
 
         application._load_frontend_asset_cache()
-        response = await application.serve_static_or_index('_app/immutable/entry.js')
+        response = await application.serve_static_or_index('_app/immutable/entry.js', _frontend_request(path='/_app/immutable/entry.js'))
 
         assert not isinstance(response, FileResponse)
         assert response.body == b'console.log("cached symlink");'
@@ -346,10 +462,10 @@ class TestUvicornSettings:
         monkeypatch.setattr(application.settings, 'prod_mode_enabled', True, raising=False)
         monkeypatch.setattr(application, 'frontend_build_dir', tmp_path)
         monkeypatch.setattr(application, '_FRONTEND_ASSET_CACHE_ROOT', None)
-        monkeypatch.setattr(application, '_cached_frontend_response', lambda _path: None)
+        monkeypatch.setattr(application, '_cached_frontend_response', lambda _path, _request: None)
         monkeypatch.setattr(type(page), 'is_file', is_file)
 
-        response = await application.serve_static_or_index('login')
+        response = await application.serve_static_or_index('login', _frontend_request(path='/login'))
 
         assert isinstance(response, FileResponse)
         assert response.path == str(page)
