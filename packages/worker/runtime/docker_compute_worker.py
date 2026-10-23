@@ -1334,13 +1334,7 @@ class DockerComputeWorker(ComputeWorker):
                         timeout=settings.compute_worker_shutdown_grace_seconds,
                         metadata=self._metadata(),
                     )
-            deadline = time.monotonic() + settings.compute_worker_shutdown_grace_seconds
-            while time.monotonic() < deadline:
-                with contextlib.suppress(Exception):
-                    container.reload()
-                    if container.status != "running":
-                        break
-                time.sleep(0.1)
+            _wait_until_not_running(container, deadline=time.monotonic() + settings.compute_worker_shutdown_grace_seconds)
             with contextlib.suppress(Exception):
                 container.reload()
                 if container.status == "running":
@@ -1363,6 +1357,26 @@ class DockerComputeWorker(ComputeWorker):
         for _local_path, artifact_url in transfers:
             with contextlib.suppress(Exception):
                 delete_object(artifact_url)
+
+
+def _wait_until_not_running(container: Any, *, deadline: float) -> None:
+    """Block until the container leaves ``running`` or the grace deadline passes.
+
+    Docker's wait endpoint returns on the state change, avoiding a reload per
+    poll. If it fails early, read-only polling continues within the same deadline.
+    """
+    remaining = deadline - time.monotonic()
+    if remaining <= 0:
+        return
+    with contextlib.suppress(Exception):
+        container.wait(timeout=remaining, condition="not-running")
+        return
+    while time.monotonic() < deadline:
+        with contextlib.suppress(Exception):
+            container.reload()
+            if container.status != "running":
+                return
+        time.sleep(0.1)
 
 
 def _result_from_message(message: compute_worker_runtime_pb2.ComputeWorkerJobResult) -> ComputeWorkerResult:

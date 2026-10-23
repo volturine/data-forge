@@ -196,6 +196,7 @@ async function capturePageState(
 				visibility: style.visibility,
 				opacity: style.opacity,
 				interactive: element.getAttribute('data-shell-interactive'),
+				editorAccessState: element.getAttribute('data-editor-access-state'),
 				state: element.getAttribute('data-preview-state'),
 				ready: element.getAttribute('data-preview-ready'),
 				outerHTML: element.outerHTML.slice(0, 1_000)
@@ -822,7 +823,7 @@ test.describe('Concurrent authenticated browser sessions', () => {
 				const page = diagnostic as {
 					index: number;
 					url: string;
-					analysisEditor?: { interactive?: string | null } | null;
+					analysisEditor?: { editorAccessState?: string | null } | null;
 					preview?: { state?: string | null; ready?: string | null } | null;
 					documentResponses: string[];
 					apiResponses: string[];
@@ -836,7 +837,7 @@ test.describe('Concurrent authenticated browser sessions', () => {
 				return {
 					index: page.index,
 					path: new URL(page.url).pathname,
-					editor: page.analysisEditor?.interactive ?? null,
+					editor: page.analysisEditor?.editorAccessState ?? null,
 					previewState: page.preview?.state ?? null,
 					previewReady: page.preview?.ready ?? null,
 					previewRequestStarts: page.previewRequestStarts,

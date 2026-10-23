@@ -4,6 +4,7 @@ import logging
 import os
 import threading
 import time
+from collections.abc import Callable
 from concurrent.futures import ThreadPoolExecutor
 from datetime import UTC, datetime, timedelta
 from pathlib import Path
@@ -86,6 +87,66 @@ def _identity(scope: int = enums_pb2.COMPUTE_WORKER_SCOPE_ANALYSIS_INTERACTIVE) 
         resource_id="analysis-1",
         analysis_id="analysis-1",
     )
+
+
+class _ShutdownContainer:
+    def __init__(self, actions: list[str], *, wait: Callable[[], None] | None = None, remove_fails: bool = False) -> None:
+        self.actions = actions
+        self.status = "running"
+        self.attrs = {"State": {"ExitCode": 0, "OOMKilled": False}}
+        self.wait_calls: list[tuple[float, str]] = []
+        self._wait = wait
+        self._remove_fails = remove_fails
+
+    def wait(self, *, timeout: float, condition: str) -> None:
+        self.actions.append("wait")
+        self.wait_calls.append((timeout, condition))
+        if self._wait is not None:
+            self._wait()
+            return
+        self.status = "exited"
+
+    def reload(self) -> None:
+        self.actions.append("reload")
+
+    def stop(self, *, timeout: float) -> None:
+        self.actions.append("stop")
+        self.status = "exited"
+
+    def remove(self, *, force: bool) -> None:
+        self.actions.append("remove")
+        if self._remove_fails:
+            raise RuntimeError("Docker remove failed")
+
+
+class _ShutdownStub:
+    def __init__(self, actions: list[str]) -> None:
+        self.actions = actions
+
+    def Shutdown(self, *_args, **_kwargs) -> None:  # noqa: N802 - generated gRPC method
+        self.actions.append("shutdown")
+
+
+class _ShutdownHandle:
+    def __init__(self, actions: list[str]) -> None:
+        self.actions = actions
+
+    def close(self) -> None:
+        self.actions.append("close")
+
+
+def _shutdown_worker(monkeypatch, container: _ShutdownContainer, actions: list[str], *, grace_seconds: float, coordinator_guard=None) -> DockerComputeWorker:
+    engine = DockerComputeWorker(_identity(), coordinator_generation=4, coordinator_guard=coordinator_guard)
+    engine._container = container
+    engine._container_id = "engine-container"
+    engine._stub = _ShutdownStub(actions)  # type: ignore[assignment]
+    engine._channel = _ShutdownHandle(actions)  # type: ignore[assignment]
+    engine._client = _ShutdownHandle(actions)
+    engine._artifact_transfers["job"] = (Path("/tmp/artifact"), "s3://bucket/artifact")
+    monkeypatch.setattr(settings, "compute_worker_shutdown_grace_seconds", grace_seconds)
+    monkeypatch.setattr(engine, "_release_placement", lambda: actions.append("release-placement"))
+    monkeypatch.setattr("runtime.docker_compute_worker.delete_object", lambda _url: actions.append("delete-artifact"))
+    return engine
 
 
 def test_engine_credentials_fetch_namespace_scoped_identity_from_backend(monkeypatch) -> None:
@@ -503,38 +564,10 @@ def test_stale_coordinator_cannot_remove_containers_during_reconciliation(monkey
 def test_stale_coordinator_shutdown_detaches_without_mutating_container(monkeypatch) -> None:
     actions: list[str] = []
 
-    class Container:
-        status = "running"
-
-        def reload(self) -> None:
-            actions.append("reload")
-
-        def stop(self, *, timeout: float) -> None:
-            actions.append("stop")
-
-        def remove(self, *, force: bool) -> None:
-            actions.append("remove")
-
-    class Stub:
-        def Shutdown(self, *_args, **_kwargs) -> None:  # noqa: N802 - generated gRPC method
-            actions.append("shutdown")
-
-    class Handle:
-        def close(self) -> None:
-            actions.append("close")
-
     def fenced() -> None:
         raise RuntimeError("stale")
 
-    engine = DockerComputeWorker(_identity(), coordinator_generation=4, coordinator_guard=fenced)
-    engine._container = Container()
-    engine._container_id = "engine-container"
-    engine._stub = Stub()  # type: ignore[assignment]
-    engine._channel = Handle()  # type: ignore[assignment]
-    engine._client = Handle()
-    engine._artifact_transfers["job"] = (Path("/tmp/artifact"), "s3://bucket/artifact")
-    monkeypatch.setattr(settings, "compute_worker_shutdown_grace_seconds", 0)
-    monkeypatch.setattr("runtime.docker_compute_worker.delete_object", lambda _url: actions.append("delete-artifact"))
+    engine = _shutdown_worker(monkeypatch, _ShutdownContainer(actions), actions, grace_seconds=0, coordinator_guard=fenced)
 
     engine.shutdown()
 
@@ -574,49 +607,67 @@ def test_coordinator_loss_mid_shutdown_prevents_stop_remove_and_artifact_delete(
     actions: list[str] = []
     guard_calls = 0
 
-    class Container:
-        status = "running"
-
-        def reload(self) -> None:
-            actions.append("reload")
-
-        def stop(self, *, timeout: float) -> None:
-            actions.append("stop")
-
-        def remove(self, *, force: bool) -> None:
-            actions.append("remove")
-
-    class Stub:
-        def Shutdown(self, *_args, **_kwargs) -> None:  # noqa: N802 - generated gRPC method
-            actions.append("shutdown")
-
-    class Handle:
-        def close(self) -> None:
-            actions.append("close")
-
     def guard() -> None:
         nonlocal guard_calls
         guard_calls += 1
         if guard_calls == 2:
             raise RuntimeError("stale")
 
-    engine = DockerComputeWorker(_identity(), coordinator_generation=4, coordinator_guard=guard)
-    engine._container = Container()
-    engine._container_id = "engine-container"
-    engine._stub = Stub()  # type: ignore[assignment]
-    engine._channel = Handle()  # type: ignore[assignment]
-    engine._client = Handle()
-    engine._artifact_transfers["job"] = (Path("/tmp/artifact"), "s3://bucket/artifact")
-    monkeypatch.setattr(settings, "compute_worker_shutdown_grace_seconds", 0)
-    monkeypatch.setattr("runtime.docker_compute_worker.delete_object", lambda _url: actions.append("delete-artifact"))
+    engine = _shutdown_worker(monkeypatch, _ShutdownContainer(actions), actions, grace_seconds=0, coordinator_guard=guard)
 
     engine.shutdown()
 
+    # Zero grace skips the Docker wait entirely.
     assert guard_calls == 2
     assert actions == ["shutdown", "reload", "close", "close"]
     assert engine._container is None
     assert engine._container_id is None
     assert engine._artifact_transfers == {}
+
+
+@pytest.mark.parametrize("remove_fails", [False, True])
+def test_shutdown_waits_for_container_exit_event_before_removal(monkeypatch, remove_fails: bool) -> None:
+    actions: list[str] = []
+    container = _ShutdownContainer(actions, remove_fails=remove_fails)
+    engine = _shutdown_worker(monkeypatch, container, actions, grace_seconds=2.75)
+    monkeypatch.setattr("runtime.docker_compute_worker.time.monotonic", lambda: 10.0)
+
+    engine.shutdown()
+
+    assert container.wait_calls == [(2.75, "not-running")]
+    if remove_fails:
+        # Placement and artifacts stay owned until removal is proven.
+        assert actions == ["shutdown", "wait", "reload", "remove", "close", "close"]
+    else:
+        assert actions == ["shutdown", "wait", "reload", "remove", "release-placement", "close", "close", "delete-artifact"]
+
+
+@pytest.mark.parametrize("wait_seconds", [0.4, 1.25])
+def test_failed_container_wait_polls_only_within_original_grace(monkeypatch, wait_seconds: float) -> None:
+    actions: list[str] = []
+    now = 0.0
+
+    def fail_wait() -> None:
+        nonlocal now
+        now += wait_seconds
+        raise RuntimeError("Docker wait failed")
+
+    def sleep(duration: float) -> None:
+        nonlocal now
+        now += duration
+
+    container = _ShutdownContainer(actions, wait=fail_wait)
+    engine = _shutdown_worker(monkeypatch, container, actions, grace_seconds=1.0)
+    monkeypatch.setattr("runtime.docker_compute_worker.time.monotonic", lambda: now)
+    monkeypatch.setattr("runtime.docker_compute_worker.time.sleep", sleep)
+
+    engine.shutdown()
+
+    fallback_polls = actions.count("reload") - 2  # Minus final validation and the post-stop reload.
+    assert container.wait_calls == [(1.0, "not-running")]
+    assert (fallback_polls > 0) == (wait_seconds < 1.0)
+    assert now == pytest.approx(max(wait_seconds, 1.0), abs=0.11)
+    assert actions.index("wait") < actions.index("stop") < actions.index("remove")
 
 
 def test_intentional_shutdown_is_not_reported_as_container_crash(monkeypatch) -> None:

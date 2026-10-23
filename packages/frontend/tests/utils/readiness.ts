@@ -1,4 +1,4 @@
-import { expect, type Locator, type Page } from '@playwright/test';
+import { errors, expect, type Locator, type Page } from '@playwright/test';
 
 function previewReadinessTimeoutMs(): number {
 	return 120_000;
@@ -42,6 +42,41 @@ async function waitForAnyVisible(locator: Locator, timeout: number): Promise<voi
 	await expect(locator.filter({ visible: true }).first()).toBeVisible({ timeout });
 }
 
+type PreviewSnapshot = {
+	state: string | null;
+	ready: string | null;
+	queryStatus: string | null;
+	fetchStatus: string | null;
+	hasData: string | null;
+	error: string | null;
+};
+
+function readPreviewSnapshot(element: Element): PreviewSnapshot {
+	return {
+		state: element.getAttribute('data-preview-state'),
+		ready: element.getAttribute('data-preview-ready'),
+		queryStatus: element.getAttribute('data-preview-query-status'),
+		fetchStatus: element.getAttribute('data-preview-fetch-status'),
+		hasData: element.getAttribute('data-preview-has-data'),
+		error: element.getAttribute('data-preview-error')
+	};
+}
+
+async function previewTimeoutError(
+	preview: Locator,
+	label: string,
+	timeout: number,
+	cause: unknown
+): Promise<Error> {
+	const details = await preview
+		.evaluate(readPreviewSnapshot, undefined, { timeout: 1_000 })
+		.catch(() => null);
+	return new Error(
+		`${label} did not become ready within ${timeout}ms (state=${JSON.stringify(details)})`,
+		{ cause }
+	);
+}
+
 async function waitForPreviewReady(
 	page: Page,
 	preview: Locator,
@@ -49,51 +84,37 @@ async function waitForPreviewReady(
 	label: string
 ): Promise<void> {
 	const deadline = Date.now() + timeout;
+	const terminal = preview.and(
+		page.locator('[data-preview-state="error"], [data-preview-ready="true"]')
+	);
 
 	while (true) {
 		const remaining = deadline - Date.now();
 		if (remaining <= 0) {
-			const details = await preview
-				.evaluate((element) => ({
-					state: element.getAttribute('data-preview-state'),
-					queryStatus: element.getAttribute('data-preview-query-status'),
-					fetchStatus: element.getAttribute('data-preview-fetch-status'),
-					hasData: element.getAttribute('data-preview-has-data'),
-					error: element.getAttribute('data-preview-error')
-				}))
-				.catch(() => null);
-			throw new Error(
-				`${label} did not become ready within ${timeout}ms (state=${JSON.stringify(details)})`
+			throw await previewTimeoutError(
+				preview,
+				label,
+				timeout,
+				new Error(`${label} readiness deadline expired before the next terminal wait`)
 			);
 		}
 
-		// Keep each browser-side lookup on a normal timeout. Passing the tiny
-		// remaining tail of the overall deadline (often 1–100ms) makes
-		// Playwright schedule a negative timer when the browser is busy under
-		// parallel CI load. The outer deadline still bounds this loop.
-		const pollTimeout = 1_000;
-		const state = await preview
-			.getAttribute('data-preview-state', { timeout: pollTimeout })
-			.catch(() => null);
-		if (state === 'error') {
-			const message =
-				(await preview.getAttribute('data-preview-error', { timeout: 1_000 }).catch(() => null)) ??
-				`${label} failed`;
-			throw new Error(`${label} failed before ready: ${message}`);
+		let snapshot: PreviewSnapshot;
+		try {
+			snapshot = await terminal.evaluate(readPreviewSnapshot, undefined, { timeout: remaining });
+		} catch (error) {
+			if (!(error instanceof errors.TimeoutError)) throw error;
+			throw await previewTimeoutError(preview, label, timeout, error);
 		}
 
-		if (
-			(await preview
-				.getAttribute('data-preview-ready', { timeout: pollTimeout })
-				.catch(() => null)) === 'true'
-		) {
-			return;
+		if (snapshot.state === 'error') {
+			throw new Error(`${label} failed before ready: ${snapshot.error ?? `${label} failed`}`);
 		}
 
-		const sleepMs = Math.floor(Math.min(100, deadline - Date.now()));
-		if (sleepMs > 0) {
-			await page.waitForTimeout(sleepMs);
-		}
+		if (snapshot.ready === 'true') return;
+		// A terminal attribute changed between locator resolution and this
+		// snapshot. Re-enter the native locator wait, which resolves the element
+		// again and remains bounded by the original deadline.
 	}
 }
 
@@ -109,8 +130,9 @@ type MonitoringTabKey = 'builds' | 'schedules' | 'health';
  * nav links) that lives outside page-specific content.
  */
 export async function waitForAppShell(page: Page, timeout = readyTimeoutMs()): Promise<void> {
-	await expect(mainNavigation(page)).toBeVisible({ timeout });
-	await expect(page.locator('[data-shell-interactive="true"]')).toBeVisible({ timeout });
+	await expect(
+		mainNavigation(page).and(page.locator('[data-shell-interactive="true"]'))
+	).toBeVisible({ timeout });
 	await waitForCurrentRouteConsistency(page, timeout);
 }
 
@@ -128,15 +150,17 @@ export async function waitForAppShell(page: Page, timeout = readyTimeoutMs()): P
  */
 export async function waitForLayoutReady(page: Page, timeout = readyTimeoutMs()): Promise<void> {
 	const bootstrapError = page.locator('[data-shell-bootstrap="error"]');
-	const nav = mainNavigation(page);
-	const shellState = nav.or(bootstrapError).filter({ visible: true }).first();
+	const shellState = mainNavigation(page)
+		.and(page.locator('[data-shell-interactive="true"]'))
+		.or(bootstrapError)
+		.filter({ visible: true })
+		.first();
 	await expect(shellState).toBeVisible({ timeout });
 	if (await bootstrapError.isVisible()) {
 		const message =
 			(await bootstrapError.innerText().catch(() => null)) ?? 'App shell bootstrap failed';
 		throw new Error(`App shell failed to bootstrap:\n${message}`);
 	}
-	await expect(page.locator('[data-shell-interactive="true"]')).toBeVisible({ timeout });
 	await waitForAnyVisible(page.locator('main'), timeout);
 	await waitForCurrentRouteConsistency(page, timeout);
 }
