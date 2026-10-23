@@ -45,6 +45,7 @@ from runtime.worker_runtime_client import (
     WorkerRuntimeClient,
     async_client_from_env,
     client_from_env,
+    compute_worker_status_result_proto,
     reset_datasource_metadata_snapshot,
     set_datasource_metadata_snapshot,
 )
@@ -1281,8 +1282,9 @@ def _execute_request_sync(
                 identity,
                 resource_config=resource_config,
             )
-            response = compute_schemas.ComputeWorkerStatusSchema.model_validate(manager.get_compute_worker_status(identity))
-            publish_complete(response=_compute_worker_status_result(response))
+            publish_complete(
+                response=compute_pb2.ComputeResponse(engine_status=compute_worker_status_result_proto(manager.get_compute_worker_status(identity)))
+            )
         elif claimed.kind == enums_pb2.COMPUTE_REQUEST_KIND_CONFIGURE_ENGINE:
             command = cast(compute_pb2.ComputeWorkerLifecycleCommand, _compute_command_from_claimed(claimed, "configure_engine"))
             identity = command.engine_identity
@@ -1290,8 +1292,9 @@ def _execute_request_sync(
             if resource_config is None:
                 raise ValueError("resource_config is required")
             manager.restart_engine_with_config(identity, resource_config)
-            response = compute_schemas.ComputeWorkerStatusSchema.model_validate(manager.get_compute_worker_status(identity))
-            publish_complete(response=_compute_worker_status_result(response))
+            publish_complete(
+                response=compute_pb2.ComputeResponse(engine_status=compute_worker_status_result_proto(manager.get_compute_worker_status(identity)))
+            )
         elif claimed.kind == enums_pb2.COMPUTE_REQUEST_KIND_SHUTDOWN_ENGINE:
             command = cast(compute_pb2.ComputeWorkerLifecycleCommand, _compute_command_from_claimed(claimed, "shutdown_engine"))
             identity = command.engine_identity
@@ -1449,64 +1452,6 @@ def _preview_result(value: compute_schemas.StepPreviewResponse) -> compute_pb2.C
     if value.metadata is not None:
         result.metadata.CopyFrom(dict_to_struct(value.metadata))
     return compute_pb2.ComputeResponse(preview=result)
-
-
-def _resource_config_proto(value: compute_schemas.ComputeWorkerResourceConfig | None) -> compute_pb2.ComputeWorkerResourceConfig | None:
-    if value is None:
-        return None
-    result = compute_pb2.ComputeWorkerResourceConfig()
-    if value.max_threads is not None:
-        result.max_threads = value.max_threads
-    if value.max_memory_mb is not None:
-        result.max_memory_mb = value.max_memory_mb
-    if value.streaming_chunk_size is not None:
-        result.streaming_chunk_size = value.streaming_chunk_size
-    return result
-
-
-def _compute_worker_status_result(value: compute_schemas.ComputeWorkerStatusSchema) -> compute_pb2.ComputeResponse:
-    result = compute_pb2.ComputeWorkerStatusResult(
-        analysis_id=value.analysis_id,
-        resource_id=value.resource_id,
-        status=cast(enums_pb2.ComputeWorkerStatus, value.status.number),
-    )
-    optional_scalars = {
-        "last_activity": value.last_activity,
-        "current_job_id": value.current_job_id,
-        "datasource_id": value.datasource_id,
-        "build_id": value.build_id,
-        "current_build_id": value.current_build_id,
-        "current_engine_run_id": value.current_compute_worker_run_id,
-        "container_id": value.container_id,
-        "image_digest": value.image_digest,
-        "termination_reason": value.termination_reason,
-        "exit_code": value.exit_code,
-        "oom_killed": value.oom_killed,
-        "supervisor_id": value.supervisor_id,
-        "owner_id": value.owner_id,
-    }
-    for field_name, field_value in optional_scalars.items():
-        if field_value is not None:
-            setattr(result, field_name, field_value)
-    if value.scope is not None:
-        result.scope = cast(enums_pb2.ComputeWorkerScope, value.scope.number)
-    if value.reuse_policy is not None:
-        result.reuse_policy = cast(enums_pb2.ComputeWorkerReusePolicy, value.reuse_policy.number)
-    if value.lifecycle_status is not None:
-        result.lifecycle_status = getattr(enums_pb2, f"COMPUTE_WORKER_INSTANCE_STATUS_{value.lifecycle_status.upper()}")
-    for field_name, config in (("resource_config", value.resource_config), ("effective_resources", value.effective_resources)):
-        proto_config = _resource_config_proto(config)
-        if proto_config is not None:
-            getattr(result, field_name).CopyFrom(proto_config)
-    if value.defaults is not None:
-        result.defaults.CopyFrom(
-            compute_pb2.ComputeWorkerDefaults(
-                max_threads=value.defaults.max_threads,
-                max_memory_mb=value.defaults.max_memory_mb,
-                streaming_chunk_size=value.defaults.streaming_chunk_size,
-            )
-        )
-    return compute_pb2.ComputeResponse(engine_status=result)
 
 
 def _retry_terminal_publication(claimed: ClaimedComputeRequest, publication: str, publish: Callable[[], None]) -> None:

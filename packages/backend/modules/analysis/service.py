@@ -274,7 +274,7 @@ def validate_stored_pipeline_definition(
     session: Session,
     pipeline_definition: dict[str, Any],
     analysis_id: str,
-) -> None:
+) -> tuple[list[PipelineTab], list[str]]:
     if not isinstance(pipeline_definition, dict):
         raise AnalysisValidationError(
             'Analysis pipeline_definition must be a dict',
@@ -289,7 +289,12 @@ def validate_stored_pipeline_definition(
         payload = AnalysisUpdateSchema(tabs=tabs)
     except ValidationError as exc:
         raise AnalysisValidationError(str(exc), details={'analysis_id': analysis_id}) from exc
-    _validate_analysis_payload(session, payload, analysis_id)
+    return _validate_analysis_payload(session, payload, analysis_id)
+
+
+def replace_datasource_links(session: Session, analysis_id: str, datasource_ids: list[str]) -> None:
+    session.execute(delete(AnalysisDataSource).where(col(AnalysisDataSource.analysis_id) == analysis_id))
+    session.add_all(AnalysisDataSource(analysis_id=analysis_id, datasource_id=datasource_id) for datasource_id in dict.fromkeys(datasource_ids))
 
 
 def _require_visible_analysis_input(session: Session, datasource_id: str) -> DataSource:
@@ -418,17 +423,7 @@ def create_analysis(
     )
 
     session.add(analysis)
-
-    seen: set[str] = set()
-    for datasource_id in datasource_ids:
-        if datasource_id in seen:
-            continue
-        seen.add(datasource_id)
-        link = AnalysisDataSource(
-            analysis_id=analysis_id,
-            datasource_id=datasource_id,
-        )
-        session.add(link)
+    replace_datasource_links(session, analysis_id, datasource_ids)
 
     version_service.create_version(session, analysis)
     session.commit()
@@ -772,15 +767,7 @@ def update_analysis(
     if data.tabs is not None:
         tabs_payload, datasource_ids = _validate_analysis_payload(session, data, analysis_id)
         analysis.pipeline_definition = PipelineDefinition(tabs=tabs_payload).to_dict()
-
-        session.execute(delete(AnalysisDataSource).where(col(AnalysisDataSource.analysis_id) == analysis_id))
-        for ds_id in set(datasource_ids):
-            session.add(
-                AnalysisDataSource(
-                    analysis_id=analysis_id,
-                    datasource_id=ds_id,
-                ),
-            )
+        replace_datasource_links(session, analysis_id, datasource_ids)
 
     analysis.updated_at = datetime.now(UTC).replace(tzinfo=None)
     analysis.revision += 1

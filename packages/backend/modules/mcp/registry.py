@@ -104,9 +104,8 @@ def _build_tool(route_data: dict, components: dict) -> MCPToolDefinition:
 
     text = op.get('description') or op.get('summary') or onboard.get('docstring')
     description = text if isinstance(text, str) and text.strip() else f'{method} {path}'
-    confirm_required = onboard.get('confirm_required')
-    if not isinstance(confirm_required, bool):
-        confirm_required = method.requires_confirmation_for_path(path)
+    # Destructive routes opt in with `mcp_confirm_required=True` on the route itself.
+    confirm_required = onboard.get('confirm_required') is True
 
     properties: dict[str, Any] = {}
     required: list[str] = []

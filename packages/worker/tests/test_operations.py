@@ -667,7 +667,7 @@ def test_with_columns_udf_can_use_sleep_helper(monkeypatch: pytest.MonkeyPatch) 
 
     monkeypatch.setattr(
         "operations.with_columns.time.sleep",
-        lambda seconds: calls.append(seconds),
+        calls.append,
     )
 
     lf = handler(

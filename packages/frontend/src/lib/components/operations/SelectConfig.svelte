@@ -13,12 +13,12 @@
 
 	interface Props {
 		schema: Schema;
-		config?: SelectConfigData;
+		config: SelectConfigData;
 	}
 
 	const CAST_TYPES = Object.values(CAST_MAP_TYPE_TOKENS);
 
-	let { schema, config = $bindable({ columns: [], cast_map: {} }) }: Props = $props();
+	let { schema, config = $bindable() }: Props = $props();
 
 	const safeColumns = $derived(Array.isArray(config.columns) ? config.columns : []);
 	const safeCasts = $derived(config.cast_map ?? {});

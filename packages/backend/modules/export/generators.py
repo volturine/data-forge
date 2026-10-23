@@ -151,14 +151,12 @@ def select_tabs(pipeline: PipelineDefinition, tab_id: str | None) -> ExportSelec
             current_tab = tab_map.get(current)
             if current_tab is None:
                 continue
-            for dep in _tab_dependencies(current_tab):
-                if dep in tab_map:
-                    stack.append(dep)
+            stack.extend(dep for dep in _tab_dependencies(current_tab) if dep in tab_map)
     else:
         required = set(tab_map.keys())
         target_tab = pipeline.tabs[-1]
 
-    in_degree = {tid: 0 for tid in required}
+    in_degree = dict.fromkeys(required, 0)
     graph: dict[str, list[str]] = {tid: [] for tid in required}
     for tid in required:
         tab = tab_map[tid]

@@ -2,7 +2,6 @@
 
 from __future__ import annotations
 
-import re
 from typing import Any
 
 from pydantic import BaseModel, Field, computed_field
@@ -40,9 +39,6 @@ class MCPHttpMethod(DataForgeStrEnum):
     @property
     def is_mutating(self) -> bool:
         return self.safety == MCPToolSafety.MUTATING
-
-    def requires_confirmation_for_path(self, path: str) -> bool:
-        return any(self == method and re.match(pattern, path) for method, pattern in CONFIRM_REQUIRED_PATTERNS)
 
 
 class MCPToolDefinition(BaseModel):
@@ -130,11 +126,3 @@ class MCPToolDefinition(BaseModel):
                 'parameters': self.input_schema,
             },
         }
-
-
-CONFIRM_REQUIRED_PATTERNS: tuple[tuple[MCPHttpMethod, str], ...] = (
-    (MCPHttpMethod.DELETE, r'^/api/v1/datasource/'),
-    (MCPHttpMethod.DELETE, r'^/api/v1/scheduler/'),
-    (MCPHttpMethod.DELETE, r'^/api/v1/healthchecks/'),
-    (MCPHttpMethod.DELETE, r'^/api/v1/analysis/'),
-)

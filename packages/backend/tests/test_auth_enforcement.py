@@ -230,7 +230,7 @@ class TestEngineWebsocketAuth:
 
 class TestNamespaceMiddleware:
     def test_headerless_health_does_not_register_implicit_namespace_when_auth_is_disabled(self, client: TestClient, monkeypatch: pytest.MonkeyPatch) -> None:
-        import backend_core.application as application
+        from backend_core import application
 
         monkeypatch.setattr('backend_core.auth_config.settings.auth_required', False)
 

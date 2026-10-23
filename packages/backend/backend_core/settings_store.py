@@ -42,7 +42,7 @@ _BOOTSTRAP_SECRET_FIELDS = (
 
 
 def _warn_bootstrap_secret_missing(name: str) -> None:
-    logging.warning('Skipping %s bootstrap because SETTINGS_ENCRYPTION_KEY is not set', name)
+    logger.warning('Skipping %s bootstrap because SETTINGS_ENCRYPTION_KEY is not set', name)
 
 
 def _notify_settings_changed(session: Session) -> None:

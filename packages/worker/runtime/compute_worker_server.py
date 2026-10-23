@@ -317,7 +317,7 @@ def _execute_job(
     payload: dict[str, object],
     progress_callback: Callable[[dict[str, object]], None],
 ) -> ComputeWorkerResult:
-    if kind.startswith("datasource_") or kind.startswith("excel_"):
+    if kind.startswith(("datasource_", "excel_")):
         return ComputeWorkerResult(
             job_id=job_id,
             data=_execute_datasource_job(kind, payload, progress_callback),
@@ -610,7 +610,7 @@ class PolarsComputeWorkerServicer(compute_worker_runtime_pb2_grpc.PolarsComputeW
                             continue
                         event = dict(raw_event)
                         sequence = event_sequence
-                        emitted_at = datetime.fromisoformat(str(event.pop("emitted_at")).replace("Z", "+00:00"))
+                        emitted_at = datetime.fromisoformat(str(event.pop("emitted_at")))
                         batch.append(
                             compute_worker_runtime_pb2.ComputeWorkerJobEvent(
                                 job_id=request.job_id,

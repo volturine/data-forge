@@ -11,17 +11,12 @@
 	import { css, stepConfig, label } from '#lib/styles/panda.js';
 	import { SvelteSet } from 'svelte/reactivity';
 
-	const defaultConfig: UnionByNameConfigData = {
-		sources: [],
-		allow_missing: true
-	};
-
 	interface Props {
 		schema: Schema;
-		config?: UnionByNameConfigData;
+		config: UnionByNameConfigData;
 	}
 
-	let { schema, config = $bindable(defaultConfig) }: Props = $props();
+	let { schema, config = $bindable() }: Props = $props();
 
 	const currentTabDatasource = $derived(analysisStore.activeTab?.datasource.id ?? null);
 	const currentDatasource = $derived(

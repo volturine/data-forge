@@ -166,16 +166,17 @@ def _preview(
             raise ValueError("Excel row bounds exceed sheet size")
         if not sheet.max_column or start_col >= sheet.max_column or end_col >= sheet.max_column:
             raise ValueError("Excel column bounds exceed sheet size")
-        rows = []
         preview_end_row = min(start_row + _PREVIEW_ROW_LIMIT - 1, end_row)
-        for row in sheet.iter_rows(
-            min_row=start_row + 1,
-            max_row=preview_end_row + 1,
-            min_col=start_col + 1,
-            max_col=end_col + 1,
-            values_only=True,
-        ):
-            rows.append({"cells": [str(value) if value is not None else None for value in row]})
+        rows = [
+            {"cells": [str(value) if value is not None else None for value in row]}
+            for row in sheet.iter_rows(
+                min_row=start_row + 1,
+                max_row=preview_end_row + 1,
+                min_col=start_col + 1,
+                max_col=end_col + 1,
+                values_only=True,
+            )
+        ]
         return {
             "preflight_id": "",
             "preview_rows": rows,

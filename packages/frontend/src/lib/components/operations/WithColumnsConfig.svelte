@@ -14,10 +14,10 @@
 
 	interface Props {
 		schema: Schema;
-		config?: WithColumnsConfigData;
+		config: WithColumnsConfigData;
 	}
 
-	let { schema, config = $bindable({ expressions: [] }) }: Props = $props();
+	let { schema, config = $bindable() }: Props = $props();
 
 	let exprType = $state<'column' | 'literal' | 'udf'>('column');
 	let exprName = $state('');

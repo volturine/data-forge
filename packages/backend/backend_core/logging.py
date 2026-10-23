@@ -435,7 +435,7 @@ class RequestTimingMiddleware:
 
     async def __call__(self, scope: dict[str, Any], receive: AsgiReceive, send: AsgiSend) -> None:
         path = str(scope.get('path') or '')
-        is_api_or_health = path == '/api' or path.startswith('/api/') or path == '/health' or path.startswith('/health/')
+        is_api_or_health = path in {'/api', '/health'} or path.startswith(('/api/', '/health/'))
         if scope.get('type') != 'http' or not is_api_or_health:
             await self.app(scope, receive, send)
             return

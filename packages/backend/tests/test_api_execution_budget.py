@@ -232,7 +232,6 @@ async def test_config_and_auth_db_adapters_progress_while_general_executor_is_bl
 
     def validate_session(_session: Session, token: str) -> None:
         validation_started.set()
-        return None
 
     def run_test_settings_db(function, *args, **kwargs):
         return function(None, *args, **kwargs)

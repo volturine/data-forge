@@ -540,62 +540,6 @@ describe('ChatStore — pure local logic', () => {
 		});
 	});
 
-	describe('draft management', () => {
-		test('ensureDraft creates a draft if missing', () => {
-			store.ensureDraft('tool-x', { key: 'value' });
-			expect(store.toolDrafts.has('tool-x')).toBe(true);
-			expect(store.toolDrafts.get('tool-x')?.args).toEqual({ key: 'value' });
-		});
-
-		test('ensureDraft does not overwrite existing draft', () => {
-			store.ensureDraft('tool-x', { key: 'original' });
-			store.ensureDraft('tool-x', { key: 'new' });
-			expect(store.toolDrafts.get('tool-x')?.args).toEqual({ key: 'original' });
-		});
-
-		test('updateDraft replaces args', () => {
-			store.ensureDraft('tool-x', { key: 'old' });
-			store.updateDraft('tool-x', { key: 'updated' });
-			expect(store.toolDrafts.get('tool-x')?.args).toEqual({ key: 'updated' });
-		});
-
-		test('setDraftErrors updates errors', () => {
-			store.ensureDraft('tool-x', {});
-			store.setDraftErrors('tool-x', [{ path: '/a', message: 'required' }]);
-			expect(store.toolDrafts.get('tool-x')?.errors).toEqual([{ path: '/a', message: 'required' }]);
-		});
-
-		test('clearDraft removes draft', () => {
-			store.ensureDraft('tool-x', {});
-			store.clearDraft('tool-x');
-			expect(store.toolDrafts.has('tool-x')).toBe(false);
-		});
-	});
-
-	describe('addLocalToolCall / setLocalToolResult / setLocalToolError', () => {
-		test('addLocalToolCall adds to toolCalls and timeline', () => {
-			const tc = store.addLocalToolCall('t1', 'GET', '/path', { a: 1 });
-			expect(tc.status).toBe('running');
-			expect(store.toolCalls).toHaveLength(1);
-			expect(store.timeline).toHaveLength(1);
-			expect(store.timeline[0].kind).toBe('tool');
-		});
-
-		test('setLocalToolResult marks tool done', () => {
-			store.addLocalToolCall('t1', 'GET', '/path', {});
-			store.setLocalToolResult('t1', { ok: true });
-			expect(store.toolCalls[0].status).toBe('done');
-			expect(store.toolCalls[0].result).toEqual({ ok: true });
-		});
-
-		test('setLocalToolError marks tool error', () => {
-			store.addLocalToolCall('t1', 'GET', '/path', {});
-			store.setLocalToolError('t1', [{ path: '/', message: 'fail' }]);
-			expect(store.toolCalls[0].status).toBe('error');
-			expect(store.toolCalls[0].errors).toHaveLength(1);
-		});
-	});
-
 	describe('_handleEvent via event processing', () => {
 		function handle(event: ChatEvent) {
 			const fn = Reflect.get(store, '_handleEvent') as ((event: ChatEvent) => void) | undefined;
@@ -603,11 +547,14 @@ describe('ChatStore — pure local logic', () => {
 			fn?.call(store, event);
 		}
 
-		test('message event adds to messages and timeline', () => {
+		const messages = () =>
+			store.timeline.flatMap((entry) => (entry.kind === 'message' ? [entry.item] : []));
+
+		test('message event adds to the timeline', () => {
 			handle({ type: 'message', role: 'assistant', content: 'Hello', ts: 1000 });
-			expect(store.messages).toHaveLength(1);
-			expect(store.messages[0].content).toBe('Hello');
-			expect(store.messages[0].role).toBe('assistant');
+			expect(messages()).toHaveLength(1);
+			expect(messages()[0].content).toBe('Hello');
+			expect(messages()[0].role).toBe('assistant');
 			expect(store.timeline).toHaveLength(1);
 		});
 
@@ -618,7 +565,7 @@ describe('ChatStore — pure local logic', () => {
 				content: '[ctx:path=/test]\nWhat is this?',
 				ts: 1000
 			});
-			expect(store.messages[0].content).toBe('What is this?');
+			expect(messages()[0].content).toBe('What is this?');
 		});
 
 		test('tool_call event adds to toolCalls and timeline', () => {
@@ -632,6 +579,20 @@ describe('ChatStore — pure local logic', () => {
 			expect(store.toolCalls).toHaveLength(1);
 			expect(store.toolCalls[0].status).toBe('running');
 			expect(store.toolCalls[0].tool_id).toBe('tool-1');
+		});
+
+		test('tool updates reach the timeline entry the card renders', () => {
+			handle({ type: 'tool_call', tool_id: 'tool-1', method: 'GET', path: '/test', args: {} });
+			store.toolCalls[0].expanded = true;
+			handle({
+				type: 'tool_result',
+				tool_id: 'tool-1',
+				result: { status: 200, body: {}, ok: true },
+				duration_ms: 5
+			});
+			const [entry] = store.timeline;
+			expect(entry.kind === 'tool' && entry.item.expanded).toBe(true);
+			expect(entry.kind === 'tool' && entry.item.status).toBe('done');
 		});
 
 		test('tool_result updates tool status to done', () => {
@@ -654,8 +615,8 @@ describe('ChatStore — pure local logic', () => {
 				errors: [{ path: '/body', message: 'invalid' }]
 			});
 			expect(store.toolCalls[0].status).toBe('error');
-			expect(store.messages).toHaveLength(1);
-			expect(store.messages[0].role).toBe('tool');
+			expect(messages()).toHaveLength(1);
+			expect(messages()[0].role).toBe('tool');
 			expect(store.loading).toBe(false);
 		});
 
@@ -699,7 +660,7 @@ describe('ChatStore — pure local logic', () => {
 			handle({ type: 'done' });
 			expect(store.loading).toBe(false);
 			expect(store.currentTurn).toBe(0);
-			expect(store.messages.map((m) => m.content)).toEqual(['ping', 'OK']);
+			expect(messages().map((m) => m.content)).toEqual(['ping', 'OK']);
 			expect(store.timeline.filter((e) => e.kind === 'message')).toHaveLength(2);
 			const assistant = store.timeline.find(
 				(e) => e.kind === 'message' && e.item.role === 'assistant'
@@ -777,11 +738,11 @@ describe('ChatStore — pure local logic', () => {
 		test('reset clears session state', () => {
 			store.open = true;
 			store.sessionId = 'sess-1';
-			store.messages = [{ id: '1', role: 'user', content: 'hi', ts: 0 }];
+			store.timeline = [{ kind: 'message', item: { id: '1', role: 'user', content: 'hi', ts: 0 } }];
 			store.reset();
 			expect(store.open).toBe(false);
 			expect(store.sessionId).toBeNull();
-			expect(store.messages).toHaveLength(0);
+			expect(store.timeline).toHaveLength(0);
 		});
 	});
 

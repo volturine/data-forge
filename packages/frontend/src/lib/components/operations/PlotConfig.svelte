@@ -67,48 +67,10 @@
 
 	interface Props {
 		schema: Schema;
-		config?: PlotConfigData;
+		config: PlotConfigData;
 	}
 
-	const defaultConfig = {
-		chart_type: 'bar',
-		x_column: '',
-		y_column: '',
-		bins: 10,
-		aggregation: 'sum',
-		group_column: null,
-		group_sort_by: null,
-		group_sort_order: 'asc',
-		group_sort_column: null,
-		stack_mode: 'grouped',
-		sort_by: null,
-		sort_order: 'asc',
-		sort_column: null,
-		x_axis_label: '',
-		y_axis_label: '',
-		y_axis_scale: 'linear',
-		y_axis_min: null,
-		y_axis_max: null,
-		display_units: '',
-		decimal_places: 2,
-		legend_position: 'right',
-		title: '',
-		area_opacity: 0.35,
-		date_bucket: null,
-		date_ordinal: null,
-		pan_zoom_enabled: false,
-		selection_enabled: false,
-		area_selection_enabled: false,
-		series_colors: [],
-		overlays: [],
-		reference_lines: [],
-		chart_height: 'medium' as const,
-		chart_width: 'normal' as const
-	} satisfies PlotConfigData;
-
-	const configDefaults = defaultConfig satisfies Record<string, unknown>;
-
-	let { schema, config = $bindable(configDefaults) }: Props = $props();
+	let { schema, config = $bindable() }: Props = $props();
 
 	let activeTab = $state<'data' | 'look'>('data');
 

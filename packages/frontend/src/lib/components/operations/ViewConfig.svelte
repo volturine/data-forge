@@ -5,11 +5,10 @@
 
 	interface Props {
 		schema: Schema;
-		config?: ViewConfigData;
+		config: ViewConfigData;
 	}
 
-	let { schema: _schema, config = $bindable({ rowLimit: 100, cacheEnabled: true }) }: Props =
-		$props();
+	let { schema: _schema, config = $bindable() }: Props = $props();
 </script>
 
 <div class={stepConfig()}>

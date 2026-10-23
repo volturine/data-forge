@@ -2,28 +2,15 @@
 	import type { Schema } from '#lib/types/schema.js';
 	import type { StringMethodsConfigData } from '#lib/types/operation-config.js';
 	import ColumnDropdown from '#lib/components/common/ColumnDropdown.svelte';
+	import { getColumnTypeConfig } from '#lib/utils/column-types.js';
 	import { css, label, stepConfig, input } from '#lib/styles/panda.js';
 
 	interface Props {
 		schema: Schema;
-		config?: StringMethodsConfigData;
+		config: StringMethodsConfigData;
 	}
 
-	let {
-		schema,
-		config = $bindable({
-			column: '',
-			method: 'uppercase',
-			new_column: '',
-			start: 0,
-			end: null,
-			pattern: '',
-			replacement: '',
-			group_index: 0,
-			delimiter: ' ',
-			index: 0
-		})
-	}: Props = $props();
+	let { schema, config = $bindable() }: Props = $props();
 
 	const methods = [
 		{ value: 'uppercase', label: 'Uppercase', params: [] },
@@ -40,14 +27,10 @@
 		{ value: 'split_take', label: 'Split & Take', params: ['delimiter', 'index'] }
 	];
 
-	const stringColumns = $derived(
-		schema.columns.filter(
-			(col) =>
-				col.dtype.toLowerCase().includes('str') ||
-				col.dtype.toLowerCase().includes('string') ||
-				col.dtype.toLowerCase() === 'utf8'
-		)
-	);
+	// `.str` operations apply to String columns only (not Struct or Categorical).
+	const isStringColumn = (col: { dtype: string }) =>
+		getColumnTypeConfig(col.dtype).canonicalName === 'String';
+	const stringColumns = $derived(schema.columns.filter(isStringColumn));
 
 	const currentMethod = $derived(methods.find((m) => m.value === config.method));
 
@@ -87,10 +70,7 @@
 			value={config.column ?? ''}
 			onChange={(val) => (config.column = val)}
 			placeholder="Select string column..."
-			filter={(col) =>
-				col.dtype.toLowerCase().includes('str') ||
-				col.dtype.toLowerCase().includes('string') ||
-				col.dtype.toLowerCase() === 'utf8'}
+			filter={isStringColumn}
 		/>
 		{#if stringColumns.length === 0}
 			<p

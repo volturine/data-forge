@@ -1365,7 +1365,7 @@ class WorkerRuntimeClient:
         request = worker_runtime_pb2.WorkerPersistComputeWorkerSnapshotRequest(
             worker_id=worker_id,
             namespace=namespace,
-            engine_status=[_compute_worker_status_result_proto(status) for status in statuses],
+            engine_status=[compute_worker_status_result_proto(status) for status in statuses],
         )
         self._unary("PersistComputeWorkerSnapshot", request)
 
@@ -1687,7 +1687,7 @@ def _engine_resource_config_proto(payload: Mapping[str, object]) -> compute_pb2.
     return config
 
 
-def _compute_worker_status_result_proto(status_info: ComputeWorkerStatusInfo) -> compute_pb2.ComputeWorkerStatusResult:
+def compute_worker_status_result_proto(status_info: ComputeWorkerStatusInfo) -> compute_pb2.ComputeWorkerStatusResult:
     if not status_info.resource_id:
         raise RuntimeError(f"Engine status resource_id must be a non-empty string: {status_info!r}")
     status = compute_pb2.ComputeWorkerStatusResult(
@@ -1886,7 +1886,7 @@ def _event_datetime(payload: Mapping[str, object], key: str) -> datetime:
     if isinstance(value, datetime):
         return value
     if isinstance(value, str) and value.strip():
-        return datetime.fromisoformat(value.replace("Z", "+00:00"))
+        return datetime.fromisoformat(value)
     raise ValueError(f"build event {key} is required")
 
 

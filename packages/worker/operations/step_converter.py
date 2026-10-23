@@ -44,6 +44,9 @@ def analysis_pipeline_to_execution_payload(pipeline: analysis_pb2.AnalysisPipeli
             datasource["source_type"] = domain_token("DataSourceType", datasource["source_type"])
         output = tab.get("output")
         if isinstance(output, dict):
+            # The protobuf JSON mapping renders int64 fields as strings.
+            if "build_timeout_warning_ms" in output:
+                output["build_timeout_warning_ms"] = int(output["build_timeout_warning_ms"])
             for field, enum_name in (
                 ("format", "ExportFormat"),
                 ("datasource_type", "DataSourceType"),

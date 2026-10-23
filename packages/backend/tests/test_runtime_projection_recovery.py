@@ -481,7 +481,7 @@ async def test_recovery_db_session_creation_use_and_close_stay_in_worker_thread(
 
 @pytest.mark.asyncio
 async def test_main_api_listener_recovery_wiring_has_mandatory_projection_callbacks(monkeypatch) -> None:
-    import backend_core.application as application
+    from backend_core import application
 
     recover = AsyncMock()
     monkeypatch.setattr(application, 'recover_runtime_notifications', recover)

@@ -80,11 +80,6 @@ export interface UsageInfo {
 export type TimelineEntry =
 	{ kind: 'message'; item: ChatMessage } | { kind: 'tool'; item: ToolCall };
 
-export interface ToolDraft {
-	args: Record<string, unknown>;
-	errors: { path: string; message: string }[];
-}
-
 export class ChatStore {
 	open = $state(false);
 	sessionId = $state<string | null>(null);
@@ -101,10 +96,11 @@ export class ChatStore {
 	modelsLoading = $state(false);
 	disabledTools = $state<SvelteSet<string>>(new SvelteSet());
 	disabledTags = $state<SvelteSet<string>>(new SvelteSet());
-	messages = $state<ChatMessage[]>([]);
-	toolCalls = $state<ToolCall[]>([]);
 	timeline = $state<TimelineEntry[]>([]);
-	toolDrafts = $state<SvelteMap<string, ToolDraft>>(new SvelteMap());
+	// Tool cards render the timeline entries, so every tool update must reach that same proxy.
+	toolCalls = $derived(
+		this.timeline.flatMap((entry) => (entry.kind === 'tool' ? [entry.item] : []))
+	);
 	loading = $state(false);
 	error = $state<string | null>(null);
 	initState = $state<ChatInitializationState>('idle');
@@ -272,10 +268,6 @@ export class ChatStore {
 	isTagFullyEnabled(tag: string): boolean {
 		const group = this.tagGroups.get(tag) ?? [];
 		return group.length > 0 && group.every((t) => this.isToolEnabled(t.id));
-	}
-
-	isTagEnabled(tag: string): boolean {
-		return !this.disabledTags.has(tag);
 	}
 
 	isToolEnabled(id: string): boolean {
@@ -473,8 +465,6 @@ export class ChatStore {
 				this.sessionId = sessionId;
 				this._lastEventId = data.last_event_id;
 				this._refreshConfigured();
-				this.messages = [];
-				this.toolCalls = [];
 				this.timeline = [];
 				this.sessionUsage = { prompt_tokens: 0, completion_tokens: 0, total_tokens: 0 };
 				this.lastTurnUsage = null;
@@ -683,7 +673,6 @@ export class ChatStore {
 					content: displayContent,
 					ts: event.ts ?? nowEpochMs()
 				};
-				this.messages.push(msg);
 				this.timeline.push({ kind: 'message', item: msg });
 				break;
 			}
@@ -696,7 +685,6 @@ export class ChatStore {
 					status: 'running',
 					expanded: false
 				};
-				this.toolCalls.push(tc);
 				this.timeline.push({ kind: 'tool', item: tc });
 				break;
 			}
@@ -717,7 +705,6 @@ export class ChatStore {
 					content: summary,
 					ts: event.ts ?? nowEpochMs()
 				};
-				this.messages.push(errMsg);
 				this.timeline.push({ kind: 'message', item: errMsg });
 				this.loading = false;
 				break;
@@ -732,20 +719,7 @@ export class ChatStore {
 				const startTc = this.toolCalls.findLast(
 					(t) => t.tool_id === event.tool_id && t.status === 'running'
 				);
-				if (startTc) {
-					startTc.startedAt = nowEpochMs();
-				}
-				for (let i = this.timeline.length - 1; i >= 0; i--) {
-					const entry = this.timeline[i];
-					if (
-						entry.kind === 'tool' &&
-						entry.item.tool_id === event.tool_id &&
-						entry.item.status === 'running'
-					) {
-						entry.item.startedAt = nowEpochMs();
-						break;
-					}
-				}
+				if (startTc) startTc.startedAt = nowEpochMs();
 				break;
 			}
 			case 'tool_confirm': {
@@ -759,17 +733,6 @@ export class ChatStore {
 					(t) => t.tool_id === event.tool_id && t.status === 'running'
 				);
 				if (confirmTc) confirmTc.status = 'confirming';
-				for (let i = this.timeline.length - 1; i >= 0; i--) {
-					const entry = this.timeline[i];
-					if (
-						entry.kind === 'tool' &&
-						entry.item.tool_id === event.tool_id &&
-						entry.item.status === 'running'
-					) {
-						entry.item.status = 'confirming';
-						break;
-					}
-				}
 				break;
 			}
 			case 'ui_patch': {
@@ -811,31 +774,14 @@ export class ChatStore {
 		errors?: { path: string; message: string }[],
 		duration_ms?: number
 	): void {
-		// Update in toolCalls array
 		const tc = this.toolCalls.findLast(
 			(t) => t.tool_id === toolId && (t.status === 'running' || t.status === 'confirming')
 		);
-		if (tc) {
-			tc.status = status;
-			if (result !== undefined) tc.result = result;
-			if (errors) tc.errors = errors;
-			if (duration_ms !== undefined) tc.duration_ms = duration_ms;
-		}
-		// Also update through timeline proxy to ensure reactivity in both arrays
-		for (let i = this.timeline.length - 1; i >= 0; i--) {
-			const entry = this.timeline[i];
-			if (
-				entry.kind === 'tool' &&
-				entry.item.tool_id === toolId &&
-				(entry.item.status === 'running' || entry.item.status === 'confirming')
-			) {
-				entry.item.status = status;
-				if (result !== undefined) entry.item.result = result;
-				if (errors) entry.item.errors = errors;
-				if (duration_ms !== undefined) entry.item.duration_ms = duration_ms;
-				break;
-			}
-		}
+		if (!tc) return;
+		tc.status = status;
+		if (result !== undefined) tc.result = result;
+		if (errors) tc.errors = errors;
+		if (duration_ms !== undefined) tc.duration_ms = duration_ms;
 	}
 
 	private _applyUiPatch(event: ChatUiPatchEvent): void {
@@ -950,53 +896,6 @@ export class ChatStore {
 		return parts[parts.length - 1];
 	}
 
-	ensureDraft(toolId: string, args: Record<string, unknown>): void {
-		if (!this.toolDrafts.has(toolId)) {
-			this.toolDrafts.set(toolId, { args: { ...args }, errors: [] });
-		}
-	}
-
-	updateDraft(toolId: string, args: Record<string, unknown>): void {
-		const existing = this.toolDrafts.get(toolId);
-		this.toolDrafts.set(toolId, { args, errors: existing?.errors ?? [] });
-	}
-
-	setDraftErrors(toolId: string, errors: { path: string; message: string }[]): void {
-		const existing = this.toolDrafts.get(toolId);
-		this.toolDrafts.set(toolId, { args: existing?.args ?? {}, errors });
-	}
-
-	clearDraft(toolId: string): void {
-		this.toolDrafts.delete(toolId);
-	}
-
-	addLocalToolCall(
-		toolId: string,
-		method: string,
-		path: string,
-		args: Record<string, unknown>
-	): ToolCall {
-		const tc: ToolCall = {
-			tool_id: toolId,
-			method,
-			path,
-			args,
-			status: 'running',
-			expanded: false
-		};
-		this.toolCalls.push(tc);
-		this.timeline.push({ kind: 'tool', item: tc });
-		return tc;
-	}
-
-	setLocalToolResult(toolId: string, result: unknown): void {
-		this._updateToolStatus(toolId, 'done', result);
-	}
-
-	setLocalToolError(toolId: string, errors: { path: string; message: string }[]): void {
-		this._updateToolStatus(toolId, 'error', undefined, errors);
-	}
-
 	requestCloseSession(): void {
 		if (!this.sessionId) return;
 		this.confirmClose = true;
@@ -1017,10 +916,7 @@ export class ChatStore {
 
 	private _resetState(): void {
 		this.sessionId = null;
-		this.messages = [];
-		this.toolCalls = [];
 		this.timeline = [];
-		this.toolDrafts = new SvelteMap();
 		this.loading = false;
 		this.error = null;
 		this.lastFailedContent = null;

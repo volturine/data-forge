@@ -329,7 +329,7 @@ async def test_request_and_build_jobs_share_manager_capacity_and_shutdown_bypass
         )
         tasks.append(asyncio.create_task(compute_request_runtime._execute_request(shutdown_claim, manager)))
         await _wait_for_thread_event(tracker.started_event("build-c"))
-        await _wait_until(lambda: tasks[2].done())
+        await _wait_until(tasks[2].done)
         await asyncio.wait_for(tasks[-1], timeout=3)
         assert completed and completed[-1].WhichOneof("response") == "ack"
         assert shutdown_claim.id not in compute_submissions

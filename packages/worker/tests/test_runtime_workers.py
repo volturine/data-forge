@@ -1128,7 +1128,7 @@ async def test_run_worker_manager_runtime_uses_manager_capacity_for_builds(
     monkeypatch.setattr(
         runtime_process,
         "start_data_plane_grpc_server_in_thread",
-        lambda: FakeDataPlaneServer(),
+        FakeDataPlaneServer,
     )
 
     async def fake_compute_request_loop(local_stop, **kwargs) -> None:

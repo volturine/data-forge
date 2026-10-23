@@ -95,7 +95,7 @@ _SHARED_FLIGHT_COMMANDS = {
     enums_pb2.COMPUTE_REQUEST_KIND_PREVIEW: 'preview',
     enums_pb2.COMPUTE_REQUEST_KIND_SCHEMA: 'schema',
     enums_pb2.COMPUTE_REQUEST_KIND_ROW_COUNT: 'row_count',
-    **{kind: 'datasource' for kind in DATASOURCE_FLIGHT_REQUEST_KINDS},
+    **dict.fromkeys(DATASOURCE_FLIGHT_REQUEST_KINDS, 'datasource'),
 }
 
 
@@ -192,7 +192,7 @@ def _snapshot_input_revisions(session: Session, command: compute_pb2.ComputeComm
         .order_by(col(DataSource.id))
         .with_for_update(read=True)
     ).all()
-    revisions = {datasource_id: revision for datasource_id, revision in rows}
+    revisions = dict(rows)
     for datasource_id in sorted(datasource_ids):
         revision = revisions.get(datasource_id)
         if revision is None:

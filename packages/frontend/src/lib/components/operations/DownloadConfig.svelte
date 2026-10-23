@@ -2,12 +2,12 @@
 	import type { DownloadConfigData } from '#lib/types/operation-config.js';
 
 	interface Props {
-		config?: DownloadConfigData;
+		config: DownloadConfigData;
 	}
 
 	import { css, stepConfig, input } from '#lib/styles/panda.js';
 
-	let { config = $bindable({ format: 'csv', filename: 'download' }) }: Props = $props();
+	let { config = $bindable() }: Props = $props();
 
 	const formats = [
 		{ value: 'csv', label: 'CSV' },

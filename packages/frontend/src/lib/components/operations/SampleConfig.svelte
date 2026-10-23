@@ -2,13 +2,13 @@
 	import { css, input, label, stepConfig } from '#lib/styles/panda.js';
 
 	interface Props {
-		config?: {
+		config: {
 			fraction?: number;
 			seed?: number | null;
 		};
 	}
 
-	let { config = $bindable({ fraction: 0.5, seed: 42 }) }: Props = $props();
+	let { config = $bindable() }: Props = $props();
 </script>
 
 <div class={stepConfig()} role="region" aria-label="Sample configuration">

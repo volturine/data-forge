@@ -106,7 +106,7 @@ def test_create_namespace_endpoint_registers_namespace(monkeypatch: pytest.Monke
     provisioned: list[str] = []
 
     monkeypatch.setattr(namespace_routes, 'register_namespace', lambda session, name: registered.append(name))
-    monkeypatch.setattr(namespace_routes, '_provision_namespace_bucket', lambda name: provisioned.append(name))
+    monkeypatch.setattr(namespace_routes, '_provision_namespace_bucket', provisioned.append)
     monkeypatch.setattr(namespace_routes, 'initialize_namespace_db', lambda name: None)
     monkeypatch.setattr(namespace_routes, 'namespace_provision_lock', lambda _name: nullcontext())
 

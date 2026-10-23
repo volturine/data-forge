@@ -5,7 +5,7 @@
 
 	interface Props {
 		schema: Schema;
-		config?: {
+		config: {
 			id_vars?: string[];
 			value_vars?: string[];
 			variable_name?: string;
@@ -13,7 +13,7 @@
 		};
 	}
 
-	let { schema, config = $bindable({}) }: Props = $props();
+	let { schema, config = $bindable() }: Props = $props();
 
 	// Helper to get config value with default
 	const get = <T,>(key: keyof typeof config, defaultValue: T): T =>

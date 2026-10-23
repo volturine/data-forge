@@ -9,13 +9,10 @@
 
 	interface Props {
 		schema: Schema;
-		config?: FillNullConfigData;
+		config: FillNullConfigData;
 	}
 
-	let {
-		schema,
-		config = $bindable({ strategy: 'literal', columns: [], value: '', value_type: 'Utf8' })
-	}: Props = $props();
+	let { schema, config = $bindable() }: Props = $props();
 
 	const strategies = [
 		{ value: 'literal', label: 'Fill with Value', needsValue: true, needsColumns: true },

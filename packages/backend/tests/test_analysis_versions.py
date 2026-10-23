@@ -7,7 +7,7 @@ from sqlmodel import Session, select
 
 from backend_core.domain.analysis.models import AnalysisStatus
 from backend_core.domain.datasource.source_types import DataSourceType
-from backend_core.persistence.analysis.models import Analysis
+from backend_core.persistence.analysis.models import Analysis, AnalysisDataSource
 from backend_core.persistence.analysis_versions.models import AnalysisVersion
 from backend_core.persistence.datasource.models import DataSource
 from backend_core.persistence.locks.models import ResourceLock
@@ -395,7 +395,7 @@ def test_restore_version_rejects_missing_branch(test_db_session, client, sample_
     assert 'tabs.0.datasource.config.branch' in response.json()['detail'].lower()
 
 
-def test_restore_version_relinks_analysis_datasource(test_db_session, client):
+def test_restore_version_relinks_tab_and_join_datasources(test_db_session, client, sample_datasource: DataSource):
     analysis_id = str(uuid.uuid4())
     source_id = str(uuid.uuid4())
     datasource = DataSource(
@@ -410,7 +410,21 @@ def test_restore_version_relinks_analysis_datasource(test_db_session, client):
     pipeline_definition = {
         'steps': [],
         'tabs': [
-            tab_payload(source_id, tab_id='tab-1'),
+            tab_payload(
+                source_id,
+                tab_id='tab-1',
+                steps=[
+                    {
+                        'id': 'join-step',
+                        'type': 'join',
+                        'config': {
+                            'right_source': sample_datasource.id,
+                            'join_columns': [{'id': 'join-1', 'left_column': 'id', 'right_column': 'id'}],
+                        },
+                        'depends_on': [],
+                    }
+                ],
+            ),
         ],
     }
     analysis = Analysis(
@@ -439,6 +453,10 @@ def test_restore_version_relinks_analysis_datasource(test_db_session, client):
     response = client.post(f'/api/v1/analysis/{analysis_id}/versions/1/restore')
 
     assert response.status_code == 200
+    links = test_db_session.execute(select(AnalysisDataSource).where(col(AnalysisDataSource.analysis_id) == analysis_id)).scalars()
+    assert {link.datasource_id for link in links} == {source_id, sample_datasource.id}
+    restored_config = response.json()['pipeline_definition']['tabs'][0]['steps'][0]['config']
+    assert restored_config['suffix'] == '_right'
 
 
 def test_restore_version_with_derived_tab_uses_internal_output_mapping(test_db_session, client, sample_datasource: DataSource):

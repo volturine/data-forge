@@ -285,7 +285,7 @@ async def test_cancelled_compute_lease_follower_does_not_cancel_shared_rpc() -> 
             renewed_ids.extend(request_id for request_id, _token, _generation in renewals)
             rpc_started.set()
             await release_rpc.wait()
-            return {request_id: 30 for request_id in renewed_ids}
+            return dict.fromkeys(renewed_ids, 30)
 
     batcher = worker_runtime_client._ComputeLeaseRenewalBatcher(batch_window_seconds=0)
 
@@ -504,7 +504,6 @@ async def test_compute_request_claims_share_a_bounded_control_plane(monkeypatch)
         peak = max(peak, active)
         await asyncio.sleep(0.02)
         active -= 1
-        return None
 
     monkeypatch.setattr(compute_request_runtime, "next_compute_request", fake_next_request)
     claim_capacity = compute_request_runtime.compute_request_claim_worker_count()
@@ -635,7 +634,7 @@ def test_compute_worker_run_finalization_uses_the_existing_typed_update() -> Non
 
 
 def test_compute_worker_status_result_proto_uses_typed_snapshot_fields() -> None:
-    status = worker_runtime_client._compute_worker_status_result_proto(
+    status = worker_runtime_client.compute_worker_status_result_proto(
         ComputeWorkerStatusInfo(
             analysis_id="analysis-1",
             resource_id="datasource-1",
@@ -651,7 +650,8 @@ def test_compute_worker_status_result_proto_uses_typed_snapshot_fields() -> None
             last_activity=datetime.now(UTC).isoformat(),
             current_job_id="job-1",
             resource_config={"max_threads": 2},
-            effective_resources={"max_threads": 2, "max_memory_mb": 1024},
+            # Effective resources reflect the host and may exceed user override limits.
+            effective_resources={"max_threads": 128, "max_memory_mb": 1024},
             defaults={"max_threads": 2, "max_memory_mb": 1024, "streaming_chunk_size": 500},
             scope="datasource_preview",
             reuse_policy="shared",
@@ -664,6 +664,7 @@ def test_compute_worker_status_result_proto_uses_typed_snapshot_fields() -> None
 
     assert status.status == enums_pb2.COMPUTE_WORKER_STATUS_HEALTHY
     assert status.resource_config.max_threads == 2
+    assert status.effective_resources.max_threads == 128
     assert status.effective_resources.max_memory_mb == 1024
     assert status.defaults.streaming_chunk_size == 500
     assert status.scope == enums_pb2.COMPUTE_WORKER_SCOPE_DATASOURCE_PREVIEW
@@ -843,6 +844,18 @@ def test_analysis_pipeline_protocol_view_config_uses_worker_service_key() -> Non
     assert step_config == {"row_limit": 100}
 
 
+def test_build_timeout_warning_reaches_the_build_as_an_integer() -> None:
+    pipeline = _single_step_pipeline(
+        analysis_pb2.AnalysisPipelineStep(id="view-1", step_type=enums_pb2.STEP_TYPE_VIEW, config=analysis_pb2.StepConfig(view=analysis_pb2.ViewConfig()))
+    )
+    pipeline.tabs[0].output.build_timeout_warning_ms = 1500
+
+    payload = analysis_pipeline_to_execution_payload(pipeline)
+
+    # int64 decodes to a JSON string; the build must still compare it as a number.
+    assert compute_service._output_timeout_warning_ms(payload, "tab-1") == 1500
+
+
 def test_analysis_pipeline_protocol_step_type_drives_service_step_type() -> None:
     pipeline = _single_step_pipeline(
         analysis_pb2.AnalysisPipelineStep(
@@ -918,7 +931,7 @@ def test_preview_compute_request_uses_typed_command_not_legacy_payload(monkeypat
         def fail_compute_request(self, **_kwargs):
             raise AssertionError("request should not fail")
 
-    monkeypatch.setattr(compute_request_runtime, "worker_runtime_client", lambda: _Client())
+    monkeypatch.setattr(compute_request_runtime, "worker_runtime_client", _Client)
     monkeypatch.setattr(compute_request_runtime.service, "preview_step", fake_preview_step)
 
     claimed = compute_request_runtime.ClaimedComputeRequest(
@@ -1001,7 +1014,7 @@ async def test_same_engine_waiter_does_not_overtake_other_engine(monkeypatch) ->
             third_started.set()
         function(claimed, manager)
 
-    monkeypatch.setattr(compute_request_runtime, "worker_runtime_client", lambda: _Client())
+    monkeypatch.setattr(compute_request_runtime, "worker_runtime_client", _Client)
     monkeypatch.setattr(compute_request_runtime, "_renew_compute_lease", _keep_lease_alive)
     monkeypatch.setattr(compute_request_runtime, "run_compute_in_thread", run_in_thread)
     monkeypatch.setattr(compute_request_runtime, "_execute_request_sync", lambda *_args: None)
@@ -1069,7 +1082,7 @@ async def test_compute_capacity_race_releases_manager_admission_before_retry(mon
         race_wait_started.set()
         await race_wait_release.wait()
 
-    monkeypatch.setattr(compute_request_runtime, "worker_runtime_client", lambda: _Client())
+    monkeypatch.setattr(compute_request_runtime, "worker_runtime_client", _Client)
     monkeypatch.setattr(compute_request_runtime, "_renew_compute_lease", _keep_lease_alive)
     monkeypatch.setattr(compute_request_runtime, "run_compute_in_thread", run_in_thread)
     monkeypatch.setattr(compute_request_runtime, "_wait_after_engine_capacity_race", wait_after_capacity_race)
@@ -1523,7 +1536,7 @@ def test_shutdown_compute_request_removes_active_engine_and_emits_empty_snapshot
         def fail_compute_request(self, **_kwargs):
             raise AssertionError("request should not fail")
 
-    monkeypatch.setattr(compute_request_runtime, "worker_runtime_client", lambda: _Client())
+    monkeypatch.setattr(compute_request_runtime, "worker_runtime_client", _Client)
 
     manager = ProcessManager(engine_factory=lambda _identity, _resource_config: cast(Any, engine), on_snapshot=snapshots.append)
     manager.spawn_compute_worker(identity)
@@ -1571,7 +1584,7 @@ def test_shutdown_compute_request_is_idempotent_when_engine_already_absent(monke
         def fail_compute_request(self, **_kwargs):
             raise AssertionError("missing engines must complete shutdown successfully")
 
-    monkeypatch.setattr(compute_request_runtime, "worker_runtime_client", lambda: _Client())
+    monkeypatch.setattr(compute_request_runtime, "worker_runtime_client", _Client)
     manager = ProcessManager(engine_factory=lambda _identity, _resource_config: cast(Any, object()))
     claimed = compute_request_runtime.ClaimedComputeRequest(
         id="req-missing-shutdown",
@@ -1628,7 +1641,7 @@ def test_compute_request_maps_missing_datasource_to_error_result(monkeypatch) ->
         def complete_compute_request(self, **kwargs):
             completed.append(kwargs["response"])
 
-    monkeypatch.setattr(compute_request_runtime, "worker_runtime_client", lambda: _Client())
+    monkeypatch.setattr(compute_request_runtime, "worker_runtime_client", _Client)
 
     claimed = compute_request_runtime.ClaimedComputeRequest(
         id="req-404",
@@ -1681,7 +1694,7 @@ def test_retired_compute_request_lease_drains_without_error_log(monkeypatch, cap
                 error_code="FAILED_PRECONDITION",
             )
 
-    monkeypatch.setattr(compute_request_runtime, "worker_runtime_client", lambda: _Client())
+    monkeypatch.setattr(compute_request_runtime, "worker_runtime_client", _Client)
     claimed = compute_request_runtime.ClaimedComputeRequest(
         id="req-retired",
         namespace="default",
@@ -2504,35 +2517,22 @@ class TestStepTimingLabels:
 
 
 # ---------------------------------------------------------------------------
-# ChartParams sort_by / group_sort_by coercion
+# ChartParams sort_by / group_sort_by parsing
 # ---------------------------------------------------------------------------
 
 
-class TestChartParamsSortByCoercion:
-    def test_invalid_sort_by_coerces_to_none(self):
-        params = ChartParams.model_validate({"chart_type": "bar", "x_column": "cat", "sort_by": "rank"})
-        assert params.sort_by is None
-
-    def test_invalid_group_sort_by_coerces_to_none(self):
-        params = ChartParams.model_validate({"chart_type": "bar", "x_column": "cat", "group_sort_by": "total"})
-        assert params.group_sort_by is None
-
-    def test_valid_sort_by_preserved(self):
-        params = ChartParams.model_validate({"chart_type": "bar", "x_column": "cat", "sort_by": "y"})
+class TestChartParamsSortBy:
+    @pytest.mark.parametrize("sort_by", ["y", enums_pb2.SORT_BY_Y], ids=["token", "protocol-int"])
+    def test_sort_by_accepts_tokens_and_protocol_integers(self, sort_by):
+        # Protocol step configs carry enums as integers; they must not be dropped.
+        params = ChartParams.model_validate({"chart_type": "bar", "x_column": "cat", "sort_by": sort_by, "group_sort_by": enums_pb2.GROUP_SORT_BY_VALUE})
         assert params.sort_by == enums_pb2.SORT_BY_Y
+        assert params.group_sort_by == enums_pb2.GROUP_SORT_BY_VALUE
 
-    def test_invalid_sort_by_does_not_raise_in_compute(self):
-        lf = pl.DataFrame({"cat": ["A", "B"], "val": [1.0, 2.0]}).lazy()
-        result = compute_chart_data(
-            lf,
-            {
-                "chart_type": "bar",
-                "x_column": "cat",
-                "y_column": "val",
-                "sort_by": "rank",
-            },
-        ).collect()
-        assert result.height == 2
+    @pytest.mark.parametrize("field", ["sort_by", "group_sort_by"])
+    def test_unknown_sort_tokens_are_rejected(self, field):
+        with pytest.raises(ValidationError):
+            ChartParams.model_validate({"chart_type": "bar", "x_column": "cat", field: "rank"})
 
 
 # ---------------------------------------------------------------------------
