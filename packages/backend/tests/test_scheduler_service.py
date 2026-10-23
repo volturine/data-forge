@@ -12,7 +12,7 @@ from backend_core import (
     build_jobs_service as build_job_service,
     build_runs_service as build_run_service,
 )
-from backend_core.build_datasource_dependencies import external_datasource_ids
+from backend_core.build_datasource_dependencies import external_datasource_ids, output_datasource_ids
 from backend_core.domain.analysis.models import AnalysisStatus
 from backend_core.domain.build_runs.models import BuildRunStatus
 from backend_core.domain.compute import schemas as compute_schemas
@@ -918,8 +918,11 @@ class TestEnqueueScheduleRun:
             test_db_session.execute(select(col(BuildRunDatasource.datasource_id)).where(col(BuildRunDatasource.build_id) == run.id)).scalars().all()
         )
         assert source_ids == (sample_datasource.id,)
-        assert persisted_ids == set(source_ids)
+        # The run records the outputs it publishes as well as what it reads.
+        assert output.id in output_datasource_ids(pipeline)
+        assert persisted_ids == {*source_ids, *output_datasource_ids(pipeline)}
         assert build_run_service.has_active_build_for_datasource(test_db_session, namespace='default', datasource_id=sample_datasource.id)
+        assert build_run_service.has_active_build_for_datasource(test_db_session, namespace='default', datasource_id=output.id)
         job = build_job_service.get_job_by_build_id(test_db_session, run_id)
         assert job is not None
 

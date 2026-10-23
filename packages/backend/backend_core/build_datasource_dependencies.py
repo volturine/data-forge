@@ -7,11 +7,25 @@ from backend_core.datasource_lifecycle import lock_datasource_lifecycle, uses_po
 from backend_core.domain.compute.schemas import AnalysisPipelinePayload
 
 
+def output_datasource_ids(pipeline: AnalysisPipelinePayload) -> tuple[str, ...]:
+    """Return the datasource RIDs a pipeline's tabs publish."""
+    return tuple(sorted({result_id for tab in pipeline.tabs if isinstance((result_id := tab.output.get('result_id')), str)}))
+
+
+def build_datasource_ids(pipeline: AnalysisPipelinePayload) -> tuple[str, ...]:
+    """Return every datasource RID a build reads or publishes.
+
+    Recording published outputs keeps a tombstoned output (for example one the
+    user deleted before rebuilding) from being finalized and cleaned up while
+    the build is still writing it.
+    """
+    return tuple(sorted({*external_datasource_ids(pipeline), *output_datasource_ids(pipeline)}))
+
+
 def external_datasource_ids(pipeline: AnalysisPipelinePayload) -> tuple[str, ...]:
     """Return the exact datasource RIDs a queued pipeline can read."""
     tab_ids = {tab.id for tab in pipeline.tabs}
-    output_ids = {result_id for tab in pipeline.tabs if isinstance((result_id := tab.output.get('result_id')), str)}
-    local_ids = tab_ids | output_ids
+    local_ids = tab_ids | set(output_datasource_ids(pipeline))
     external_ids: set[str] = set()
 
     for tab in pipeline.tabs:
