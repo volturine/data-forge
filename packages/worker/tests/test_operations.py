@@ -61,247 +61,123 @@ def test_resolve_pipeline_datasource_uses_shared_analysis_source_type() -> None:
     }
 
 
-def test_filter_handler():
-    handler = FilterHandler()
-    lf = handler(
-        _frame(),
-        {
-            "conditions": [{"column": "age", "operator": ">", "value": 30, "value_type": "number"}],
-            "logic": "AND",
-        },
-    )
-    assert lf.collect().height == 1
-
-
-def test_filter_handler_string():
-    handler = FilterHandler()
-    lf = handler(
-        _frame(),
-        {
-            "conditions": [
-                {
-                    "column": "name",
-                    "operator": "contains",
-                    "value": "Ali",
-                    "value_type": "string",
-                }
+@pytest.mark.parametrize(
+    ("frame", "conditions", "column", "expected"),
+    [
+        pytest.param(
+            _frame(),
+            [{"column": "age", "operator": ">", "value": 30, "value_type": "number"}],
+            "name",
+            ["Charlie"],
+            id="test_filter_handler",
+        ),
+        pytest.param(
+            _frame(),
+            [{"column": "name", "operator": "contains", "value": "Ali", "value_type": "string"}],
+            "name",
+            ["Alice"],
+            id="test_filter_handler_string",
+        ),
+        pytest.param(
+            pl.DataFrame({"a": [1, None, 3]}).lazy(),
+            [{"column": "a", "operator": "is_not_null", "value": None, "value_type": "string"}],
+            "a",
+            [1, 3],
+            id="test_filter_handler_null",
+        ),
+        pytest.param(
+            _frame(),
+            [{"column": "date", "operator": "<", "value": None, "value_type": "column", "compare_column": "date2"}],
+            "name",
+            ["Alice", "Bob", "Charlie"],
+            id="test_filter_handler_column_comparison",
+        ),
+        pytest.param(
+            _frame(),
+            [{"column": "name", "operator": "contains", "value": ["Ali", "Bob"], "value_type": "string"}],
+            "name",
+            ["Alice", "Bob"],
+            id="test_filter_handler_contains_list_or",
+        ),
+        pytest.param(
+            _frame(),
+            [{"column": "group", "operator": "=", "value": ["a", "b"], "value_type": "string"}],
+            "name",
+            ["Alice", "Bob", "Charlie"],
+            id="test_filter_handler_equals_list_or",
+        ),
+        pytest.param(
+            _frame(),
+            [{"column": "name", "operator": "not_contains", "value": ["Ali", "Bob"], "value_type": "string"}],
+            "name",
+            ["Charlie"],
+            id="test_filter_handler_not_contains_list_and",
+        ),
+        pytest.param(
+            _frame(),
+            [{"column": "group", "operator": "in", "value": ["a"], "value_type": "string"}],
+            "name",
+            ["Alice", "Bob"],
+            id="test_filter_handler_in_list",
+        ),
+        pytest.param(
+            _frame(),
+            [{"column": "group", "operator": "not_in", "value": ["a"], "value_type": "string"}],
+            "group",
+            ["b"],
+            id="test_filter_handler_not_in_list",
+        ),
+        pytest.param(
+            _frame(),
+            [{"column": "group", "operator": "not_in", "value": [], "value_type": "string"}],
+            "name",
+            ["Alice", "Bob", "Charlie"],
+            id="test_filter_handler_empty_list_semantics_not_in",
+        ),
+        pytest.param(
+            _frame(),
+            [{"column": "group", "operator": "in", "value": [], "value_type": "string"}],
+            "name",
+            [],
+            id="test_filter_handler_empty_list_semantics_in",
+        ),
+        pytest.param(
+            _frame(),
+            [{"column": "name", "operator": "regex", "value": "", "value_type": "string"}],
+            "name",
+            [],
+            id="test_filter_handler_empty_regex",
+        ),
+        pytest.param(
+            _frame(),
+            [{"column": "", "operator": "=", "value": "", "value_type": "string"}],
+            "name",
+            ["Alice", "Bob", "Charlie"],
+            id="test_filter_handler_placeholder_conditions_are_noop",
+        ),
+        pytest.param(
+            _frame(),
+            [
+                {"column": "", "operator": "=", "value": "", "value_type": "string"},
+                {"column": "age", "operator": ">", "value": 30, "value_type": "number"},
             ],
-            "logic": "AND",
-        },
-    )
-    assert lf.collect().height == 1
-
-
-def test_filter_handler_null():
+            "name",
+            ["Charlie"],
+            id="test_filter_handler_ignores_placeholder_conditions_when_valid_ones_exist",
+        ),
+        pytest.param(
+            _frame(),
+            [{"column": "age", "operator": "==", "value": 30, "value_type": "number"}],
+            "name",
+            ["Alice"],
+            id="test_filter_operator_definition",
+        ),
+    ],
+)
+def test_filter_handler_conditions(frame: pl.LazyFrame, conditions: list[dict], column: str, expected: list) -> None:
     handler = FilterHandler()
-    lf = handler(
-        pl.DataFrame({"a": [1, None, 3]}).lazy(),
-        {
-            "conditions": [
-                {
-                    "column": "a",
-                    "operator": "is_not_null",
-                    "value": None,
-                    "value_type": "string",
-                }
-            ],
-            "logic": "AND",
-        },
-    )
-    assert lf.collect().height == 2
-
-
-def test_filter_handler_column_comparison():
-    handler = FilterHandler()
-    lf = handler(
-        _frame(),
-        {
-            "conditions": [
-                {
-                    "column": "date",
-                    "operator": "<",
-                    "value": None,
-                    "value_type": "column",
-                    "compare_column": "date2",
-                }
-            ],
-            "logic": "AND",
-        },
-    )
-    assert lf.collect().height == 3
-
-
-def test_filter_handler_contains_list_or():
-    handler = FilterHandler()
-    lf = handler(
-        _frame(),
-        {
-            "conditions": [
-                {
-                    "column": "name",
-                    "operator": "contains",
-                    "value": ["Ali", "Bob"],
-                    "value_type": "string",
-                },
-            ],
-            "logic": "AND",
-        },
-    )
-    assert lf.collect().height == 2
-
-
-def test_filter_handler_equals_list_or():
-    handler = FilterHandler()
-    lf = handler(
-        _frame(),
-        {
-            "conditions": [
-                {
-                    "column": "group",
-                    "operator": "=",
-                    "value": ["a", "b"],
-                    "value_type": "string",
-                },
-            ],
-            "logic": "AND",
-        },
-    )
-    assert lf.collect().height == 3
-
-
-def test_filter_handler_not_contains_list_and():
-    handler = FilterHandler()
-    lf = handler(
-        _frame(),
-        {
-            "conditions": [
-                {
-                    "column": "name",
-                    "operator": "not_contains",
-                    "value": ["Ali", "Bob"],
-                    "value_type": "string",
-                },
-            ],
-            "logic": "AND",
-        },
-    )
-    assert lf.collect()["name"].to_list() == ["Charlie"]
-
-
-def test_filter_handler_in_list():
-    handler = FilterHandler()
-    lf = handler(
-        _frame(),
-        {
-            "conditions": [
-                {
-                    "column": "group",
-                    "operator": "in",
-                    "value": ["a"],
-                    "value_type": "string",
-                },
-            ],
-            "logic": "AND",
-        },
-    )
-    assert lf.collect().height == 2
-
-
-def test_filter_handler_not_in_list():
-    handler = FilterHandler()
-    lf = handler(
-        _frame(),
-        {
-            "conditions": [
-                {
-                    "column": "group",
-                    "operator": "not_in",
-                    "value": ["a"],
-                    "value_type": "string",
-                },
-            ],
-            "logic": "AND",
-        },
-    )
-    assert lf.collect()["group"].to_list() == ["b"]
-
-
-def test_filter_handler_empty_list_semantics():
-    handler = FilterHandler()
-
-    def keep(operator: str) -> int:
-        condition = {"column": "group", "operator": operator, "value": [], "value_type": "string"}
-        return handler(_frame(), {"conditions": [condition], "logic": "AND"}).collect().height
-
-    assert keep("not_in") == 3
-    assert keep("in") == 0
-
-
-def test_filter_handler_empty_regex():
-    handler = FilterHandler()
-    lf = handler(
-        _frame(),
-        {
-            "conditions": [
-                {
-                    "column": "name",
-                    "operator": "regex",
-                    "value": "",
-                    "value_type": "string",
-                },
-            ],
-            "logic": "AND",
-        },
-    )
-    assert lf.collect().height == 0
-
-
-def test_filter_handler_placeholder_conditions_are_noop() -> None:
-    handler = FilterHandler()
-
-    result = handler(
-        _frame(),
-        {
-            "conditions": [
-                {
-                    "column": "",
-                    "operator": "=",
-                    "value": "",
-                    "value_type": "string",
-                },
-            ],
-            "logic": "AND",
-        },
-    ).collect()
-
-    assert result["name"].to_list() == ["Alice", "Bob", "Charlie"]
-
-
-def test_filter_handler_ignores_placeholder_conditions_when_valid_ones_exist() -> None:
-    handler = FilterHandler()
-
-    result = handler(
-        _frame(),
-        {
-            "conditions": [
-                {
-                    "column": "",
-                    "operator": "=",
-                    "value": "",
-                    "value_type": "string",
-                },
-                {
-                    "column": "age",
-                    "operator": ">",
-                    "value": 30,
-                    "value_type": "number",
-                },
-            ],
-            "logic": "AND",
-        },
-    ).collect()
-
-    assert result["name"].to_list() == ["Charlie"]
+    result = handler(frame, {"conditions": conditions, "logic": "AND"}).collect()
+    assert result[column].to_list() == expected
 
 
 def test_groupby_handler():
@@ -342,22 +218,6 @@ def test_timeseries_offset_add():
         },
     )
     assert lf.collect()["shifted"][0].day == 2
-
-
-def test_timeseries_timestamp():
-    handler = TimeseriesHandler()
-    lf = handler(
-        _frame(),
-        {
-            "column": "date",
-            "operation_type": "timestamp",
-            "new_column": "ts",
-            "unit": "us",
-        },
-    )
-    result = lf.collect()["ts"].to_list()
-    assert all(isinstance(v, int) for v in result)
-    assert len(result) == 3
 
 
 @pytest.mark.parametrize(
@@ -402,18 +262,57 @@ def test_timeseries_timestamp_defaults_to_microseconds() -> None:
     assert result == [1704067200000000] * 3
 
 
-def test_timeseries_timestamp_rejects_months() -> None:
+@pytest.mark.parametrize(
+    ("params", "error", "match"),
+    [
+        pytest.param(
+            {"column": "date", "operation_type": "timestamp", "new_column": "ts", "unit": "months"},
+            ValueError,
+            "Unsupported duration unit",
+            id="test_timeseries_timestamp_rejects_months",
+        ),
+        pytest.param(
+            {"column": "date", "operation_type": "bogus", "new_column": "x"},
+            ValidationError,
+            "operation_type",
+            id="test_timeseries_unsupported_operation",
+        ),
+        pytest.param(
+            {"column": "date", "operation_type": "add", "new_column": "x", "unit": "days"},
+            ValueError,
+            "requires numeric value",
+            id="test_timeseries_add_missing_value",
+        ),
+        pytest.param(
+            {"column": "date", "operation_type": "add", "new_column": "shifted", "value": 1.5, "unit": "days"},
+            ValueError,
+            "whole number",
+            id="test_timeseries_add_rejects_fractional_value",
+        ),
+        pytest.param(
+            {"column": "date", "operation_type": "add", "new_column": "x", "value": 1},
+            ValueError,
+            "requires unit",
+            id="test_timeseries_add_missing_unit",
+        ),
+        pytest.param(
+            {"column": "date", "operation_type": "diff", "new_column": "x"},
+            ValueError,
+            "requires column2",
+            id="test_timeseries_diff_missing_column2",
+        ),
+        pytest.param(
+            {"column": "date", "operation_type": "truncate", "new_column": "x"},
+            ValueError,
+            "requires unit",
+            id="test_timeseries_truncate_missing_unit",
+        ),
+    ],
+)
+def test_timeseries_rejects_invalid_params(params: dict, error: type[Exception], match: str) -> None:
     handler = TimeseriesHandler()
-    with pytest.raises(ValueError, match="Unsupported duration unit"):
-        handler(
-            _frame(),
-            {
-                "column": "date",
-                "operation_type": "timestamp",
-                "new_column": "ts",
-                "unit": "months",
-            },
-        ).collect()
+    with pytest.raises(error, match=match):
+        handler(_frame(), params).collect()
 
 
 def test_timeseries_subtract():
@@ -508,15 +407,6 @@ def test_timeseries_extract_dayofweek():
     assert all(isinstance(v, int) for v in result)
 
 
-def test_timeseries_unsupported_operation():
-    handler = TimeseriesHandler()
-    with pytest.raises(ValidationError, match="operation_type"):
-        handler(
-            _frame(),
-            {"column": "date", "operation_type": "bogus", "new_column": "x"},
-        ).collect()
-
-
 def test_timeseries_accepts_enum_fields() -> None:
     handler = TimeseriesHandler()
     lf = handler(
@@ -530,62 +420,6 @@ def test_timeseries_accepts_enum_fields() -> None:
     )
     result = lf.collect()["dow"].to_list()
     assert all(isinstance(v, int) for v in result)
-
-
-def test_timeseries_add_missing_value():
-    handler = TimeseriesHandler()
-    with pytest.raises(ValueError, match="requires numeric value"):
-        handler(
-            _frame(),
-            {
-                "column": "date",
-                "operation_type": "add",
-                "new_column": "x",
-                "unit": "days",
-            },
-        ).collect()
-
-
-def test_timeseries_add_rejects_fractional_value() -> None:
-    handler = TimeseriesHandler()
-    with pytest.raises(ValueError, match="whole number"):
-        handler(
-            _frame(),
-            {
-                "column": "date",
-                "operation_type": "add",
-                "new_column": "shifted",
-                "value": 1.5,
-                "unit": "days",
-            },
-        ).collect()
-
-
-def test_timeseries_add_missing_unit():
-    handler = TimeseriesHandler()
-    with pytest.raises(ValueError, match="requires unit"):
-        handler(
-            _frame(),
-            {"column": "date", "operation_type": "add", "new_column": "x", "value": 1},
-        ).collect()
-
-
-def test_timeseries_diff_missing_column2():
-    handler = TimeseriesHandler()
-    with pytest.raises(ValueError, match="requires column2"):
-        handler(
-            _frame(),
-            {"column": "date", "operation_type": "diff", "new_column": "x"},
-        ).collect()
-
-
-def test_timeseries_truncate_missing_unit():
-    handler = TimeseriesHandler()
-    with pytest.raises(ValueError, match="requires unit"):
-        handler(
-            _frame(),
-            {"column": "date", "operation_type": "truncate", "new_column": "x"},
-        ).collect()
 
 
 def test_string_transform_uppercase():
@@ -707,26 +541,15 @@ def test_deduplicate_handler_keep_last_on_subset():
     assert result["tag"].to_list() == ["b", "d"]
 
 
-def test_join_handler_inner_correctness():
-    handler = JoinHandler()
-    left = pl.DataFrame({"id": [1, 2], "val": ["a", "b"]}).lazy()
-    right = pl.DataFrame({"id": [2, 3], "val2": ["x", "y"]}).lazy()
-    lf = handler(
-        left,
-        {
-            "join_columns": [{"left_column": "id", "right_column": "id"}],
-            "how": "inner",
-            "right_source": "right",
-        },
-        right_lf=right,
-    )
-    result = lf.collect()
-    assert result.height == 1
-    assert result["val"].to_list() == ["b"]
-    assert result["val2"].to_list() == ["x"]
-
-
-def test_join_handler_outer_uses_shared_join_how() -> None:
+@pytest.mark.parametrize(
+    ("how", "expected_height", "expected_values"),
+    [
+        pytest.param("inner", 1, {"val": ["b"], "val2": ["x"]}, id="test_join_handler_inner_correctness"),
+        # Only the row count is pinned for the outer join, matching the original test.
+        pytest.param("outer", 3, {}, id="test_join_handler_outer_uses_shared_join_how"),
+    ],
+)
+def test_join_handler_how(how: str, expected_height: int, expected_values: dict[str, list]) -> None:
     handler = JoinHandler()
     left = pl.DataFrame({"id": [1, 2], "val": ["a", "b"]}).lazy()
     right = pl.DataFrame({"id": [2, 3], "val2": ["x", "y"]}).lazy()
@@ -735,16 +558,25 @@ def test_join_handler_outer_uses_shared_join_how() -> None:
         left,
         {
             "join_columns": [{"left_column": "id", "right_column": "id"}],
-            "how": "outer",
+            "how": how,
             "right_source": "right",
         },
         right_lf=right,
     ).collect()
 
-    assert result.height == 3
+    assert result.height == expected_height
+    for column, values in expected_values.items():
+        assert result[column].to_list() == values
 
 
-def test_join_handler_right_columns_filters_unsuffixed_right_columns() -> None:
+@pytest.mark.parametrize(
+    "suffix",
+    [
+        pytest.param("_r", id="test_join_handler_right_columns_filters_unsuffixed_right_columns"),
+        pytest.param("", id="test_join_handler_right_columns_with_empty_suffix_keeps_requested_columns"),
+    ],
+)
+def test_join_handler_right_columns_keep_requested_columns(suffix: str) -> None:
     handler = JoinHandler()
     left = pl.DataFrame({"id": [1, 2], "left_val": ["a", "b"]}).lazy()
     right = pl.DataFrame({"id": [2, 3], "right_keep": [10, 20], "right_drop": [100, 200]}).lazy()
@@ -756,28 +588,7 @@ def test_join_handler_right_columns_filters_unsuffixed_right_columns() -> None:
             "how": "inner",
             "right_source": "right",
             "right_columns": ["right_keep"],
-            "suffix": "_r",
-        },
-        right_lf=right,
-    ).collect()
-
-    assert result.columns == ["id", "left_val", "right_keep"]
-    assert result["right_keep"].to_list() == [10]
-
-
-def test_join_handler_right_columns_with_empty_suffix_keeps_requested_columns() -> None:
-    handler = JoinHandler()
-    left = pl.DataFrame({"id": [1, 2], "left_val": ["a", "b"]}).lazy()
-    right = pl.DataFrame({"id": [2, 3], "right_keep": [10, 20], "right_drop": [100, 200]}).lazy()
-
-    result = handler(
-        left,
-        {
-            "join_columns": [{"left_column": "id", "right_column": "id"}],
-            "how": "inner",
-            "right_source": "right",
-            "right_columns": ["right_keep"],
-            "suffix": "",
+            "suffix": suffix,
         },
         right_lf=right,
     ).collect()
@@ -1014,22 +825,6 @@ def test_topk_handler_descending_returns_largest_rows_first():
 
     assert result["name"].to_list() == ["b", "c"]
     assert result["score"].to_list() == [30, 20]
-
-
-def test_pivot_handler():
-    handler = PivotHandler()
-    lf = handler(
-        pl.DataFrame({"idx": ["a", "a"], "col": ["x", "y"], "val": [1, 2]}).lazy(),
-        {
-            "index": ["idx"],
-            "columns": "col",
-            "value_columns": ["val"],
-            "aggregate_function": "first",
-            "on_columns": ["x", "y"],
-        },
-    )
-    result = lf.collect()
-    assert "x" in result.columns
 
 
 def test_pivot_handler_count_aggregates_with_len():

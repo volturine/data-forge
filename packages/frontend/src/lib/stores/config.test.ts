@@ -61,57 +61,19 @@ describe('ConfigStore', () => {
 	});
 
 	describe('initial state', () => {
-		test('config is null', () => {
+		test('is empty before fetch and getters return defaults', () => {
 			expect(store.config).toBeNull();
-		});
-
-		test('loading is false', () => {
 			expect(store.loading).toBe(false);
-		});
-
-		test('error is null', () => {
 			expect(store.error).toBeNull();
-		});
-	});
-
-	describe('getter defaults before fetch', () => {
-		test('auditLogBatchSize returns 20', () => {
 			expect(store.auditLogBatchSize).toBe(20);
-		});
-
-		test('auditLogFlushIntervalMs returns 5000', () => {
 			expect(store.auditLogFlushIntervalMs).toBe(5000);
-		});
-
-		test('auditLogDedupeWindowMs returns 500', () => {
 			expect(store.auditLogDedupeWindowMs).toBe(500);
-		});
-
-		test('auditLogFlushCooldownMs returns 3000', () => {
 			expect(store.auditLogFlushCooldownMs).toBe(3000);
-		});
-
-		test('logQueueMaxSize returns 2000', () => {
 			expect(store.logQueueMaxSize).toBe(2000);
-		});
-
-		test('publicIdbDebug returns false', () => {
 			expect(store.publicIdbDebug).toBe(false);
-		});
-
-		test('smtpEnabled returns false', () => {
 			expect(store.smtpEnabled).toBe(false);
-		});
-
-		test('telegramEnabled returns false', () => {
 			expect(store.telegramEnabled).toBe(false);
-		});
-
-		test('authRequired returns true', () => {
 			expect(store.authRequired).toBe(true);
-		});
-
-		test('verifyEmailAddress returns true', () => {
 			expect(store.verifyEmailAddress).toBe(true);
 		});
 	});

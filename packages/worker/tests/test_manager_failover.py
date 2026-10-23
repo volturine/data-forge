@@ -1,28 +1,16 @@
 from __future__ import annotations
 
 import asyncio
-import importlib.util
-from pathlib import Path
 from typing import Any, cast
 
 import pytest
+from worker_test_support import load_runtime_process
 
 from runtime.dispatcher_health import DispatcherHealth
 from runtime.manager_lease import WorkerManagerLeaseLost
 from runtime.worker_runtime_client import WorkerRuntimeClient
 
-
-def _load_runtime_process():
-    path = Path(__file__).resolve().parents[1] / "main.py"
-    spec = importlib.util.spec_from_file_location("worker_main_for_failover_tests", path)
-    if spec is None or spec.loader is None:
-        raise RuntimeError(f"Unable to load worker runtime module from {path}")
-    module = importlib.util.module_from_spec(spec)
-    spec.loader.exec_module(module)
-    return module
-
-
-runtime_process = _load_runtime_process()
+runtime_process = load_runtime_process()
 
 
 def _health() -> DispatcherHealth:

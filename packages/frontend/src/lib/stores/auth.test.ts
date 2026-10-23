@@ -105,23 +105,11 @@ describe('AuthStore', () => {
 	});
 
 	describe('initial state', () => {
-		test('user is null', () => {
+		test('is unresolved with no user and not loading', () => {
 			expect(store.user).toBeNull();
-		});
-
-		test('status is unknown', () => {
 			expect(store.status).toBe('unknown');
-		});
-
-		test('authenticated is false', () => {
 			expect(store.authenticated).toBe(false);
-		});
-
-		test('resolved is false', () => {
 			expect(store.resolved).toBe(false);
-		});
-
-		test('loading is false', () => {
 			expect(store.loading).toBe(false);
 		});
 	});

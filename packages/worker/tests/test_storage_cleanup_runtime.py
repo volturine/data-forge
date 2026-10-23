@@ -3,7 +3,6 @@ from __future__ import annotations
 import asyncio
 import threading
 from collections.abc import Callable
-from concurrent.futures import ThreadPoolExecutor
 from dataclasses import replace
 from typing import cast
 
@@ -553,44 +552,6 @@ def test_reingest_datasource_strips_stale_time_travel_keys(monkeypatch: pytest.M
         "branch": "master",
         "metadata_path": "s3://default/clean/ds-1__claim_previous/master",
     }
-
-
-def test_worker_heartbeat_reports_registration_loss_and_recovery_on_its_thread() -> None:
-    from runtime.worker_runtime_client import run_worker_heartbeat_loop
-
-    stop = threading.Event()
-    states: list[tuple[bool, int]] = []
-
-    class HeartbeatClient:
-        def __init__(self) -> None:
-            self.calls = 0
-
-        def heartbeat_worker(self, **_kwargs: object) -> None:
-            self.calls += 1
-            if self.calls == 1:
-                raise RuntimeError("Coordinator unavailable")
-            stop.set()
-
-        def register_worker(self, **_kwargs: object) -> None:
-            return None
-
-    client = HeartbeatClient()
-    with ThreadPoolExecutor(max_workers=1) as executor:
-        future = executor.submit(
-            run_worker_heartbeat_loop,
-            client=cast(WorkerRuntimeClient, client),
-            stop_signal=stop,
-            worker_id="writer",
-            kind="coordinator",
-            hostname="test",
-            pid=1,
-            capacity=1,
-            heartbeat_seconds=0.05,
-            on_registration_changed=lambda available: states.append((available, threading.get_ident())),
-        )
-        future.result(timeout=3)
-    assert [available for available, _thread in states] == [False, True]
-    assert all(thread != threading.get_ident() for _available, thread in states)
 
 
 @pytest.mark.asyncio

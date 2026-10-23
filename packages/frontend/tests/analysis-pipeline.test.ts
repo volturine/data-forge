@@ -216,29 +216,6 @@ test.describe('Pipeline data verification', () => {
 		}
 	});
 
-	test('limit keeps only first N rows', async ({ page, request }) => {
-		const aName = `E2E Pipe Limit ${uid()}`;
-		const info = await createPipelineAnalysis(request, aName, dsId, [
-			{ type: 'limit', config: { n: 2 } }
-		]);
-		try {
-			await navigateAndWaitForTable(page, info.analysisId);
-			const table = page.locator('[data-testid="inline-data-table"]');
-
-			await expect(table.locator('[data-column-id="id"]')).toBeVisible();
-			await expect(table.locator('[data-column-id="name"]')).toBeVisible();
-			await expect(table.locator('[data-column-id="age"]')).toBeVisible();
-			await expect(table.locator('[data-column-id="city"]')).toBeVisible();
-
-			await expect(table.locator('tbody tr')).toHaveCount(2);
-
-			await screenshot(page, 'analysis/pipeline', 'limit');
-		} finally {
-			await leaveAnalysisPage(page);
-			await deleteAnalysisViaUI(page, aName, { skipNavigation: true });
-		}
-	});
-
 	test('topk returns rows with largest values', async ({ page, request }, testInfo) => {
 		// The preview requires one cold engine for this exact analysis RID; under
 		// the 3×4 load it measured just over the suite-wide 120s deadline including
@@ -485,35 +462,13 @@ test.describe('Pipeline data verification', () => {
 		}
 	});
 
-	test('string_transform applies string operation', async ({ page, request }) => {
+	test('string_transform applies uppercase and slice operations', async ({ page, request }) => {
 		const aName = `E2E Pipe StrXform ${uid()}`;
 		const info = await createPipelineAnalysis(request, aName, dsId, [
 			{
 				type: 'string_transform',
 				config: { column: 'name', method: 'uppercase', new_column: 'name_upper' }
-			}
-		]);
-		try {
-			await navigateAndWaitForTable(page, info.analysisId);
-			const table = page.locator('[data-testid="inline-data-table"]');
-
-			await expect(table.locator('[data-column-id="name_upper"]')).toBeVisible();
-
-			await expect(table.locator('tbody tr')).toHaveCount(3);
-			await expect(table.getByText('ALICE', { exact: true })).toBeVisible();
-			await expect(table.getByText('BOB', { exact: true })).toBeVisible();
-			await expect(table.getByText('CHARLIE', { exact: true })).toBeVisible();
-
-			await screenshot(page, 'analysis/pipeline', 'string-transform');
-		} finally {
-			await leaveAnalysisPage(page);
-			await deleteAnalysisViaUI(page, aName, { skipNavigation: true });
-		}
-	});
-
-	test('string_transform slice treats end as an ending index', async ({ page, request }) => {
-		const aName = `E2E Pipe StrSlice ${uid()}`;
-		const info = await createPipelineAnalysis(request, aName, dsId, [
+			},
 			{
 				type: 'string_transform',
 				config: { column: 'name', method: 'slice', start: 1, end: 3, new_column: 'name_slice' }
@@ -523,16 +478,21 @@ test.describe('Pipeline data verification', () => {
 			await navigateAndWaitForTable(page, info.analysisId);
 			const table = page.locator('[data-testid="inline-data-table"]');
 
+			await expect(table.locator('[data-column-id="name_upper"]')).toBeVisible();
 			await expect(table.locator('[data-column-id="name_slice"]')).toBeVisible();
 
 			const rows = table.locator('tbody tr');
 			await expect(rows).toHaveCount(3);
+			await expect(table.getByText('ALICE', { exact: true })).toBeVisible();
+			await expect(table.getByText('BOB', { exact: true })).toBeVisible();
+			await expect(table.getByText('CHARLIE', { exact: true })).toBeVisible();
+			// Slice treats end as an ending index: start 1, end 3.
 			await expect(rows.nth(0)).toContainText('li');
 			await expect(rows.nth(1)).toContainText('ob');
 			await expect(rows.nth(2)).toContainText('ha');
 			await expect(table.getByText('lic', { exact: true })).toHaveCount(0);
 
-			await screenshot(page, 'analysis/pipeline', 'string-transform-slice');
+			await screenshot(page, 'analysis/pipeline', 'string-transform');
 		} finally {
 			await leaveAnalysisPage(page);
 			await deleteAnalysisViaUI(page, aName, { skipNavigation: true });

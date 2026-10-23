@@ -54,6 +54,20 @@ def _clear_database_state() -> None:
     database.clear_settings_engine_override()
 
 
+def _configure_postgres_settings(monkeypatch: pytest.MonkeyPatch, container: PostgresContainer, tmp_path: Path) -> None:
+    """Clear previous database state and point settings at a fresh container."""
+    from backend_core import database
+    from backend_core.config import settings
+
+    _clear_database_state()
+    data_dir = tmp_path / 'data'
+    data_dir.mkdir(parents=True, exist_ok=True)
+    monkeypatch.setattr(settings, 'database_url', container.url, raising=False)
+    monkeypatch.setattr(settings, 'data_dir', data_dir, raising=False)
+    monkeypatch.setattr(settings, 'distributed_runtime_enabled', True, raising=False)
+    database.set_settings_engine_override(database._create_public_engine())
+
+
 def _table_exists(connection: psycopg.Connection, schema: str, table: str) -> bool:
     row = connection.execute(
         'SELECT 1 FROM information_schema.tables WHERE table_schema = %s AND table_name = %s',
@@ -534,17 +548,10 @@ def test_init_db_bootstraps_public_and_tenant_schemas_in_postgres(monkeypatch, t
     require_docker()
 
     from backend_core import database
-    from backend_core.config import settings
     from backend_core.namespaces_service import register_namespace
 
     with PostgresContainer() as container:
-        _clear_database_state()
-        data_dir = tmp_path / 'data'
-        data_dir.mkdir(parents=True, exist_ok=True)
-        monkeypatch.setattr(settings, 'database_url', container.url, raising=False)
-        monkeypatch.setattr(settings, 'data_dir', data_dir, raising=False)
-        monkeypatch.setattr(settings, 'distributed_runtime_enabled', True, raising=False)
-        database.set_settings_engine_override(database._create_public_engine())
+        _configure_postgres_settings(monkeypatch, container, tmp_path)
 
         asyncio.run(database.init_db())
         # A namespace registered by any replica is migrated by every replica's
@@ -590,24 +597,12 @@ def test_runtime_database_transactions_reject_a_stale_coordinator_generation(mon
     from sqlmodel import Session
 
     from backend_core import database
-    from backend_core.config import settings
 
     with PostgresContainer() as container:
-        _clear_database_state()
-        data_dir = tmp_path / 'data'
-        data_dir.mkdir(parents=True, exist_ok=True)
-        monkeypatch.setattr(settings, 'database_url', container.url, raising=False)
-        monkeypatch.setattr(settings, 'data_dir', data_dir, raising=False)
-        monkeypatch.setattr(settings, 'distributed_runtime_enabled', True, raising=False)
-        database.set_settings_engine_override(database._create_public_engine())
+        _configure_postgres_settings(monkeypatch, container, tmp_path)
         asyncio.run(database.init_db())
 
-        data_dir = tmp_path / 'data'
-        data_dir.mkdir(parents=True, exist_ok=True)
-        monkeypatch.setattr(settings, 'database_url', container.url, raising=False)
-        monkeypatch.setattr(settings, 'data_dir', data_dir, raising=False)
-        monkeypatch.setattr(settings, 'distributed_runtime_enabled', True, raising=False)
-        database.set_settings_engine_override(database._create_public_engine())
+        _configure_postgres_settings(monkeypatch, container, tmp_path)
         asyncio.run(database.init_db())
 
         with container.connect() as connection:
@@ -639,20 +634,13 @@ def test_terminal_scheduled_build_reconciles_after_event_commit_without_holding_
 
     from backend_core import build_jobs_service, build_runs_service, database, runtime_work_service
     from backend_core.build_commands import BuildClaimCommand, fail_build_job
-    from backend_core.config import settings
     from backend_core.domain.build_runs.models import BuildRunStatus
     from backend_core.domain.compute.schemas import BuildFailedEvent
     from backend_core.persistence.scheduler.models import Schedule
     from modules.scheduler.service import reconcile_pending_schedule_runs
 
     with PostgresContainer() as container:
-        _clear_database_state()
-        data_dir = tmp_path / 'data'
-        data_dir.mkdir(parents=True, exist_ok=True)
-        monkeypatch.setattr(settings, 'database_url', container.url, raising=False)
-        monkeypatch.setattr(settings, 'data_dir', data_dir, raising=False)
-        monkeypatch.setattr(settings, 'distributed_runtime_enabled', True, raising=False)
-        database.set_settings_engine_override(database._create_public_engine())
+        _configure_postgres_settings(monkeypatch, container, tmp_path)
         asyncio.run(database.init_db())
 
         now = datetime.now(UTC)
@@ -769,16 +757,9 @@ def test_schedule_work_generation_preserves_wakeup_during_scan(monkeypatch, tmp_
     require_docker()
 
     from backend_core import database, runtime_work_service
-    from backend_core.config import settings
 
     with PostgresContainer() as container:
-        _clear_database_state()
-        data_dir = tmp_path / 'data'
-        data_dir.mkdir(parents=True, exist_ok=True)
-        monkeypatch.setattr(settings, 'database_url', container.url, raising=False)
-        monkeypatch.setattr(settings, 'data_dir', data_dir, raising=False)
-        monkeypatch.setattr(settings, 'distributed_runtime_enabled', True, raising=False)
-        database.set_settings_engine_override(database._create_public_engine())
+        _configure_postgres_settings(monkeypatch, container, tmp_path)
         asyncio.run(database.init_db())
 
         due_at = datetime.now(UTC) + timedelta(hours=1)
@@ -836,16 +817,9 @@ def test_runtime_wake_appends_do_not_wait_for_marker_lock(monkeypatch, tmp_path:
     require_docker()
 
     from backend_core import database, runtime_work_service
-    from backend_core.config import settings
 
     with PostgresContainer() as container:
-        _clear_database_state()
-        data_dir = tmp_path / 'data'
-        data_dir.mkdir(parents=True, exist_ok=True)
-        monkeypatch.setattr(settings, 'database_url', container.url, raising=False)
-        monkeypatch.setattr(settings, 'data_dir', data_dir, raising=False)
-        monkeypatch.setattr(settings, 'distributed_runtime_enabled', True, raising=False)
-        database.set_settings_engine_override(database._create_public_engine())
+        _configure_postgres_settings(monkeypatch, container, tmp_path)
         asyncio.run(database.init_db())
 
         from backend_core.persistence.runtime_events.models import RuntimeNamespaceWork
@@ -912,13 +886,7 @@ def test_runtime_wake_appends_do_not_wait_for_marker_lock(monkeypatch, tmp_path:
                 == 100
             )
 
-        _clear_database_state()
-        data_dir = tmp_path / 'data'
-        data_dir.mkdir(parents=True, exist_ok=True)
-        monkeypatch.setattr(settings, 'database_url', container.url, raising=False)
-        monkeypatch.setattr(settings, 'data_dir', data_dir, raising=False)
-        monkeypatch.setattr(settings, 'distributed_runtime_enabled', True, raising=False)
-        database.set_settings_engine_override(database._create_public_engine())
+        _configure_postgres_settings(monkeypatch, container, tmp_path)
         asyncio.run(database.init_db())
 
         due_at = datetime.now(UTC) + timedelta(hours=1)
@@ -1007,18 +975,11 @@ def test_runtime_work_recovers_expired_leases_and_preserves_concurrent_enqueue(m
     require_docker()
 
     from backend_core import build_jobs_service, compute_requests_service, database, runtime_work_service
-    from backend_core.config import settings
     from backend_core.persistence.build_jobs.models import BuildJob
     from backend_core.persistence.compute_requests.models import ComputeRequest
 
     with PostgresContainer() as container:
-        _clear_database_state()
-        data_dir = tmp_path / 'data'
-        data_dir.mkdir(parents=True, exist_ok=True)
-        monkeypatch.setattr(settings, 'database_url', container.url, raising=False)
-        monkeypatch.setattr(settings, 'data_dir', data_dir, raising=False)
-        monkeypatch.setattr(settings, 'distributed_runtime_enabled', True, raising=False)
-        database.set_settings_engine_override(database._create_public_engine())
+        _configure_postgres_settings(monkeypatch, container, tmp_path)
         asyncio.run(database.init_db())
 
         now = datetime.now(UTC)
@@ -1264,17 +1225,10 @@ def test_refresh_missing_runtime_work_marker_does_not_block_producer(monkeypatch
     require_docker()
 
     from backend_core import database, runtime_work_service
-    from backend_core.config import settings
     from backend_core.persistence.compute_requests.models import ComputeRequest
 
     with PostgresContainer() as container:
-        _clear_database_state()
-        data_dir = tmp_path / 'data'
-        data_dir.mkdir(parents=True, exist_ok=True)
-        monkeypatch.setattr(settings, 'database_url', container.url, raising=False)
-        monkeypatch.setattr(settings, 'data_dir', data_dir, raising=False)
-        monkeypatch.setattr(settings, 'distributed_runtime_enabled', True, raising=False)
-        database.set_settings_engine_override(database._create_public_engine())
+        _configure_postgres_settings(monkeypatch, container, tmp_path)
         asyncio.run(database.init_db())
 
         kind = runtime_work_service.RuntimeWorkKind.COMPUTE
@@ -1425,18 +1379,11 @@ def test_postgres_compute_claims_are_serialized_per_compute_worker_identity(monk
     require_docker()
 
     from backend_core import compute_requests_service, database
-    from backend_core.config import settings
     from backend_core.namespace import reset_namespace, set_namespace_context
     from backend_core.persistence.compute_requests.models import ComputeRequest
 
     with PostgresContainer() as container:
-        _clear_database_state()
-        data_dir = tmp_path / 'data'
-        data_dir.mkdir(parents=True, exist_ok=True)
-        monkeypatch.setattr(settings, 'database_url', container.url, raising=False)
-        monkeypatch.setattr(settings, 'data_dir', data_dir, raising=False)
-        monkeypatch.setattr(settings, 'distributed_runtime_enabled', True, raising=False)
-        database.set_settings_engine_override(database._create_public_engine())
+        _configure_postgres_settings(monkeypatch, container, tmp_path)
         asyncio.run(database.init_db())
 
         now = datetime.now(UTC)
@@ -1517,19 +1464,12 @@ def test_postgres_busy_engine_claim_does_not_block_other_identity(monkeypatch, t
     require_docker()
 
     from backend_core import compute_requests_service, database
-    from backend_core.config import settings
     from backend_core.namespace import reset_namespace, set_namespace_context
     from backend_core.persistence.compute_requests.models import ComputeRequest
 
     with PostgresContainer() as container:
-        _clear_database_state()
-        data_dir = tmp_path / 'data'
-        data_dir.mkdir(parents=True, exist_ok=True)
-        monkeypatch.setattr(settings, 'database_url', container.url, raising=False)
-        monkeypatch.setattr(settings, 'data_dir', data_dir, raising=False)
-        monkeypatch.setattr(settings, 'distributed_runtime_enabled', True, raising=False)
         database.set_active_runtime_coordinator_generation(None)
-        database.set_settings_engine_override(database._create_public_engine())
+        _configure_postgres_settings(monkeypatch, container, tmp_path)
         asyncio.run(database.init_db())
 
         namespace_token = set_namespace_context('default')
@@ -1644,21 +1584,14 @@ def test_postgres_shared_flight_followers_do_not_block_completion(monkeypatch, t
     require_docker()
 
     from backend_core import compute_requests_service, database
-    from backend_core.config import settings
     from backend_core.domain.compute_requests.models import command_envelope, command_from_payload
     from backend_core.namespace import reset_namespace, set_namespace_context
     from backend_core.persistence.compute_requests.models import ComputeRequest, ComputeRequestFlight
     from backend_core.persistence.datasource.models import DataSource
 
     with PostgresContainer() as container:
-        _clear_database_state()
-        data_dir = tmp_path / 'data'
-        data_dir.mkdir(parents=True, exist_ok=True)
-        monkeypatch.setattr(settings, 'database_url', container.url, raising=False)
-        monkeypatch.setattr(settings, 'data_dir', data_dir, raising=False)
-        monkeypatch.setattr(settings, 'distributed_runtime_enabled', True, raising=False)
         database.set_active_runtime_coordinator_generation(None)
-        database.set_settings_engine_override(database._create_public_engine())
+        _configure_postgres_settings(monkeypatch, container, tmp_path)
         asyncio.run(database.init_db())
 
         datasource_id = 'shared-flight-race-datasource'
@@ -1834,16 +1767,9 @@ def test_postgres_outbox_dispatchers_do_not_share_unclaimed_batch_rows(monkeypat
     require_docker()
 
     from backend_core import database, runtime_outbox_service, runtime_work_service
-    from backend_core.config import settings
 
     with PostgresContainer() as container:
-        _clear_database_state()
-        data_dir = tmp_path / 'data'
-        data_dir.mkdir(parents=True, exist_ok=True)
-        monkeypatch.setattr(settings, 'database_url', container.url, raising=False)
-        monkeypatch.setattr(settings, 'data_dir', data_dir, raising=False)
-        monkeypatch.setattr(settings, 'distributed_runtime_enabled', True, raising=False)
-        database.set_settings_engine_override(database._create_public_engine())
+        _configure_postgres_settings(monkeypatch, container, tmp_path)
         asyncio.run(database.init_db())
 
         with Session(database._get_tenant_engine()) as session:
@@ -1913,16 +1839,9 @@ def test_postgres_outbox_runtime_dispatch_batches_claim_and_finalize_transaction
     from sqlalchemy import event as sa_event
 
     from backend_core import database, runtime_outbox_service
-    from backend_core.config import settings
 
     with PostgresContainer() as container:
-        _clear_database_state()
-        data_dir = tmp_path / 'data'
-        data_dir.mkdir(parents=True, exist_ok=True)
-        monkeypatch.setattr(settings, 'database_url', container.url, raising=False)
-        monkeypatch.setattr(settings, 'data_dir', data_dir, raising=False)
-        monkeypatch.setattr(settings, 'distributed_runtime_enabled', True, raising=False)
-        database.set_settings_engine_override(database._create_public_engine())
+        _configure_postgres_settings(monkeypatch, container, tmp_path)
         asyncio.run(database.init_db())
         engine = database._get_tenant_engine()
 
@@ -1962,16 +1881,9 @@ def test_postgres_outbox_claim_recovers_after_dispatcher_process_crash(monkeypat
     require_docker()
 
     from backend_core import database, runtime_outbox_service
-    from backend_core.config import settings
 
     with PostgresContainer() as container:
-        _clear_database_state()
-        data_dir = tmp_path / 'data'
-        data_dir.mkdir(parents=True, exist_ok=True)
-        monkeypatch.setattr(settings, 'database_url', container.url, raising=False)
-        monkeypatch.setattr(settings, 'data_dir', data_dir, raising=False)
-        monkeypatch.setattr(settings, 'distributed_runtime_enabled', True, raising=False)
-        database.set_settings_engine_override(database._create_public_engine())
+        _configure_postgres_settings(monkeypatch, container, tmp_path)
         asyncio.run(database.init_db())
 
         with Session(database._get_tenant_engine()) as session:
@@ -2054,16 +1966,9 @@ def test_init_db_postgres_shared_seed_is_safe_under_concurrent_startup(monkeypat
     require_docker()
 
     from backend_core import database
-    from backend_core.config import settings
 
     with PostgresContainer() as container:
-        _clear_database_state()
-        data_dir = tmp_path / 'data'
-        data_dir.mkdir(parents=True, exist_ok=True)
-        monkeypatch.setattr(settings, 'database_url', container.url, raising=False)
-        monkeypatch.setattr(settings, 'data_dir', data_dir, raising=False)
-        monkeypatch.setattr(settings, 'distributed_runtime_enabled', True, raising=False)
-        database.set_settings_engine_override(database._create_public_engine())
+        _configure_postgres_settings(monkeypatch, container, tmp_path)
 
         errors: list[BaseException] = []
 
@@ -2087,6 +1992,7 @@ def test_init_db_postgres_shared_seed_is_safe_under_concurrent_startup(monkeypat
         with container.connect() as connection:
             assert _query_value(connection, 'SELECT count(*) FROM public.app_settings') == 1
             assert not _table_exists(connection, 'public', 'users')
+            assert _table_exists(connection, 'default', 'build_runs')
 
         _clear_database_state()
 
@@ -2097,21 +2003,14 @@ def test_backend_public_bootstrap_creates_auth_tables_and_default_user(monkeypat
 
     from backend_core import database
     from backend_core.auth_config import settings as auth_settings
-    from backend_core.config import settings
     from backend_core.public_schema import ensure_backend_public_tables
     from modules.auth.service import ensure_default_user
 
     with PostgresContainer() as container:
-        _clear_database_state()
-        data_dir = tmp_path / 'data'
-        data_dir.mkdir(parents=True, exist_ok=True)
-        monkeypatch.setattr(settings, 'database_url', container.url, raising=False)
-        monkeypatch.setattr(settings, 'data_dir', data_dir, raising=False)
-        monkeypatch.setattr(settings, 'distributed_runtime_enabled', True, raising=False)
+        _configure_postgres_settings(monkeypatch, container, tmp_path)
         monkeypatch.setattr(auth_settings, 'default_user_email', 'seeded@example.com', raising=False)
         monkeypatch.setattr(auth_settings, 'default_user_password', 'SeededPass123', raising=False)
         monkeypatch.setattr(auth_settings, 'default_user_name', 'Seeded User', raising=False)
-        database.set_settings_engine_override(database._create_public_engine())
 
         asyncio.run(database.init_db())
         ensure_backend_public_tables()
@@ -2129,76 +2028,20 @@ def test_backend_public_bootstrap_creates_auth_tables_and_default_user(monkeypat
 
 
 @pytest.mark.timeout(300)
-def test_init_db_postgres_namespace_bootstrap_does_not_deadlock(monkeypatch, tmp_path: Path) -> None:
+def test_namespace_connection_sets_search_path_per_namespace(monkeypatch, tmp_path: Path) -> None:
     require_docker()
 
     from backend_core import database
-    from backend_core.config import settings
-
-    with PostgresContainer() as container:
-        _clear_database_state()
-        data_dir = tmp_path / 'data'
-        data_dir.mkdir(parents=True, exist_ok=True)
-        monkeypatch.setattr(settings, 'database_url', container.url, raising=False)
-        monkeypatch.setattr(settings, 'data_dir', data_dir, raising=False)
-        monkeypatch.setattr(settings, 'distributed_runtime_enabled', True, raising=False)
-        database.set_settings_engine_override(database._create_public_engine())
-
-        thread = threading.Thread(target=lambda: asyncio.run(database.init_db()))
-        thread.start()
-        thread.join(timeout=30)
-
-        assert not thread.is_alive()
-
-        with container.connect() as connection:
-            assert _table_exists(connection, 'default', 'build_runs')
-
-        _clear_database_state()
-
-
-@pytest.mark.timeout(300)
-def test_namespace_connection_sets_search_path(monkeypatch, tmp_path: Path) -> None:
-    require_docker()
-
-    from backend_core import database
-    from backend_core.config import settings
-
-    with PostgresContainer() as container:
-        _clear_database_state()
-        data_dir = tmp_path / 'data'
-        data_dir.mkdir(parents=True, exist_ok=True)
-        monkeypatch.setattr(settings, 'database_url', container.url, raising=False)
-        monkeypatch.setattr(settings, 'data_dir', data_dir, raising=False)
-        monkeypatch.setattr(settings, 'distributed_runtime_enabled', True, raising=False)
-        database.set_settings_engine_override(database._create_public_engine())
-
-        asyncio.run(database.init_db())
-
-        with database.namespace_connection('default') as connection:
-            assert connection.execute(text('SELECT current_schema()')).scalar_one() == 'default'
-
-        _clear_database_state()
-
-
-@pytest.mark.timeout(300)
-def test_namespace_connection_maps_public_namespace_away_from_public_schema(monkeypatch, tmp_path: Path) -> None:
-    require_docker()
-
-    from backend_core import database
-    from backend_core.config import settings
     from backend_core.namespace import namespace_database_schema
 
     with PostgresContainer() as container:
-        _clear_database_state()
-        data_dir = tmp_path / 'data'
-        data_dir.mkdir(parents=True, exist_ok=True)
-        monkeypatch.setattr(settings, 'database_url', container.url, raising=False)
-        monkeypatch.setattr(settings, 'data_dir', data_dir, raising=False)
-        monkeypatch.setattr(settings, 'distributed_runtime_enabled', True, raising=False)
-        database.set_settings_engine_override(database._create_public_engine())
+        _configure_postgres_settings(monkeypatch, container, tmp_path)
 
         asyncio.run(database.init_db())
         database.initialize_namespace_db('public')
+
+        with database.namespace_connection('default') as connection:
+            assert connection.execute(text('SELECT current_schema()')).scalar_one() == 'default'
 
         with database.namespace_connection('public') as connection:
             assert connection.execute(text('SELECT current_schema()')).scalar_one() == namespace_database_schema('public')
@@ -2211,17 +2054,10 @@ def test_tenant_engine_checkout_tracks_current_namespace(monkeypatch, tmp_path: 
     require_docker()
 
     from backend_core import database
-    from backend_core.config import settings
     from backend_core.namespace import reset_namespace, set_namespace_context
 
     with PostgresContainer() as container:
-        _clear_database_state()
-        data_dir = tmp_path / 'data'
-        data_dir.mkdir(parents=True, exist_ok=True)
-        monkeypatch.setattr(settings, 'database_url', container.url, raising=False)
-        monkeypatch.setattr(settings, 'data_dir', data_dir, raising=False)
-        monkeypatch.setattr(settings, 'distributed_runtime_enabled', True, raising=False)
-        database.set_settings_engine_override(database._create_public_engine())
+        _configure_postgres_settings(monkeypatch, container, tmp_path)
 
         asyncio.run(database.init_db())
         database.initialize_namespace_db('alpha')

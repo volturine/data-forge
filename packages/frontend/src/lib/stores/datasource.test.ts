@@ -114,19 +114,10 @@ describe('DatasourceStore', () => {
 	});
 
 	describe('initial state', () => {
-		test('datasources is empty array', () => {
+		test('has no datasources, is not loading, has no error and an empty schema map', () => {
 			expect(store.datasources).toEqual([]);
-		});
-
-		test('loading is false', () => {
 			expect(store.loading).toBe(false);
-		});
-
-		test('error is null', () => {
 			expect(store.error).toBeNull();
-		});
-
-		test('schemas map is empty', () => {
 			expect(store.schemas.size).toBe(0);
 		});
 	});

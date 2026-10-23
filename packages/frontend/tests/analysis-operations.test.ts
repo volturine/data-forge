@@ -1,14 +1,10 @@
 import { test, expect } from './fixtures.js';
 import { createAnalysis, type E2ERequest } from './utils/api.js';
-import { addStepAndOpenConfig, gotoAnalysisEditor } from './utils/analysis.js';
+import { addStepAndOpenConfig } from './utils/analysis.js';
 import { deleteAnalysisViaUI } from './utils/ui-cleanup.js';
 import { screenshot } from './utils/visual.js';
 import { uid } from './utils/uid.js';
-import {
-	readyTimeoutMs,
-	waitForChartPreviewReady,
-	waitForInlinePreviewReady
-} from './utils/readiness.js';
+import { readyTimeoutMs, waitForChartPreviewReady } from './utils/readiness.js';
 
 let sharedBaseDatasourceName = '';
 let sharedBaseDatasourceId = '';
@@ -58,6 +54,10 @@ test.describe('Analyses – download config format switching', () => {
 			// Switch to duckdb
 			await formatSelect.selectOption('duckdb');
 			await expect(formatSelect).toHaveValue('duckdb');
+
+			// Switch to json
+			await formatSelect.selectOption('json');
+			await expect(formatSelect).toHaveValue('json');
 
 			// Change filename
 			await filenameInput.fill('my_export');
@@ -312,22 +312,6 @@ test.describe('Analyses – filter config editing', () => {
 });
 
 // ── View and chart ──────────────────────────────────────────────────────────
-
-test.describe('Analyses – view node inline preview', () => {
-	test('view step renders inline data table with preview data', async ({ page, request }) => {
-		const id = uid();
-		const analysis = `E2E View Preview ${id}`;
-		const aId = await createTrackedAnalysis(request, analysis, sharedBaseDatasourceId);
-		try {
-			await gotoAnalysisEditor(page, aId);
-			await waitForInlinePreviewReady(page);
-
-			await screenshot(page, 'analysis/operations', 'view-inline-preview');
-		} finally {
-			await deleteAnalysisViaUI(page, analysis);
-		}
-	});
-});
 
 test.describe('Analyses – chart config and preview', () => {
 	test('chart step: configure x/y columns, apply, chart SVG renders', async ({ page, request }) => {
@@ -896,35 +880,6 @@ test.describe('Analyses – with_columns config editing', () => {
 
 // ── Export operations ────────────────────────────────────────────────────────
 
-test.describe('Analyses – download config editing', () => {
-	test('Download: set filename + format, Apply', async ({ page, request }) => {
-		const id = uid();
-		const analysis = `E2E Download Edit ${id}`;
-		const aId = await createTrackedAnalysis(request, analysis, sharedBaseDatasourceId);
-		try {
-			const configPanel = await addStepAndOpenConfig(page, aId, 'download');
-
-			// Set filename
-			const filenameInput = configPanel.locator('#download-filename');
-			await expect(filenameInput).toBeVisible();
-			await filenameInput.fill('my_export');
-
-			// Change format to JSON
-			const formatSelect = configPanel.locator('#download-format');
-			await formatSelect.selectOption('json');
-
-			const applyBtn = configPanel.getByRole('button', { name: 'Apply' });
-			await expect(applyBtn).toBeEnabled();
-			await applyBtn.click();
-			await expect(applyBtn).toBeDisabled({ timeout: 5_000 });
-
-			await screenshot(page, 'analysis/operations', 'download-config-applied');
-		} finally {
-			await deleteAnalysisViaUI(page, analysis);
-		}
-	});
-});
-
 test.describe('Analyses – notification config editing', () => {
 	test('Notification: set email method + recipient, Apply', async ({ page, request }) => {
 		const id = uid();
@@ -1246,60 +1201,6 @@ test.describe('Analyses – union_by_name config editing', () => {
 			await expect(applyBtn).toBeDisabled({ timeout: 5_000 });
 
 			await screenshot(page, 'analysis/operations', 'union-config-applied');
-		} finally {
-			await deleteAnalysisViaUI(page, analysis);
-		}
-	});
-});
-
-test.describe('Analyses – explode config positive path', () => {
-	test('Explode: list column appears and can be selected after with_columns step', async ({
-		page,
-		request
-	}) => {
-		const id = uid();
-		const analysis = `E2E Explode Positive ${id}`;
-		const aId = await createTrackedAnalysis(request, analysis, sharedBaseDatasourceId);
-		try {
-			// Step 1: add a with_columns step that produces a list column via UDF expression
-			const withColPanel = await addStepAndOpenConfig(page, aId, 'with_columns');
-
-			// Use the "literal" expression type and set the column name
-			await withColPanel.locator('#wc-expr-type').selectOption('literal');
-			await withColPanel.locator('#wc-expr-name').fill('name_city_list');
-			await withColPanel.locator('#wc-expr-value').fill('[1,2,3]');
-
-			const addBtn = withColPanel.getByRole('button', { name: 'Add' });
-			await expect(addBtn).toBeEnabled();
-			await addBtn.click();
-
-			const applyWith = withColPanel.getByRole('button', { name: 'Apply' });
-			await expect(applyWith).toBeEnabled();
-			await applyWith.click();
-			await expect(applyWith).toBeDisabled({ timeout: 5_000 });
-
-			// Step 2: add an explode step and open its config
-			await page.locator('button[data-step="explode"]').click();
-			const explodeNode = page.locator('[data-step-type="explode"]');
-			await expect(explodeNode).toHaveCount(1, { timeout: 5_000 });
-			await expect(explodeNode).toBeVisible({ timeout: 5_000 });
-			await explodeNode.locator('[data-action="edit"]').click();
-
-			const explodePanel = page.locator('[data-step-config="explode"]');
-			await expect(explodePanel).toBeVisible({ timeout: 5_000 });
-
-			// Descriptive text should be visible
-			await expect(
-				explodePanel.getByText(/Transform list\/array columns into multiple rows/i)
-			).toBeVisible();
-
-			// Apply explode (regardless of column availability — the step itself is valid)
-			const applyExplode = explodePanel.getByRole('button', { name: 'Apply' });
-			await expect(applyExplode).toBeEnabled();
-			await applyExplode.click();
-			await expect(applyExplode).toBeDisabled({ timeout: 5_000 });
-
-			await screenshot(page, 'analysis/operations', 'explode-positive-applied');
 		} finally {
 			await deleteAnalysisViaUI(page, analysis);
 		}

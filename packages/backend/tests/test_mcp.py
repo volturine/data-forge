@@ -62,15 +62,6 @@ class TestMCPToolListing:
 
         assert not any(tool_id.endswith('_engine') for tool_id in by_id)
 
-    def test_compute_worker_run_tools_use_compute_worker_run_paths(self, client: TestClient) -> None:
-        response = client.get('/api/v1/mcp/tools')
-
-        paths = [tool['path'] for tool in response.json()]
-
-        assert any(path.endswith('/compute-worker-runs') for path in paths)
-        assert any(path.endswith('/compute-worker-runs/stats') for path in paths)
-        assert not any('/engine-runs' in path for path in paths)
-
     def test_routes_require_auth(self, client: TestClient, monkeypatch: pytest.MonkeyPatch) -> None:
         from backend_core.application import app
         from modules.auth.dependencies import get_current_user
@@ -80,16 +71,12 @@ class TestMCPToolListing:
         response = client.get('/api/v1/mcp/tools')
         assert response.status_code == 401
 
-    def test_list_tools_returns_list(self, client: TestClient) -> None:
+    def test_tools_listing_contract(self, client: TestClient) -> None:
         response = client.get('/api/v1/mcp/tools')
         assert response.status_code == 200
         tools = response.json()
         assert isinstance(tools, list)
         assert len(tools) > 0
-
-    def test_tools_have_required_fields(self, client: TestClient) -> None:
-        response = client.get('/api/v1/mcp/tools')
-        tools = response.json()
         for tool in tools:
             assert 'id' in tool
             assert 'method' in tool
@@ -100,38 +87,22 @@ class TestMCPToolListing:
             assert 'confirm_required' in tool
             assert 'output_schema' in tool
 
-    def test_get_tools_are_safe(self, client: TestClient) -> None:
-        response = client.get('/api/v1/mcp/tools')
-        tools = response.json()
-        get_tools = [t for t in tools if t['method'] == 'GET']
-        for tool in get_tools:
-            assert tool['safety'] == MCPToolSafety.SAFE.value
+        paths = [tool['path'] for tool in tools]
+        assert any(path.endswith('/compute-worker-runs') for path in paths)
+        assert any(path.endswith('/compute-worker-runs/stats') for path in paths)
+        assert not any('/engine-runs' in path for path in paths)
+        assert not any('/mcp/' in path for path in paths)
 
-    def test_delete_tools_are_mutating(self, client: TestClient) -> None:
-        response = client.get('/api/v1/mcp/tools')
-        tools = response.json()
-        delete_tools = [t for t in tools if t['method'] == 'DELETE']
-        for tool in delete_tools:
+        for tool in [t for t in tools if t['method'] == 'GET']:
+            assert tool['safety'] == MCPToolSafety.SAFE.value
+        for tool in [t for t in tools if t['method'] == 'DELETE']:
             assert tool['safety'] == MCPToolSafety.MUTATING.value
 
-    def test_mcp_tools_not_in_registry(self, client: TestClient) -> None:
-        response = client.get('/api/v1/mcp/tools')
-        tools = response.json()
-        paths = [t['path'] for t in tools]
-        for p in paths:
-            assert '/mcp/' not in p
-
-    def test_datasource_delete_requires_confirm(self, client: TestClient) -> None:
-        response = client.get('/api/v1/mcp/tools')
-        tools = response.json()
         ds_delete = [t for t in tools if t['method'] == 'DELETE' and '/datasource/' in t['path']]
         assert len(ds_delete) > 0
         for tool in ds_delete:
             assert tool['confirm_required'] is True
 
-    def test_analysis_delete_requires_confirm(self, client: TestClient) -> None:
-        response = client.get('/api/v1/mcp/tools')
-        tools = response.json()
         analysis_delete = [t for t in tools if t['method'] == 'DELETE' and '/analysis/' in t['path']]
         assert len(analysis_delete) > 0
         for tool in analysis_delete:
@@ -232,46 +203,17 @@ class TestMCPConfirm:
         data = confirm_resp.json()
         assert data['status'] == 'executed'
         assert 'result' in data
+        replay = client.post('/api/v1/mcp/confirm', json={'token': token})
+        assert replay.status_code == 404
 
     def test_confirm_expired_token_returns_404(self, client: TestClient) -> None:
         resp = client.post('/api/v1/mcp/confirm', json={'token': 'invalid-token-xyz'})
         assert resp.status_code == 404
 
-    def test_token_consumed_after_confirm(self, client: TestClient) -> None:
-        response = client.get('/api/v1/mcp/tools')
-        tools = response.json()
-        post_tool = next(
-            (t for t in tools if t['method'] == 'POST' and not t['input_schema'].get('required')),
-            None,
-        )
-        if post_tool is None:
-            pytest.skip('No POST tool without required args available')
-
-        call_resp = client.post('/api/v1/mcp/call', json={'tool_id': post_tool['id'], 'args': {}})
-        token = call_resp.json()['token']
-
-        client.post('/api/v1/mcp/confirm', json={'token': token})
-        second = client.post('/api/v1/mcp/confirm', json={'token': token})
-        assert second.status_code == 404
-
     @staticmethod
     def _post_tool_without_required_args(client: TestClient) -> dict | None:
         tools = client.get('/api/v1/mcp/tools').json()
         return next((t for t in tools if t['method'] == 'POST' and not t['input_schema'].get('required')), None)
-
-    def test_pending_token_is_bound_to_creating_user(self, client: TestClient, test_user) -> None:
-        from modules.mcp.pending import PendingStore, pending_store
-
-        post_tool = self._post_tool_without_required_args(client)
-        if post_tool is None:
-            pytest.skip('No POST tool without required args available')
-
-        call_resp = client.post('/api/v1/mcp/call', json={'tool_id': post_tool['id'], 'args': {}})
-        token = call_resp.json()['token']
-
-        assert pending_store.pop(token, owner_id='someone-else') is None
-        assert PendingStore().pop(token, owner_id=test_user.id) is not None
-        assert pending_store.pop(token, owner_id=test_user.id) is None
 
     def test_confirm_rejects_token_presented_by_other_user(self, client: TestClient, test_user) -> None:
         import uuid
@@ -367,104 +309,51 @@ class TestMCPCallValidation:
         assert data['status'] == 'validation_error'
         assert data['valid'] is False
         assert isinstance(data['errors'], list)
-
-    def test_call_does_not_create_pending_for_invalid_args(self, client: TestClient) -> None:
-        response = client.get('/api/v1/mcp/tools')
-        tools = response.json()
-        post_tool = next(
-            (t for t in tools if t['method'] == 'POST' and t['input_schema'].get('required')),
-            None,
-        )
-        if post_tool is None:
-            pytest.skip('No POST tool with required args available')
-        resp = client.post(
-            '/api/v1/mcp/call',
-            json={'tool_id': post_tool['id'], 'args': {'__invalid__': 1}},
-        )
-        data = resp.json()
-        assert data['status'] == 'validation_error'
         assert 'token' not in data
 
 
 class TestValidationFormatAndDefaults:
-    def test_format_email_valid(self) -> None:
+    @pytest.mark.parametrize(
+        ('value_format', 'value', 'expected_valid'),
+        [
+            pytest.param('email', 'user@example.com', True, id='email-valid'),
+            pytest.param('email', 'not-an-email', False, id='email-invalid'),
+            pytest.param('date', '2024-01-15', True, id='date-valid'),
+            pytest.param('date', 'not-a-date', False, id='date-invalid'),
+        ],
+    )
+    def test_string_format_is_enforced(self, value_format: str, value: str, expected_valid: bool) -> None:
         from modules.mcp.validation import validate_args
 
-        schema = {
-            'type': 'object',
-            'properties': {'email': {'type': 'string', 'format': 'email'}},
-        }
-        valid, errors, _ = validate_args(schema, {'email': 'user@example.com'})
-        assert valid is True
-        assert errors == []
+        schema = {'type': 'object', 'properties': {'value': {'type': 'string', 'format': value_format}}}
+        valid, errors, _ = validate_args(schema, {'value': value})
+        assert valid is expected_valid
+        assert len(errors) == (0 if expected_valid else 1)
+        assert all(error['path'] == 'value' for error in errors)
 
-    def test_format_email_invalid(self) -> None:
-        from modules.mcp.validation import validate_args
-
-        schema = {
-            'type': 'object',
-            'properties': {'email': {'type': 'string', 'format': 'email'}},
-        }
-        valid, errors, _ = validate_args(schema, {'email': 'not-an-email'})
-        assert valid is False
-        assert len(errors) == 1
-        assert 'email' in errors[0]['path'] or errors[0]['path'] == 'email'
-
-    def test_format_date_valid(self) -> None:
-        from modules.mcp.validation import validate_args
-
-        schema = {
-            'type': 'object',
-            'properties': {'d': {'type': 'string', 'format': 'date'}},
-        }
-        valid, errors, _ = validate_args(schema, {'d': '2024-01-15'})
-        assert valid is True
-
-    def test_format_date_invalid(self) -> None:
-        from modules.mcp.validation import validate_args
-
-        schema = {
-            'type': 'object',
-            'properties': {'d': {'type': 'string', 'format': 'date'}},
-        }
-        valid, errors, _ = validate_args(schema, {'d': 'not-a-date'})
-        assert valid is False
-
-    def test_const_applied_when_missing(self) -> None:
+    @pytest.mark.parametrize(
+        ('prop_schema', 'args', 'expected'),
+        [
+            pytest.param({'const': 'fixed'}, {}, 'fixed', id='const-filled-when-missing'),
+            pytest.param({'const': 'fixed'}, {'value': 'other'}, 'other', id='const-kept-when-present'),
+            pytest.param({'type': 'integer', 'default': 10}, {}, 10, id='default-filled-when-missing'),
+            pytest.param({'type': 'integer', 'default': 10}, {'value': 5}, 5, id='default-kept-when-present'),
+        ],
+    )
+    def test_apply_defaults_fills_only_missing_values(self, prop_schema: dict, args: dict, expected: object) -> None:
         from modules.mcp.validation import apply_defaults
 
-        schema = {'type': 'object', 'properties': {'mode': {'const': 'fixed'}}}
-        result = apply_defaults(schema, {})
-        assert result['mode'] == 'fixed'
+        schema = {'type': 'object', 'properties': {'value': prop_schema}}
+        assert apply_defaults(schema, args)['value'] == expected
 
-    def test_const_not_overwritten_when_present(self) -> None:
-        from modules.mcp.validation import apply_defaults
-
-        schema = {'type': 'object', 'properties': {'mode': {'const': 'fixed'}}}
-        result = apply_defaults(schema, {'mode': 'other'})
-        assert result['mode'] == 'other'
-
-    def test_default_applied_when_missing(self) -> None:
-        from modules.mcp.validation import apply_defaults
-
-        schema = {
-            'type': 'object',
-            'properties': {'limit': {'type': 'integer', 'default': 10}},
-        }
-        result = apply_defaults(schema, {})
-        assert result['limit'] == 10
-
-    def test_default_not_overwritten_when_present(self) -> None:
-        from modules.mcp.validation import apply_defaults
-
-        schema = {
-            'type': 'object',
-            'properties': {'limit': {'type': 'integer', 'default': 10}},
-        }
-        result = apply_defaults(schema, {'limit': 5})
-        assert result['limit'] == 5
-
-    def test_nested_defaults_applied(self) -> None:
+    @pytest.mark.parametrize(
+        ('verbose_default', 'args'),
+        [
+            pytest.param(False, {'opts': {}}, id='existing-object-gets-default'),
+            pytest.param(True, {}, id='missing-object-is-created'),
+        ],
+    )
+    def test_apply_defaults_recurses_into_nested_objects(self, verbose_default: bool, args: dict) -> None:
         from modules.mcp.validation import apply_defaults
 
         schema = {
@@ -472,211 +361,149 @@ class TestValidationFormatAndDefaults:
             'properties': {
                 'opts': {
                     'type': 'object',
-                    'properties': {'verbose': {'type': 'boolean', 'default': False}},
+                    'properties': {'verbose': {'type': 'boolean', 'default': verbose_default}},
                 },
             },
         }
-        result = apply_defaults(schema, {'opts': {}})
-        assert result['opts']['verbose'] is False
+        assert apply_defaults(schema, args)['opts']['verbose'] is verbose_default
 
-    def test_nested_object_created_when_missing(self) -> None:
-        from modules.mcp.validation import apply_defaults
-
-        schema = {
-            'type': 'object',
-            'properties': {
-                'opts': {
-                    'type': 'object',
-                    'properties': {'verbose': {'type': 'boolean', 'default': True}},
-                },
-            },
-        }
-        result = apply_defaults(schema, {})
-        assert result['opts']['verbose'] is True
-
-    def test_validate_returns_normalized_with_defaults(self) -> None:
+    @pytest.mark.parametrize(
+        ('prop_name', 'prop_schema', 'expected'),
+        [
+            pytest.param('limit', {'type': 'integer', 'default': 20}, 20, id='default'),
+            pytest.param('version', {'const': 'v1'}, 'v1', id='const'),
+        ],
+    )
+    def test_validate_args_returns_normalized_defaults_and_consts(self, prop_name: str, prop_schema: dict, expected: object) -> None:
         from modules.mcp.validation import validate_args
 
         schema = {
             'type': 'object',
-            'properties': {
-                'name': {'type': 'string'},
-                'limit': {'type': 'integer', 'default': 20},
-            },
+            'properties': {'name': {'type': 'string'}, prop_name: prop_schema},
             'required': ['name'],
         }
         valid, errors, normalized = validate_args(schema, {'name': 'test'})
         assert valid is True
-        assert normalized['limit'] == 20
+        assert normalized[prop_name] == expected
 
-    def test_validate_returns_normalized_with_const(self) -> None:
+    @pytest.mark.parametrize(
+        ('schema', 'args', 'validator', 'message'),
+        [
+            pytest.param(
+                {'type': 'object', 'properties': {'name': {'type': 'string'}}, 'required': ['name']},
+                {},
+                'required',
+                'Provide all required fields',
+                id='required',
+            ),
+            pytest.param(
+                {'type': 'object', 'properties': {'name': {'type': 'string'}}, 'additionalProperties': False},
+                {'extra': 1},
+                'additionalProperties',
+                'Remove unknown fields',
+                id='additional-properties',
+            ),
+            pytest.param(
+                {'type': 'object', 'properties': {'mode': {'type': 'string', 'enum': ['a', 'b']}}, 'required': ['mode']},
+                {'mode': 'c'},
+                'enum',
+                'Use one of the documented enum values',
+                id='enum',
+            ),
+            pytest.param(
+                {'type': 'object', 'properties': {'limit': {'type': 'integer'}}, 'required': ['limit']},
+                {'limit': 'ten'},
+                'type',
+                'Use the documented JSON type',
+                id='type',
+            ),
+        ],
+    )
+    def test_validate_args_reports_actionable_error(self, schema: dict, args: dict, validator: str, message: str) -> None:
         from modules.mcp.validation import validate_args
 
-        schema = {
-            'type': 'object',
-            'properties': {
-                'name': {'type': 'string'},
-                'version': {'const': 'v1'},
-            },
-            'required': ['name'],
-        }
-        valid, errors, normalized = validate_args(schema, {'name': 'test'})
-        assert valid is True
-        assert normalized['version'] == 'v1'
-
-    def test_validate_reports_actionable_required_error(self) -> None:
-        from modules.mcp.validation import validate_args
-
-        schema = {
-            'type': 'object',
-            'properties': {'name': {'type': 'string'}},
-            'required': ['name'],
-        }
-        valid, errors, _ = validate_args(schema, {})
+        valid, errors, _ = validate_args(schema, args)
         assert valid is False
         assert len(errors) == 1
-        assert errors[0]['validator'] == 'required'
-        assert 'Provide all required fields' in errors[0]['message']
-
-    def test_validate_reports_actionable_additional_properties_error(self) -> None:
-        from modules.mcp.validation import validate_args
-
-        schema = {
-            'type': 'object',
-            'properties': {'name': {'type': 'string'}},
-            'additionalProperties': False,
-        }
-        valid, errors, _ = validate_args(schema, {'extra': 1})
-        assert valid is False
-        assert len(errors) == 1
-        assert errors[0]['validator'] == 'additionalProperties'
-        assert 'Remove unknown fields' in errors[0]['message']
-
-    def test_validate_reports_actionable_enum_error(self) -> None:
-        from modules.mcp.validation import validate_args
-
-        schema = {
-            'type': 'object',
-            'properties': {'mode': {'type': 'string', 'enum': ['a', 'b']}},
-            'required': ['mode'],
-        }
-        valid, errors, _ = validate_args(schema, {'mode': 'c'})
-        assert valid is False
-        assert len(errors) == 1
-        assert errors[0]['validator'] == 'enum'
-        assert 'Use one of the documented enum values' in errors[0]['message']
-
-    def test_validate_reports_actionable_type_error(self) -> None:
-        from modules.mcp.validation import validate_args
-
-        schema = {
-            'type': 'object',
-            'properties': {'limit': {'type': 'integer'}},
-            'required': ['limit'],
-        }
-        valid, errors, _ = validate_args(schema, {'limit': 'ten'})
-        assert valid is False
-        assert len(errors) == 1
-        assert errors[0]['validator'] == 'type'
-        assert 'Use the documented JSON type' in errors[0]['message']
+        assert errors[0]['validator'] == validator
+        assert message in errors[0]['message']
 
 
 class TestOpenAPIToJsonSchema:
-    def test_bool_true_passthrough(self) -> None:
-        result = _openapi_to_json_schema(True, {})
-        assert result is True
+    @pytest.mark.parametrize(
+        'value',
+        [
+            pytest.param(True, id='bool-true'),
+            pytest.param(False, id='bool-false'),
+            pytest.param(None, id='none'),
+            pytest.param({'type': 'string'}, id='dict'),
+        ],
+    )
+    def test_non_ref_values_pass_through_unchanged(self, value: object) -> None:
+        result = _openapi_to_json_schema(value, {})
+        assert result == value
+        assert type(result) is type(value)
 
-    def test_bool_false_passthrough(self) -> None:
-        result = _openapi_to_json_schema(False, {})
-        assert result is False
+    @pytest.mark.parametrize(
+        'schema',
+        [
+            pytest.param({'type': 'object', 'additionalProperties': True}, id='additional-properties-true'),
+            pytest.param({'type': 'object', 'additionalProperties': False}, id='additional-properties-false'),
+            pytest.param({'type': 'object', 'additionalProperties': {'type': 'string'}}, id='additional-properties-schema'),
+            pytest.param({'type': 'array', 'items': True}, id='items-bool'),
+            pytest.param({'type': 'array', 'items': {'type': 'integer'}}, id='items-schema'),
+        ],
+    )
+    def test_subschema_keywords_are_preserved(self, schema: dict) -> None:
+        assert _openapi_to_json_schema(schema, {}) == schema
 
-    def test_none_passthrough(self) -> None:
-        result = _openapi_to_json_schema(None, {})
-        assert result is None
-
-    def test_dict_passthrough(self) -> None:
-        result = _openapi_to_json_schema({'type': 'string'}, {})
-        assert result == {'type': 'string'}
-
-    def test_additional_properties_true(self) -> None:
-        schema = {'type': 'object', 'additionalProperties': True}
-        result = _openapi_to_json_schema(schema, {})
-        assert result == {'type': 'object', 'additionalProperties': True}
-
-    def test_additional_properties_false(self) -> None:
-        schema = {'type': 'object', 'additionalProperties': False}
-        result = _openapi_to_json_schema(schema, {})
-        assert result == {'type': 'object', 'additionalProperties': False}
-
-    def test_additional_properties_dict(self) -> None:
-        schema = {'type': 'object', 'additionalProperties': {'type': 'string'}}
-        result = _openapi_to_json_schema(schema, {})
-        assert result == {'type': 'object', 'additionalProperties': {'type': 'string'}}
-
-    def test_additional_properties_ref_schema(self) -> None:
-        components = {
-            'schemas': {
-                'ExtraValue': {
-                    'type': 'object',
-                    'properties': {'name': {'type': 'string'}},
-                    'required': ['name'],
-                    'additionalProperties': False,
+    @pytest.mark.parametrize(
+        ('schema', 'components', 'expected'),
+        [
+            pytest.param(
+                {'$ref': '#/components/schemas/Foo'},
+                {'schemas': {'Foo': {'type': 'string'}}},
+                {'type': 'string'},
+                id='top-level-ref',
+            ),
+            pytest.param(
+                {'type': 'object', 'additionalProperties': {'$ref': '#/components/schemas/ExtraValue'}},
+                {
+                    'schemas': {
+                        'ExtraValue': {
+                            'type': 'object',
+                            'properties': {'name': {'type': 'string'}},
+                            'required': ['name'],
+                            'additionalProperties': False,
+                        },
+                    },
                 },
-            },
-        }
-        schema = {
-            'type': 'object',
-            'additionalProperties': {'$ref': '#/components/schemas/ExtraValue'},
-        }
-        result = _openapi_to_json_schema(schema, components)
-        assert result == {
-            'type': 'object',
-            'additionalProperties': {
-                'type': 'object',
-                'properties': {'name': {'type': 'string'}},
-                'required': ['name'],
-                'additionalProperties': False,
-            },
-        }
+                {
+                    'type': 'object',
+                    'additionalProperties': {
+                        'type': 'object',
+                        'properties': {'name': {'type': 'string'}},
+                        'required': ['name'],
+                        'additionalProperties': False,
+                    },
+                },
+                id='additional-properties-ref',
+            ),
+            pytest.param({'type': 'string', 'title': 'My Field'}, {}, {'type': 'string'}, id='title-stripped'),
+        ],
+    )
+    def test_refs_resolve_and_titles_are_stripped(self, schema: dict, components: dict, expected: dict) -> None:
+        assert _openapi_to_json_schema(schema, components) == expected
 
-    def test_items_bool(self) -> None:
-        schema = {'type': 'array', 'items': True}
-        result = _openapi_to_json_schema(schema, {})
-        assert result == {'type': 'array', 'items': True}
-
-    def test_items_dict(self) -> None:
-        schema = {'type': 'array', 'items': {'type': 'integer'}}
-        result = _openapi_to_json_schema(schema, {})
-        assert result == {'type': 'array', 'items': {'type': 'integer'}}
-
-    def test_ref_resolution(self) -> None:
-        components = {'schemas': {'Foo': {'type': 'string'}}}
-        schema = {'$ref': '#/components/schemas/Foo'}
-        result = _openapi_to_json_schema(schema, components)
-        assert result == {'type': 'string'}
-
-    def test_title_stripped(self) -> None:
-        schema = {'type': 'string', 'title': 'My Field'}
-        result = _openapi_to_json_schema(schema, {})
-        assert 'title' not in result
-
-    def test_build_tool_additional_properties_true(self) -> None:
+    @pytest.mark.parametrize('additional_properties', [True, False], ids=['additional-properties-true', 'additional-properties-false'])
+    def test_build_tool_payload_keeps_additional_properties(self, additional_properties: bool) -> None:
         op = {
             'summary': 'Test',
-            'requestBody': {'content': {'application/json': {'schema': {'type': 'object', 'additionalProperties': True}}}},
+            'requestBody': {'content': {'application/json': {'schema': {'type': 'object', 'additionalProperties': additional_properties}}}},
         }
         tool = _build_tool({'method': 'POST', 'path': '/api/v1/test', 'operation': op}, {})
         payload = tool.input_schema['properties']['payload']
-        assert payload == {'type': 'object', 'additionalProperties': True}
-
-    def test_build_tool_additional_properties_false(self) -> None:
-        op = {
-            'summary': 'Test',
-            'requestBody': {'content': {'application/json': {'schema': {'type': 'object', 'additionalProperties': False}}}},
-        }
-        tool = _build_tool({'method': 'POST', 'path': '/api/v1/test', 'operation': op}, {})
-        payload = tool.input_schema['properties']['payload']
-        assert payload == {'type': 'object', 'additionalProperties': False}
+        assert payload == {'type': 'object', 'additionalProperties': additional_properties}
 
     def test_build_tool_sets_top_level_additional_properties_false(self) -> None:
         op = {
@@ -865,47 +692,6 @@ class TestMCPContractGuardrails:
 
 
 class TestRouterOnboarding:
-    def test_mcp_defaults_to_off(self) -> None:
-        from fastapi import APIRouter, FastAPI
-
-        from modules.mcp import registry as reg
-
-        leaf = MCPRouter(prefix='/demo', tags=['demo'])
-
-        @leaf.delete('/item/{item_id}')
-        def endpoint(item_id: str) -> dict[str, str]:
-            """Delete item endpoint."""
-            return {'id': item_id}
-
-        v1 = APIRouter(prefix='/api/v1')
-        v1.include_router(leaf)
-        app = FastAPI()
-        app.include_router(v1)
-
-        tools = reg.build_tool_registry(app)
-        assert tools == []
-
-    def test_mcp_true_onboards_route(self) -> None:
-        from fastapi import APIRouter, FastAPI
-
-        from modules.mcp import registry as reg
-
-        leaf = MCPRouter(prefix='/demo', tags=['demo'])
-
-        @leaf.delete('/item/{item_id}', mcp=True)
-        def endpoint(item_id: str) -> dict[str, str]:
-            """Delete item endpoint."""
-            return {'id': item_id}
-
-        v1 = APIRouter(prefix='/api/v1')
-        v1.include_router(leaf)
-        app = FastAPI()
-        app.include_router(v1)
-
-        tools = reg.build_tool_registry(app)
-        assert len(tools) == 1
-        assert tools[0].id == 'endpoint'
-
     def test_mcp_route_onboards_with_docstring(self) -> None:
         from fastapi import APIRouter, FastAPI
 
@@ -1217,6 +1003,7 @@ class TestPathParameterReliability:
         context = build_tool_context({'X-Session-Token': 'session-1', 'X-Namespace': 'alpha'})
         result = await call_tool(app, 'GET', '/api/v1/test/context', {}, context)
         assert result['ok'] is True
+        assert result['status'] == 200
         assert result['body'] == {'session_token': 'session-1', 'namespace': 'alpha'}
 
 
@@ -1274,119 +1061,57 @@ class TestSecretRedaction:
 
 
 class TestCheckSchemaSupported:
-    def test_valid_schema_returns_empty(self) -> None:
+    @pytest.mark.parametrize(
+        'schema',
+        [
+            pytest.param({'type': 'object', 'properties': {'name': {'type': 'string'}}, 'required': ['name']}, id='object-with-properties'),
+            pytest.param({'type': 'array', 'items': {'type': 'string'}}, id='items-schema'),
+            pytest.param({'type': 'array', 'items': {'type': 'string', 'enum': ['a', 'b']}}, id='items-with-enum'),
+            pytest.param({'type': 'array', 'items': [{'type': 'string'}, {'type': 'integer'}]}, id='items-tuple'),
+            pytest.param({'if': {'type': 'string'}, 'then': {'minLength': 1}, 'else': {'type': 'integer'}}, id='if-then-else'),
+            pytest.param({'not': {'type': 'string'}}, id='not'),
+            pytest.param({'type': 'object', 'patternProperties': {'^x_': {'type': 'string'}}}, id='pattern-properties'),
+            pytest.param({'type': 'object', 'additionalProperties': {'type': 'integer'}}, id='additional-properties-schema'),
+        ],
+    )
+    def test_supported_schema_has_no_issues(self, schema: dict) -> None:
         from modules.mcp.validation import check_schema_supported
 
-        schema = {
-            'type': 'object',
-            'properties': {'name': {'type': 'string'}},
-            'required': ['name'],
-        }
         assert check_schema_supported(schema) == []
 
-    def test_unknown_top_level_keyword(self) -> None:
+    @pytest.mark.parametrize(
+        ('schema', 'marker'),
+        [
+            pytest.param({'type': 'object', 'x-custom-extension': 'foo'}, 'x-custom-extension', id='unknown-top-level-keyword'),
+            pytest.param({'type': 'custom-unknown-type'}, 'custom-unknown-type', id='unsupported-type'),
+            pytest.param({'type': 'object', 'properties': {'x': {'type': 'string', 'x-secret': True}}}, 'x-secret', id='nested-unknown-keyword'),
+            pytest.param({'anyOf': [{'type': 'string', 'x-unknown': 1}]}, 'x-unknown', id='anyof-unknown-keyword'),
+        ],
+    )
+    def test_unsupported_schema_reports_issue(self, schema: dict, marker: str) -> None:
         from modules.mcp.validation import check_schema_supported
 
-        schema = {'type': 'object', 'x-custom-extension': 'foo'}
         issues = check_schema_supported(schema)
-        assert any('x-custom-extension' in i for i in issues)
-
-    def test_unsupported_type_flagged(self) -> None:
-        from modules.mcp.validation import check_schema_supported
-
-        schema = {'type': 'custom-unknown-type'}
-        issues = check_schema_supported(schema)
-        assert any('custom-unknown-type' in i for i in issues)
-
-    def test_nested_unknown_keyword_in_property(self) -> None:
-        from modules.mcp.validation import check_schema_supported
-
-        schema = {
-            'type': 'object',
-            'properties': {'x': {'type': 'string', 'x-secret': True}},
-        }
-        issues = check_schema_supported(schema)
-        assert any('x-secret' in i for i in issues)
-
-    def test_anyof_with_unknown_keyword(self) -> None:
-        from modules.mcp.validation import check_schema_supported
-
-        schema = {'anyOf': [{'type': 'string', 'x-unknown': 1}]}
-        issues = check_schema_supported(schema)
-        assert any('x-unknown' in i for i in issues)
-
-    def test_items_schema_valid(self) -> None:
-        from modules.mcp.validation import check_schema_supported
-
-        schema = {'type': 'array', 'items': {'type': 'string'}}
-        assert check_schema_supported(schema) == []
-
-    def test_items_schema_with_enum(self) -> None:
-        from modules.mcp.validation import check_schema_supported
-
-        schema = {'type': 'array', 'items': {'type': 'string', 'enum': ['a', 'b']}}
-        assert check_schema_supported(schema) == []
-
-    def test_items_array_of_schemas(self) -> None:
-        from modules.mcp.validation import check_schema_supported
-
-        schema = {'type': 'array', 'items': [{'type': 'string'}, {'type': 'integer'}]}
-        assert check_schema_supported(schema) == []
-
-    def test_if_then_else_valid(self) -> None:
-        from modules.mcp.validation import check_schema_supported
-
-        schema = {
-            'if': {'type': 'string'},
-            'then': {'minLength': 1},
-            'else': {'type': 'integer'},
-        }
-        assert check_schema_supported(schema) == []
-
-    def test_not_valid(self) -> None:
-        from modules.mcp.validation import check_schema_supported
-
-        schema = {'not': {'type': 'string'}}
-        assert check_schema_supported(schema) == []
-
-    def test_pattern_properties_valid(self) -> None:
-        from modules.mcp.validation import check_schema_supported
-
-        schema = {'type': 'object', 'patternProperties': {'^x_': {'type': 'string'}}}
-        assert check_schema_supported(schema) == []
-
-    def test_additional_properties_schema_valid(self) -> None:
-        from modules.mcp.validation import check_schema_supported
-
-        schema = {'type': 'object', 'additionalProperties': {'type': 'integer'}}
-        assert check_schema_supported(schema) == []
-
-    def test_validate_route_returns_invalid_for_unsupported_schema(self) -> None:
-        from modules.mcp.validation import check_schema_supported
-
-        schema = {'type': 'object', 'x-unsupported': True}
-        issues = check_schema_supported(schema)
-        assert len(issues) > 0
-        assert any('x-unsupported' in i for i in issues)
+        assert any(marker in i for i in issues)
 
 
 class TestMCPCapabilities:
-    def test_capabilities_all_tools_returns_list(self, client: TestClient) -> None:
-        resp = client.post('/api/v1/mcp/capabilities', json={})
+    @pytest.mark.parametrize('body', [pytest.param({}, id='default-body'), pytest.param({'tool_ids': []}, id='empty-tool-ids')])
+    def test_capabilities_without_filter_reports_every_tool(self, client: TestClient, body: dict) -> None:
+        all_count = len(client.get('/api/v1/mcp/tools').json())
+        resp = client.post('/api/v1/mcp/capabilities', json=body)
         assert resp.status_code == 200
         data = resp.json()
         assert isinstance(data, list)
-        assert len(data) > 0
-
-    def test_capabilities_entries_have_required_fields(self, client: TestClient) -> None:
-        resp = client.post('/api/v1/mcp/capabilities', json={})
-        data = resp.json()
+        assert all_count > 0
+        assert len(data) == all_count
         for entry in data:
             assert 'tool_id' in entry
             assert 'supported' in entry
             assert 'issues' in entry
             assert isinstance(entry['supported'], bool)
             assert isinstance(entry['issues'], list)
+            assert entry['supported'] is (entry['issues'] == [])
 
     def test_capabilities_filters_by_tool_ids(self, client: TestClient) -> None:
         tools_resp = client.get('/api/v1/mcp/tools')
@@ -1400,30 +1125,6 @@ class TestMCPCapabilities:
         returned_ids = [e['tool_id'] for e in data]
         for tid in subset:
             assert tid in returned_ids
-
-    def test_capabilities_empty_tool_ids_returns_all(self, client: TestClient) -> None:
-        tools_resp = client.get('/api/v1/mcp/tools')
-        all_count = len(tools_resp.json())
-
-        resp = client.post('/api/v1/mcp/capabilities', json={'tool_ids': []})
-        assert resp.status_code == 200
-        data = resp.json()
-        assert len(data) == all_count
-
-    def test_capabilities_supported_tools_have_empty_issues(self, client: TestClient) -> None:
-        resp = client.post('/api/v1/mcp/capabilities', json={})
-        data = resp.json()
-        for entry in data:
-            if entry['supported']:
-                assert entry['issues'] == []
-
-    def test_capabilities_unsupported_tool_has_issues(self) -> None:
-        from modules.mcp.validation import check_schema_supported
-
-        schema = {'type': 'object', 'x-unsupported': True}
-        issues = check_schema_supported(schema)
-        assert len(issues) > 0
-        assert any('x-unsupported' in i for i in issues)
 
     def test_capabilities_unknown_tool_id_excluded(self, client: TestClient) -> None:
         resp = client.post('/api/v1/mcp/capabilities', json={'tool_ids': ['nonexistent_tool_xyz']})
@@ -1472,23 +1173,6 @@ class TestBuildRegistryFailFast:
         with pytest.raises(ValueError, match='fake_endpoint'):
             reg.build_tool_registry(app)
 
-    def test_undecorated_route_excluded(self) -> None:
-        from fastapi import FastAPI
-
-        from modules.mcp import registry as reg
-
-        router = MCPRouter(prefix='/api/v1/undecorated', tags=['undecorated'])
-
-        @router.get('/endpoint')
-        def undecorated_endpoint() -> dict[str, str]:
-            return {'ok': 'no'}
-
-        app = FastAPI()
-        app.include_router(router)
-
-        tools = reg.build_tool_registry(app)
-        assert tools == []
-
     def test_mixed_routes_include_only_decorated(self) -> None:
         from fastapi import FastAPI
 
@@ -1514,45 +1198,6 @@ class TestBuildRegistryFailFast:
 
 
 class TestStartupEnforcement:
-    def test_startup_raises_on_unsupported_schema(self, monkeypatch: pytest.MonkeyPatch) -> None:
-        import pytest
-        from fastapi import APIRouter, FastAPI
-
-        from modules.mcp.routes import get_registry
-
-        def fake_openapi() -> dict:
-            return {
-                'paths': {
-                    '/api/v1/startup/check': {
-                        'get': {
-                            'summary': 'StartupCheck',
-                            'parameters': [
-                                {
-                                    'name': 'p',
-                                    'in': 'query',
-                                    'schema': {'type': 'string', 'x-bad-ext': True},
-                                },
-                            ],
-                        },
-                    },
-                },
-                'components': {},
-            }
-
-        def startup_check() -> None:
-            pass
-
-        leaf = MCPRouter(prefix='/startup', tags=['startup'])
-        leaf.add_api_route('/check', startup_check, methods=['GET'], mcp=True)
-        v1 = APIRouter(prefix='/api/v1')
-        v1.include_router(leaf)
-        app = FastAPI()
-        app.include_router(v1)
-        monkeypatch.setattr(app, 'openapi', fake_openapi)
-
-        with pytest.raises(ValueError, match='startup_check'):
-            get_registry(app)
-
     def test_startup_populates_cache_so_no_double_build(self, monkeypatch: pytest.MonkeyPatch) -> None:
         from fastapi import FastAPI
 

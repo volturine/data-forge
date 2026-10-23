@@ -2,61 +2,13 @@ import { test, expect } from './fixtures.js';
 import type { Page } from '@playwright/test';
 import { createLongRunningAnalysis } from './utils/api.js';
 import { deleteAnalysisViaUI } from './utils/ui-cleanup.js';
-import { readyTimeoutMs, waitForLayoutReady } from './utils/readiness.js';
-import { gotoAnalysisEditor } from './utils/analysis.js';
-import { waitForBuildPreviewId } from './utils/builds.js';
+import { readyTimeoutMs } from './utils/readiness.js';
+import {
+	gotoMonitoringBuilds,
+	startBuildFromAnalysisPage,
+	waitForBuildRowById
+} from './utils/builds.js';
 import { uid } from './utils/uid.js';
-
-async function startBuildFromAnalysisPage(
-	page: Page,
-	analysisId: string,
-	options: { openPreview?: boolean } = {}
-): Promise<string> {
-	const openPreview = options.openPreview ?? true;
-	await gotoAnalysisEditor(page, analysisId);
-	const buildBtn = page.locator('[data-testid="output-build-button"]');
-	await expect(buildBtn).toBeVisible({ timeout: 5_000 });
-	// Capture build id from the start response so callers can navigate away immediately
-	// (e.g. monitoring cancel) without spending time opening the preview dialog.
-	const started = page.waitForResponse(
-		(response) => {
-			if (response.request().method() !== 'POST' || !response.ok()) return false;
-			// Match POST /builds start, not cancel.
-			const path = new URL(response.url()).pathname;
-			return path === '/api/v1/compute/builds' || path === '/api/v1/compute/builds/';
-		},
-		{ timeout: readyTimeoutMs() }
-	);
-	// analysisPipeline may take a moment to populate after the lock is acquired;
-	// give the button a generous timeout so we fail fast instead of consuming the
-	// full 240 s test budget.
-	await buildBtn.click({ timeout: 5_000 });
-	const startResponse = await started;
-	const payload = (await startResponse.json()) as { build_id?: string; id?: string };
-	const buildId = payload.build_id ?? payload.id;
-	if (!buildId) {
-		throw new Error('Build start response did not include a build id');
-	}
-	if (!openPreview) return buildId;
-
-	const openPreviewBtn = page.locator('[data-testid="output-build-preview-trigger"]');
-	await expect(openPreviewBtn).toBeVisible({ timeout: readyTimeoutMs() });
-	await openPreviewBtn.click({ timeout: 5_000 });
-	const previewId = await waitForBuildPreviewId(page);
-	expect(previewId).toBe(buildId);
-	return buildId;
-}
-
-async function gotoMonitoringBuilds(page: Page, analysisId?: string) {
-	const params = new URLSearchParams({ tab: 'builds' });
-	if (analysisId) params.set('analysis_id', analysisId);
-	await page.goto(`/monitoring?${params.toString()}`);
-	await waitForLayoutReady(page);
-	await expect(page.getByRole('tab', { name: 'Builds', selected: true })).toBeVisible({
-		timeout: 5_000
-	});
-	await expect(page.locator('#panel-builds')).toBeVisible({ timeout: 5_000 });
-}
 
 async function openCancelDialogFromRow(page: Page, row: ReturnType<Page['locator']>) {
 	const btn = row.getByLabel('Cancel build');
@@ -101,24 +53,6 @@ async function confirmCancelDialog(page: Page) {
 		.catch(() => null);
 	await confirmButton.click({ force: true, timeout: 5_000 });
 	return responsePromise;
-}
-
-async function waitForBuildRowById(
-	page: Page,
-	panel: ReturnType<Page['locator']>,
-	buildId: string,
-	statuses: Array<'queued' | 'running' | 'completed' | 'failed' | 'cancelled'>,
-	timeout = 5_000
-) {
-	const row = panel
-		.locator(
-			statuses
-				.map((status) => `[data-build-row="${buildId}"][data-build-status="${status}"]`)
-				.join(',')
-		)
-		.first();
-	await expect(row).toBeVisible({ timeout });
-	return row;
 }
 
 test.describe('Cancel Build – e2e', () => {

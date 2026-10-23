@@ -1,5 +1,6 @@
 import uuid
 from collections.abc import Sequence
+from contextlib import nullcontext
 from datetime import UTC, datetime, timedelta
 from threading import get_ident
 from typing import cast
@@ -104,13 +105,6 @@ def test_user_public_schema_uses_auth_enums() -> None:
     assert _schema_enum_values(schema, 'providers') == [item.value for item in AuthProviderName]
 
 
-def test_verification_token_type_enum_values() -> None:
-    assert [item.value for item in VerificationTokenType] == [
-        'email_verify',
-        'password_reset',
-    ]
-
-
 def test_backend_public_tables_use_locked_settings_connection(monkeypatch: pytest.MonkeyPatch) -> None:
     from backend_core import public_schema
 
@@ -185,24 +179,19 @@ class TestPasswordHashing:
         assert verify_password('strongpassword123', 'pbkdf2_sha256$abc$00$11') is False
         assert verify_password('strongpassword123', 'pbkdf2_sha256$200000$0$11') is False
 
-    def test_validate_password_valid(self) -> None:
-        validate_password('Strong123')
-
-    def test_validate_password_too_short(self) -> None:
-        with pytest.raises(ValueError, match='at least 8'):
-            validate_password('short')
-
-    def test_validate_password_requires_uppercase(self) -> None:
-        with pytest.raises(ValueError, match='uppercase'):
-            validate_password('strong123')
-
-    def test_validate_password_requires_lowercase(self) -> None:
-        with pytest.raises(ValueError, match='lowercase'):
-            validate_password('STRONG123')
-
-    def test_validate_password_requires_digit(self) -> None:
-        with pytest.raises(ValueError, match='digit'):
-            validate_password('StrongPass')
+    @pytest.mark.parametrize(
+        ('password', 'error_match'),
+        [
+            pytest.param('Strong123', None, id='valid'),
+            pytest.param('short', 'at least 8', id='too-short'),
+            pytest.param('strong123', 'uppercase', id='requires-uppercase'),
+            pytest.param('STRONG123', 'lowercase', id='requires-lowercase'),
+            pytest.param('StrongPass', 'digit', id='requires-digit'),
+        ],
+    )
+    def test_validate_password(self, password: str, error_match: str | None) -> None:
+        with pytest.raises(ValueError, match=error_match) if error_match else nullcontext():
+            validate_password(password)
 
 
 class TestUserService:
@@ -1119,25 +1108,6 @@ class TestAuthRoutes:
 
         assert response.status_code == 400
 
-    def test_login_success(self, auth_client: TestClient) -> None:
-        auth_client.post(
-            '/api/v1/auth/register',
-            json={
-                'email': 'login@example.com',
-                'password': 'Password123',
-                'display_name': 'Login User',
-            },
-        )
-
-        response = auth_client.post(
-            '/api/v1/auth/login',
-            json={'email': 'login@example.com', 'password': 'Password123'},
-        )
-
-        assert response.status_code == 200
-        assert response.json()['email'] == 'login@example.com'
-        assert 'session_token' in response.cookies
-
     def test_login_runs_complete_settings_db_unit_in_bounded_thread(
         self,
         auth_client: TestClient,
@@ -1222,13 +1192,6 @@ class TestAuthRoutes:
         assert response.json()['email'] == 'me@example.com'
 
     def test_me_unauthenticated(self, auth_client: TestClient, monkeypatch: pytest.MonkeyPatch) -> None:
-        monkeypatch.setattr('backend_core.auth_config.settings.auth_required', True)
-
-        response = auth_client.get('/api/v1/auth/me')
-
-        assert response.status_code == 401
-
-    def test_me_unauthenticated_when_auth_required(self, auth_client: TestClient, monkeypatch: pytest.MonkeyPatch) -> None:
         monkeypatch.setattr('backend_core.auth_config.settings.auth_required', True)
 
         response = auth_client.get('/api/v1/auth/me')

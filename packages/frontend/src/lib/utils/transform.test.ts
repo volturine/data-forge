@@ -38,6 +38,34 @@ const BASE = schema([
 	{ name: 'city', dtype: 'Utf8', nullable: true }
 ]);
 
+// ── null input ──────────────────────────────────────────────────────────────
+
+describe('null input', () => {
+	test('every transform returns EMPTY for null input', () => {
+		const cases: Array<[string, () => Schema]> = [
+			['selectTransform', () => selectTransform(null, { columns: ['id'] })],
+			['dropTransform', () => dropTransform(null, { columns: ['id'] })],
+			['renameTransform', () => renameTransform(null, { column_mapping: { id: 'pk' } })],
+			['groupbyTransform', () => groupbyTransform(null, {})],
+			['fillNullTransform', () => fillNullTransform(null, {})],
+			['withColumnsTransform', () => withColumnsTransform(null, {})],
+			['pivotTransform', () => pivotTransform(null, {})],
+			['unpivotTransform', () => unpivotTransform(null, {})],
+			['explodeTransform', () => explodeTransform(null, {})],
+			['stringTransform', () => stringTransform(null, {})],
+			['timeseriesTransform', () => timeseriesTransform(null, {})],
+			['nullCountTransform', () => nullCountTransform(null, {})],
+			['valueCountsTransform', () => valueCountsTransform(null, {})],
+			['expressionTransform', () => expressionTransform(null, {})],
+			['joinTransform (both null)', () => joinTransform(null, { how: 'inner' }, null)],
+			['unionByNameTransform', () => unionByNameTransform(null, {}, [])]
+		];
+		for (const [name, run] of cases) {
+			expect(run(), name).toEqual(EMPTY);
+		}
+	});
+});
+
 // ── normalizeDtype ──────────────────────────────────────────────────────────
 
 describe('normalizeDtype', () => {
@@ -69,10 +97,6 @@ describe('normalizeDtype', () => {
 // ── selectTransform ─────────────────────────────────────────────────────────
 
 describe('selectTransform', () => {
-	test('returns EMPTY for null input', () => {
-		expect(selectTransform(null, { columns: ['id'] })).toEqual(EMPTY);
-	});
-
 	test('returns all columns when columns config is empty', () => {
 		const result = selectTransform(BASE, { columns: [] });
 		expect(result.columns).toEqual(BASE.columns);
@@ -121,10 +145,6 @@ describe('selectTransform', () => {
 // ── dropTransform ───────────────────────────────────────────────────────────
 
 describe('dropTransform', () => {
-	test('returns EMPTY for null input', () => {
-		expect(dropTransform(null, { columns: ['id'] })).toEqual(EMPTY);
-	});
-
 	test('returns all columns when columns config is empty', () => {
 		const result = dropTransform(BASE, { columns: [] });
 		expect(result.columns).toEqual(BASE.columns);
@@ -149,10 +169,6 @@ describe('dropTransform', () => {
 // ── renameTransform ─────────────────────────────────────────────────────────
 
 describe('renameTransform', () => {
-	test('returns EMPTY for null input', () => {
-		expect(renameTransform(null, { column_mapping: { id: 'pk' } })).toEqual(EMPTY);
-	});
-
 	test('returns all columns when column_mapping is empty', () => {
 		const result = renameTransform(BASE, { column_mapping: {} });
 		expect(result.columns).toEqual(BASE.columns);
@@ -185,10 +201,6 @@ describe('renameTransform', () => {
 // ── groupbyTransform ────────────────────────────────────────────────────────
 
 describe('groupbyTransform', () => {
-	test('returns EMPTY for null input', () => {
-		expect(groupbyTransform(null, {})).toEqual(EMPTY);
-	});
-
 	test('produces group columns from group_by', () => {
 		const result = groupbyTransform(BASE, { group_by: ['city'] });
 		expect(result.columns[0].name).toBe('city');
@@ -256,10 +268,6 @@ describe('groupbyTransform', () => {
 // ── fillNullTransform ───────────────────────────────────────────────────────
 
 describe('fillNullTransform', () => {
-	test('returns EMPTY for null input', () => {
-		expect(fillNullTransform(null, {})).toEqual(EMPTY);
-	});
-
 	test('clears nullable when strategy is specified', () => {
 		const result = fillNullTransform(BASE, { strategy: 'forward', columns: ['city'] });
 		const city = result.columns.find((c) => c.name === 'city')!;
@@ -293,10 +301,6 @@ describe('fillNullTransform', () => {
 // ── withColumnsTransform ────────────────────────────────────────────────────
 
 describe('withColumnsTransform', () => {
-	test('returns EMPTY for null input', () => {
-		expect(withColumnsTransform(null, {})).toEqual(EMPTY);
-	});
-
 	test('returns input columns when expressions empty', () => {
 		const result = withColumnsTransform(BASE, { expressions: [] });
 		expect(result.columns).toEqual(BASE.columns);
@@ -350,10 +354,6 @@ describe('withColumnsTransform', () => {
 // ── pivotTransform ──────────────────────────────────────────────────────────
 
 describe('pivotTransform', () => {
-	test('returns EMPTY for null input', () => {
-		expect(pivotTransform(null, {})).toEqual(EMPTY);
-	});
-
 	test('returns EMPTY when index is empty', () => {
 		expect(pivotTransform(BASE, { index: [] })).toEqual(EMPTY);
 	});
@@ -372,10 +372,6 @@ describe('pivotTransform', () => {
 // ── unpivotTransform ────────────────────────────────────────────────────────
 
 describe('unpivotTransform', () => {
-	test('returns EMPTY for null input', () => {
-		expect(unpivotTransform(null, {})).toEqual(EMPTY);
-	});
-
 	test('returns variable and value columns', () => {
 		const result = unpivotTransform(BASE, {});
 		expect(result.columns).toHaveLength(2);
@@ -387,10 +383,6 @@ describe('unpivotTransform', () => {
 // ── explodeTransform ────────────────────────────────────────────────────────
 
 describe('explodeTransform', () => {
-	test('returns EMPTY for null input', () => {
-		expect(explodeTransform(null, {})).toEqual(EMPTY);
-	});
-
 	test('removes exploded column when it exists', () => {
 		const result = explodeTransform(BASE, { explode_column: 'city' });
 		expect(result.columns.map((c) => c.name)).toEqual(['id', 'name', 'age']);
@@ -410,10 +402,6 @@ describe('explodeTransform', () => {
 // ── stringTransform ─────────────────────────────────────────────────────────
 
 describe('stringTransform', () => {
-	test('returns EMPTY for null input', () => {
-		expect(stringTransform(null, {})).toEqual(EMPTY);
-	});
-
 	test('returns input when source is missing', () => {
 		const result = stringTransform(BASE, {});
 		expect(result.columns).toEqual(BASE.columns);
@@ -451,10 +439,6 @@ describe('stringTransform', () => {
 // ── timeseriesTransform ─────────────────────────────────────────────────────
 
 describe('timeseriesTransform', () => {
-	test('returns EMPTY for null input', () => {
-		expect(timeseriesTransform(null, {})).toEqual(EMPTY);
-	});
-
 	test('returns passthrough when new_column or operation_type missing', () => {
 		const result = timeseriesTransform(BASE, { column: 'age' });
 		expect(result.columns).toEqual(BASE.columns);
@@ -547,10 +531,6 @@ describe('timeseriesTransform', () => {
 // ── nullCountTransform ──────────────────────────────────────────────────────
 
 describe('nullCountTransform', () => {
-	test('returns EMPTY for null input', () => {
-		expect(nullCountTransform(null, {})).toEqual(EMPTY);
-	});
-
 	test('transforms each column name to _null_count suffix', () => {
 		const result = nullCountTransform(BASE, {});
 		expect(result.columns.map((c) => c.name)).toEqual([
@@ -567,10 +547,6 @@ describe('nullCountTransform', () => {
 // ── valueCountsTransform ────────────────────────────────────────────────────
 
 describe('valueCountsTransform', () => {
-	test('returns EMPTY for null input', () => {
-		expect(valueCountsTransform(null, {})).toEqual(EMPTY);
-	});
-
 	test('produces value and count columns', () => {
 		const result = valueCountsTransform(BASE, {});
 		expect(result.columns).toEqual([
@@ -583,10 +559,6 @@ describe('valueCountsTransform', () => {
 // ── expressionTransform ─────────────────────────────────────────────────────
 
 describe('expressionTransform', () => {
-	test('returns EMPTY for null input', () => {
-		expect(expressionTransform(null, {})).toEqual(EMPTY);
-	});
-
 	test('returns input when expression or column_name missing', () => {
 		const result = expressionTransform(BASE, { expression: 'col("x")' });
 		expect(result.columns).toEqual(BASE.columns);
@@ -629,10 +601,6 @@ describe('joinTransform', () => {
 	test('returns right schema when left is null', () => {
 		const result = joinTransform(null, { how: 'inner' }, RIGHT);
 		expect(result.columns).toEqual(RIGHT.columns);
-	});
-
-	test('returns EMPTY when both null', () => {
-		expect(joinTransform(null, { how: 'inner' }, null)).toEqual(EMPTY);
 	});
 
 	test('inner join produces only overlapping columns', () => {
@@ -686,10 +654,6 @@ describe('joinTransform', () => {
 // ── unionByNameTransform ────────────────────────────────────────────────────
 
 describe('unionByNameTransform', () => {
-	test('returns empty schema for null input', () => {
-		expect(unionByNameTransform(null, {}, [])).toEqual(EMPTY);
-	});
-
 	test('merges columns from multiple schemas with allow_missing', () => {
 		const other = schema([
 			{ name: 'id', dtype: 'Int64' },

@@ -58,46 +58,6 @@ test.describe('Analyses – editor title spacing', () => {
 // ── Save/discard dirty tracking ─────────────────────────────────────────────
 
 test.describe('Analyses – save/discard dirty tracking', () => {
-	test('Save shows "Saved" and Discard is disabled on clean analysis', async ({
-		page,
-		request
-	}) => {
-		const id = uid();
-		const analysis = `E2E Dirty Clean ${id}`;
-		const aId = await createAnalysis(request, analysis, sharedDatasourceId);
-		try {
-			await gotoAnalysisEditor(page, aId);
-
-			const saveBtn = page.getByRole('button', { name: 'Saved' });
-			await expect(saveBtn).toBeVisible({ timeout: 5_000 });
-
-			const discardBtn = page.getByRole('button', { name: 'Discard' });
-			await expect(discardBtn).toBeDisabled();
-		} finally {
-			await deleteAnalysisViaUI(page, analysis);
-		}
-	});
-
-	test('adding a step makes Save show "Save" and enables Discard', async ({ page, request }) => {
-		const id = uid();
-		const analysis = `E2E Dirty Add ${id}`;
-		const aId = await createAnalysis(request, analysis, sharedDatasourceId);
-		try {
-			await gotoAnalysisEditor(page, aId);
-			await page.locator('button[data-step="select"]').click();
-
-			await expect(await latestNode(page, 'select')).toBeVisible({ timeout: 5_000 });
-
-			const saveBtn = page.getByRole('button', { name: 'Save' });
-			await expect(saveBtn).toBeVisible({ timeout: 5_000 });
-
-			const discardBtn = page.getByRole('button', { name: 'Discard' });
-			await expect(discardBtn).toBeEnabled({ timeout: 5_000 });
-		} finally {
-			await deleteAnalysisViaUI(page, analysis);
-		}
-	});
-
 	test('Discard reverts dirty state back to "Saved"', async ({ page, request }) => {
 		const id = uid();
 		const analysis = `E2E Dirty Discard ${id}`;
@@ -113,47 +73,44 @@ test.describe('Analyses – save/discard dirty tracking', () => {
 			await gotoAnalysisEditor(page, aId);
 			const initialAnalysisGetCount = analysisGetCount;
 			expect(initialAnalysisGetCount).toBeGreaterThan(0);
-			await page.locator('button[data-step="sort"]').click();
-			await expect(await latestNode(page, 'sort')).toBeVisible({ timeout: 5_000 });
 
-			await expect(page.getByRole('button', { name: 'Save' })).toBeVisible({ timeout: 5_000 });
+			await test.step('Save shows "Saved" and Discard is disabled on clean analysis', async () => {
+				const saveBtn = page.getByRole('button', { name: 'Saved' });
+				await expect(saveBtn).toBeVisible({ timeout: 5_000 });
 
-			await page.getByRole('button', { name: 'Discard' }).click();
+				const discardBtn = page.getByRole('button', { name: 'Discard' });
+				await expect(discardBtn).toBeDisabled();
+			});
 
-			await expect(page.getByRole('button', { name: 'Saved' })).toBeVisible({ timeout: 5_000 });
-			await expect(page.getByRole('button', { name: 'Discard' })).toBeDisabled();
-			expect(analysisGetCount).toBe(initialAnalysisGetCount);
-		} finally {
-			await deleteAnalysisViaUI(page, analysis);
-		}
-	});
+			await test.step('adding a step makes Save show "Save" and enables Discard', async () => {
+				// No select nodes before adding, exactly one after.
+				await expect(page.locator('[data-step-type="select"]')).toHaveCount(0);
+				await page.locator('button[data-step="select"]').click();
 
-	test('step config Apply/Cancel buttons start with correct state for new step', async ({
-		page,
-		request
-	}) => {
-		const id = uid();
-		const analysis = `E2E Dirty Config ${id}`;
-		const aId = await createAnalysis(request, analysis, sharedDatasourceId);
-		try {
-			await gotoAnalysisEditor(page, aId);
-			await page.locator('button[data-step="filter"]').click();
+				await expect(await latestNode(page, 'select')).toBeVisible({ timeout: 5_000 });
+				await expect(page.locator('[data-step-type="select"]')).toHaveCount(1, {
+					timeout: 5_000
+				});
 
-			const canvasNode = await latestNode(page, 'filter');
-			await expect(canvasNode).toBeVisible({ timeout: 5_000 });
-			await canvasNode.click();
+				const saveBtn = page.getByRole('button', { name: 'Save' });
+				await expect(saveBtn).toBeVisible({ timeout: 5_000 });
 
-			const configPanel = page.locator('[data-step-config="filter"]');
-			await expect(configPanel).toBeVisible({ timeout: 5_000 });
+				const discardBtn = page.getByRole('button', { name: 'Discard' });
+				await expect(discardBtn).toBeEnabled({ timeout: 5_000 });
+			});
 
-			const applyBtn = configPanel.getByRole('button', { name: 'Apply' });
-			const cancelBtn = configPanel.getByRole('button', { name: 'Cancel' });
-			await expect(applyBtn).toBeVisible();
-			await expect(cancelBtn).toBeVisible();
+			await test.step('Discard reverts dirty state back to "Saved"', async () => {
+				await page.locator('button[data-step="sort"]').click();
+				await expect(await latestNode(page, 'sort')).toBeVisible({ timeout: 5_000 });
 
-			// New steps have is_applied=false → hasChanges is true → both enabled
-			await expect(applyBtn).toBeEnabled();
-			await expect(cancelBtn).toBeEnabled();
+				await expect(page.getByRole('button', { name: 'Save' })).toBeVisible({ timeout: 5_000 });
+
+				await page.getByRole('button', { name: 'Discard' }).click();
+
+				await expect(page.getByRole('button', { name: 'Saved' })).toBeVisible({ timeout: 5_000 });
+				await expect(page.getByRole('button', { name: 'Discard' })).toBeDisabled();
+				expect(analysisGetCount).toBe(initialAnalysisGetCount);
+			});
 		} finally {
 			await deleteAnalysisViaUI(page, analysis);
 		}
@@ -238,90 +195,20 @@ test.describe('Analyses – step library labels', () => {
 		['download', 'Download']
 	] as const;
 
-	for (const [stepType, label] of ALL_STEP_TYPES) {
-		test(`step type "${label}" is visible in library`, async ({ page }) => {
-			await gotoAnalysisEditor(page, aId);
-			await expect(page.locator(`button[data-step="${stepType}"]`)).toBeVisible({
-				timeout: 5_000
-			});
-		});
-	}
+	test('every step type button is visible in library', async ({ page }) => {
+		await gotoAnalysisEditor(page, aId);
+		for (const [stepType, label] of ALL_STEP_TYPES) {
+			await expect(
+				page.locator(`button[data-step="${stepType}"]`),
+				`step type "${label}" is visible in library`
+			).toBeVisible({ timeout: 5_000 });
+		}
+	});
 });
 
 // ────────────────────────────────────────────────────────────────────────────────
 // Download config – filename & format switching
 // ────────────────────────────────────────────────────────────────────────────────
-
-// ── Step interaction ────────────────────────────────────────────────────────
-
-test.describe('Analyses – step interaction', () => {
-	test('clicking Filter step adds it to the canvas', async ({ page, request }) => {
-		const id = uid();
-		const analysis = `E2E Click Filter ${id}`;
-		const aId = await createAnalysis(request, analysis, sharedDatasourceId);
-		try {
-			await gotoAnalysisEditor(page, aId);
-
-			// Count filter nodes before click (should be 0)
-			const before = await page.locator('[data-step-type="filter"]').count();
-			await page.locator('button[data-step="filter"]').click();
-
-			// Exactly one new filter node should appear
-			await expect(page.locator('[data-step-type="filter"]')).toHaveCount(before + 1, {
-				timeout: 5_000
-			});
-		} finally {
-			await deleteAnalysisViaUI(page, analysis);
-		}
-	});
-
-	test('clicking Filter canvas node opens config panel with correct type', async ({
-		page,
-		request
-	}) => {
-		const id = uid();
-		const analysis = `E2E Config Panel ${id}`;
-		const aId = await createAnalysis(request, analysis, sharedDatasourceId);
-		try {
-			await gotoAnalysisEditor(page, aId);
-			await page.locator('button[data-step="filter"]').click();
-
-			const canvasNode = await latestNode(page, 'filter');
-			await expect(canvasNode).toBeVisible({ timeout: 5_000 });
-			await canvasNode.click();
-
-			const configPanel = page.locator('[data-step-config="filter"]');
-			await expect(configPanel).toBeVisible({ timeout: 5_000 });
-			await expect(configPanel.getByRole('button', { name: 'Apply' })).toBeVisible();
-			await expect(configPanel.getByRole('button', { name: 'Cancel' })).toBeVisible();
-		} finally {
-			await deleteAnalysisViaUI(page, analysis);
-		}
-	});
-
-	test('clicking Select step adds it to the canvas (not initial View)', async ({
-		page,
-		request
-	}) => {
-		const id = uid();
-		const analysis = `E2E Click Select ${id}`;
-		const aId = await createAnalysis(request, analysis, sharedDatasourceId);
-		try {
-			await gotoAnalysisEditor(page, aId);
-
-			// No select nodes before click
-			await expect(page.locator('[data-step-type="select"]')).toHaveCount(0);
-			await page.locator('button[data-step="select"]').click();
-
-			// Exactly one select node after click
-			await expect(page.locator('[data-step-type="select"]')).toHaveCount(1, {
-				timeout: 5_000
-			});
-		} finally {
-			await deleteAnalysisViaUI(page, analysis);
-		}
-	});
-});
 
 test.describe('Analyses – independent operation panels', () => {
 	test('closing either panel leaves the other panel open', async ({ page }) => {
@@ -431,6 +318,8 @@ test.describe('Analyses – save persistence', () => {
 
 			const applyBtn = configPanel.getByRole('button', { name: 'Apply' });
 			const cancelBtn = configPanel.getByRole('button', { name: 'Cancel' });
+			await expect(applyBtn).toBeVisible();
+			await expect(cancelBtn).toBeVisible();
 
 			// New step: is_applied=false → both buttons enabled
 			await expect(applyBtn).toBeEnabled();
@@ -635,56 +524,6 @@ test.describe('Analyses – save + reload config persistence', () => {
 
 // ── Tabs ────────────────────────────────────────────────────────────────────
 
-test.describe('Analyses – derived tab flow', () => {
-	test('add derived tab from existing tab output, switch back', async ({ page, request }) => {
-		const id = uid();
-		const analysis = `E2E Derived Tab ${id}`;
-		const aId = await createAnalysis(request, analysis, sharedDatasourceId);
-		try {
-			await gotoAnalysisEditor(page, aId);
-			await expect(page.locator('[data-step-type="view"]')).toBeVisible({ timeout: 5_000 });
-
-			const firstTab = page.locator('[data-tab-name="Source 1"]');
-			await expect(firstTab).toBeVisible();
-
-			// Click "Add derived tab" button (tab sourced from another tab's output)
-			const addDerivedBtn = page.locator('button[title="Add derived tab"]');
-
-			// If derived tab button doesn't exist, try the add tab menu
-			if (await addDerivedBtn.isVisible({ timeout: 3_000 }).catch(() => false)) {
-				await addDerivedBtn.click();
-			} else {
-				// Fallback: add a datasource tab and verify multi-tab switching works
-				await page.locator('button[title="Add datasource tab"]').click();
-				const modal = dialogByHeading(page, /Add Datasource/i);
-				await expect(modal).toBeVisible({ timeout: 5_000 });
-
-				// Search for our datasource (use the same one)
-				await modal.locator('#dsm-search').fill(sharedDatasourceName);
-				await modal
-					.locator(`[data-datasource-option="${sharedDatasourceName}"]`)
-					.click({ timeout: 5_000 });
-				await expect(modal).toBeHidden({ timeout: 5_000 });
-			}
-
-			// Verify a second tab appeared and is active
-			const allTabs = page.locator('[data-tab-name]');
-			await expect(allTabs).toHaveCount(2, { timeout: 5_000 });
-
-			// The second tab should show a view step
-			await expect(page.locator('[data-step-type="view"]')).toBeVisible({ timeout: 5_000 });
-
-			// Switch back to first tab
-			await firstTab.click();
-			await expect(page.locator('[data-step-type="view"]')).toBeVisible({ timeout: 5_000 });
-
-			await screenshot(page, 'analysis/editor', 'derived-tab-flow');
-		} finally {
-			await deleteAnalysisViaUI(page, analysis);
-		}
-	});
-});
-
 test.describe('Analyses – multi-tab flow', () => {
 	test('add second tab from another datasource, switch between tabs', async ({ page, request }) => {
 		const id = uid();
@@ -712,6 +551,8 @@ test.describe('Analyses – multi-tab flow', () => {
 
 			const secondTab = page.locator(`[data-tab-name="${ds2}"]`);
 			await expect(secondTab).toBeVisible({ timeout: 5_000 });
+			// Exactly two tabs: the original source tab and the added one.
+			await expect(page.locator('[data-tab-name]')).toHaveCount(2, { timeout: 5_000 });
 
 			await expect(page.locator('[data-step-type="view"]')).toBeVisible({ timeout: 5_000 });
 

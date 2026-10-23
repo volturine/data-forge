@@ -1,33 +1,6 @@
 import { afterEach, beforeEach, describe, expect, test, vi } from 'vitest';
+import { MockWebSocket } from '#lib/test-utils/mock-websocket.js';
 import type { LockSession, LockStatus } from './locks';
-
-type Listener = (event?: { data?: string }) => void;
-
-class MockWebSocket {
-	readyState = 1;
-	sent: string[] = [];
-	closed = false;
-	private listeners = new Map<string, Listener[]>();
-
-	addEventListener(type: string, listener: Listener) {
-		this.listeners.set(type, [...(this.listeners.get(type) ?? []), listener]);
-	}
-
-	send(message: string) {
-		this.sent.push(message);
-	}
-
-	close() {
-		this.closed = true;
-		this.readyState = 3;
-	}
-
-	emit(type: string, event?: { data?: string }) {
-		for (const listener of this.listeners.get(type) ?? []) {
-			listener(event);
-		}
-	}
-}
 
 const sockets: MockWebSocket[] = [];
 
@@ -80,7 +53,7 @@ describe('openLockSession', () => {
 
 	afterEach(() => {
 		for (const socket of sockets) {
-			if (!socket.closed) {
+			if (socket.closeCalls.length === 0) {
 				socket.close();
 			}
 		}
@@ -169,7 +142,7 @@ describe('openLockSession', () => {
 		socket.emit('open');
 		socket.emit('message', { data: statusMessage(lock('existing-lock')) });
 		session.close();
-		expect(socket.closed).toBe(false);
+		expect(socket.closeCalls).toHaveLength(0);
 
 		socket.emit('message', { data: statusMessage(lock('late-token')) });
 

@@ -7,7 +7,6 @@ import {
 import {
 	createHealthCheckViaUi,
 	createScheduleViaUi,
-	createUdfViaUi,
 	uploadDatasourceViaUi,
 	uploadDatasourceWithDatesViaUi,
 	E2E_PASSWORD
@@ -62,7 +61,6 @@ export interface E2ERequest extends APIRequestContext {
 
 const datasourceRegistry = new Map<string, { name: string; namespace?: string }>();
 const analysisRegistry = new Map<string, { name: string }>();
-const udfRegistry = new Map<string, { name: string }>();
 
 /**
  * Default app namespace used by helpers unless a test passes another.
@@ -407,15 +405,6 @@ export async function createLongRunningAnalysis(
 	);
 }
 
-export async function createUdf(request: E2ERequest, name: string): Promise<string> {
-	return withAuthedPage(request, async (page) => {
-		await prepareHelperNamespace(page);
-		const id = await createUdfViaUi(page, name);
-		udfRegistry.set(id, { name });
-		return id;
-	});
-}
-
 export async function createSchedule(
 	request: E2ERequest,
 	datasourceId: string,
@@ -436,18 +425,6 @@ export async function createHealthCheck(
 		await prepareHelperNamespace(page);
 		return createHealthCheckViaUi(page, datasourceId, name);
 	});
-}
-
-export async function spawnComputeWorker(_request: E2ERequest, _analysisId: string): Promise<void> {
-	// Compute workers are started through visible user actions and compute requests.
-}
-
-export async function waitForNoComputeWorkerJob(
-	_request: E2ERequest,
-	_analysisId: string,
-	_timeoutMs = 5_000
-): Promise<void> {
-	// Observe compute worker lifecycle via the Compute workers popup / visible build status.
 }
 
 export function registerAnalysis(id: string, name: string): void {
@@ -475,10 +452,6 @@ export function unregisterDatasource(datasourceId: string): void {
 	datasourceRegistry.delete(datasourceId);
 }
 
-export function registeredAnalysisIds(): string[] {
-	return [...analysisRegistry.keys()];
-}
-
 export function registeredDatasourceIds(): string[] {
 	return [...datasourceRegistry.keys()];
 }
@@ -489,8 +462,4 @@ export function nameForDatasourceId(datasourceId: string): string | undefined {
 
 export function nameForAnalysisId(analysisId: string): string | undefined {
 	return analysisRegistry.get(analysisId)?.name;
-}
-
-export function nameForUdfId(udfId: string): string | undefined {
-	return udfRegistry.get(udfId)?.name;
 }

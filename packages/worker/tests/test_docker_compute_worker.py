@@ -11,6 +11,7 @@ from pathlib import Path
 
 import grpc
 import pytest
+from worker_test_support import FakeDockerClient, ProbeClient, compute_worker_identity
 
 from dataforge_protocol import compute_pb2, compute_worker_runtime_pb2, enums_pb2, worker_runtime_pb2
 from runtime.compute_worker_credentials import ObjectStoreCredentials, resolve_compute_worker_credentials
@@ -33,27 +34,9 @@ _HOST_CONNECTED_LOCAL = DockerHostSpec(name="local", docker_host="unix:///var/ru
 _REMOTE_HOST = DockerHostSpec(name="node-b", docker_host="tcp://10.0.0.5:2375", connect_host="10.0.0.5", compute_worker_network="net-test")
 
 
-class _ProbeClient:
-    """Minimal daemon answering a host probe."""
-
-    def __init__(self, *, cpus: int = 4, image_id: str = "sha256:abc") -> None:
-        self.images = type("Images", (), {"get": staticmethod(lambda _name: type("Image", (), {"id": image_id})())})()
-        self.networks = type("Networks", (), {"get": staticmethod(lambda _name: object())})()
-        self._cpus = cpus
-
-    def ping(self) -> bool:
-        return True
-
-    def info(self) -> dict[str, object]:
-        return {"NCPU": self._cpus}
-
-    def close(self) -> None:
-        return None
-
-
 def _ready_registry(monkeypatch, *, cpus: int = 4) -> DockerHostRegistry:
     """Mark every configured host healthy without touching Docker."""
-    monkeypatch.setattr("runtime.docker_hosts.open_docker_client", lambda _spec, **_kwargs: _ProbeClient(cpus=cpus))
+    monkeypatch.setattr("runtime.docker_hosts.open_docker_client", lambda _spec, **_kwargs: ProbeClient(cpus=cpus))
     registry = docker_host_registry()
     assert all(registry.probe_all().values())
     return registry
@@ -78,15 +61,6 @@ def test_effective_resources_uses_docker_cpu_count_for_auto(monkeypatch) -> None
     monkeypatch.setattr(settings, "polars_cores_available", 0)
 
     assert _effective_resources({}, runtime_cpu_count=5)["max_threads"] == 5
-
-
-def _identity(scope: int = enums_pb2.COMPUTE_WORKER_SCOPE_ANALYSIS_INTERACTIVE) -> compute_pb2.ComputeWorkerIdentity:
-    return compute_pb2.ComputeWorkerIdentity(
-        scope=scope,
-        reuse_policy=enums_pb2.COMPUTE_WORKER_REUSE_POLICY_SHARED,
-        resource_id="analysis-1",
-        analysis_id="analysis-1",
-    )
 
 
 class _ShutdownContainer:
@@ -136,7 +110,7 @@ class _ShutdownHandle:
 
 
 def _shutdown_worker(monkeypatch, container: _ShutdownContainer, actions: list[str], *, grace_seconds: float, coordinator_guard=None) -> DockerComputeWorker:
-    engine = DockerComputeWorker(_identity(), coordinator_generation=4, coordinator_guard=coordinator_guard)
+    engine = DockerComputeWorker(compute_worker_identity(), coordinator_generation=4, coordinator_guard=coordinator_guard)
     engine._container = container
     engine._container_id = "engine-container"
     engine._stub = _ShutdownStub(actions)  # type: ignore[assignment]
@@ -162,13 +136,17 @@ def test_engine_credentials_fetch_namespace_scoped_identity_from_backend(monkeyp
 
     monkeypatch.setattr("runtime.compute_worker_credentials.client_from_env", lambda: FakeClient())
 
-    credentials = resolve_compute_worker_credentials("tenant-a", _identity())
+    credentials = resolve_compute_worker_credentials("tenant-a", compute_worker_identity())
 
     assert requests == [("tenant-a", "reader")]
     assert credentials.access_key == "ns-reader"
     assert credentials.secret_key == "ns-secret"
 
-    resolve_compute_worker_credentials("tenant-b", _identity(enums_pb2.COMPUTE_WORKER_SCOPE_BUILD))
+    # A repeated call for the same namespace and role is served from the cache.
+    assert resolve_compute_worker_credentials("tenant-a", compute_worker_identity()) == credentials
+    assert requests == [("tenant-a", "reader")]
+
+    resolve_compute_worker_credentials("tenant-b", compute_worker_identity(enums_pb2.COMPUTE_WORKER_SCOPE_BUILD))
     assert requests[-1] == ("tenant-b", "builder")
 
 
@@ -204,19 +182,6 @@ def test_container_name_is_dns_safe_and_bounded(monkeypatch) -> None:
     assert len(name) <= 63
     assert "_" not in name
     assert name != second  # full-identity hash suffix keeps them unique
-
-
-def test_container_rpc_target_uses_unique_container_dns_name(monkeypatch) -> None:
-    class Container:
-        name = "/dataforge-compute-worker-analysis-abc123"
-        status = "running"
-
-        def reload(self) -> None:
-            return None
-
-    monkeypatch.setattr(settings, "compute_worker_rpc_port", 50053)
-
-    assert _container_rpc_target(Container(), _LOCAL_HOST) == "dataforge-compute-worker-analysis-abc123:50053"
 
 
 def test_container_rpc_target_uses_dns_without_polling_docker(monkeypatch) -> None:
@@ -259,7 +224,7 @@ def test_await_listening_waits_for_channel_then_checks_health_once(monkeypatch) 
             calls.append(("health", timeout))
             return compute_worker_runtime_pb2.ComputeWorkerHealthResponse()
 
-    engine = DockerComputeWorker(_identity())
+    engine = DockerComputeWorker(compute_worker_identity())
     engine._channel = object()  # type: ignore[assignment]
     engine._stub = Stub()  # type: ignore[assignment]
     monkeypatch.setattr(settings, "compute_worker_start_timeout_seconds", 30)
@@ -297,7 +262,7 @@ def test_await_listening_retries_transient_health_deadlines_within_start_deadlin
                 raise TransientHealthError()
             return compute_worker_runtime_pb2.ComputeWorkerHealthResponse()
 
-    engine = DockerComputeWorker(_identity())
+    engine = DockerComputeWorker(compute_worker_identity())
     engine._channel = object()  # type: ignore[assignment]
     engine._stub = Stub()  # type: ignore[assignment]
     monkeypatch.setattr(settings, "compute_worker_start_timeout_seconds", 30)
@@ -322,7 +287,7 @@ def test_engine_object_store_endpoint_prefers_the_host_override(monkeypatch) -> 
 
 
 def test_export_submits_object_store_artifact_instead_of_worker_path(monkeypatch, tmp_path: Path) -> None:
-    engine = DockerComputeWorker(_identity(), namespace="tenant-a")
+    engine = DockerComputeWorker(compute_worker_identity(), namespace="tenant-a")
     submitted: dict[str, object] = {}
     presigned: dict[str, object] = {}
 
@@ -351,163 +316,97 @@ def test_export_submits_object_store_artifact_instead_of_worker_path(monkeypatch
     assert engine._artifact_transfers[job_id][0] == output_path
 
 
-def test_startup_reconciliation_removes_only_current_deployment_engines(monkeypatch) -> None:
-    removed: list[str] = []
-
-    class Api:
-        def containers(self, *, all: bool, filters: dict[str, object]):
-            assert all
-            assert filters == {"label": ["io.dataforge.managed=true", "io.dataforge.deployment=test-deployment"]}
-            return [{"Id": "container-1", "State": "running"}]
-
-        def remove_container(self, container_id: str, *, force: bool) -> None:
-            assert force
-            removed.append(container_id)
-
-    class Client:
-        api = Api()
-
-        def close(self) -> None:
-            return None
-
+def _fake_docker_daemon(monkeypatch, containers: list[dict[str, object]]) -> FakeDockerClient:
+    client = FakeDockerClient(containers)
     monkeypatch.setattr(settings, "deployment_id", "test-deployment")
-    monkeypatch.setattr("runtime.docker_compute_worker.docker.DockerClient", lambda **_kwargs: Client())
-
-    assert reconcile_deployment_containers() == 1
-    assert removed == ["container-1"]
+    monkeypatch.setattr("runtime.docker_compute_worker.docker.DockerClient", lambda **_kwargs: client)
+    return client
 
 
-def test_periodic_reconciliation_removes_only_stopped_owned_containers(monkeypatch) -> None:
-    removed: list[str] = []
+_OWNED_LABELS = ["io.dataforge.managed=true", "io.dataforge.deployment=test-deployment"]
+_SUPERVISOR_LABELS = [*_OWNED_LABELS, "io.dataforge.supervisor=worker-1"]
 
-    class Api:
-        def containers(self, *, all: bool, filters: dict[str, object]):
-            assert all
-            assert filters == {
-                "label": [
-                    "io.dataforge.managed=true",
-                    "io.dataforge.deployment=test-deployment",
-                    "io.dataforge.supervisor=worker-1",
-                ]
-            }
-            return [
+
+@pytest.mark.parametrize(
+    ("containers", "kwargs", "removed_count", "removed_ids", "label_filter"),
+    [
+        pytest.param(
+            [{"Id": "container-1", "State": "running"}],
+            {},
+            1,
+            ["container-1"],
+            _OWNED_LABELS,
+            id="startup-removes-current-deployment-engines",
+        ),
+        pytest.param(
+            [
                 {"Id": "running", "State": "running"},
                 {"Id": "starting", "State": "created"},
                 {"Id": "stopped", "State": "exited"},
                 {"Id": "dead", "State": "dead"},
-            ]
-
-        def remove_container(self, container_id: str, *, force: bool) -> None:
-            assert force
-            removed.append(container_id)
-
-    class Client:
-        api = Api()
-
-        def close(self) -> None:
-            return None
-
-    monkeypatch.setattr(settings, "deployment_id", "test-deployment")
-    monkeypatch.setattr("runtime.docker_compute_worker.docker.DockerClient", lambda **_kwargs: Client())
-
-    assert reconcile_deployment_containers(supervisor_id="worker-1", remove_running=False) == 2
-    assert removed == ["stopped", "dead"]
-
-
-def test_periodic_reconciliation_removes_old_untracked_running_containers(monkeypatch) -> None:
-    removed: list[str] = []
-    old = (datetime.now(UTC) - timedelta(seconds=10)).isoformat()
-    current = datetime.now(UTC).isoformat()
-
-    class Api:
-        def containers(self, *, all: bool, filters: dict[str, object]):
-            assert all
-            return [
-                {"Id": "old-running", "State": "running", "Labels": {"io.dataforge.created-at": old}},
-                {"Id": "new-running", "State": "running", "Labels": {"io.dataforge.created-at": current}},
-                {"Id": "unknown-created-at", "State": "running", "Labels": {}},
-            ]
-
-        def remove_container(self, container_id: str, *, force: bool) -> None:
-            assert force
-            removed.append(container_id)
-
-    class Client:
-        api = Api()
-
-        def close(self) -> None:
-            return None
-
-    monkeypatch.setattr(settings, "deployment_id", "test-deployment")
-    monkeypatch.setattr("runtime.docker_compute_worker.docker.DockerClient", lambda **_kwargs: Client())
-
-    assert (
-        reconcile_deployment_containers(
-            supervisor_id="worker-1",
-            running_grace_seconds=5,
-        )
-        == 1
-    )
-    assert removed == ["old-running"]
-
-
-def test_startup_reconciliation_removes_untracked_running_containers(monkeypatch) -> None:
-    removed: list[str] = []
-
-    class Api:
-        def containers(self, *, all: bool, filters: dict[str, object]):
-            assert all
-            return [
+            ],
+            {"supervisor_id": "worker-1", "remove_running": False},
+            2,
+            ["stopped", "dead"],
+            _SUPERVISOR_LABELS,
+            id="periodic-removes-only-stopped-owned-containers",
+        ),
+        pytest.param(
+            [
                 {"Id": "tracked", "State": "running"},
                 {"Id": "orphan-running", "State": "running"},
                 {"Id": "orphan-created", "State": "created"},
-            ]
-
-        def remove_container(self, container_id: str, *, force: bool) -> None:
-            assert force
-            removed.append(container_id)
-
-    class Client:
-        api = Api()
-
-        def close(self) -> None:
-            return None
-
-    monkeypatch.setattr(settings, "deployment_id", "test-deployment")
-    monkeypatch.setattr("runtime.docker_compute_worker.docker.DockerClient", lambda **_kwargs: Client())
-
-    assert reconcile_deployment_containers(supervisor_id="worker-1", keep_container_ids={"tracked"}) == 2
-    assert removed == ["orphan-running", "orphan-created"]
-
-
-def test_coordinator_takeover_removes_stale_generation_and_keeps_current_generation(monkeypatch) -> None:
-    removed: list[str] = []
-
-    class Api:
-        def containers(self, *, all: bool, filters: dict[str, object]):
-            assert all
-            assert filters == {"label": ["io.dataforge.managed=true", "io.dataforge.deployment=test-deployment"]}
-            return [
+            ],
+            {"supervisor_id": "worker-1", "keep_container_ids": {"tracked"}},
+            2,
+            ["orphan-running", "orphan-created"],
+            _SUPERVISOR_LABELS,
+            id="startup-removes-untracked-running-containers",
+        ),
+        pytest.param(
+            [
                 {"Id": "stale-running", "State": "running", "Labels": {"io.dataforge.coordinator-generation": "4"}},
                 {"Id": "unlabeled-running", "State": "running", "Labels": {}},
                 {"Id": "current-running", "State": "running", "Labels": {"io.dataforge.coordinator-generation": "5"}},
-            ]
+            ],
+            {"coordinator_generation": 5, "keep_container_ids": ("current-running",)},
+            2,
+            ["stale-running", "unlabeled-running"],
+            _OWNED_LABELS,
+            id="coordinator-takeover-removes-stale-generation",
+        ),
+    ],
+)
+def test_reconciliation_removes_only_selected_deployment_containers(
+    monkeypatch,
+    containers: list[dict[str, object]],
+    kwargs: dict[str, object],
+    removed_count: int,
+    removed_ids: list[str],
+    label_filter: list[str],
+) -> None:
+    client = _fake_docker_daemon(monkeypatch, containers)
 
-        def remove_container(self, container_id: str, *, force: bool) -> None:
-            assert force
-            removed.append(container_id)
+    assert reconcile_deployment_containers(**kwargs) == removed_count
+    assert client.filters == [{"label": label_filter}]
+    assert client.removed == removed_ids
 
-    class Client:
-        api = Api()
 
-        def close(self) -> None:
-            return None
+def test_periodic_reconciliation_removes_old_untracked_running_containers(monkeypatch) -> None:
+    # Timestamps are relative to now, so the containers are built inside the test.
+    old = (datetime.now(UTC) - timedelta(seconds=10)).isoformat()
+    current = datetime.now(UTC).isoformat()
+    client = _fake_docker_daemon(
+        monkeypatch,
+        [
+            {"Id": "old-running", "State": "running", "Labels": {"io.dataforge.created-at": old}},
+            {"Id": "new-running", "State": "running", "Labels": {"io.dataforge.created-at": current}},
+            {"Id": "unknown-created-at", "State": "running", "Labels": {}},
+        ],
+    )
 
-    monkeypatch.setattr(settings, "deployment_id", "test-deployment")
-    monkeypatch.setattr("runtime.docker_compute_worker.docker.DockerClient", lambda **_kwargs: Client())
-
-    assert reconcile_deployment_containers(coordinator_generation=5, keep_container_ids=("current-running",)) == 2
-    assert removed == ["stale-running", "unlabeled-running"]
+    assert reconcile_deployment_containers(supervisor_id="worker-1", running_grace_seconds=5) == 1
+    assert client.removed == ["old-running"]
 
 
 def test_stale_coordinator_is_rejected_before_engine_start_or_submit(monkeypatch) -> None:
@@ -518,7 +417,7 @@ def test_stale_coordinator_is_rejected_before_engine_start_or_submit(monkeypatch
         raise AssertionError("stale coordinator reached Docker")
 
     monkeypatch.setattr("runtime.docker_compute_worker.docker.DockerClient", docker_client_must_not_be_opened)
-    engine = DockerComputeWorker(_identity(), coordinator_guard=fenced)
+    engine = DockerComputeWorker(compute_worker_identity(), coordinator_guard=fenced)
 
     with pytest.raises(RuntimeError, match="stale coordinator"):
         engine.start()
@@ -527,22 +426,7 @@ def test_stale_coordinator_is_rejected_before_engine_start_or_submit(monkeypatch
 
 
 def test_stale_coordinator_cannot_remove_containers_during_reconciliation(monkeypatch) -> None:
-    removed: list[str] = []
-
-    class Api:
-        def containers(self, *, all: bool, filters: dict[str, object]):
-            assert all
-            return [{"Id": "stale", "State": "running", "Labels": {"io.dataforge.coordinator-generation": "4"}}]
-
-        def remove_container(self, container_id: str, *, force: bool) -> None:
-            removed.append(container_id)
-
-    class Client:
-        api = Api()
-
-        def close(self) -> None:
-            return None
-
+    client = _fake_docker_daemon(monkeypatch, [{"Id": "stale", "State": "running", "Labels": {"io.dataforge.coordinator-generation": "4"}}])
     guard_calls = 0
 
     def fenced() -> None:
@@ -551,14 +435,11 @@ def test_stale_coordinator_cannot_remove_containers_during_reconciliation(monkey
         if guard_calls == 2:
             raise RuntimeError("stale coordinator")
 
-    monkeypatch.setattr(settings, "deployment_id", "test-deployment")
-    monkeypatch.setattr("runtime.docker_compute_worker.docker.DockerClient", lambda **_kwargs: Client())
-
     with pytest.raises(RuntimeError, match="stale coordinator"):
         reconcile_deployment_containers(coordinator_generation=5, coordinator_guard=fenced)
 
     assert guard_calls == 2
-    assert removed == []
+    assert client.removed == []
 
 
 def test_stale_coordinator_shutdown_detaches_without_mutating_container(monkeypatch) -> None:
@@ -594,7 +475,7 @@ def test_failed_start_leaves_container_for_current_generation_reconciliation() -
     def fenced() -> None:
         raise RuntimeError("stale")
 
-    engine = DockerComputeWorker(_identity(), coordinator_generation=4, coordinator_guard=fenced)
+    engine = DockerComputeWorker(compute_worker_identity(), coordinator_generation=4, coordinator_guard=fenced)
     engine._container_id = "partially-started"
 
     engine._cleanup_failed_start(Container(), Client())
@@ -671,7 +552,7 @@ def test_failed_container_wait_polls_only_within_original_grace(monkeypatch, wai
 
 
 def test_intentional_shutdown_is_not_reported_as_container_crash(monkeypatch) -> None:
-    engine = DockerComputeWorker(_identity())
+    engine = DockerComputeWorker(compute_worker_identity())
     engine._shutdown_requested = True
     monkeypatch.setattr(engine, "is_process_alive", lambda: False)
 
@@ -682,60 +563,46 @@ def test_intentional_shutdown_is_not_reported_as_container_crash(monkeypatch) ->
     assert result.error_kind == "engine_shutdown"
 
 
-def test_initialize_fails_fast_on_identity_collision(monkeypatch) -> None:
-    engine = DockerComputeWorker(_identity())
+@pytest.mark.parametrize(
+    ("status_code", "detail", "expected_error"),
+    [
+        pytest.param(
+            grpc.StatusCode.FAILED_PRECONDITION,
+            "Compute worker already initialized for another-compute-worker",
+            "Compute worker identity collision",
+            id="identity-collision-fails-fast",
+        ),
+        pytest.param(
+            grpc.StatusCode.UNAVAILABLE,
+            "compute worker temporarily unavailable",
+            "Compute worker initialization failed",
+            id="unavailable-not-retried",
+        ),
+    ],
+)
+def test_initialize_fails_fast_without_retrying_rpc_errors(monkeypatch, status_code: grpc.StatusCode, detail: str, expected_error: str) -> None:
+    engine = DockerComputeWorker(compute_worker_identity())
     engine._host = _LOCAL_HOST
     calls = 0
 
-    class AlreadyInitialized(grpc.RpcError):
+    class RpcFailure(grpc.RpcError):
         def code(self):
-            return grpc.StatusCode.FAILED_PRECONDITION
+            return status_code
 
         def details(self):
-            return "Compute worker already initialized for another-compute-worker"
+            return detail
 
     class Stub:
         def Initialize(self, request, timeout):  # noqa: N802 - gRPC stub name
             nonlocal calls
             del request, timeout
             calls += 1
-            raise AlreadyInitialized()
+            raise RpcFailure()
 
     engine._stub = Stub()  # type: ignore[assignment]
     monkeypatch.setattr(settings, "compute_worker_start_timeout_seconds", 120)
 
-    with pytest.raises(RuntimeError, match="Compute worker identity collision"):
-        engine._initialize(
-            resources={"max_threads": 1, "max_memory_mb": 256, "streaming_chunk_size": 0},
-            credentials=ObjectStoreCredentials(access_key="access", secret_key="secret"),
-        )
-
-    assert calls == 1
-
-
-def test_initialize_does_not_retry_transient_rpc_failures(monkeypatch) -> None:
-    engine = DockerComputeWorker(_identity())
-    engine._host = _LOCAL_HOST
-    calls = 0
-
-    class Unavailable(grpc.RpcError):
-        def code(self):
-            return grpc.StatusCode.UNAVAILABLE
-
-        def details(self):
-            return "compute worker temporarily unavailable"
-
-    class Stub:
-        def Initialize(self, request, timeout):  # noqa: N802 - generated gRPC method
-            nonlocal calls
-            del request, timeout
-            calls += 1
-            raise Unavailable()
-
-    engine._stub = Stub()  # type: ignore[assignment]
-    monkeypatch.setattr(settings, "compute_worker_start_timeout_seconds", 120)
-
-    with pytest.raises(RuntimeError, match="Compute worker initialization failed"):
+    with pytest.raises(RuntimeError, match=expected_error):
         engine._initialize(
             resources={"max_threads": 1, "max_memory_mb": 256, "streaming_chunk_size": 0},
             credentials=ObjectStoreCredentials(access_key="access", secret_key="secret"),
@@ -745,7 +612,7 @@ def test_initialize_does_not_retry_transient_rpc_failures(monkeypatch) -> None:
 
 
 def test_oom_exit_is_reported_with_container_details() -> None:
-    engine = DockerComputeWorker(_identity())
+    engine = DockerComputeWorker(compute_worker_identity())
 
     class Container:
         id = "container-oom"
@@ -782,7 +649,7 @@ def test_repeated_grpc_health_failures_do_not_evict_a_running_container(monkeypa
         def reload(self) -> None:
             self.reloads += 1
 
-    engine = DockerComputeWorker(_identity())
+    engine = DockerComputeWorker(compute_worker_identity())
     container = Container()
     notifications: list[bool] = []
     engine._container = container
@@ -814,7 +681,7 @@ def test_repeated_grpc_health_failures_do_not_evict_a_running_container(monkeypa
 
 
 def test_job_watch_resumes_clean_stream_close_without_leaking_active_job(monkeypatch) -> None:
-    engine = DockerComputeWorker(_identity())
+    engine = DockerComputeWorker(compute_worker_identity())
     job_id = "job-resume"
     result = compute_worker_runtime_pb2.ComputeWorkerJobResult(job_id=job_id, data_json=b'{"rows":[1]}')
     progress = compute_worker_runtime_pb2.ComputeWorkerJobEvent(job_id=job_id, sequence=1, progress_json=b'{"type":"compute_start"}')
@@ -849,7 +716,7 @@ def test_job_watch_resumes_clean_stream_close_without_leaking_active_job(monkeyp
 
 
 def test_job_watch_recovers_terminal_result_after_progress_cursor_eviction() -> None:
-    engine = DockerComputeWorker(_identity())
+    engine = DockerComputeWorker(compute_worker_identity())
     job_id = "job-evicted"
     result = compute_worker_runtime_pb2.ComputeWorkerJobResult(job_id=job_id, data_json=b'{"rows":[1]}')
 
@@ -887,16 +754,9 @@ def test_runtime_readiness_probes_every_host_and_requires_one_ready(monkeypatch)
         ' {"name": "node-b", "docker_host": "tcp://10.0.0.5:2375", "connect_host": "10.0.0.5"}]',
     )
 
-    class BrokenClient:
-        def ping(self) -> None:
-            raise OSError("connection refused")
-
-        def close(self) -> None:
-            return None
-
     def open_client(spec: DockerHostSpec, **_kwargs):
         calls.append(spec.name)
-        return _ProbeClient() if spec.name == "local" else BrokenClient()
+        return ProbeClient() if spec.name == "local" else ProbeClient(fail=True)
 
     monkeypatch.setattr("runtime.docker_compute_worker._warn_unpinned_compute_worker_image", lambda: calls.append("image-reference"))
     monkeypatch.setattr("runtime.docker_hosts.open_docker_client", open_client)
@@ -911,14 +771,7 @@ def test_runtime_readiness_probes_every_host_and_requires_one_ready(monkeypatch)
 
 
 def test_runtime_readiness_fails_when_no_host_answers(monkeypatch) -> None:
-    class BrokenClient:
-        def ping(self) -> None:
-            raise OSError("connection refused")
-
-        def close(self) -> None:
-            return None
-
-    monkeypatch.setattr("runtime.docker_hosts.open_docker_client", lambda _spec, **_kwargs: BrokenClient())
+    monkeypatch.setattr("runtime.docker_hosts.open_docker_client", lambda _spec, **_kwargs: ProbeClient(fail=True))
 
     with pytest.raises(RuntimeError, match="No Docker host is available"):
         validate_compute_worker_runtime_readiness()
@@ -1008,23 +861,6 @@ def test_resolve_launch_context_caches_daemon_and_image_lookups_per_host(monkeyp
     assert other.info_calls == 1
 
 
-def test_engine_credentials_are_cached_per_namespace_and_role(monkeypatch) -> None:
-    requests: list[tuple[str, str]] = []
-
-    class FakeClient:
-        def engine_credentials(self, *, namespace: str, role: str):
-            requests.append((namespace, role))
-            return worker_runtime_pb2.WorkerComputeWorkerCredentialsResponse(access_key="ns-reader", secret_key="ns-secret")
-
-    monkeypatch.setattr("runtime.compute_worker_credentials.client_from_env", lambda: FakeClient())
-
-    first = resolve_compute_worker_credentials("tenant-a", _identity())
-    second = resolve_compute_worker_credentials("tenant-a", _identity())
-
-    assert first == second
-    assert requests == [("tenant-a", "reader")]
-
-
 def test_engine_credentials_singleflight_concurrent_cold_starts(monkeypatch) -> None:
     callers = 8
     barrier = threading.Barrier(callers)
@@ -1043,7 +879,7 @@ def test_engine_credentials_singleflight_concurrent_cold_starts(monkeypatch) -> 
 
     def resolve() -> ObjectStoreCredentials:
         barrier.wait(timeout=2)
-        return resolve_compute_worker_credentials("tenant-a", _identity())
+        return resolve_compute_worker_credentials("tenant-a", compute_worker_identity())
 
     with ThreadPoolExecutor(max_workers=callers) as executor:
         futures = [executor.submit(resolve) for _ in range(callers)]
@@ -1069,7 +905,7 @@ def test_engine_start_closes_docker_client_when_container_creation_fails(monkeyp
 
     client = Client()
     _ready_registry(monkeypatch)
-    engine = DockerComputeWorker(_identity(), namespace="tenant-a")
+    engine = DockerComputeWorker(compute_worker_identity(), namespace="tenant-a")
     monkeypatch.setattr("runtime.docker_compute_worker.resolve_compute_worker_credentials", lambda *_args: ObjectStoreCredentials("key", "secret"))
     monkeypatch.setattr("runtime.docker_compute_worker._resolve_launch_context", lambda _host, _client: (1, "image-id"))
     monkeypatch.setattr("runtime.docker_compute_worker._effective_resources", lambda *_args, **_kwargs: {"max_threads": 1, "max_memory_mb": 256})
@@ -1110,7 +946,7 @@ def test_engine_start_waits_for_rpc_listener_before_initializing(monkeypatch, ca
 
     client = Client()
     _ready_registry(monkeypatch)
-    engine = DockerComputeWorker(_identity(), namespace="tenant-a")
+    engine = DockerComputeWorker(compute_worker_identity(), namespace="tenant-a")
     monkeypatch.setattr("runtime.docker_compute_worker.resolve_compute_worker_credentials", lambda *_args: ObjectStoreCredentials("key", "secret"))
     monkeypatch.setattr("runtime.docker_compute_worker._resolve_launch_context", lambda _host, _client: (1, "image-id"))
     monkeypatch.setattr(
@@ -1202,7 +1038,7 @@ class _FakeContainer:
 
 
 def test_liveness_probe_is_rate_limited(monkeypatch) -> None:
-    engine = DockerComputeWorker(_identity(), namespace="tenant-a")
+    engine = DockerComputeWorker(compute_worker_identity(), namespace="tenant-a")
     container = _FakeContainer()
     engine._container = container
     engine._alive = True
@@ -1217,7 +1053,7 @@ def test_liveness_probe_is_rate_limited(monkeypatch) -> None:
 
 
 def test_liveness_probe_does_not_wait_for_the_lifecycle_lock() -> None:
-    engine = DockerComputeWorker(_identity(), namespace="tenant-a")
+    engine = DockerComputeWorker(compute_worker_identity(), namespace="tenant-a")
     engine._container = _FakeContainer()
     engine._alive = True
     lock_held = threading.Event()
@@ -1243,7 +1079,7 @@ def test_liveness_probe_does_not_wait_for_the_lifecycle_lock() -> None:
 
 
 def test_submit_releases_the_lifecycle_lock_during_the_rpc(monkeypatch) -> None:
-    engine = DockerComputeWorker(_identity(), namespace="tenant-a")
+    engine = DockerComputeWorker(compute_worker_identity(), namespace="tenant-a")
     engine._container = _FakeContainer()
     engine._alive = True
     engine._token = "token"
@@ -1267,7 +1103,7 @@ def test_submit_releases_the_lifecycle_lock_during_the_rpc(monkeypatch) -> None:
 
 def test_submit_restarts_an_engine_that_was_shut_down(monkeypatch) -> None:
     """A reaped or crashed engine is restarted by the next job, not reported broken."""
-    engine = DockerComputeWorker(_identity(), namespace="tenant-a")
+    engine = DockerComputeWorker(compute_worker_identity(), namespace="tenant-a")
     submitted: list[str] = []
 
     class FakeStub:

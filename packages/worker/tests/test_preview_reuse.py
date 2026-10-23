@@ -217,29 +217,6 @@ def test_distinct_sources_and_namespaces_with_identical_steps_never_share_cached
     assert load_calls == 3
 
 
-def test_changed_transform_parameters_invalidate_cached_descendants(monkeypatch: pytest.MonkeyPatch, tmp_path: Path) -> None:
-    source_config = _source_config(tmp_path)
-    frame = pl.DataFrame({"value": range(10)})
-    load_calls = 0
-    step_calls = _count_steps(monkeypatch)
-    _install_cache(monkeypatch)
-
-    def load_datasource(_config: dict[str, object]) -> pl.LazyFrame:
-        nonlocal load_calls
-        load_calls += 1
-        return frame.lazy()
-
-    monkeypatch.setattr(polars_compute, "load_datasource", load_datasource)
-
-    first = polars_compute.execute_preview(source_config, [_filter("filter", 2)], 10, 0, "first")
-    second = polars_compute.execute_preview(source_config, [_filter("filter", 7)], 10, 0, "second")
-
-    assert [row["value"] for row in first["data"]] == list(range(3, 10))
-    assert [row["value"] for row in second["data"]] == [8, 9]
-    assert load_calls == 2
-    assert step_calls["filter"] == 2
-
-
 def test_eviction_through_execute_preview_recomputes_when_returning_to_previous_step(monkeypatch: pytest.MonkeyPatch, tmp_path: Path) -> None:
     source_config = _source_config(tmp_path)
     frame = pl.DataFrame({"value": range(10)})
@@ -260,6 +237,8 @@ def test_eviction_through_execute_preview_recomputes_when_returning_to_previous_
 
     second = polars_compute.execute_preview(source_config, [_filter("filter", 7), _view("preview", ["filter"])], 10, 0, "second")
     assert cache.get(first_key) is None
+    assert load_calls == 2
+    assert step_calls["filter"] == 2
 
     third = polars_compute.execute_preview(source_config, [_filter("filter", 2), _view("preview", ["filter"])], 10, 0, "third")
 

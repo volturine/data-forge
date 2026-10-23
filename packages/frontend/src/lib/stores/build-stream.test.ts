@@ -1,6 +1,7 @@
 import { afterEach, beforeEach, describe, expect, test, vi } from 'vitest';
 import type { BuildRunDetail } from '#lib/types/build-stream.js';
 import type { BuildRequest } from '#lib/api/compute.js';
+import { MockWebSocket } from '#lib/test-utils/mock-websocket.js';
 
 const mockStartRuntimeBuild = vi.fn();
 const mockGetRuntimeBuild = vi.fn();
@@ -72,38 +73,6 @@ vi.mock('#lib/stores/compute-activity.svelte.js', () => ({
 		}
 	}
 }));
-
-type Listener = (event?: { data?: string; code?: number; reason?: string }) => void;
-
-class MockWebSocket {
-	static instances: MockWebSocket[] = [];
-
-	url: string;
-	readyState = 1;
-	private listeners = new Map<string, Listener[]>();
-
-	static readonly OPEN = 1;
-	static readonly CONNECTING = 0;
-
-	constructor(url: string) {
-		this.url = url;
-		MockWebSocket.instances.push(this);
-	}
-
-	addEventListener(type: string, listener: Listener) {
-		this.listeners.set(type, [...(this.listeners.get(type) ?? []), listener]);
-	}
-
-	close() {
-		this.emit('close', { code: 1000, reason: '' });
-	}
-
-	emit(type: string, event?: { data?: string; code?: number; reason?: string }) {
-		for (const listener of this.listeners.get(type) ?? []) {
-			listener(event);
-		}
-	}
-}
 
 const BASE = { build_id: 'build-1', analysis_id: 'analysis-1', emitted_at: '2025-01-01T00:00:00Z' };
 
@@ -230,6 +199,7 @@ describe('BuildStreamStore', () => {
 		expect(store.latestResources).toBeNull();
 		expect(store.done).toBe(false);
 		expect(store.succeeded).toBe(false);
+		expect(store.memoryPercent).toBe(0);
 	});
 
 	test('start requests a live build and connects to its detail stream', () => {
@@ -307,7 +277,7 @@ describe('BuildStreamStore', () => {
 		store.watch('build-2');
 
 		expect(MockWebSocket.instances).toHaveLength(2);
-		expect(first.readyState).toBe(1);
+		expect(first.readyState).toBe(MockWebSocket.CLOSED);
 		expect(MockWebSocket.instances[1].url).toContain('/v1/compute/ws/builds/build-2');
 		expect(store.buildId).toBe('build-2');
 	});
@@ -934,6 +904,16 @@ describe('BuildStreamStore', () => {
 		socket.emit('open');
 
 		msg(socket, {
+			type: 'resources',
+			cpu_percent: 50,
+			memory_mb: 256,
+			memory_limit_mb: 1024,
+			active_threads: 2,
+			max_threads: 8
+		});
+		expect(store.resourceHistory).toHaveLength(1);
+
+		msg(socket, {
 			type: 'complete',
 			progress: 1.0,
 			elapsed_ms: 1000,
@@ -957,6 +937,8 @@ describe('BuildStreamStore', () => {
 		expect(store.results).toEqual([]);
 		expect(store.duration).toBeNull();
 		expect(store.error).toBeNull();
+		expect(store.resourceHistory).toEqual([]);
+		expect(store.resourceConfig).toBeNull();
 		expect(mockReleaseActivity).toHaveBeenCalledTimes(1);
 	});
 
@@ -1224,79 +1206,6 @@ describe('BuildStreamStore', () => {
 		expect(mockReleaseActivity).toHaveBeenCalledTimes(1);
 	});
 
-	test('memoryPercent is 0 when no resources', () => {
-		const store = new BuildStreamStore();
-		expect(store.memoryPercent).toBe(0);
-	});
-
-	test('applySnapshot and applyEvent are callable directly', () => {
-		const store = new BuildStreamStore();
-
-		const detail: BuildRunDetail = {
-			build_id: 'b-1',
-			analysis_id: 'a-1',
-			analysis_name: 'Direct',
-			namespace: 'default',
-			status: 'running',
-			started_at: '2025-01-01T00:00:00Z',
-			starter: STARTER,
-			resource_config: null,
-			progress: 0.1,
-			elapsed_ms: 100,
-			estimated_remaining_ms: 900,
-			current_step: 'Loading',
-			current_step_index: 0,
-			total_steps: 2,
-			current_kind: 'preview',
-			current_datasource_id: 'ds-1',
-			current_tab_id: null,
-			current_tab_name: null,
-			current_output_id: null,
-			current_output_name: null,
-			current_compute_worker_run_id: null,
-			total_tabs: 1,
-			cancelled_at: null,
-			cancelled_by: null,
-			steps: [],
-			query_plans: [],
-			latest_resources: null,
-			resources: [],
-			logs: [],
-			results: [],
-			duration_ms: null,
-			error: null,
-			request_json: null,
-			result_json: null
-		};
-		store.applySnapshot(detail);
-		expect(store.buildId).toBe('b-1');
-		expect(store.progress).toBe(0.1);
-		expect(store.progressPct).toBe(10);
-
-		store.applyEvent({
-			type: 'progress',
-			build_id: 'b-1',
-			analysis_id: 'a-1',
-			emitted_at: '2025-01-01T00:00:01Z',
-			sequence: 1,
-			current_kind: null,
-			current_datasource_id: null,
-			tab_id: null,
-			tab_name: null,
-			current_output_id: null,
-			current_output_name: null,
-			compute_worker_run_id: null,
-			progress: 0.5,
-			elapsed_ms: 500,
-			estimated_remaining_ms: 500,
-			current_step: 'Filtering',
-			current_step_index: 1,
-			total_steps: 2
-		});
-		expect(store.progress).toBe(0.5);
-		expect(store.progressPct).toBe(50);
-	});
-
 	test('resourceHistory accumulates from resource events', () => {
 		const store = new BuildStreamStore();
 		store.start(MINIMAL_BUILD_REQUEST);
@@ -1390,27 +1299,5 @@ describe('BuildStreamStore', () => {
 		expect(store.resourceConfig!.streaming_chunk_size).toBe(10000);
 		expect(store.resourceHistory).toHaveLength(1);
 		expect(store.resourceHistory[0].cpu_percent).toBe(60);
-	});
-
-	test('reset clears resourceHistory and resourceConfig', () => {
-		const store = new BuildStreamStore();
-		store.start(MINIMAL_BUILD_REQUEST);
-
-		const socket = MockWebSocket.instances[0];
-		socket.emit('open');
-
-		msg(socket, {
-			type: 'resources',
-			cpu_percent: 50,
-			memory_mb: 256,
-			memory_limit_mb: 1024,
-			active_threads: 2,
-			max_threads: 8
-		});
-
-		expect(store.resourceHistory).toHaveLength(1);
-		store.reset();
-		expect(store.resourceHistory).toEqual([]);
-		expect(store.resourceConfig).toBeNull();
 	});
 });

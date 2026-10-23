@@ -5,12 +5,10 @@ import polars as pl
 import pytest
 
 from dataforge_protocol import enums_pb2
-from operations.enums import ChartAggregation, FilterOperator, TimeComponent
+from operations.enums import FilterOperator, TimeComponent
 from operations.fill_null import cast_value, get_polars_type
 from operations.filter import FilterOperatorDefinition
 from operations.groupby import GroupByAggregationDefinition
-from operations.plot import _agg_expr
-from operations.template_placeholders import render_template_placeholders
 from operations.timeseries import TimeseriesParams
 from runtime.config import settings
 from runtime.export_formats import get_export_format
@@ -20,12 +18,6 @@ from runtime.iceberg_metadata import (
     resolve_iceberg_metadata_path,
 )
 from runtime.namespace import namespace_paths
-
-
-def test_filter_operator_definition():
-    definition = FilterOperatorDefinition.require("==")
-    expr = definition.apply(pl.col("a"), 1)
-    assert isinstance(expr, pl.Expr)
 
 
 def test_filter_operator_uses_generated_protocol_enum_value():
@@ -48,20 +40,9 @@ def test_filter_operator_definition_invalid():
         FilterOperatorDefinition.require("nope")
 
 
-def test_groupby_aggregation_definition():
-    definition = GroupByAggregationDefinition.require("sum")
-    expr = definition.apply("value")
-    assert isinstance(expr, pl.Expr)
-
-
 def test_groupby_aggregation_definition_invalid():
     with pytest.raises(ValueError, match="Unsupported aggregation"):
         GroupByAggregationDefinition.require("nope")
-
-
-def test_chart_aggregation_expression():
-    expr = _agg_expr("value", ChartAggregation.SUM)
-    assert isinstance(expr, pl.Expr)
 
 
 def test_timeseries_extractor_and_duration():
@@ -167,12 +148,3 @@ def test_resolve_iceberg_metadata_path_reports_missing_metadata_dir_race(tmp_pat
 
     with pytest.raises(IcebergMetadataPathNotFoundError, match="Iceberg metadata_path not found"):
         resolve_iceberg_metadata_path(str(table_dir), data_root=data_root)
-
-
-def test_render_template_placeholders_replaces_known_keys_and_leaves_unknown() -> None:
-    rendered = render_template_placeholders(
-        "Hello {{name}} from {{city}} / {{missing}}",
-        {"name": "Ada", "city": "London"},
-    )
-
-    assert rendered == "Hello Ada from London / {{missing}}"

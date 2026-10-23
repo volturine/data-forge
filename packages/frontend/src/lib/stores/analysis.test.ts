@@ -61,44 +61,31 @@ describe('AnalysisStore.buildTabs', () => {
 		store = new AnalysisStore();
 	});
 
-	test('returns empty array for empty input', () => {
+	test('builds empty and per-datasource tabs with refs, names and empty steps', () => {
 		expect(store.buildTabs([])).toEqual([]);
-	});
 
-	test('creates one tab per datasource ID', () => {
 		const tabs = store.buildTabs(['ds-a', 'ds-b']);
 		expect(tabs).toHaveLength(2);
 		expect(tabs[0].id).toBe('tab-ds-a');
 		expect(tabs[1].id).toBe('tab-ds-b');
+
+		const single = store.buildTabs(['ds-x']);
+		expect(single[0].datasource.id).toBe('ds-x');
+		expect(single[0].datasource.analysis_tab_id).toBeNull();
+		expect(single[0].datasource.config.branch).toBe('master');
+
+		const named = store.buildTabs(['a', 'b', 'c']);
+		expect(named[0].name).toBe('Source 1');
+		expect(named[1].name).toBe('Source 2');
+		expect(named[2].name).toBe('Source 3');
+
+		expect(store.buildTabs(['ds-1'])[0].steps).toEqual([]);
 	});
 
-	test('sets correct datasource references', () => {
-		const tabs = store.buildTabs(['ds-x']);
-		expect(tabs[0].datasource.id).toBe('ds-x');
-		expect(tabs[0].datasource.analysis_tab_id).toBeNull();
-		expect(tabs[0].datasource.config.branch).toBe('master');
-	});
-
-	test('names tabs sequentially', () => {
-		const tabs = store.buildTabs(['a', 'b', 'c']);
-		expect(tabs[0].name).toBe('Source 1');
-		expect(tabs[1].name).toBe('Source 2');
-		expect(tabs[2].name).toBe('Source 3');
-	});
-
-	test('initializes steps as empty array', () => {
-		const tabs = store.buildTabs(['ds-1']);
-		expect(tabs[0].steps).toEqual([]);
-	});
-
-	test('output has valid result_id (UUID format)', () => {
+	test('built tab output is a UUID result with parquet format and full build', () => {
 		const tabs = store.buildTabs(['ds-1']);
 		const uuidPattern = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i;
 		expect(tabs[0].output.result_id).toMatch(uuidPattern);
-	});
-
-	test('output has parquet format and full build_mode', () => {
-		const tabs = store.buildTabs(['ds-1']);
 		expect(tabs[0].output.format).toBe('parquet');
 		expect(tabs[0].output.build_mode).toBe('full');
 	});

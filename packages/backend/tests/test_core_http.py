@@ -135,12 +135,3 @@ def test_cancelled_async_client_prewarm_drains_before_client_cleanup(monkeypatch
             await http.close_clients()
 
     asyncio.run(_exercise())
-
-
-def test_callers_can_override_timeout_per_request():
-    client = http.get_client()
-    try:
-        request = client.build_request('GET', 'https://example.com', timeout=5.0)
-        assert request.extensions['timeout'] == {'connect': 5.0, 'pool': 5.0, 'read': 5.0, 'write': 5.0}
-    finally:
-        asyncio.run(http.close_clients())

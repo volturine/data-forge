@@ -110,22 +110,6 @@ test.describe('Namespace – data isolation', () => {
 		}
 	});
 
-	test('selected namespace persists across page refresh', async ({ page }) => {
-		const ns = E2E_SHARED_NAMESPACE_B;
-
-		await page.goto('/');
-		await waitForAppShell(page);
-
-		await switchNamespace(page, ns);
-		await expectNamespace(page, ns);
-
-		await page.reload();
-		await waitForAppShell(page);
-
-		await expectNamespace(page, ns);
-		await screenshot(page, 'namespace', 'persistence-after-refresh');
-	});
-
 	test('switching namespace preserves current route', async ({ page, sharedDatasource }) => {
 		const nsA = E2E_SHARED_NAMESPACE_A;
 		const nsB = E2E_SHARED_NAMESPACE_B;

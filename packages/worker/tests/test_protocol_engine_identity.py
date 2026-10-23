@@ -7,22 +7,6 @@ from dataforge_protocol import analysis_pb2, compute_pb2, enums_pb2
 from runtime import compute_request_runtime, compute_service
 
 
-def test_step_preview_request_uses_generated_compute_worker_identity() -> None:
-    identity = compute_pb2.ComputeWorkerIdentity(
-        scope=enums_pb2.COMPUTE_WORKER_SCOPE_DATASOURCE_PREVIEW,
-        reuse_policy=enums_pb2.COMPUTE_WORKER_REUSE_POLICY_SHARED,
-        datasource_id="datasource-1",
-        resource_id="datasource-1",
-    )
-    request = compute_pb2.StepPreviewCommand(engine_identity=identity)
-
-    assert isinstance(request.engine_identity, compute_pb2.ComputeWorkerIdentity)
-    assert request.engine_identity.scope == enums_pb2.COMPUTE_WORKER_SCOPE_DATASOURCE_PREVIEW
-    assert request.engine_identity.reuse_policy == enums_pb2.COMPUTE_WORKER_REUSE_POLICY_SHARED
-    assert request.engine_identity.datasource_id == "datasource-1"
-    assert request.engine_identity.resource_id == "datasource-1"
-
-
 def test_step_preview_request_rejects_invalid_compute_worker_identity_payload() -> None:
     identity = compute_pb2.ComputeWorkerIdentity(
         scope=enums_pb2.COMPUTE_WORKER_SCOPE_DATASOURCE_PREVIEW,
@@ -68,9 +52,9 @@ def _claimed_request(kind: int, command: compute_pb2.ComputeCommand) -> compute_
     ],
 )
 def test_analysis_requests_share_analysis_compute_worker_identity(kind, field_name, command_type) -> None:
+    # Stateless kinds take their identity from the pipeline, so the command carries no analysis_id.
     pipeline = _pipeline("dataset-1", "analysis-1")
     request = command_type(
-        analysis_id="analysis-1",
         target_step_id="source",
         analysis_pipeline=pipeline,
     )

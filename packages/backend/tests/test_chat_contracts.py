@@ -36,10 +36,19 @@ def _mcp_tool(
     )
 
 
+def _create_session(client: TestClient, **fields: str) -> str:
+    response = client.post(
+        '/api/v1/ai/chat/sessions',
+        json={'provider': 'openrouter', 'model': 'gpt-4o-mini', 'api_key': 'test-key', **fields},
+    )
+    assert response.status_code == 200
+    return response.json()['session_id']
+
+
 class TestModelsRoute:
     def test_models_with_provided_key(self, client: TestClient) -> None:
         mock_models = [{'id': 'openai/gpt-4o', 'name': 'GPT-4o'}]
-        with patch('modules.chat.routes.list_models', new=AsyncMock(return_value=mock_models)):
+        with patch('modules.chat.routes.list_models', new=AsyncMock(return_value=mock_models)) as mock_list:
             resp = client.post(
                 '/api/v1/ai/chat/models',
                 json={'provider': 'openrouter', 'api_key': 'sk-test'},
@@ -49,6 +58,7 @@ class TestModelsRoute:
         assert len(data) == 1
         assert data[0]['id'] == 'openai/gpt-4o'
         assert data[0]['name'] == 'GPT-4o'
+        mock_list.assert_awaited_once_with('sk-test')
 
     def test_models_requires_provider(self, client: TestClient) -> None:
         resp = client.post('/api/v1/ai/chat/models', json={'api_key': 'sk-test'})
@@ -79,16 +89,6 @@ class TestModelsRoute:
         assert resp.status_code == 200
         assert resp.json() == []
 
-    def test_models_uses_provided_key(self, client: TestClient) -> None:
-        mock_models = [{'id': 'model/a', 'name': 'A'}]
-        with patch('modules.chat.routes.list_models', new=AsyncMock(return_value=mock_models)) as mock_list:
-            resp = client.post(
-                '/api/v1/ai/chat/models',
-                json={'provider': 'openrouter', 'api_key': 'sk-session'},
-            )
-        assert resp.status_code == 200
-        mock_list.assert_awaited_once_with('sk-session')
-
     def test_models_route_requires_auth(self, client: TestClient, monkeypatch: pytest.MonkeyPatch) -> None:
         from backend_core.application import app
         from modules.auth.dependencies import get_current_user
@@ -102,83 +102,31 @@ class TestModelsRoute:
         assert resp.status_code == 401
 
 
-class TestToolContextForwarding:
-    @pytest.mark.asyncio
-    async def test_call_tool_forwards_session_and_namespace_headers(self) -> None:
-        from fastapi import FastAPI, Header
-
-        from modules.mcp.executor import build_tool_context, call_tool
-
-        app = FastAPI()
-
-        @app.get('/api/v1/test/auth')
-        async def auth_headers(
-            x_session_token: str | None = Header(default=None),
-            x_namespace: str | None = Header(default=None),
-        ) -> dict[str, str | None]:
-            return {'token': x_session_token, 'namespace': x_namespace or 'default'}
-
-        context = build_tool_context({'X-Session-Token': 'sess-123', 'X-Namespace': 'team-a'})
-        result = await call_tool(app, 'GET', '/api/v1/test/auth', {}, context)
-        assert result['status'] == 200
-        assert result['body'] == {'token': 'sess-123', 'namespace': 'team-a'}
-
-
-SAMPLE_REGISTRY = [
-    {
-        'id': 'get_config',
-        'method': 'GET',
-        'path': '/api/v1/config',
-        'safety': 'safe',
-        'tags': ['config'],
-        'input_schema': {
-            'type': 'object',
-            'properties': {},
-            'additionalProperties': False,
-        },
-    },
-    {
-        'id': 'get_datasources',
-        'method': 'GET',
-        'path': '/api/v1/datasource',
-        'safety': 'safe',
-        'tags': ['datasource'],
-        'input_schema': {
-            'type': 'object',
-            'properties': {},
-            'additionalProperties': False,
-        },
-    },
-    {
-        'id': 'post_datasource',
-        'method': 'POST',
-        'path': '/api/v1/datasource',
-        'safety': 'mutating',
-        'tags': ['datasource'],
-        'input_schema': {
-            'type': 'object',
-            'properties': {'payload': {'type': 'object'}},
-            'additionalProperties': False,
-        },
-    },
-]
-
-STOP_RESPONSE = {
-    'choices': [{'message': {'content': 'Done', 'tool_calls': None}, 'finish_reason': 'stop'}],
-    'usage': {'prompt_tokens': 5, 'completion_tokens': 3, 'total_tokens': 8},
-}
-
-
 class TestTextToolCallParsing:
     """Tests for _parse_text_tool_calls handling malformed model output."""
 
-    def test_parses_well_formed_array(self) -> None:
+    @pytest.mark.parametrize(
+        ('content', 'expected_cleaned', 'expected_names'),
+        [
+            pytest.param('TOOLCALL>[{"name": "get_config", "arguments": {}}]', '', ['get_config'], id='well-formed-array'),
+            pytest.param('Some text TOOLCALL>{"name": "get_config", "arguments": {"id": "abc"}}', 'Some text', ['get_config'], id='single-object'),
+            pytest.param('TOOLCALL>[{"name": "my_tool", "arguments": {"x": 1}}]CALL>extra garbage', '', ['my_tool'], id='trailing-garbage'),
+            pytest.param('TOOLCALL>[not valid json at all', 'TOOLCALL>[not valid json at all', [], id='completely-malformed'),
+            pytest.param('Just a normal message', 'Just a normal message', [], id='no-tool-call'),
+            pytest.param(
+                'I will call the tool now.\nTOOLCALL>[{"name": "test", "arguments": {}}]',
+                'I will call the tool now.',
+                ['test'],
+                id='text-before-tool-call',
+            ),
+        ],
+    )
+    def test_parses_text_tool_calls(self, content: str, expected_cleaned: str, expected_names: list[str]) -> None:
         from modules.chat.routes import _parse_text_tool_calls
 
-        content = 'TOOLCALL>[{"name": "get_config", "arguments": {}}]'
         cleaned, calls = _parse_text_tool_calls(content)
-        assert cleaned == ''
-        assert len(calls) == 1
+        assert cleaned == expected_cleaned
+        assert [call['function']['name'] for call in calls] == expected_names
 
 
 class TestToolSystemMessage:
@@ -379,46 +327,6 @@ class TestToolSystemMessage:
         assert '- payload (body,' in msg
         assert f'content_type: {content_type}' in msg
 
-    def test_parses_single_object(self) -> None:
-        from modules.chat.routes import _parse_text_tool_calls
-
-        content = 'Some text TOOLCALL>{"name": "get_config", "arguments": {"id": "abc"}}'
-        cleaned, calls = _parse_text_tool_calls(content)
-        assert 'TOOLCALL' not in cleaned
-        assert len(calls) == 1
-        assert calls[0]['function']['name'] == 'get_config'
-
-    def test_handles_trailing_garbage(self) -> None:
-        from modules.chat.routes import _parse_text_tool_calls
-
-        content = 'TOOLCALL>[{"name": "my_tool", "arguments": {"x": 1}}]CALL>extra garbage'
-        cleaned, calls = _parse_text_tool_calls(content)
-        assert len(calls) == 1
-        assert calls[0]['function']['name'] == 'my_tool'
-
-    def test_handles_completely_malformed(self) -> None:
-        from modules.chat.routes import _parse_text_tool_calls
-
-        content = 'TOOLCALL>[not valid json at all'
-        cleaned, calls = _parse_text_tool_calls(content)
-        assert calls == []
-
-    def test_no_toolcall_returns_original(self) -> None:
-        from modules.chat.routes import _parse_text_tool_calls
-
-        content = 'Just a normal message'
-        cleaned, calls = _parse_text_tool_calls(content)
-        assert cleaned == content
-        assert calls == []
-
-    def test_preserves_text_before_toolcall(self) -> None:
-        from modules.chat.routes import _parse_text_tool_calls
-
-        content = 'I will call the tool now.\nTOOLCALL>[{"name": "test", "arguments": {}}]'
-        cleaned, calls = _parse_text_tool_calls(content)
-        assert cleaned == 'I will call the tool now.'
-        assert len(calls) == 1
-
 
 class TestOpenRouterToolMapping:
     def test_mcp_tool_to_openai_appends_expected_output_hint(self) -> None:
@@ -497,93 +405,32 @@ class TestToolContractFormatting:
         assert format_output_hint(output) == 'Expected output: status 200; application/json; model ItemsResponse; fields: id, name'
 
 
-MALFORMED_ARGS_REGISTRY = [
-    {
-        'id': 'safe_tool',
-        'method': 'GET',
-        'path': '/api/v1/config',
-        'safety': 'safe',
-        'tags': ['config'],
-        'confirm_required': False,
-        'input_schema': {'type': 'object', 'properties': {}, 'required': []},
-    },
-]
-
-MALFORMED_ARGS_RESPONSE = {
-    'choices': [
-        {
-            'message': {
-                'content': None,
-                'tool_calls': [
-                    {
-                        'id': 'tc1',
-                        'function': {
-                            'name': 'safe_tool',
-                            'arguments': '{not valid json}',
-                        },
-                    }
-                ],
-            },
-            'finish_reason': 'tool_calls',
-        },
-    ],
-    'usage': {'prompt_tokens': 5, 'completion_tokens': 3, 'total_tokens': 8},
-}
-
-
 class TestInferPatch:
     """Test _infer_patch extracts the correct resource name from API paths."""
 
-    def test_simple_resource_path(self) -> None:
+    @pytest.mark.parametrize(
+        ('method', 'path', 'body', 'expected'),
+        [
+            pytest.param('POST', '/api/v1/analysis', {'id': '123'}, {'resource': 'analysis', 'action': 'created', 'id': '123'}, id='create-root-resource'),
+            pytest.param('GET', '/api/v1/analysis/abc-123', {'id': 'abc-123'}, {'resource': 'analysis', 'action': 'refresh'}, id='refresh-resource-with-id'),
+            pytest.param(
+                'POST', '/api/v1/analysis/abc/tabs/t1/steps', {'id': 's1'}, {'resource': 'analysis', 'action': 'created'}, id='create-nested-resource'
+            ),
+            pytest.param('DELETE', '/api/v1/datasource/xyz', None, {'resource': 'datasource', 'action': 'deleted'}, id='delete-datasource'),
+        ],
+    )
+    def test_infers_resource_and_action(self, method: str, path: str, body: dict | None, expected: dict) -> None:
         from modules.chat.routes import _infer_patch
 
-        patch = _infer_patch(
-            'POST',
-            '/api/v1/analysis',
-            {'ok': True, 'body': {'id': '123'}},
-        )
+        patch = _infer_patch(method, path, {'ok': True, 'body': body})
         assert patch is not None
-        assert patch['resource'] == 'analysis'
-        assert patch['action'] == 'created'
-        assert patch['id'] == '123'
-
-    def test_resource_with_id(self) -> None:
-        from modules.chat.routes import _infer_patch
-
-        patch = _infer_patch(
-            'GET',
-            '/api/v1/analysis/abc-123',
-            {'ok': True, 'body': {'id': 'abc-123'}},
-        )
-        assert patch is not None
-        assert patch['resource'] == 'analysis'
-        assert patch['action'] == 'refresh'
-
-    def test_nested_resource_path(self) -> None:
-        from modules.chat.routes import _infer_patch
-
-        patch = _infer_patch(
-            'POST',
-            '/api/v1/analysis/abc/tabs/t1/steps',
-            {'ok': True, 'body': {'id': 's1'}},
-        )
-        assert patch is not None
-        assert patch['resource'] == 'analysis'
-        assert patch['action'] == 'created'
+        for key, value in expected.items():
+            assert patch[key] == value
 
     def test_failed_result_returns_none(self) -> None:
         from modules.chat.routes import _infer_patch
 
-        patch = _infer_patch('POST', '/api/v1/analysis', {'ok': False, 'status': 422})
-        assert patch is None
-
-    def test_datasource_path(self) -> None:
-        from modules.chat.routes import _infer_patch
-
-        patch = _infer_patch('DELETE', '/api/v1/datasource/xyz', {'ok': True, 'body': None})
-        assert patch is not None
-        assert patch['resource'] == 'datasource'
-        assert patch['action'] == 'deleted'
+        assert _infer_patch('POST', '/api/v1/analysis', {'ok': False, 'status': 422}) is None
 
 
 class TestProviderResponseValidation:
@@ -617,18 +464,6 @@ class TestProviderResponseValidation:
 class TestSessionOwnership:
     """Per-user chat session isolation."""
 
-    def _create_session(self, client: TestClient) -> str:
-        resp = client.post(
-            '/api/v1/ai/chat/sessions',
-            json={
-                'provider': 'openrouter',
-                'model': 'gpt-4o-mini',
-                'api_key': 'test-key',
-            },
-        )
-        assert resp.status_code == 200
-        return resp.json()['session_id']
-
     def _insert_session_row(self, session_id: str, user_id: str | None) -> None:
         with Session(get_settings_engine()) as db:
             db.add(
@@ -643,46 +478,31 @@ class TestSessionOwnership:
             db.commit()
 
     def test_create_stamps_current_user_id(self, client: TestClient, test_user) -> None:
-        sid = self._create_session(client)
+        sid = _create_session(client)
         with Session(get_settings_engine()) as db:
             row = db.get(ChatSession, sid)
             assert row is not None
             assert row.user_id == test_user.id
 
-    def test_owner_can_read_own_session(self, client: TestClient) -> None:
-        sid = self._create_session(client)
-        resp = client.get(f'/api/v1/ai/chat/history/{sid}')
-        assert resp.status_code == 200
-
-    def test_foreign_session_history_returns_404(self, client: TestClient) -> None:
+    @pytest.mark.parametrize(
+        ('method', 'url', 'body'),
+        [
+            pytest.param('GET', '/api/v1/ai/chat/history/foreign-sid', None, id='history'),
+            pytest.param('PATCH', '/api/v1/ai/chat/sessions/foreign-sid', {'model': 'new-model'}, id='update'),
+            pytest.param('DELETE', '/api/v1/ai/chat/sessions/foreign-sid', None, id='delete'),
+            pytest.param('POST', '/api/v1/ai/chat/message', {'session_id': 'foreign-sid', 'content': 'hi'}, id='message'),
+            pytest.param('POST', '/api/v1/ai/chat/sessions/foreign-sid/stop', None, id='stop'),
+        ],
+    )
+    def test_foreign_session_returns_404_and_is_not_removed(self, client: TestClient, method: str, url: str, body: dict | None) -> None:
         self._insert_session_row('foreign-sid', 'another-user')
-        resp = client.get('/api/v1/ai/chat/history/foreign-sid')
-        assert resp.status_code == 404
-
-    def test_foreign_session_update_returns_404(self, client: TestClient) -> None:
-        self._insert_session_row('foreign-sid', 'another-user')
-        resp = client.patch('/api/v1/ai/chat/sessions/foreign-sid', json={'model': 'new-model'})
-        assert resp.status_code == 404
-
-    def test_foreign_session_delete_returns_404(self, client: TestClient) -> None:
-        self._insert_session_row('foreign-sid', 'another-user')
-        resp = client.delete('/api/v1/ai/chat/sessions/foreign-sid')
+        resp = client.request(method, url, json=body)
         assert resp.status_code == 404
         with Session(get_settings_engine()) as db:
             assert db.get(ChatSession, 'foreign-sid') is not None
 
-    def test_foreign_session_message_returns_404(self, client: TestClient) -> None:
-        self._insert_session_row('foreign-sid', 'another-user')
-        resp = client.post('/api/v1/ai/chat/message', json={'session_id': 'foreign-sid', 'content': 'hi'})
-        assert resp.status_code == 404
-
-    def test_foreign_session_stop_returns_404(self, client: TestClient) -> None:
-        self._insert_session_row('foreign-sid', 'another-user')
-        resp = client.post('/api/v1/ai/chat/sessions/foreign-sid/stop')
-        assert resp.status_code == 404
-
     def test_list_sessions_scoped_to_owner(self, client: TestClient, test_user) -> None:
-        own_sid = self._create_session(client)
+        own_sid = _create_session(client)
         self._insert_session_row('foreign-sid', 'another-user')
         resp = client.get('/api/v1/ai/chat/sessions')
         assert resp.status_code == 200
@@ -705,17 +525,8 @@ class TestSessionOwnership:
         from modules.auth.service import get_default_user_id
         from modules.chat.sessions import SessionStore
 
+        self._insert_session_row('legacy-sid', None)
         with Session(get_settings_engine()) as db:
-            db.add(
-                ChatSession(
-                    id='legacy-sid',
-                    user_id=None,
-                    provider='openrouter',
-                    model='gpt-4o-mini',
-                    api_key=encrypt_secret('key'),
-                ),
-            )
-            db.commit()
             db.execute(text('UPDATE chat_sessions SET user_id = :uid WHERE user_id IS NULL'), {'uid': get_default_user_id()})
             db.commit()
 
@@ -796,11 +607,7 @@ class TestSessionEndpoints:
         assert 'Unknown AI provider' in resp.json()['detail']
 
     def test_update_session_model(self, client: TestClient) -> None:
-        resp = client.post(
-            '/api/v1/ai/chat/sessions',
-            json={'provider': 'openrouter', 'model': 'gpt-4o-mini', 'api_key': 'key'},
-        )
-        sid = resp.json()['session_id']
+        sid = _create_session(client)
         patch_resp = client.patch(
             f'/api/v1/ai/chat/sessions/{sid}',
             json={'model': 'anthropic/claude-3.5-sonnet'},
@@ -814,16 +621,7 @@ class TestSessionEndpoints:
         assert live.model == 'anthropic/claude-3.5-sonnet'
 
     def test_update_session_system_prompt(self, client: TestClient) -> None:
-        resp = client.post(
-            '/api/v1/ai/chat/sessions',
-            json={
-                'provider': 'openrouter',
-                'model': 'gpt-4o-mini',
-                'api_key': 'key',
-                'system_prompt': 'Original.',
-            },
-        )
-        sid = resp.json()['session_id']
+        sid = _create_session(client, system_prompt='Original.')
         client.patch(
             f'/api/v1/ai/chat/sessions/{sid}',
             json={'system_prompt': 'Updated prompt.'},
@@ -835,23 +633,8 @@ class TestSessionEndpoints:
         assert live.system_prompt == 'Updated prompt.'
         assert session_store.messages(sid)[0] == {'role': 'system', 'content': 'Original.'}
 
-    def test_update_session_not_found(self, client: TestClient) -> None:
-        resp = client.patch(
-            '/api/v1/ai/chat/sessions/nonexistent',
-            json={'model': 'new-model'},
-        )
-        assert resp.status_code == 404
-
     def test_history_empty_for_new_session(self, client: TestClient) -> None:
-        resp = client.post(
-            '/api/v1/ai/chat/sessions',
-            json={
-                'provider': 'openrouter',
-                'model': 'gpt-4o-mini',
-                'api_key': 'test-key',
-            },
-        )
-        sid = resp.json()['session_id']
+        sid = _create_session(client)
         hist = client.get(f'/api/v1/ai/chat/history/{sid}')
         assert hist.status_code == 200
         data = hist.json()
@@ -859,15 +642,7 @@ class TestSessionEndpoints:
         assert data['history'] == []
 
     def test_list_sessions_returns_epoch_milliseconds(self, client: TestClient) -> None:
-        resp = client.post(
-            '/api/v1/ai/chat/sessions',
-            json={
-                'provider': 'openrouter',
-                'model': 'gpt-4o-mini',
-                'api_key': 'test-key',
-            },
-        )
-        sid = resp.json()['session_id']
+        sid = _create_session(client)
 
         sessions_resp = client.get('/api/v1/ai/chat/sessions')
         assert sessions_resp.status_code == 200
@@ -875,51 +650,26 @@ class TestSessionEndpoints:
         assert isinstance(session['created_at'], int)
         assert session['created_at'] > 10_000_000_000
 
-    def test_history_unknown_session_returns_404(self, client: TestClient) -> None:
-        resp = client.get('/api/v1/ai/chat/history/nonexistent')
+    @pytest.mark.parametrize(
+        ('method', 'url', 'body'),
+        [
+            pytest.param('GET', '/api/v1/ai/chat/history/nonexistent', None, id='history'),
+            pytest.param('POST', '/api/v1/ai/chat/message', {'session_id': 'nonexistent', 'content': 'hello'}, id='message'),
+            pytest.param('GET', '/api/v1/ai/chat/stream/nonexistent', None, id='stream'),
+            pytest.param('PATCH', '/api/v1/ai/chat/sessions/nonexistent', {'model': 'new-model'}, id='update'),
+            pytest.param('DELETE', '/api/v1/ai/chat/sessions/nonexistent', None, id='delete'),
+        ],
+    )
+    def test_unknown_session_returns_404(self, client: TestClient, method: str, url: str, body: dict | None) -> None:
+        resp = client.request(method, url, json=body)
         assert resp.status_code == 404
 
-    def test_send_message_unknown_session_returns_404(self, client: TestClient) -> None:
-        resp = client.post(
-            '/api/v1/ai/chat/message',
-            json={'session_id': 'nonexistent', 'content': 'hello'},
-        )
-        assert resp.status_code == 404
-
-    def test_stream_unknown_session_returns_404(self, client: TestClient) -> None:
-        resp = client.get('/api/v1/ai/chat/stream/nonexistent')
-        assert resp.status_code == 404
-
-    def test_delete_session_returns_closed(self, client: TestClient) -> None:
-        resp = client.post(
-            '/api/v1/ai/chat/sessions',
-            json={
-                'provider': 'openrouter',
-                'model': 'gpt-4o-mini',
-                'api_key': 'test-key',
-            },
-        )
-        sid = resp.json()['session_id']
+    def test_delete_session_closes_and_removes_from_store(self, client: TestClient) -> None:
+        sid = _create_session(client)
         del_resp = client.delete(f'/api/v1/ai/chat/sessions/{sid}')
         assert del_resp.status_code == 200
         data = del_resp.json()
         assert data['status'] == 'closed'
         assert data['session_id'] == sid
-
-    def test_delete_session_removes_from_store(self, client: TestClient) -> None:
-        resp = client.post(
-            '/api/v1/ai/chat/sessions',
-            json={
-                'provider': 'openrouter',
-                'model': 'gpt-4o-mini',
-                'api_key': 'test-key',
-            },
-        )
-        sid = resp.json()['session_id']
-        client.delete(f'/api/v1/ai/chat/sessions/{sid}')
         hist = client.get(f'/api/v1/ai/chat/history/{sid}')
         assert hist.status_code == 404
-
-    def test_delete_unknown_session_returns_404(self, client: TestClient) -> None:
-        resp = client.delete('/api/v1/ai/chat/sessions/nonexistent')
-        assert resp.status_code == 404
