@@ -6,7 +6,7 @@ import {
 } from '#lib/api/compute.js';
 import { ReconnectionManager } from './reconnection-manager';
 import { SvelteSet } from 'svelte/reactivity';
-import { computeWorkerIdentityKey } from '#lib/representations/compute-worker.js';
+import { computeWorkerIdentityKey } from '#lib/nxt/compute-worker.js';
 
 const RECONNECT_DELAY_MS = 1_000;
 const RECONNECT_MAX_DELAY_MS = 30_000;

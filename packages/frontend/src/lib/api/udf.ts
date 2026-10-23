@@ -21,10 +21,6 @@ export function listUdfs(
 	return apiRequest<Udf[]>(endpoint, options);
 }
 
-export function getUdf(id: string): ResultAsync<Udf, ApiError> {
-	return apiRequest<Udf>(`/v1/udf/${id}`);
-}
-
 export function createUdf(data: UdfCreate): ResultAsync<Udf, ApiError> {
 	return apiRequest<Udf>('/v1/udf', {
 		method: 'POST',

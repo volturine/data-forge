@@ -63,18 +63,3 @@ function cyrb53(str: string): string {
 
 	return (h2 >>> 0).toString(16).padStart(8, '0') + (h1 >>> 0).toString(16).padStart(8, '0');
 }
-
-/**
- * Check if cached preview is stale based on current pipeline hash
- */
-export function isCacheStale(
-	cachedHash: string,
-	currentSteps: Array<{
-		id: string;
-		type: string;
-		config: Record<string, unknown>;
-		depends_on?: string[];
-	}>
-): boolean {
-	return hashPipeline(currentSteps) !== cachedHash;
-}

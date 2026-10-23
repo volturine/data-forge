@@ -1,4 +1,11 @@
-import { readNumber, readString, type ChartConfig } from './format';
+import {
+	overlayRowsOf,
+	overlaySeriesLabel,
+	readNumber,
+	readString,
+	referenceLinesOf,
+	type ChartConfig
+} from './format';
 import { stringValue, type ChartRow } from './preparation';
 
 type CsvRow = { dataset: string; x: string; y: string };
@@ -8,26 +15,6 @@ function csvEscape(value: string): string {
 	const needsQuotes = escaped.includes(',') || escaped.includes('\n') || escaped.includes('"');
 	if (!needsQuotes) return escaped;
 	return `"${escaped}"`;
-}
-
-function overlayMarksOf(metadata: Record<string, unknown> | null | undefined): ChartRow[] {
-	const raw = metadata?.overlays;
-	if (!Array.isArray(raw)) return [];
-	return raw.filter((item) => item && typeof item === 'object') as ChartRow[];
-}
-
-function overlaySeriesLabel(overlay: ChartRow): string {
-	const yCol = readString(overlay, 'y_column');
-	const agg = readString(overlay, 'aggregation');
-	if (!yCol) return 'Overlay';
-	if (!agg) return yCol;
-	return `${agg.charAt(0).toUpperCase()}${agg.slice(1)} of ${yCol}`;
-}
-
-function referenceLinesOf(metadata: Record<string, unknown> | null | undefined): ChartRow[] {
-	const raw = metadata?.reference_lines;
-	if (!Array.isArray(raw)) return [];
-	return raw.filter((item) => item && typeof item === 'object') as ChartRow[];
 }
 
 function buildRows(data: ChartRow[], chartType: string, config: ChartConfig): CsvRow[] {
@@ -94,7 +81,7 @@ export function chartCsv(
 	metadata?: Record<string, unknown> | null
 ): string {
 	const rows: CsvRow[] = [...buildRows(data, chartType, config)];
-	for (const overlay of overlayMarksOf(metadata ?? null)) {
+	for (const overlay of overlayRowsOf(metadata ?? null)) {
 		const label = overlaySeriesLabel(overlay);
 		const raw = overlay.data;
 		if (!Array.isArray(raw)) continue;

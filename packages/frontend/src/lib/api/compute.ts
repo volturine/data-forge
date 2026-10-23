@@ -19,8 +19,12 @@ import { okAsync, ResultAsync } from 'neverthrow';
 import type { ApiError } from './client';
 import { createStream, type StreamHandle } from './websocket';
 import { computeActivityStore } from '#lib/stores/compute-activity.svelte.js';
-import { isNamespaceReady, requireNamespace } from '#lib/stores/namespace.svelte.js';
-import { shareInFlight, shareInFlightWithSignal, type SharedInFlight } from './in-flight';
+import {
+	namespaceKey,
+	shareInFlight,
+	shareInFlightWithSignal,
+	type SharedInFlight
+} from './in-flight';
 
 type Field<T, K extends keyof T> = NonNullable<T[K]>;
 type StringField<T, K extends keyof T> = Extract<Field<T, K>, string>;
@@ -60,7 +64,6 @@ const schemaInFlight = new Map<string, ResultAsync<StepSchemaResponse, ApiError>
 const schemaSignalInFlight = new Map<string, SharedInFlight<StepSchemaResponse, ApiError>>();
 const rowCountInFlight = new Map<string, ResultAsync<StepRowCountResponse, ApiError>>();
 const rowCountSignalInFlight = new Map<string, SharedInFlight<StepRowCountResponse, ApiError>>();
-const spawnInFlight = new Map<string, ResultAsync<ComputeWorkerStatusResponse, ApiError>>();
 const shutdownInFlight = new Map<string, ResultAsync<void, ApiError>>();
 
 export interface ComputeRequestOptions {
@@ -69,11 +72,6 @@ export interface ComputeRequestOptions {
 
 function cancelledComputeError(): ApiError {
 	return { type: 'network', message: 'Compute request cancelled' };
-}
-
-function namespaceKey(): string {
-	if (!isNamespaceReady()) return '';
-	return requireNamespace();
 }
 
 function requestKey(endpoint: string, body?: string): string {
@@ -105,22 +103,6 @@ export function previewStepData(
 }
 
 // Compute worker lifecycle functions
-
-export function spawnAnalysisComputeWorker(
-	analysisId: string,
-	resourceConfig?: ComputeWorkerResourceConfig
-): ResultAsync<ComputeWorkerStatusResponse, ApiError> {
-	const body = resourceConfig ? JSON.stringify({ resource_config: resourceConfig }) : undefined;
-	const endpoint = `/v1/compute/compute-worker/spawn/analysis/${analysisId}`;
-	return shareInFlight(spawnInFlight, requestKey(endpoint, body), () =>
-		computeActivityStore.track(
-			apiRequest<ComputeWorkerStatusResponse>(endpoint, {
-				method: 'POST',
-				body
-			})
-		)
-	);
-}
 
 export function shutdownAnalysisComputeWorker(analysisId: string): ResultAsync<void, ApiError> {
 	const endpoint = `/v1/compute/compute-worker/analysis/${analysisId}`;

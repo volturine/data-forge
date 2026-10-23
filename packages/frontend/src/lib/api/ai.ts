@@ -12,19 +12,6 @@ export interface AIConnectionResult {
 	detail: string;
 }
 
-export interface AIProviderStatus {
-	provider: string;
-	configured: boolean;
-	endpoint_url: string;
-	default_model: string;
-}
-
-export function listAIProviders(): ResultAsync<AIProviderStatus[], ApiError> {
-	return apiRequest<AIProviderStatus[]>('/v1/ai/providers', {
-		method: 'POST'
-	});
-}
-
 export function listAIModels(
 	provider: string,
 	endpointUrl?: string | null,

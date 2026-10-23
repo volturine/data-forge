@@ -1,5 +1,5 @@
 import { describe, test, expect } from 'vitest';
-import { hashPipeline, isCacheStale } from './hash';
+import { hashPipeline } from './hash';
 
 describe('hashPipeline', () => {
 	test('returns a 16-char hex string', () => {
@@ -74,25 +74,5 @@ describe('hashPipeline', () => {
 	test('handles null config values', () => {
 		const hash = hashPipeline([{ id: 'a', type: 'x', config: { val: null } }]);
 		expect(hash).toMatch(/^[0-9a-f]{16}$/);
-	});
-});
-
-describe('isCacheStale', () => {
-	test('returns false when hash matches', () => {
-		const steps = [{ id: 'a', type: 'view', config: {} }];
-		const hash = hashPipeline(steps);
-		expect(isCacheStale(hash, steps)).toBe(false);
-	});
-
-	test('returns true when steps differ', () => {
-		const original = [{ id: 'a', type: 'view', config: {} }];
-		const hash = hashPipeline(original);
-		const changed = [{ id: 'a', type: 'limit', config: { n: 10 } }];
-		expect(isCacheStale(hash, changed)).toBe(true);
-	});
-
-	test('returns true for arbitrary hash string', () => {
-		const steps = [{ id: 'a', type: 'view', config: {} }];
-		expect(isCacheStale('0000000000000000', steps)).toBe(true);
 	});
 });

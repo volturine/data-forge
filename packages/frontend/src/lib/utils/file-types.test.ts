@@ -3,13 +3,11 @@ import {
 	detectFileType,
 	getFileTypeConfig,
 	getSourceTypeConfig,
-	getSourceTypeCategory,
 	getAllFileTypes,
 	FILE_TYPE_REGISTRY,
-	SOURCE_TYPE_REGISTRY,
-	SOURCE_TYPE_CATEGORY
+	SOURCE_TYPE_REGISTRY
 } from './file-types';
-import type { FileType, SourceType } from './file-types';
+import type { FileType } from './file-types';
 
 describe('detectFileType', () => {
 	test('returns unknown for empty string', () => {
@@ -149,37 +147,6 @@ describe('getSourceTypeConfig', () => {
 			expect(cfg.label).toBeTruthy();
 			expect(cfg.icon).toBeDefined();
 			expect(cfg.description).toBeTruthy();
-		}
-	});
-});
-
-describe('getSourceTypeCategory', () => {
-	const expected: Record<SourceType, string> = {
-		file: 'file',
-		iceberg: 'file',
-		database: 'database',
-		analysis: 'analysis',
-		derived: 'derived',
-		duckdb: 'duckdb'
-	};
-
-	for (const [source, category] of Object.entries(expected)) {
-		test(`${source} maps to ${category}`, () => {
-			expect(getSourceTypeCategory(source as SourceType)).toBe(category);
-		});
-	}
-
-	test('SOURCE_TYPE_CATEGORY covers all source types', () => {
-		const sourceTypes: SourceType[] = [
-			'file',
-			'iceberg',
-			'database',
-			'analysis',
-			'derived',
-			'duckdb'
-		];
-		for (const st of sourceTypes) {
-			expect(SOURCE_TYPE_CATEGORY[st]).toBeDefined();
 		}
 	});
 });

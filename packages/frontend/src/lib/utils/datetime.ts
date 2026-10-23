@@ -3,7 +3,6 @@ import { localTimeZone, parseInstantWithZone } from '#lib/utils/temporal.js';
 
 type DateInput = string | number | Temporal.Instant;
 
-const DATE_TIME_INPUT_RE = /^(\d{4}-\d{2}-\d{2})T(\d{2}):(\d{2})$/;
 const timeZoneValidity = new Map<string, boolean>();
 
 function instantFor(
@@ -121,22 +120,6 @@ export function formatDateTimeValue(
 	});
 }
 
-function parseDateTimeInput(value: string): Temporal.PlainDateTime | null {
-	const match = DATE_TIME_INPUT_RE.exec(value);
-	if (!match) return null;
-	try {
-		return Temporal.PlainDateTime.from({
-			year: Number(match[1].slice(0, 4)),
-			month: Number(match[1].slice(5, 7)),
-			day: Number(match[1].slice(8, 10)),
-			hour: Number(match[2]),
-			minute: Number(match[3])
-		});
-	} catch {
-		return null;
-	}
-}
-
 export function toEpoch(value: DateInput, timezone: string, normalize: boolean): number {
 	const instant = instantFor(value, timezone, normalize);
 	if (!instant) return Number.NaN;
@@ -149,33 +132,6 @@ export function formatDateForInput(value: DateInput, timezone: string, normalize
 	if (!instant) return '';
 	if (!normalize) return instant.toString().slice(0, 10);
 	return instant.toZonedDateTimeISO(timezone).toPlainDate().toString();
-}
-
-export function formatDateTimeForInput(
-	value: DateInput,
-	timezone: string,
-	normalize: boolean
-): string {
-	const instant = instantFor(value, timezone, normalize);
-	if (!instant) return '';
-	if (!normalize) return instant.toString().slice(0, 16);
-	const zoned = instant.toZonedDateTimeISO(timezone);
-	return `${zoned.toPlainDate().toString()}T${String(zoned.hour).padStart(2, '0')}:${String(zoned.minute).padStart(2, '0')}`;
-}
-
-export function parseDateTimeInputToIso(
-	value: string,
-	timezone: string,
-	normalize: boolean
-): string {
-	if (!value) return '';
-	if (!normalize) {
-		const instant = instantFor(value, timezone, false);
-		return instant?.toString() ?? '';
-	}
-	const parsed = parseDateTimeInput(value);
-	if (!parsed) return '';
-	return parsed.toZonedDateTime(timezone).toInstant().toString();
 }
 
 export function getYearInZone(

@@ -3,7 +3,6 @@ import {
 	normalizeColumnType,
 	getColumnTypeConfig,
 	resolveColumnType,
-	getColumnTypesByCategory,
 	getAllColumnTypes,
 	COLUMN_TYPE_REGISTRY
 } from './column-types';
@@ -120,37 +119,6 @@ describe('resolveColumnType', () => {
 
 	test('resolves parameterized type', () => {
 		expect(resolveColumnType("Datetime(time_unit='us')")).toBe('Datetime');
-	});
-});
-
-// ── getColumnTypesByCategory ────────────────────────────────────────────────
-
-describe('getColumnTypesByCategory', () => {
-	test('returns all expected categories', () => {
-		const grouped = getColumnTypesByCategory();
-		expect(Object.keys(grouped).sort()).toEqual([
-			'boolean',
-			'complex',
-			'float',
-			'integer',
-			'other',
-			'string',
-			'temporal'
-		]);
-	});
-
-	test('each category contains at least one type', () => {
-		const grouped = getColumnTypesByCategory();
-		for (const category of Object.values(grouped)) {
-			expect(category.length).toBeGreaterThan(0);
-		}
-	});
-
-	test('does not include duplicate canonical names', () => {
-		const grouped = getColumnTypesByCategory();
-		const allTypes = Object.values(grouped).flat();
-		const canonical = allTypes.map((t) => t.canonicalName);
-		expect(new Set(canonical).size).toBe(canonical.length);
 	});
 });
 

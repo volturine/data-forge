@@ -209,7 +209,6 @@ FRONTEND_BUILD_API_FORBIDDEN_PATTERNS = {
     re.compile(r'\binterface\s+BuildRunListResponse\b'): 'build list response must be imported from protocol-anchored build-stream types',
 }
 FRONTEND_COMPUTE_TYPES_REQUIRED_TOKENS = {
-	'ComputeWorkerIdentityJson as ProtocolComputeWorkerIdentityJson': 'compute worker identity payload must be anchored to generated protocol JSON',
 	'ComputeWorkerStatusResultJson as ProtocolComputeWorkerStatusResultJson': 'compute worker status response must be anchored to generated protocol JSON',
 	'ComputeWorkerResourceConfigJson as ProtocolComputeWorkerResourceConfigJson': 'compute worker resource config must be anchored to generated protocol JSON',
 }
