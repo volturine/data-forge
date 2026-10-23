@@ -236,71 +236,80 @@ test.describe('Navigation – compute worker monitor', () => {
 // Chat panel – minimal smoke tests
 // ────────────────────────────────────────────────────────────────────────────────
 
+const OPENROUTER_CHAT_SETTINGS = {
+	smtp_host: '',
+	smtp_port: 587,
+	smtp_user: '',
+	smtp_password: '',
+	telegram_bot_token: '',
+	telegram_bot_enabled: false,
+	openrouter_api_key: 'sk-test',
+	openrouter_default_model: 'openai/gpt-4o-mini',
+	ollama_endpoint_url: 'http://ollama.test',
+	ollama_default_model: 'llama3.2',
+	public_idb_debug: false
+};
+
+/** Stub GET /api/v1/settings with an OpenRouter-configured profile, optionally slowing GETs. */
+async function stubChatSettings(page: Page, options: { delayGetMs?: number } = {}): Promise<void> {
+	await page.route('**/api/v1/settings', async (route) => {
+		if (options.delayGetMs && route.request().method() === 'GET') {
+			await new Promise((resolve) => setTimeout(resolve, options.delayGetMs));
+		}
+		await route.fulfill({
+			status: 200,
+			contentType: 'application/json',
+			body: JSON.stringify(OPENROUTER_CHAT_SETTINGS)
+		});
+	});
+}
+
 test.describe('Navigation – chat panel smoke', () => {
-	test('chat trigger opens panel and close button dismisses it', async ({ page }) => {
+	test('chat panel opens and closes via trigger, close button, Escape, and second trigger click', async ({
+		page
+	}) => {
+		// One page load covers all three open/close paths. Each step ends with the
+		// panel closed, so the next step starts from the same state as a fresh load.
 		await gotoAuthedRoute(page, '/');
 
 		const trigger = page.getByRole('button', { name: 'AI Assistant' });
-		await expect(trigger).toBeVisible();
-		await trigger.click();
-
 		const panel = page.locator('#chat-panel');
-		await expect(panel).toBeVisible({ timeout: 5_000 });
 
-		await screenshot(page, 'navigation', 'chat-panel-open');
+		await test.step('chat trigger opens panel and close button dismisses it', async () => {
+			await expect(trigger).toBeVisible();
+			await trigger.click();
+			await expect(panel).toBeVisible({ timeout: 5_000 });
 
-		// Close via the close button
-		await panel.getByRole('button', { name: 'Close chat' }).click();
-		await expect(panel).not.toBeVisible({ timeout: 3_000 });
-	});
+			await screenshot(page, 'navigation', 'chat-panel-open');
 
-	test('chat panel closes via Escape key', async ({ page }) => {
-		await gotoAuthedRoute(page, '/');
+			// Close via the close button
+			await panel.getByRole('button', { name: 'Close chat' }).click();
+			await expect(panel).not.toBeVisible({ timeout: 3_000 });
+		});
 
-		await page.getByRole('button', { name: 'AI Assistant' }).click();
-		const panel = page.locator('#chat-panel');
-		await expect(panel).toBeVisible({ timeout: 5_000 });
+		await test.step('chat panel closes via Escape key', async () => {
+			await trigger.click();
+			await expect(panel).toBeVisible({ timeout: 5_000 });
 
-		await page.keyboard.press('Escape');
-		await expect(panel).not.toBeVisible({ timeout: 3_000 });
-	});
+			await page.keyboard.press('Escape');
+			await expect(panel).not.toBeVisible({ timeout: 3_000 });
+		});
 
-	test('chat panel toggle: second click closes the panel', async ({ page }) => {
-		await gotoAuthedRoute(page, '/');
+		await test.step('chat panel toggle: second click closes the panel', async () => {
+			await trigger.click();
+			await expect(panel).toBeVisible({ timeout: 5_000 });
 
-		const trigger = page.getByRole('button', { name: 'AI Assistant' });
-		await trigger.click();
-		const panel = page.locator('#chat-panel');
-		await expect(panel).toBeVisible({ timeout: 5_000 });
-
-		// Click trigger again to close
-		await trigger.click();
-		await expect(panel).not.toBeVisible({ timeout: 3_000 });
+			// Click trigger again to close
+			await trigger.click();
+			await expect(panel).not.toBeVisible({ timeout: 3_000 });
+		});
 	});
 
 	test('chat panel provider switch updates model selector without a local Ollama service', async ({
 		page
 	}) => {
 		await gotoAuthedRoute(page, '/');
-		await page.route('**/api/v1/settings', (route) =>
-			route.fulfill({
-				status: 200,
-				contentType: 'application/json',
-				body: JSON.stringify({
-					smtp_host: '',
-					smtp_port: 587,
-					smtp_user: '',
-					smtp_password: '',
-					telegram_bot_token: '',
-					telegram_bot_enabled: false,
-					openrouter_api_key: 'sk-test',
-					openrouter_default_model: 'openai/gpt-4o-mini',
-					ollama_endpoint_url: 'http://ollama.test',
-					ollama_default_model: 'llama3.2',
-					public_idb_debug: false
-				})
-			})
-		);
+		await stubChatSettings(page);
 		await page.route('**/api/v1/mcp/tools', (route) =>
 			route.fulfill({ status: 200, contentType: 'application/json', body: '[]' })
 		);
@@ -362,27 +371,7 @@ test.describe('Navigation – chat panel smoke', () => {
 
 	test('first chat open stays neutral while provider settings and tools load', async ({ page }) => {
 		await page.addInitScript(() => localStorage.setItem('chat_session_id', 'session-1'));
-		await page.route('**/api/v1/settings', async (route) => {
-			if (route.request().method() === 'GET')
-				await new Promise((resolve) => setTimeout(resolve, 800));
-			await route.fulfill({
-				status: 200,
-				contentType: 'application/json',
-				body: JSON.stringify({
-					smtp_host: '',
-					smtp_port: 587,
-					smtp_user: '',
-					smtp_password: '',
-					telegram_bot_token: '',
-					telegram_bot_enabled: false,
-					openrouter_api_key: 'sk-test',
-					openrouter_default_model: 'openai/gpt-4o-mini',
-					ollama_endpoint_url: 'http://ollama.test',
-					ollama_default_model: 'llama3.2',
-					public_idb_debug: false
-				})
-			});
-		});
+		await stubChatSettings(page, { delayGetMs: 800 });
 		await page.route('**/api/v1/mcp/tools', async (route) => {
 			await new Promise((resolve) => setTimeout(resolve, 800));
 			await route.fulfill({ status: 200, contentType: 'application/json', body: '[]' });

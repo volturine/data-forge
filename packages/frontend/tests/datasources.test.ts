@@ -251,11 +251,15 @@ test.describe('Datasources – detail view', () => {
 		});
 	});
 
-	test('general tab allows editing and clearing the datasource description', async ({
+	test('general description, rename, and schema column description save and persist after reload', async ({
 		page,
 		request
 	}) => {
-		const ds = `e2e-detail-description-${uid()}`;
+		// One datasource runs the three edits in order. Each edit saves and asserts
+		// in place; a single reload then asserts every persisted value.
+		const id = uid();
+		const ds = `e2e-detail-${id}`;
+		const renamed = `e2e-renamed-${id}`;
 		const dsId = await createDatasource(request, ds);
 		try {
 			await gotoDatasourcesPage(page);
@@ -263,49 +267,79 @@ test.describe('Datasources – detail view', () => {
 
 			const config = page.locator('[data-ds-config]');
 			const descriptionField = config.locator('textarea[id^="datasource-description-"]');
-			await expect(descriptionField).toHaveValue('');
+			const schemaDescription = 'Primary city label used for regional rollups';
 
-			await descriptionField.fill('Initial dataset guidance for weekly commercial reporting.');
-			await config.getByRole('button', { name: /Save Changes/i }).click();
-			await expect(config.getByText('Changes saved successfully!')).toBeVisible();
-			await expect(descriptionField).toHaveValue(
-				'Initial dataset guidance for weekly commercial reporting.'
-			);
+			await test.step('general tab allows editing and clearing the datasource description', async () => {
+				await expect(descriptionField).toHaveValue('');
 
-			await descriptionField.fill('');
-			await config.getByRole('button', { name: /Save Changes/i }).click();
-			await expect(config.getByText('Changes saved successfully!')).toBeVisible();
-			await expect(descriptionField).toHaveValue('');
+				await descriptionField.fill('Initial dataset guidance for weekly commercial reporting.');
+				await config.getByRole('button', { name: /Save Changes/i }).click();
+				await expect(config.getByText('Changes saved successfully!')).toBeVisible();
+				await expect(descriptionField).toHaveValue(
+					'Initial dataset guidance for weekly commercial reporting.'
+				);
+
+				await descriptionField.fill('');
+				await config.getByRole('button', { name: /Save Changes/i }).click();
+				await expect(config.getByText('Changes saved successfully!')).toBeVisible();
+				await expect(descriptionField).toHaveValue('');
+			});
+
+			await test.step('rename datasource shows Save button and persists', async () => {
+				const nameInput = config.locator('[id^="datasource-name-"]');
+				await nameInput.fill(renamed);
+
+				await expect(config.getByRole('button', { name: 'Save Changes' })).toBeVisible({
+					timeout: 5_000
+				});
+
+				// Wait for save API call to complete before the reload below
+				const [saveResponse] = await Promise.all([
+					page.waitForResponse(
+						(resp) =>
+							resp.url().includes('/api/v1/datasource/') && resp.request().method() === 'PUT'
+					),
+					config.getByRole('button', { name: 'Save Changes' }).click()
+				]);
+				expect(saveResponse.ok()).toBeTruthy();
+
+				// Verify the new name is visible immediately after save (before reload)
+				await expect(nameInput).toHaveValue(renamed, { timeout: 5_000 });
+			});
+
+			await test.step('Schema tab allows editing and viewing column descriptions', async () => {
+				await openSchemaTabAndWait(page);
+
+				const editButton = config.getByRole('button', { name: 'Edit description for city' });
+				await editButton.click();
+				await config.locator('textarea').fill(schemaDescription);
+				await config.getByRole('button', { name: 'Save' }).click();
+				await expect(editButton).toBeVisible({ timeout: 5_000 });
+
+				await expect(config.locator('[data-schema-description="city"]')).toContainText(
+					schemaDescription
+				);
+
+				await config.locator('[data-schema-column="city"]').click();
+				const panel = page.getByTestId('column-stats-panel');
+				await expect(panel).toContainText('Description');
+				await expect(panel).toContainText(schemaDescription);
+			});
+
+			await test.step('cleared description, renamed datasource, and schema description persist after reload', async () => {
+				await page.reload();
+				await expect(page.locator(`[data-ds-row="${renamed}"]`)).toBeVisible({ timeout: 5_000 });
+
+				await selectDatasourceAndWaitForConfig(page, renamed);
+				await expect(descriptionField).toHaveValue('');
+
+				await openSchemaTabAndWait(page);
+				await expect(config.locator('[data-schema-description="city"]')).toContainText(
+					schemaDescription
+				);
+			});
 		} finally {
-			await deleteDatasourceViaUI(page, ds, { id: dsId }).catch(() => undefined);
-		}
-	});
-
-	test('Schema tab allows editing and viewing column descriptions', async ({ page, request }) => {
-		const ds = `e2e-detail-schema-${uid()}`;
-		const dsId = await createDatasource(request, ds);
-		try {
-			await gotoDatasourcesPage(page);
-			await selectDatasourceAndWaitForConfig(page, ds);
-			await openSchemaTabAndWait(page);
-
-			const config = page.locator('[data-ds-config]');
-			const editButton = config.getByRole('button', { name: 'Edit description for city' });
-			await editButton.click();
-			await config.locator('textarea').fill('Primary city label used for regional rollups');
-			await config.getByRole('button', { name: 'Save' }).click();
-			await expect(editButton).toBeVisible({ timeout: 5_000 });
-
-			await expect(config.locator('[data-schema-description="city"]')).toContainText(
-				'Primary city label used for regional rollups'
-			);
-
-			await config.locator('[data-schema-column="city"]').click();
-			const panel = page.getByTestId('column-stats-panel');
-			await expect(panel).toContainText('Description');
-			await expect(panel).toContainText('Primary city label used for regional rollups');
-		} finally {
-			await deleteDatasourceViaUI(page, ds, { id: dsId }).catch(() => undefined);
+			await deleteDatasourceViaUI(page, renamed, { id: dsId }).catch(() => undefined);
 		}
 	});
 });
@@ -366,47 +400,6 @@ test.describe('Datasources – column stats panel', () => {
 
 		await page.locator('[data-testid="column-stats-close"]').click();
 		await expect(panel).not.toBeVisible();
-	});
-});
-
-test.describe('Datasources – config tab interactions', () => {
-	test('rename datasource shows Save button and persists', async ({ page, request }) => {
-		const id = uid();
-		const ds = `e2e-rename-${id}`;
-		const renamed = `e2e-renamed-${id}`;
-		await createDatasource(request, ds);
-		try {
-			await gotoDatasourcesPage(page);
-			await page.locator(`[data-ds-row="${ds}"]`).click();
-
-			const config = page.locator('[data-ds-config]');
-			await expect(config).toBeVisible({ timeout: 5_000 });
-
-			const nameInput = config.locator('[id^="datasource-name-"]');
-			await nameInput.fill(renamed);
-
-			await expect(config.getByRole('button', { name: 'Save Changes' })).toBeVisible({
-				timeout: 5_000
-			});
-
-			// Wait for save API call to complete before reloading
-			const [saveResponse] = await Promise.all([
-				page.waitForResponse(
-					(resp) => resp.url().includes('/api/v1/datasource/') && resp.request().method() === 'PUT'
-				),
-				config.getByRole('button', { name: 'Save Changes' }).click()
-			]);
-			expect(saveResponse.ok()).toBeTruthy();
-
-			// Verify the new name is visible immediately after save (before reload)
-			await expect(nameInput).toHaveValue(renamed, { timeout: 5_000 });
-
-			// After save, reload page and verify renamed datasource appears
-			await page.reload();
-			await expect(page.locator(`[data-ds-row="${renamed}"]`)).toBeVisible({ timeout: 5_000 });
-		} finally {
-			await deleteDatasourceViaUI(page, renamed);
-		}
 	});
 });
 
@@ -690,221 +683,218 @@ test.describe('Datasources – re-ingest freshness & time travel', () => {
 		await expect(page.getByRole('status')).toHaveText('Preferences saved');
 	}
 
-	test('re-ingest advances the Last updated stamp instead of staying stale', async ({
+	test('time travel, re-ingest freshness, and timezone rendering share one uploaded dataset', async ({
 		page,
 		request
 	}) => {
-		const ds = `e2e-last-updated-${uid()}`;
+		// Time travel runs first: it asserts a skip_rows=0 baseline and exactly two
+		// ingest generations, which the freshness re-ingest below would break.
+		// Three ingest-driven journeys share one dataset, so the merged test is slow.
+		test.slow();
+		const ds = `e2e-reingest-${uid()}`;
 		const dsId = await createCsvDatasource(request, ds, REINGEST_CSV);
 		try {
-			await gotoDatasourcesPage(page);
-			await selectDatasourceAndWaitForConfig(page, ds);
-			await waitForDatasourcePreviewReady(page);
-			const preview = page.getByTestId('datasource-preview');
-			await expect(preview.locator('table')).toBeVisible({ timeout: readyTimeoutMs() });
+			await test.step('time travel lists every ingest and switching snapshots changes the preview data', async () => {
+				await gotoDatasourcesPage(page);
+				await selectDatasourceAndWaitForConfig(page, ds);
+				await waitForDatasourcePreviewReady(page);
+				const preview = page.locator('[data-testid="datasource-preview"]');
+				// Latest generation: skip_rows=0 → five rows.
+				await expect(preview.locator('tbody tr')).toHaveCount(5, { timeout: readyTimeoutMs() });
 
-			const config = page.locator('[data-ds-config]');
-			const beforeMs = await readLastUpdated(page, dsId);
-			expect(beforeMs).toBeGreaterThan(0);
-			// The publish response carries the freshness stamp: "Never" must
-			// not appear for a freshly imported, ingested datasource.
-			await expect(config.getByText('Never', { exact: true })).toHaveCount(0);
-			const displayedTimestamp = config.locator('time').first();
-			await expect(displayedTimestamp).toBeVisible();
-			const displayedBefore = await displayedTimestamp.getAttribute('datetime');
-			expect(displayedBefore).not.toBeNull();
-			expect(Date.parse(displayedBefore ?? '')).toBe(beforeMs);
-			const listRow = page.locator(`[data-ds-row="${ds}"]`);
-			const datasourceCard = listRow.getByRole('button').first();
-			await expect(datasourceCard.getByText('Last updated', { exact: true })).toHaveCount(0);
+				const config = page.locator('[data-ds-config]');
+				const beforeMs = await readLastUpdated(page, dsId);
+				expect(beforeMs).toBeGreaterThan(0);
 
-			await config.getByRole('button', { name: /Re-ingest from source/i }).click();
-			await expect(
-				config.getByRole('button', { name: /Refreshing|Re-ingesting/i })
-			).not.toBeVisible({
-				timeout: readyTimeoutMs()
-			});
-			await waitForDatasourcePreviewReady(page);
+				// Change parsing options and save: the panel re-ingests, producing
+				// a second ingest generation (skip_rows=1 → four rows).
+				await config.getByRole('tab', { name: 'CSV' }).click();
+				await config.locator('input[id^="csv-skip-rows-"]').fill('1');
+				await config.getByRole('button', { name: 'Save Changes' }).click();
+				await expect
+					.poll(() => readLastUpdated(page, dsId), { timeout: readyTimeoutMs() })
+					.toBeGreaterThan(beforeMs);
+				await waitForDatasourcePreviewReady(page);
+				await expect(preview.locator('tbody tr')).toHaveCount(4, { timeout: readyTimeoutMs() });
 
-			// The preview must not show an error after the re-ingest and must still
-			// render data rows.
-			await expect(preview.getByTestId('preview-error')).not.toBeVisible();
-			await expect(preview.locator('tbody tr').first()).toBeVisible({
-				timeout: readyTimeoutMs()
-			});
+				// The time travel picker must list BOTH ingest generations.
+				const timeTravelButton = page.getByRole('button', { name: /Time Travel/i });
+				await expect(timeTravelButton).toBeVisible();
+				await timeTravelButton.click();
+				const popover = page.getByTestId('time-travel-popover');
+				await expect(popover.getByTestId('time-travel-selected')).toContainText('Latest');
+				await expect(popover.getByText('Select a day to view snapshots.')).toBeVisible();
+				const ingestionDay = popover.locator(
+					'[data-testid="time-travel-day"][data-snapshot-count="2"]'
+				);
+				await expect(ingestionDay).toHaveCount(1, { timeout: readyTimeoutMs() });
+				await ingestionDay.click();
+				const items = popover.getByTestId('time-travel-snapshot-item');
+				await expect(items).toHaveCount(2, { timeout: readyTimeoutMs() });
 
-			await expect(config.getByText('Never', { exact: true })).toHaveCount(0);
-			// The stamp must actually advance with the new ingest.
-			await expect
-				.poll(() => readLastUpdated(page, dsId), { timeout: readyTimeoutMs() })
-				.toBeGreaterThan(beforeMs);
-			await expect
-				.poll(async () => Date.parse((await displayedTimestamp.getAttribute('datetime')) ?? ''), {
-					timeout: readyTimeoutMs()
-				})
-				.toBeGreaterThan(beforeMs);
-		} finally {
-			await deleteDatasourceViaUI(page, ds, { id: dsId }).catch(() => undefined);
-		}
-	});
-
-	test('renders UTC freshness timestamps in the saved user timezone', async ({ page, request }) => {
-		const ds = `e2e-timezone-${uid()}`;
-		const dsId = await createCsvDatasource(request, ds, REINGEST_CSV);
-		let originalTimeZone: string | null = null;
-		let originalTimeZoneCaptured = false;
-		try {
-			const meResponse = await page.context().request.get('/api/v1/auth/me');
-			expect(meResponse.ok()).toBeTruthy();
-			const me = (await meResponse.json()) as { preferences: Record<string, unknown> };
-			originalTimeZone =
-				typeof me.preferences.timezone === 'string' ? me.preferences.timezone : null;
-			if (originalTimeZone) {
-				const isValid = await page.evaluate((timezone) => {
-					try {
-						new Intl.DateTimeFormat('en-US', { timeZone: timezone });
-						return true;
-					} catch {
-						return false;
-					}
-				}, originalTimeZone);
-				if (!isValid) originalTimeZone = null;
-			}
-			originalTimeZoneCaptured = true;
-
-			await gotoDatasourcesPage(page);
-			await selectDatasourceAndWaitForConfig(page, ds);
-			await waitForDatasourcePreviewReady(page);
-
-			const config = page.locator('[data-ds-config]');
-			const timestamp = config.locator('time').first();
-			await expect(timestamp).toBeVisible();
-			const timestampIso = await timestamp.getAttribute('datetime');
-			expect(timestampIso).toMatch(/Z$/);
-			const timestampMs = Date.parse(timestampIso ?? '');
-			expect(timestampMs).toBe(await readLastUpdated(page, dsId));
-			const localTitle = await formatTimestampInZone(page, timestampMs, 'Europe/Bratislava');
-			await expect(timestamp).toHaveAttribute('title', localTitle);
-
-			const losAngelesOption = page.locator(
-				'#supported-timezones option[value="America/Los_Angeles"]'
-			);
-			await gotoProfile(page, 'preferences');
-			await expect(losAngelesOption).toHaveAttribute(
-				'label',
-				/^America\/Los_Angeles \(UTC[-+]\d{2}:\d{2}\)$/
-			);
-			await page.getByLabel('Time zone').fill('America/Los_Angeles');
-			await page.getByRole('button', { name: 'Save preferences' }).click();
-			await expect(page.getByRole('status')).toHaveText('Preferences saved');
-
-			await gotoDatasourcesPage(page);
-			await selectDatasourceAndWaitForConfig(page, ds);
-			await waitForDatasourcePreviewReady(page);
-			const updatedTimestamp = page.locator('[data-ds-config] time').first();
-			const selectedZoneTitle = await formatTimestampInZone(
-				page,
-				timestampMs,
-				'America/Los_Angeles'
-			);
-			await expect(updatedTimestamp).toHaveAttribute('datetime', timestampIso ?? '');
-			await expect(updatedTimestamp).toHaveAttribute('title', selectedZoneTitle);
-			await expect(updatedTimestamp).not.toHaveAttribute('title', localTitle);
-
-			const savedMeResponse = await page.context().request.get('/api/v1/auth/me');
-			const savedMe = (await savedMeResponse.json()) as { preferences: Record<string, unknown> };
-			expect(savedMe.preferences.timezone).toBe('America/Los_Angeles');
-
-			await saveTimezonePreference(page, null);
-			const clearedMeResponse = await page.context().request.get('/api/v1/auth/me');
-			const clearedMe = (await clearedMeResponse.json()) as {
-				preferences: Record<string, unknown>;
-			};
-			expect(clearedMe.preferences.timezone).toBeUndefined();
-		} finally {
-			if (originalTimeZoneCaptured) {
-				await saveTimezonePreference(page, originalTimeZone).catch(() => undefined);
-			}
-			await deleteDatasourceViaUI(page, ds, { id: dsId }).catch(() => undefined);
-		}
-	});
-
-	test('time travel lists every ingest and switching snapshots changes the preview data', async ({
-		page,
-		request
-	}) => {
-		const ds = `e2e-time-travel-${uid()}`;
-		const dsId = await createCsvDatasource(request, ds, REINGEST_CSV);
-		try {
-			await gotoDatasourcesPage(page);
-			await selectDatasourceAndWaitForConfig(page, ds);
-			await waitForDatasourcePreviewReady(page);
-			const preview = page.locator('[data-testid="datasource-preview"]');
-			// Latest generation: skip_rows=0 → five rows.
-			await expect(preview.locator('tbody tr')).toHaveCount(5, { timeout: readyTimeoutMs() });
-
-			const config = page.locator('[data-ds-config]');
-			const beforeMs = await readLastUpdated(page, dsId);
-			expect(beforeMs).toBeGreaterThan(0);
-
-			// Change parsing options and save: the panel re-ingests, producing
-			// a second ingest generation (skip_rows=1 → four rows).
-			await config.getByRole('tab', { name: 'CSV' }).click();
-			await config.locator('input[id^="csv-skip-rows-"]').fill('1');
-			await config.getByRole('button', { name: 'Save Changes' }).click();
-			await expect
-				.poll(() => readLastUpdated(page, dsId), { timeout: readyTimeoutMs() })
-				.toBeGreaterThan(beforeMs);
-			await waitForDatasourcePreviewReady(page);
-			await expect(preview.locator('tbody tr')).toHaveCount(4, { timeout: readyTimeoutMs() });
-
-			// The time travel picker must list BOTH ingest generations.
-			const timeTravelButton = page.getByRole('button', { name: /Time Travel/i });
-			await expect(timeTravelButton).toBeVisible();
-			await timeTravelButton.click();
-			const popover = page.getByTestId('time-travel-popover');
-			await expect(popover.getByTestId('time-travel-selected')).toContainText('Latest');
-			await expect(popover.getByText('Select a day to view snapshots.')).toBeVisible();
-			const ingestionDay = popover.locator(
-				'[data-testid="time-travel-day"][data-snapshot-count="2"]'
-			);
-			await expect(ingestionDay).toHaveCount(1, { timeout: readyTimeoutMs() });
-			await ingestionDay.click();
-			const items = popover.getByTestId('time-travel-snapshot-item');
-			await expect(items).toHaveCount(2, { timeout: readyTimeoutMs() });
-
-			// Selecting the older ingestion must send its exact Iceberg snapshot
-			// to compute and load that generation's data.
-			const olderSnapshot = items.last();
-			const olderSnapshotId = await olderSnapshot.getAttribute('data-snapshot-id');
-			expect(olderSnapshotId).toBeTruthy();
-			const previewRequest = page.waitForRequest(
-				(request) =>
-					request.url().includes('/api/v1/compute/preview') && request.method() === 'POST',
-				{ timeout: readyTimeoutMs() }
-			);
-			await olderSnapshot.getByRole('button').first().click();
-			const selectedPreviewRequest = await previewRequest;
-			const previewPayload = selectedPreviewRequest.postDataJSON() as {
-				analysis_pipeline: {
-					tabs: Array<{ datasource: { config: { snapshot_id?: string } } }>;
+				// Selecting the older ingestion must send its exact Iceberg snapshot
+				// to compute and load that generation's data.
+				const olderSnapshot = items.last();
+				const olderSnapshotId = await olderSnapshot.getAttribute('data-snapshot-id');
+				expect(olderSnapshotId).toBeTruthy();
+				const previewRequest = page.waitForRequest(
+					(request) =>
+						request.url().includes('/api/v1/compute/preview') && request.method() === 'POST',
+					{ timeout: readyTimeoutMs() }
+				);
+				await olderSnapshot.getByRole('button').first().click();
+				const selectedPreviewRequest = await previewRequest;
+				const previewPayload = selectedPreviewRequest.postDataJSON() as {
+					analysis_pipeline: {
+						tabs: Array<{ datasource: { config: { snapshot_id?: string } } }>;
+					};
 				};
-			};
-			expect(previewPayload.analysis_pipeline.tabs[0]?.datasource.config.snapshot_id).toBe(
-				olderSnapshotId
-			);
-			await expect(popover.getByTestId('time-travel-selected')).toContainText('#');
-			await expect(popover.getByTestId('time-travel-selected')).not.toContainText('Latest');
-			await page.getByRole('button', { name: /Time Travel/i }).click();
-			await waitForDatasourcePreviewReady(page);
-			await expect(preview.locator('tbody tr')).toHaveCount(5, { timeout: readyTimeoutMs() });
+				expect(previewPayload.analysis_pipeline.tabs[0]?.datasource.config.snapshot_id).toBe(
+					olderSnapshotId
+				);
+				await expect(popover.getByTestId('time-travel-selected')).toContainText('#');
+				await expect(popover.getByTestId('time-travel-selected')).not.toContainText('Latest');
+				await page.getByRole('button', { name: /Time Travel/i }).click();
+				await waitForDatasourcePreviewReady(page);
+				await expect(preview.locator('tbody tr')).toHaveCount(5, { timeout: readyTimeoutMs() });
 
-			// Returning to latest restores the newest generation.
-			await page.getByRole('button', { name: /Time Travel/i }).click();
-			await popover.getByTestId('time-travel-latest').click();
-			await page.getByRole('button', { name: /Time Travel/i }).click();
-			await waitForDatasourcePreviewReady(page);
-			await expect(preview.locator('tbody tr')).toHaveCount(4, { timeout: readyTimeoutMs() });
+				// Returning to latest restores the newest generation.
+				await page.getByRole('button', { name: /Time Travel/i }).click();
+				await popover.getByTestId('time-travel-latest').click();
+				await page.getByRole('button', { name: /Time Travel/i }).click();
+				await waitForDatasourcePreviewReady(page);
+				await expect(preview.locator('tbody tr')).toHaveCount(4, { timeout: readyTimeoutMs() });
+			});
+
+			await test.step('re-ingest advances the Last updated stamp instead of staying stale', async () => {
+				await gotoDatasourcesPage(page);
+				await selectDatasourceAndWaitForConfig(page, ds);
+				await waitForDatasourcePreviewReady(page);
+				const preview = page.getByTestId('datasource-preview');
+				await expect(preview.locator('table')).toBeVisible({ timeout: readyTimeoutMs() });
+
+				const config = page.locator('[data-ds-config]');
+				const beforeMs = await readLastUpdated(page, dsId);
+				expect(beforeMs).toBeGreaterThan(0);
+				// The publish response carries the freshness stamp: "Never" must
+				// not appear for a freshly imported, ingested datasource.
+				await expect(config.getByText('Never', { exact: true })).toHaveCount(0);
+				const displayedTimestamp = config.locator('time').first();
+				await expect(displayedTimestamp).toBeVisible();
+				const displayedBefore = await displayedTimestamp.getAttribute('datetime');
+				expect(displayedBefore).not.toBeNull();
+				expect(Date.parse(displayedBefore ?? '')).toBe(beforeMs);
+				const listRow = page.locator(`[data-ds-row="${ds}"]`);
+				const datasourceCard = listRow.getByRole('button').first();
+				await expect(datasourceCard.getByText('Last updated', { exact: true })).toHaveCount(0);
+
+				await config.getByRole('button', { name: /Re-ingest from source/i }).click();
+				await expect(
+					config.getByRole('button', { name: /Refreshing|Re-ingesting/i })
+				).not.toBeVisible({
+					timeout: readyTimeoutMs()
+				});
+				await waitForDatasourcePreviewReady(page);
+
+				// The preview must not show an error after the re-ingest and must still
+				// render data rows.
+				await expect(preview.getByTestId('preview-error')).not.toBeVisible();
+				await expect(preview.locator('tbody tr').first()).toBeVisible({
+					timeout: readyTimeoutMs()
+				});
+
+				await expect(config.getByText('Never', { exact: true })).toHaveCount(0);
+				// The stamp must actually advance with the new ingest.
+				await expect
+					.poll(() => readLastUpdated(page, dsId), { timeout: readyTimeoutMs() })
+					.toBeGreaterThan(beforeMs);
+				await expect
+					.poll(async () => Date.parse((await displayedTimestamp.getAttribute('datetime')) ?? ''), {
+						timeout: readyTimeoutMs()
+					})
+					.toBeGreaterThan(beforeMs);
+			});
+
+			await test.step('renders UTC freshness timestamps in the saved user timezone', async () => {
+				let originalTimeZone: string | null = null;
+				let originalTimeZoneCaptured = false;
+				try {
+					const meResponse = await page.context().request.get('/api/v1/auth/me');
+					expect(meResponse.ok()).toBeTruthy();
+					const me = (await meResponse.json()) as { preferences: Record<string, unknown> };
+					originalTimeZone =
+						typeof me.preferences.timezone === 'string' ? me.preferences.timezone : null;
+					if (originalTimeZone) {
+						const isValid = await page.evaluate((timezone) => {
+							try {
+								new Intl.DateTimeFormat('en-US', { timeZone: timezone });
+								return true;
+							} catch {
+								return false;
+							}
+						}, originalTimeZone);
+						if (!isValid) originalTimeZone = null;
+					}
+					originalTimeZoneCaptured = true;
+
+					await gotoDatasourcesPage(page);
+					await selectDatasourceAndWaitForConfig(page, ds);
+					await waitForDatasourcePreviewReady(page);
+
+					const config = page.locator('[data-ds-config]');
+					const timestamp = config.locator('time').first();
+					await expect(timestamp).toBeVisible();
+					const timestampIso = await timestamp.getAttribute('datetime');
+					expect(timestampIso).toMatch(/Z$/);
+					const timestampMs = Date.parse(timestampIso ?? '');
+					expect(timestampMs).toBe(await readLastUpdated(page, dsId));
+					const localTitle = await formatTimestampInZone(page, timestampMs, 'Europe/Bratislava');
+					await expect(timestamp).toHaveAttribute('title', localTitle);
+
+					const losAngelesOption = page.locator(
+						'#supported-timezones option[value="America/Los_Angeles"]'
+					);
+					await gotoProfile(page, 'preferences');
+					await expect(losAngelesOption).toHaveAttribute(
+						'label',
+						/^America\/Los_Angeles \(UTC[-+]\d{2}:\d{2}\)$/
+					);
+					await page.getByLabel('Time zone').fill('America/Los_Angeles');
+					await page.getByRole('button', { name: 'Save preferences' }).click();
+					await expect(page.getByRole('status')).toHaveText('Preferences saved');
+
+					await gotoDatasourcesPage(page);
+					await selectDatasourceAndWaitForConfig(page, ds);
+					await waitForDatasourcePreviewReady(page);
+					const updatedTimestamp = page.locator('[data-ds-config] time').first();
+					const selectedZoneTitle = await formatTimestampInZone(
+						page,
+						timestampMs,
+						'America/Los_Angeles'
+					);
+					await expect(updatedTimestamp).toHaveAttribute('datetime', timestampIso ?? '');
+					await expect(updatedTimestamp).toHaveAttribute('title', selectedZoneTitle);
+					await expect(updatedTimestamp).not.toHaveAttribute('title', localTitle);
+
+					const savedMeResponse = await page.context().request.get('/api/v1/auth/me');
+					const savedMe = (await savedMeResponse.json()) as {
+						preferences: Record<string, unknown>;
+					};
+					expect(savedMe.preferences.timezone).toBe('America/Los_Angeles');
+
+					await saveTimezonePreference(page, null);
+					const clearedMeResponse = await page.context().request.get('/api/v1/auth/me');
+					const clearedMe = (await clearedMeResponse.json()) as {
+						preferences: Record<string, unknown>;
+					};
+					expect(clearedMe.preferences.timezone).toBeUndefined();
+				} finally {
+					// Restore the user's own timezone preference even if the step failed.
+					if (originalTimeZoneCaptured) {
+						await saveTimezonePreference(page, originalTimeZone).catch(() => undefined);
+					}
+				}
+			});
 		} finally {
 			await deleteDatasourceViaUI(page, ds, { id: dsId }).catch(() => undefined);
 		}

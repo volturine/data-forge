@@ -221,90 +221,131 @@ test.describe('Monitoring – page structure', () => {
 });
 
 test.describe('Monitoring – Schedules tab', () => {
-	test('created schedule appears in the Schedules tab', async ({
+	test('schedule journey: list, search, cron edit, enable toggle, and delete', async ({
 		page,
 		request,
 		sharedDatasource
 	}) => {
+		// One schedule covers six former tests. Each step re-opens the Schedules tab. The cron stays
+		// at its created value until the inline edits: Escape runs before Enter so it still sees
+		// '0 6 * * *'. The schedule is deleted last.
+		const ds = sharedDatasource.name;
 		const dsId = sharedDatasource.id;
 		const scheduleId = await createSchedule(request, dsId, '0 6 * * *');
 		try {
-			await gotoMonitoringTab(page, 'schedules');
-			const schedRow = page.locator(`[data-schedule-row="${scheduleId}"]`);
-			await expect(schedRow).toBeVisible({ timeout: 5_000 });
-			await expect(schedRow).toContainText('Cron: 0 6 * * *', { timeout: 5_000 });
-		} finally {
-			await deleteScheduleById(page, scheduleId);
-		}
-	});
-
-	test('schedules search filters by datasource name', async ({
-		page,
-		request,
-		sharedDatasource
-	}) => {
-		const ds = sharedDatasource.name;
-		const dsId = sharedDatasource.id;
-		const scheduleId = await createSchedule(request, dsId, '0 9 * * *');
-		try {
-			await gotoMonitoringTab(page, 'schedules');
-			const schedRow = page.locator(`[data-schedule-row="${scheduleId}"]`);
-			await expect(schedRow).toBeVisible({ timeout: 5_000 });
-
-			// Search for the datasource name should show the schedule
-			await page.getByLabel(/Search schedules/i).fill(ds);
-			await expect(schedRow).toBeVisible({ timeout: 5_000 });
-
-			// Search for non-matching term should show empty state
-			await page.getByLabel(/Search schedules/i).fill('ZZZNOMATCH');
-			await expect(page.getByText('No schedules match your search.')).toBeVisible({
-				timeout: 5_000
+			await test.step('created schedule appears in the Schedules tab', async () => {
+				await gotoMonitoringTab(page, 'schedules');
+				const schedRow = page.locator(`[data-schedule-row="${scheduleId}"]`);
+				await expect(schedRow).toBeVisible({ timeout: 5_000 });
+				await expect(schedRow).toContainText('Cron: 0 6 * * *', { timeout: 5_000 });
 			});
-		} finally {
-			await deleteScheduleById(page, scheduleId);
-		}
-	});
 
-	test('schedule can be deleted via UI', async ({ page, request, sharedDatasource }) => {
-		const dsId = sharedDatasource.id;
-		const scheduleId = await createSchedule(request, dsId, '0 7 * * *');
+			await test.step('schedules search filters by datasource name', async () => {
+				await gotoMonitoringTab(page, 'schedules');
+				const schedRow = page.locator(`[data-schedule-row="${scheduleId}"]`);
+				await expect(schedRow).toBeVisible({ timeout: 5_000 });
 
-		try {
-			await gotoMonitoringTab(page, 'schedules');
+				// Search for the datasource name should show the schedule
+				await page.getByLabel(/Search schedules/i).fill(ds);
+				await expect(schedRow).toBeVisible({ timeout: 5_000 });
 
-			const schedRow = page.locator(`[data-schedule-row="${scheduleId}"]`);
-			const deleteBtn = schedRow.getByLabel('Delete schedule');
-			await expect(deleteBtn).toBeAttached({ timeout: 5_000 });
+				// Search for non-matching term should show empty state
+				await page.getByLabel(/Search schedules/i).fill('ZZZNOMATCH');
+				await expect(page.getByText('No schedules match your search.')).toBeVisible({
+					timeout: 5_000
+				});
+			});
 
-			// Delete button is always visible in the table row
-			await deleteBtn.click({ timeout: 5_000 });
+			await test.step('inline cron edit: Escape cancels without saving', async () => {
+				await gotoMonitoringTab(page, 'schedules');
 
-			// Confirm in the dialog
-			const dialog = dialogByHeading(page, /Delete Schedule/i);
-			await expect(dialog).toBeVisible();
-			await dialog.getByRole('button', { name: /^Delete$/ }).click();
+				// Expand (table view)
+				const schedRow = page.locator(`[data-schedule-row="${scheduleId}"]`);
+				await expect(schedRow).toBeVisible({ timeout: 5_000 });
+				await schedRow.click();
+				const detailRow = page.locator(`[data-schedule-detail="${scheduleId}"]`);
+				await expect(detailRow.locator('code')).toBeVisible({ timeout: 5_000 });
 
-			await expect(schedRow).toHaveCount(0, { timeout: 5_000 });
-		} finally {
-			await deleteScheduleById(page, scheduleId);
-		}
-	});
+				// Enter edit mode scoped to expanded row
+				await detailRow.locator('button[title="Edit cron expression"]').click();
+				const cronInput = detailRow.locator('input[aria-label="Cron expression"]');
+				await expect(cronInput).toBeVisible({ timeout: 3_000 });
 
-	test('schedule enable/disable toggle works', async ({ page, request, sharedDatasource }) => {
-		const dsId = sharedDatasource.id;
-		const scheduleId = await createSchedule(request, dsId, '0 8 * * *');
-		try {
-			await gotoMonitoringTab(page, 'schedules');
-			const schedRow = page.locator(`[data-schedule-row="${scheduleId}"]`);
-			await expect(schedRow).toBeVisible({ timeout: 5_000 });
+				// Type a different value then Escape
+				await cronInput.fill('59 23 * * *');
+				await cronInput.press('Escape');
 
-			const toggleBtn = schedRow.locator('button[title="Click to disable"]');
-			await expect(toggleBtn).toBeAttached({ timeout: 5_000 });
-			await toggleBtn.click({ timeout: 5_000 });
+				// Input should disappear, original expression should remain
+				await expect(cronInput).not.toBeVisible({ timeout: 3_000 });
+				await expect(detailRow.locator('code')).toContainText('0 6 * * *', { timeout: 5_000 });
+			});
 
-			// After toggle, the button title should change to "Click to enable"
-			await expect(schedRow.locator('button[title="Click to enable"]')).toBeAttached({
-				timeout: 5_000
+			await test.step('inline cron edit: pencil → input → Enter saves new expression', async () => {
+				await gotoMonitoringTab(page, 'schedules');
+
+				// Expand the schedule row by clicking on it (table view uses <tr>)
+				const schedRow = page.locator(`[data-schedule-row="${scheduleId}"]`);
+				await expect(schedRow).toBeVisible({ timeout: 5_000 });
+				await schedRow.click();
+
+				const detailRow = page.locator(`[data-schedule-detail="${scheduleId}"]`);
+				await expect(detailRow.locator('code')).toBeVisible({ timeout: 5_000 });
+
+				// Click the pencil/edit button scoped to the expanded row
+				const editBtn = detailRow.locator('button[title="Edit cron expression"]');
+				await expect(editBtn).toBeVisible({ timeout: 5_000 });
+				await editBtn.click();
+
+				// Cron input should appear
+				const cronInput = detailRow.locator('input[aria-label="Cron expression"]');
+				await expect(cronInput).toBeVisible({ timeout: 3_000 });
+
+				// Clear and type new expression, then press Enter
+				await cronInput.fill('30 12 * * 1');
+				const saveResponse = page.waitForResponse(
+					(response) =>
+						response.url().includes(`/v1/schedules/${scheduleId}`) &&
+						response.request().method() === 'PUT'
+				);
+				await cronInput.press('Enter');
+				await expect((await saveResponse).ok()).toBe(true);
+
+				// The expanded row must keep showing the persisted expression after the refetch.
+				await expect(detailRow.locator('code')).toContainText('30 12 * * 1', { timeout: 5_000 });
+
+				await screenshot(page, 'monitoring', 'schedule-cron-edited');
+			});
+
+			await test.step('schedule enable/disable toggle works', async () => {
+				await gotoMonitoringTab(page, 'schedules');
+				const schedRow = page.locator(`[data-schedule-row="${scheduleId}"]`);
+				await expect(schedRow).toBeVisible({ timeout: 5_000 });
+
+				const toggleBtn = schedRow.locator('button[title="Click to disable"]');
+				await expect(toggleBtn).toBeAttached({ timeout: 5_000 });
+				await toggleBtn.click({ timeout: 5_000 });
+
+				// After toggle, the button title should change to "Click to enable"
+				await expect(schedRow.locator('button[title="Click to enable"]')).toBeAttached({
+					timeout: 5_000
+				});
+			});
+
+			await test.step('schedule can be deleted via UI', async () => {
+				await gotoMonitoringTab(page, 'schedules');
+				const schedRow = page.locator(`[data-schedule-row="${scheduleId}"]`);
+				const deleteBtn = schedRow.getByLabel('Delete schedule');
+				await expect(deleteBtn).toBeAttached({ timeout: 5_000 });
+
+				// Delete button is always visible in the table row
+				await deleteBtn.click({ timeout: 5_000 });
+
+				// Confirm in the dialog
+				const dialog = dialogByHeading(page, /Delete Schedule/i);
+				await expect(dialog).toBeVisible();
+				await dialog.getByRole('button', { name: /^Delete$/ }).click();
+
+				await expect(schedRow).toHaveCount(0, { timeout: 5_000 });
 			});
 		} finally {
 			await deleteScheduleById(page, scheduleId);
@@ -364,173 +405,65 @@ test.describe('Monitoring – Schedule create flow', () => {
 	});
 });
 
-test.describe('Monitoring – Schedule inline cron edit', () => {
-	test('inline cron edit: pencil → input → Enter saves new expression', async ({
-		page,
-		request,
-		sharedDatasource
-	}) => {
-		const dsId = sharedDatasource.id;
-		const scheduleId = await createSchedule(request, dsId, '0 6 * * *');
-		try {
-			await gotoMonitoringTab(page, 'schedules');
-
-			// Expand the schedule row by clicking on it (table view uses <tr>)
-			const schedRow = page.locator(`[data-schedule-row="${scheduleId}"]`);
-			await expect(schedRow).toBeVisible({ timeout: 5_000 });
-			await schedRow.click();
-
-			const detailRow = page.locator(`[data-schedule-detail="${scheduleId}"]`);
-			await expect(detailRow.locator('code')).toBeVisible({ timeout: 5_000 });
-
-			// Click the pencil/edit button scoped to the expanded row
-			const editBtn = detailRow.locator('button[title="Edit cron expression"]');
-			await expect(editBtn).toBeVisible({ timeout: 5_000 });
-			await editBtn.click();
-
-			// Cron input should appear
-			const cronInput = detailRow.locator('input[aria-label="Cron expression"]');
-			await expect(cronInput).toBeVisible({ timeout: 3_000 });
-
-			// Clear and type new expression, then press Enter
-			await cronInput.fill('30 12 * * 1');
-			const saveResponse = page.waitForResponse(
-				(response) =>
-					response.url().includes(`/v1/schedules/${scheduleId}`) &&
-					response.request().method() === 'PUT'
-			);
-			await cronInput.press('Enter');
-			await expect((await saveResponse).ok()).toBe(true);
-
-			// The expanded row must keep showing the persisted expression after the refetch.
-			await expect(detailRow.locator('code')).toContainText('30 12 * * 1', { timeout: 5_000 });
-
-			await screenshot(page, 'monitoring', 'schedule-cron-edited');
-		} finally {
-			await deleteScheduleById(page, scheduleId);
-		}
-	});
-
-	test('inline cron edit: Escape cancels without saving', async ({
-		page,
-		request,
-		sharedDatasource
-	}) => {
-		const dsId = sharedDatasource.id;
-		const scheduleId = await createSchedule(request, dsId, '0 6 * * *');
-		try {
-			await gotoMonitoringTab(page, 'schedules');
-
-			// Expand (table view)
-			const schedRow = page.locator(`[data-schedule-row="${scheduleId}"]`);
-			await expect(schedRow).toBeVisible({ timeout: 5_000 });
-			await schedRow.click();
-			const detailRow = page.locator(`[data-schedule-detail="${scheduleId}"]`);
-			await expect(detailRow.locator('code')).toBeVisible({ timeout: 5_000 });
-
-			// Enter edit mode scoped to expanded row
-			await detailRow.locator('button[title="Edit cron expression"]').click();
-			const cronInput = detailRow.locator('input[aria-label="Cron expression"]');
-			await expect(cronInput).toBeVisible({ timeout: 3_000 });
-
-			// Type a different value then Escape
-			await cronInput.fill('59 23 * * *');
-			await cronInput.press('Escape');
-
-			// Input should disappear, original expression should remain
-			await expect(cronInput).not.toBeVisible({ timeout: 3_000 });
-			await expect(detailRow.locator('code')).toContainText('0 6 * * *', { timeout: 5_000 });
-		} finally {
-			await deleteScheduleById(page, scheduleId);
-		}
-	});
-});
-
 test.describe('Monitoring – Health Checks tab', () => {
-	test('created health check appears in list', async ({ page, request, sharedDatasource }) => {
+	test('health check journey: list, search, enable toggle, and delete', async ({
+		page,
+		request,
+		sharedDatasource
+	}) => {
+		// One health check covers four former tests. Each step re-opens the Health Checks tab.
+		// The check stays enabled until the toggle step, and it is deleted last.
 		const id = uid();
-		const hc = `e2e Row Count ${id}`;
+		const hc = `e2e Monitoring HC ${id}`;
 		const healthCheckId = await createHealthCheck(request, sharedDatasource.id, hc);
 		try {
-			await gotoMonitoringTab(page, 'health');
-			await waitForHealthCheckRow(page, hc);
-		} finally {
-			await deleteHealthCheckById(page, healthCheckId);
-		}
-	});
-
-	test('health checks search filters by check name', async ({
-		page,
-		request,
-		sharedAuxDatasource
-	}) => {
-		const id = uid();
-		const hc = `e2e Searchable HC ${id}`;
-		const healthCheckId = await createHealthCheck(request, sharedAuxDatasource.id, hc);
-		try {
-			await gotoMonitoringTab(page, 'health');
-			const row = await waitForHealthCheckRow(page, hc);
-			await expect(row).toBeVisible({ timeout: 5_000 });
-
-			// Search for the check name should show it
-			await page.getByLabel(/Search health checks/i).fill(hc);
-			await expect(row).toBeVisible({ timeout: 5_000 });
-
-			// Search for non-matching term should show empty state
-			await page.getByLabel(/Search health checks/i).fill('ZZZNOMATCH');
-			await expect(page.getByText('No health checks match your search.')).toBeVisible({
-				timeout: 5_000
+			await test.step('created health check appears in list', async () => {
+				await gotoMonitoringTab(page, 'health');
+				await waitForHealthCheckRow(page, hc);
 			});
-		} finally {
-			await deleteHealthCheckById(page, healthCheckId);
-		}
-	});
 
-	test('health check delete button removes it from list', async ({
-		page,
-		request,
-		sharedDateDatasource
-	}) => {
-		const id = uid();
-		const hc = `e2e Delete HC ${id}`;
-		const healthCheckId = await createHealthCheck(request, sharedDateDatasource.id, hc);
+			await test.step('health checks search filters by check name', async () => {
+				await gotoMonitoringTab(page, 'health');
+				const row = await waitForHealthCheckRow(page, hc);
+				await expect(row).toBeVisible({ timeout: 5_000 });
 
-		try {
-			await gotoMonitoringTab(page, 'health');
-			const row = await waitForHealthCheckRow(page, hc);
-			await row.getByLabel('Delete check').click({ timeout: 5_000 });
+				// Search for the check name should show it
+				await page.getByLabel(/Search health checks/i).fill(hc);
+				await expect(row).toBeVisible({ timeout: 5_000 });
 
-			// Confirm in the dialog
-			const dialog = dialogByHeading(page, /Delete Health Check/i);
-			await expect(dialog).toBeVisible();
-			await dialog.getByRole('button', { name: /^Delete$/ }).click();
+				// Search for non-matching term should show empty state
+				await page.getByLabel(/Search health checks/i).fill('ZZZNOMATCH');
+				await expect(page.getByText('No health checks match your search.')).toBeVisible({
+					timeout: 5_000
+				});
+			});
 
-			await expect(row).toHaveCount(0, { timeout: 5_000 });
-		} finally {
-			await deleteHealthCheckById(page, healthCheckId);
-		}
-	});
+			await test.step('health check enable/disable toggle works', async () => {
+				await gotoMonitoringTab(page, 'health');
+				const row = await waitForHealthCheckRow(page, hc);
+				const toggleBtn = row.locator('button[title="Click to disable"]');
+				await expect(toggleBtn).toBeAttached({ timeout: 5_000 });
+				await toggleBtn.click({ timeout: 5_000 });
 
-	test('health check enable/disable toggle works', async ({
-		page,
-		request,
-		sharedBulkDatasource
-	}) => {
-		const id = uid();
-		const hc = `e2e Toggle HC ${id}`;
-		const healthCheckId = await createHealthCheck(request, sharedBulkDatasource.id, hc);
-		try {
-			await gotoMonitoringTab(page, 'health');
-			const row = await waitForHealthCheckRow(page, hc);
-			const toggleBtn = row.locator('button[title="Click to disable"]');
-			await expect(toggleBtn).toBeAttached({ timeout: 5_000 });
-			await toggleBtn.click({ timeout: 5_000 });
+				await waitForHealthChecksList(page);
+				const updatedRow = await waitForHealthCheckRow(page, hc);
+				await expect(updatedRow.getByText('Off')).toBeVisible({ timeout: 5_000 });
 
-			await waitForHealthChecksList(page);
-			const updatedRow = await waitForHealthCheckRow(page, hc);
-			await expect(updatedRow.getByText('Off')).toBeVisible({ timeout: 5_000 });
+				await screenshot(page, 'monitoring', 'health-check-toggled-off');
+			});
 
-			await screenshot(page, 'monitoring', 'health-check-toggled-off');
+			await test.step('health check delete button removes it from list', async () => {
+				await gotoMonitoringTab(page, 'health');
+				const row = await waitForHealthCheckRow(page, hc);
+				await row.getByLabel('Delete check').click({ timeout: 5_000 });
+
+				// Confirm in the dialog
+				const dialog = dialogByHeading(page, /Delete Health Check/i);
+				await expect(dialog).toBeVisible();
+				await dialog.getByRole('button', { name: /^Delete$/ }).click();
+
+				await expect(row).toHaveCount(0, { timeout: 5_000 });
+			});
 		} finally {
 			await deleteHealthCheckById(page, healthCheckId);
 		}

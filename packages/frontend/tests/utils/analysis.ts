@@ -162,7 +162,14 @@ export async function addStepAndOpenConfig(
 	stepType: string
 ): Promise<Locator> {
 	await gotoAnalysisEditor(page, analysisId);
+	return addStepToOpenEditor(page, stepType);
+}
 
+/**
+ * Add a step from the library of the already-open editor, click "edit" on the
+ * new canvas node and return its config panel.
+ */
+export async function addStepToOpenEditor(page: Page, stepType: string): Promise<Locator> {
 	const stepBtn = page.locator(`button[data-step="${stepType}"]`);
 	await expect(stepBtn).toBeEnabled({ timeout: 5_000 });
 	await stepBtn.click();
