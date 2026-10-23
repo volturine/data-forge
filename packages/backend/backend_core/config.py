@@ -216,7 +216,7 @@ class Settings(EnvFileSettings):
         if not normalized:
             raise ValueError('DATABASE_URL must be set to a PostgreSQL connection string')
         lower = normalized.lower()
-        if not (lower.startswith('postgresql://') or lower.startswith('postgresql+')):
+        if not lower.startswith(('postgresql://', 'postgresql+')):
             raise ValueError('DATABASE_URL must be a PostgreSQL connection string')
         return normalized
 

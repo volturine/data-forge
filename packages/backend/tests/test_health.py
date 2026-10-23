@@ -61,7 +61,7 @@ class TestHealthEndpoints:
 
 
 def test_readiness_object_store_failure_does_not_expose_exception_detail(monkeypatch) -> None:
-    import backend_core.object_store_probe as object_store_probe
+    from backend_core import object_store_probe
     from backend_core.application import _readiness_checks
 
     def fail(*, namespace: str | None = None) -> str:

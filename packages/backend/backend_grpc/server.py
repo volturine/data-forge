@@ -135,7 +135,7 @@ def _proto_enum_value(prefix: str, value: object) -> Any:
 def proto_value_to_enum_name(enum_type: Any, prefix: str, value: int) -> str:
     enum_name = enum_type.Name(value)
     suffix = enum_name.removeprefix(f'{prefix}_')
-    if suffix == 'UNSPECIFIED' or suffix == enum_name:
+    if suffix in {'UNSPECIFIED', enum_name}:
         raise ValueError(f'Unsupported {prefix} enum value: {enum_name}')
     return suffix.lower()
 
@@ -1550,25 +1550,25 @@ class WorkerRuntimeServicer(worker_runtime_pb2_grpc.WorkerRuntimeServiceServicer
         with namespace_scope(request.namespace):
             payload_fields: dict[str, Any] = _record_rpc_phase(
                 'payload_conversion_ms',
-                lambda: dict(
-                    analysis_id=_optional(request, 'analysis_id'),
-                    datasource_id=request.datasource_id,
-                    kind=proto_value_to_enum_name(enums_pb2.ComputeWorkerRunKind, 'COMPUTE_WORKER_RUN_KIND', request.kind),
-                    status=proto_value_to_enum_name(enums_pb2.ComputeWorkerRunStatus, 'COMPUTE_WORKER_RUN_STATUS', request.status),
-                    request_json=struct_to_dict(request.request),
-                    result_json=struct_to_dict(request.result) if request.HasField('result') else None,
-                    error_message=_optional(request, 'error_message'),
-                    created_at=request.created_at.ToDatetime(tzinfo=UTC) if request.HasField('created_at') else None,
-                    completed_at=request.completed_at.ToDatetime(tzinfo=UTC) if request.HasField('completed_at') else None,
-                    duration_ms=_optional(request, 'duration_ms'),
-                    step_timings=dict(request.timing_by_key) if request.timing_by_key else None,
-                    query_plan=_optional(request, 'query_plan'),
-                    execution_entries=[_compute_worker_run_execution_entry_payload(entry) for entry in request.execution_entry] or None,
-                    progress=request.progress,
-                    current_step=_optional(request, 'current_step'),
-                    triggered_by=_optional(request, 'triggered_by'),
-                    idempotency_key=_optional(request, 'idempotency_key'),
-                ),
+                lambda: {
+                    'analysis_id': _optional(request, 'analysis_id'),
+                    'datasource_id': request.datasource_id,
+                    'kind': proto_value_to_enum_name(enums_pb2.ComputeWorkerRunKind, 'COMPUTE_WORKER_RUN_KIND', request.kind),
+                    'status': proto_value_to_enum_name(enums_pb2.ComputeWorkerRunStatus, 'COMPUTE_WORKER_RUN_STATUS', request.status),
+                    'request_json': struct_to_dict(request.request),
+                    'result_json': struct_to_dict(request.result) if request.HasField('result') else None,
+                    'error_message': _optional(request, 'error_message'),
+                    'created_at': request.created_at.ToDatetime(tzinfo=UTC) if request.HasField('created_at') else None,
+                    'completed_at': request.completed_at.ToDatetime(tzinfo=UTC) if request.HasField('completed_at') else None,
+                    'duration_ms': _optional(request, 'duration_ms'),
+                    'step_timings': dict(request.timing_by_key) if request.timing_by_key else None,
+                    'query_plan': _optional(request, 'query_plan'),
+                    'execution_entries': [_compute_worker_run_execution_entry_payload(entry) for entry in request.execution_entry] or None,
+                    'progress': request.progress,
+                    'current_step': _optional(request, 'current_step'),
+                    'triggered_by': _optional(request, 'triggered_by'),
+                    'idempotency_key': _optional(request, 'idempotency_key'),
+                },
             )
             payload = _record_rpc_phase(
                 'compute_worker_run_payload_service_ms',
@@ -2002,7 +2002,7 @@ async def _prewarm_executor(executor: Executor, size: int) -> None:
     futures = []
     try:
         for _ in range(size):
-            futures.append(executor.submit(barrier.wait))
+            futures.append(executor.submit(barrier.wait))  # noqa: PERF401 - the except path must see every future submitted so far
         await asyncio.to_thread(barrier.wait)
         await asyncio.gather(*(asyncio.wrap_future(future) for future in futures))
     except BaseException:

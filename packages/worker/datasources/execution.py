@@ -722,19 +722,17 @@ def _build_snapshot_stats(lazy: pl.LazyFrame, schema: pl.Schema) -> list[ColumnS
 
 
 def _build_schema_diff(schema_a: pl.Schema, schema_b: pl.Schema) -> list[SchemaDiff]:
-    diffs: list[SchemaDiff] = []
     cols_a = set(schema_a.keys())
     cols_b = set(schema_b.keys())
-    for name in sorted(cols_a - cols_b):
-        diffs.append(SchemaDiff(column=name, status=SchemaDiffStatus.REMOVED.value, type_a=str(schema_a[name]), type_b=None))
-    for name in sorted(cols_b - cols_a):
-        diffs.append(SchemaDiff(column=name, status=SchemaDiffStatus.ADDED.value, type_a=None, type_b=str(schema_b[name])))
-    for name in sorted(cols_a & cols_b):
-        dtype_a = str(schema_a[name])
-        dtype_b = str(schema_b[name])
-        if dtype_a != dtype_b:
-            diffs.append(SchemaDiff(column=name, status=SchemaDiffStatus.TYPE_CHANGED.value, type_a=dtype_a, type_b=dtype_b))
-    return diffs
+    return [
+        *(SchemaDiff(column=name, status=SchemaDiffStatus.REMOVED.value, type_a=str(schema_a[name]), type_b=None) for name in sorted(cols_a - cols_b)),
+        *(SchemaDiff(column=name, status=SchemaDiffStatus.ADDED.value, type_a=None, type_b=str(schema_b[name])) for name in sorted(cols_b - cols_a)),
+        *(
+            SchemaDiff(column=name, status=SchemaDiffStatus.TYPE_CHANGED.value, type_a=str(schema_a[name]), type_b=str(schema_b[name]))
+            for name in sorted(cols_a & cols_b)
+            if str(schema_a[name]) != str(schema_b[name])
+        ),
+    ]
 
 
 def compare_iceberg_snapshots_from_metadata(

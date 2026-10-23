@@ -176,7 +176,7 @@ def test_namespace_migration_holds_advisory_lock_without_checking_out_pool_conne
         finally:
             lock_entered = False
 
-    monkeypatch.setattr(database, 'get_settings_engine', lambda: PostgresEngine())
+    monkeypatch.setattr(database, 'get_settings_engine', PostgresEngine)
     monkeypatch.setattr(database, '_postgres_advisory_lock', advisory_lock)
     monkeypatch.setattr('backend_core.migrations.ensure_database_exists', lambda _url: None)
 

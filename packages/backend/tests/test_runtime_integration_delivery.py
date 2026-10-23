@@ -41,7 +41,7 @@ async def test_blocked_external_provider_does_not_block_runtime_wake_lane() -> N
     )
     runtime = RuntimeOutboxDispatcher(
         dispatch_namespace=dispatch_wake,
-        list_namespaces=lambda: [],
+        list_namespaces=list,
     )
 
     delivery_task = asyncio.create_task(delivery.dispatch_namespace('default'))

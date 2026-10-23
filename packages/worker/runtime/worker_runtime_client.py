@@ -1886,7 +1886,7 @@ def _event_datetime(payload: Mapping[str, object], key: str) -> datetime:
     if isinstance(value, datetime):
         return value
     if isinstance(value, str) and value.strip():
-        return datetime.fromisoformat(value.replace("Z", "+00:00"))
+        return datetime.fromisoformat(value)
     raise ValueError(f"build event {key} is required")
 
 

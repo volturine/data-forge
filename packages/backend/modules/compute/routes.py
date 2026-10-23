@@ -699,7 +699,7 @@ async def _send_websocket_failure(
         return
     if isinstance(exc, RuntimeError) and is_disconnect_runtime_error(exc):
         return
-    logger.error('%s websocket error: %s', label, exc, exc_info=True)
+    logger.error('%s websocket error: %s', label, exc, exc_info=exc)
     await safe_send_json_error(websocket, error_message(error='An internal error occurred'))
 
 

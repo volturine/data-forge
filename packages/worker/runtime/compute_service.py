@@ -952,9 +952,7 @@ def _hydrate_udfs(steps: list[dict]) -> list[dict]:
         expressions = config.get("expressions", []) if isinstance(config, dict) else []
         if not isinstance(expressions, list):
             continue
-        for expr in expressions:
-            if _library_udf_expression(expr):
-                udf_ids.append(str(expr["udf_id"]))
+        udf_ids.extend(str(expr["udf_id"]) for expr in expressions if _library_udf_expression(expr))
     codes = client_from_env().udf_codes(namespace=get_namespace(), udf_ids=sorted(set(udf_ids))) if udf_ids else {}
     next_steps: list[dict] = []
     for step in steps:

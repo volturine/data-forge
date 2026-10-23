@@ -218,7 +218,6 @@ def test_ensure_database_exists_creates_missing_database(monkeypatch: pytest.Mon
 
         def fetchone(self) -> None:
             calls.append(('fetchone', None))
-            return None
 
     class FakeConnection:
         def __enter__(self) -> FakeConnection:

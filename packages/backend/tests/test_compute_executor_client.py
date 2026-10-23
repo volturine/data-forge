@@ -13,7 +13,6 @@ import pytest
 from fastapi import Request
 from pydantic import BaseModel, Field
 
-import modules.compute.executor_client as executor_client
 from backend_core import compute_requests_service
 from backend_core.api_execution_budget import (
     BoundedThreadPoolExecutor,
@@ -25,6 +24,7 @@ from backend_core.domain.compute.schemas import AnalysisPipelinePayload, Downloa
 from backend_core.domain.compute_requests.models import command_envelope
 from backend_core.exceptions import AppError, ClientDisconnectedError
 from dataforge_protocol import compute_pb2, enums_pb2
+from modules.compute import executor_client
 
 
 class _DisconnectedRequest:

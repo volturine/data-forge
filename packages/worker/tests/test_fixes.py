@@ -285,7 +285,7 @@ async def test_cancelled_compute_lease_follower_does_not_cancel_shared_rpc() -> 
             renewed_ids.extend(request_id for request_id, _token, _generation in renewals)
             rpc_started.set()
             await release_rpc.wait()
-            return {request_id: 30 for request_id in renewed_ids}
+            return dict.fromkeys(renewed_ids, 30)
 
     batcher = worker_runtime_client._ComputeLeaseRenewalBatcher(batch_window_seconds=0)
 
@@ -504,7 +504,6 @@ async def test_compute_request_claims_share_a_bounded_control_plane(monkeypatch)
         peak = max(peak, active)
         await asyncio.sleep(0.02)
         active -= 1
-        return None
 
     monkeypatch.setattr(compute_request_runtime, "next_compute_request", fake_next_request)
     claim_capacity = compute_request_runtime.compute_request_claim_worker_count()
@@ -918,7 +917,7 @@ def test_preview_compute_request_uses_typed_command_not_legacy_payload(monkeypat
         def fail_compute_request(self, **_kwargs):
             raise AssertionError("request should not fail")
 
-    monkeypatch.setattr(compute_request_runtime, "worker_runtime_client", lambda: _Client())
+    monkeypatch.setattr(compute_request_runtime, "worker_runtime_client", _Client)
     monkeypatch.setattr(compute_request_runtime.service, "preview_step", fake_preview_step)
 
     claimed = compute_request_runtime.ClaimedComputeRequest(
@@ -1001,7 +1000,7 @@ async def test_same_engine_waiter_does_not_overtake_other_engine(monkeypatch) ->
             third_started.set()
         function(claimed, manager)
 
-    monkeypatch.setattr(compute_request_runtime, "worker_runtime_client", lambda: _Client())
+    monkeypatch.setattr(compute_request_runtime, "worker_runtime_client", _Client)
     monkeypatch.setattr(compute_request_runtime, "_renew_compute_lease", _keep_lease_alive)
     monkeypatch.setattr(compute_request_runtime, "run_compute_in_thread", run_in_thread)
     monkeypatch.setattr(compute_request_runtime, "_execute_request_sync", lambda *_args: None)
@@ -1069,7 +1068,7 @@ async def test_compute_capacity_race_releases_manager_admission_before_retry(mon
         race_wait_started.set()
         await race_wait_release.wait()
 
-    monkeypatch.setattr(compute_request_runtime, "worker_runtime_client", lambda: _Client())
+    monkeypatch.setattr(compute_request_runtime, "worker_runtime_client", _Client)
     monkeypatch.setattr(compute_request_runtime, "_renew_compute_lease", _keep_lease_alive)
     monkeypatch.setattr(compute_request_runtime, "run_compute_in_thread", run_in_thread)
     monkeypatch.setattr(compute_request_runtime, "_wait_after_engine_capacity_race", wait_after_capacity_race)
@@ -1523,7 +1522,7 @@ def test_shutdown_compute_request_removes_active_engine_and_emits_empty_snapshot
         def fail_compute_request(self, **_kwargs):
             raise AssertionError("request should not fail")
 
-    monkeypatch.setattr(compute_request_runtime, "worker_runtime_client", lambda: _Client())
+    monkeypatch.setattr(compute_request_runtime, "worker_runtime_client", _Client)
 
     manager = ProcessManager(engine_factory=lambda _identity, _resource_config: cast(Any, engine), on_snapshot=snapshots.append)
     manager.spawn_compute_worker(identity)
@@ -1571,7 +1570,7 @@ def test_shutdown_compute_request_is_idempotent_when_engine_already_absent(monke
         def fail_compute_request(self, **_kwargs):
             raise AssertionError("missing engines must complete shutdown successfully")
 
-    monkeypatch.setattr(compute_request_runtime, "worker_runtime_client", lambda: _Client())
+    monkeypatch.setattr(compute_request_runtime, "worker_runtime_client", _Client)
     manager = ProcessManager(engine_factory=lambda _identity, _resource_config: cast(Any, object()))
     claimed = compute_request_runtime.ClaimedComputeRequest(
         id="req-missing-shutdown",
@@ -1628,7 +1627,7 @@ def test_compute_request_maps_missing_datasource_to_error_result(monkeypatch) ->
         def complete_compute_request(self, **kwargs):
             completed.append(kwargs["response"])
 
-    monkeypatch.setattr(compute_request_runtime, "worker_runtime_client", lambda: _Client())
+    monkeypatch.setattr(compute_request_runtime, "worker_runtime_client", _Client)
 
     claimed = compute_request_runtime.ClaimedComputeRequest(
         id="req-404",
@@ -1681,7 +1680,7 @@ def test_retired_compute_request_lease_drains_without_error_log(monkeypatch, cap
                 error_code="FAILED_PRECONDITION",
             )
 
-    monkeypatch.setattr(compute_request_runtime, "worker_runtime_client", lambda: _Client())
+    monkeypatch.setattr(compute_request_runtime, "worker_runtime_client", _Client)
     claimed = compute_request_runtime.ClaimedComputeRequest(
         id="req-retired",
         namespace="default",

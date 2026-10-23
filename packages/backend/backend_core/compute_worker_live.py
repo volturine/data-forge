@@ -20,6 +20,9 @@ class ComputeWorkerRegistry:
         self._snapshot_loads: dict[tuple[str, int], asyncio.Future[tuple[int, schemas.ComputeWorkersSnapshotMessage]]] = {}
         self._serialized_snapshot_cache: dict[str, tuple[int, str]] = {}
         self._serialized_snapshot_loads: dict[tuple[str, int], asyncio.Future[tuple[int, str]]] = {}
+        # The event loop keeps only weak references to tasks; hold each shared
+        # load until it settles so its waiters cannot be orphaned by GC.
+        self._load_tasks: set[asyncio.Task[None]] = set()
 
     async def clear(self) -> None:
         async with self._lock:
@@ -152,7 +155,9 @@ class ComputeWorkerRegistry:
             if load is None:
                 load = asyncio.get_running_loop().create_future()
                 loads[load_key] = load
-                asyncio.create_task(self._settle_shared_load(stores, namespace, load_version, load, produce), name=task_name)
+                task = asyncio.create_task(self._settle_shared_load(stores, namespace, load_version, load, produce), name=task_name)
+                self._load_tasks.add(task)
+                task.add_done_callback(self._load_tasks.discard)
         return await asyncio.shield(load)
 
     async def _settle_shared_load[T](

@@ -187,7 +187,7 @@ async def _require_internal_token(context: grpc.aio.ServicerContext) -> None:
     if not settings.internal_api_token:
         await context.abort(grpc.StatusCode.UNAVAILABLE, "INTERNAL_API_TOKEN must be configured before worker data-plane services can be used")
     invocation_metadata = cast(tuple[tuple[str, str], ...], context.invocation_metadata() or ())
-    metadata = {key: value for key, value in invocation_metadata}
+    metadata = dict(invocation_metadata)
     if metadata.get(_TOKEN_METADATA_KEY) != settings.internal_api_token:
         await context.abort(grpc.StatusCode.UNAUTHENTICATED, "Invalid worker data-plane token")
 

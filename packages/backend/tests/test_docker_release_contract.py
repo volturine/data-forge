@@ -47,8 +47,8 @@ def test_e2e_api_keep_alive_outlasts_the_suite_budget() -> None:
     with no response. The e2e API must keep idle sockets for the whole suite.
     """
     env_text = (ROOT / 'docker' / 'env' / 'e2e.env').read_text()
-    suite = re.search(r'^E2E_TIMEOUT_SECONDS=\$\{E2E_TIMEOUT_SECONDS:-(\d+)\}', env_text, re.M)
-    keep_alive = re.search(r'^UVICORN_TIMEOUT_KEEP_ALIVE=(\d+)\s*$', env_text, re.M)
+    suite = re.search(r'^E2E_TIMEOUT_SECONDS=\$\{E2E_TIMEOUT_SECONDS:-(\d+)\}', env_text, re.MULTILINE)
+    keep_alive = re.search(r'^UVICORN_TIMEOUT_KEEP_ALIVE=(\d+)\s*$', env_text, re.MULTILINE)
     assert suite is not None and keep_alive is not None
     assert int(keep_alive.group(1)) >= int(suite.group(1))
     api_service = COMPOSE_E2E.read_text().split('\n  api:\n', 1)[1].split('\n  runtime:\n', 1)[0]
@@ -82,7 +82,7 @@ def test_compose_services_define_relative_cpu_shares_without_changing_cpu_limits
     for compose in (COMPOSE, COMPOSE_E2E):
         text = compose.read_text()
         for service, shares in expected.items():
-            service_match = re.search(rf'^  {re.escape(service)}:\n(.*?)(?=^  [\w-]+:\n|\Z)', text, re.M | re.S)
+            service_match = re.search(rf'^  {re.escape(service)}:\n(.*?)(?=^  [\w-]+:\n|\Z)', text, re.MULTILINE | re.DOTALL)
             assert service_match is not None
             assert f'cpu_shares: {shares}' in service_match.group(1)
 
@@ -92,12 +92,12 @@ def test_compose_services_define_relative_cpu_shares_without_changing_cpu_limits
     assert 'cpus: ${DF_WORKER_CPUS:-0}' in prod_text
 
     e2e_text = COMPOSE_E2E.read_text()
-    fixture_match = re.search(r'^  openai-fixture:\n(.*?)(?=^  [\w-]+:\n|\Z)', e2e_text, re.M | re.S)
+    fixture_match = re.search(r'^  openai-fixture:\n(.*?)(?=^  [\w-]+:\n|\Z)', e2e_text, re.MULTILINE | re.DOTALL)
     assert fixture_match is not None
     assert 'cpu_shares: 512' in fixture_match.group(1)
 
     dev_text = COMPOSE_DEV.read_text()
-    frontend_match = re.search(r'^  frontend:\n(.*?)(?=^  [\w-]+:\n|\Z)', dev_text, re.M | re.S)
+    frontend_match = re.search(r'^  frontend:\n(.*?)(?=^  [\w-]+:\n|\Z)', dev_text, re.MULTILINE | re.DOTALL)
     assert frontend_match is not None
     assert 'cpu_shares: 512' in frontend_match.group(1)
 

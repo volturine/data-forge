@@ -215,7 +215,7 @@ def test_datasource_delete_drops_only_its_catalog_table_family(monkeypatch: pyte
         return Catalog()
 
     monkeypatch.setattr(cleanup, "load_runtime_catalog", load_catalog)
-    monkeypatch.setattr(cleanup, "object_store_storage_options", lambda: {})
+    monkeypatch.setattr(cleanup, "object_store_storage_options", dict)
     monkeypatch.setattr(cleanup, "delete_prefix", lambda path: calls.append(("prefix", path)))
     claim = StorageCleanupClaim(
         "default",
@@ -273,7 +273,7 @@ def test_non_sql_catalog_family_uses_its_namespace_scoped_listing_api(monkeypatc
             calls.append(identifier)
 
     monkeypatch.setattr(cleanup, "load_runtime_catalog", lambda *_args, **_kwargs: Catalog())
-    monkeypatch.setattr(cleanup, "object_store_storage_options", lambda: {})
+    monkeypatch.setattr(cleanup, "object_store_storage_options", dict)
     monkeypatch.setattr(cleanup, "delete_prefix", lambda _path: None)
     claim = replace(
         _claim(),
@@ -354,7 +354,7 @@ def test_cleanup_drops_only_the_exact_catalog_identifier_and_prefix(monkeypatch:
                 raise NoSuchTableError(identifier)
 
     monkeypatch.setattr(cleanup, "load_runtime_catalog", lambda *_args, **_kwargs: Catalog())
-    monkeypatch.setattr(cleanup, "object_store_storage_options", lambda: {})
+    monkeypatch.setattr(cleanup, "object_store_storage_options", dict)
     monkeypatch.setattr(cleanup, "delete_prefix", lambda path: calls.append(("prefix", path)))
     cleanup.delete_cleanup_target(_claim())
     assert calls == [("catalog", "clean.datasource-1__claim_attempt"), ("prefix", "s3://default/clean/datasource-1__claim_attempt/master")]
@@ -429,7 +429,7 @@ def test_failed_or_stale_import_leaves_only_claim_prefix_for_durable_cleanup(mon
 
     monkeypatch.setattr(compute_request_runtime, "_datasource_engine_job", lambda *_args, **_kwargs: manifest)
     monkeypatch.setattr(compute_request_runtime.datasource_execution, "import_staged_parquet_files", fail_import)
-    monkeypatch.setattr("runtime.object_store.delete_object", lambda path: deleted_objects.append(path))
+    monkeypatch.setattr("runtime.object_store.delete_object", deleted_objects.append)
 
     with pytest.raises(RuntimeError, match="no longer active"):
         compute_request_runtime._publish_staged_datasource(cast(WorkerRuntimeClient, RegistrationClient()), _manager(), claimed, command.datasource)

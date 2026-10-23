@@ -91,7 +91,7 @@ async def test_running_cancellation_keeps_admission_until_thread_settles() -> No
         assert later_started.is_set()
     finally:
         release.set()
-        await asyncio.gather(running, *(tuple([later]) if later is not None else ()), return_exceptions=True)
+        await asyncio.gather(running, *((later,) if later is not None else ()), return_exceptions=True)
         executor.shutdown(wait=True)
 
 

@@ -134,7 +134,7 @@ def test_engine_credentials_fetch_namespace_scoped_identity_from_backend(monkeyp
                 secret_key="ns-secret",
             )
 
-    monkeypatch.setattr("runtime.compute_worker_credentials.client_from_env", lambda: FakeClient())
+    monkeypatch.setattr("runtime.compute_worker_credentials.client_from_env", FakeClient)
 
     credentials = resolve_compute_worker_credentials("tenant-a", compute_worker_identity())
 
@@ -875,7 +875,7 @@ def test_engine_credentials_singleflight_concurrent_cold_starts(monkeypatch) -> 
             assert release_response.wait(2)
             return worker_runtime_pb2.WorkerComputeWorkerCredentialsResponse(access_key="ns-reader", secret_key="ns-secret")
 
-    monkeypatch.setattr("runtime.compute_worker_credentials.client_from_env", lambda: FakeClient())
+    monkeypatch.setattr("runtime.compute_worker_credentials.client_from_env", FakeClient)
 
     def resolve() -> ObjectStoreCredentials:
         barrier.wait(timeout=2)

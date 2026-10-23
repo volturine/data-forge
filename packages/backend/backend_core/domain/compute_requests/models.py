@@ -58,7 +58,7 @@ def struct_to_dict(payload: struct_pb2.Struct) -> dict[str, object]:
 def _proto_enum_suffix(enum_type: Any, prefix: str, value: int) -> str:
     enum_name = enum_type.Name(value)
     suffix = enum_name.removeprefix(f'{prefix}_')
-    if suffix == 'UNSPECIFIED' or suffix == enum_name:
+    if suffix in {'UNSPECIFIED', enum_name}:
         raise ValueError(f'Unsupported {prefix} enum value: {enum_name}')
     return suffix
 

@@ -15,7 +15,7 @@ def test_dispatch_pending_events_marks_event_dispatched(test_db_session, monkeyp
     payloads: list[dict[str, object]] = []
     event = runtime_outbox_service.enqueue_build_job_notification(test_db_session)
 
-    monkeypatch.setattr('backend_core.runtime_outbox_service.runtime_ipc.notify_runtime_payload', lambda payload: payloads.append(payload))
+    monkeypatch.setattr('backend_core.runtime_outbox_service.runtime_ipc.notify_runtime_payload', payloads.append)
 
     dispatched = runtime_outbox_service.dispatch_pending_events(test_db_session)
 

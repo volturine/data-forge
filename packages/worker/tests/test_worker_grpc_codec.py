@@ -17,7 +17,7 @@ def test_worker_grpc_json_payload_normalizes_json_boundary_values() -> None:
                 "seen_at": datetime(2026, 6, 16, 8, 30, tzinfo=UTC),
                 "window_start": time(8, 30, 15),
                 "amount": Decimal("42.50"),
-                "count": Decimal("7"),
+                "count": Decimal(7),
                 "id": UUID("12345678-1234-5678-1234-567812345678"),
             },
         ],
