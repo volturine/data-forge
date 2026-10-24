@@ -77,20 +77,20 @@ describe('SchemaStore', () => {
 			expect(store.joinSchemas.get('ds-right')).toEqual(s);
 		});
 
-		test('getJoinSchema returns stored schema', () => {
+		test('setJoinDatasource stored schema is readable by id', () => {
 			const s = schema([col('x')]);
 			store.setJoinDatasource('ds-1', s);
-			expect(store.getJoinSchema('ds-1')).toEqual(s);
+			expect(store.joinSchemas.get('ds-1')).toEqual(s);
 		});
 
-		test('getJoinSchema returns null for missing key', () => {
-			expect(store.getJoinSchema('missing')).toBeNull();
+		test('join schema is absent for a missing key', () => {
+			expect(store.joinSchemas.get('missing')).toBeUndefined();
 		});
 
 		test('removeJoinDatasource deletes schema', () => {
 			store.setJoinDatasource('ds-1', schema([col('a')]));
 			store.removeJoinDatasource('ds-1');
-			expect(store.getJoinSchema('ds-1')).toBeNull();
+			expect(store.joinSchemas.has('ds-1')).toBe(false);
 			expect(store.joinSchemas.size).toBe(0);
 		});
 
@@ -103,7 +103,7 @@ describe('SchemaStore', () => {
 		test('overwriting join schema replaces previous', () => {
 			store.setJoinDatasource('ds-1', schema([col('a')]));
 			store.setJoinDatasource('ds-1', schema([col('b'), col('c')]));
-			const s = store.getJoinSchema('ds-1');
+			const s = store.joinSchemas.get('ds-1');
 			expect(s?.columns).toHaveLength(2);
 			expect(s?.columns[0].name).toBe('b');
 		});
@@ -144,18 +144,6 @@ describe('SchemaStore', () => {
 		test('setPreviewSchema uses "Any" for missing column type', () => {
 			store.setPreviewSchema('step-1', ['a'], {});
 			expect(store.previewSchemas.get('step-1')?.schema.columns[0].dtype).toBe('Any');
-		});
-
-		test('clearPreviewSchema removes entry', () => {
-			store.setPreviewSchema('step-1', ['a']);
-			store.clearPreviewSchema('step-1');
-			expect(store.previewSchemas.has('step-1')).toBe(false);
-		});
-
-		test('clearPreviewSchema is noop for missing key', () => {
-			store.setPreviewSchema('step-1', ['a']);
-			store.clearPreviewSchema('step-missing');
-			expect(store.previewSchemas.size).toBe(1);
 		});
 	});
 
@@ -199,10 +187,6 @@ describe('SchemaStore', () => {
 
 		test('getLastOutput returns null with no steps', () => {
 			expect(store.getLastOutput()).toBeNull();
-		});
-
-		test('getAllOutputs returns empty array with no steps', () => {
-			expect(store.getAllOutputs()).toEqual([]);
 		});
 	});
 
@@ -273,7 +257,7 @@ describe('SchemaStore', () => {
 			expect(last).not.toBeNull();
 		});
 
-		test('getAllOutputs returns one output per step', () => {
+		test('every step has an output', () => {
 			mockActiveTab = { datasource: { id: 'ds-1' } };
 			mockActiveSchemaKey = 'ds-1';
 			mockSourceSchemas.set('ds-1', schema([col('a')]));
@@ -284,7 +268,8 @@ describe('SchemaStore', () => {
 
 			store = new SchemaStore();
 
-			expect(store.getAllOutputs()).toHaveLength(2);
+			expect(store.getOutput('s1')).not.toBeNull();
+			expect(store.getOutput('s2')).not.toBeNull();
 		});
 
 		test('uses target-prefix hashes so later steps do not stale an upstream preview schema', () => {

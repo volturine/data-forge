@@ -19,7 +19,11 @@
 	import { datasourceStore } from '#lib/stores/datasource.svelte.js';
 	import { useNamespace } from '#lib/stores/namespace.svelte.js';
 	import type { BuildStreamStore } from '#lib/stores/build-stream.svelte.js';
-	import type { BuildRunDetail } from '#lib/types/build-stream.js';
+	import {
+		isTerminalBuildStatus,
+		type BuildRunDetail,
+		type BuildStatus
+	} from '#lib/types/build-stream.js';
 	import { buildAnalysisPipelinePayload } from '#lib/utils/analysis-pipeline.js';
 	import { isUuid } from '#lib/utils/analysis-tab.js';
 	import ScheduleManager from '#lib/components/common/ScheduleManager.svelte';
@@ -256,20 +260,18 @@
 		enabled: canTelegram
 	}));
 
+	const defaultNotificationBodyTemplate =
+		'Analysis: {{analysis_name}}\nStatus: {{status}}\nDuration: {{duration_ms}}ms\nRows: {{row_count}}';
 	const notifyConfig = $derived.by(() => {
 		const n = outputConfig?.notification;
 		if (!n) {
-			return {
-				enabled: false,
-				body_template:
-					'Analysis: {{analysis_name}}\nStatus: {{status}}\nDuration: {{duration_ms}}ms\nRows: {{row_count}}'
-			};
+			return { enabled: false, body_template: defaultNotificationBodyTemplate };
 		}
 		return {
 			enabled: true,
 			body_template:
 				(typeof n.body_template === 'string' ? n.body_template : undefined) ||
-				'Analysis: {{analysis_name}}\nStatus: {{status}}\nDuration: {{duration_ms}}ms\nRows: {{row_count}}'
+				defaultNotificationBodyTemplate
 		};
 	});
 
@@ -278,30 +280,17 @@
 	);
 
 	const selectedCount = $derived(activeSubscribers.length);
-	const buildBusy = $derived(
-		buildStarting ||
-			buildStore.status === 'connecting' ||
-			buildStore.status === 'queued' ||
-			buildStore.status === 'running'
-	);
+	const activeBuildStatuses: BuildStatus[] = ['connecting', 'queued', 'running'];
+	const buildBusy = $derived(buildStarting || activeBuildStatuses.includes(buildStore.status));
 	const hasBuildSession = $derived(
-		buildBusy ||
-			buildStore.buildId !== null ||
-			buildStore.status === 'completed' ||
-			buildStore.status === 'failed' ||
-			buildStore.status === 'cancelled'
+		buildBusy || buildStore.buildId !== null || isTerminalBuildStatus(buildStore.status)
 	);
 	const canCancelRunningBuild = $derived(
-		(buildStore.status === 'connecting' ||
-			buildStore.status === 'queued' ||
-			buildStore.status === 'running') &&
-			!!buildStore.buildId
+		activeBuildStatuses.includes(buildStore.status) && !!buildStore.buildId
 	);
 	const buildSessionLabel = $derived.by(() => {
 		if (buildBusy) return 'Active Build';
-		if (buildStore.status === 'completed') return 'Last Build';
-		if (buildStore.status === 'failed') return 'Last Build';
-		if (buildStore.status === 'cancelled') return 'Last Build';
+		if (isTerminalBuildStatus(buildStore.status)) return 'Last Build';
 		return 'Build';
 	});
 	const buildSessionSummary = $derived.by(() => {
@@ -408,8 +397,7 @@
 		updateOutputConfig({
 			notification: {
 				method: 'telegram',
-				body_template:
-					'Analysis: {{analysis_name}}\nStatus: {{status}}\nDuration: {{duration_ms}}ms\nRows: {{row_count}}'
+				body_template: defaultNotificationBodyTemplate
 			}
 		});
 	}
@@ -490,6 +478,12 @@
 		queryClient.setQueryData(['datasource', namespace, outputId], output);
 	}
 
+	function failBuildStart(message: string): void {
+		unpausePreviews();
+		error = message;
+		buildStarting = false;
+	}
+
 	async function handleManualBuild() {
 		if (!analysisId || buildBusy || readOnly) return;
 		analysisStore.previews.paused = true;
@@ -502,9 +496,7 @@
 		if (analysisStore.isDirty()) {
 			const saveResult = await analysisStore.save();
 			if (saveResult.isErr()) {
-				unpausePreviews();
-				error = saveResult.error.message;
-				buildStarting = false;
+				failBuildStart(saveResult.error.message);
 				return;
 			}
 			queryClient.setQueryData(analysisQueryKey(saveResult.value.analysis.id), saveResult.value);
@@ -516,24 +508,21 @@
 			datasourceStore.datasources
 		);
 		if (!pipeline) {
-			unpausePreviews();
-			error = datasourceStore.loaded
-				? 'Unable to build analysis payload.'
-				: 'Datasources are still loading. Please try again.';
-			buildStarting = false;
+			failBuildStart(
+				datasourceStore.loaded
+					? 'Unable to build analysis payload.'
+					: 'Datasources are still loading. Please try again.'
+			);
 			return;
 		}
 		if (!outputConfig) {
-			unpausePreviews();
-			error =
-				'Output configuration is incomplete. Fill in explicit output settings before building.';
-			buildStarting = false;
+			failBuildStart(
+				'Output configuration is incomplete. Fill in explicit output settings before building.'
+			);
 			return;
 		}
 		if (!activeTab) {
-			unpausePreviews();
-			error = 'No active tab to build.';
-			buildStarting = false;
+			failBuildStart('No active tab to build.');
 			return;
 		}
 		buildStore.onSettled = (status) => {

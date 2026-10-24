@@ -16,7 +16,6 @@ import { listTools } from '#lib/api/mcp.js';
 import type { MCPTool } from '#lib/api/mcp.js';
 import { analysisStore } from '#lib/stores/analysis.svelte.js';
 import { schemaStore } from '#lib/stores/schema.svelte.js';
-import type { Schema } from '#lib/types/schema.js';
 import { nowEpochMs } from '#lib/utils/temporal.js';
 import { SvelteSet, SvelteMap } from 'svelte/reactivity';
 
@@ -104,7 +103,12 @@ export class ChatStore {
 	loading = $state(false);
 	error = $state<string | null>(null);
 	initState = $state<ChatInitializationState>('idle');
-	configured = $state(false);
+	configured = $derived.by(() => {
+		if (this.sessionId) return true;
+		if (!this.settings) return false;
+		if (this.provider === 'ollama') return true;
+		return this.apiKey.length > 0 || this._hasStoredProviderKey('openrouter');
+	});
 	connection = $state<ConnectionStatus>('disconnected');
 	confirmClose = $state(false);
 	sessionUsage = $state<UsageInfo>({ prompt_tokens: 0, completion_tokens: 0, total_tokens: 0 });
@@ -113,12 +117,7 @@ export class ChatStore {
 	sessions = $state<ChatSessionInfo[]>([]);
 	currentTurn = $state(0);
 	maxTurns = $state<number | null>(null);
-	pendingConfirm = $state<{
-		tool_id: string;
-		method: string;
-		path: string;
-		args: Record<string, unknown>;
-	} | null>(null);
+	pendingConfirm = $state<{ tool_id: string } | null>(null);
 
 	private _es: EventSource | null = null;
 	private _counter = 0;
@@ -186,32 +185,24 @@ export class ChatStore {
 		return this.mode === 'plan' ? PLAN_SYSTEM_PROMPT : EXECUTE_SYSTEM_PROMPT;
 	}
 
-	/** In plan mode, only safe (GET) tools; in execute mode, all enabled tools. */
-	get modeFilteredTools(): MCPTool[] {
-		const enabled = this.enabledTools;
-		if (this.mode === 'plan') {
-			return enabled.filter((t) => t.safety === 'safe');
-		}
-		return enabled;
-	}
-
-	get enabledTools(): MCPTool[] {
-		return this.tools.filter((t) => {
+	enabledTools = $derived(
+		this.tools.filter((t) => {
 			if (this.disabledTools.has(t.id)) return false;
-			const tag = t.tags.length ? t.tags[0] : 'uncategorized';
-			return !this.disabledTags.has(tag);
-		});
-	}
+			return !this.disabledTags.has(t.tags[0] ?? 'uncategorized');
+		})
+	);
 
-	get contextLimit(): number {
-		const found = this.models.find((m) => m.id === this.model);
-		return found?.context_length ?? 0;
-	}
+	/** In plan mode, only safe (GET) tools; in execute mode, all enabled tools. */
+	modeFilteredTools = $derived(
+		this.mode === 'plan' ? this.enabledTools.filter((t) => t.safety === 'safe') : this.enabledTools
+	);
+
+	contextLimit = $derived(this.models.find((m) => m.id === this.model)?.context_length ?? 0);
 
 	private _groupByTag(tools: MCPTool[]): SvelteMap<string, MCPTool[]> {
 		const groups = new SvelteMap<string, MCPTool[]>();
 		for (const tool of tools) {
-			const tag = tool.tags.length ? tool.tags[0] : 'uncategorized';
+			const tag = tool.tags[0] ?? 'uncategorized';
 			const list = groups.get(tag) ?? [];
 			list.push(tool);
 			groups.set(tag, list);
@@ -219,15 +210,13 @@ export class ChatStore {
 		return groups;
 	}
 
-	get tagGroups(): SvelteMap<string, MCPTool[]> {
-		return this._groupByTag(this.tools);
-	}
+	tagGroups = $derived(this._groupByTag(this.tools));
 
-	get modeFilteredTagGroups(): SvelteMap<string, MCPTool[]> {
+	modeFilteredTagGroups = $derived.by(() => {
 		const source =
 			this.mode === 'plan' ? this.tools.filter((t) => t.safety === 'safe') : this.tools;
 		return this._groupByTag(source);
-	}
+	});
 
 	setMode(mode: AgentMode): void {
 		this.mode = mode;
@@ -274,8 +263,7 @@ export class ChatStore {
 		const tool = this.tools.find((t) => t.id === id);
 		if (!tool) return false;
 		if (this.disabledTools.has(id)) return false;
-		const tag = tool.tags.length ? tool.tags[0] : 'uncategorized';
-		return !this.disabledTags.has(tag);
+		return !this.disabledTags.has(tool.tags[0] ?? 'uncategorized');
 	}
 
 	async loadContext(generation = this._contextGeneration): Promise<void> {
@@ -357,7 +345,6 @@ export class ChatStore {
 			if (this.settings) this.settings.openrouter_api_key = apiKey;
 			await updateSettings({ openrouter_api_key: apiKey });
 		}
-		this._refreshConfigured();
 	}
 
 	setProvider(provider: ChatProvider): void {
@@ -379,45 +366,18 @@ export class ChatStore {
 		return provider === 'ollama';
 	}
 
-	private _providerCanStart(provider: ChatProvider): boolean {
-		if (!this.settings) return false;
-		if (provider === 'openrouter') return this._hasStoredProviderKey(provider);
-		return (this.settings.ollama_endpoint_url || 'http://localhost:11434').length > 0;
-	}
-
 	private _pickPreferredProvider(): ChatProvider {
 		if (!this.settings) return this.provider;
 		const candidates: ChatProvider[] = [this.provider, 'openrouter', 'ollama'];
 		for (const candidate of candidates) {
-			if (this._providerCanStart(candidate)) return candidate;
+			if (this._hasStoredProviderKey(candidate)) return candidate;
 		}
 		return 'ollama';
 	}
 
-	private _refreshConfigured(): void {
-		if (this.sessionId) {
-			this.configured = true;
-			return;
-		}
-		if (!this.settings) {
-			this.configured = false;
-			return;
-		}
-		if (this.provider === 'ollama') {
-			const endpoint =
-				this.settings?.ollama_endpoint_url || this.endpointUrl || 'http://localhost:11434';
-			this.configured = endpoint.length > 0;
-			return;
-		}
-		this.configured = this.apiKey.length > 0 || this._hasStoredProviderKey();
-	}
-
 	private _applyProviderDefaults(): void {
 		const s = this.settings;
-		if (!s) {
-			this._refreshConfigured();
-			return;
-		}
+		if (!s) return;
 		if (this.provider === 'openrouter') {
 			this.model = s.openrouter_default_model || this.model || 'openai/gpt-4o-mini';
 			this.apiKey =
@@ -430,7 +390,6 @@ export class ChatStore {
 			this.endpointUrl = s.ollama_endpoint_url || 'http://localhost:11434';
 			this.organizationId = '';
 		}
-		this._refreshConfigured();
 	}
 
 	async startSession(): Promise<void> {
@@ -445,7 +404,6 @@ export class ChatStore {
 			(s) => {
 				this.sessionId = s.session_id;
 				this._lastEventId = 0;
-				this._refreshConfigured();
 				if (typeof window !== 'undefined') {
 					localStorage.setItem(SESSION_KEY, s.session_id);
 				}
@@ -464,7 +422,6 @@ export class ChatStore {
 			(data) => {
 				this.sessionId = sessionId;
 				this._lastEventId = data.last_event_id;
-				this._refreshConfigured();
 				this.timeline = [];
 				this.sessionUsage = { prompt_tokens: 0, completion_tokens: 0, total_tokens: 0 };
 				this.lastTurnUsage = null;
@@ -723,12 +680,7 @@ export class ChatStore {
 				break;
 			}
 			case 'tool_confirm': {
-				this.pendingConfirm = {
-					tool_id: event.tool_id,
-					method: event.method,
-					path: event.path,
-					args: event.args
-				};
+				this.pendingConfirm = { tool_id: event.tool_id };
 				const confirmTc = this.toolCalls.findLast(
 					(t) => t.tool_id === event.tool_id && t.status === 'running'
 				);
@@ -789,19 +741,6 @@ export class ChatStore {
 		window.dispatchEvent(new CustomEvent('chat:ui_patch', { detail: event }));
 	}
 
-	private _resolveSchema(): Schema | null {
-		const last = schemaStore.getLastOutput();
-		if (last) return last;
-
-		const calculated = schemaStore.calculatedSchema;
-		if (calculated) return calculated;
-
-		const key = analysisStore.activeSchemaKey;
-		const source = key ? analysisStore.sourceSchemas.get(key) : undefined;
-		if (!source) return null;
-		return { columns: source.columns, row_count: source.row_count };
-	}
-
 	private _pageContext(): string {
 		if (typeof window === 'undefined') return '';
 		const path = window.location.pathname;
@@ -815,7 +754,7 @@ export class ChatStore {
 			const tab = analysisStore.activeTab;
 			if (tab) {
 				parts.push(`tab="${tab.name}" tab_id=${tab.id}`);
-				const schema = this._resolveSchema();
+				const schema = schemaStore.calculatedSchema;
 				if (schema && schema.columns.length > 0) {
 					const total = schema.columns.length;
 					const cols = schema.columns
@@ -925,7 +864,6 @@ export class ChatStore {
 		this.currentTurn = 0;
 		this.maxTurns = null;
 		this.pendingConfirm = null;
-		this._refreshConfigured();
 		if (!this.configured && this.settings) {
 			this.setProvider(this._pickPreferredProvider());
 		}
@@ -992,7 +930,6 @@ export class ChatStore {
 		this.apiKey = '';
 		this.endpointUrl = '';
 		this.organizationId = '';
-		this.configured = false;
 		this.initState = 'idle';
 		this.error = null;
 	}

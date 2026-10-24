@@ -19,7 +19,8 @@
 	import { analysisStore } from '#lib/stores/analysis.svelte.js';
 	import { datasourceStore } from '#lib/stores/datasource.svelte.js';
 	import { isNamespaceReady, requireNamespace } from '#lib/stores/namespace.svelte.js';
-	import { getStepTypeConfig, isChartStep } from '#lib/components/pipeline/utils.js';
+	import { getStepTypeConfig } from '#lib/components/pipeline/utils.js';
+	import { isChartStepType } from '#lib/types/pipeline-step.js';
 	import {
 		buildAnalysisPipelinePayload,
 		buildDatasourceConfig,
@@ -34,7 +35,6 @@
 
 	interface Props {
 		step: PipelineStep;
-		index: number;
 		analysisId?: string;
 		datasourceId?: string;
 		allSteps?: PipelineStep[];
@@ -47,7 +47,6 @@
 
 	let {
 		step,
-		index: _index,
 		analysisId,
 		datasourceId,
 		allSteps = [],
@@ -58,16 +57,14 @@
 		readOnly = false
 	}: Props = $props();
 
-	const isChart = $derived(isChartStep(step.type));
+	const isChart = $derived(isChartStepType(step.type));
 	const namespace = $derived(isNamespaceReady() ? requireNamespace() : null);
 
 	const chartHeight = $derived(
 		isChart ? (step.config?.chart_height as string | undefined) : undefined
 	);
 
-	const nodeWidthClass = $derived.by(() => {
-		return css({ width: '60%' });
-	});
+	const nodeWidthClass = css({ width: '60%' });
 
 	const chartHeightPx = $derived.by(() => {
 		if (chartHeight === 'small') return 260;
@@ -194,9 +191,7 @@
 	const previewRowLimit = $derived(
 		typeof step.config?.rowLimit === 'number' ? step.config.rowLimit : 100
 	);
-	const tableResetKey = $derived(
-		`${analysisId ?? ''}:${datasourceId ?? ''}:${step.id}:${previewRowLimit}:${rowCountPipelineKey}:${targetPipelineKey}:${JSON.stringify(rowCountDatasourceConfig)}`
-	);
+	const tableResetKey = $derived(`${rowCountKey}:${previewRowLimit}`);
 	let rowCountAbortController: AbortController | null = null;
 
 	async function calculateRowCount() {
@@ -219,17 +214,12 @@
 				},
 				{ signal: controller.signal }
 			);
-			throwIfAborted(controller.signal);
+			if (controller.signal.aborted) return;
 			if (result.isOk()) {
 				rowCounts.set(requestKey, result.value.row_count);
 			} else {
 				rowCounts.delete(requestKey);
 				rowCountErrors.set(requestKey, result.error.message);
-			}
-		} catch (error) {
-			if (!controller.signal.aborted) {
-				rowCounts.delete(requestKey);
-				rowCountErrors.set(requestKey, error instanceof Error ? error.message : String(error));
 			}
 		} finally {
 			if (rowCountAbortController === controller) {
@@ -240,7 +230,7 @@
 	}
 
 	let copyFeedback = $state(false);
-	let copyTimer = $state<number | null>(null);
+	let copyTimer: number | null = null;
 
 	async function copyStepToClipboard() {
 		const payload = JSON.stringify({
@@ -263,17 +253,15 @@
 		if (copyTimer !== null) window.clearTimeout(copyTimer);
 	});
 
+	// Is this node being dragged?
 	let dragging = $state(false);
-	let clickConsumed = $state(false);
-	let longPressTimer = $state<number | null>(null);
-	let pointerStartX = $state<number | null>(null);
-	let pointerStartY = $state<number | null>(null);
+	let clickConsumed = false;
+	let longPressTimer: number | null = null;
+	let pointerStartX: number | null = null;
+	let pointerStartY: number | null = null;
 
 	const longPressDelay = 180;
 	const dragThreshold = 8;
-
-	// Is this node being dragged?
-	let isDragging = $state(false);
 
 	// Is another node being dragged (not this one)?
 	const isOtherDragging = $derived(drag.active && drag.stepId !== step.id);
@@ -285,7 +273,7 @@
 		clickConsumed = false;
 	}
 
-	async function handleDownload() {
+	function handleDownload() {
 		if (!analysisId || !analysisPipeline) return;
 
 		downloadStep({
@@ -323,7 +311,6 @@
 	function initiateDrag(event: PointerEvent) {
 		dragging = true;
 		clickConsumed = true;
-		isDragging = true;
 		if (event.cancelable) {
 			event.preventDefault();
 		}
@@ -366,7 +353,6 @@
 		const wasDragging = dragging;
 		dragging = false;
 		clickConsumed = wasDragging;
-		isDragging = false;
 		cancelLongPress();
 	}
 </script>
@@ -376,7 +362,7 @@
 	class={[
 		'step-node',
 		nodeWidthClass,
-		isDragging &&
+		dragging &&
 			css({
 				opacity: '0.4',
 				filter: 'grayscale(1)'

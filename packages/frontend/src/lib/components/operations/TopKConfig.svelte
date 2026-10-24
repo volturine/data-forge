@@ -14,10 +14,6 @@
 		const num = parseInt(value, 10);
 		config.k = isNaN(num) ? 10 : num;
 	}
-
-	function setDescending(checked: boolean) {
-		config.descending = checked;
-	}
 </script>
 
 <div class={stepConfig()} role="region" aria-label="Top K configuration">
@@ -64,7 +60,7 @@
 				data-testid="topk-descending-checkbox"
 				type="checkbox"
 				checked={config.descending}
-				onchange={(e) => setDescending(e.currentTarget.checked)}
+				onchange={(e) => (config.descending = e.currentTarget.checked)}
 				aria-describedby="topk-descending-help"
 			/>
 			<span>Descending (largest first)</span>

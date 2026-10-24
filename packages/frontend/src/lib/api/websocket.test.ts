@@ -112,13 +112,16 @@ describe('createStream', () => {
 			onError: overrides.onError ?? vi.fn(),
 			onClose: overrides.onClose ?? vi.fn()
 		};
-		const handle = createStream<TestSnapshot, TestEvent, TestMessage>('/v1/test/ws', {
-			parse,
-			isSnapshot,
-			extractSnapshot,
-			extractEvent,
-			callbacks
-		});
+		const handle = createStream<TestSnapshot, TestEvent, TestMessage, TestSnapshotMessage>(
+			'/v1/test/ws',
+			{
+				parse,
+				isSnapshot,
+				extractSnapshot,
+				extractEvent,
+				callbacks
+			}
+		);
 		const socket = MockWebSocket.instances[MockWebSocket.instances.length - 1];
 		return { handle, callbacks, socket };
 	}
@@ -237,7 +240,7 @@ describe('createStream', () => {
 			onError: vi.fn(),
 			onClose: vi.fn()
 		};
-		createStream<TestSnapshot, never, TestMessage>('/v1/test/ws', {
+		createStream<TestSnapshot, never, TestMessage, TestSnapshotMessage>('/v1/test/ws', {
 			parse,
 			isSnapshot,
 			extractSnapshot: extractSnapshot,

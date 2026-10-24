@@ -1,23 +1,17 @@
 import { err, okAsync, ResultAsync } from 'neverthrow';
 import { getClientIdentity, getEditorClientId } from '#lib/stores/clientIdentity.svelte.js';
-import { requireNamespace, isNamespaceReady } from '#lib/stores/namespace.svelte.js';
 import { uuid } from '#lib/utils/uuid.js';
 import { track } from '#lib/utils/audit-log.js';
+import { currentNamespace } from './in-flight';
 
 export const BASE_URL = '/api';
-
-function backendOrigin(): string {
-	const origin = import.meta.env.DEV
-		? `http://${window.location.hostname}:${import.meta.env.VITE_BACKEND_PORT ?? '8000'}`
-		: '';
-	return origin;
-}
 
 export function buildBackendUrl(endpoint: string): string {
 	const path = `${BASE_URL}${endpoint}`;
 	if (typeof window === 'undefined') return path;
 	if (!import.meta.env.DEV) return path;
-	return new URL(path, backendOrigin()).toString();
+	const origin = `http://${window.location.hostname}:${import.meta.env.VITE_BACKEND_PORT ?? '8000'}`;
+	return new URL(path, origin).toString();
 }
 
 export type ApiErrorType = 'network' | 'http' | 'parse';
@@ -78,7 +72,7 @@ function buildHeaders(options?: RequestInit): Headers {
 	const headers = new Headers(options?.headers);
 	const identity = getClientIdentity();
 	const editorClientId = getEditorClientId();
-	const namespace = isNamespaceReady() ? requireNamespace() : undefined;
+	const namespace = currentNamespace();
 	if (identity.clientId && !headers.has('X-Client-Id'))
 		headers.set('X-Client-Id', identity.clientId);
 	if (identity.clientSignature && !headers.has('X-Client-Signature'))
@@ -128,11 +122,6 @@ function handleErrorResponse(
 /** Bound for app-shell bootstrap probes (config + session). Compute stays unbounded. */
 export const BOOTSTRAP_API_TIMEOUT_MS = 15_000;
 
-function requestCacheMode(options: RequestInit | undefined): RequestCache | undefined {
-	if (options?.cache !== undefined) return options.cache;
-	return 'no-store';
-}
-
 function combineSignals(signals: AbortSignal[]): AbortSignal | undefined {
 	if (signals.length === 0) return undefined;
 	if (signals.length === 1) return signals[0];
@@ -144,6 +133,17 @@ function isAbortError(error: unknown): boolean {
 		(error instanceof DOMException && error.name === 'AbortError') ||
 		(error instanceof Error && error.name === 'AbortError')
 	);
+}
+
+function parseJsonBody<T>(
+	response: Response,
+	endpoint: string,
+	options?: RequestInit
+): ResultAsync<T, ApiError> {
+	return ResultAsync.fromPromise(response.json() as Promise<T>, (): ApiError => {
+		trackParseError(endpoint, options?.method);
+		return createApiError('parse', 'Failed to parse response JSON');
+	});
 }
 
 function apiFetch<T>(
@@ -170,7 +170,7 @@ function apiFetch<T>(
 		...options,
 		headers,
 		signal,
-		cache: requestCacheMode(options)
+		cache: options?.cache ?? 'no-store'
 	} satisfies RequestInit;
 	const result = ResultAsync.fromPromise(
 		fetch(buildApiUrl(endpoint), request),
@@ -195,34 +195,23 @@ function apiFetch<T>(
 			return handleErrorResponse(response, endpoint, options);
 		}
 		return parse(response).andThen((value) => {
-			const currentNamespace = isNamespaceReady() ? requireNamespace() : null;
-			if (
-				requestNamespace &&
-				(requestEpoch !== namespaceEpoch || requestNamespace !== currentNamespace)
-			) {
+			const namespace = currentNamespace();
+			if (requestNamespace && (requestEpoch !== namespaceEpoch || requestNamespace !== namespace)) {
 				return err(createApiError('network', 'Response discarded because the namespace changed'));
 			}
 			return okAsync(value);
 		});
 	});
-	return result
-		.map((value) => {
-			namespaceRequests.delete(namespaceController);
-			return value;
-		})
-		.mapErr((error) => {
-			namespaceRequests.delete(namespaceController);
-			return error;
-		});
+	const release = (): void => {
+		namespaceRequests.delete(namespaceController);
+	};
+	return result.andTee(release).orTee(release);
 }
 
 export function apiRequest<T>(endpoint: string, options?: RequestInit): ResultAsync<T, ApiError> {
 	return apiFetch(endpoint, options, (response) => {
 		if (response.status === 204) return okAsync(undefined as T);
-		return ResultAsync.fromPromise(response.json() as Promise<T>, (): ApiError => {
-			trackParseError(endpoint, options?.method);
-			return createApiError('parse', 'Failed to parse response JSON');
-		});
+		return parseJsonBody<T>(response, endpoint, options);
 	});
 }
 
@@ -233,10 +222,10 @@ export function apiRequestWithHeaders<T>(
 	return apiFetch(endpoint, options, (response) => {
 		if (response.status === 204)
 			return okAsync({ data: undefined as T, headers: response.headers });
-		return ResultAsync.fromPromise(response.json() as Promise<T>, (): ApiError => {
-			trackParseError(endpoint, options?.method);
-			return createApiError('parse', 'Failed to parse response JSON');
-		}).map((data) => ({ data, headers: response.headers }));
+		return parseJsonBody<T>(response, endpoint, options).map((data) => ({
+			data,
+			headers: response.headers
+		}));
 	});
 }
 export function apiConditionalRequestWithHeaders<T>(
@@ -250,10 +239,11 @@ export function apiConditionalRequestWithHeaders<T>(
 			if (response.status === 304) return okAsync({ notModified: true, headers: response.headers });
 			if (response.status === 204)
 				return okAsync({ notModified: false, headers: response.headers, data: undefined as T });
-			return ResultAsync.fromPromise(response.json() as Promise<T>, (): ApiError => {
-				trackParseError(endpoint, options?.method);
-				return createApiError('parse', 'Failed to parse response JSON');
-			}).map((data) => ({ notModified: false, data, headers: response.headers }));
+			return parseJsonBody<T>(response, endpoint, options).map((data) => ({
+				notModified: false,
+				data,
+				headers: response.headers
+			}));
 		}
 	);
 }

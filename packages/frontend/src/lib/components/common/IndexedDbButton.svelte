@@ -1,11 +1,11 @@
 <script lang="ts">
-	import { onDestroy } from 'svelte';
 	import { Check, Copy, Database, LoaderCircle, X } from '@lucide/svelte';
 	import { configStore } from '#lib/stores/config.svelte.js';
 	import { idbEntries, idbDelete, idbClear } from '#lib/utils/indexeddb.js';
 	import { css, emptyText, iconButton } from '#lib/styles/panda.js';
 	import { overlayStack } from '#lib/stores/overlay.svelte.js';
 	import type { OverlayConfig } from '#lib/stores/overlay.svelte.js';
+	import { createCopyFeedback } from '#lib/chat/copy-feedback.svelte.js';
 
 	let open = $state(false);
 	let entries = $state.raw<Array<{ key: string; value: unknown }>>([]);
@@ -13,8 +13,7 @@
 	let dropdownRef = $state<HTMLElement>();
 	let popupRef = $state<HTMLElement>();
 	let expandedKey = $state<string | null>(null);
-	let copiedKey = $state<string | null>(null);
-	let copyTimer = $state<number | null>(null);
+	const copyFeedback = createCopyFeedback(1500);
 	const truncateLimit = 120;
 
 	const overlayConfig = $derived<OverlayConfig>({
@@ -47,20 +46,9 @@
 		expandedKey = expandedKey === key ? null : key;
 	}
 
-	async function copyValue(key: string, value: unknown) {
-		const formatted = formatValue(value);
-		await navigator.clipboard.writeText(formatted).catch(() => {});
-		copiedKey = key;
-		if (copyTimer !== null) window.clearTimeout(copyTimer);
-		copyTimer = window.setTimeout(() => {
-			copiedKey = null;
-			copyTimer = null;
-		}, 1500);
+	function copyValue(key: string, value: unknown) {
+		return copyFeedback.copy(formatValue(value), key);
 	}
-
-	onDestroy(() => {
-		if (copyTimer !== null) window.clearTimeout(copyTimer);
-	});
 
 	async function refresh() {
 		loading = true;
@@ -259,7 +247,7 @@
 													onclick={() => copyValue(entry.key, entry.value)}
 													type="button"
 												>
-													{#if copiedKey === entry.key}
+													{#if copyFeedback.copiedId === entry.key}
 														<Check size={12} />
 														Copied
 													{:else}

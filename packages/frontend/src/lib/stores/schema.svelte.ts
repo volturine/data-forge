@@ -1,4 +1,4 @@
-import type { Schema, ColumnInfo } from '#lib/types/schema.js';
+import type { Schema, Column } from '#lib/types/schema.js';
 import { analysisStore } from '#lib/stores/analysis.svelte.js';
 import { emptySchema } from '#lib/types/schema.js';
 import {
@@ -27,7 +27,6 @@ export class SchemaStore {
 	joinSchemas = $state(new SvelteMap<string, Schema>());
 	previewSchemas = $state(new SvelteMap<string, PreviewEntry>());
 
-	primaryDatasourceId = $derived(analysisStore.activeTab?.datasource.id ?? null);
 	steps = $derived(analysisStore.pipeline);
 
 	calculatedSchema = $derived.by(() => {
@@ -63,7 +62,7 @@ export class SchemaStore {
 			const entry = this.previewSchemas.get(step.id);
 			if (!isApplied) {
 				output = input;
-			} else if (entry?.hash !== null && entry?.hash === currentHash && !isChartStep(step.type)) {
+			} else if (entry?.hash === currentHash && !isChartStep(step.type)) {
 				output = entry.schema;
 			} else if (step.type === 'join') {
 				const rightSource = typeof config.right_source === 'string' ? config.right_source : '';
@@ -96,10 +95,6 @@ export class SchemaStore {
 		this.joinSchemas.delete(datasourceId);
 	}
 
-	getJoinSchema(datasourceId: string): Schema | null {
-		return this.joinSchemas.get(datasourceId) ?? null;
-	}
-
 	syncPreviewSchema(
 		stepId: string,
 		response: { columns?: string[]; column_types?: Record<string, string> },
@@ -115,7 +110,7 @@ export class SchemaStore {
 		columnTypes?: Record<string, string>,
 		pipelineHash?: string | null
 	): void {
-		const schemaColumns: ColumnInfo[] = columns.map((name) => ({
+		const schemaColumns: Column[] = columns.map((name) => ({
 			name,
 			dtype: resolveColumnType(columnTypes?.[name]),
 			nullable: true
@@ -126,20 +121,12 @@ export class SchemaStore {
 		});
 	}
 
-	clearPreviewSchema(stepId: string): void {
-		this.previewSchemas.delete(stepId);
-	}
-
 	getInput(stepId: string): Schema | null {
 		return this.stepSchemas.get(stepId)?.input ?? null;
 	}
 
 	getOutput(stepId: string): Schema | null {
 		return this.stepSchemas.get(stepId)?.output ?? null;
-	}
-
-	getAllOutputs(): Schema[] {
-		return this.steps.map((step) => this.getOutput(step.id)).filter((s): s is Schema => s !== null);
 	}
 
 	getLastOutput(): Schema | null {

@@ -1,16 +1,7 @@
 import type { ApiError } from '#lib/api/client.js';
 
-export class ComputeError extends Error {
-	readonly status?: number;
-	readonly errorType?: ApiError['type'];
-
-	constructor(message: string, options: { status?: number; errorType?: ApiError['type'] } = {}) {
-		super(message);
-		this.status = options.status;
-		this.errorType = options.errorType;
-	}
-}
+export class ComputeError extends Error {}
 
 export function toComputeError(error: ApiError): ComputeError {
-	return new ComputeError(error.message, { status: error.status, errorType: error.type });
+	return new ComputeError(error.message);
 }

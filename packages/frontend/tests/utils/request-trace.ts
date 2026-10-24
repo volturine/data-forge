@@ -13,6 +13,12 @@ export interface RequestTraceEntry {
 	startMs: number;
 	endMs: number | null;
 	durationMs: number | null;
+	/** Browser Resource Timing start time as Unix epoch milliseconds. */
+	browserTimingStartEpochMs: number | null;
+	/** Millisecond offsets relative to browserTimingStartEpochMs. */
+	browserTimingRequestStartMs: number | null;
+	browserTimingResponseStartMs: number | null;
+	browserTimingResponseEndMs: number | null;
 	serverDurationMs: number | null;
 	status: number | null;
 	clientRequestId: string | null;
@@ -78,9 +84,30 @@ function safeRequestUrl(raw: string): string {
 	}
 }
 
+function availableTimingValue(value: number): number | null {
+	return Number.isFinite(value) && value >= 0 ? value : null;
+}
+
+function captureBrowserTiming(request: Request, entry: RequestTraceEntry): void {
+	const timing = request.timing();
+	entry.browserTimingStartEpochMs = availableTimingValue(timing.startTime);
+	entry.browserTimingRequestStartMs = availableTimingValue(timing.requestStart);
+	entry.browserTimingResponseStartMs = availableTimingValue(timing.responseStart);
+	entry.browserTimingResponseEndMs = availableTimingValue(timing.responseEnd);
+}
+
+function isTopLevelDocumentRequest(request: Request): boolean {
+	return (
+		request.isNavigationRequest() &&
+		request.resourceType() === 'document' &&
+		request.frame().parentFrame() === null
+	);
+}
+
 /**
- * Records page API request timing without query values. The E2E runner points
- * this at a run-scoped ignored artifact directory; unit tests leave it unset.
+ * Records page API and top-level document request timing without query values.
+ * The E2E runner points this at a run-scoped ignored artifact directory; unit
+ * tests leave it unset.
  */
 export function createRequestTrace(
 	page: Page,
@@ -97,35 +124,44 @@ export function createRequestTrace(
 	const responseReads: Promise<void>[] = [];
 
 	const onRequest = (request: Request): void => {
-		if (!request.url().includes('/api/')) return;
+		const rawUrl = request.url();
+		const isApiRequest = rawUrl.includes('/api/');
+		if (!isApiRequest && !isTopLevelDocumentRequest(request)) return;
 		const startEpochMs = Date.now();
+		const postData = isApiRequest ? request.postData() : null;
 		const entry: RequestTraceEntry = {
 			workerIndex,
 			title,
 			method: request.method(),
-			url: safeRequestUrl(request.url()),
-			resourceId: extractResourceId(request.url(), request.postData()),
+			url: safeRequestUrl(rawUrl),
+			resourceId: extractResourceId(rawUrl, postData),
 			startEpochMs,
 			endEpochMs: null,
 			startMs: startEpochMs - startedAt,
 			endMs: null,
 			durationMs: null,
+			browserTimingStartEpochMs: null,
+			browserTimingRequestStartMs: null,
+			browserTimingResponseStartMs: null,
+			browserTimingResponseEndMs: null,
 			serverDurationMs: null,
 			status: null,
-			clientRequestId: request.headers()['x-request-id'] ?? null,
+			clientRequestId: isApiRequest ? (request.headers()['x-request-id'] ?? null) : null,
 			requestId: null,
 			responseFields: null,
 			responseBuildId: null,
 			failureText: null,
-			targetStepId: extractTargetStep(request.url(), request.postData())
+			targetStepId: extractTargetStep(rawUrl, postData)
 		};
 		entries.push(entry);
 		byRequest.set(request, entry);
 	};
 
 	const onResponse = (response: Response): void => {
-		const entry = byRequest.get(response.request());
+		const request = response.request();
+		const entry = byRequest.get(request);
 		if (!entry) return;
+		captureBrowserTiming(request, entry);
 		entry.status = response.status();
 		const headers = response.headers();
 		entry.requestId = headers['x-request-id'] ?? null;
@@ -154,6 +190,7 @@ export function createRequestTrace(
 	const finish = (request: Request): void => {
 		const entry = byRequest.get(request);
 		if (!entry) return;
+		captureBrowserTiming(request, entry);
 		entry.endEpochMs = Date.now();
 		entry.endMs = entry.endEpochMs - startedAt;
 		entry.durationMs = entry.endMs - entry.startMs;

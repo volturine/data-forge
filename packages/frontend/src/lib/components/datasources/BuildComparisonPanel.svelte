@@ -71,7 +71,7 @@
 		const q = runSearch.trim().toLowerCase();
 		if (!q) return snapshots;
 		return snapshots.filter((snapshot) => {
-			const created = formatSnapshotDate(snapshot.timestamp_ms).toLowerCase();
+			const created = formatDateTimeDisplay(snapshot.timestamp_ms).toLowerCase();
 			return snapshot.snapshot_id.toLowerCase().includes(q) || created.includes(q);
 		});
 	});
@@ -80,7 +80,7 @@
 		const q = runSearch.trim().toLowerCase();
 		if (!q) return runs;
 		return runs.filter((run) => {
-			const created = formatDate(run.started_at).toLowerCase();
+			const created = formatDateTimeDisplay(run.started_at).toLowerCase();
 			return (
 				run.build_id.toLowerCase().includes(q) ||
 				(run.current_kind ?? '').toLowerCase().includes(q) ||
@@ -151,21 +151,13 @@
 		compareError = null;
 	}
 
-	function formatDate(isoDate: string): string {
-		return formatDateTimeDisplay(isoDate);
-	}
-
-	function formatSnapshotDate(timestampMs: number): string {
-		return formatDateTimeDisplay(timestampMs);
-	}
-
 	function formatDelta(val: number): string {
 		if (val === 0) return '0';
 		const sign = val > 0 ? '+' : '';
 		return `${sign}${val}`;
 	}
 
-	function rowDeltaClass(val: number): string {
+	function deltaClass(val: number): string {
 		if (val === 0) return css({ color: 'fg.muted' });
 		return val > 0 ? css({ color: 'fg.success' }) : css({ color: 'fg.error' });
 	}
@@ -173,23 +165,6 @@
 	function nullDeltaClass(val: number): string {
 		if (val === 0) return css({ color: 'fg.muted' });
 		return val > 0 ? css({ color: 'fg.error' }) : css({ color: 'fg.success' });
-	}
-
-	function uniqueDeltaClass(val: number): string {
-		if (val === 0) return css({ color: 'fg.muted' });
-		return val > 0 ? css({ color: 'fg.success' }) : css({ color: 'fg.error' });
-	}
-
-	function previewColumns(preview: SnapshotCompareResponse['preview_a'] | null) {
-		return preview?.columns ?? [];
-	}
-
-	function previewData(preview: SnapshotCompareResponse['preview_a'] | null) {
-		return preview?.data ?? [];
-	}
-
-	function previewTypes(preview: SnapshotCompareResponse['preview_a'] | null) {
-		return preview?.column_types ?? {};
 	}
 
 	const combinedStats = $derived.by(() => {
@@ -325,9 +300,7 @@
 					{:else if logicalBuildMode ? snapshotsQuery.isError : computeWorkerRunsStore.status === 'error'}
 						<div class={css({ fontSize: 'sm', color: 'fg.error' })}>
 							{logicalBuildMode
-								? snapshotsQuery.error instanceof Error
-									? snapshotsQuery.error.message
-									: 'Failed to load builds'
+								? (snapshotsQuery.error?.message ?? 'Failed to load builds')
 								: (computeWorkerRunsStore.error ?? 'Failed to load runs')}
 						</div>
 					{:else if logicalBuildMode ? snapshots.length === 0 : runs.length === 0}
@@ -420,7 +393,7 @@
 											>
 												<div class={css({ minWidth: '0' })}>
 													<div class={css({ fontSize: 'xs', color: 'fg.muted' })}>
-														{formatSnapshotDate(snapshot.timestamp_ms)}
+														{formatDateTimeDisplay(snapshot.timestamp_ms)}
 													</div>
 													<div
 														class={css({
@@ -471,7 +444,7 @@
 														>
 													</div>
 													<div class={css({ fontSize: 'xs', color: 'fg.muted' })}>
-														{formatDate(run.started_at)}
+														{formatDateTimeDisplay(run.started_at)}
 													</div>
 												</div>
 												<div class={css({ fontSize: 'xs', color: 'fg.tertiary' })}>
@@ -537,7 +510,7 @@
 										>
 											<div class={css({ minWidth: '0' })}>
 												<div class={css({ color: 'fg.muted' })}>
-													{formatSnapshotDate(snapshot.timestamp_ms)}
+													{formatDateTimeDisplay(snapshot.timestamp_ms)}
 												</div>
 												<div
 													class={css({ fontFamily: 'mono', fontSize: '2xs', color: 'fg.tertiary' })}
@@ -674,7 +647,7 @@
 							<div
 								class={[
 									css({ marginTop: '1', fontFamily: 'mono', fontSize: 'lg' }),
-									rowDeltaClass(comparison.row_count_delta)
+									deltaClass(comparison.row_count_delta)
 								]}
 							>
 								{formatDelta(comparison.row_count_delta)}
@@ -998,7 +971,7 @@
 															<span
 																class={[
 																	css({ marginLeft: '1', fontSize: '2xs' }),
-																	uniqueDeltaClass(stat.unique_delta)
+																	deltaClass(stat.unique_delta)
 																]}
 															>
 																({formatDelta(stat.unique_delta)})
@@ -1082,9 +1055,9 @@
 								]}
 							>
 								<DataTable
-									columns={previewColumns(comparison.preview_a)}
-									data={previewData(comparison.preview_a)}
-									columnTypes={previewTypes(comparison.preview_a)}
+									columns={comparison.preview_a.columns}
+									data={comparison.preview_a.data}
+									columnTypes={comparison.preview_a.column_types}
 									fillContainer
 									showHeader
 								/>
@@ -1115,9 +1088,9 @@
 								]}
 							>
 								<DataTable
-									columns={previewColumns(comparison.preview_b)}
-									data={previewData(comparison.preview_b)}
-									columnTypes={previewTypes(comparison.preview_b)}
+									columns={comparison.preview_b.columns}
+									data={comparison.preview_b.data}
+									columnTypes={comparison.preview_b.column_types}
 									fillContainer
 									showHeader
 								/>

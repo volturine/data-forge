@@ -53,7 +53,7 @@
 		datasourceLabel = null,
 		tabName,
 		analysisId,
-		activeTab: activeTabRaw,
+		activeTab,
 		onChangeDatasource,
 		onRenameTab,
 		onDuplicateTab,
@@ -61,7 +61,6 @@
 		readOnly = false
 	}: Props = $props();
 
-	const activeTab = $derived(activeTabRaw);
 	const ns = useNamespace();
 
 	let isEditing = $state(false);
@@ -156,53 +155,38 @@
 		);
 	});
 	function ensureBranch(
-		config: AnalysisTabDatasource['config'] | null | undefined,
+		config: AnalysisTabDatasource['config'],
 		fallback: string
 	): AnalysisTabDatasource['config'] {
-		const branch = fallback.trim();
-		return { ...(config ?? { branch }), branch };
+		return { ...config, branch: fallback.trim() };
+	}
+
+	function updateActiveTabConfig(config: AnalysisTabDatasource['config']) {
+		const active = activeTab;
+		if (!active) return;
+		analysisStore.updateTab(active.id, {
+			datasource: { ...active.datasource, config }
+		});
 	}
 
 	function updateTimeTravelUi(updates: { open?: boolean; month?: string; day?: string }) {
-		if (readOnly) return;
 		const active = activeTab;
-		if (!active) return;
+		if (readOnly || !active) return;
 		const branch = active.datasource.config.branch;
-		const nextConfig = ensureBranch(active?.datasource?.config, branch ?? '');
+		const nextConfig = ensureBranch(active.datasource.config, branch ?? '');
 		const currentUi = nextConfig.time_travel_ui ?? {};
 		nextConfig.time_travel_ui = { ...currentUi, ...updates };
-		const tab = active;
-		analysisStore.updateTab(active.id, {
-			datasource: {
-				...(tab?.datasource ?? {}),
-				config: nextConfig
-			}
-		});
+		updateActiveTabConfig(nextConfig);
 	}
 
 	function updateSnapshotConfig(nextConfig: Record<string, unknown>) {
-		if (readOnly) return;
 		const active = activeTab;
-		if (!active) return;
-		const branch = active.datasource.config.branch;
-		const config = ensureBranch(
-			{
-				...nextConfig,
-				branch:
-					typeof nextConfig.branch === 'string' && nextConfig.branch.trim()
-						? nextConfig.branch
-						: branch
-			},
-			branch ?? ''
-		);
-		const tab = active;
-		analysisStore.updateTab(active.id, {
-			datasource: {
-				...(tab?.datasource ?? {}),
-				config
-			}
+		if (readOnly || !active) return;
+		// SnapshotPicker edits a copy of this tab's config, so the tab branch stays authoritative.
+		updateActiveTabConfig({
+			...nextConfig,
+			branch: (active.datasource.config.branch ?? '').trim()
 		});
-		analysisStore.setActiveTab(active.id);
 	}
 
 	function handleSnapshotSelect(snapshotId: string | null, timestampMs?: number) {
@@ -267,26 +251,14 @@
 	);
 	const isDragActive = $derived(drag.active);
 	const snapshotConfig = $derived(activeTab?.datasource?.config ?? {});
-	const snapshotBranch = $derived.by((): string | null => {
-		const branch = activeTab?.datasource?.config?.branch;
-		return typeof branch === 'string' ? branch : null;
-	});
+	const snapshotBranch = $derived(activeTab?.datasource?.config?.branch ?? null);
 	const branchValue = $derived(activeTab?.datasource?.config?.branch ?? '');
 
 	function applyBranchValue(next: string) {
-		if (readOnly) return;
 		const active = activeTab;
-		if (!active) return;
+		if (readOnly || !active) return;
 		if (!next.trim()) return;
-		const config = ensureBranch(active?.datasource?.config, next);
-		const tab = active;
-		analysisStore.updateTab(active.id, {
-			datasource: {
-				...(tab?.datasource ?? {}),
-				config
-			}
-		});
-		analysisStore.setActiveTab(active.id);
+		updateActiveTabConfig(ensureBranch(active.datasource.config, next));
 	}
 </script>
 

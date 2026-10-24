@@ -6,13 +6,11 @@ export const NAMESPACE_NAME_RULES =
 
 export function isValidNamespace(value: string): boolean {
 	const trimmed = value.trim();
-	if (!trimmed || trimmed.length < 3 || trimmed.length > 63) return false;
-	if (trimmed.includes('..') || trimmed.startsWith('xn--')) return false;
+	if (trimmed.startsWith('xn--')) return false;
 	return namespacePattern.test(trimmed);
 }
 
 export function normalizeNamespace(value: string): string {
 	const trimmed = value.trim();
-	if (!trimmed) return '';
 	return isValidNamespace(trimmed) ? trimmed : '';
 }

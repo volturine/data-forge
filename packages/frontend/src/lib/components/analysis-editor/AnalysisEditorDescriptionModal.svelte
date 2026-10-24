@@ -16,16 +16,11 @@
 	// svelte-ignore state_referenced_locally
 	let descriptionDraft = $state(description ?? '');
 
-	function closeDescriptionModal() {
-		onClose();
-		descriptionDraft = '';
-	}
-
 	function saveDescriptionDraft() {
 		if (editorReadOnly || !open) return;
 		const next = descriptionDraft.trim() || null;
 		onSave(next);
-		closeDescriptionModal();
+		onClose();
 	}
 </script>
 
@@ -57,7 +52,7 @@
 				transitionDuration: 'normal',
 				_hover: { backgroundColor: 'bg.hover', color: 'fg.primary' }
 			})}
-			onclick={closeDescriptionModal}
+			onclick={onClose}
 			aria-label="Close description editor"
 		>
 			<X size={16} />
@@ -92,9 +87,7 @@
 			gap: '2'
 		})}
 	>
-		<button class={button({ variant: 'secondary' })} onclick={closeDescriptionModal} type="button"
-			>Cancel</button
-		>
+		<button class={button({ variant: 'secondary' })} onclick={onClose} type="button">Cancel</button>
 		<button class={button({ variant: 'primary' })} onclick={saveDescriptionDraft} type="button"
 			>Apply</button
 		>
@@ -103,7 +96,7 @@
 
 <BaseModal
 	{open}
-	onClose={closeDescriptionModal}
+	{onClose}
 	closeOnEscape={true}
 	closeOnBackdrop={true}
 	panelClass={css({

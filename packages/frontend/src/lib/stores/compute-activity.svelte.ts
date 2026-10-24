@@ -20,15 +20,7 @@ export class ComputeActivityStore {
 
 	track<T, E>(result: ResultAsync<T, E>): ResultAsync<T, E> {
 		const release = this.retain();
-		return result
-			.map((value) => {
-				release();
-				return value;
-			})
-			.mapErr((error) => {
-				release();
-				return error;
-			});
+		return result.andTee(release).orTee(release);
 	}
 
 	reset(): void {

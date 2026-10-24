@@ -206,10 +206,6 @@
 		pickerOpen = false;
 	}
 
-	function cancelEdit() {
-		resetForm();
-	}
-
 	function removeExpression(index: number) {
 		const expressions = Array.isArray(config.expressions) ? config.expressions : [];
 		config.expressions = expressions.filter((_: WithColumnsExpr, idx: number) => idx !== index);
@@ -338,7 +334,7 @@
 					onclick={saveExpression}
 					disabled={!canAdd}>Save</button
 				>
-				<button type="button" class={button({ variant: 'secondary' })} onclick={cancelEdit}
+				<button type="button" class={button({ variant: 'secondary' })} onclick={resetForm}
 					>Cancel</button
 				>
 			{:else}

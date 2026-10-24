@@ -12,9 +12,9 @@ import type {
 
 export type { ComputeWorkerReusePolicy, ComputeWorkerScope, ComputeWorkerStatus };
 
-type Field<T, K extends keyof T> = NonNullable<T[K]>;
-type NumberField<T, K extends keyof T> = Extract<Field<T, K>, number>;
-type StringField<T, K extends keyof T> = Extract<Field<T, K>, string>;
+export type Field<T, K extends keyof T> = NonNullable<T[K]>;
+export type NumberField<T, K extends keyof T> = Extract<Field<T, K>, number>;
+export type StringField<T, K extends keyof T> = Extract<Field<T, K>, string>;
 type OptionalNumberField<T, K extends keyof T> = NumberField<T, K> | null;
 type OptionalStringField<T, K extends keyof T> = StringField<T, K> | null;
 type OptionalObjectField<T, K extends keyof T> = Field<T, K> | null;

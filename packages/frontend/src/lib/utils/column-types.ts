@@ -100,8 +100,6 @@ export interface ColumnTypeConfig {
 	icon: LucideIcon;
 	/** Human-readable description */
 	description: string;
-	/** Alternative names/aliases */
-	aliases: string[];
 }
 
 /**
@@ -129,8 +127,7 @@ export const COLUMN_TYPE_REGISTRY: Record<ColumnType, ColumnTypeConfig> = {
 		canonicalName: 'String',
 		category: 'string',
 		icon: Type,
-		description: 'Text data (UTF-8)',
-		aliases: ['Utf8', 'str']
+		description: 'Text data (UTF-8)'
 	},
 	Utf8: {
 		type: 'Utf8',
@@ -138,8 +135,7 @@ export const COLUMN_TYPE_REGISTRY: Record<ColumnType, ColumnTypeConfig> = {
 		canonicalName: 'String',
 		category: 'string',
 		icon: Type,
-		description: 'Text data (UTF-8)',
-		aliases: ['String', 'str']
+		description: 'Text data (UTF-8)'
 	},
 	Categorical: {
 		type: 'Categorical',
@@ -147,8 +143,7 @@ export const COLUMN_TYPE_REGISTRY: Record<ColumnType, ColumnTypeConfig> = {
 		canonicalName: 'Categorical',
 		category: 'string',
 		icon: Type,
-		description: 'Categorical data (enum-like)',
-		aliases: []
+		description: 'Categorical data (enum-like)'
 	},
 
 	// Integer types
@@ -158,8 +153,7 @@ export const COLUMN_TYPE_REGISTRY: Record<ColumnType, ColumnTypeConfig> = {
 		canonicalName: 'Int8',
 		category: 'integer',
 		icon: Hash,
-		description: '8-bit signed integer',
-		aliases: []
+		description: '8-bit signed integer'
 	},
 	Int16: {
 		type: 'Int16',
@@ -167,8 +161,7 @@ export const COLUMN_TYPE_REGISTRY: Record<ColumnType, ColumnTypeConfig> = {
 		canonicalName: 'Int16',
 		category: 'integer',
 		icon: Hash,
-		description: '16-bit signed integer',
-		aliases: []
+		description: '16-bit signed integer'
 	},
 	Int32: {
 		type: 'Int32',
@@ -176,8 +169,7 @@ export const COLUMN_TYPE_REGISTRY: Record<ColumnType, ColumnTypeConfig> = {
 		canonicalName: 'Int32',
 		category: 'integer',
 		icon: Hash,
-		description: '32-bit signed integer',
-		aliases: []
+		description: '32-bit signed integer'
 	},
 	Int64: {
 		type: 'Int64',
@@ -185,8 +177,7 @@ export const COLUMN_TYPE_REGISTRY: Record<ColumnType, ColumnTypeConfig> = {
 		canonicalName: 'Int64',
 		category: 'integer',
 		icon: Hash,
-		description: '64-bit signed integer',
-		aliases: ['int']
+		description: '64-bit signed integer'
 	},
 	UInt8: {
 		type: 'UInt8',
@@ -194,8 +185,7 @@ export const COLUMN_TYPE_REGISTRY: Record<ColumnType, ColumnTypeConfig> = {
 		canonicalName: 'UInt8',
 		category: 'integer',
 		icon: Hash,
-		description: '8-bit unsigned integer',
-		aliases: []
+		description: '8-bit unsigned integer'
 	},
 	UInt16: {
 		type: 'UInt16',
@@ -203,8 +193,7 @@ export const COLUMN_TYPE_REGISTRY: Record<ColumnType, ColumnTypeConfig> = {
 		canonicalName: 'UInt16',
 		category: 'integer',
 		icon: Hash,
-		description: '16-bit unsigned integer',
-		aliases: []
+		description: '16-bit unsigned integer'
 	},
 	UInt32: {
 		type: 'UInt32',
@@ -212,8 +201,7 @@ export const COLUMN_TYPE_REGISTRY: Record<ColumnType, ColumnTypeConfig> = {
 		canonicalName: 'UInt32',
 		category: 'integer',
 		icon: Hash,
-		description: '32-bit unsigned integer',
-		aliases: []
+		description: '32-bit unsigned integer'
 	},
 	UInt64: {
 		type: 'UInt64',
@@ -221,8 +209,7 @@ export const COLUMN_TYPE_REGISTRY: Record<ColumnType, ColumnTypeConfig> = {
 		canonicalName: 'UInt64',
 		category: 'integer',
 		icon: Hash,
-		description: '64-bit unsigned integer',
-		aliases: []
+		description: '64-bit unsigned integer'
 	},
 
 	// Float types
@@ -232,8 +219,7 @@ export const COLUMN_TYPE_REGISTRY: Record<ColumnType, ColumnTypeConfig> = {
 		canonicalName: 'Float32',
 		category: 'float',
 		icon: Binary,
-		description: '32-bit floating point',
-		aliases: []
+		description: '32-bit floating point'
 	},
 	Float64: {
 		type: 'Float64',
@@ -241,8 +227,7 @@ export const COLUMN_TYPE_REGISTRY: Record<ColumnType, ColumnTypeConfig> = {
 		canonicalName: 'Float64',
 		category: 'float',
 		icon: Binary,
-		description: '64-bit floating point',
-		aliases: ['float']
+		description: '64-bit floating point'
 	},
 
 	// Temporal types
@@ -252,8 +237,7 @@ export const COLUMN_TYPE_REGISTRY: Record<ColumnType, ColumnTypeConfig> = {
 		canonicalName: 'Date',
 		category: 'temporal',
 		icon: Calendar,
-		description: 'Calendar date',
-		aliases: []
+		description: 'Calendar date'
 	},
 	Datetime: {
 		type: 'Datetime',
@@ -261,8 +245,7 @@ export const COLUMN_TYPE_REGISTRY: Record<ColumnType, ColumnTypeConfig> = {
 		canonicalName: 'Datetime',
 		category: 'temporal',
 		icon: Calendar,
-		description: 'Date and time',
-		aliases: ['Timestamp']
+		description: 'Date and time'
 	},
 	Timestamp: {
 		type: 'Timestamp',
@@ -270,8 +253,7 @@ export const COLUMN_TYPE_REGISTRY: Record<ColumnType, ColumnTypeConfig> = {
 		canonicalName: 'Datetime',
 		category: 'temporal',
 		icon: Calendar,
-		description: 'Timestamp (alias for Datetime)',
-		aliases: ['Datetime']
+		description: 'Timestamp (alias for Datetime)'
 	},
 	Time: {
 		type: 'Time',
@@ -279,8 +261,7 @@ export const COLUMN_TYPE_REGISTRY: Record<ColumnType, ColumnTypeConfig> = {
 		canonicalName: 'Time',
 		category: 'temporal',
 		icon: Calendar,
-		description: 'Time of day',
-		aliases: []
+		description: 'Time of day'
 	},
 	Duration: {
 		type: 'Duration',
@@ -288,8 +269,7 @@ export const COLUMN_TYPE_REGISTRY: Record<ColumnType, ColumnTypeConfig> = {
 		canonicalName: 'Duration',
 		category: 'temporal',
 		icon: Calendar,
-		description: 'Time duration',
-		aliases: []
+		description: 'Time duration'
 	},
 
 	// Boolean
@@ -299,8 +279,7 @@ export const COLUMN_TYPE_REGISTRY: Record<ColumnType, ColumnTypeConfig> = {
 		canonicalName: 'Boolean',
 		category: 'boolean',
 		icon: ToggleLeft,
-		description: 'True or false',
-		aliases: ['bool']
+		description: 'True or false'
 	},
 
 	// Complex types
@@ -310,8 +289,7 @@ export const COLUMN_TYPE_REGISTRY: Record<ColumnType, ColumnTypeConfig> = {
 		canonicalName: 'List',
 		category: 'complex',
 		icon: Layers,
-		description: 'List of values',
-		aliases: ['Array']
+		description: 'List of values'
 	},
 	Array: {
 		type: 'Array',
@@ -319,8 +297,7 @@ export const COLUMN_TYPE_REGISTRY: Record<ColumnType, ColumnTypeConfig> = {
 		canonicalName: 'List',
 		category: 'complex',
 		icon: Layers,
-		description: 'Array of values',
-		aliases: ['List']
+		description: 'Array of values'
 	},
 	Struct: {
 		type: 'Struct',
@@ -328,8 +305,7 @@ export const COLUMN_TYPE_REGISTRY: Record<ColumnType, ColumnTypeConfig> = {
 		canonicalName: 'Struct',
 		category: 'complex',
 		icon: Layers,
-		description: 'Structured data',
-		aliases: []
+		description: 'Structured data'
 	},
 
 	// Other
@@ -339,8 +315,7 @@ export const COLUMN_TYPE_REGISTRY: Record<ColumnType, ColumnTypeConfig> = {
 		canonicalName: 'Binary',
 		category: 'other',
 		icon: CircleQuestionMark,
-		description: 'Binary data',
-		aliases: []
+		description: 'Binary data'
 	},
 	Object: {
 		type: 'Object',
@@ -348,8 +323,7 @@ export const COLUMN_TYPE_REGISTRY: Record<ColumnType, ColumnTypeConfig> = {
 		canonicalName: 'Object',
 		category: 'other',
 		icon: CircleQuestionMark,
-		description: 'Python object (mixed type)',
-		aliases: []
+		description: 'Python object (mixed type)'
 	},
 	Null: {
 		type: 'Null',
@@ -357,8 +331,7 @@ export const COLUMN_TYPE_REGISTRY: Record<ColumnType, ColumnTypeConfig> = {
 		canonicalName: 'Null',
 		category: 'other',
 		icon: CircleQuestionMark,
-		description: 'Null type',
-		aliases: []
+		description: 'Null type'
 	},
 	Any: {
 		type: 'Any',
@@ -366,8 +339,7 @@ export const COLUMN_TYPE_REGISTRY: Record<ColumnType, ColumnTypeConfig> = {
 		canonicalName: 'Any',
 		category: 'other',
 		icon: File,
-		description: 'Any type',
-		aliases: ['Unknown', 'unknown']
+		description: 'Any type'
 	}
 };
 
@@ -389,15 +361,11 @@ export function resolveColumnType(type?: string | null): string {
 	return getColumnTypeConfig(type).canonicalName;
 }
 
-function canonicalTypes(): ColumnTypeConfig[] {
+export function getAllColumnTypes(): ColumnTypeConfig[] {
 	const seen = new Set<string>();
 	return Object.values(COLUMN_TYPE_REGISTRY).filter((c) => {
 		if (seen.has(c.canonicalName)) return false;
 		seen.add(c.canonicalName);
 		return true;
 	});
-}
-
-export function getAllColumnTypes(): ColumnTypeConfig[] {
-	return canonicalTypes();
 }

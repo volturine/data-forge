@@ -28,7 +28,6 @@
 
 	let searchQuery = $state('');
 	let activityFilter = $state<ActivityFilter>('all');
-	let confirmOpen = $state(false);
 	let pendingComputeWorker = $state<ComputeWorkerStatusResponse | null>(null);
 
 	function computeWorkerIsIdle(computeWorker: ComputeWorkerStatusResponse): boolean {
@@ -67,33 +66,16 @@
 			error: 'Live worker updates unavailable'
 		}[computeWorkersStore.status]
 	);
-	const confirmHeading = $derived(
-		pendingComputeWorker
-			? computeWorkerShutdownHeading(pendingComputeWorker)
-			: 'Shut down compute worker?'
-	);
-	const confirmMessage = $derived(
-		pendingComputeWorker
-			? computeWorkerShutdownMessage(pendingComputeWorker)
-			: 'This will stop and remove the compute worker container.'
-	);
-	const confirmText = $derived(
-		pendingComputeWorker ? computeWorkerShutdownConfirmText(pendingComputeWorker) : 'Shut down'
-	);
-
 	function requestShutdown(computeWorker: ComputeWorkerStatusResponse): void {
 		pendingComputeWorker = computeWorker;
-		confirmOpen = true;
 	}
 
 	function cancelConfirm(): void {
-		confirmOpen = false;
 		pendingComputeWorker = null;
 	}
 
 	async function confirmShutdown(): Promise<void> {
 		const computeWorker = pendingComputeWorker;
-		confirmOpen = false;
 		pendingComputeWorker = null;
 		if (!computeWorker) return;
 
@@ -110,7 +92,7 @@
 	}
 
 	function handleClose(): void {
-		if (confirmOpen) return;
+		if (pendingComputeWorker) return;
 		onClose();
 	}
 </script>
@@ -519,12 +501,14 @@
 	{/snippet}
 </BaseModal>
 
-<ConfirmDialog
-	show={confirmOpen}
-	heading={confirmHeading}
-	message={confirmMessage}
-	{confirmText}
-	cancelText="Keep running"
-	onConfirm={confirmShutdown}
-	onCancel={cancelConfirm}
-/>
+{#if pendingComputeWorker}
+	<ConfirmDialog
+		show
+		heading={computeWorkerShutdownHeading(pendingComputeWorker)}
+		message={computeWorkerShutdownMessage(pendingComputeWorker)}
+		confirmText={computeWorkerShutdownConfirmText(pendingComputeWorker)}
+		cancelText="Keep running"
+		onConfirm={confirmShutdown}
+		onCancel={cancelConfirm}
+	/>
+{/if}

@@ -62,10 +62,6 @@
 		);
 	});
 
-	function handleColumnsChange(columns: string[]) {
-		config.input_columns = columns;
-	}
-
 	function handleMethodChange(next: 'email' | 'telegram') {
 		const prev = config.method;
 		config.method = next;
@@ -81,10 +77,6 @@
 		if (config.recipient_source !== 'column') {
 			config.recipient_source = 'manual';
 		}
-	}
-
-	function handleRecipientColumnChange(column: string) {
-		config.recipient_column = column;
 	}
 
 	function handleRecipientSourceChange(source: 'manual' | 'column') {
@@ -190,7 +182,7 @@
 					<ColumnDropdown
 						{schema}
 						value={recipientColumn}
-						onChange={handleRecipientColumnChange}
+						onChange={(column) => (config.recipient_column = column)}
 						placeholder="Select recipient column..."
 						filter={(col) =>
 							col.dtype.toLowerCase().includes('string') ||
@@ -341,7 +333,7 @@
 		<MultiSelectColumnDropdown
 			{schema}
 			value={inputColumns}
-			onChange={handleColumnsChange}
+			onChange={(columns) => (config.input_columns = columns)}
 			placeholder="Select column(s)..."
 			showSelectAll={false}
 		/>

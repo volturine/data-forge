@@ -4,13 +4,7 @@
 </script>
 
 <script lang="ts">
-	type Action<T = unknown> = (
-		node: HTMLElement,
-		value: T
-	) => {
-		update?: (value: T) => void;
-		destroy?: () => void;
-	};
+	import type { Action } from 'svelte/action';
 
 	import type { Snippet } from 'svelte';
 	import { css } from '#lib/styles/panda.js';
@@ -27,7 +21,7 @@
 		panelClass?: string;
 		size?: 'default' | 'large';
 		initialFocus?: string;
-		panelAction?: Action<unknown>;
+		panelAction?: Action<HTMLElement, unknown>;
 		panelActionValue?: unknown;
 		role?: string;
 		ariaModal?: boolean;
@@ -35,7 +29,7 @@
 		ariaDescribedby?: string;
 	}
 
-	const noopAction: Action<unknown> = () => ({
+	const noopAction: Action<HTMLElement, unknown> = () => ({
 		update: () => undefined,
 		destroy: () => undefined
 	});

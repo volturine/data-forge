@@ -3,7 +3,9 @@ import {
 	overlaySeriesLabel,
 	readNumber,
 	readString,
+	referenceAxisOf,
 	referenceLinesOf,
+	referencePositionOf,
 	type ChartConfig
 } from './format';
 import { stringValue, type ChartRow } from './preparation';
@@ -96,8 +98,8 @@ export function chartCsv(
 	for (const line of referenceLinesOf(metadata ?? null)) {
 		const value = readNumber(line, 'value');
 		if (value == null) continue;
-		const axis = readString(line, 'axis') || readString(line, 'target_axis') || 'y';
-		const position = readString(line, 'y_axis_position') || readString(line, 'target_axis');
+		const axis = referenceAxisOf(line);
+		const position = referencePositionOf(line);
 		const baseLabel = readString(line, 'label').trim();
 		const suffix = position === 'right' && axis === 'y' ? ' right' : '';
 		const dataset = baseLabel || `Reference ${axis.toUpperCase()}${suffix}`;

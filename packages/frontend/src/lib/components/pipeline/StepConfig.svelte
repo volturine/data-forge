@@ -2,7 +2,7 @@
 	import { useQueryClient } from '@tanstack/svelte-query';
 	import { onDestroy } from 'svelte';
 	import type { PipelineStep } from '#lib/types/analysis.js';
-	import type { Schema } from '#lib/types/schema.js';
+	import { emptySchema, type Schema } from '#lib/types/schema.js';
 	import { schemaStore } from '#lib/stores/schema.svelte.js';
 	import { analysisStore } from '#lib/stores/analysis.svelte.js';
 	import { configStore } from '#lib/stores/config.svelte.js';
@@ -83,24 +83,22 @@
 		return controller;
 	}
 
-	function cloneConfig(
-		config: Record<string, unknown> | null | undefined
-	): Record<string, unknown> {
-		const payload = config ?? {};
-		return cloneJson(payload);
+	function resetPivotApply(): void {
+		schemaAbortController?.abort();
+		schemaAbortController = null;
+		applyingPivotSchema = false;
+		pivotApplyError = '';
 	}
 
 	function draftFromStep(current: PipelineStep | null | undefined): Record<string, unknown> {
 		if (!current) return {};
-		return cloneConfig(
-			normalizeConfig(current.type, (current.config as Record<string, unknown>) ?? {}) as Record<
-				string,
-				unknown
-			>
-		);
+		return normalizeConfig(
+			current.type,
+			(current.config as Record<string, unknown>) ?? {}
+		) as Record<string, unknown>;
 	}
 
-	let draftStepId = $state<string | null>(step?.id ?? null);
+	const draftStepId = step?.id ?? null;
 	// One $state object, bound straight into the step form. A getter wrapper
 	// lets the inputs mutate a copy while Apply still reads this object.
 	let draftConfig = $state<StepDraft>(draftFromStep(step));
@@ -111,9 +109,7 @@
 	);
 
 	const inputSchema = $derived(
-		step
-			? (schemaStore.getInput(step.id) ?? { columns: [], row_count: null })
-			: { columns: [], row_count: null }
+		step ? (schemaStore.getInput(step.id) ?? emptySchema()) : emptySchema()
 	);
 	const pivotOutputColumns = $derived.by(() => {
 		if (step?.type !== 'pivot') return [];
@@ -185,20 +181,10 @@
 		!!step && hasChanges && applyBlockedBecause == null && !applyingPivotSchema
 	);
 
-	function handlePivotConfigChange() {
-		if (step?.type !== 'pivot') return;
-		schemaAbortController?.abort();
-		schemaAbortController = null;
-		applyingPivotSchema = false;
-		pivotApplyError = '';
-	}
-
 	async function handleApplyConfig() {
-		if (readOnly) return;
-		if (!step || !hasChanges || applyBlockReason(step.type, draftConfig) || applyingPivotSchema)
-			return;
+		if (readOnly || !step || !canApply) return;
 		const stepId = step.id;
-		const appliedConfig = cloneConfig(draftConfig);
+		const appliedConfig = cloneJson<Record<string, unknown>>(draftConfig);
 		let pivotSchema: StepSchemaResponse | null = null;
 
 		if (step.type === 'pivot') {
@@ -216,7 +202,7 @@
 							...tab,
 							steps: tab.steps.map((currentStep) =>
 								currentStep.id === stepId
-									? { ...currentStep, config: cloneConfig(appliedConfig), is_applied: true }
+									? { ...currentStep, config: cloneJson(appliedConfig), is_applied: true }
 									: currentStep
 							)
 						}
@@ -250,13 +236,11 @@
 			if (controller.signal.aborted || schemaAbortController !== controller) return;
 			if (draftStepId !== stepId || JSON.stringify(draftConfig) !== configKey) {
 				// Discard the schema result if the user moved on or changed this draft while it loaded.
-				applyingPivotSchema = false;
-				schemaAbortController = null;
+				resetPivotApply();
 				return;
 			}
 			if (result.isErr()) {
-				applyingPivotSchema = false;
-				schemaAbortController = null;
+				resetPivotApply();
 				pivotApplyError = `Could not load pivot output columns: ${result.error.message}`;
 				track({
 					event: 'schema_error',
@@ -267,8 +251,7 @@
 				return;
 			}
 			pivotSchema = result.value;
-			applyingPivotSchema = false;
-			schemaAbortController = null;
+			resetPivotApply();
 		}
 
 		if (
@@ -286,7 +269,7 @@
 
 		analysisStore.updateStepConfig(stepId, appliedConfig);
 		if (step.is_applied === false) {
-			analysisStore.updateStep(stepId, { is_applied: true } as Partial<PipelineStep>);
+			analysisStore.updateStep(stepId, { is_applied: true });
 		}
 		if (step.type === 'pivot') {
 			schemaStore.setPreviewSchema(
@@ -347,11 +330,8 @@
 	function handleCancelConfig() {
 		if (readOnly) return;
 		if (!step) return;
-		schemaAbortController?.abort();
-		schemaAbortController = null;
-		applyingPivotSchema = false;
-		pivotApplyError = '';
-		draftConfig = cloneConfig(step.config as Record<string, unknown>);
+		resetPivotApply();
+		draftConfig = cloneJson(step.config);
 	}
 
 	onDestroy(() => {
@@ -434,7 +414,7 @@
 						color: 'fg.muted',
 						_hover: { backgroundColor: 'bg.hover', color: 'fg.primary' }
 					})}
-					onclick={() => onClose?.()}
+					onclick={onClose}
 					type="button"
 					title="Close"
 				>
@@ -471,10 +451,8 @@
 			{:else if !schema && !isLoadingSchema}
 				<Callout tone="warn">
 					<p>Schema not available. Please ensure the data source is loaded.</p>
-					<button
-						class={button({ variant: 'ghost', size: 'sm' })}
-						onclick={() => onClose?.()}
-						type="button">Close</button
+					<button class={button({ variant: 'ghost', size: 'sm' })} onclick={onClose} type="button"
+						>Close</button
 					>
 				</Callout>
 			{:else if waitingForSelectedStepSchema}
@@ -537,7 +515,7 @@
 				<PivotConfig
 					schema={inputSchema}
 					bind:config={draftConfig}
-					onConfigChange={handlePivotConfigChange}
+					onConfigChange={resetPivotApply}
 					outputColumns={pivotOutputColumns}
 				/>
 			{:else if step.type === 'timeseries'}
@@ -587,7 +565,7 @@
 							color: 'fg.secondary',
 							_hover: { backgroundColor: 'bg.hover' }
 						})}
-						onclick={() => onClose?.()}
+						onclick={onClose}
 						type="button">Close</button
 					>
 				</div>
@@ -645,7 +623,7 @@
 						}
 					})}
 					onclick={handleApplyConfig}
-					disabled={!canApply || applyingPivotSchema}
+					disabled={!canApply}
 					aria-busy={applyingPivotSchema}
 					title={applyingPivotSchema
 						? 'Loading pivot output columns'

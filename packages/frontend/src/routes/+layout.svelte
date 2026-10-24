@@ -88,7 +88,6 @@
 	function bindNamespaceServices(): void {
 		if (!isNamespaceReady()) return;
 		favoriteStore.setNamespace(namespaceState.value);
-		void analysisStore.initialize(namespaceState.value);
 	}
 
 	if (typeof window !== 'undefined') {
@@ -169,8 +168,7 @@
 		});
 	}
 
-	function onWindowReject(event: Event): void {
-		const rejection = event as PromiseRejectionEvent;
+	function onWindowReject(rejection: PromiseRejectionEvent): void {
 		track({
 			event: 'client_error',
 			action: 'unhandledrejection',
@@ -312,7 +310,6 @@
 
 	let namespaceOpen = $state(false);
 	let namespaceError = $state<string | null>(null);
-	const namespaceDraft = $derived(namespaceState.value);
 
 	async function handleNamespaceSelect(value: string) {
 		await switchNamespace(value, {
@@ -373,11 +370,16 @@
 		void chatStore.open_panel();
 	}
 
+	// Not $derived: the snapshot effect must keep tracking these same dependencies.
+	function canLoadComputeWorkers(): boolean {
+		if (!appBootstrap.appReady || onAuthPage || !isNamespaceReady()) return false;
+		if (configStore.authRequired && !authStore.authenticated) return false;
+		return !!namespaceState.value;
+	}
+
 	function refreshComputeWorkersSnapshotWhenVisible(): void {
 		if (document.visibilityState !== 'visible') return;
-		if (!appBootstrap.appReady || onAuthPage || !isNamespaceReady()) return;
-		if (configStore.authRequired && !authStore.authenticated) return;
-		if (!namespaceState.value) return;
+		if (!canLoadComputeWorkers()) return;
 		computeWorkersStore.refreshSnapshot();
 	}
 
@@ -401,10 +403,7 @@
 	});
 
 	$effect(() => {
-		if (!appBootstrap.appReady || onAuthPage || !isNamespaceReady()) return;
-		if (configStore.authRequired && !authStore.authenticated) return;
-		const namespace = namespaceState.value;
-		if (!namespace) return;
+		if (!canLoadComputeWorkers()) return;
 		computeWorkersStore.loadSnapshotOnce();
 	});
 
@@ -519,7 +518,7 @@
 					onOpenChat={handleOpenChat}
 					onOpenNamespace={openNamespace}
 					onSignOut={handleSignOut}
-					namespace={namespaceDraft}
+					namespace={namespaceState.value}
 					authenticated={authStore.authenticated}
 					authRequired={configStore.authRequired}
 					avatarUrl={authStore.user?.avatar_url ?? null}
@@ -632,7 +631,7 @@
 
 		<NamespacePickerModal
 			open={namespaceOpen}
-			selected={namespaceDraft}
+			selected={namespaceState.value}
 			onSelect={handleNamespaceSelect}
 			onSelectError={handleNamespaceError}
 			onClose={() => (namespaceOpen = false)}

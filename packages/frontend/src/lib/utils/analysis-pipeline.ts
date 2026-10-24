@@ -5,8 +5,8 @@ import type {
 	PipelineStep
 } from '#lib/types/analysis.js';
 import type { DataSource } from '#lib/types/datasource.js';
+import { slugify } from '#lib/utils/analysis-tab.js';
 import { applySteps } from '#lib/utils/pipeline.js';
-import { isRecord } from '#lib/utils/json.js';
 import { normalizeConfig } from '#lib/utils/step-config-defaults.js';
 
 type PipelineDatasource = {
@@ -29,20 +29,17 @@ export type AnalysisPipelinePayload = {
 	tabs: PipelineTab[];
 };
 
-function toDatasourceConfig(config: Record<string, unknown>): AnalysisTabDatasourceConfig {
-	const branchRaw = config.branch;
-	if (typeof branchRaw !== 'string' || !branchRaw.trim()) {
-		throw new Error('datasource config.branch is required');
-	}
-	const branch = branchRaw.trim();
-	return { ...config, branch };
+function branchOf(config: Record<string, unknown>): string {
+	const branch = config.branch;
+	return typeof branch === 'string' ? branch.trim() : '';
 }
 
-function mergeDatasourceConfig(
-	persisted: Record<string, unknown>,
-	overrides: Record<string, unknown>
-): AnalysisTabDatasourceConfig {
-	return normalizeSnapshotConfig({ ...persisted, ...overrides });
+function toDatasourceConfig(config: Record<string, unknown>): AnalysisTabDatasourceConfig {
+	const branch = branchOf(config);
+	if (!branch) {
+		throw new Error('datasource config.branch is required');
+	}
+	return { ...config, branch };
 }
 
 /**
@@ -62,7 +59,7 @@ export function normalizeSnapshotConfig(
 		branches: _branches,
 		...rest
 	} = typedConfig;
-	const normalized: AnalysisTabDatasourceConfig = { ...rest, branch: rest.branch };
+	const normalized: AnalysisTabDatasourceConfig = { ...rest };
 	if (time_travel_snapshot_id != null) {
 		normalized.snapshot_id = time_travel_snapshot_id;
 		if (time_travel_snapshot_timestamp_ms != null) {
@@ -73,11 +70,11 @@ export function normalizeSnapshotConfig(
 }
 
 function toPipelineDatasource(args: {
-	analysisId: string;
 	datasource: AnalysisTab['datasource'];
 	datasourceMap: Map<string, DataSource>;
 	outputById: Map<string, string>;
-}): PipelineDatasource {
+}): PipelineDatasource | null {
+	if (!branchOf(args.datasource.config)) return null;
 	const config = normalizeSnapshotConfig(args.datasource.config);
 	if (args.datasource.analysis_tab_id) {
 		return {
@@ -97,17 +94,12 @@ function toPipelineDatasource(args: {
 		};
 	}
 	const ds = args.datasourceMap.get(args.datasource.id);
-	if (!ds) {
-		throw new Error(`datasource ${args.datasource.id} metadata is required`);
-	}
-	if (!isRecord(ds.config)) {
-		throw new Error(`datasource ${ds.id} config is invalid`);
-	}
+	if (!ds) return null;
 	return {
 		id: args.datasource.id,
 		analysis_tab_id: null,
 		source_type: ds.source_type,
-		config: mergeDatasourceConfig(ds.config, config)
+		config: normalizeSnapshotConfig({ ...ds.config, ...config })
 	};
 }
 
@@ -139,18 +131,12 @@ export function buildAnalysisPipelinePayload(
 
 	const pipelineTabs = tabs.map((tab) => {
 		const outputId = outputByTabId.get(tab.id);
-		let datasource: PipelineDatasource;
-		try {
-			datasource = toPipelineDatasource({
-				analysisId,
-				datasource: tab.datasource,
-				datasourceMap,
-				outputById
-			});
-		} catch {
-			return null;
-		}
-		if (!outputId) return null;
+		const datasource = toPipelineDatasource({
+			datasource: tab.datasource,
+			datasourceMap,
+			outputById
+		});
+		if (!datasource || !outputId) return null;
 		return {
 			id: tab.id,
 			name: tab.name,
@@ -178,21 +164,19 @@ export function buildTargetPreviewPipelinePayload(
 	tabId: string | null,
 	targetStepId: string
 ): AnalysisPipelinePayload | null {
-	let selected = tabId ? (pipeline.tabs.find((tab) => tab.id === tabId) ?? null) : null;
-	if (
-		selected &&
-		targetStepId !== 'source' &&
-		!selected.steps.some((step) => step.id === targetStepId)
-	) {
-		selected = null;
-	}
-	if (!selected && targetStepId !== 'source') {
-		selected =
-			pipeline.tabs.find((tab) => tab.steps.some((step) => step.id === targetStepId)) ?? null;
-	}
-	if (!selected) {
-		selected = pipeline.tabs.find((tab) => tab.steps.length > 0) ?? pipeline.tabs[0] ?? null;
-	}
+	const requested = tabId ? pipeline.tabs.find((tab) => tab.id === tabId) : undefined;
+	const requestedMatches =
+		requested &&
+		(targetStepId === 'source' || requested.steps.some((step) => step.id === targetStepId));
+	const targetTab =
+		targetStepId === 'source'
+			? undefined
+			: pipeline.tabs.find((tab) => tab.steps.some((step) => step.id === targetStepId));
+	const selected =
+		(requestedMatches ? requested : undefined) ??
+		targetTab ??
+		pipeline.tabs.find((tab) => tab.steps.length > 0) ??
+		pipeline.tabs[0];
 	if (!selected) return null;
 
 	const selectedId = selected.id;
@@ -234,16 +218,9 @@ export function buildDatasourcePipelinePayload(args: {
 	datasourceConfig: Record<string, unknown>;
 }): AnalysisPipelinePayload {
 	const datasource = args.datasource;
-	const normalized = normalizeSnapshotConfig(args.datasourceConfig);
-	const branch = normalized.branch.trim();
-	if (!branch) {
-		throw new Error('datasourceConfig.branch is required');
-	}
-	const normalizedConfig: AnalysisTabDatasourceConfig = { ...normalized, branch };
-	if (!datasource.name || !datasource.name.trim()) {
-		throw new Error('datasource.name is required');
-	}
-	const filename = datasource.name.trim().replace(/\s+/g, '_').toLowerCase();
+	const normalizedConfig = normalizeSnapshotConfig(args.datasourceConfig);
+	const branch = normalizedConfig.branch;
+	const filename = slugify(datasource.name, 'datasource.name');
 	const previewOutputId = `datasource-preview-${datasource.id}`;
 	const tabs: PipelineTab[] = [
 		{
@@ -275,10 +252,9 @@ export function buildDatasourcePreviewPipelinePayload(args: {
 	datasource: DataSource;
 	datasourceConfig: Record<string, unknown>;
 }): AnalysisPipelinePayload {
-	const persistedConfig = isRecord(args.datasource.config) ? args.datasource.config : {};
 	return buildDatasourcePipelinePayload({
 		datasource: args.datasource,
-		datasourceConfig: { ...persistedConfig, ...args.datasourceConfig }
+		datasourceConfig: { ...args.datasource.config, ...args.datasourceConfig }
 	});
 }
 

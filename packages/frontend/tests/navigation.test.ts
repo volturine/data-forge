@@ -54,6 +54,13 @@ test.describe('Navigation – page load smoke tests', () => {
 		await screenshot(page, 'navigation', 'datasources-page');
 	});
 
+	test('legacy datasource detail URLs redirect to the datasource list', async ({ page }) => {
+		await page.goto('/datasources/legacy-id');
+		await waitForLayoutReady(page);
+		await expect(page).toHaveURL(/\/datasources\/?$/);
+		await expect(page.getByRole('heading', { name: 'Data Sources' })).toBeVisible();
+	});
+
 	test('UDFs are not a sidebar destination', async ({ page }) => {
 		await gotoAuthedRoute(page, '/');
 		const sidebar = page.locator('aside[aria-label="Main navigation"]');
@@ -250,11 +257,14 @@ const OPENROUTER_CHAT_SETTINGS = {
 	public_idb_debug: false
 };
 
-/** Stub GET /api/v1/settings with an OpenRouter-configured profile, optionally slowing GETs. */
-async function stubChatSettings(page: Page, options: { delayGetMs?: number } = {}): Promise<void> {
+/** Stub GET /api/v1/settings with an OpenRouter-configured profile, optionally gating GETs. */
+async function stubChatSettings(
+	page: Page,
+	options: { getGate?: Promise<void> } = {}
+): Promise<void> {
 	await page.route('**/api/v1/settings', async (route) => {
-		if (options.delayGetMs && route.request().method() === 'GET') {
-			await new Promise((resolve) => setTimeout(resolve, options.delayGetMs));
+		if (route.request().method() === 'GET' && options.getGate) {
+			await options.getGate;
 		}
 		await route.fulfill({
 			status: 200,
@@ -371,9 +381,10 @@ test.describe('Navigation – chat panel smoke', () => {
 
 	test('first chat open stays neutral while provider settings and tools load', async ({ page }) => {
 		await page.addInitScript(() => localStorage.setItem('chat_session_id', 'session-1'));
-		await stubChatSettings(page, { delayGetMs: 800 });
+		const settingsGate = Promise.withResolvers<void>();
+		await stubChatSettings(page, { getGate: settingsGate.promise });
 		await page.route('**/api/v1/mcp/tools', async (route) => {
-			await new Promise((resolve) => setTimeout(resolve, 800));
+			await settingsGate.promise;
 			await route.fulfill({ status: 200, contentType: 'application/json', body: '[]' });
 		});
 		await page.route('**/api/v1/ai/chat/sessions', (route) =>
@@ -402,28 +413,33 @@ test.describe('Navigation – chat panel smoke', () => {
 			})
 		);
 
-		await gotoAuthedRoute(page, '/');
-		await page.reload();
-		const settingsRequest = page.waitForRequest(
-			(request) =>
-				request.method() === 'GET' && new URL(request.url()).pathname === '/api/v1/settings'
-		);
-		const toolsRequest = page.waitForRequest(
-			(request) =>
-				request.method() === 'GET' && new URL(request.url()).pathname === '/api/v1/mcp/tools'
-		);
-		await page.getByRole('button', { name: 'AI Assistant' }).click();
+		const trigger = page.getByRole('button', { name: 'AI Assistant' });
 		const panel = page.locator('#chat-panel');
-		await expect(panel).toBeVisible();
-		await Promise.all([settingsRequest, toolsRequest]);
+		try {
+			await gotoAuthedRoute(page, '/');
+			await page.reload();
+			const settingsRequest = page.waitForRequest(
+				(request) =>
+					request.method() === 'GET' && new URL(request.url()).pathname === '/api/v1/settings'
+			);
+			const toolsRequest = page.waitForRequest(
+				(request) =>
+					request.method() === 'GET' && new URL(request.url()).pathname === '/api/v1/mcp/tools'
+			);
+			await trigger.click();
+			await expect(panel).toBeVisible();
+			await Promise.all([settingsRequest, toolsRequest]);
 
-		await expect(panel.getByRole('status').first()).toContainText('Loading chat');
-		await expect(panel.getByRole('button', { name: 'Configure' })).toBeDisabled();
-		await expect(panel.getByText(/No AI provider is configured/)).toHaveCount(0);
-		await expect(panel.locator('select[title="Chat provider"]')).toHaveCount(0);
-		await expect(panel.getByText(/Ollama|settings unavailable|failed|not configured/i)).toHaveCount(
-			0
-		);
+			await expect(panel.getByRole('status').first()).toContainText('Loading chat');
+			await expect(panel.getByRole('button', { name: 'Configure' })).toBeDisabled();
+			await expect(panel.getByText(/No AI provider is configured/)).toHaveCount(0);
+			await expect(panel.locator('select[title="Chat provider"]')).toHaveCount(0);
+			await expect(
+				panel.getByText(/Ollama|settings unavailable|failed|not configured/i)
+			).toHaveCount(0);
+		} finally {
+			settingsGate.resolve();
+		}
 
 		await expect(panel.locator('select[title="Chat provider"]')).toHaveValue('openrouter', {
 			timeout: 5_000
@@ -432,7 +448,8 @@ test.describe('Navigation – chat panel smoke', () => {
 	});
 
 	test('chat reloads provider settings after saving them in Profile', async ({ page }) => {
-		let delayNextSettingsGet = false;
+		let holdNextSettingsGet = false;
+		const settingsGetGate = Promise.withResolvers<void>();
 		let settings: Record<string, unknown> = {
 			smtp_host: '',
 			smtp_port: 587,
@@ -448,9 +465,9 @@ test.describe('Navigation – chat panel smoke', () => {
 		};
 		await page.route('**/api/v1/settings', async (route) => {
 			if (route.request().method() === 'GET') {
-				if (delayNextSettingsGet) {
-					delayNextSettingsGet = false;
-					await new Promise((resolve) => setTimeout(resolve, 700));
+				if (holdNextSettingsGet) {
+					holdNextSettingsGet = false;
+					await settingsGetGate.promise;
 				}
 				await route.fulfill({
 					status: 200,
@@ -503,12 +520,21 @@ test.describe('Navigation – chat panel smoke', () => {
 		await expect(page.getByText('AI provider settings saved')).toBeVisible({ timeout: 5_000 });
 
 		await gotoAuthedRoute(page, '/');
-		delayNextSettingsGet = true;
-		await page.getByRole('button', { name: 'AI Assistant' }).click();
+		holdNextSettingsGet = true;
+		const settingsRequest = page.waitForRequest(
+			(request) =>
+				request.method() === 'GET' && new URL(request.url()).pathname === '/api/v1/settings'
+		);
 		panel = page.locator('#chat-panel');
-		await expect(panel.getByRole('status').first()).toContainText('Loading chat');
-		await expect(panel.getByText(/No AI provider is configured/)).toHaveCount(0);
-		await expect(panel.locator('select[title="Chat provider"]')).toHaveCount(0);
+		try {
+			await page.getByRole('button', { name: 'AI Assistant' }).click();
+			await settingsRequest;
+			await expect(panel.getByRole('status').first()).toContainText('Loading chat');
+			await expect(panel.getByText(/No AI provider is configured/)).toHaveCount(0);
+			await expect(panel.locator('select[title="Chat provider"]')).toHaveCount(0);
+		} finally {
+			settingsGetGate.resolve();
+		}
 		await expect(panel.locator('select[title="Chat provider"]')).toHaveValue('openrouter');
 		await expect(panel.getByText('Start a session and ask anything.')).toBeVisible({
 			timeout: 5_000

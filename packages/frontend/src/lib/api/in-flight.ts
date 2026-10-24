@@ -1,9 +1,12 @@
 import { err, ResultAsync, type Result } from 'neverthrow';
 import { isNamespaceReady, requireNamespace } from '#lib/stores/namespace.svelte.js';
 
+export function currentNamespace(): string | null {
+	return isNamespaceReady() ? requireNamespace() : null;
+}
+
 export function namespaceKey(): string {
-	if (!isNamespaceReady()) return '';
-	return requireNamespace();
+	return currentNamespace() ?? '';
 }
 
 export interface SharedInFlight<T, E> {
@@ -22,16 +25,10 @@ export function shareInFlight<T, E>(
 	if (existing) return existing;
 	const result = factory();
 	map.set(key, result);
-	void result.match(
-		(value) => {
-			if (map.get(key) === result) map.delete(key);
-			return value;
-		},
-		(error) => {
-			if (map.get(key) === result) map.delete(key);
-			return error;
-		}
-	);
+	const settle = (): void => {
+		if (map.get(key) === result) map.delete(key);
+	};
+	void result.match(settle, settle);
 	return result;
 }
 
@@ -63,16 +60,11 @@ export function shareInFlightWithSignal<T, E>(
 		};
 		map.set(key, entry);
 		const current = entry;
-		void result.match(
-			() => {
-				current.settled = true;
-				if (map.get(key) === current) map.delete(key);
-			},
-			() => {
-				current.settled = true;
-				if (map.get(key) === current) map.delete(key);
-			}
-		);
+		const settle = (): void => {
+			current.settled = true;
+			if (map.get(key) === current) map.delete(key);
+		};
+		void result.match(settle, settle);
 	}
 
 	const current = entry;

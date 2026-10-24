@@ -138,30 +138,20 @@
 		});
 	});
 
-	function collapseAllTools() {
+	function setAllToolsExpanded(expanded: boolean) {
 		for (const tc of chatStore.toolCalls) {
-			tc.expanded = false;
-		}
-	}
-
-	function expandAllTools() {
-		for (const tc of chatStore.toolCalls) {
-			tc.expanded = true;
+			tc.expanded = expanded;
 		}
 	}
 
 	const hasToolCalls = $derived(chatStore.toolCalls.length > 0);
+	const anyToolExpanded = $derived(chatStore.toolCalls.some((tc) => tc.expanded));
 
 	const showQuickReplies = $derived.by(() => {
 		if (chatStore.loading) return false;
 		if (chatStore.mode !== 'plan') return false;
-		for (let i = chatStore.timeline.length - 1; i >= 0; i--) {
-			const entry = chatStore.timeline[i];
-			if (entry.kind === 'message') {
-				return entry.item.role === 'assistant';
-			}
-		}
-		return false;
+		const lastMessage = chatStore.timeline.findLast((entry) => entry.kind === 'message');
+		return lastMessage?.item.role === 'assistant';
 	});
 </script>
 
@@ -406,14 +396,10 @@
 					fontFamily: 'mono',
 					_hover: { color: 'fg.primary' }
 				})}
-				onclick={() => {
-					const anyExpanded = chatStore.toolCalls.some((tc) => tc.expanded);
-					if (anyExpanded) collapseAllTools();
-					else expandAllTools();
-				}}
+				onclick={() => setAllToolsExpanded(!anyToolExpanded)}
 				type="button"
 			>
-				{chatStore.toolCalls.some((tc) => tc.expanded) ? 'Collapse all tools' : 'Expand all tools'}
+				{anyToolExpanded ? 'Collapse all tools' : 'Expand all tools'}
 			</button>
 		</div>
 	{/if}

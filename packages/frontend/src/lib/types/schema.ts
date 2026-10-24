@@ -4,9 +4,6 @@ export interface Column {
 	nullable: boolean;
 }
 
-// Alias for Column used in some places
-export type ColumnInfo = Column;
-
 export interface Schema {
 	columns: Column[];
 	row_count: number | null;
@@ -17,22 +14,12 @@ export function emptySchema(): Schema {
 	return { columns: [], row_count: null };
 }
 
-export function getColumn(schema: Schema | null, name: string): Column | null {
-	if (!schema) return null;
-	return schema.columns.find((c) => c.name === name) ?? null;
-}
-
 export function hasColumn(schema: Schema | null, name: string): boolean {
 	if (!schema) return false;
 	return schema.columns.some((c) => c.name === name);
 }
 
-export function columnNames(schema: Schema | null): string[] {
-	if (!schema) return [];
-	return schema.columns.map((c) => c.name);
-}
-
-export function unionByName(schemas: Schema[], _allowMissing: boolean = true): Schema {
+export function unionByName(schemas: Schema[]): Schema {
 	const columnMap = new Map<string, { dtype: string; nullable: boolean }>();
 
 	for (const schema of schemas) {

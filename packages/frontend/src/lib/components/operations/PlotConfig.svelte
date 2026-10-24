@@ -2,7 +2,7 @@
 	import type { Schema } from '#lib/types/schema.js';
 	import type {
 		OverlayConfig,
-		PlotConfigData as PlotConfigBase,
+		PlotConfigData,
 		ReferenceLineConfig
 	} from '#lib/types/operation-config.js';
 	import {
@@ -21,49 +21,7 @@
 	import SectionHeader from '#lib/components/ui/SectionHeader.svelte';
 	import { css, label, stepConfig, input } from '#lib/styles/panda.js';
 
-	type PlotConfigData = Omit<PlotConfigBase, 'aggregation' | 'chart_type' | 'stack_mode'> & {
-		chart_type:
-			| 'bar'
-			| 'horizontal_bar'
-			| 'area'
-			| 'heatgrid'
-			| 'histogram'
-			| 'scatter'
-			| 'line'
-			| 'pie'
-			| 'boxplot';
-		aggregation:
-			'sum' | 'mean' | 'count' | 'min' | 'max' | 'median' | 'std' | 'variance' | 'unique_count';
-		group_sort_by: 'name' | 'value' | 'custom' | null;
-		group_sort_order: 'asc' | 'desc';
-		group_sort_column: string | null;
-		stack_mode: 'grouped' | 'stacked' | '100%';
-		sort_by: 'x' | 'y' | 'custom' | null;
-		sort_order: 'asc' | 'desc';
-		sort_column: string | null;
-		x_axis_label: string | null;
-		y_axis_label: string | null;
-		y_axis_scale: 'linear' | 'log';
-		y_axis_min: number | null;
-		y_axis_max: number | null;
-		display_units: '' | 'K' | 'M' | 'B' | '%';
-		decimal_places: number;
-		legend_position: 'top' | 'bottom' | 'left' | 'right' | 'none';
-		title: string | null;
-		area_opacity: number;
-		date_bucket: 'exact' | 'year' | 'quarter' | 'month' | 'week' | 'day' | 'hour' | null;
-		date_ordinal: 'day_of_week' | 'month_of_year' | 'quarter_of_year' | null;
-		pan_zoom_enabled: boolean;
-		selection_enabled: boolean;
-		area_selection_enabled: boolean;
-		series_colors: string[];
-		overlays: OverlayConfig[];
-		reference_lines: ReferenceLineConfig[];
-		chart_height: 'small' | 'medium' | 'large' | 'xlarge';
-		chart_width: 'normal' | 'wide' | 'full';
-	};
-
-	const uid = `plot-${Math.random().toString(36).slice(2, 9)}`;
+	const uid = $props.id();
 
 	interface Props {
 		schema: Schema;
@@ -178,11 +136,13 @@
 			.filter((item) => item.length > 0);
 	}
 
-	let yMinInput = $state('');
-	let yMaxInput = $state('');
+	type AxisBoundKey = 'y_axis_min' | 'y_axis_max';
+	const axisBoundInput = $state<Record<AxisBoundKey, string>>({ y_axis_min: '', y_axis_max: '' });
+	const axisBoundDirty = $state<Record<AxisBoundKey, boolean>>({
+		y_axis_min: false,
+		y_axis_max: false
+	});
 	let decimalInput = $state('');
-	let yMinDirty = $state(false);
-	let yMaxDirty = $state(false);
 	let decimalDirty = $state(false);
 	let areaOpacityInput = $state('');
 	let areaOpacityDirty = $state(false);
@@ -195,25 +155,22 @@
 	let refLabel = $state('');
 	let refColor = $state('');
 
-	const yMinDisplay = $derived(
-		yMinDirty ? yMinInput : config.y_axis_min === null ? '' : String(config.y_axis_min)
-	);
-	const yMaxDisplay = $derived(
-		yMaxDirty ? yMaxInput : config.y_axis_max === null ? '' : String(config.y_axis_max)
-	);
+	const yMinDisplay = $derived(axisBoundDisplay('y_axis_min'));
+	const yMaxDisplay = $derived(axisBoundDisplay('y_axis_max'));
 	const decimalDisplay = $derived(decimalDirty ? decimalInput : String(config.decimal_places ?? 0));
 	const areaOpacityDisplay = $derived(
 		areaOpacityDirty ? areaOpacityInput : String(config.area_opacity ?? 0.35)
 	);
 
-	function setYAxisMin(value: string) {
-		yMinInput = value;
-		yMinDirty = true;
+	function axisBoundDisplay(key: AxisBoundKey): string {
+		if (axisBoundDirty[key]) return axisBoundInput[key];
+		const value = config[key];
+		return value === null ? '' : String(value);
 	}
 
-	function setYAxisMax(value: string) {
-		yMaxInput = value;
-		yMaxDirty = true;
+	function setAxisBound(key: AxisBoundKey, value: string) {
+		axisBoundInput[key] = value;
+		axisBoundDirty[key] = true;
 	}
 
 	function setDecimalPlaces(value: string) {
@@ -226,38 +183,15 @@
 		areaOpacityDirty = true;
 	}
 
-	function commitYAxisMin() {
-		if (yMinInput.trim() === '') {
-			config.y_axis_min = null;
-			normalizeAxisRange();
-			yMinDirty = false;
-			yMinInput = '';
-			return;
-		}
-		const parsed = Number(yMinInput);
-		config.y_axis_min = Number.isNaN(parsed) ? null : parsed;
-		if (config.y_axis_min === null) {
-			yMinInput = '';
+	function commitAxisBound(key: AxisBoundKey) {
+		const text = axisBoundInput[key];
+		const parsed = text.trim() === '' ? null : Number(text);
+		config[key] = parsed === null || Number.isNaN(parsed) ? null : parsed;
+		if (config[key] === null) {
+			axisBoundInput[key] = '';
 		}
 		normalizeAxisRange();
-		yMinDirty = false;
-	}
-
-	function commitYAxisMax() {
-		if (yMaxInput.trim() === '') {
-			config.y_axis_max = null;
-			normalizeAxisRange();
-			yMaxDirty = false;
-			yMaxInput = '';
-			return;
-		}
-		const parsed = Number(yMaxInput);
-		config.y_axis_max = Number.isNaN(parsed) ? null : parsed;
-		if (config.y_axis_max === null) {
-			yMaxInput = '';
-		}
-		normalizeAxisRange();
-		yMaxDirty = false;
+		axisBoundDirty[key] = false;
 	}
 
 	function commitDecimalPlaces() {
@@ -292,8 +226,8 @@
 		const minValue = config.y_axis_min;
 		config.y_axis_min = config.y_axis_max;
 		config.y_axis_max = minValue;
-		yMinInput = String(config.y_axis_min);
-		yMaxInput = String(config.y_axis_max);
+		axisBoundInput.y_axis_min = String(config.y_axis_min);
+		axisBoundInput.y_axis_max = String(config.y_axis_max);
 	}
 
 	function addOverlay() {
@@ -1397,8 +1331,8 @@
 									type="number"
 									class={input()}
 									value={yMinDisplay}
-									oninput={(e) => setYAxisMin(e.currentTarget.value)}
-									onblur={commitYAxisMin}
+									oninput={(e) => setAxisBound('y_axis_min', e.currentTarget.value)}
+									onblur={() => commitAxisBound('y_axis_min')}
 									placeholder="auto"
 								/>
 							</div>
@@ -1409,8 +1343,8 @@
 									type="number"
 									class={input()}
 									value={yMaxDisplay}
-									oninput={(e) => setYAxisMax(e.currentTarget.value)}
-									onblur={commitYAxisMax}
+									oninput={(e) => setAxisBound('y_axis_max', e.currentTarget.value)}
+									onblur={() => commitAxisBound('y_axis_max')}
 									placeholder="auto"
 								/>
 							</div>

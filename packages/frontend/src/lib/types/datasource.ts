@@ -22,6 +22,38 @@ export interface CSVOptions {
 	encoding: string;
 }
 
+export const DEFAULT_CSV_OPTIONS: CSVOptions = {
+	delimiter: ',',
+	quote_char: '"',
+	has_header: true,
+	skip_rows: 0,
+	encoding: 'utf8'
+};
+
+export interface ExcelConfig {
+	sheet_name: string;
+	table_name: string;
+	named_range: string;
+	cell_range: string;
+	start_row: number;
+	start_col: number;
+	end_col: number;
+	end_row: number | null;
+	has_header: boolean;
+}
+
+export const DEFAULT_EXCEL_CONFIG: ExcelConfig = {
+	sheet_name: '',
+	table_name: '',
+	named_range: '',
+	cell_range: '',
+	start_row: 0,
+	start_col: 0,
+	end_col: 0,
+	end_row: null,
+	has_header: true
+};
+
 export type DataSourceFileType = 'csv' | 'parquet' | 'json' | 'ndjson' | 'excel';
 export type DataSourceCreatedBy = 'import' | 'analysis';
 
@@ -165,6 +197,11 @@ export function datasourceIsAnalysis(datasource: DataSource): datasource is Anal
 
 export function datasourceIsAnalysisOutput(datasource: DataSource): boolean {
 	return datasource.created_by === 'analysis';
+}
+
+export function datasourceBranches(datasource: DataSource): string[] {
+	if (!datasourceIsIceberg(datasource)) return [];
+	return datasource.config.branches ?? [];
 }
 
 export function datasourceExternalSourceConfig(

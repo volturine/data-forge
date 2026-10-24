@@ -558,7 +558,7 @@
 
 	{#if createMut.isError}
 		<p class={css({ marginTop: '3', fontSize: 'xs', color: 'fg.error' })}>
-			{createMut.error instanceof Error ? createMut.error.message : 'Failed to create schedule'}
+			{createMut.error?.message ?? 'Failed to create schedule'}
 		</p>
 	{/if}
 </div>

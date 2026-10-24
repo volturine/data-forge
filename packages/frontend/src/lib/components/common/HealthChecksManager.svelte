@@ -32,6 +32,8 @@
 	} from '@lucide/svelte';
 	import { SvelteMap } from 'svelte/reactivity';
 	import ConfirmDialog from '#lib/components/common/ConfirmDialog.svelte';
+	import { createDatasourceLookupQuery } from '#lib/components/common/datasource-lookup.js';
+	import { createDeleteConfirm } from '#lib/components/common/delete-confirm.svelte.js';
 	import { useNamespace } from '#lib/stores/namespace.svelte.js';
 	import { formatDateTimeDisplay } from '#lib/utils/datetime.js';
 	import { button, css, emptyText, input, label } from '#lib/styles/panda.js';
@@ -42,23 +44,11 @@
 		searchQuery?: string;
 	}
 
-	type HealthCheckItem = HealthCheck & { critical: boolean };
-
 	let { datasourceId, compact = false, searchQuery }: Props = $props();
 	const queryClient = useQueryClient();
 	const ns = useNamespace();
 
-	const datasourcesQuery = createQuery(() => ({
-		queryKey: ['datasources-lookup', ns.value, 'include-hidden'],
-		queryFn: async () => {
-			const result = await listDatasources(true, { cache: 'no-store' });
-			if (result.isErr()) throw new Error(result.error.message);
-			return result.value;
-		},
-		staleTime: 0,
-		refetchOnMount: 'always',
-		enabled: !ns.switching
-	}));
+	const datasourcesQuery = createDatasourceLookupQuery(ns);
 
 	const datasourceMap = $derived.by(() => {
 		const map = new SvelteMap<string, DataSource>();
@@ -88,17 +78,14 @@
 			hcPage,
 			hcLimit
 		],
-		queryFn: async (): Promise<HealthCheckItem[]> => {
+		queryFn: async () => {
 			const search = effectiveSearch.trim() || undefined;
 			const offset = (hcPage - 1) * hcLimit;
 			const result = datasourceId
 				? await listHealthChecks({ datasourceId, search, limit: hcLimit, offset })
 				: await listAllHealthChecks({ search, limit: hcLimit, offset });
 			if (result.isErr()) throw new Error(result.error.message);
-			return result.value.map((check) => ({
-				...check,
-				critical: !!(check as { critical?: boolean }).critical
-			}));
+			return result.value;
 		},
 		enabled: !ns.switching
 	}));
@@ -153,8 +140,8 @@
 			await queryClient.cancelQueries({ queryKey: ['healthchecks'] });
 			// The list key also carries search and page, so update every page by prefix.
 			const listFilter = { queryKey: ['healthchecks', ns.value, datasourceId ?? 'all'] };
-			const previous = queryClient.getQueriesData<HealthCheckItem[]>(listFilter);
-			queryClient.setQueriesData<HealthCheckItem[]>(listFilter, (current) =>
+			const previous = queryClient.getQueriesData<HealthCheck[]>(listFilter);
+			queryClient.setQueriesData<HealthCheck[]>(listFilter, (current) =>
 				current?.map((c) => (c.id === payload.id ? { ...c, ...payload.update } : c))
 			);
 			return { previous };
@@ -180,22 +167,18 @@
 		}
 	}));
 
-	const checkTypes = [
-		{ value: 'row_count', label: 'Row Count' },
-		{ value: 'column_count', label: 'Column Count' },
-		{ value: 'null_percentage', label: 'Null Percentage (All Columns)' },
-		{ value: 'duplicate_percentage', label: 'Duplicate Percentage' },
-		{ value: 'column_null', label: 'Null Percentage (Column)' },
-		{ value: 'column_unique', label: 'Unique Values' },
-		{ value: 'column_range', label: 'Value Range' }
-	];
+	const checkTypeLabels: Record<CheckType, string> = {
+		row_count: 'Row Count',
+		column_count: 'Column Count',
+		null_percentage: 'Null Percentage (All Columns)',
+		duplicate_percentage: 'Duplicate Percentage',
+		column_null: 'Null Percentage (Column)',
+		column_unique: 'Unique Values',
+		column_range: 'Value Range'
+	};
 
 	const checks = $derived(listQuery.data ?? []);
-	const colCount = $derived.by(() => {
-		let count = 7;
-		if (!datasourceId) count += 1;
-		return count;
-	});
+	const colCount = $derived(datasourceId ? 7 : 8);
 
 	let creating = $state(false);
 	let createDatasources = $state.raw<DataSource[]>([]);
@@ -209,12 +192,11 @@
 	const effectiveDatasourceId = $derived(datasourceId ?? targetDatasourceId);
 	const targetChecks = $derived.by(() => {
 		const id = effectiveDatasourceId;
-		if (!id) return [] as HealthCheckItem[];
+		if (!id) return [];
 		return checks.filter((check) => check.datasource_id === id);
 	});
 	const rowCountExists = $derived(targetChecks.some((check) => check.check_type === 'row_count'));
 	const hasSearch = $derived(effectiveSearch.trim().length > 0);
-	const visibleChecks = $derived(checks);
 
 	function toggleExpand(id: string): void {
 		expandedId = expandedId === id ? null : id;
@@ -269,12 +251,6 @@
 		updateConfig('columns', items);
 	}
 
-	function getTypeLabel(value: string): string {
-		const match = checkTypes.find((type) => type.value === value);
-		if (match) return match.label;
-		return value;
-	}
-
 	function addHealthCheck(): void {
 		const targetId = effectiveDatasourceId;
 		if (!targetId) return;
@@ -290,28 +266,14 @@
 		createCheckMutation.mutate(payload);
 	}
 
-	function toggleEnabled(check: HealthCheckItem): void {
+	function toggleEnabled(check: HealthCheck): void {
 		updateMutation.mutate({
 			id: check.id,
 			update: { enabled: !check.enabled }
 		});
 	}
 
-	let deleteConfirmId = $state<string | null>(null);
-
-	function handleDelete(id: string): void {
-		deleteConfirmId = id;
-	}
-
-	function confirmDelete(): void {
-		if (!deleteConfirmId) return;
-		deleteMutation.mutate(deleteConfirmId);
-		deleteConfirmId = null;
-	}
-
-	function cancelDelete(): void {
-		deleteConfirmId = null;
-	}
+	const deleteConfirm = createDeleteConfirm((id) => deleteMutation.mutate(id));
 </script>
 
 {#snippet createForm()}
@@ -398,9 +360,9 @@
 							duplicateColumns = '';
 						}}
 					>
-						{#each checkTypes as type (type.value)}
-							<option value={type.value} disabled={rowCountExists && type.value === 'row_count'}>
-								{type.label}
+						{#each Object.entries(checkTypeLabels) as [value, typeLabel] (value)}
+							<option {value} disabled={rowCountExists && value === 'row_count'}>
+								{typeLabel}
 							</option>
 						{/each}
 					</select>
@@ -728,12 +690,12 @@
 {/snippet}
 
 <ConfirmDialog
-	show={deleteConfirmId !== null}
+	show={deleteConfirm.pendingId !== null}
 	heading="Delete Health Check"
 	message="This health check will be permanently deleted. This action cannot be undone."
 	confirmText="Delete"
-	onConfirm={confirmDelete}
-	onCancel={cancelDelete}
+	onConfirm={deleteConfirm.confirm}
+	onCancel={deleteConfirm.cancel}
 />
 
 <div class={css({ display: 'flex', flexDirection: 'column', height: '100%', width: '100%' })}>
@@ -906,13 +868,8 @@
 				color: 'fg.error'
 			})}
 		>
-			{datasourcesQuery.error instanceof Error
-				? datasourcesQuery.error.message
-				: listQuery.error instanceof Error
-					? listQuery.error.message
-					: resultsQuery.error instanceof Error
-						? resultsQuery.error.message
-						: 'Failed to load health checks.'}
+			{(datasourcesQuery.error ?? listQuery.error ?? resultsQuery.error)?.message ??
+				'Failed to load health checks.'}
 		</div>
 	{:else if checks.length === 0 && !creating && !hasSearch}
 		<div
@@ -936,7 +893,7 @@
 				</p>
 			{/if}
 		</div>
-	{:else if visibleChecks.length === 0 && hasSearch}
+	{:else if checks.length === 0 && hasSearch}
 		<div
 			class={css({
 				borderWidth: '1',
@@ -948,7 +905,7 @@
 		>
 			<p class={emptyText({ size: 'panel' })}>No health checks match your search.</p>
 		</div>
-	{:else if visibleChecks.length > 0}
+	{:else if checks.length > 0}
 		{#if !compact}
 			<div
 				class={css({
@@ -1041,7 +998,7 @@
 						</tr>
 					</thead>
 					<tbody>
-						{#each visibleChecks as check (check.id)}
+						{#each checks as check (check.id)}
 							{@const latest = latestResults.get(check.id)}
 							<tr
 								data-healthcheck-row={check.id}
@@ -1156,7 +1113,7 @@
 										color: 'fg.secondary'
 									})}
 								>
-									{getTypeLabel(check.check_type)}
+									{checkTypeLabels[check.check_type]}
 								</td>
 								<td
 									class={css({
@@ -1244,7 +1201,7 @@
 										})}
 										onclick={(e) => {
 											e.stopPropagation();
-											handleDelete(check.id);
+											deleteConfirm.request(check.id);
 										}}
 										disabled={deleteMutation.isPending}
 										aria-label="Delete check"
@@ -1276,7 +1233,7 @@
 											<div class={css({ display: 'flex', flexDirection: 'column', gap: '1' })}>
 												<span class={css({ fontSize: '2xs', color: 'fg.muted' })}>Check Type</span>
 												<span class={css({ fontSize: '2xs', color: 'fg.secondary' })}>
-													{getTypeLabel(check.check_type)}
+													{checkTypeLabels[check.check_type]}
 												</span>
 											</div>
 											{#if !datasourceId}
@@ -1348,7 +1305,7 @@
 			</div>
 		{:else}
 			<div class={css({ display: 'flex', flexDirection: 'column', gap: '1' })}>
-				{#each visibleChecks as check (check.id)}
+				{#each checks as check (check.id)}
 					{@const latest = latestResults.get(check.id)}
 					<div
 						class={css({
@@ -1466,7 +1423,7 @@
 										outlineOffset: '1px'
 									}
 								})}
-								onclick={() => handleDelete(check.id)}
+								onclick={() => deleteConfirm.request(check.id)}
 								disabled={deleteMutation.isPending}
 								aria-label="Delete check"
 							>

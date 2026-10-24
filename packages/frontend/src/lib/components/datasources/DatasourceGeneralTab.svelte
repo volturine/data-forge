@@ -1,13 +1,7 @@
 <script lang="ts">
 	import { resolve } from '$app/paths';
 	import { GitBranch, Loader, RefreshCw, Save, Upload } from '@lucide/svelte';
-	import type {
-		DataSource,
-		DatabaseDataSource,
-		FileDataSource,
-		IcebergDataSource,
-		SchemaInfo
-	} from '#lib/types/datasource.js';
+	import type { DataSource, SchemaInfo } from '#lib/types/datasource.js';
 	import {
 		datasourceExternalSourceConfig,
 		datasourceExternalSourceType,
@@ -54,28 +48,8 @@
 		onSave
 	}: Props = $props();
 
-	function isFile(value: DataSource): value is FileDataSource {
-		return datasourceIsFile(value);
-	}
-
-	function isDatabase(value: DataSource): value is DatabaseDataSource {
-		return datasourceIsDatabase(value);
-	}
-
-	function isIceberg(value: DataSource): value is IcebergDataSource {
-		return datasourceIsIceberg(value);
-	}
-
 	const isOutputDatasource = $derived(datasourceIsAnalysisOutput(ds));
 	const rowCount = $derived(schema?.row_count ?? datasourceRowCount(ds));
-
-	function getExternalSource(value: DataSource) {
-		return datasourceExternalSourceConfig(value);
-	}
-
-	function getExternalSourceType(value: DataSource) {
-		return datasourceExternalSourceType(value);
-	}
 </script>
 
 <div class={css({ display: 'flex', flexDirection: 'column', gap: '4' })}>
@@ -215,8 +189,8 @@
 				>
 			</div>
 
-			{#if isFile(ds)}
-				{@const config = (ds as FileDataSource).config}
+			{#if datasourceIsFile(ds)}
+				{@const config = ds.config}
 				<div class={css({ display: 'flex', flexDirection: 'column', gap: '1' })}>
 					<span
 						class={css({
@@ -235,7 +209,7 @@
 				</div>
 			{/if}
 
-			{#if isDatabase(ds)}
+			{#if datasourceIsDatabase(ds)}
 				{@const config = ds.config}
 				{#if config.connection_string}
 					<div class={css({ display: 'flex', flexDirection: 'column', gap: '1' })}>
@@ -257,10 +231,10 @@
 				{/if}
 			{/if}
 
-			{#if isIceberg(ds)}
-				{#if getExternalSource(ds)}
-					{@const externalSource = getExternalSource(ds)}
-					{@const externalSourceType = getExternalSourceType(ds)}
+			{#if datasourceIsIceberg(ds)}
+				{#if datasourceExternalSourceConfig(ds)}
+					{@const externalSource = datasourceExternalSourceConfig(ds)}
+					{@const externalSourceType = datasourceExternalSourceType(ds)}
 					<div
 						class={css({
 							paddingTop: '2',

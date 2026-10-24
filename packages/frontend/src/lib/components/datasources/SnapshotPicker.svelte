@@ -1,7 +1,6 @@
 <script lang="ts">
 	import { onMount, untrack } from 'svelte';
-	import { listIcebergSnapshots } from '#lib/api/datasource.js';
-	import { apiRequest } from '#lib/api/client.js';
+	import { deleteIcebergSnapshot, listIcebergSnapshots } from '#lib/api/datasource.js';
 	import { Trash2, ChevronDown, Clock } from '@lucide/svelte';
 	import { SvelteMap } from 'svelte/reactivity';
 	import {
@@ -45,13 +44,7 @@
 	const initialUi = untrack(
 		() => (datasourceConfig.time_travel_ui as Record<string, unknown> | undefined) ?? {}
 	);
-	const startOpen = untrack(() =>
-		persistOpen
-			? Boolean(initialUi.open)
-			: initialUi.open !== undefined
-				? Boolean(initialUi.open)
-				: false
-	);
+	const startOpen = untrack(() => Boolean(initialUi.open));
 	let snapshotsOpen = $state(startOpen);
 	let triggerRef = $state<HTMLButtonElement>();
 	let popoverRef = $state<HTMLDivElement>();
@@ -76,20 +69,17 @@
 	let deleteConfirmId = $state<string | null>(null);
 	let deleteLoading = $state(false);
 	let deleteError = $state<string | null>(null);
-	const filteredSnapshotList = $derived(snapshotList);
-	const calendarDays = $derived.by(() => computeCalendarDays(snapshotMonth, filteredSnapshotList));
+	const calendarDays = $derived.by(() => computeCalendarDays(snapshotMonth, snapshotList));
 	const effectiveSelectedDay = $derived.by(() => {
 		if (!selectedDay) return '';
-		if (filteredSnapshotList.some((snap) => formatSnapshotKey(snap.timestamp) === selectedDay)) {
+		if (snapshotList.some((snap) => formatSnapshotKey(snap.timestamp) === selectedDay)) {
 			return selectedDay;
 		}
 		return '';
 	});
 	const filteredSnapshots = $derived(
 		effectiveSelectedDay
-			? filteredSnapshotList.filter(
-					(snap) => formatSnapshotKey(snap.timestamp) === effectiveSelectedDay
-				)
+			? snapshotList.filter((snap) => formatSnapshotKey(snap.timestamp) === effectiveSelectedDay)
 			: []
 	);
 	const missingSnapshotId = $derived(
@@ -149,9 +139,8 @@
 			.sort((a, b) => b.timestamp - a.timestamp);
 		snapshotList = list;
 		snapshotsLoaded = true;
-		const monthSource = showBuildPreviews ? filteredSnapshotList : list;
 		const monthOptions = Array.from(
-			new Set(monthSource.map((snap) => formatSnapshotKey(snap.timestamp).slice(0, 7)))
+			new Set(list.map((snap) => formatSnapshotKey(snap.timestamp).slice(0, 7)))
 		).sort((a, b) => (a > b ? -1 : 1));
 		const persistedMonth = (datasourceConfig.time_travel_ui as Record<string, unknown>)?.month as
 			string | undefined;
@@ -322,9 +311,7 @@
 		if (!showDelete) return;
 		deleteLoading = true;
 		deleteError = null;
-		apiRequest<void>(`/v1/compute/iceberg/${datasourceId}/snapshots/${snapshotId}`, {
-			method: 'DELETE'
-		}).match(
+		deleteIcebergSnapshot(datasourceId, snapshotId).match(
 			() => {
 				deleteConfirmId = null;
 				deleteLoading = false;
@@ -544,7 +531,7 @@
 				</div>
 			{:else if snapshotsError}
 				<div class={css({ fontSize: 'xs', color: 'fg.error' })}>{snapshotsError}</div>
-			{:else if filteredSnapshotList.length === 0}
+			{:else if snapshotList.length === 0}
 				<div class={css({ fontSize: 'xs', color: 'fg.tertiary' })}>No snapshots found.</div>
 			{:else}
 				<div class={css({ display: 'flex', gap: '2' })}>

@@ -24,7 +24,7 @@
 
 	let {
 		schema,
-		value = $bindable(),
+		value,
 		onChange,
 		placeholder = 'Select column...',
 		filter,

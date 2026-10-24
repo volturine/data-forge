@@ -10,8 +10,7 @@ import type {
 	BuildStarterJson as ProtocolBuildStarterJson,
 	BuildStepKindJson as ProtocolBuildStepKindJson,
 	BuildStepSnapshotJson as ProtocolBuildStepSnapshotJson,
-	BuildTabResultJson as ProtocolBuildTabResultJson,
-	BuildWebsocketErrorMessageJson as ProtocolBuildWebsocketErrorMessageJson
+	BuildTabResultJson as ProtocolBuildTabResultJson
 } from '#lib/protocol/dataforge_protocol/compute_pb.js';
 import type {
 	BuildLifecycleStatus,
@@ -20,6 +19,8 @@ import type {
 	BuildTabStatus,
 	ComputeWorkerRunKind
 } from '#lib/types/protocol-enum-tokens.js';
+import { COMPUTE_WORKER_RUN_KIND_TOKENS } from '#lib/types/protocol-enum-tokens.js';
+import type { Field, NumberField, StringField } from '#lib/types/compute.js';
 
 export type {
 	BuildLifecycleStatus,
@@ -29,9 +30,6 @@ export type {
 	ComputeWorkerRunKind
 };
 
-type Field<T, K extends keyof T> = NonNullable<T[K]>;
-type StringField<T, K extends keyof T> = Extract<Field<T, K>, string>;
-type NumberField<T, K extends keyof T> = Extract<Field<T, K>, number>;
 type OptionalStringField<T, K extends keyof T> = StringField<T, K> | null;
 type OptionalNumberField<T, K extends keyof T> = NumberField<T, K> | null;
 type StructHttpField<T, K extends keyof T> =
@@ -44,8 +42,7 @@ type BuildStepTypeField =
 		? string
 		: never;
 
-export interface BuildPlanEvent {
-	type: 'plan';
+export interface BuildEventContext {
 	build_id: string;
 	analysis_id: string;
 	emitted_at: string;
@@ -57,23 +54,16 @@ export interface BuildPlanEvent {
 	current_output_id: string | null;
 	current_output_name: string | null;
 	compute_worker_run_id: string | null;
+}
+
+export interface BuildPlanEvent extends BuildEventContext {
+	type: 'plan';
 	optimized_plan: string;
 	unoptimized_plan: string;
 }
 
-export interface BuildStepStartEvent {
+export interface BuildStepStartEvent extends BuildEventContext {
 	type: 'step_start';
-	build_id: string;
-	analysis_id: string;
-	emitted_at: string;
-	sequence: number | null;
-	current_kind: ComputeWorkerRunKind | null;
-	current_datasource_id: string | null;
-	tab_id: string | null;
-	tab_name: string | null;
-	current_output_id: string | null;
-	current_output_name: string | null;
-	compute_worker_run_id: string | null;
 	build_step_index: number;
 	step_index: number;
 	step_id: string;
@@ -82,19 +72,8 @@ export interface BuildStepStartEvent {
 	total_steps: number;
 }
 
-export interface BuildStepCompleteEvent {
+export interface BuildStepCompleteEvent extends BuildEventContext {
 	type: 'step_complete';
-	build_id: string;
-	analysis_id: string;
-	emitted_at: string;
-	sequence: number | null;
-	current_kind: ComputeWorkerRunKind | null;
-	current_datasource_id: string | null;
-	tab_id: string | null;
-	tab_name: string | null;
-	current_output_id: string | null;
-	current_output_name: string | null;
-	compute_worker_run_id: string | null;
 	build_step_index: number;
 	step_index: number;
 	step_id: string;
@@ -105,19 +84,8 @@ export interface BuildStepCompleteEvent {
 	total_steps: number;
 }
 
-export interface BuildStepFailedEvent {
+export interface BuildStepFailedEvent extends BuildEventContext {
 	type: 'step_failed';
-	build_id: string;
-	analysis_id: string;
-	emitted_at: string;
-	sequence: number | null;
-	current_kind: ComputeWorkerRunKind | null;
-	current_datasource_id: string | null;
-	tab_id: string | null;
-	tab_name: string | null;
-	current_output_id: string | null;
-	current_output_name: string | null;
-	compute_worker_run_id: string | null;
 	build_step_index: number;
 	step_index: number;
 	step_id: string;
@@ -127,19 +95,8 @@ export interface BuildStepFailedEvent {
 	total_steps: number;
 }
 
-export interface BuildProgressEvent {
+export interface BuildProgressEvent extends BuildEventContext {
 	type: 'progress';
-	build_id: string;
-	analysis_id: string;
-	emitted_at: string;
-	sequence: number | null;
-	current_kind: ComputeWorkerRunKind | null;
-	current_datasource_id: string | null;
-	tab_id: string | null;
-	tab_name: string | null;
-	current_output_id: string | null;
-	current_output_name: string | null;
-	compute_worker_run_id: string | null;
 	progress: number;
 	elapsed_ms: number;
 	estimated_remaining_ms: number | null;
@@ -148,19 +105,8 @@ export interface BuildProgressEvent {
 	total_steps: number;
 }
 
-export interface BuildResourceEvent {
+export interface BuildResourceEvent extends BuildEventContext {
 	type: 'resources';
-	build_id: string;
-	analysis_id: string;
-	emitted_at: string;
-	sequence: number | null;
-	current_kind: ComputeWorkerRunKind | null;
-	current_datasource_id: string | null;
-	tab_id: string | null;
-	tab_name: string | null;
-	current_output_id: string | null;
-	current_output_name: string | null;
-	compute_worker_run_id: string | null;
 	cpu_percent: number;
 	memory_mb: number;
 	memory_limit_mb: number | null;
@@ -168,19 +114,8 @@ export interface BuildResourceEvent {
 	max_threads: number | null;
 }
 
-export interface BuildLogEvent {
+export interface BuildLogEvent extends BuildEventContext {
 	type: 'log';
-	build_id: string;
-	analysis_id: string;
-	emitted_at: string;
-	sequence: number | null;
-	current_kind: ComputeWorkerRunKind | null;
-	current_datasource_id: string | null;
-	tab_id: string | null;
-	tab_name: string | null;
-	current_output_id: string | null;
-	current_output_name: string | null;
-	compute_worker_run_id: string | null;
 	level: BuildLogLevel;
 	message: string;
 	step_name: string | null;
@@ -196,19 +131,8 @@ export interface BuildTabResult {
 	error: OptionalStringField<ProtocolBuildTabResultJson, 'error'>;
 }
 
-export interface BuildCompleteEvent {
+export interface BuildCompleteEvent extends BuildEventContext {
 	type: 'complete';
-	build_id: string;
-	analysis_id: string;
-	emitted_at: string;
-	sequence: number | null;
-	current_kind: ComputeWorkerRunKind | null;
-	current_datasource_id: string | null;
-	tab_id: string | null;
-	tab_name: string | null;
-	current_output_id: string | null;
-	current_output_name: string | null;
-	compute_worker_run_id: string | null;
 	progress: number;
 	elapsed_ms: number;
 	total_steps: number;
@@ -217,19 +141,8 @@ export interface BuildCompleteEvent {
 	duration_ms: number;
 }
 
-export interface BuildFailedEvent {
+export interface BuildFailedEvent extends BuildEventContext {
 	type: 'failed';
-	build_id: string;
-	analysis_id: string;
-	emitted_at: string;
-	sequence: number | null;
-	current_kind: ComputeWorkerRunKind | null;
-	current_datasource_id: string | null;
-	tab_id: string | null;
-	tab_name: string | null;
-	current_output_id: string | null;
-	current_output_name: string | null;
-	compute_worker_run_id: string | null;
 	progress: number;
 	elapsed_ms: number;
 	total_steps: number;
@@ -239,19 +152,8 @@ export interface BuildFailedEvent {
 	error: string | null;
 }
 
-export interface BuildCancelledEvent {
+export interface BuildCancelledEvent extends BuildEventContext {
 	type: 'cancelled';
-	build_id: string;
-	analysis_id: string;
-	emitted_at: string;
-	sequence: number | null;
-	current_kind: ComputeWorkerRunKind | null;
-	current_datasource_id: string | null;
-	tab_id: string | null;
-	tab_name: string | null;
-	current_output_id: string | null;
-	current_output_name: string | null;
-	compute_worker_run_id: string | null;
 	progress: number;
 	elapsed_ms: number;
 	total_steps: number;
@@ -385,12 +287,6 @@ export interface BuildDetailSnapshot {
 	last_sequence?: NumberField<ProtocolBuildSnapshotMessageJson, 'lastSequence'>;
 }
 
-export interface BuildWebsocketErrorMessage {
-	type: 'error';
-	error: StringField<ProtocolBuildWebsocketErrorMessageJson, 'error'>;
-	status_code: NumberField<ProtocolBuildWebsocketErrorMessageJson, 'statusCode'>;
-}
-
 export interface BuildRunListResponse {
 	builds: Field<ProtocolBuildRunListResponseJson, 'builds'> extends unknown[]
 		? BuildRunSummary[]
@@ -425,20 +321,9 @@ export type QueryPlan = {
 	unoptimized: string;
 };
 
-const COMPUTE_WORKER_RUN_KINDS = new Set<ComputeWorkerRunKind>([
-	'build',
-	'preview',
-	'row_count',
-	'download',
-	'ingest'
-]);
-const BUILD_STEP_STATES = new Set<BuildStepState>([
-	'pending',
-	'running',
-	'completed',
-	'failed',
-	'skipped'
-]);
+const COMPUTE_WORKER_RUN_KINDS = new Set<ComputeWorkerRunKind>(
+	Object.values(COMPUTE_WORKER_RUN_KIND_TOKENS)
+);
 const BUILD_STATUS_TONES: Record<BuildStatus, BuildStatusTone> = {
 	connecting: 'accent',
 	queued: 'accent',
@@ -484,22 +369,8 @@ export function readComputeWorkerRunKind(value: unknown): ComputeWorkerRunKind |
 		: null;
 }
 
-export function readBuildStepState(value: unknown): BuildStepState | null {
-	return typeof value === 'string' && BUILD_STEP_STATES.has(value as BuildStepState)
-		? (value as BuildStepState)
-		: null;
-}
-
-export function coerceBuildStepState(value: unknown): BuildStepState {
-	return readBuildStepState(value) ?? 'pending';
-}
-
 export function isTerminalBuildStatus(status: BuildStatus): boolean {
 	return status === 'completed' || status === 'failed' || status === 'cancelled';
-}
-
-export function buildResultStatusFromLifecycle(status: BuildLifecycleStatus): BuildStatus {
-	return status;
 }
 
 export function buildStatusLabel(status: BuildStatus, currentStep: string | null = null): string {

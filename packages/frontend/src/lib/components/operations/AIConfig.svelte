@@ -11,10 +11,6 @@
 
 	let { config = $bindable(), schema }: Props = $props();
 
-	function handleColumnsChange(columns: string[]) {
-		config.input_columns = columns;
-	}
-
 	const inputColumns = $derived(Array.isArray(config?.input_columns) ? config.input_columns : []);
 
 	const placeholderHint = $derived.by(() => {
@@ -77,7 +73,7 @@
 		<MultiSelectColumnDropdown
 			{schema}
 			value={inputColumns}
-			onChange={handleColumnsChange}
+			onChange={(columns) => (config.input_columns = columns)}
 			placeholder="Select column(s)..."
 			showSelectAll={false}
 		/>

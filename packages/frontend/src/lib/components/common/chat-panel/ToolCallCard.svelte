@@ -12,7 +12,6 @@
 		Copy,
 		ClipboardCheck
 	} from '@lucide/svelte';
-	import { onDestroy } from 'svelte';
 	import { css } from '#lib/styles/panda.js';
 	import { chatStore } from '#lib/stores/chat.svelte.js';
 	import type { ToolCall } from '#lib/stores/chat.svelte.js';
@@ -22,6 +21,7 @@
 		resultSummary,
 		toolDisplayName
 	} from '#lib/chat/presentation.js';
+	import { createCopyFeedback } from '#lib/chat/copy-feedback.svelte.js';
 
 	interface Props {
 		tc: ToolCall;
@@ -36,22 +36,7 @@
 		tc.startedAt && tc.status === 'running' ? tick - tc.startedAt : undefined
 	);
 
-	let copiedId = $state<string | null>(null);
-	let copiedTimer: ReturnType<typeof setTimeout> | null = null;
-
-	async function copyToClipboard(text: string, id: string) {
-		await navigator.clipboard.writeText(text).catch(() => {});
-		copiedId = id;
-		if (copiedTimer) clearTimeout(copiedTimer);
-		copiedTimer = setTimeout(() => {
-			copiedTimer = null;
-			if (copiedId === id) copiedId = null;
-		}, 2000);
-	}
-
-	onDestroy(() => {
-		if (copiedTimer) clearTimeout(copiedTimer);
-	});
+	const copyFeedback = createCopyFeedback(2000);
 </script>
 
 <div
@@ -313,13 +298,13 @@
 							_hover: { color: 'fg.primary' }
 						})}
 						onclick={() =>
-							void copyToClipboard(JSON.stringify(tc.args, null, 2), `args-${tc.tool_id}`)}
+							void copyFeedback.copy(JSON.stringify(tc.args, null, 2), `args-${tc.tool_id}`)}
 						type="button"
 						title="Copy arguments"
 					>
-						{#if copiedId === `args-${tc.tool_id}`}<ClipboardCheck size={9} />{:else}<Copy
+						{#if copyFeedback.copiedId === `args-${tc.tool_id}`}<ClipboardCheck
 								size={9}
-							/>{/if}
+							/>{:else}<Copy size={9} />{/if}
 					</button>
 				</div>
 				<pre
@@ -360,11 +345,11 @@
 							_hover: { color: 'fg.primary' }
 						})}
 						onclick={() =>
-							void copyToClipboard(JSON.stringify(tc.result, null, 2), `result-${tc.tool_id}`)}
+							void copyFeedback.copy(JSON.stringify(tc.result, null, 2), `result-${tc.tool_id}`)}
 						type="button"
 						title="Copy response"
 					>
-						{#if copiedId === `result-${tc.tool_id}`}
+						{#if copyFeedback.copiedId === `result-${tc.tool_id}`}
 							<ClipboardCheck size={9} />
 						{:else}
 							<Copy size={9} />

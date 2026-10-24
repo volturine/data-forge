@@ -1,23 +1,15 @@
 <script lang="ts">
 	import type { Schema } from '#lib/types/schema.js';
+	import type { UnpivotConfigData } from '#lib/types/operation-config.js';
 	import MultiSelectColumnDropdown from '#lib/components/common/MultiSelectColumnDropdown.svelte';
 	import { css, label, stepConfig, input } from '#lib/styles/panda.js';
 
 	interface Props {
 		schema: Schema;
-		config: {
-			id_vars?: string[];
-			value_vars?: string[];
-			variable_name?: string;
-			value_name?: string;
-		};
+		config: UnpivotConfigData;
 	}
 
 	let { schema, config = $bindable() }: Props = $props();
-
-	// Helper to get config value with default
-	const get = <T,>(key: keyof typeof config, defaultValue: T): T =>
-		(config[key] as T) ?? defaultValue;
 </script>
 
 <div class={stepConfig()} role="region" aria-label="Unpivot configuration">
@@ -90,7 +82,7 @@
 			data-testid="unpivot-variable-input"
 			type="text"
 			class={input()}
-			value={get('variable_name', 'variable')}
+			value={config.variable_name ?? 'variable'}
 			oninput={(e) => (config.variable_name = e.currentTarget.value)}
 			placeholder="variable"
 		/>
@@ -103,7 +95,7 @@
 			data-testid="unpivot-value-input"
 			type="text"
 			class={input()}
-			value={get('value_name', 'value')}
+			value={config.value_name ?? 'value'}
 			oninput={(e) => (config.value_name = e.currentTarget.value)}
 			placeholder="value"
 		/>

@@ -2,7 +2,7 @@ import { describe, expect, test, vi } from 'vitest';
 import { timestampedAnalysisName } from './analysis-name';
 
 vi.mock('#lib/utils/datetime.js', () => ({
-	getTimezoneSettings: () => ({ timezone: 'UTC' })
+	getTimezoneSettings: () => 'UTC'
 }));
 
 const NOW = new Date(Date.UTC(2026, 9, 6, 14, 32, 5, 123));

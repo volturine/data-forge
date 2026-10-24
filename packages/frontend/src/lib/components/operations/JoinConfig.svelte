@@ -6,6 +6,7 @@
 	import { schemaStore } from '#lib/stores/schema.svelte.js';
 	import { analysisStore } from '#lib/stores/analysis.svelte.js';
 	import { uuid } from '#lib/utils/uuid.js';
+	import { fetchSourceSchema } from '#lib/components/operations/source-schemas.js';
 	import DatasourcePicker from '#lib/components/common/DatasourcePicker.svelte';
 	import ColumnDropdown from '#lib/components/common/ColumnDropdown.svelte';
 	import MultiSelectColumnDropdown from '#lib/components/common/MultiSelectColumnDropdown.svelte';
@@ -13,8 +14,6 @@
 	import Callout from '#lib/components/ui/Callout.svelte';
 	import { X } from '@lucide/svelte';
 	import { css, stepConfig, label, input, button } from '#lib/styles/panda.js';
-
-	const _uid = $props.id();
 
 	interface Props {
 		schema: Schema;
@@ -55,23 +54,10 @@
 
 		rightSchemaLoading = true;
 		rightSchemaError = null;
-		if (options.forceRefresh) {
-			datasourceStore.clearSchemaCache(datasourceId);
-		}
 
 		try {
-			const schemaInfo = await datasourceStore.getSchema(datasourceId, {
-				refresh: options.forceRefresh === true
-			});
+			const joinSchema = await fetchSourceSchema(datasourceId, options);
 			if (generation !== loadGeneration) return;
-			const joinSchema: Schema = {
-				columns: schemaInfo.columns.map((c) => ({
-					name: c.name,
-					dtype: c.dtype,
-					nullable: c.nullable
-				})),
-				row_count: schemaInfo.row_count
-			};
 			rightSchema = joinSchema;
 			rightSchemaError = null;
 			schemaStore.setJoinDatasource(datasourceId, joinSchema);

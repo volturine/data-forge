@@ -171,13 +171,15 @@ describe('api client cache policy', () => {
 			method: () => 'GET',
 			postData: () => null,
 			headers: () => ({ 'x-request-id': 'client-request-id' }),
+			timing: () => ({ startTime: 1_000, requestStart: 0, responseStart: -1, responseEnd: -1 }),
 			failure: () => ({ errorText: 'net::ERR_ABORTED' })
 		} as unknown as Request;
 		const successfulRequest = {
 			url: () => 'https://app.example/api/v1/auth/me',
 			method: () => 'GET',
 			postData: () => null,
-			headers: () => ({ 'x-request-id': 'successful-client-request-id' })
+			headers: () => ({ 'x-request-id': 'successful-client-request-id' }),
+			timing: () => ({ startTime: 1_100, requestStart: 5, responseStart: 35, responseEnd: 42 })
 		} as unknown as Request;
 		const response = {
 			request: () => successfulRequest,
@@ -202,12 +204,17 @@ describe('api client cache policy', () => {
 				clientRequestId: string | null;
 				requestId: string | null;
 				failureText: string | null;
+				browserTimingStartEpochMs: number | null;
+				browserTimingResponseEndMs: number | null;
 			}[];
 			expect(entries[0]?.clientRequestId).toBe('client-request-id');
 			expect(entries[0]?.requestId).toBeNull();
 			expect(entries[0]?.failureText).toBe('net::ERR_ABORTED');
+			expect(entries[0]?.browserTimingStartEpochMs).toBe(1_000);
+			expect(entries[0]?.browserTimingResponseEndMs).toBeNull();
 			expect(entries[1]?.clientRequestId).toBe('successful-client-request-id');
 			expect(entries[1]?.requestId).toBe('server-request-id');
+			expect(entries[1]?.browserTimingResponseEndMs).toBe(42);
 		} finally {
 			rmSync(dir, { recursive: true, force: true });
 			vi.unstubAllEnvs();

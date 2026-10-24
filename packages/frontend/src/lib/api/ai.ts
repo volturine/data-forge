@@ -12,19 +12,28 @@ export interface AIConnectionResult {
 	detail: string;
 }
 
+function providerRequestBody(
+	provider: string,
+	endpointUrl?: string | null,
+	apiKey?: string | null,
+	organizationId?: string | null
+): string {
+	const body: Record<string, string> = { provider };
+	if (endpointUrl) body.endpoint_url = endpointUrl;
+	if (apiKey) body.api_key = apiKey;
+	if (organizationId) body.organization_id = organizationId;
+	return JSON.stringify(body);
+}
+
 export function listAIModels(
 	provider: string,
 	endpointUrl?: string | null,
 	apiKey?: string | null,
 	organizationId?: string | null
 ): ResultAsync<AIModel[], ApiError> {
-	const body: Record<string, string> = { provider };
-	if (endpointUrl) body.endpoint_url = endpointUrl;
-	if (apiKey) body.api_key = apiKey;
-	if (organizationId) body.organization_id = organizationId;
 	return apiRequest<AIModel[]>('/v1/ai/models', {
 		method: 'POST',
-		body: JSON.stringify(body)
+		body: providerRequestBody(provider, endpointUrl, apiKey, organizationId)
 	});
 }
 
@@ -34,12 +43,8 @@ export function testAIConnection(
 	apiKey?: string | null,
 	organizationId?: string | null
 ): ResultAsync<AIConnectionResult, ApiError> {
-	const body: Record<string, string> = { provider };
-	if (endpointUrl) body.endpoint_url = endpointUrl;
-	if (apiKey) body.api_key = apiKey;
-	if (organizationId) body.organization_id = organizationId;
 	return apiRequest<AIConnectionResult>('/v1/ai/test', {
 		method: 'POST',
-		body: JSON.stringify(body)
+		body: providerRequestBody(provider, endpointUrl, apiKey, organizationId)
 	});
 }

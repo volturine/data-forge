@@ -2,6 +2,7 @@
 	import { Search, LoaderCircle } from '@lucide/svelte';
 	import { css, button, input, label } from '#lib/styles/panda.js';
 	import { chatStore } from '#lib/stores/chat.svelte.js';
+	import { filterChatModels } from '#lib/chat/presentation.js';
 
 	interface Props {
 		maximized: boolean;
@@ -18,7 +19,7 @@
 	let modelSearch = $state('');
 
 	async function saveConfig() {
-		chatStore.setProvider(providerDraft as 'openrouter' | 'ollama');
+		chatStore.setProvider(providerDraft);
 		chatStore.model = modelDraft;
 		chatStore.systemPrompt = systemPromptDraft;
 		await chatStore.configure(apiKeyDraft);
@@ -26,7 +27,7 @@
 	}
 
 	function handleLoadModels() {
-		chatStore.setProvider(providerDraft as 'openrouter' | 'ollama');
+		chatStore.setProvider(providerDraft);
 		chatStore.apiKey = apiKeyDraft;
 		void chatStore.loadModels();
 	}
@@ -36,15 +37,7 @@
 		modelSearch = '';
 	}
 
-	const filteredModels = $derived(
-		modelSearch
-			? chatStore.models.filter(
-					(m) =>
-						m.id.toLowerCase().includes(modelSearch.toLowerCase()) ||
-						m.name.toLowerCase().includes(modelSearch.toLowerCase())
-				)
-			: chatStore.models
-	);
+	const filteredModels = $derived(filterChatModels(chatStore.models, modelSearch));
 </script>
 
 <div

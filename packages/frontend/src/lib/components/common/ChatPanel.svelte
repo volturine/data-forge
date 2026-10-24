@@ -51,14 +51,13 @@
 		return panelComponents;
 	}
 
-	let configOpen = $state(false);
-	let toolsOpen = $state(false);
-	let sessionsOpen = $state(false);
+	type OpenPanel = 'config' | 'tools' | 'sessions';
+	let openPanel = $state<OpenPanel | null>(null);
 	let inputValue = $state('');
 	let inputEl = $state<HTMLTextAreaElement | undefined>();
 	let messagesRef = $state<{ resetScroll(): void } | undefined>();
 	const layout = new ChatPanelLayout();
-	const anyPanelOpen = $derived(configOpen || toolsOpen || sessionsOpen);
+	const anyPanelOpen = $derived(openPanel !== null);
 	if (typeof window !== 'undefined') layout.restore();
 
 	function focusInput() {
@@ -104,26 +103,19 @@
 		focusInput();
 	}
 
-	function togglePanel(panel: 'config' | 'tools' | 'sessions') {
-		if (panel === 'config') {
-			configOpen = !configOpen;
-			toolsOpen = false;
-			sessionsOpen = false;
-			if (configOpen && chatStore.models.length === 0) {
-				void chatStore.loadModels();
-			}
-		} else if (panel === 'tools') {
-			toolsOpen = !toolsOpen;
-			configOpen = false;
-			sessionsOpen = false;
-		} else if (panel === 'sessions') {
-			sessionsOpen = !sessionsOpen;
-			configOpen = false;
-			toolsOpen = false;
-			if (sessionsOpen) {
-				void chatStore.loadSessions();
-			}
+	function togglePanel(panel: OpenPanel) {
+		openPanel = openPanel === panel ? null : panel;
+		if (openPanel === 'config' && chatStore.models.length === 0) {
+			void chatStore.loadModels();
 		}
+		if (openPanel === 'sessions') {
+			void chatStore.loadSessions();
+		}
+	}
+
+	// A save can finish after another panel was opened; only the config panel's own close applies.
+	function closeConfigPanel() {
+		if (openPanel === 'config') openPanel = null;
 	}
 
 	function onPatch(e: Event) {
@@ -150,10 +142,8 @@
 	// Overlay config for the panel — two-level escape: close sub-panels first, then close panel.
 	const chatOverlayConfig = $derived<OverlayConfig>({
 		onEscape: () => {
-			if (configOpen || toolsOpen || sessionsOpen) {
-				configOpen = false;
-				toolsOpen = false;
-				sessionsOpen = false;
+			if (openPanel !== null) {
+				openPanel = null;
 				return;
 			}
 			chatStore.close();
@@ -365,7 +355,7 @@
 									transitionTimingFunction: 'ease',
 									_hover: { backgroundColor: 'bg.hover', color: 'fg.primary' }
 								}),
-								toolsOpen && css({ color: 'fg.primary' })
+								openPanel === 'tools' && css({ color: 'fg.primary' })
 							]}
 							onclick={() => togglePanel('tools')}
 							title="Tools"
@@ -388,7 +378,7 @@
 									transitionTimingFunction: 'ease',
 									_hover: { backgroundColor: 'bg.hover', color: 'fg.primary' }
 								}),
-								sessionsOpen && css({ color: 'fg.primary' })
+								openPanel === 'sessions' && css({ color: 'fg.primary' })
 							]}
 							onclick={() => togglePanel('sessions')}
 							title="Sessions"
@@ -411,7 +401,7 @@
 									transitionTimingFunction: 'ease',
 									_hover: { backgroundColor: 'bg.hover', color: 'fg.primary' }
 								}),
-								configOpen && css({ color: 'fg.primary' })
+								openPanel === 'config' && css({ color: 'fg.primary' })
 							]}
 							onclick={() => togglePanel('config')}
 							disabled={chatStore.initState === 'loading'}
@@ -450,15 +440,15 @@
 			</div>
 
 			<!-- Config panel -->
-			{#if configOpen && chatStore.initState !== 'loading'}
-				<ChatConfigPanel maximized={layout.maximized} onClose={() => (configOpen = false)} />
+			{#if openPanel === 'config' && chatStore.initState !== 'loading'}
+				<ChatConfigPanel maximized={layout.maximized} onClose={closeConfigPanel} />
 			{/if}
 
-			{#if toolsOpen}
+			{#if openPanel === 'tools'}
 				<ChatToolsPanel maximized={layout.maximized} />
 			{/if}
 
-			{#if sessionsOpen}
+			{#if openPanel === 'sessions'}
 				<ChatSessionsPanel maximized={layout.maximized} />
 			{/if}
 

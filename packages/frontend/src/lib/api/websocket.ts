@@ -1,5 +1,7 @@
 import { getClientIdentity, getEditorClientId } from '#lib/stores/clientIdentity.svelte.js';
 import { requireNamespace } from '#lib/stores/namespace.svelte.js';
+import { isRecord } from '#lib/utils/json.js';
+import { buildBackendUrl } from './client';
 
 const CLOSE_NORMAL = 1000;
 const CLOSE_GOING_AWAY = 1001;
@@ -86,10 +88,7 @@ export function closeOwnedEventSource(source: EventSource): void {
 }
 
 export function buildWebsocketUrl(endpoint: string): string {
-	const base = import.meta.env.DEV
-		? `http://${window.location.hostname}:${import.meta.env.VITE_BACKEND_PORT ?? '8000'}`
-		: window.location.origin;
-	const url = new URL(`/api${endpoint}`, base);
+	const url = new URL(buildBackendUrl(endpoint), window.location.origin);
 	url.protocol = url.protocol === 'https:' ? 'wss:' : 'ws:';
 	const identity = getClientIdentity();
 	const namespace = requireNamespace();
@@ -127,19 +126,27 @@ export interface StreamHandle {
 	close: () => void;
 }
 
-function isErrorMessage(msg: unknown): msg is { type: 'error'; error: string } {
-	if (msg === null || typeof msg !== 'object') return false;
-	const value = msg as Record<string, unknown>;
-	return value.type === 'error' && typeof value.error === 'string';
+export interface StreamErrorMessage {
+	type: 'error';
+	error: string;
 }
 
-export function createStream<TSnapshot, TEvent = never, TMessage extends object = { type: string }>(
+export function isErrorMessage(value: unknown): value is StreamErrorMessage {
+	return isRecord(value) && value.type === 'error' && typeof value.error === 'string';
+}
+
+export function createStream<
+	TSnapshot,
+	TEvent = never,
+	TMessage extends object = { type: string },
+	TSnapshotMessage extends TMessage = TMessage
+>(
 	endpoint: string,
 	options: {
 		parse: (data: string) => TMessage | null;
-		isSnapshot: (msg: TMessage) => boolean;
-		extractSnapshot: (msg: TMessage) => TSnapshot;
-		extractEvent?: (msg: TMessage) => TEvent;
+		isSnapshot: (msg: TMessage) => msg is TSnapshotMessage;
+		extractSnapshot: (msg: TSnapshotMessage) => TSnapshot;
+		extractEvent?: (msg: Exclude<TMessage, TSnapshotMessage | StreamErrorMessage>) => TEvent;
 		callbacks: StreamCallbacks<TSnapshot, TEvent>;
 	}
 ): StreamHandle {
@@ -157,7 +164,9 @@ export function createStream<TSnapshot, TEvent = never, TMessage extends object 
 			return;
 		}
 		if (options.extractEvent && options.callbacks.onEvent) {
-			options.callbacks.onEvent(options.extractEvent(msg));
+			// Snapshot and error messages returned above; TypeScript cannot narrow the generic.
+			const eventMessage = msg as Exclude<TMessage, TSnapshotMessage | StreamErrorMessage>;
+			options.callbacks.onEvent(options.extractEvent(eventMessage));
 		}
 	});
 

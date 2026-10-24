@@ -41,6 +41,13 @@ const EDGE_STYLES: Record<EdgeType, { color: string; dash: string }> = {
 	consumes_internal: { color: 'var(--colors-fg-faint)', dash: '6 4' }
 };
 
+export const LINEAGE_KIND_LABELS: Record<NodeKind, string> = {
+	source: 'Source',
+	output: 'Output',
+	internal: 'Internal',
+	analysis: 'Analysis'
+};
+
 type ElkInstance = InstanceType<typeof ElkConstructor>;
 
 interface ElkWorkerSession {
@@ -254,7 +261,7 @@ export function buildFlowGraph(
 		if (seen.has(id)) continue;
 		if (!positions.has(edge.from) || !positions.has(edge.to)) continue;
 		seen.add(id);
-		const stroke = EDGE_STYLES[edge.type] ?? EDGE_STYLES.uses;
+		const stroke = EDGE_STYLES[edge.type];
 		edges.push({
 			id,
 			source: edge.from,

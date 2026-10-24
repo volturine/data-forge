@@ -11,7 +11,8 @@
 	import PipelineMinimap from './PipelineMinimap.svelte';
 	import { css } from '#lib/styles/panda.js';
 	import { ClipboardPaste, Plus, Eye, ArrowDown } from '@lucide/svelte';
-	import { stepTypes, isChartStep } from './utils';
+	import { stepTypes } from './utils';
+	import { isChartStepType } from '#lib/types/pipeline-step.js';
 
 	export interface ClipboardStep {
 		type: string;
@@ -48,7 +49,7 @@
 		datasourceId,
 		datasource = null,
 		datasourceLabel = null,
-		tabName: _tabName,
+		tabName,
 		activeTab = null,
 		onStepClick,
 		onStepDelete,
@@ -56,10 +57,10 @@
 		onInsertStep,
 		onPasteStep,
 		onMoveStep,
-		onChangeDatasource: _onChangeDatasource,
-		onRenameTab: _onRenameTab,
-		onDuplicateTab: _onDuplicateTab,
-		onResourceConfigChange: _onResourceConfigChange,
+		onChangeDatasource,
+		onRenameTab,
+		onDuplicateTab,
+		onResourceConfigChange,
 		readOnly = false
 	}: Props = $props();
 
@@ -140,7 +141,7 @@
 				showPasteError('Clipboard does not contain a valid step');
 				return;
 			}
-			if (!(parsed.type in stepTypes) && !isChartStep(parsed.type)) {
+			if (!(parsed.type in stepTypes) && !isChartStepType(parsed.type)) {
 				showPasteError(`Unknown step type: ${parsed.type}`);
 				return;
 			}
@@ -174,7 +175,7 @@
 			}
 		}
 
-		if (drag.type && isChartStep(drag.type)) {
+		if (drag.type && isChartStepType(drag.type)) {
 			return true;
 		}
 
@@ -400,12 +401,12 @@
 					{datasource}
 					{datasourceLabel}
 					{analysisId}
-					tabName={_tabName}
+					{tabName}
 					{activeTab}
-					onChangeDatasource={_onChangeDatasource}
-					onRenameTab={_onRenameTab}
-					onDuplicateTab={_onDuplicateTab}
-					onResourceConfigChange={_onResourceConfigChange}
+					{onChangeDatasource}
+					{onRenameTab}
+					{onDuplicateTab}
+					{onResourceConfigChange}
 					{readOnly}
 				/>
 			</div>
@@ -432,12 +433,7 @@
 					ondrop={(e) => handleDrop(e, 0)}
 				>
 					{#if canDrop}
-						<ConnectionLine
-							fromStepIndex={-1}
-							toStepIndex={0}
-							totalSteps={steps.length + 1}
-							highlighted={hoverIndex === 0}
-						/>
+						<ConnectionLine highlighted={hoverIndex === 0} />
 						<div
 							class={css({
 								marginY: '2',
@@ -473,12 +469,7 @@
 								>
 							{/if}
 						</div>
-						<ConnectionLine
-							fromStepIndex={-1}
-							toStepIndex={0}
-							totalSteps={steps.length + 1}
-							highlighted={hoverIndex === 0}
-						/>
+						<ConnectionLine highlighted={hoverIndex === 0} />
 					{:else}
 						<div
 							class={css({
@@ -489,19 +480,8 @@
 								justifyContent: 'center'
 							})}
 						>
-							<ConnectionLine
-								fromStepIndex={-1}
-								toStepIndex={0}
-								totalSteps={steps.length + 1}
-								highlighted={false}
-								arrow={false}
-							/>
-							<ConnectionLine
-								fromStepIndex={-1}
-								toStepIndex={0}
-								totalSteps={steps.length + 1}
-								highlighted={false}
-							/>
+							<ConnectionLine highlighted={false} arrow={false} />
+							<ConnectionLine highlighted={false} />
 							{#if !readOnly}
 								<div class={insertControls}>
 									<button
@@ -541,13 +521,12 @@
 					})}
 					aria-hidden="true"
 				>
-					<ConnectionLine fromStepIndex={-1} toStepIndex={0} totalSteps={steps.length} />
+					<ConnectionLine />
 				</div>
 			{/if}
 			{#each steps as step, i (step.id)}
 				<StepNode
 					{step}
-					index={i}
 					{analysisId}
 					{datasourceId}
 					allSteps={steps}
@@ -581,12 +560,7 @@
 					>
 						{#if canDrop}
 							{#if i < steps.length - 1 || !drag.isReorder || drag.stepId !== step.id}
-								<ConnectionLine
-									fromStepIndex={i}
-									toStepIndex={i + 1}
-									totalSteps={steps.length}
-									highlighted={hoverIndex === i + 1}
-								/>
+								<ConnectionLine highlighted={hoverIndex === i + 1} />
 							{/if}
 							<div
 								class={css({
@@ -624,12 +598,7 @@
 									>
 								{/if}
 							</div>
-							<ConnectionLine
-								fromStepIndex={i}
-								toStepIndex={i + 1}
-								totalSteps={steps.length}
-								highlighted={hoverIndex === i + 1}
-							/>
+							<ConnectionLine highlighted={hoverIndex === i + 1} />
 						{:else}
 							<div
 								class={css({
@@ -640,19 +609,8 @@
 									justifyContent: 'center'
 								})}
 							>
-								<ConnectionLine
-									fromStepIndex={i}
-									toStepIndex={i + 1}
-									totalSteps={steps.length}
-									highlighted={false}
-									arrow={false}
-								/>
-								<ConnectionLine
-									fromStepIndex={i}
-									toStepIndex={i + 1}
-									totalSteps={steps.length}
-									highlighted={false}
-								/>
+								<ConnectionLine highlighted={false} arrow={false} />
+								<ConnectionLine highlighted={false} />
 								{#if !readOnly}
 									<div class={insertControls}>
 										<button
@@ -696,7 +654,7 @@
 						})}
 						aria-hidden="true"
 					>
-						<ConnectionLine fromStepIndex={i} toStepIndex={i + 1} totalSteps={steps.length} />
+						<ConnectionLine />
 					</div>
 				{/if}
 			{/each}

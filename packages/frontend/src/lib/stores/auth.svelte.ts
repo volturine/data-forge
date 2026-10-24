@@ -1,33 +1,39 @@
 import { getMe, login, logout, register, updateProfile, type UserPublic } from '#lib/api/auth.js';
+import type { ApiError } from '#lib/api/client.js';
+import type { Result } from 'neverthrow';
 
 type AuthStatus = 'unknown' | 'authenticated' | 'unauthenticated' | 'failed';
 
 export class AuthStore {
 	user = $state<UserPublic | null>(null);
 	status = $state<AuthStatus>('unknown');
-	loading = $state(false);
 	error = $state<string | null>(null);
 	private operationVersion = 0;
 	private resolvePending: Promise<void> | null = null;
 
 	private beginOperation(): number {
 		const version = ++this.operationVersion;
-		this.loading = true;
 		this.error = null;
 		return version;
 	}
 
-	private finishOperation(version: number): void {
-		if (version === this.operationVersion) this.loading = false;
+	private settleUserResult(result: Result<UserPublic, ApiError>, authenticated: boolean): boolean {
+		let success = false;
+		result.match(
+			(user) => {
+				this.user = user;
+				if (authenticated) this.status = 'authenticated';
+				success = true;
+			},
+			(err) => {
+				this.error = err.message;
+			}
+		);
+		return success;
 	}
 
 	get authenticated(): boolean {
 		return this.status === 'authenticated' && this.user !== null;
-	}
-
-	/** Auth has a terminal answer for bootstrap (including hard failure). */
-	get resolved(): boolean {
-		return this.status !== 'unknown';
 	}
 
 	/** Bootstrap cannot proceed: session probe failed without a clear 401. */
@@ -66,7 +72,6 @@ export class AuthStore {
 			);
 		})().finally(() => {
 			if (this.resolvePending === request) this.resolvePending = null;
-			this.finishOperation(version);
 		});
 
 		this.resolvePending = request;
@@ -77,38 +82,14 @@ export class AuthStore {
 		const version = this.beginOperation();
 		const result = await login({ email, password });
 		if (version !== this.operationVersion) return false;
-		let success = false;
-		result.match(
-			(user) => {
-				this.user = user;
-				this.status = 'authenticated';
-				success = true;
-			},
-			(err) => {
-				this.error = err.message;
-			}
-		);
-		this.finishOperation(version);
-		return success;
+		return this.settleUserResult(result, true);
 	}
 
 	async register(email: string, password: string, name: string): Promise<boolean> {
 		const version = this.beginOperation();
 		const result = await register({ email, password, display_name: name });
 		if (version !== this.operationVersion) return false;
-		let success = false;
-		result.match(
-			(user) => {
-				this.user = user;
-				this.status = 'authenticated';
-				success = true;
-			},
-			(err) => {
-				this.error = err.message;
-			}
-		);
-		this.finishOperation(version);
-		return success;
+		return this.settleUserResult(result, true);
 	}
 
 	async logout(): Promise<void> {
@@ -127,25 +108,7 @@ export class AuthStore {
 		const version = this.beginOperation();
 		const result = await updateProfile(payload);
 		if (version !== this.operationVersion) return false;
-		let success = false;
-		result.match(
-			(user) => {
-				this.user = user;
-				success = true;
-			},
-			(err) => {
-				this.error = err.message;
-			}
-		);
-		this.finishOperation(version);
-		return success;
-	}
-
-	clear(): void {
-		this.operationVersion += 1;
-		this.user = null;
-		this.status = 'unauthenticated';
-		this.error = null;
+		return this.settleUserResult(result, false);
 	}
 }
 

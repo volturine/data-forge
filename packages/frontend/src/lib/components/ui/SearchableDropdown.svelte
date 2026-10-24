@@ -81,7 +81,7 @@
 
 	let {
 		options,
-		value = $bindable(),
+		value,
 		onChange,
 		renderOption,
 		placeholder = 'Select...',
@@ -148,18 +148,10 @@
 		});
 	});
 
-	function updateValue(next: string | string[]) {
-		onChange(next);
-	}
-
 	function handleSelect(id: string) {
 		if (mode === 'single') {
-			updateValue(id);
-			if (!alwaysOpen) {
-				menuOpen = false;
-				searchValue = '';
-				onClose?.();
-			}
+			onChange(id);
+			closeMenu();
 			return;
 		}
 		const current = new SvelteSet(selectedSet);
@@ -168,17 +160,17 @@
 		} else {
 			current.add(id);
 		}
-		updateValue(Array.from(current));
+		onChange(Array.from(current));
 	}
 
 	function selectAll() {
 		if (mode !== 'multi') return;
-		updateValue(filteredOptions.map((option) => option.id));
+		onChange(filteredOptions.map((option) => option.id));
 	}
 
 	function deselectAll() {
 		if (mode !== 'multi') return;
-		updateValue([]);
+		onChange([]);
 	}
 
 	function openMenu() {
@@ -334,13 +326,13 @@
 					})}
 					onclick={(e) => {
 						e.stopPropagation();
-						updateValue(mode === 'multi' ? [] : '');
+						onChange(mode === 'multi' ? [] : '');
 						onClose?.();
 					}}
 					onkeydown={(e) => {
 						if (e.key === 'Enter' || e.key === ' ') {
 							e.stopPropagation();
-							updateValue(mode === 'multi' ? [] : '');
+							onChange(mode === 'multi' ? [] : '');
 							onClose?.();
 						}
 					}}

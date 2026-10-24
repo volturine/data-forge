@@ -162,11 +162,7 @@
 		triggerMut.mutate({ id, trigger_on_datasource_id: value || null });
 	}
 
-	const colCount = $derived.by(() => {
-		let count = 7;
-		if (!datasourceId) count += 1;
-		return count;
-	});
+	const colCount = $derived(datasourceId ? 7 : 8);
 </script>
 
 {#snippet descriptionBlock(schedule: Schedule)}

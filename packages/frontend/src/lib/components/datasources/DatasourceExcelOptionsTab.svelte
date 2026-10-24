@@ -1,20 +1,8 @@
-<script lang="ts" module>
-	export type ExcelConfig = {
-		sheet_name: string;
-		table_name: string;
-		named_range: string;
-		cell_range: string;
-		start_row: number;
-		start_col: number;
-		end_col: number;
-		end_row: number | null;
-		has_header: boolean;
-	};
-</script>
-
 <script lang="ts">
 	import { Loader, Save } from '@lucide/svelte';
 	import ExcelTableSelector from '#lib/components/common/ExcelTableSelector.svelte';
+	import { DEFAULT_EXCEL_CONFIG } from '#lib/types/datasource.js';
+	import type { ExcelConfig } from '#lib/types/datasource.js';
 	import { css } from '#lib/styles/panda.js';
 
 	interface Props {
@@ -28,17 +16,7 @@
 
 	let {
 		filePath,
-		config = $bindable({
-			sheet_name: '',
-			table_name: '',
-			named_range: '',
-			cell_range: '',
-			start_row: 0,
-			start_col: 0,
-			end_col: 0,
-			end_row: null,
-			has_header: true
-		}),
+		config = $bindable({ ...DEFAULT_EXCEL_CONFIG }),
 		pending,
 		hasChanges,
 		onDirty,

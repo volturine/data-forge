@@ -43,7 +43,6 @@ function truncate(items: string[], max = 3, len = 20): string {
 type StepTypeConfig = {
 	label: string;
 	icon: typeof Funnel;
-	typeLabel: string;
 	summary: (c: Record<string, unknown>) => string;
 };
 
@@ -51,7 +50,6 @@ const stepTypes = {
 	filter: {
 		label: 'Filter',
 		icon: Funnel,
-		typeLabel: 'filter',
 		summary: (c) => {
 			const conds = c.conditions as Array<{ column: string; operator: string; value: string }>;
 			const logic = (c.logic as string) || 'AND';
@@ -65,7 +63,6 @@ const stepTypes = {
 	select: {
 		label: 'Select',
 		icon: ListChecks,
-		typeLabel: 'select',
 		summary: (c) => {
 			const cols = c.columns as string[];
 			return cols?.length ? truncate(cols) : 'no columns';
@@ -74,7 +71,6 @@ const stepTypes = {
 	groupby: {
 		label: 'Group By',
 		icon: ChartColumn,
-		typeLabel: 'group_by',
 		summary: (c) => {
 			const keys = c.group_by as string[];
 			const aggs = c.aggregations as Array<{ column: string; function: string }>;
@@ -91,7 +87,6 @@ const stepTypes = {
 	sort: {
 		label: 'Sort',
 		icon: ArrowUpDown,
-		typeLabel: 'sort',
 		summary: (c) => {
 			const cols = c.columns as string[];
 			const desc = c.descending as boolean[];
@@ -102,7 +97,6 @@ const stepTypes = {
 	rename: {
 		label: 'Rename',
 		icon: Pencil,
-		typeLabel: 'rename',
 		summary: (c) => {
 			const map = c.column_mapping as Record<string, string>;
 			const entries = Object.entries(map || {});
@@ -114,7 +108,6 @@ const stepTypes = {
 	drop: {
 		label: 'Drop',
 		icon: Trash2,
-		typeLabel: 'drop',
 		summary: (c) => {
 			const cols = c.columns as string[];
 			return cols?.length ? truncate(cols) : 'no columns';
@@ -123,7 +116,6 @@ const stepTypes = {
 	join: {
 		label: 'Join',
 		icon: Link,
-		typeLabel: 'join',
 		summary: (c) => {
 			const how = (c.how as string) || 'inner';
 			const joins = c.join_columns as Array<{ left_column: string }>;
@@ -136,7 +128,6 @@ const stepTypes = {
 	expression: {
 		label: 'Expression',
 		icon: Calculator,
-		typeLabel: 'expression',
 		summary: (c) => {
 			const expr = c.expression as string;
 			const col = c.column_name as string;
@@ -148,7 +139,6 @@ const stepTypes = {
 	with_columns: {
 		label: 'With Columns',
 		icon: Calculator,
-		typeLabel: 'with_columns',
 		summary: (c) => {
 			const expressions = c.expressions as Array<{ name?: string }>;
 			if (!expressions?.length) return 'no columns';
@@ -162,7 +152,6 @@ const stepTypes = {
 	pivot: {
 		label: 'Pivot',
 		icon: Repeat,
-		typeLabel: 'pivot',
 		summary: (c) => {
 			const col = c.columns as string;
 			const vals = Array.isArray(c.value_columns) ? (c.value_columns as string[]) : [];
@@ -177,7 +166,6 @@ const stepTypes = {
 	unpivot: {
 		label: 'Unpivot',
 		icon: Repeat2,
-		typeLabel: 'unpivot',
 		summary: (c) => {
 			const valueVars = c.value_vars as string[] | undefined;
 			const varName = (c.variable_name as string) || 'variable';
@@ -189,7 +177,6 @@ const stepTypes = {
 	fill_null: {
 		label: 'Fill Null',
 		icon: Wrench,
-		typeLabel: 'fill_null',
 		summary: (c) => {
 			const strategy = (c.strategy as string) || 'literal';
 			const cols = c.columns as string[] | null;
@@ -202,7 +189,6 @@ const stepTypes = {
 	deduplicate: {
 		label: 'Deduplicate',
 		icon: Brush,
-		typeLabel: 'deduplicate',
 		summary: (c) => {
 			const subset = c.subset as string[] | null;
 			const keep = (c.keep as string) || 'first';
@@ -213,7 +199,6 @@ const stepTypes = {
 	explode: {
 		label: 'Explode',
 		icon: Bomb,
-		typeLabel: 'explode',
 		summary: (c) => {
 			const cols = c.columns as string[];
 			return cols?.length ? truncate(cols) : 'no column';
@@ -222,7 +207,6 @@ const stepTypes = {
 	timeseries: {
 		label: 'Time Series',
 		icon: Calendar,
-		typeLabel: 'timeseries',
 		summary: (c) => {
 			const col = c.column as string;
 			const op = c.operation_type as string;
@@ -245,7 +229,6 @@ const stepTypes = {
 	string_transform: {
 		label: 'String Transform',
 		icon: Type,
-		typeLabel: 'string',
 		summary: (c) => {
 			const col = c.column as string;
 			const method = c.method as string;
@@ -264,7 +247,6 @@ const stepTypes = {
 	sample: {
 		label: 'Sample',
 		icon: Dices,
-		typeLabel: 'sample',
 		summary: (c) => {
 			const frac = c.fraction as number | undefined;
 			const seed = c.seed as number | null | undefined;
@@ -276,7 +258,6 @@ const stepTypes = {
 	limit: {
 		label: 'Limit',
 		icon: Scissors,
-		typeLabel: 'limit',
 		summary: (c) => {
 			const n = c.n as number;
 			return n !== undefined ? `${n} rows` : 'not configured';
@@ -285,7 +266,6 @@ const stepTypes = {
 	topk: {
 		label: 'Top K',
 		icon: Trophy,
-		typeLabel: 'topk',
 		summary: (c) => {
 			const col = c.column as string;
 			const k = c.k as number;
@@ -298,7 +278,6 @@ const stepTypes = {
 	chart: {
 		label: 'Chart',
 		icon: ChartColumnIncreasing,
-		typeLabel: 'chart',
 		summary: (c) => {
 			const chartType = (c.chart_type as string) || 'chart';
 			const x = c.x_column as string;
@@ -313,7 +292,6 @@ const stepTypes = {
 	notification: {
 		label: 'Notify',
 		icon: Bell,
-		typeLabel: 'notification',
 		summary: (c) => {
 			const method = (c.method as string) || 'email';
 			return `via ${method}`;
@@ -322,7 +300,6 @@ const stepTypes = {
 	ai: {
 		label: 'AI',
 		icon: Sparkles,
-		typeLabel: 'ai',
 		summary: (c) => {
 			const cols = c.input_columns as string[] | undefined;
 			const output = c.output_column as string;
@@ -333,13 +310,11 @@ const stepTypes = {
 	view: {
 		label: 'View',
 		icon: Eye,
-		typeLabel: 'view',
 		summary: (c) => `limit ${(c.rowLimit as number) ?? 100} rows`
 	},
 	union_by_name: {
 		label: 'Union By Name',
 		icon: LayoutGrid,
-		typeLabel: 'union_by_name',
 		summary: (c) => {
 			const sources = c.sources as string[];
 			const allowMissing = c.allow_missing as boolean;
@@ -351,7 +326,6 @@ const stepTypes = {
 	export: {
 		label: 'Export',
 		icon: Upload,
-		typeLabel: 'export',
 		summary: (c) => {
 			const filename = (c.filename as string) || 'export';
 			const format = (c.format as string) || 'csv';
@@ -365,7 +339,6 @@ const stepTypes = {
 	download: {
 		label: 'Download',
 		icon: Download,
-		typeLabel: 'download',
 		summary: (c) => {
 			const filename = (c.filename as string) || 'download';
 			const format = (c.format as string) || 'csv';
@@ -381,7 +354,6 @@ function hasStepTypeConfig(type: string): type is keyof typeof stepTypes {
 const defaultStepType: StepTypeConfig = {
 	label: 'Unknown',
 	icon: Settings2,
-	typeLabel: 'unknown',
 	summary: () => 'click to configure'
 };
 
@@ -401,11 +373,4 @@ function normalizeStepType(type: string): string {
 	return normalizePipelineStepType(type);
 }
 
-export {
-	type StepTypeConfig,
-	defaultStepType,
-	stepTypes,
-	getStepTypeConfig,
-	isChartStep,
-	normalizeStepType
-};
+export { type StepTypeConfig, stepTypes, getStepTypeConfig, isChartStep, normalizeStepType };

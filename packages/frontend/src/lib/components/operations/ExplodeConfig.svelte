@@ -4,6 +4,7 @@
 	import MultiSelectColumnDropdown from '#lib/components/common/MultiSelectColumnDropdown.svelte';
 	import SectionHeader from '#lib/components/ui/SectionHeader.svelte';
 	import Callout from '#lib/components/ui/Callout.svelte';
+	import { getColumnTypeConfig } from '#lib/utils/column-types.js';
 	import { css, stepConfig } from '#lib/styles/panda.js';
 
 	interface Props {
@@ -13,19 +14,9 @@
 
 	let { schema, config = $bindable() }: Props = $props();
 
-	const hasListColumns = $derived(
-		schema.columns.some(
-			(col) =>
-				col.dtype.toLowerCase().includes('list') ||
-				col.dtype.toLowerCase().includes('array') ||
-				col.dtype.toLowerCase().startsWith('list[')
-		)
-	);
-
-	function isListColumn(col: { name: string; dtype: string }): boolean {
-		const d = col.dtype.toLowerCase();
-		return d.includes('list') || d.includes('array');
-	}
+	const isListColumn = (col: { dtype: string }) =>
+		getColumnTypeConfig(col.dtype).canonicalName === 'List';
+	const hasListColumns = $derived(schema.columns.some(isListColumn));
 </script>
 
 <div class={stepConfig()}>

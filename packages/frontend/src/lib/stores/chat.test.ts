@@ -39,7 +39,7 @@ vi.mock('#lib/stores/analysis.svelte.js', () => ({
 }));
 
 vi.mock('#lib/stores/schema.svelte.js', () => ({
-	schemaStore: { getLastOutput: () => null }
+	schemaStore: { calculatedSchema: null }
 }));
 
 // Mock localStorage + window for the test environment (chat store guards with `typeof window`)
@@ -143,10 +143,6 @@ describe('ChatStore — pure local logic', () => {
 			store.provider = 'openrouter';
 			store.apiKey = '';
 			store.sessionId = 'session-1';
-			const refreshConfigured = Reflect.get(store, '_refreshConfigured') as
-				(() => void) | undefined;
-			expect(refreshConfigured).toBeTypeOf('function');
-			refreshConfigured?.call(store);
 			expect(store.configured).toBe(true);
 		});
 
@@ -310,7 +306,7 @@ describe('ChatStore — pure local logic', () => {
 		test('resetForSignOut clears settings before another account opens chat', () => {
 			store.settings = makeSettings({ openrouter_api_key: '••••••••' });
 			store.provider = 'openrouter';
-			store.configured = true;
+			expect(store.configured).toBe(true);
 			store.initState = 'ready';
 
 			store.resetForSignOut();
@@ -383,20 +379,21 @@ describe('ChatStore — pure local logic', () => {
 			store.provider = 'openrouter';
 			store.apiKey = '';
 			store.settings = makeSettings();
-			const refreshConfigured = Reflect.get(store, '_refreshConfigured') as
-				(() => void) | undefined;
-			refreshConfigured?.call(store);
 			expect(store.configured).toBe(false);
+		});
+
+		test('entering an api key marks openrouter configured without a refresh', () => {
+			store.provider = 'openrouter';
+			store.settings = makeSettings();
+			expect(store.configured).toBe(false);
+			store.apiKey = 'sk-test';
+			expect(store.configured).toBe(true);
 		});
 
 		test('reset clears session-backed configured state when no provider key is stored', () => {
 			store.provider = 'openrouter';
 			store.settings = makeSettings();
 			store.sessionId = 'session-1';
-			const refreshConfigured = Reflect.get(store, '_refreshConfigured') as
-				(() => void) | undefined;
-			expect(refreshConfigured).toBeTypeOf('function');
-			refreshConfigured?.call(store);
 			expect(store.configured).toBe(true);
 
 			store.reset();
@@ -691,12 +688,7 @@ describe('ChatStore — pure local logic', () => {
 				path: '/action',
 				args: { x: 1 }
 			});
-			expect(store.pendingConfirm).toEqual({
-				tool_id: 'tool-1',
-				method: 'POST',
-				path: '/action',
-				args: { x: 1 }
-			});
+			expect(store.pendingConfirm).toEqual({ tool_id: 'tool-1' });
 			expect(store.toolCalls[0].status).toBe('confirming');
 		});
 	});

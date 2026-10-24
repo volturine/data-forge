@@ -1,16 +1,10 @@
 import { describe, test, expect, vi, beforeEach } from 'vitest';
 import type { DataSource, SchemaInfo } from '#lib/types/datasource.js';
 
-const mockListDatasources = vi.fn();
-const mockUploadFile = vi.fn();
 const mockGetDatasourceSchema = vi.fn();
-const mockDeleteDatasource = vi.fn();
 
 vi.mock('#lib/api/datasource.js', () => ({
-	listDatasources: (...args: unknown[]) => mockListDatasources(...args),
-	uploadFile: (...args: unknown[]) => mockUploadFile(...args),
-	getDatasourceSchema: (...args: unknown[]) => mockGetDatasourceSchema(...args),
-	deleteDatasource: (...args: unknown[]) => mockDeleteDatasource(...args)
+	getDatasourceSchema: (...args: unknown[]) => mockGetDatasourceSchema(...args)
 }));
 
 const { DatasourceStore } = await import('./datasource.svelte');
@@ -37,40 +31,6 @@ function makeSchema(overrides: Partial<SchemaInfo> = {}): SchemaInfo {
 	};
 }
 
-function mockListSuccess(datasources: DataSource[]) {
-	mockListDatasources.mockReturnValue({
-		match: (onOk: (ds: DataSource[]) => void) => {
-			onOk(datasources);
-			return Promise.resolve();
-		}
-	});
-}
-
-function mockListError(message: string) {
-	mockListDatasources.mockReturnValue({
-		match: (_onOk: unknown, onErr: (e: { message: string }) => void) => {
-			onErr({ message });
-			return Promise.resolve();
-		}
-	});
-}
-
-function mockUploadSuccess(datasource: DataSource) {
-	mockUploadFile.mockReturnValue({
-		match: (onOk: (ds: DataSource) => DataSource) => {
-			return Promise.resolve(onOk(datasource));
-		}
-	});
-}
-
-function mockUploadError(message: string) {
-	mockUploadFile.mockReturnValue({
-		match: (_onOk: unknown, onErr: (e: { message: string }) => never) => {
-			return Promise.resolve().then(() => onErr({ message }));
-		}
-	});
-}
-
 function mockSchemaSuccess(schema: SchemaInfo) {
 	mockGetDatasourceSchema.mockReturnValue({
 		match: (onOk: (s: SchemaInfo) => SchemaInfo) => {
@@ -87,24 +47,6 @@ function mockSchemaError(message: string) {
 	});
 }
 
-function mockDeleteSuccess() {
-	mockDeleteDatasource.mockReturnValue({
-		match: (onOk: () => void) => {
-			onOk();
-			return Promise.resolve();
-		}
-	});
-}
-
-function mockDeleteError(message: string) {
-	mockDeleteDatasource.mockReturnValue({
-		match: (_onOk: unknown, onErr: (e: { message: string }) => void) => {
-			onErr({ message });
-			return Promise.resolve();
-		}
-	});
-}
-
 describe('DatasourceStore', () => {
 	let store: InstanceType<typeof DatasourceStore>;
 
@@ -114,93 +56,10 @@ describe('DatasourceStore', () => {
 	});
 
 	describe('initial state', () => {
-		test('has no datasources, is not loading, has no error and an empty schema map', () => {
+		test('has no datasources, is not loaded and has an empty schema map', () => {
 			expect(store.datasources).toEqual([]);
-			expect(store.loading).toBe(false);
-			expect(store.error).toBeNull();
+			expect(store.loaded).toBe(false);
 			expect(store.schemas.size).toBe(0);
-		});
-	});
-
-	describe('loadDatasources', () => {
-		test('success populates datasources and clears loading', async () => {
-			const ds = [makeDatasource({ id: 'ds-1' }), makeDatasource({ id: 'ds-2' })];
-			mockListSuccess(ds);
-
-			await store.loadDatasources();
-
-			expect(store.datasources).toHaveLength(2);
-			expect(store.datasources[0].id).toBe('ds-1');
-			expect(store.loading).toBe(false);
-			expect(store.error).toBeNull();
-		});
-
-		test('error sets error message and clears loading', async () => {
-			mockListError('Network error');
-
-			await store.loadDatasources();
-
-			expect(store.error).toBe('Network error');
-			expect(store.loading).toBe(false);
-			expect(store.datasources).toEqual([]);
-		});
-
-		test('passes includeHidden=false by default', async () => {
-			mockListSuccess([]);
-			await store.loadDatasources();
-			expect(mockListDatasources).toHaveBeenCalledWith(false);
-		});
-
-		test('passes includeHidden=true when specified', async () => {
-			mockListSuccess([]);
-			await store.loadDatasources(true);
-			expect(mockListDatasources).toHaveBeenCalledWith(true);
-		});
-
-		test('replaces previous datasources on reload', async () => {
-			mockListSuccess([makeDatasource({ id: 'ds-old' })]);
-			await store.loadDatasources();
-			expect(store.datasources).toHaveLength(1);
-
-			mockListSuccess([makeDatasource({ id: 'ds-new-a' }), makeDatasource({ id: 'ds-new-b' })]);
-			await store.loadDatasources();
-			expect(store.datasources).toHaveLength(2);
-			expect(store.datasources[0].id).toBe('ds-new-a');
-		});
-	});
-
-	describe('uploadFile', () => {
-		test('success appends datasource and returns it', async () => {
-			const ds = makeDatasource({ id: 'ds-uploaded', name: 'upload.csv' });
-			mockUploadSuccess(ds);
-
-			const file = new File(['data'], 'upload.csv');
-			const result = await store.uploadFile(file, 'upload.csv');
-
-			expect(result.id).toBe('ds-uploaded');
-			expect(store.datasources).toHaveLength(1);
-			expect(store.datasources[0].id).toBe('ds-uploaded');
-			expect(store.loading).toBe(false);
-		});
-
-		test('appends to existing datasources', async () => {
-			mockListSuccess([makeDatasource({ id: 'ds-existing' })]);
-			await store.loadDatasources();
-
-			const ds = makeDatasource({ id: 'ds-new' });
-			mockUploadSuccess(ds);
-			await store.uploadFile(new File(['x'], 'f.csv'), 'f.csv');
-
-			expect(store.datasources).toHaveLength(2);
-		});
-
-		test('error sets error and throws', async () => {
-			mockUploadError('File too large');
-
-			const file = new File(['data'], 'big.csv');
-			await expect(store.uploadFile(file, 'big.csv')).rejects.toThrow('File too large');
-			expect(store.error).toBe('File too large');
-			expect(store.loading).toBe(false);
 		});
 	});
 
@@ -293,34 +152,6 @@ describe('DatasourceStore', () => {
 		});
 	});
 
-	describe('deleteDatasource', () => {
-		test('removes datasource from list and schema cache', async () => {
-			const ds1 = makeDatasource({ id: 'ds-1' });
-			const ds2 = makeDatasource({ id: 'ds-2' });
-			store.datasources = [ds1, ds2];
-			store.schemas.set('ds-1', makeSchema());
-			mockDeleteSuccess();
-
-			await store.deleteDatasource('ds-1');
-
-			expect(store.datasources).toHaveLength(1);
-			expect(store.datasources[0].id).toBe('ds-2');
-			expect(store.schemas.has('ds-1')).toBe(false);
-			expect(store.loading).toBe(false);
-		});
-
-		test('error sets error and preserves datasources', async () => {
-			store.datasources = [makeDatasource({ id: 'ds-1' })];
-			mockDeleteError('Permission denied');
-
-			await store.deleteDatasource('ds-1');
-
-			expect(store.error).toBe('Permission denied');
-			expect(store.datasources).toHaveLength(1);
-			expect(store.loading).toBe(false);
-		});
-	});
-
 	describe('getDatasource', () => {
 		test('returns datasource by id', () => {
 			store.datasources = [makeDatasource({ id: 'ds-a' }), makeDatasource({ id: 'ds-b' })];
@@ -366,18 +197,16 @@ describe('DatasourceStore', () => {
 	});
 
 	describe('reset', () => {
-		test('clears all state', async () => {
-			mockListSuccess([makeDatasource({ id: 'ds-1' })]);
-			await store.loadDatasources();
+		test('clears all state', () => {
+			store.datasources = [makeDatasource({ id: 'ds-1' })];
+			store.loaded = true;
 			store.schemas.set('ds-1', makeSchema());
-			store.error = 'stale error';
 
 			store.reset();
 
 			expect(store.datasources).toEqual([]);
 			expect(store.schemas.size).toBe(0);
-			expect(store.error).toBeNull();
-			expect(store.loading).toBe(false);
+			expect(store.loaded).toBe(false);
 		});
 	});
 });
