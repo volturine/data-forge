@@ -8,12 +8,12 @@ import pytest
 
 from builds import build_execution
 from builds.build_live import RuntimeBuild
-from dataforge_protocol import enums_pb2
+from dataforge_protocol import analysis_pb2, enums_pb2
 from runtime import compute_service, executors
 from runtime.build_events import BuildCancelledError
 from runtime.compute_manager import ProcessManager
 from runtime.domain.compute import schemas
-from runtime.worker_runtime_client import ClaimedBuildJob
+from runtime.worker_runtime_client import BuildJobLeaseLost, ClaimedBuildJob, StartedBuildRun
 
 
 def _build() -> RuntimeBuild:
@@ -46,11 +46,68 @@ def _pipeline() -> dict:
     }
 
 
+def _schedule_pipeline() -> analysis_pb2.AnalysisPipelinePayload:
+    return analysis_pb2.AnalysisPipelinePayload(
+        analysis_id="analysis-rid",
+        tabs=[
+            analysis_pb2.AnalysisPipelineTab(
+                id="tab-1",
+                datasource=analysis_pb2.AnalysisPipelineDatasource(id="datasource-rid", source_type=enums_pb2.DATA_SOURCE_TYPE_SCHEDULE),
+            )
+        ],
+    )
+
+
+@pytest.mark.asyncio
+async def test_schedule_ingest_lease_loss_is_not_reported_as_build_failure(monkeypatch) -> None:
+    persisted_event_types: list[str] = []
+
+    class Client:
+        async def start_build_run_async(self, **_kwargs):
+            return StartedBuildRun(
+                id="build-rid",
+                namespace="tenant-a",
+                analysis_id="analysis-rid",
+                analysis_name="Analysis",
+                analysis_pipeline=_schedule_pipeline(),
+                tab_id=None,
+                starter_json={"triggered_by": "schedule"},
+                current_kind="build",
+                current_datasource_id="datasource-rid",
+                current_tab_id="tab-1",
+                current_tab_name="Output",
+                current_output_id="output-rid",
+                current_output_name="Output",
+            )
+
+        async def persist_build_event_async(self, *, event, **_kwargs):
+            persisted_event_types.append(event.type)
+
+    async def client_from_env() -> Client:
+        return Client()
+
+    monkeypatch.setattr(build_execution, "async_client_from_env", client_from_env)
+    claim = ClaimedBuildJob(
+        job_id="durable-job-id",
+        build_id="build-rid",
+        namespace="tenant-a",
+        claim_token="claim-token",
+        lease_generation=1,
+        lease_expires_at=datetime.now(UTC),
+        attempt=1,
+        lease_ttl_seconds=300,
+    )
+
+    with pytest.raises(BuildJobLeaseLost):
+        await build_execution.run_queued_build_job(manager=create_autospec(ProcessManager, instance=True), worker_id="worker-id", claim=claim)
+    assert persisted_event_types == ["step_start"]
+
+
 @pytest.mark.asyncio
 @pytest.mark.parametrize("cancel_before_callback", [False, True])
 async def test_build_cancellation_hands_off_exact_job_before_joining_thread(monkeypatch, cancel_before_callback: bool) -> None:
     executor = ThreadPoolExecutor(max_workers=1)
-    lane = executors._ExecutorLane(executor, max_pending=1)
+    lane = executors._ExecutorLane("test", executor, max_pending=1)
     monkeypatch.setattr(executors, "COMPUTE_LANE", lane)
     monkeypatch.setattr(compute_service, "_start_stream_tasks", lambda *_args, **_kwargs: (None, None))
     manager = create_autospec(ProcessManager, instance=True)
@@ -89,7 +146,7 @@ async def test_build_cancellation_hands_off_exact_job_before_joining_thread(monk
             if cancel_before_callback:
                 ready.set()
                 assert allow_callback.wait(timeout=5)
-            job_started({"job_id": "engine-job-id", "engine": object()})
+            job_started("engine-job-id", object())
             ready.set()
             assert real_work_stop_requested.wait(timeout=5)
             raise BuildCancelledError("build-rid")
@@ -152,7 +209,7 @@ async def test_build_cancellation_hands_off_exact_job_before_joining_thread(monk
 @pytest.mark.asyncio
 async def test_build_cancelled_before_executor_starts_never_submits_engine_work(monkeypatch) -> None:
     executor = ThreadPoolExecutor(max_workers=1)
-    lane = executors._ExecutorLane(executor, max_pending=1)
+    lane = executors._ExecutorLane("test", executor, max_pending=1)
     monkeypatch.setattr(executors, "COMPUTE_LANE", lane)
     manager = create_autospec(ProcessManager, instance=True)
     blocker_started = threading.Event()

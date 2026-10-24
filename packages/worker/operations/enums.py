@@ -35,12 +35,6 @@ class OperationEnumValue(int):
     def value(self) -> str:
         return type(self)._token_by_number[int(self)]
 
-    def __eq__(self, other: object) -> bool:
-        return int.__eq__(self, other)
-
-    def __hash__(self) -> int:
-        return int.__hash__(self)
-
     @property
     def number(self) -> int:
         return int(self)
@@ -720,14 +714,6 @@ class FillNullStrategy(OperationEnumValue):
     ZERO: ClassVar[Self]
     LITERAL: ClassVar[Self]
     DROP_ROWS: ClassVar[Self]
-
-    @property
-    def uses_literal_value(self) -> bool:
-        return self == FillNullStrategy.LITERAL
-
-    @property
-    def drops_rows(self) -> bool:
-        return self == FillNullStrategy.DROP_ROWS
 
 
 FillNullStrategy.FORWARD = FillNullStrategy(enums_pb2.FILL_NULL_STRATEGY_FORWARD)

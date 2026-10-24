@@ -6,6 +6,7 @@ import json
 import logging
 import uuid
 from collections.abc import Callable, Mapping
+from dataclasses import dataclass
 from datetime import UTC, datetime
 from itertools import chain
 from time import monotonic
@@ -27,8 +28,9 @@ from datasources.schemas import (
     SnapshotPreview,
 )
 from runtime.compute_manager import ProcessManager
+from runtime.domain.compute.identity import datasource_compute_worker_identity
 from runtime.domain.compute_worker_runs.schemas import ComputeWorkerRunKind, ComputeWorkerRunStatus, SchemaDiffStatus
-from runtime.domain.datasource.source_types import DataSourceType
+from runtime.domain.datasource.source_types import DataSourceFileType, DataSourceType
 from runtime.exceptions import DataSourceConnectionError, DataSourceValidationError
 from runtime.iceberg_catalog import ensure_catalog_namespace, load_runtime_catalog
 from runtime.namespace import get_namespace
@@ -55,6 +57,15 @@ class DatasourceNotFound(RuntimeError):
     """Raised when a datasource metadata lookup fails."""
 
 
+@dataclass(frozen=True)
+class FoundDatasourceMetadata(DatasourceMetadata):
+    """Datasource metadata whose lookup succeeded, so its identity, type and config are present."""
+
+    id: str
+    source_type: str
+    config: dict[str, object]
+
+
 def _coerce_iceberg_compatible_lazyframe(lazy: pl.LazyFrame) -> pl.LazyFrame:
     null_columns = [name for name, dtype in lazy.collect_schema().items() if dtype == pl.Null]
     if not null_columns:
@@ -63,14 +74,13 @@ def _coerce_iceberg_compatible_lazyframe(lazy: pl.LazyFrame) -> pl.LazyFrame:
 
 
 def _normalize_iceberg_incompatible_value(value: Any) -> Any:
-    if isinstance(value, pl.Series):
-        return [_normalize_iceberg_incompatible_value(item) for item in value.to_list()]
-    if isinstance(value, dict):
-        return {key: _normalize_iceberg_incompatible_value(item) for key, item in value.items()}
-    if isinstance(value, list):
-        return [_normalize_iceberg_incompatible_value(item) for item in value]
-    if isinstance(value, tuple):
-        return [_normalize_iceberg_incompatible_value(item) for item in value]
+    match value:
+        case pl.Series():
+            return [_normalize_iceberg_incompatible_value(item) for item in value.to_list()]
+        case dict():
+            return {key: _normalize_iceberg_incompatible_value(item) for key, item in value.items()}
+        case list() | tuple():
+            return [_normalize_iceberg_incompatible_value(item) for item in value]
     return value
 
 
@@ -145,7 +155,9 @@ def stage_datasource_to_object_store(
     first = next(batches, None)
     if first is None:
         first = load_datasource_frame(dict(source_config)).limit(0).collect(engine="streaming")
-    coerce = _coerce_database_iceberg_compatible_lazyframe if source_config.get("source_type") == "database" else _coerce_iceberg_compatible_lazyframe
+    coerce = (
+        _coerce_database_iceberg_compatible_lazyframe if source_config.get("source_type") == DataSourceType.DATABASE else _coerce_iceberg_compatible_lazyframe
+    )
     first = coerce(first.lazy()).collect(engine="streaming")
     schema = first.schema
     arrow_schema = first.to_arrow().schema
@@ -347,7 +359,7 @@ def _get_first_non_null_samples(lazy: pl.LazyFrame, max_rows: int = 1000) -> dic
     return {column: (str(result[column][0]) if result[column][0] is not None else None) for column in columns}
 
 
-def require_metadata(client: WorkerRuntimeClient, *, namespace: str, datasource_id: str) -> DatasourceMetadata:
+def require_metadata(client: WorkerRuntimeClient, *, namespace: str, datasource_id: str) -> FoundDatasourceMetadata:
     from runtime.worker_runtime_client import frozen_datasource_metadata
 
     metadata = frozen_datasource_metadata(namespace, datasource_id)
@@ -355,7 +367,19 @@ def require_metadata(client: WorkerRuntimeClient, *, namespace: str, datasource_
         metadata = client.datasource_metadata(namespace=namespace, datasource_id=datasource_id)
     if not metadata.found or metadata.id is None or metadata.source_type is None or metadata.config is None:
         raise DatasourceNotFound(datasource_id)
-    return metadata
+    return FoundDatasourceMetadata(
+        found=True,
+        id=metadata.id,
+        name=metadata.name,
+        source_type=metadata.source_type,
+        config=metadata.config,
+        schema_cache=metadata.schema_cache,
+        is_hidden=metadata.is_hidden,
+        revision=metadata.revision,
+        description=metadata.description,
+        column_descriptions=metadata.column_descriptions,
+        created_by=metadata.created_by,
+    )
 
 
 def create_ingest_run(
@@ -447,14 +471,13 @@ def fail_ingest_run(client: WorkerRuntimeClient, *, namespace: str, run_id: str,
         )
 
 
-def external_source(metadata: DatasourceMetadata) -> tuple[dict[str, object], DataSourceType]:
+def external_source(metadata: FoundDatasourceMetadata) -> tuple[dict[str, object], DataSourceType]:
     if metadata.source_type != DataSourceType.ICEBERG.value:
         raise DataSourceValidationError(
             "Ingest is only available for Iceberg datasources",
             details={"datasource_id": metadata.id},
         )
-    config = metadata.config or {}
-    source = config.get("source")
+    source = metadata.config.get("source")
     if not isinstance(source, dict):
         raise DataSourceValidationError(
             "Datasource has no external source configuration",
@@ -469,16 +492,16 @@ def external_source(metadata: DatasourceMetadata) -> tuple[dict[str, object], Da
     return source, source_type
 
 
-def is_reingestable_raw(metadata: DatasourceMetadata) -> bool:
+def reingestable_source(metadata: FoundDatasourceMetadata) -> dict[str, object] | None:
     if metadata.source_type != DataSourceType.ICEBERG.value:
-        return False
+        return None
     if metadata.created_by == "analysis":
-        return False
+        return None
     try:
-        external_source(metadata)
+        source, _source_type = external_source(metadata)
     except DataSourceValidationError:
-        return False
-    return True
+        return None
+    return source
 
 
 def ingest_datasource_for_schedule(
@@ -495,24 +518,19 @@ def ingest_datasource_for_schedule(
     job_id: str,
     build_id: str,
 ) -> datasource_pb2.DataSourceRecord:
-    from dataforge_protocol import compute_pb2
     from runtime.compute_utils import await_compute_worker_result
 
     metadata = require_metadata(client, namespace=namespace, datasource_id=datasource_id)
     if metadata.revision is None:
         raise ValueError("Scheduled datasource snapshot is missing its revision")
-    if not is_reingestable_raw(metadata):
+    source = reingestable_source(metadata)
+    if source is None:
         raise DataSourceValidationError(
             "This datasource has no external source to re-ingest. Schedule an analysis output instead.",
             details={"datasource_id": datasource_id},
         )
-    identity = compute_pb2.ComputeWorkerIdentity(
-        scope=enums_pb2.COMPUTE_WORKER_SCOPE_DATASOURCE_PREVIEW,
-        reuse_policy=enums_pb2.COMPUTE_WORKER_REUSE_POLICY_SHARED,
-        datasource_id=datasource_id,
-        resource_id=datasource_id,
-    )
-    config = dict(metadata.config or {})
+    identity = datasource_compute_worker_identity(datasource_id)
+    config = dict(metadata.config)
     manifest_url = object_store_url("runtime-staging", "schedule-ingest", job_id, str(lease_generation), "manifest.json", namespace=namespace)
     try:
         with manager.acquire_engine(identity) as engine:
@@ -533,7 +551,6 @@ def ingest_datasource_for_schedule(
                 manifest_url=manifest_url,
                 catalog_identifier=f"clean.{target.rstrip('/').split('/')[-2]}",
             )
-            source, _source_type = external_source(metadata)
             engine_job = engine.datasource_job("datasource_stage", {"source_config": source, "table_path": target, "manifest_url": manifest_url})
             result = await_compute_worker_result(engine, job_id=engine_job)
             if result.get("error") or not isinstance(result.get("data"), dict):
@@ -593,7 +610,7 @@ def _schema_from_database(metadata: DatasourceMetadata) -> datasource_pb2.Schema
         source = config.get("source")
         if isinstance(source, dict):
             config = dict(source)
-    config["source_type"] = "database"
+    config["source_type"] = DataSourceType.DATABASE
     try:
         return _schema_from_batches(config)
     except Exception as exc:
@@ -607,7 +624,7 @@ def _schema_from_file(metadata: DatasourceMetadata, sheet_name: str | None) -> d
     config = {"source_type": metadata.source_type, **(metadata.config or {})}
     if sheet_name:
         config = {**config, "sheet_name": sheet_name}
-    if metadata.source_type == "file" and config.get("file_type") == "excel":
+    if metadata.source_type == DataSourceType.FILE and config.get("file_type") == DataSourceFileType.EXCEL:
         return _schema_from_batches(config)
     try:
         lazy = load_datasource_frame(config)

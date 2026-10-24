@@ -8,7 +8,7 @@ from pydantic import BaseModel, ConfigDict, Field, model_validator
 from operations.enums import FilterLogic, FilterOperator, FilterValueType
 from operations.validation import validate_regex_pattern
 from runtime.config import settings
-from runtime.domain.compute.base import OperationHandler, OperationParams
+from runtime.domain.compute.base import OperationParams
 
 FilterExpr = Callable[[pl.Expr, Any], pl.Expr]
 ColumnFilterExpr = Callable[[pl.Expr, pl.Expr], pl.Expr]
@@ -19,14 +19,6 @@ class FilterOperatorDefinition:
     operator: FilterOperator
     expression: FilterExpr
     column_expression: ColumnFilterExpr | None = None
-
-    @classmethod
-    def require(cls, operator: FilterOperator | str) -> FilterOperatorDefinition:
-        parsed = FilterOperator.require_supported(operator)
-        for definition in FILTER_OPERATOR_DEFINITIONS:
-            if definition.operator == parsed:
-                return definition
-        raise ValueError(FilterOperator.unsupported_message(parsed.value))
 
     def apply(self, left: pl.Expr, value: Any) -> pl.Expr:
         return self.expression(left, value)
@@ -55,24 +47,27 @@ class FilterOperatorDefinition:
         return self.column_expression(left, right)
 
 
-FILTER_OPERATOR_DEFINITIONS: tuple[FilterOperatorDefinition, ...] = (
-    FilterOperatorDefinition(FilterOperator.EQUAL, lambda left, right: left == right, lambda left, right: left == right),
-    FilterOperatorDefinition(FilterOperator.DOUBLE_EQUAL, lambda left, right: left == right, lambda left, right: left == right),
-    FilterOperatorDefinition(FilterOperator.NOT_EQUAL, lambda left, right: left != right, lambda left, right: left != right),
-    FilterOperatorDefinition(FilterOperator.GREATER_THAN, lambda left, right: left > right, lambda left, right: left > right),
-    FilterOperatorDefinition(FilterOperator.LESS_THAN, lambda left, right: left < right, lambda left, right: left < right),
-    FilterOperatorDefinition(FilterOperator.GREATER_EQUAL, lambda left, right: left >= right, lambda left, right: left >= right),
-    FilterOperatorDefinition(FilterOperator.LESS_EQUAL, lambda left, right: left <= right, lambda left, right: left <= right),
-    FilterOperatorDefinition(FilterOperator.CONTAINS, lambda left, value: left.str.contains(value, literal=True)),
-    FilterOperatorDefinition(FilterOperator.NOT_CONTAINS, lambda left, value: ~left.str.contains(value, literal=True)),
-    FilterOperatorDefinition(FilterOperator.STARTS_WITH, lambda left, value: left.str.starts_with(value)),
-    FilterOperatorDefinition(FilterOperator.ENDS_WITH, lambda left, value: left.str.ends_with(value)),
-    FilterOperatorDefinition(FilterOperator.REGEX, lambda left, value: left.str.contains(value, literal=False)),
-    FilterOperatorDefinition(FilterOperator.IS_NULL, lambda left, _: left.is_null()),
-    FilterOperatorDefinition(FilterOperator.IS_NOT_NULL, lambda left, _: left.is_not_null()),
-    FilterOperatorDefinition(FilterOperator.IN, lambda left, value: left.is_in(value)),
-    FilterOperatorDefinition(FilterOperator.NOT_IN, lambda left, value: ~left.is_in(value)),
-)
+FILTER_OPERATOR_DEFINITIONS: dict[FilterOperator, FilterOperatorDefinition] = {
+    definition.operator: definition
+    for definition in (
+        FilterOperatorDefinition(FilterOperator.EQUAL, lambda left, right: left == right, lambda left, right: left == right),
+        FilterOperatorDefinition(FilterOperator.DOUBLE_EQUAL, lambda left, right: left == right, lambda left, right: left == right),
+        FilterOperatorDefinition(FilterOperator.NOT_EQUAL, lambda left, right: left != right, lambda left, right: left != right),
+        FilterOperatorDefinition(FilterOperator.GREATER_THAN, lambda left, right: left > right, lambda left, right: left > right),
+        FilterOperatorDefinition(FilterOperator.LESS_THAN, lambda left, right: left < right, lambda left, right: left < right),
+        FilterOperatorDefinition(FilterOperator.GREATER_EQUAL, lambda left, right: left >= right, lambda left, right: left >= right),
+        FilterOperatorDefinition(FilterOperator.LESS_EQUAL, lambda left, right: left <= right, lambda left, right: left <= right),
+        FilterOperatorDefinition(FilterOperator.CONTAINS, lambda left, value: left.str.contains(value, literal=True)),
+        FilterOperatorDefinition(FilterOperator.NOT_CONTAINS, lambda left, value: ~left.str.contains(value, literal=True)),
+        FilterOperatorDefinition(FilterOperator.STARTS_WITH, lambda left, value: left.str.starts_with(value)),
+        FilterOperatorDefinition(FilterOperator.ENDS_WITH, lambda left, value: left.str.ends_with(value)),
+        FilterOperatorDefinition(FilterOperator.REGEX, lambda left, value: left.str.contains(value, literal=False)),
+        FilterOperatorDefinition(FilterOperator.IS_NULL, lambda left, _: left.is_null()),
+        FilterOperatorDefinition(FilterOperator.IS_NOT_NULL, lambda left, _: left.is_not_null()),
+        FilterOperatorDefinition(FilterOperator.IN, lambda left, value: left.is_in(value)),
+        FilterOperatorDefinition(FilterOperator.NOT_IN, lambda left, value: ~left.is_in(value)),
+    )
+}
 
 
 class FilterCondition(BaseModel):
@@ -148,7 +143,7 @@ class FilterCondition(BaseModel):
         return self
 
     def expression(self, schema: pl.Schema) -> pl.Expr:
-        definition = FilterOperatorDefinition.require(self.operator)
+        definition = FILTER_OPERATOR_DEFINITIONS[self.operator]
         left = pl.col(self.column)
         if dtype := schema.get(self.column):
             left = self.normalize_datetime_column(left, dtype)
@@ -202,13 +197,11 @@ class FilterParams(OperationParams):
         }
 
 
-class FilterHandler(OperationHandler):
-    def __call__(self, lf: pl.LazyFrame, params: dict, **_) -> pl.LazyFrame:
-        validated = FilterParams.model_validate(params)
-        if not validated.conditions:
-            return lf
+def filter(lf: pl.LazyFrame, params: FilterParams, **_) -> pl.LazyFrame:
+    if not params.conditions:
+        return lf
 
-        schema = lf.collect_schema()
-        exprs = [condition.expression(schema) for condition in validated.conditions]
-        combiner = pl.all_horizontal if validated.logic == FilterLogic.AND else pl.any_horizontal
-        return lf.filter(combiner(exprs))
+    schema = lf.collect_schema()
+    exprs = [condition.expression(schema) for condition in params.conditions]
+    combiner = pl.all_horizontal if params.logic == FilterLogic.AND else pl.any_horizontal
+    return lf.filter(combiner(exprs))

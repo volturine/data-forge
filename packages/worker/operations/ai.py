@@ -12,11 +12,11 @@ import time
 from collections.abc import Sequence
 
 import polars as pl
-from pydantic import ConfigDict, Field, field_validator, model_validator
+from pydantic import Field, field_validator, model_validator
 
 from dataforge_protocol import enums_pb2
 from operations.template_placeholders import render_template_placeholders
-from runtime.domain.compute.base import OperationHandler, OperationParams
+from runtime.domain.compute.base import OperationParams
 from runtime.worker_runtime_client import WorkerRuntimeClient, client_from_env
 
 logger = logging.getLogger(__name__)
@@ -26,21 +26,21 @@ class AIError(Exception):
     """Raised when an AI provider response is invalid for the requested batch."""
 
 
-_AI_PROVIDER_NAMES: dict[enums_pb2.AIProvider, str] = {
+_AI_PROVIDER_NAMES: dict[int, str] = {
     enums_pb2.AI_PROVIDER_OLLAMA: "ollama",
     enums_pb2.AI_PROVIDER_OPENROUTER: "openrouter",
 }
 _AI_PROVIDER_BY_NAME = {name: provider for provider, name in _AI_PROVIDER_NAMES.items()}
 
 
-def ai_provider_name(provider: enums_pb2.AIProvider) -> str:
+def ai_provider_name(provider: int) -> str:
     try:
         return _AI_PROVIDER_NAMES[provider]
     except KeyError as exc:
         raise ValueError(f"Unknown AI provider: {provider}") from exc
 
 
-def parse_ai_provider(provider: str | enums_pb2.AIProvider) -> enums_pb2.AIProvider:
+def parse_ai_provider(provider: str | int) -> int:
     if isinstance(provider, int):
         ai_provider_name(provider)
         return provider
@@ -68,7 +68,7 @@ class InternalAIClient:
     def __init__(
         self,
         *,
-        provider: enums_pb2.AIProvider,
+        provider: int,
         endpoint_url: str | None,
         api_key: str | None,
         client: WorkerRuntimeClient | None = None,
@@ -94,7 +94,7 @@ class InternalAIClient:
         )
 
 
-def get_ai_client(provider: str | enums_pb2.AIProvider, *, endpoint_url: str | None = None, api_key: str | None = None) -> InternalAIClient:
+def get_ai_client(provider: str | int, *, endpoint_url: str | None = None, api_key: str | None = None) -> InternalAIClient:
     return InternalAIClient(
         provider=parse_ai_provider(provider),
         endpoint_url=endpoint_url,
@@ -105,17 +105,15 @@ def get_ai_client(provider: str | enums_pb2.AIProvider, *, endpoint_url: str | N
 class AIParams(OperationParams):
     """Parameters for the AI UDF handler."""
 
-    model_config = ConfigDict(extra="forbid")
-
-    provider: str = ai_provider_name(enums_pb2.AI_PROVIDER_OLLAMA)
+    provider: int = enums_pb2.AI_PROVIDER_OLLAMA
     model: str = "llama2"
     input_columns: list[str] = Field(default_factory=list)
     output_column: str = "ai_result"
     error_column: str = "ai_error"
     prompt_template: str = "Classify this text: {{text}}"
-    batch_size: int = 10
-    max_retries: int = 3
-    rate_limit_rpm: int | None = None
+    batch_size: int = Field(default=10, ge=1)
+    max_retries: int = Field(default=3, ge=0)
+    rate_limit_rpm: int | None = Field(default=None, gt=0)
     endpoint_url: str | None = None
     api_key: str | None = None
     temperature: float = 0.7
@@ -127,10 +125,10 @@ class AIParams(OperationParams):
     def _parse_options(cls, v: str | dict[str, object] | None) -> dict[str, object] | None:
         return parse_request_options(v)
 
-    @field_validator("provider")
+    @field_validator("provider", mode="before")
     @classmethod
-    def _validate_provider(cls, v: str) -> str:
-        return ai_provider_name(parse_ai_provider(v))
+    def _validate_provider(cls, v: str | enums_pb2.AIProvider) -> int:
+        return parse_ai_provider(v)
 
     @model_validator(mode="after")
     def _validate_input_columns(self) -> AIParams:
@@ -139,120 +137,107 @@ class AIParams(OperationParams):
         return self
 
 
-class AIHandler(OperationHandler):
-    def __call__(self, lf: pl.LazyFrame, params: dict, **_) -> pl.LazyFrame:
-        validated = AIParams.model_validate(params)
-        if validated.batch_size < 1:
-            raise ValueError("batch_size must be at least 1")
-        if validated.max_retries < 0:
-            raise ValueError("max_retries must be non-negative")
-        if validated.rate_limit_rpm is not None and validated.rate_limit_rpm <= 0:
-            raise ValueError("rate_limit_rpm must be positive when provided")
-        schema = lf.collect_schema()
+def ai(lf: pl.LazyFrame, params: AIParams, **_) -> pl.LazyFrame:
+    schema = lf.collect_schema()
 
-        # Validate all input columns exist
-        missing = [c for c in validated.input_columns if c not in schema]
-        if missing:
-            raise ValueError(f"Input column(s) not found: {', '.join(missing)}")
+    # Validate all input columns exist
+    missing = [c for c in params.input_columns if c not in schema]
+    if missing:
+        raise ValueError(f"Input column(s) not found: {', '.join(missing)}")
 
-        select_cols = list(validated.input_columns)
-        uses_text = "{{text}}" in validated.prompt_template
-        single_col = len(select_cols) == 1
+    select_cols = list(params.input_columns)
+    uses_text = "{{text}}" in params.prompt_template
+    single_col = len(select_cols) == 1
 
-        output_schema = dict(schema)
-        output_schema[validated.output_column] = pl.Utf8()
-        output_schema[validated.error_column] = pl.Utf8()
+    output_schema = dict(schema)
+    output_schema[params.output_column] = pl.Utf8()
+    output_schema[params.error_column] = pl.Utf8()
 
-        def apply_batch(df: pl.DataFrame) -> pl.DataFrame:
-            if df.is_empty():
-                return df.with_columns(
-                    pl.Series(name=validated.output_column, values=[], dtype=pl.Utf8),
-                    pl.Series(name=validated.error_column, values=[], dtype=pl.Utf8),
-                )
-
-            rows = df.select(select_cols).to_dicts()
-            row_count = len(rows)
-
-            client = get_ai_client(
-                validated.provider,
-                endpoint_url=validated.endpoint_url,
-                api_key=validated.api_key,
+    def apply_batch(df: pl.DataFrame) -> pl.DataFrame:
+        if df.is_empty():
+            return df.with_columns(
+                pl.Series(name=params.output_column, values=[], dtype=pl.Utf8),
+                pl.Series(name=params.error_column, values=[], dtype=pl.Utf8),
             )
-            results: list[str] = []
-            errors: list[str] = []
-            last_call_ts = 0.0
-            min_interval_sec = 0.0
-            if validated.rate_limit_rpm:
-                min_interval_sec = 60.0 / float(validated.rate_limit_rpm)
 
-            request_options = dict(validated.request_options or {})
-            request_options.setdefault("temperature", validated.temperature)
-            if validated.max_tokens is not None:
-                request_options.setdefault("max_tokens", validated.max_tokens)
+        rows = df.select(select_cols).to_dicts()
+        row_count = len(rows)
 
-            for offset in range(0, row_count, validated.batch_size):
-                batch_rows = rows[offset : offset + validated.batch_size]
-                prompts: list[str] = []
-                for row in batch_rows:
-                    if uses_text and single_col:
-                        row["text"] = row[select_cols[0]]
-                    prompts.append(render_template_placeholders(validated.prompt_template, row))
-                for attempt in range(validated.max_retries + 1):
-                    try:
-                        if min_interval_sec > 0:
-                            elapsed = time.monotonic() - last_call_ts
-                            if elapsed < min_interval_sec:
-                                time.sleep(min_interval_sec - elapsed)
-                        outputs = client.generate_batch(
-                            prompts,
-                            model=validated.model,
-                            options=request_options,
-                        )
-                        last_call_ts = time.monotonic()
-                        if len(outputs) != len(batch_rows):
-                            raise AIError(f"AI output length mismatch for batch: got {len(outputs)}, expected {len(batch_rows)}")
-                        results.extend(outputs)
-                        errors.extend([""] * len(batch_rows))
-                        break
-                    except Exception as exc:
-                        if attempt >= validated.max_retries:
-                            logger.error(
-                                "AI batch failed at row %d-%d after %d attempt(s): %s",
-                                offset,
-                                offset + len(batch_rows),
-                                attempt + 1,
-                                exc,
-                            )
-                            detail = str(exc) or exc.__class__.__name__
-                            results.extend([f"[error: {detail}]"] * len(batch_rows))
-                            errors.extend([detail] * len(batch_rows))
-                            break
-                        logger.warning(
-                            "AI batch retry %d/%d at row %d-%d: %s",
-                            attempt + 1,
-                            validated.max_retries,
+        client = get_ai_client(
+            params.provider,
+            endpoint_url=params.endpoint_url,
+            api_key=params.api_key,
+        )
+        results: list[str] = []
+        errors: list[str] = []
+        last_call_ts = 0.0
+        min_interval_sec = 0.0
+        if params.rate_limit_rpm:
+            min_interval_sec = 60.0 / float(params.rate_limit_rpm)
+
+        request_options = dict(params.request_options or {})
+        request_options.setdefault("temperature", params.temperature)
+        if params.max_tokens is not None:
+            request_options.setdefault("max_tokens", params.max_tokens)
+
+        for offset in range(0, row_count, params.batch_size):
+            batch_rows = rows[offset : offset + params.batch_size]
+            prompts: list[str] = []
+            for row in batch_rows:
+                if uses_text and single_col:
+                    row["text"] = row[select_cols[0]]
+                prompts.append(render_template_placeholders(params.prompt_template, row))
+            for attempt in range(params.max_retries + 1):
+                try:
+                    if min_interval_sec > 0:
+                        elapsed = time.monotonic() - last_call_ts
+                        if elapsed < min_interval_sec:
+                            time.sleep(min_interval_sec - elapsed)
+                    outputs = client.generate_batch(
+                        prompts,
+                        model=params.model,
+                        options=request_options,
+                    )
+                    last_call_ts = time.monotonic()
+                    if len(outputs) != len(batch_rows):
+                        raise AIError(f"AI output length mismatch for batch: got {len(outputs)}, expected {len(batch_rows)}")
+                    results.extend(outputs)
+                    errors.extend([""] * len(batch_rows))
+                    break
+                except Exception as exc:
+                    if attempt >= params.max_retries:
+                        logger.error(
+                            "AI batch failed at row %d-%d after %d attempt(s): %s",
                             offset,
                             offset + len(batch_rows),
+                            attempt + 1,
                             exc,
                         )
-                        time.sleep(min(2**attempt, 30))
+                        detail = str(exc) or exc.__class__.__name__
+                        results.extend([f"[error: {detail}]"] * len(batch_rows))
+                        errors.extend([detail] * len(batch_rows))
+                        break
+                    logger.warning(
+                        "AI batch retry %d/%d at row %d-%d: %s",
+                        attempt + 1,
+                        params.max_retries,
+                        offset,
+                        offset + len(batch_rows),
+                        exc,
+                    )
+                    time.sleep(min(2**attempt, 30))
 
-            if len(results) != row_count:
-                raise ValueError(f"AI output length mismatch: got {len(results)}, expected {row_count}")
-            if len(errors) != row_count:
-                raise ValueError(f"AI error length mismatch: got {len(errors)}, expected {row_count}")
-
-            return df.with_columns(
-                pl.Series(name=validated.output_column, values=results, dtype=pl.Utf8),
-                pl.Series(name=validated.error_column, values=errors, dtype=pl.Utf8),
-            )
-
-        return lf.map_batches(
-            apply_batch,
-            schema=output_schema,
-            predicate_pushdown=False,
-            projection_pushdown=False,
-            slice_pushdown=False,
-            validate_output_schema=True,
-            streamable=False,
+        return df.with_columns(
+            pl.Series(name=params.output_column, values=results, dtype=pl.Utf8),
+            pl.Series(name=params.error_column, values=errors, dtype=pl.Utf8),
         )
+
+    return lf.map_batches(
+        apply_batch,
+        schema=output_schema,
+        predicate_pushdown=False,
+        projection_pushdown=False,
+        slice_pushdown=False,
+        validate_output_schema=True,
+        streamable=False,
+    )

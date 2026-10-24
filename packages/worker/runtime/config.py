@@ -88,8 +88,7 @@ settings = WorkerSettings(
     compute_worker_docker_host=read_env(
         "COMPUTE_WORKER_DOCKER_HOST",
         "unix:///var/run/docker.sock",
-    ).strip()
-    or "unix:///var/run/docker.sock",
+    ).strip(),
     compute_worker_docker_hosts=read_env("COMPUTE_WORKER_DOCKER_HOSTS").strip(),
     compute_worker_docker_host_health_interval_seconds=read_int(
         "COMPUTE_WORKER_DOCKER_HOST_HEALTH_INTERVAL_SECONDS",
@@ -99,16 +98,14 @@ settings = WorkerSettings(
     compute_worker_docker_network=read_env(
         "COMPUTE_WORKER_DOCKER_NETWORK",
         "dataforge-compute-worker-runtime",
-    ).strip()
-    or "dataforge-compute-worker-runtime",
+    ).strip(),
     compute_worker_object_store_endpoint=read_env(
         "COMPUTE_WORKER_OBJECT_STORE_ENDPOINT",
     ).strip(),
     compute_worker_image=read_env(
         "COMPUTE_WORKER_IMAGE",
         "data-forge-compute-worker:latest",
-    ).strip()
-    or "data-forge-compute-worker:latest",
+    ).strip(),
     # Empty keeps compute-worker RPC private on the Docker network. Test harnesses that
     # run the worker on the host can opt in to an ephemeral host port.
     compute_worker_connect_host=read_env(

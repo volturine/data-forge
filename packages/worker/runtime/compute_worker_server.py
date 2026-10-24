@@ -16,7 +16,6 @@ from pathlib import Path
 
 import grpc
 import requests
-from google.protobuf.timestamp_pb2 import Timestamp
 
 from dataforge_protocol import compute_worker_runtime_pb2, compute_worker_runtime_pb2_grpc
 from runtime.config import settings
@@ -24,6 +23,7 @@ from runtime.domain.compute.result import ComputeWorkerResult
 from runtime.environment import read_env, read_int
 from runtime.json_values import dict_to_struct, encode_json_bytes
 from runtime.object_store import reset_object_store_client
+from runtime.protocol_mapping import datetime_to_timestamp
 
 logger = logging.getLogger(__name__)
 
@@ -411,12 +411,6 @@ def _result_message(result: ComputeWorkerResult) -> compute_worker_runtime_pb2.C
     return message
 
 
-def _timestamp(value: datetime) -> Timestamp:
-    message = Timestamp()
-    message.FromDatetime(value)
-    return message
-
-
 class PolarsComputeWorkerServicer(compute_worker_runtime_pb2_grpc.PolarsComputeWorkerServiceServicer):
     def __init__(
         self,
@@ -597,7 +591,7 @@ class PolarsComputeWorkerServicer(compute_worker_runtime_pb2_grpc.PolarsComputeW
                             compute_worker_runtime_pb2.ComputeWorkerJobEvent(
                                 job_id=request.job_id,
                                 sequence=max(sequence + 1, state.next_sequence),
-                                emitted_at=_timestamp(datetime.now(UTC)),
+                                emitted_at=datetime_to_timestamp(datetime.now(UTC)),
                                 result=_result_message(state.result),
                             )
                         )
@@ -615,7 +609,7 @@ class PolarsComputeWorkerServicer(compute_worker_runtime_pb2_grpc.PolarsComputeW
                             compute_worker_runtime_pb2.ComputeWorkerJobEvent(
                                 job_id=request.job_id,
                                 sequence=event_sequence,
-                                emitted_at=_timestamp(emitted_at),
+                                emitted_at=datetime_to_timestamp(emitted_at),
                                 progress_json=encode_json_bytes(event),
                             )
                         )
@@ -625,7 +619,7 @@ class PolarsComputeWorkerServicer(compute_worker_runtime_pb2_grpc.PolarsComputeW
                                 compute_worker_runtime_pb2.ComputeWorkerJobEvent(
                                     job_id=request.job_id,
                                     sequence=sequence + 1,
-                                    emitted_at=_timestamp(datetime.now(UTC)),
+                                    emitted_at=datetime_to_timestamp(datetime.now(UTC)),
                                     result=_result_message(state.result),
                                 )
                             )

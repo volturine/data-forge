@@ -7,8 +7,7 @@ import threading
 import time
 import weakref
 from collections.abc import Awaitable, Callable
-from concurrent.futures import Executor, Future as ConcurrentFuture, ThreadPoolExecutor
-from datetime import UTC, datetime
+from concurrent.futures import Executor, Future as ConcurrentFuture, ThreadPoolExecutor, wait
 from functools import partial
 from typing import Any, Never, cast
 
@@ -193,7 +192,7 @@ async def _require_internal_token(context: grpc.aio.ServicerContext) -> None:
 
 
 async def _abort_backend_worker_rpc_error(context: grpc.aio.ServicerContext, error: BackendWorkerRpcError) -> Never:
-    status_code = next((status for status in grpc.StatusCode if status.name == error.error_code), grpc.StatusCode.UNKNOWN)
+    status_code = grpc.StatusCode.__members__.get(error.error_code or "", grpc.StatusCode.UNKNOWN)
     await context.abort(status_code, error.error)
 
 
@@ -386,9 +385,9 @@ class IcebergServicer(iceberg_pb2_grpc.IcebergServiceServicer):
         return iceberg_pb2.IcebergSnapshotDeleteResponse(datasource_id=response.datasource_id, snapshot_id=response.snapshot_id)
 
 
-def _timestamp_from_ms(timestamp_ms: int) -> Any:
+def _timestamp_from_ms(timestamp_ms: int) -> Timestamp:
     stamp = Timestamp()
-    stamp.FromDatetime(datetime.fromtimestamp(timestamp_ms / 1000, UTC))
+    stamp.FromMilliseconds(timestamp_ms)
     return stamp
 
 
@@ -415,8 +414,7 @@ async def start_data_plane_grpc_server() -> grpc.aio.Server:
 
 
 def start_data_plane_grpc_server_in_thread() -> ThreadedDataPlaneServer:
-    ready = threading.Event()
-    holder: dict[str, object] = {}
+    started: ConcurrentFuture[tuple[asyncio.AbstractEventLoop, grpc.aio.Server]] = ConcurrentFuture()
 
     def _run() -> None:
         loop = asyncio.new_event_loop()
@@ -424,13 +422,10 @@ def start_data_plane_grpc_server_in_thread() -> ThreadedDataPlaneServer:
         try:
             server = loop.run_until_complete(start_data_plane_grpc_server())
         except Exception as exc:
-            holder["error"] = exc
-            ready.set()
+            started.set_exception(exc)
             loop.close()
             return
-        holder["loop"] = loop
-        holder["server"] = server
-        ready.set()
+        started.set_result((loop, server))
         try:
             loop.run_forever()
         finally:
@@ -438,13 +433,8 @@ def start_data_plane_grpc_server_in_thread() -> ThreadedDataPlaneServer:
 
     thread = threading.Thread(target=_run, name="worker-data-plane-grpc", daemon=True)
     thread.start()
-    if not ready.wait(timeout=30):
+    done, _pending = wait([started], timeout=30)
+    if not done:
         raise RuntimeError("Timed out starting worker data-plane gRPC server")
-    error = holder.get("error")
-    if isinstance(error, Exception):
-        raise error
-    return ThreadedDataPlaneServer(
-        loop=cast(asyncio.AbstractEventLoop, holder["loop"]),
-        server=cast(grpc.aio.Server, holder["server"]),
-        thread=thread,
-    )
+    loop, server = started.result()
+    return ThreadedDataPlaneServer(loop=loop, server=server, thread=thread)

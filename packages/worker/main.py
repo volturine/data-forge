@@ -72,6 +72,14 @@ def worker_manager_id() -> str:
     return f"worker-manager:{uuid.uuid4()}"
 
 
+async def _stopped_within(stop_event: asyncio.Event, seconds: float) -> bool:
+    try:
+        await asyncio.wait_for(stop_event.wait(), timeout=seconds)
+    except TimeoutError:
+        return False
+    return True
+
+
 async def _supervise_runtime_loop(
     stop_event: asyncio.Event,
     name: str,
@@ -92,11 +100,9 @@ async def _supervise_runtime_loop(
         except Exception:
             health.failed(name)
             logger.exception("Runtime loop %s failed; restarting in %.2fs", name, delay)
-            try:
-                await asyncio.wait_for(stop_event.wait(), timeout=delay)
+            if await _stopped_within(stop_event, delay):
                 return
-            except TimeoutError:
-                delay = min(delay * 2, 5.0)
+            delay = min(delay * 2, 5.0)
 
 
 async def run_worker_manager_runtime(
@@ -262,40 +268,33 @@ async def _run_worker_manager_runtime(
     active_claim_semaphore = asyncio.Semaphore(compute_request_claim_worker_count())
     shutdown_claim_semaphore = asyncio.Semaphore(1)
     request_lanes = [
-        (ACTIVE_REQUEST_KINDS, request_worker_count, active_claim_semaphore),
+        ("compute-active", ACTIVE_REQUEST_KINDS, request_worker_count, active_claim_semaphore),
         (
+            "compute-shutdown",
             COMPUTE_WORKER_SHUTDOWN_REQUEST_KINDS,
             min(request_worker_count, COMPUTE_WORKER_SHUTDOWN_WORKERS),
             shutdown_claim_semaphore,
         ),
     ]
     request_tasks = []
-    for lane, (allowed_kinds, max_concurrency, claim_semaphore) in enumerate(request_lanes):
-        lane_name = _DISPATCH_LANES[lane]
-
-        async def run_request_lane(
+    for lane_name, allowed_kinds, max_concurrency, claim_semaphore in request_lanes:
+        run_request_lane = partial(
+            compute_request_loop,
+            local_stop,
+            worker_id=worker_id,
+            manager=manager,
             allowed_kinds=allowed_kinds,
-            max_concurrency=max_concurrency,
             claim_semaphore=claim_semaphore,
-            lane_name=lane_name,
-        ) -> None:
-            await compute_request_loop(
-                local_stop,
-                worker_id=worker_id,
-                manager=manager,
-                allowed_kinds=allowed_kinds,
-                claim_semaphore=claim_semaphore,
-                poll_for_work=True,
-                max_concurrency=max_concurrency,
-                namespace_directory=compute_namespace_directory,
-                recovery=compute_request_recovery,
-                on_progress=partial(health.progress, lane_name),
-            )
-
+            poll_for_work=True,
+            max_concurrency=max_concurrency,
+            namespace_directory=compute_namespace_directory,
+            recovery=compute_request_recovery,
+            on_progress=partial(health.progress, lane_name),
+        )
         request_tasks.append(
             asyncio.create_task(
                 _supervise_runtime_loop(local_stop, lane_name, run_request_lane, health=health),
-                name=f"compute-request-supervisor-{lane}",
+                name=f"compute-request-supervisor-{lane_name}",
             )
         )
     datasource_delete_task = asyncio.create_task(
@@ -400,9 +399,7 @@ async def _wait_for_coordinator_generation(stop_event: asyncio.Event, client: Wo
             if exc.error_code not in {"UNAVAILABLE", "DEADLINE_EXCEEDED"}:
                 raise
             logger.info("Runtime coordinator unavailable; worker manager waiting to connect: %s", exc.error)
-        try:
-            await asyncio.wait_for(stop_event.wait(), timeout=retry_seconds)
-        except TimeoutError:
+        if not await _stopped_within(stop_event, retry_seconds):
             retry_seconds = min(retry_seconds * 2, 2.0)
     return None
 
@@ -428,10 +425,7 @@ async def _watch_coordinator_generation(
                 generation_stop_event.set()
                 return
 
-        try:
-            await asyncio.wait_for(process_stop_event.wait(), timeout=_COORDINATOR_GENERATION_POLL_SECONDS)
-        except TimeoutError:
-            continue
+        await _stopped_within(process_stop_event, _COORDINATOR_GENERATION_POLL_SECONDS)
 
 
 async def _run_worker_manager_generation(
@@ -520,21 +514,14 @@ async def _wait_for_manager_lease(stop_event: asyncio.Event, lease: WorkerManage
             raise
         except Exception:
             logger.warning("Worker manager standby could not check the lease; retrying", exc_info=True)
-        try:
-            await asyncio.wait_for(stop_event.wait(), timeout=_MANAGER_LEASE_RETRY_SECONDS)
-        except TimeoutError:
-            continue
+        await _stopped_within(stop_event, _MANAGER_LEASE_RETRY_SECONDS)
     return False
 
 
 async def _watch_manager_lease(process_stop_event: asyncio.Event, lease_lost: asyncio.Event, lease: WorkerManagerLease) -> None:
     """Force a fresh lease probe every second; a lost lease ends Docker ownership."""
     while not process_stop_event.is_set():
-        try:
-            await asyncio.wait_for(process_stop_event.wait(), timeout=_MANAGER_LEASE_CHECK_SECONDS)
-        except TimeoutError:
-            pass
-        else:
+        if await _stopped_within(process_stop_event, _MANAGER_LEASE_CHECK_SECONDS):
             return
         try:
             await asyncio.to_thread(lease.check, force=True)
@@ -589,8 +576,7 @@ async def _run_as_manager(
             finally:
                 os.environ.pop("RUNTIME_COORDINATOR_GENERATION", None)
             if not role_stop.is_set():
-                with contextlib.suppress(TimeoutError):
-                    await asyncio.wait_for(role_stop.wait(), timeout=1.0)
+                await _stopped_within(role_stop, 1.0)
     finally:
         for task in watchers:
             task.cancel()
@@ -623,8 +609,7 @@ async def main() -> None:
                 if lease_lost and not stop_event.is_set():
                     logger.warning("Worker manager returning to standby after losing its lease")
                     health.standby()
-                    with contextlib.suppress(TimeoutError):
-                        await asyncio.wait_for(stop_event.wait(), timeout=_MANAGER_LEASE_RETRY_SECONDS)
+                    await _stopped_within(stop_event, _MANAGER_LEASE_RETRY_SECONDS)
     finally:
         with contextlib.suppress(Exception):
             await data_plane_server.stop(grace=1.0)

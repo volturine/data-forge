@@ -13,6 +13,7 @@ from typing import Any, cast
 
 import polars as pl
 import pytest
+from operation_support import run_operation
 from pydantic import ValidationError
 
 from builds.build_live import RuntimeBuild
@@ -20,8 +21,8 @@ from dataforge_protocol import analysis_pb2, compute_pb2, datasource_pb2, enums_
 from datasources import execution as datasource_execution
 from operations.download import DownloadParams
 from operations.export import ExportParams
-from operations.notification import NotificationHandler, NotificationParams
-from operations.plot import ChartHandler, ChartParams, compute_chart_data
+from operations.notification import NotificationParams
+from operations.plot import ChartParams, compute_chart_data
 from operations.step_converter import analysis_pipeline_to_execution_payload
 from runtime import compute_request_runtime, compute_service, datasource_delete_runtime, worker_runtime_client
 from runtime.compute_manager import (
@@ -33,6 +34,7 @@ from runtime.compute_manager import (
 from runtime.compute_service import ExportDatasourceResult
 from runtime.domain.compute import schemas as compute_schemas
 from runtime.domain.compute.base import ComputeWorkerStatusInfo
+from runtime.domain.compute_worker_runs.schemas import ComputeWorkerRunExecutionCategory
 from runtime.executors import (
     CLEANUP_EXECUTOR,
     COMPUTE_EXECUTOR,
@@ -43,7 +45,7 @@ from runtime.executors import (
     run_engine_io_in_thread,
 )
 from runtime.polars_compute import _build_pipeline_details, classify_engine_error
-from runtime.worker_runtime_client import BackendWorkerRpcError, PendingDatasourceDelete
+from runtime.worker_runtime_client import BackendWorkerRpcError, ExecutionEntry, PendingDatasourceDelete
 
 # ---------------------------------------------------------------------------
 # Build runtime regressions
@@ -527,15 +529,17 @@ async def test_compute_request_claims_share_a_bounded_control_plane(monkeypatch)
 
 def test_compute_worker_run_execution_entry_proto_uses_typed_fields() -> None:
     entry = worker_runtime_client._compute_worker_run_execution_entry_proto(
-        {
-            "key": "filter",
-            "label": "Filter",
-            "category": "step",
-            "order": 0,
-            "duration_ms": 12.5,
-            "share_pct": 100.0,
-            "metadata": {"step_type": "filter"},
-        }
+        ExecutionEntry(
+            key="filter",
+            label="Filter",
+            category=ComputeWorkerRunExecutionCategory.STEP,
+            order=0,
+            duration_ms=12.5,
+            share_pct=100.0,
+            optimized_plan=None,
+            unoptimized_plan=None,
+            step_type="filter",
+        )
     )
 
     assert isinstance(entry, compute_pb2.ComputeWorkerRunExecutionEntry)
@@ -553,9 +557,9 @@ def test_compute_worker_run_execution_entries_normalize_invalid_timing_metrics()
         total_duration_ms=1,
     )
 
-    assert [entry["key"] for entry in entries] == ["compute"]
-    assert entries[0]["duration_ms"] == 250.0
-    assert entries[0]["share_pct"] == 100.0
+    assert [entry.key for entry in entries] == ["compute"]
+    assert entries[0].duration_ms == 250.0
+    assert entries[0].share_pct == 100.0
 
 
 def test_export_operation_params_accept_generated_enum_numbers() -> None:
@@ -591,14 +595,17 @@ def test_compute_worker_run_update_proto_uses_typed_patch_fields() -> None:
             "duration_ms": 42,
             "step_timings": {"filter": 2.5},
             "execution_entries": [
-                {
-                    "key": "filter",
-                    "label": "Filter",
-                    "category": "step",
-                    "order": 0,
-                    "duration_ms": 2.5,
-                    "metadata": {"step_type": "filter"},
-                }
+                ExecutionEntry(
+                    key="filter",
+                    label="Filter",
+                    category=ComputeWorkerRunExecutionCategory.STEP,
+                    order=0,
+                    duration_ms=2.5,
+                    share_pct=None,
+                    optimized_plan=None,
+                    unoptimized_plan=None,
+                    step_type="filter",
+                )
             ],
             "progress": 1.0,
             "current_step": None,
@@ -1501,10 +1508,23 @@ def test_shutdown_compute_request_removes_active_engine_and_emits_empty_snapshot
         process_id = 1234
         resource_config: dict[str, object] = {}
         effective_resources: dict[str, object] = {}
+        container_id = None
+        image_digest = None
+        docker_host = None
+        termination_reason = None
+        exit_code = None
+        oom_killed = None
 
         def __init__(self) -> None:
             self.alive = False
             self.shutdown_calls = 0
+
+        def bind_capacity_notifier(self, _notifier) -> None:
+            return None
+
+        @property
+        def lifecycle_status(self) -> str:
+            return "running" if self.current_job_id else "idle"
 
         def start(self) -> None:
             self.alive = True
@@ -1868,10 +1888,10 @@ async def test_run_analysis_build_stream_shuts_down_build_engine_after_completio
 class TestNotificationHandler:
     def test_validates_params(self):
         """Invalid params raise ValidationError."""
-        handler = NotificationHandler()
         lf = pl.DataFrame({"a": [1]}).lazy()
         with pytest.raises(ValidationError):
-            handler(
+            run_operation(
+                "notification",
                 lf,
                 {
                     "method": "invalid_method",
@@ -2044,9 +2064,9 @@ class TestChartHandlerPassThrough:
     """Chart handler must return input lf unchanged (pass-through for DAG)."""
 
     def test_pass_through_preserves_schema(self):
-        handler = ChartHandler()
         lf = _chart_frame()
-        result = handler(
+        result = run_operation(
+            "chart",
             lf,
             {
                 "chart_type": "bar",
@@ -2059,9 +2079,8 @@ class TestChartHandlerPassThrough:
         assert result.collect_schema().names() == lf.collect_schema().names()
 
     def test_pass_through_data_unchanged(self):
-        handler = ChartHandler()
         lf = _chart_frame()
-        result = handler(lf, {"chart_type": "scatter", "x_column": "category", "y_column": "value"})
+        result = run_operation("chart", lf, {"chart_type": "scatter", "x_column": "category", "y_column": "value"})
         assert result.collect().height == lf.collect().height
         assert result.collect().columns == lf.collect().columns
 
@@ -2573,11 +2592,9 @@ class TestSafeBuiltinsUdf:
             self._run_udf(code)
 
     def test_dunder_escape_blocked_before_exec(self):
-        from operations.with_columns import WithColumnsHandler
-
-        handler = WithColumnsHandler()
         with pytest.raises(ValueError, match="forbidden dunder access"):
-            handler(
+            run_operation(
+                "with_columns",
                 pl.DataFrame({"id": [1]}).lazy(),
                 {
                     "expressions": [

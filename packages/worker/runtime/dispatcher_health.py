@@ -7,9 +7,18 @@ import os
 import socket
 import time
 from collections.abc import AsyncIterator, Callable
+from enum import StrEnum
 from pathlib import Path
 
 _ROLE = "worker"
+
+
+class DispatcherState(StrEnum):
+    STARTING = "starting"
+    STANDBY = "standby"
+    TAKING_OVER = "taking_over"
+    ACTIVE = "active"
+    STOPPED = "stopped"
 
 
 def _socket_path(pid: int) -> Path:
@@ -39,20 +48,20 @@ class DispatcherHealth:
         # lease, or a manager waiting for a new coordinator generation: it
         # sweeps every host and rebuilds the warm reserve before it can
         # register, so it stays healthy for a bounded grace period.
-        self._state = "starting"
+        self._state = DispatcherState.STARTING
         self._taking_over_until = 0.0
         self._progress: dict[str, float | None] = dict.fromkeys(lanes)
         self._max_age_seconds = max_age_seconds
         self._clock = clock
 
     @property
-    def state(self) -> str:
+    def state(self) -> DispatcherState:
         return self._state
 
     def standby(self) -> None:
         self.registration_changed(False)
         if self._running:
-            self._state = "standby"
+            self._state = DispatcherState.STANDBY
 
     def taking_over(self, grace_seconds: float) -> None:
         self.registration_changed(False)
@@ -60,9 +69,9 @@ class DispatcherHealth:
             return
         # A takeover that keeps failing before it registers must not refresh
         # its own grace period; only a registration starts the clock again.
-        if self._state != "taking_over":
+        if self._state != DispatcherState.TAKING_OVER:
             self._taking_over_until = self._clock() + max(grace_seconds, 0.0)
-        self._state = "taking_over"
+        self._state = DispatcherState.TAKING_OVER
 
     def registered(self) -> None:
         self.registration_changed(True)
@@ -70,7 +79,7 @@ class DispatcherHealth:
     def registration_changed(self, registered: bool) -> None:
         self._registered = registered and self._running
         if self._registered:
-            self._state = "active"
+            self._state = DispatcherState.ACTIVE
         else:
             self._progress = dict.fromkeys(self._progress)
 
@@ -79,7 +88,7 @@ class DispatcherHealth:
 
     def stopped(self) -> None:
         self._running = False
-        self._state = "stopped"
+        self._state = DispatcherState.STOPPED
         self.registration_changed(False)
 
     def failed(self, lane: str) -> None:
@@ -90,9 +99,9 @@ class DispatcherHealth:
         ages = {lane: now - stamp if stamp is not None else None for lane, stamp in self._progress.items()}
         if not self._running:
             healthy = False
-        elif self._state == "standby":
+        elif self._state == DispatcherState.STANDBY:
             healthy = True
-        elif self._state == "taking_over":
+        elif self._state == DispatcherState.TAKING_OVER:
             healthy = now < self._taking_over_until
         else:
             healthy = self._registered and bool(ages) and all(age is not None and 0 <= age <= self._max_age_seconds for age in ages.values())
@@ -146,7 +155,7 @@ def probe(pid: int = 1) -> bool:
             response = json.loads(b"".join(chunks))
         if not isinstance(response, dict) or response.get("pid") != pid or response.get("healthy") is not True:
             return False
-        return response.get("registered") is True or response.get("state") in {"standby", "taking_over"}
+        return response.get("registered") is True or response.get("state") in {DispatcherState.STANDBY, DispatcherState.TAKING_OVER}
     except OSError, ValueError:
         return False
 

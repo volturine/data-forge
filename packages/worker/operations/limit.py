@@ -2,14 +2,12 @@
 
 import polars as pl
 
-from runtime.domain.compute.base import OperationHandler, OperationParams
+from runtime.domain.compute.base import OperationParams
 
 
 class LimitParams(OperationParams):
     n: int = 10
 
 
-class LimitHandler(OperationHandler):
-    def __call__(self, lf: pl.LazyFrame, params: dict, **_) -> pl.LazyFrame:
-        validated = LimitParams.model_validate(params)
-        return lf.head(validated.n)
+def limit(lf: pl.LazyFrame, params: LimitParams, **_) -> pl.LazyFrame:
+    return lf.head(params.n)

@@ -48,7 +48,8 @@ SHUTDOWN_EXECUTOR = ThreadPoolExecutor(
 
 
 class _ExecutorLane:
-    def __init__(self, executor: ThreadPoolExecutor, max_pending: int) -> None:
+    def __init__(self, name: str, executor: ThreadPoolExecutor, max_pending: int) -> None:
+        self.name = name
         self.executor = executor
         self.max_pending = max_pending
         self._semaphores: weakref.WeakKeyDictionary[asyncio.AbstractEventLoop, asyncio.Semaphore] = weakref.WeakKeyDictionary()
@@ -63,11 +64,11 @@ class _ExecutorLane:
             return semaphore
 
 
-COMPUTE_LANE = _ExecutorLane(COMPUTE_EXECUTOR, settings.compute_workers * 2)
-CONTROL_LANE = _ExecutorLane(CONTROL_EXECUTOR, _CONTROL_WORKERS * 2)
-CLEANUP_LANE = _ExecutorLane(CLEANUP_EXECUTOR, _CLEANUP_WORKERS * 2)
-ENGINE_IO_LANE = _ExecutorLane(ENGINE_IO_EXECUTOR, settings.compute_workers * 2)
-SHUTDOWN_LANE = _ExecutorLane(SHUTDOWN_EXECUTOR, COMPUTE_WORKER_SHUTDOWN_WORKERS * 2)
+COMPUTE_LANE = _ExecutorLane("compute-work", COMPUTE_EXECUTOR, settings.compute_workers * 2)
+CONTROL_LANE = _ExecutorLane("runtime-control", CONTROL_EXECUTOR, _CONTROL_WORKERS * 2)
+CLEANUP_LANE = _ExecutorLane("runtime-cleanup", CLEANUP_EXECUTOR, _CLEANUP_WORKERS * 2)
+ENGINE_IO_LANE = _ExecutorLane("engine-io", ENGINE_IO_EXECUTOR, settings.compute_workers * 2)
+SHUTDOWN_LANE = _ExecutorLane("compute-worker-shutdown", SHUTDOWN_EXECUTOR, COMPUTE_WORKER_SHUTDOWN_WORKERS * 2)
 
 
 async def run_compute_in_thread[T](
@@ -78,28 +79,27 @@ async def run_compute_in_thread[T](
     expected_cancel_errors: tuple[type[Exception], ...] = (),
     **kwargs: Any,
 ) -> T:
-    return await _run_in_executor(COMPUTE_LANE, "compute-work", function, cancel_work, *args, expected_cancel_errors=expected_cancel_errors, **kwargs)
+    return await _run_in_executor(COMPUTE_LANE, function, cancel_work, *args, expected_cancel_errors=expected_cancel_errors, **kwargs)
 
 
 async def run_control_in_thread[T](function: Callable[..., T], /, *args: Any, **kwargs: Any) -> T:
-    return await _run_in_executor(CONTROL_LANE, "runtime-control", function, None, *args, **kwargs)
+    return await _run_in_executor(CONTROL_LANE, function, None, *args, **kwargs)
 
 
 async def run_shutdown_in_thread[T](function: Callable[..., T], /, *args: Any, **kwargs: Any) -> T:
-    return await _run_in_executor(SHUTDOWN_LANE, "compute-worker-shutdown", function, None, *args, **kwargs)
+    return await _run_in_executor(SHUTDOWN_LANE, function, None, *args, **kwargs)
 
 
 async def run_cleanup_in_thread[T](function: Callable[..., T], /, *args: Any, **kwargs: Any) -> T:
-    return await _run_in_executor(CLEANUP_LANE, "runtime-cleanup", function, None, *args, **kwargs)
+    return await _run_in_executor(CLEANUP_LANE, function, None, *args, **kwargs)
 
 
 async def run_engine_io_in_thread[T](function: Callable[..., T], /, *args: Any, **kwargs: Any) -> T:
-    return await _run_in_executor(ENGINE_IO_LANE, "engine-io", function, None, *args, **kwargs)
+    return await _run_in_executor(ENGINE_IO_LANE, function, None, *args, **kwargs)
 
 
 async def _run_in_executor[T](
     lane: _ExecutorLane,
-    executor_name: str,
     function: Callable[..., T],
     cancel_work: Callable[[], object] | None,
     /,
@@ -123,7 +123,7 @@ async def _run_in_executor[T](
             if queue_ms >= 100:
                 logger.warning(
                     "Runtime executor queue delay executor=%s operation=%s queue_ms=%.1f",
-                    executor_name,
+                    lane.name,
                     getattr(function, "__qualname__", type(function).__name__),
                     queue_ms,
                 )

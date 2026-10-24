@@ -7,7 +7,7 @@ from collections.abc import Callable
 import polars as pl
 
 from operations.validation import validate_no_reflection_escape
-from runtime.domain.compute.base import OperationHandler, OperationParams
+from runtime.domain.compute.base import OperationParams
 
 
 class ExpressionParams(OperationParams):
@@ -173,10 +173,6 @@ def parse_expression(expr_str: str) -> pl.Expr:
     return result
 
 
-class ExpressionHandler(OperationHandler):
+def expression(lf: pl.LazyFrame, params: ExpressionParams, **_) -> pl.LazyFrame:
     """Create a new column using a Polars expression string."""
-
-    def __call__(self, lf: pl.LazyFrame, params: dict, **_) -> pl.LazyFrame:
-        validated = ExpressionParams.model_validate(params)
-
-        return lf.with_columns(parse_expression(validated.expression).alias(validated.column_name))
+    return lf.with_columns(parse_expression(params.expression).alias(params.column_name))

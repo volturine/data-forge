@@ -240,23 +240,21 @@ def _build_pipeline(
 - **Cycle detection**: Throws error if pipeline has cycles
 - **No merge support**: Multiple dependencies (`len(depends_on) > 1`) not supported
 
-### 4. Operation Handlers (`modules/compute/operations/`)
+### 4. Operations (`packages/worker/operations/`)
 
-Each step type has a corresponding handler that implements the transformation:
+Each step type is a typed function registered with its parameter model. Step
+parameters are parsed once when the step is converted, and the function
+receives the parsed model:
 
 ```python
-class OperationHandler(Protocol):
-    @property
-    def name(self) -> str: ...
+@dataclass(frozen=True, slots=True)
+class Operation:
+    params: type[OperationParams]
+    apply: Callable[..., pl.LazyFrame]
 
-    def __call__(
-        self,
-        lf: pl.LazyFrame,
-        params: dict,
-        *,
-        right_lf: pl.LazyFrame | None = None,
-        right_sources: dict[str, pl.LazyFrame] | None = None,
-    ) -> pl.LazyFrame: ...
+
+def limit(lf: pl.LazyFrame, params: LimitParams, **_) -> pl.LazyFrame:
+    return lf.head(params.n)
 ```
 
 **Supported Operations (25+):**

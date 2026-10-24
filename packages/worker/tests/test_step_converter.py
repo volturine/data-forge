@@ -1,8 +1,12 @@
 import dataclasses
+from typing import Self
 
 import pytest
+from pydantic import model_validator
 
 from dataforge_protocol import enums_pb2
+from operations import PARAM_MODELS
+from operations.limit import LimitParams
 from operations.step_converter import (
     BackendStep,
     FrontendStep,
@@ -10,9 +14,9 @@ from operations.step_converter import (
 )
 
 
-def test_direct_frontend_step_with_unknown_type_is_rejected() -> None:
-    with pytest.raises(ValueError, match="Unknown operation 'typo'"):
-        convert_step_format(FrontendStep(id="step-1", type="typo"))
+def test_unknown_step_type_is_rejected() -> None:
+    with pytest.raises(ValueError, match="Unknown step type 'typo'"):
+        convert_step_format({"id": "step-1", "type": "typo"})
 
 
 def test_convert_step_format_returns_frozen_backend_step_dataclass() -> None:
@@ -34,6 +38,24 @@ def test_convert_step_format_returns_frozen_backend_step_dataclass() -> None:
 
     with pytest.raises(dataclasses.FrozenInstanceError):
         step.operation = "filter"
+
+
+def test_convert_step_format_validates_operation_config_once(monkeypatch: pytest.MonkeyPatch) -> None:
+    validated: list[LimitParams] = []
+
+    class CountingLimitParams(LimitParams):
+        @model_validator(mode="after")
+        def record_validation(self) -> Self:
+            validated.append(self)
+            return self
+
+    monkeypatch.setitem(PARAM_MODELS, "limit", CountingLimitParams)
+
+    step = convert_step_format({"id": "step-1", "type": "limit", "config": {"n": 5}})
+
+    assert len(validated) == 1
+    assert step.config is validated[0]
+    assert step.params == {"n": 5}
 
 
 def test_convert_step_format_parses_config_through_protocol_step_config() -> None:

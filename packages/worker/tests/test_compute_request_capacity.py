@@ -66,6 +66,13 @@ class _JobTracker:
 
 
 class _GatedComputeWorker:
+    container_id: str | None = None
+    image_digest: str | None = None
+    docker_host: str | None = None
+    termination_reason: str | None = None
+    exit_code: int | None = None
+    oom_killed: bool | None = None
+
     def __init__(self, tracker: _JobTracker, resource_config: dict[str, object] | None = None) -> None:
         self.resource_config = resource_config or {}
         self.effective_resources = {"max_threads": 1}
@@ -85,7 +92,14 @@ class _GatedComputeWorker:
         return self._alive
 
     @property
+    def lifecycle_status(self) -> str:
+        return "running" if self.current_job_id else "idle"
+
+    @property
     def process_id(self) -> None:
+        return None
+
+    def bind_identity(self, _identity: compute_pb2.ComputeWorkerIdentity, *, resource_config: dict | None = None, namespace: str | None = None) -> None:
         return None
 
     def bind_capacity_notifier(self, _notifier: Callable[[], None]) -> None:
@@ -224,7 +238,7 @@ async def _wait_until(predicate: Callable[[], bool]) -> None:
 async def test_request_and_build_jobs_share_manager_capacity_and_shutdown_bypasses_it(monkeypatch) -> None:
     monkeypatch.setattr(compute_request_runtime.settings, "compute_workers", 2)
     compute_executor = ThreadPoolExecutor(max_workers=2, thread_name_prefix="capacity-test")
-    monkeypatch.setattr(executors, "COMPUTE_LANE", _ExecutorLane(compute_executor, max_pending=2))
+    monkeypatch.setattr(executors, "COMPUTE_LANE", _ExecutorLane("compute-work", compute_executor, max_pending=2))
     tracker = _JobTracker()
     manager = _manager(tracker)
     real_execute_sync = compute_request_runtime._execute_request_sync
@@ -358,7 +372,7 @@ async def test_request_and_build_jobs_share_manager_capacity_and_shutdown_bypass
 async def test_queued_same_datasource_build_releases_only_its_rid_slot_when_cancelled(monkeypatch) -> None:
     monkeypatch.setattr(compute_request_runtime.settings, "compute_workers", 2)
     compute_executor = ThreadPoolExecutor(max_workers=2, thread_name_prefix="shared-rid-test")
-    monkeypatch.setattr(executors, "COMPUTE_LANE", _ExecutorLane(compute_executor, max_pending=2))
+    monkeypatch.setattr(executors, "COMPUTE_LANE", _ExecutorLane("compute-work", compute_executor, max_pending=2))
     tracker = _JobTracker()
     manager = _manager(tracker)
     real_run_compute = compute_request_runtime.run_compute_in_thread

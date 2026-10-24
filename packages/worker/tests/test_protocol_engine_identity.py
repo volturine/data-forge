@@ -63,12 +63,7 @@ def test_analysis_requests_share_analysis_compute_worker_identity(kind, field_na
 
     identity = compute_request_runtime._compute_worker_identity_for_claimed(_claimed_request(kind, command))
 
-    assert identity == compute_service.default_stateless_compute_worker_identity(
-        {
-            "analysis_id": "analysis-1",
-            "tabs": [{"id": "tab-1", "datasource": {"id": "dataset-1"}, "steps": []}],
-        },
-    )
+    assert identity == compute_service.default_stateless_compute_worker_identity("analysis-1")
     assert identity.scope == enums_pb2.COMPUTE_WORKER_SCOPE_ANALYSIS_INTERACTIVE
     assert identity.analysis_id == "analysis-1"
 
@@ -121,3 +116,11 @@ def test_distinct_transforms_share_only_the_exact_analysis_engine() -> None:
 def test_compute_worker_identity_rejects_scope_invariant_violations(identity: compute_pb2.ComputeWorkerIdentity) -> None:
     with pytest.raises(ValidationError):
         Validator().validate(identity)
+
+
+def test_stateless_identity_rejects_empty_pipeline_analysis_id() -> None:
+    request = compute_pb2.StepPreviewCommand(target_step_id="step-a", analysis_pipeline=_pipeline("dataset-1", ""))
+    command = compute_pb2.ComputeCommand(preview=request)
+
+    with pytest.raises(ValueError, match="analysis_pipeline.analysis_id is required"):
+        compute_request_runtime._compute_worker_identity_for_claimed(_claimed_request(enums_pb2.COMPUTE_REQUEST_KIND_PREVIEW, command))

@@ -13,7 +13,7 @@ from runtime.compute_service import _schema_cache_payload_from_arrow, export_dat
 from runtime.domain.compute.base import ComputeWorkerResult
 from runtime.iceberg_metadata import sync_iceberg_schema
 from runtime.namespace import namespace_paths
-from runtime.worker_runtime_client import ClaimedBuildJob
+from runtime.worker_runtime_client import ClaimedBuildJob, ComputeWorkerRunState
 
 
 class TestSyncIcebergSchema:
@@ -144,7 +144,7 @@ class TestBuildModeWiring:
     def _make_internal_client_mock(self, output_ds_id: str) -> MagicMock:
         client = MagicMock()
         client.create_compute_worker_run.return_value = "run-1"
-        client.compute_worker_run_state.return_value = {"result_json": {}}
+        client.compute_worker_run_state.return_value = ComputeWorkerRunState(status=None, result_json={}, cancelled_at=None, cancelled_by=None)
         client.list_healthchecks.return_value = []
         client.analysis_name.return_value = "Test Analysis"
         client.telegram_targets.return_value = []
@@ -281,8 +281,8 @@ class TestBuildModeWiring:
         mock_table.overwrite.assert_called_once_with(mock_arrow)
         mock_table.append.assert_not_called()
         publication = internal_client.upsert_output_datasource.call_args.kwargs
-        assert publication["job_id"] == "job-1"
-        assert publication["claim_token"] == "claim-token-1"
-        assert publication["lease_generation"] == 3
+        assert publication["publication"].job_id == "job-1"
+        assert publication["publication"].claim_token == "claim-token-1"
+        assert publication["publication"].lease_generation == 3
         assert publication["config"]["table"].endswith("_claim_claim_token_1")
         assert "/claims/claim-token-1" in publication["config"]["metadata_path"]

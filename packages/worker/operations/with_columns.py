@@ -11,7 +11,7 @@ from pydantic import BaseModel, ConfigDict, Field
 
 from operations.enums import WithColumnsExprType
 from operations.validation import validate_no_reflection_escape
-from runtime.domain.compute.base import OperationHandler, OperationParams
+from runtime.domain.compute.base import OperationParams
 
 # Builtins allowed inside UDF code.
 # Keep this as a narrow allowlist so aliased introspection helpers cannot escape the sandbox.
@@ -74,43 +74,40 @@ class WithColumnsParams(OperationParams):
     expressions: list[WithColumnsExpr] = Field(default_factory=list)
 
 
-class WithColumnsHandler(OperationHandler):
+def with_columns(lf: pl.LazyFrame, params: WithColumnsParams, **_) -> pl.LazyFrame:
     """Add or modify columns using expressions."""
+    exprs: list[pl.Expr] = []
+    for expr in params.expressions:
+        if expr.type == WithColumnsExprType.LITERAL:
+            exprs.append(pl.lit(expr.value).alias(expr.name))
+        elif expr.type == WithColumnsExprType.COLUMN and expr.column:
+            exprs.append(pl.col(expr.column).alias(expr.name))
+        elif expr.type == WithColumnsExprType.UDF:
+            if not expr.code:
+                raise ValueError(f"UDF expression {expr.name!r} is missing its code")
+            validate_no_reflection_escape(expr.code, label="UDF code")
+            scope: dict[str, Any] = {
+                "pl": pl,
+                "sleep": time.sleep,
+                "__builtins__": _SAFE_BUILTINS,
+            }
+            local_scope: dict[str, Any] = {}
+            exec(expr.code, scope, local_scope)
+            udf = local_scope.get("udf") or scope.get("udf")
+            if not callable(udf):
+                raise ValueError("UDF must define a callable named udf")
+            fn = cast(Callable[..., Any], udf)
+            args = expr.args or []
 
-    def __call__(self, lf: pl.LazyFrame, params: dict, **_) -> pl.LazyFrame:
-        validated = WithColumnsParams.model_validate(params)
-        exprs: list[pl.Expr] = []
-        for expr in validated.expressions:
-            if expr.type == WithColumnsExprType.LITERAL:
-                exprs.append(pl.lit(expr.value).alias(expr.name))
-            elif expr.type == WithColumnsExprType.COLUMN and expr.column:
-                exprs.append(pl.col(expr.column).alias(expr.name))
-            elif expr.type == WithColumnsExprType.UDF:
-                if not expr.code:
-                    raise ValueError(f"UDF expression {expr.name!r} is missing its code")
-                validate_no_reflection_escape(expr.code, label="UDF code")
-                scope: dict[str, Any] = {
-                    "pl": pl,
-                    "sleep": time.sleep,
-                    "__builtins__": _SAFE_BUILTINS,
-                }
-                local_scope: dict[str, Any] = {}
-                exec(expr.code, scope, local_scope)
-                udf = local_scope.get("udf") or scope.get("udf")
-                if not callable(udf):
-                    raise ValueError("UDF must define a callable named udf")
-                fn = cast(Callable[..., Any], udf)
-                args = expr.args or []
+            def apply_row(row: dict[str, Any], *, fn: Callable[..., Any], cols: list[str]) -> Any:
+                return fn(*[row[col] for col in cols])
 
-                def apply_row(row: dict[str, Any], *, fn: Callable[..., Any], cols: list[str]) -> Any:
-                    return fn(*[row[col] for col in cols])
+            def apply_null(_: Any, *, fn: Callable[..., Any]) -> Any:
+                return fn()
 
-                def apply_null(_: Any, *, fn: Callable[..., Any]) -> Any:
-                    return fn()
-
-                if args:
-                    struct = pl.struct(args)
-                    exprs.append(struct.map_elements(partial(apply_row, fn=fn, cols=args)).alias(expr.name))
-                else:
-                    exprs.append(pl.int_range(pl.len()).map_elements(partial(apply_null, fn=fn)).alias(expr.name))
-        return lf.with_columns(exprs)
+            if args:
+                struct = pl.struct(args)
+                exprs.append(struct.map_elements(partial(apply_row, fn=fn, cols=args)).alias(expr.name))
+            else:
+                exprs.append(pl.int_range(pl.len()).map_elements(partial(apply_null, fn=fn)).alias(expr.name))
+    return lf.with_columns(exprs)

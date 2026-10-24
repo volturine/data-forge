@@ -138,13 +138,10 @@ def _freeze_claimed_input_metadata(
         if key in snapshot:
             raise ValueError(f"Compute request {claimed.id} contains duplicate datasource revision entries")
         metadata = client.datasource_metadata(namespace=claimed.namespace, datasource_id=expected.datasource_id)
-        if not metadata.found:
-            # A datasource can disappear between staging and claim. Preserve
-            # its user-facing not-found result; a present datasource with a
-            # changed revision is stale.
-            snapshot[key] = metadata
-            continue
-        if metadata.revision != expected.revision:
+        # A datasource can disappear between staging and claim. Preserve
+        # its user-facing not-found result; a present datasource with a
+        # changed revision is stale.
+        if metadata.found and metadata.revision != expected.revision:
             raise StaleComputeInputError(
                 expected.datasource_id,
                 expected_revision=int(expected.revision),
@@ -415,13 +412,7 @@ async def _run_once(
     claim_semaphore: asyncio.Semaphore | None = None,
 ) -> bool:
     async def claim_once() -> ClaimedComputeRequest | None:
-        if claim_semaphore is None:
-            return await next_compute_request(
-                worker_id,
-                allowed_kinds=allowed_kinds,
-                namespace=namespace,
-            )
-        async with claim_semaphore:
+        async with claim_semaphore or contextlib.nullcontext():
             return await next_compute_request(
                 worker_id,
                 allowed_kinds=allowed_kinds,
@@ -944,7 +935,7 @@ def _publish_staged_datasource(
             manifest, staged_prefix=target_path, table_path=table_path, database_url=settings.database_url
         )
         if create:
-            config = datasource_execution.build_iceberg_config(published_table_path, branch, source_config=source)
+            config: dict[str, object] = {}
         else:
             assert metadata is not None
             config = dict(metadata.config or {})
@@ -1158,7 +1149,7 @@ def _execute_request_sync(
         if claimed.kind == enums_pb2.COMPUTE_REQUEST_KIND_PREVIEW:
             preview_request = cast(compute_pb2.StepPreviewCommand, _compute_command_from_claimed(claimed, "preview"))
             analysis_pipeline = analysis_pipeline_to_execution_payload(preview_request.analysis_pipeline)
-            request_json = _step_request_json(preview_request)
+            request_json = _step_request_json(preview_request, analysis_pipeline)
             preview_started = time.monotonic()
             preview_outcome = service.preview_step(
                 manager=manager,
@@ -1217,12 +1208,13 @@ def _execute_request_sync(
             row_count_request = cast(compute_pb2.StepRowCountCommand, _compute_command_from_claimed(claimed, "row_count"))
             if not row_count_request.HasField("analysis_id"):
                 raise ValueError("analysis_id is required")
-            request_json = _step_request_json(row_count_request)
+            analysis_pipeline = analysis_pipeline_to_execution_payload(row_count_request.analysis_pipeline)
+            request_json = _step_request_json(row_count_request, analysis_pipeline)
             row_count_response = service.get_step_row_count(
                 manager=manager,
                 target_step_id=row_count_request.target_step_id,
                 analysis_id=row_count_request.analysis_id,
-                analysis_pipeline=analysis_pipeline_to_execution_payload(row_count_request.analysis_pipeline),
+                analysis_pipeline=analysis_pipeline,
                 tab_id=row_count_request.tab_id if row_count_request.HasField("tab_id") else None,
                 request_json=request_json,
             )
@@ -1269,29 +1261,21 @@ def _execute_request_sync(
                 destination=export_request.destination,
                 message=f"Created datasource {export_operation_result.datasource_name}",
                 datasource_id=export_operation_result.datasource_id,
+                datasource_name=export_operation_result.datasource_name,
             )
-            datasource_name = export_operation_result.result_meta.get("datasource_name") if isinstance(export_operation_result.result_meta, dict) else None
-            if isinstance(datasource_name, str):
-                export_result.datasource_name = datasource_name
             publish_complete(response=compute_pb2.ComputeResponse(export=export_result))
-        elif claimed.kind == enums_pb2.COMPUTE_REQUEST_KIND_SPAWN_ENGINE:
-            command = cast(compute_pb2.ComputeWorkerLifecycleCommand, _compute_command_from_claimed(claimed, "spawn_engine"))
+        elif claimed.kind in {enums_pb2.COMPUTE_REQUEST_KIND_SPAWN_ENGINE, enums_pb2.COMPUTE_REQUEST_KIND_CONFIGURE_ENGINE}:
+            is_configure = claimed.kind == enums_pb2.COMPUTE_REQUEST_KIND_CONFIGURE_ENGINE
+            field_name = "configure_engine" if is_configure else "spawn_engine"
+            command = cast(compute_pb2.ComputeWorkerLifecycleCommand, _compute_command_from_claimed(claimed, field_name))
             identity = command.engine_identity
             resource_config = _resource_config_from_command(command)
-            manager.spawn_compute_worker(
-                identity,
-                resource_config=resource_config,
-            )
-            publish_complete(
-                response=compute_pb2.ComputeResponse(engine_status=compute_worker_status_result_proto(manager.get_compute_worker_status(identity)))
-            )
-        elif claimed.kind == enums_pb2.COMPUTE_REQUEST_KIND_CONFIGURE_ENGINE:
-            command = cast(compute_pb2.ComputeWorkerLifecycleCommand, _compute_command_from_claimed(claimed, "configure_engine"))
-            identity = command.engine_identity
-            resource_config = _resource_config_from_command(command)
-            if resource_config is None:
-                raise ValueError("resource_config is required")
-            manager.restart_engine_with_config(identity, resource_config)
+            if is_configure:
+                if resource_config is None:
+                    raise ValueError("resource_config is required")
+                logger.info("Restarting engine for %s with new config: %s", identity.resource_id, resource_config)
+            # spawn_compute_worker transfers the replaced engine's capacity to its replacement atomically.
+            manager.spawn_compute_worker(identity, resource_config=resource_config)
             publish_complete(
                 response=compute_pb2.ComputeResponse(engine_status=compute_worker_status_result_proto(manager.get_compute_worker_status(identity)))
             )
@@ -1306,11 +1290,9 @@ def _execute_request_sync(
         else:
             raise ValueError(f"Unsupported compute request kind: {_compute_request_kind_name(claimed.kind)}")
         return True
-    except ComputeRequestLeaseLost:
-        # Stale claim / replaced publication fence: drain without failing the request as an infrastructure error.
-        raise
-    except ComputeWorkerCapacityFull:
-        # Propagate so the async runner can park without holding a pool thread.
+    except ComputeRequestLeaseLost, ComputeWorkerCapacityFull:
+        # A stale claim or replaced publication fence drains without failing the request as an infrastructure error.
+        # Capacity-full propagates so the async runner can park without holding a pool thread.
         raise
     except Exception as exc:
         error_to_report = exc
@@ -1359,10 +1341,8 @@ _STATELESS_COMMAND_FIELDS = {
 
 
 def _stateless_compute_worker_identity_for_command(command: message.Message) -> compute_pb2.ComputeWorkerIdentity:
-    pipeline = getattr(command, "analysis_pipeline", None)
-    if pipeline is None:
-        raise ValueError("Malformed compute request: stateless compute command is missing analysis_pipeline")
-    return service.default_stateless_compute_worker_identity(analysis_pipeline_to_execution_payload(pipeline))
+    # The identity needs only analysis_id, so the pipeline is not decoded to read it.
+    return service.default_stateless_compute_worker_identity(cast(Any, command).analysis_pipeline.analysis_id)
 
 
 def _compute_worker_identity_for_claimed(claimed: ClaimedComputeRequest) -> compute_pb2.ComputeWorkerIdentity | None:
@@ -1422,11 +1402,10 @@ def _message_to_service_payload(value: message.Message) -> dict[str, object]:
     return cast(dict[str, object], decoded)
 
 
-def _step_request_json(command: message.Message) -> dict[str, object]:
+def _step_request_json(command: message.Message, analysis_pipeline: dict[str, object]) -> dict[str, object]:
     request_json = _message_to_service_payload(command)
-    pipeline = request_json.get("analysis_pipeline")
-    if isinstance(pipeline, dict):
-        request_json["analysis_pipeline"] = analysis_pipeline_to_execution_payload(cast(Any, command).analysis_pipeline)
+    if "analysis_pipeline" in request_json:
+        request_json["analysis_pipeline"] = analysis_pipeline
     return request_json
 
 

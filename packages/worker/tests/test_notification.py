@@ -5,10 +5,11 @@ from unittest.mock import patch
 import polars as pl
 import pyarrow as pa  # type: ignore[import-untyped]
 import pytest
+from operation_support import run_operation
 from pydantic import ValidationError
 
 from dataforge_protocol import analysis_pb2, enums_pb2
-from operations.notification import NotificationHandler, NotificationParams
+from operations.notification import NotificationParams
 from operations.step_converter import analysis_pipeline_to_execution_payload, convert_step_format
 from operations.template_placeholders import render_template_placeholders
 from runtime.compute_service import _prepare_pipeline_notifications
@@ -42,7 +43,7 @@ def _pipeline_with(step: analysis_pb2.AnalysisPipelineStep) -> analysis_pb2.Anal
 
 def _collect(params: dict[str, object], frame: pl.DataFrame | None = None) -> pl.DataFrame:
     source = frame if frame is not None else pl.DataFrame({"body": ["hello"]})
-    return NotificationHandler()(source.lazy(), params, step_id="step-1").collect()
+    return run_operation("notification", source.lazy(), params, step_id="step-1").collect()
 
 
 class TestNotificationParams:
@@ -154,7 +155,8 @@ class TestNotificationHandler:
 
     def test_missing_input_column_fails_before_execution(self) -> None:
         with pytest.raises(ValueError, match="not found"):
-            NotificationHandler()(
+            run_operation(
+                "notification",
                 pl.DataFrame({"body": ["hello"]}).lazy(),
                 {"method": "email", "recipient": "a@example.com", "input_columns": ["missing"]},
                 step_id="step-1",

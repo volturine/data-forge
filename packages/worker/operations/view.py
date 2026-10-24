@@ -1,16 +1,8 @@
 """View passthrough operation."""
 
-import polars as pl
-
-from runtime.domain.compute.base import OperationHandler, OperationParams
+from runtime.domain.compute.base import OperationParams
 
 
 class ViewParams(OperationParams):
     row_limit: int | None = None
     cache_enabled: bool = True
-
-
-class ViewHandler(OperationHandler):
-    def __call__(self, lf: pl.LazyFrame, params: dict, **_) -> pl.LazyFrame:
-        ViewParams.model_validate(params)
-        return lf

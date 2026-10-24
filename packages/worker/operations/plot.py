@@ -23,7 +23,7 @@ from operations.enums import (
     YAxisPosition,
 )
 from runtime.domain.analysis.step_types import ChartType
-from runtime.domain.compute.base import OperationHandler, OperationParams
+from runtime.domain.compute.base import OperationParams
 
 logger = logging.getLogger(__name__)
 
@@ -47,8 +47,6 @@ class ReferenceLine(BaseModel):
 
 
 class ChartParams(OperationParams):
-    model_config = ConfigDict(extra="forbid")
-
     chart_type: ChartType = ChartType.BAR
     x_column: str
     y_column: str | None = None
@@ -90,8 +88,10 @@ def compute_chart_data(lf: pl.LazyFrame, params: dict) -> pl.LazyFrame:
     This is called separately from the pipeline DAG — chart steps are pass-through
     in the DAG but produce visualization data when previewed directly.
     """
-    p = ChartParams.model_validate(params)
+    return _compute_chart(lf, ChartParams.model_validate(params))
 
+
+def _compute_chart(lf: pl.LazyFrame, p: ChartParams) -> pl.LazyFrame:
     if p.chart_type in (ChartType.BAR, ChartType.HORIZONTAL_BAR, ChartType.LINE, ChartType.AREA):
         return _aggregate_grouped(lf, p)
     if p.chart_type == ChartType.PIE:
@@ -120,25 +120,17 @@ def compute_overlay_datasets(
         return datasets
 
     for overlay in params.overlays:
-        overlay_params: dict[str, object] = {
-            "chart_type": overlay.chart_type.value,
-            "x_column": params.x_column,
-            "y_column": overlay.y_column,
-            "aggregation": overlay.aggregation.value,
-            "bins": params.bins,
-            "group_column": None,
-            "group_sort_by": None,
-            "group_sort_order": params.group_sort_order.value,
-            "group_sort_column": None,
-            "stack_mode": params.stack_mode.value,
-            "area_opacity": params.area_opacity,
-            "date_bucket": params.date_bucket.value if params.date_bucket else None,
-            "date_ordinal": params.date_ordinal.value if params.date_ordinal else None,
-            "sort_by": params.sort_by.value if params.sort_by else None,
-            "sort_order": params.sort_order.value,
-            "sort_column": params.sort_column,
-        }
-        overlay_lf = compute_chart_data(lf, overlay_params)
+        overlay_params = params.model_copy(
+            update={
+                "chart_type": ChartType.require(overlay.chart_type.value),
+                "y_column": overlay.y_column,
+                "aggregation": overlay.aggregation,
+                "group_column": None,
+                "group_sort_by": None,
+                "group_sort_column": None,
+            },
+        )
+        overlay_lf = _compute_chart(lf, overlay_params)
         overlay_df = overlay_lf.slice(offset, row_limit).collect()
         datasets.append(
             {
@@ -151,20 +143,6 @@ def compute_overlay_datasets(
         )
 
     return datasets
-
-
-class ChartHandler(OperationHandler):
-    """Chart handler — pass-through for DAG.
-
-    Chart nodes do NOT modify the pipeline data. They exist for visualization only.
-    Downstream steps receive the same data as if the chart node were not there.
-    Visualization data is computed separately via compute_chart_data().
-    """
-
-    def __call__(self, lf: pl.LazyFrame, params: dict, **_) -> pl.LazyFrame:
-        # Validate params but return input unchanged — chart is pass-through
-        ChartParams.model_validate(params)
-        return lf
 
 
 # --- Chart computation functions (used by compute_chart_data) ---
@@ -187,16 +165,14 @@ def _agg_expr(col: str, agg: ChartAggregation, *, alias: str = "y") -> pl.Expr:
     return _CHART_AGGREGATION_EXPRS[agg](col).alias(alias)
 
 
-def _apply_sort(df: pl.LazyFrame, p: ChartParams) -> pl.LazyFrame:
-    if p.sort_by is None:
-        return df.sort("x")
-    order_desc = p.sort_order == SortDirection.DESC
+def _apply_sort(df: pl.LazyFrame, p: ChartParams, *, x_column: str, y_column: str) -> pl.LazyFrame:
+    descending = p.sort_order == SortDirection.DESC
     if p.sort_by == SortBy.X:
-        return df.sort("x", descending=order_desc)
+        return df.sort(x_column, descending=descending)
     if p.sort_by == SortBy.Y:
-        return df.sort("y", descending=order_desc)
+        return df.sort(y_column, descending=descending)
     if p.sort_by == SortBy.CUSTOM and p.sort_column:
-        return df.sort(p.sort_column, descending=order_desc)
+        return df.sort(p.sort_column, descending=descending)
     return df
 
 
@@ -220,9 +196,7 @@ def _apply_date_bucket(lf: pl.LazyFrame, column: str, p: ChartParams) -> pl.Lazy
             DateBucket.DAY: "1d",
             DateBucket.HOUR: "1h",
         }
-        if (duration := bucket_map.get(p.date_bucket)) is None:
-            return lf
-        return lf.with_columns(pl.col(column).dt.truncate(duration).alias(column))
+        return lf.with_columns(pl.col(column).dt.truncate(bucket_map[p.date_bucket]).alias(column))
 
     if p.date_ordinal == DateOrdinal.DAY_OF_WEEK:
         return lf.with_columns((pl.col(column).dt.weekday() - 1).alias(column))
@@ -298,7 +272,7 @@ def _aggregate_grouped(lf: pl.LazyFrame, p: ChartParams) -> pl.LazyFrame:
     agg_expr = _agg_expr(p.y_column, p.aggregation) if p.y_column else pl.len().alias("y")
 
     result = lf.group_by(group_cols).agg(agg_expr).rename({p.x_column: "x"})
-    sorted_result = _apply_sort(result, p)
+    sorted_result = result.sort("x") if p.sort_by is None else _apply_sort(result, p, x_column="x", y_column="y")
     return _apply_group_sort(sorted_result, p, order_lf=group_order_lf)
 
 
@@ -311,10 +285,6 @@ def _aggregate_pie(lf: pl.LazyFrame, p: ChartParams) -> pl.LazyFrame:
     result = lf.group_by(group_cols).agg(agg_expr).rename({p.x_column: "label"})
     if p.group_column:
         result = result.rename({p.group_column: "group"})
-
-    if p.group_column:
-        group_sorted = _apply_group_sort(result.rename({"label": "x"}), p)
-        result = group_sorted.rename({"x": "label"})
 
     if p.sort_by == SortBy.X:
         sorted_result = result.sort("label", descending=p.sort_order == SortDirection.DESC)
@@ -383,13 +353,7 @@ def _build_histogram(lf: pl.LazyFrame, p: ChartParams) -> pl.LazyFrame:
             "count": counts,
         },
     )
-    if p.sort_by == SortBy.X:
-        return result.sort("bin_start", descending=p.sort_order == SortDirection.DESC)
-    if p.sort_by == SortBy.Y:
-        return result.sort("count", descending=p.sort_order == SortDirection.DESC)
-    if p.sort_by == SortBy.CUSTOM and p.sort_column:
-        return result.sort(p.sort_column, descending=p.sort_order == SortDirection.DESC)
-    return result
+    return _apply_sort(result, p, x_column="bin_start", y_column="count")
 
 
 def _build_scatter(lf: pl.LazyFrame, p: ChartParams) -> pl.LazyFrame:

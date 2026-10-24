@@ -20,7 +20,7 @@ import grpc
 import requests
 from google.protobuf import json_format
 
-from dataforge_protocol import compute_pb2, compute_worker_runtime_pb2, compute_worker_runtime_pb2_grpc, enums_pb2
+from dataforge_protocol import compute_pb2, compute_worker_runtime_pb2, compute_worker_runtime_pb2_grpc
 from runtime.compute_request_context import get_compute_request_id
 from runtime.compute_worker_credentials import ObjectStoreCredentials, resolve_compute_worker_credentials
 from runtime.compute_worker_server import COMPUTE_WORKER_PROTOCOL_VERSION
@@ -33,6 +33,7 @@ from runtime.docker_hosts import (
     parse_docker_hosts,
 )
 from runtime.domain.compute.base import ComputeWorker, ComputeWorkerProgressEvent, ComputeWorkerResult
+from runtime.domain.compute.schemas import ComputeWorkerReusePolicy, ComputeWorkerScope
 from runtime.export_formats import get_export_format
 from runtime.json_values import encode_json_bytes
 from runtime.namespace import get_namespace
@@ -228,7 +229,7 @@ def reconcile_deployment_containers(
     return removed
 
 
-def _remove_reconciled_container(client: Any, host: DockerHostSpec, container_id: str) -> bool:
+def _remove_reconciled_container(client: Any, host: DockerHostSpec, container_id: str) -> None:
     """Force-remove a swept container and free its placement slot once it is gone.
 
     A container a live compute worker detached from (fenced coordinator, failed
@@ -239,7 +240,6 @@ def _remove_reconciled_container(client: Any, host: DockerHostSpec, container_id
     with contextlib.suppress(docker.errors.NotFound):  # type: ignore[attr-defined]  # docker-py has no Python 3.14 stubs.
         client.api.remove_container(container_id, force=True)
     docker_host_registry().release_placement(host.name, container_id)
-    return True
 
 
 def _reconcile_host_containers(
@@ -299,10 +299,6 @@ def _reconcile_host_containers(
                 exc_info=True,
             )
     return removed
-
-
-def _identity_scope(identity: compute_pb2.ComputeWorkerIdentity) -> str:
-    return enums_pb2.ComputeWorkerScope.Name(identity.scope).removeprefix("COMPUTE_WORKER_SCOPE_").lower()
 
 
 def _safe_name(value: str) -> str:
@@ -571,11 +567,6 @@ class DockerComputeWorker(ComputeWorker):
         return host.name if host is not None else None
 
     @property
-    def is_warm_worker(self) -> bool:
-        with self._lock:
-            return self._is_warm_worker and self._alive
-
-    @property
     def lifecycle_status(self) -> str:
         if self._shutdown_requested and self._alive:
             return "stopping"
@@ -635,10 +626,8 @@ class DockerComputeWorker(ComputeWorker):
                 "io.dataforge.managed": "true",
                 "io.dataforge.deployment": settings.deployment_id,
                 "io.dataforge.namespace": self._namespace,
-                "io.dataforge.scope": _identity_scope(self.identity),
-                "io.dataforge.reuse-policy": enums_pb2.ComputeWorkerReusePolicy.Name(self.identity.reuse_policy)
-                .removeprefix("COMPUTE_WORKER_REUSE_POLICY_")
-                .lower(),
+                "io.dataforge.scope": ComputeWorkerScope.require(self.identity.scope).value,
+                "io.dataforge.reuse-policy": ComputeWorkerReusePolicy.require(self.identity.reuse_policy).value,
                 "io.dataforge.resource-id": self.identity.resource_id,
                 "io.dataforge.supervisor": self._supervisor_id,
                 "io.dataforge.owner": self.identity.build_id if self.identity.HasField("build_id") else self._supervisor_id,
@@ -668,7 +657,7 @@ class DockerComputeWorker(ComputeWorker):
                     "Slow compute-worker startup request_id=%s namespace=%s compute_worker_scope=%s resource_id=%s docker_host=%s duration_ms=%.1f %s",
                     get_compute_request_id() or "-",
                     self._namespace,
-                    _identity_scope(self.identity),
+                    ComputeWorkerScope.require(self.identity.scope).value,
                     self.identity.resource_id,
                     self.docker_host,
                     startup_duration_ms,
@@ -848,7 +837,6 @@ class DockerComputeWorker(ComputeWorker):
             object_store_region=settings.object_store_region,
             object_store_access_key=credentials.access_key,
             object_store_secret_key=credentials.secret_key,
-            object_store_session_token=credentials.session_token or "",
             polars_max_threads=resources["max_threads"],
             polars_streaming_chunk_size=resources["streaming_chunk_size"],
         )
@@ -1135,11 +1123,8 @@ class DockerComputeWorker(ComputeWorker):
             if stub is None or not self._alive:
                 return False
             metadata = self._metadata()
-        cancel = getattr(stub, "CancelJob", None)
-        if not callable(cancel):
-            return False
         try:
-            response = cancel(
+            response = stub.CancelJob(
                 compute_worker_runtime_pb2.ComputeWorkerCancelJobRequest(job_id=expected),
                 timeout=settings.compute_worker_shutdown_grace_seconds,
                 metadata=metadata,

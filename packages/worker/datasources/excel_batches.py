@@ -2,6 +2,7 @@ from __future__ import annotations
 
 from collections.abc import Generator
 from datetime import date, datetime, time
+from itertools import batched
 from typing import Any
 
 import polars as pl
@@ -12,20 +13,21 @@ from datasources.excel_preflight import resolve_excel_bounds
 
 
 def _kind(value: object) -> str | None:
-    if value is None:
-        return None
-    if isinstance(value, bool):
-        return "bool"
-    if isinstance(value, int):
-        return "int"
-    if isinstance(value, float):
-        return "float"
-    if isinstance(value, datetime):
-        return "datetime"
-    if isinstance(value, date):
-        return "date"
-    if isinstance(value, time):
-        return "time"
+    match value:
+        case None:
+            return None
+        case bool():
+            return "bool"
+        case int():
+            return "int"
+        case float():
+            return "float"
+        case datetime():
+            return "datetime"
+        case date():
+            return "date"
+        case time():
+            return "time"
     return "string"
 
 
@@ -99,10 +101,8 @@ def iter_excel_batches(config: dict[str, Any], *, batch_size: int) -> Generator[
             "string": pl.String,
         }
         schema = {column: types[kind or "string"] for column, kind in zip(columns, kinds, strict=True)}
-        pending = []
-        emitted = False
-        for row in rows():
-            normalized = [
+        normalized_rows = (
+            [
                 str(value)
                 if kind == "string" and value is not None
                 else datetime.combine(value, time())
@@ -110,14 +110,13 @@ def iter_excel_batches(config: dict[str, Any], *, batch_size: int) -> Generator[
                 else value
                 for value, kind in zip(row, kinds, strict=True)
             ]
-            pending.append(normalized)
-            if len(pending) >= batch_size:
-                yield pl.DataFrame(pending, schema=schema, orient="row", strict=False)
-                emitted = True
-                pending = []
-        if pending:
-            yield pl.DataFrame(pending, schema=schema, orient="row", strict=False)
-        elif not emitted:
+            for row in rows()
+        )
+        emitted = False
+        for batch in batched(normalized_rows, batch_size, strict=False):
+            yield pl.DataFrame(batch, schema=schema, orient="row", strict=False)
+            emitted = True
+        if not emitted:
             yield pl.DataFrame(schema=schema)
     finally:
         workbook.close()
