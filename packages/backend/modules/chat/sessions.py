@@ -13,12 +13,12 @@ from sqlmodel import Session as DbSession
 from backend_core.database import get_settings_engine, run_settings_db
 from backend_core.secrets import encrypt_secret
 from backend_core.sqlmodel_typing import col
-from modules.chat.models import ChatEvent, ChatMessage, ChatSession, ChatTurn
+from modules.chat.models import ChatEvent, ChatMessage, ChatSession, ChatTurn, ChatTurnStatus
 
 MAX_EVENTS = 500
 MAX_MESSAGES = 100
 SECOND_EPOCH_THRESHOLD = 10_000_000_000
-ACTIVE_TURN_STATUSES = ('queued', 'running', 'awaiting_confirmation')
+ACTIVE_TURN_STATUSES = (ChatTurnStatus.QUEUED, ChatTurnStatus.RUNNING, ChatTurnStatus.AWAITING_CONFIRMATION)
 
 
 class ChatSessionBusy(Exception):

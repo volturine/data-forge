@@ -119,6 +119,14 @@ class TestSettings:
         assert settings.default_namespace == 'acme'
         assert settings.public_idb_debug is True
 
+    def test_default_namespace_env_value_is_stored_stripped(self, monkeypatch, tmp_path):
+        _set_isolated_settings_env(monkeypatch, tmp_path)
+        monkeypatch.setenv('DEFAULT_NAMESPACE', '  acme  ')
+
+        settings = Settings()
+
+        assert settings.default_namespace == 'acme'
+
     def test_cors_settings(self, monkeypatch, tmp_path):
         _set_isolated_settings_env(monkeypatch, tmp_path)
         monkeypatch.setenv('CORS_ORIGINS', 'http://localhost:3000,http://localhost:5173')

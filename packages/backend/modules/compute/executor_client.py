@@ -276,10 +276,9 @@ def _stage_validated_request(
     def validate() -> None:
         if pipeline is not None:
             _require_active_pipeline_datasources(session, pipeline)
-        for datasource_id in sorted(set(datasource_ids)):
-            # Direct datasource requests do not carry an analysis pipeline,
-            # but still need the same deletion-to-enqueue fence as previews.
-            build_datasource_dependencies.lock_active_datasources(session, namespace=get_namespace(), datasource_ids=(datasource_id,))
+        # Direct datasource requests do not carry an analysis pipeline,
+        # but still need the same deletion-to-enqueue fence as previews.
+        build_datasource_dependencies.lock_active_datasources(session, namespace=get_namespace(), datasource_ids=datasource_ids)
 
     return _submit(
         session,
@@ -453,8 +452,11 @@ async def _submit_and_wait(
     payload = await _response_payload(completed)
     message = str(payload.get('error') or completed.error_message or 'Compute request failed')
     status_code = payload.get('status_code')
-    logger.warning(
-        'Durable compute request failed durable_request_id=%s http_request_id=%s kind=%s namespace=%s status_code=%s error_code=%s',
+    expected_cancellation = not isinstance(status_code, int) and message == _COMPUTE_WORKER_SHUTDOWN_CANCELLATION
+    logger.log(
+        logging.INFO if expected_cancellation else logging.WARNING,
+        'Durable compute request %s durable_request_id=%s http_request_id=%s kind=%s namespace=%s status_code=%s error_code=%s',
+        'cancelled' if expected_cancellation else 'failed',
         request.id,
         http_request_id,
         kind,

@@ -293,9 +293,52 @@ async def test_slow_terminal_compute_request_logs_http_and_durable_ids(
 
 
 @pytest.mark.asyncio
+@pytest.mark.parametrize(
+    (
+        'response_payload',
+        'expected_exception',
+        'expected_level',
+        'expected_verb',
+    ),
+    [
+        pytest.param(
+            {
+                'error': 'The preview failed',
+                'status_code': 500,
+                'error_code': 'PIPELINE_EXECUTION_ERROR',
+            },
+            AppError,
+            'WARNING',
+            'failed',
+            id='compute-failure',
+        ),
+        pytest.param(
+            {'error': executor_client._COMPUTE_WORKER_SHUTDOWN_CANCELLATION},
+            executor_client.PipelineExecutionCancelledError,
+            'INFO',
+            'cancelled',
+            id='expected-engine-shutdown-cancellation',
+        ),
+        pytest.param(
+            {
+                'error': executor_client._COMPUTE_WORKER_SHUTDOWN_CANCELLATION,
+                'status_code': 500,
+                'error_code': 'PIPELINE_EXECUTION_ERROR',
+            },
+            AppError,
+            'WARNING',
+            'failed',
+            id='explicit-error-status-takes-precedence',
+        ),
+    ],
+)
 async def test_failed_compute_request_logs_correlation_and_error_code(
     monkeypatch: pytest.MonkeyPatch,
     caplog: pytest.LogCaptureFixture,
+    response_payload: dict[str, object],
+    expected_exception: type[AppError],
+    expected_level: str,
+    expected_verb: str,
 ) -> None:
     command = compute_pb2.ComputeCommand()
     staged = _staged_request('durable-request-2', 'tenant-a', command)
@@ -313,28 +356,35 @@ async def test_failed_compute_request_logs_correlation_and_error_code(
     monkeypatch.setattr(
         executor_client.compute_requests_service,
         'response_payload',
-        lambda _request: {
-            'error': 'The preview failed',
-            'status_code': 500,
-            'error_code': 'PIPELINE_EXECUTION_ERROR',
-        },
+        lambda _request: response_payload,
     )
     monkeypatch.setattr(executor_client.response_recovery, 'register', register)
     monkeypatch.setattr(executor_client.response_recovery, 'unregister', unregister)
     request = cast(Request, SimpleNamespace(scope={'state': {'request_id': 'http-request-2'}}))
 
-    with caplog.at_level('WARNING', logger='modules.compute.executor_client'), pytest.raises(AppError) as exc_info:
+    with caplog.at_level('INFO', logger='modules.compute.executor_client'), pytest.raises(expected_exception) as exc_info:
         await executor_client._submit_and_wait(
             kind=enums_pb2.COMPUTE_REQUEST_KIND_PREVIEW,
             command=command,
             http_request=request,
         )
 
-    assert exc_info.value.message == 'The preview failed'
-    assert exc_info.value.error_code == 'PIPELINE_EXECUTION_ERROR'
-    assert 'durable_request_id=durable-request-2' in caplog.text
-    assert 'http_request_id=http-request-2' in caplog.text
-    assert 'error_code=PIPELINE_EXECUTION_ERROR' in caplog.text
+    assert type(exc_info.value) is expected_exception
+    assert exc_info.value.message == response_payload['error']
+    durable_request_logs = [record for record in caplog.records if 'Durable compute request' in record.getMessage()]
+    assert len(durable_request_logs) == 1
+    record = durable_request_logs[0]
+    log_message = record.getMessage()
+    assert record.levelname == expected_level
+    assert f'Durable compute request {expected_verb} ' in log_message
+    assert 'durable_request_id=durable-request-2' in log_message
+    assert 'http_request_id=http-request-2' in log_message
+    assert f'kind={enums_pb2.COMPUTE_REQUEST_KIND_PREVIEW}' in log_message
+    assert 'namespace=tenant-a' in log_message
+    assert f'status_code={response_payload.get("status_code", "-")}' in log_message
+    assert f'error_code={response_payload.get("error_code", "-")}' in log_message
+    if expected_verb == 'failed':
+        assert exc_info.value.error_code == response_payload['error_code']
 
 
 @pytest.mark.asyncio

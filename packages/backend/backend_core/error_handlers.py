@@ -45,6 +45,8 @@ ERROR_CODE_STATUS_MAP: dict[int, int] = {
     errors_pb2.ERROR_CODE_DATASOURCE_CONNECTION_ERROR: 502,
     errors_pb2.ERROR_CODE_DATASOURCE_SNAPSHOT_ERROR: 409,
     errors_pb2.ERROR_CODE_ENGINE_BUSY: 409,
+    errors_pb2.ERROR_CODE_JOB_CANCELLED: 409,
+    errors_pb2.ERROR_CODE_STALE_COMPUTE_INPUT: 409,
     errors_pb2.ERROR_CODE_FILE_SIZE_EXCEEDED: 413,
     errors_pb2.ERROR_CODE_PIPELINE_EXECUTION_ERROR: 500,
     errors_pb2.ERROR_CODE_SETTINGS_CONFIGURATION_ERROR: 500,
@@ -58,6 +60,8 @@ ERROR_CODE_STATUS_MAP: dict[int, int] = {
 
 
 def status_for_app_error(exc: AppError) -> int:
+    if isinstance(exc, PipelineExecutionCancelledError):
+        return 409
     return ERROR_CODE_STATUS_MAP.get(exc.error_code_value, 500)
 
 

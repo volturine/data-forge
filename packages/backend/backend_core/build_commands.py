@@ -99,7 +99,7 @@ def fail_build_job(session: Session, claim: BuildClaimCommand, *, error: str) ->
             build_id=run.id,
             analysis_id=run.analysis_id,
             emitted_at=datetime.now(UTC),
-            current_kind=ComputeWorkerRunKind.parse(run.current_kind) if run.current_kind is not None else None,
+            current_kind=ComputeWorkerRunKind.parse(run.current_kind),
             current_datasource_id=run.current_datasource_id,
             tab_id=run.current_tab_id,
             tab_name=run.current_tab_name,

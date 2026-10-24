@@ -6,6 +6,7 @@ from datetime import UTC
 from sqlmodel import Session, select
 
 from backend_core import runtime_workers_service
+from backend_core.compute_worker_instances_service import row_resource_id
 from backend_core.config import settings
 from backend_core.database import run_db
 from backend_core.domain.build_jobs.models import BuildJobStatus
@@ -69,7 +70,7 @@ def list_compute_worker_summaries(session: Session) -> list[schemas.ComputeWorke
             worker_id=row.worker_id,
             namespace=row.namespace,
             analysis_id=row.analysis_id,
-            resource_id=_engine_resource_id(row),
+            resource_id=row_resource_id(row),
             container_id=row.container_id,
             image_digest=row.image_digest,
             termination_reason=row.termination_reason,
@@ -91,14 +92,6 @@ def list_compute_worker_summaries(session: Session) -> list[schemas.ComputeWorke
         )
         for row in session.execute(stmt).scalars().all()
     ]
-
-
-def _engine_resource_id(row: ComputeWorkerInstance) -> str:
-    if row.compute_worker_scope == 'datasource_preview' and row.datasource_id:
-        return row.datasource_id
-    if row.compute_worker_scope == 'build' and row.build_id:
-        return row.build_id
-    return row.analysis_id
 
 
 def queue_summary(session: Session) -> schemas.QueueSummary:

@@ -161,7 +161,7 @@ def test_build_job_owns_activity_and_orphan_rules() -> None:
 
     assert BuildJobStatus.RUNNING.is_active is True
     assert BuildJobStatus.COMPLETED.is_active is False
-    assert BuildJobStatus.LEASED.is_reclaimable is True
+    assert BuildJobStatus.LEASED.is_active is True
     assert job.is_orphaned({'dead-worker'}) is True
     job.clear_lease()
     assert job.lease_owner is None

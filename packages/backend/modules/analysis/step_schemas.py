@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+from dataclasses import dataclass
 from typing import cast
 
 from pydantic import BaseModel, ConfigDict, Field, model_validator
@@ -53,7 +54,13 @@ __all__ = [
 ]
 
 
-type StepCatalogEntry = dict[str, str | type[BaseModel]]
+@dataclass(frozen=True, slots=True)
+class StepCatalogEntry:
+    description: str
+    category: str
+    config: type[BaseModel]
+
+
 type StepCatalogItem = dict[str, str | dict[str, object]]
 
 
@@ -440,160 +447,158 @@ class StringTransformConfig(BaseModel):
 
 
 STEP_CATALOG: dict[str, StepCatalogEntry] = {
-    'select': {
-        'description': 'Keep only the specified columns, removing all others.',
-        'category': 'transform',
-        'config': SelectConfig,
-    },
-    'drop': {
-        'description': 'Remove the specified columns from the dataset.',
-        'category': 'transform',
-        'config': DropConfig,
-    },
-    'filter': {
-        'description': (
+    'select': StepCatalogEntry(
+        description='Keep only the specified columns, removing all others.',
+        category='transform',
+        config=SelectConfig,
+    ),
+    'drop': StepCatalogEntry(
+        description='Remove the specified columns from the dataset.',
+        category='transform',
+        config=DropConfig,
+    ),
+    'filter': StepCatalogEntry(
+        description=(
             'Filter rows using conditions. Supports multiple conditions with AND/OR logic. '
             'Each condition specifies a column, operator (=, !=, >, <, >=, <=, contains, '
             'starts_with, ends_with, is_null, is_not_null, in, not_in), value, and value_type.'
         ),
-        'category': 'transform',
-        'config': FilterConfig,
-    },
-    'sort': {
-        'description': 'Sort rows by one or more columns with per-column ascending/descending control.',
-        'category': 'transform',
-        'config': SortConfig,
-    },
-    'rename': {
-        'description': 'Rename columns using an old-name-to-new-name mapping.',
-        'category': 'transform',
-        'config': RenameConfig,
-    },
-    'expression': {
-        'description': 'Evaluate a Polars expression string and assign the result to a new column.',
-        'category': 'transform',
-        'config': ExpressionConfig,
-    },
-    'with_columns': {
-        'description': 'Add or replace columns using literal values, column references, or UDFs.',
-        'category': 'transform',
-        'config': WithColumnsConfig,
-    },
-    'fill_null': {
-        'description': (
+        category='transform',
+        config=FilterConfig,
+    ),
+    'sort': StepCatalogEntry(
+        description='Sort rows by one or more columns with per-column ascending/descending control.',
+        category='transform',
+        config=SortConfig,
+    ),
+    'rename': StepCatalogEntry(
+        description='Rename columns using an old-name-to-new-name mapping.',
+        category='transform',
+        config=RenameConfig,
+    ),
+    'expression': StepCatalogEntry(
+        description='Evaluate a Polars expression string and assign the result to a new column.',
+        category='transform',
+        config=ExpressionConfig,
+    ),
+    'with_columns': StepCatalogEntry(
+        description='Add or replace columns using literal values, column references, or UDFs.',
+        category='transform',
+        config=WithColumnsConfig,
+    ),
+    'fill_null': StepCatalogEntry(
+        description=(
             'Fill null values using a strategy: literal value, forward fill, backward fill, mean, min, or max. Optionally restrict to specific columns.'
         ),
-        'category': 'transform',
-        'config': FillNullConfig,
-    },
-    'deduplicate': {
-        'description': 'Remove duplicate rows. Optionally specify a column subset and which duplicate to keep.',
-        'category': 'transform',
-        'config': DeduplicateConfig,
-    },
-    'string_transform': {
-        'description': (
-            'Apply string methods to a column: uppercase, lowercase, trim, strip, slice, replace, extract, split, contains, starts_with, ends_with.'
-        ),
-        'category': 'transform',
-        'config': StringTransformConfig,
-    },
-    'timeseries': {
-        'description': (
+        category='transform',
+        config=FillNullConfig,
+    ),
+    'deduplicate': StepCatalogEntry(
+        description='Remove duplicate rows. Optionally specify a column subset and which duplicate to keep.',
+        category='transform',
+        config=DeduplicateConfig,
+    ),
+    'string_transform': StepCatalogEntry(
+        description=('Apply string methods to a column: uppercase, lowercase, trim, strip, slice, replace, extract, split, contains, starts_with, ends_with.'),
+        category='transform',
+        config=StringTransformConfig,
+    ),
+    'timeseries': StepCatalogEntry(
+        description=(
             'Perform temporal operations on date/datetime columns: extract components, add/subtract durations, compute differences, truncate, or round.'
         ),
-        'category': 'transform',
-        'config': TimeSeriesConfig,
-    },
-    'limit': {
-        'description': 'Return only the first N rows of the dataset.',
-        'category': 'transform',
-        'config': LimitConfig,
-    },
-    'sample': {
-        'description': 'Randomly sample N rows from the dataset with optional seed and replacement.',
-        'category': 'transform',
-        'config': SampleConfig,
-    },
-    'groupby': {
-        'description': (
+        category='transform',
+        config=TimeSeriesConfig,
+    ),
+    'limit': StepCatalogEntry(
+        description='Return only the first N rows of the dataset.',
+        category='transform',
+        config=LimitConfig,
+    ),
+    'sample': StepCatalogEntry(
+        description='Randomly sample N rows from the dataset with optional seed and replacement.',
+        category='transform',
+        config=SampleConfig,
+    ),
+    'groupby': StepCatalogEntry(
+        description=(
             'Group rows by columns and compute aggregations. Supported functions: sum, mean, count, min, max, first, last, median, std, '
             'n_unique, collect_list, collect_set.'
         ),
-        'category': 'aggregate',
-        'config': GroupByConfig,
-    },
-    'topk': {
-        'description': 'Return the top K rows ranked by a column value.',
-        'category': 'aggregate',
-        'config': TopKConfig,
-    },
-    'pivot': {
-        'description': 'Pivot long-format data to wide-format using index, column, and value fields.',
-        'category': 'reshape',
-        'config': PivotConfig,
-    },
-    'unpivot': {
-        'description': 'Unpivot wide-format data to long-format (melt). Specify id vars and value vars.',
-        'category': 'reshape',
-        'config': UnpivotConfig,
-    },
-    'explode': {
-        'description': 'Explode list-type columns so each list element becomes its own row.',
-        'category': 'reshape',
-        'config': ExplodeConfig,
-    },
-    'union_by_name': {
-        'description': 'Vertically concatenate datasets by matching column names. Missing columns filled with null.',
-        'category': 'reshape',
-        'config': UnionByNameConfig,
-    },
-    'join': {
-        'description': ('Join with another datasource tab. Supports inner, left, right, outer, and cross join types. Specify column pairs to join on.'),
-        'category': 'reshape',
-        'config': JoinConfig,
-    },
-    'export': {
-        'description': 'Export the dataset to a file in csv, parquet, or json format.',
-        'category': 'io',
-        'config': ExportConfig,
-    },
-    'download': {
-        'description': 'Download the dataset as a file in the specified format.',
-        'category': 'io',
-        'config': DownloadConfig,
-    },
-    'view': {
-        'description': 'Preview rows from the dataset with an optional row limit.',
-        'category': 'io',
-        'config': ViewConfig,
-    },
-    'datasource': {
-        'description': 'Load data from a configured datasource.',
-        'category': 'io',
-        'config': DatasourceConfig,
-    },
-    'chart': {
-        'description': (
+        category='aggregate',
+        config=GroupByConfig,
+    ),
+    'topk': StepCatalogEntry(
+        description='Return the top K rows ranked by a column value.',
+        category='aggregate',
+        config=TopKConfig,
+    ),
+    'pivot': StepCatalogEntry(
+        description='Pivot long-format data to wide-format using index, column, and value fields.',
+        category='reshape',
+        config=PivotConfig,
+    ),
+    'unpivot': StepCatalogEntry(
+        description='Unpivot wide-format data to long-format (melt). Specify id vars and value vars.',
+        category='reshape',
+        config=UnpivotConfig,
+    ),
+    'explode': StepCatalogEntry(
+        description='Explode list-type columns so each list element becomes its own row.',
+        category='reshape',
+        config=ExplodeConfig,
+    ),
+    'union_by_name': StepCatalogEntry(
+        description='Vertically concatenate datasets by matching column names. Missing columns filled with null.',
+        category='reshape',
+        config=UnionByNameConfig,
+    ),
+    'join': StepCatalogEntry(
+        description=('Join with another datasource tab. Supports inner, left, right, outer, and cross join types. Specify column pairs to join on.'),
+        category='reshape',
+        config=JoinConfig,
+    ),
+    'export': StepCatalogEntry(
+        description='Export the dataset to a file in csv, parquet, or json format.',
+        category='io',
+        config=ExportConfig,
+    ),
+    'download': StepCatalogEntry(
+        description='Download the dataset as a file in the specified format.',
+        category='io',
+        config=DownloadConfig,
+    ),
+    'view': StepCatalogEntry(
+        description='Preview rows from the dataset with an optional row limit.',
+        category='io',
+        config=ViewConfig,
+    ),
+    'datasource': StepCatalogEntry(
+        description='Load data from a configured datasource.',
+        category='io',
+        config=DatasourceConfig,
+    ),
+    'chart': StepCatalogEntry(
+        description=(
             'Create a visualization. Supports chart types: bar, horizontal_bar, area, heatgrid, '
             'histogram, scatter, line, pie, boxplot. Configure axes, aggregation, grouping, '
             'sorting, overlays, reference lines, and display options.'
         ),
-        'category': 'visualization',
-        'config': ChartConfig,
-    },
-    'ai': {
-        'description': (
+        category='visualization',
+        config=ChartConfig,
+    ),
+    'ai': StepCatalogEntry(
+        description=(
             'Run AI inference on rows using Ollama or OpenRouter. Configure input columns, prompt template with {{column}} placeholders, and output column.'
         ),
-        'category': 'advanced',
-        'config': AIConfig,
-    },
-    'notification': {
-        'description': ('Send notifications via email or Telegram. Configure recipient, message template, and batch processing options.'),
-        'category': 'advanced',
-        'config': NotificationConfig,
-    },
+        category='advanced',
+        config=AIConfig,
+    ),
+    'notification': StepCatalogEntry(
+        description=('Send notifications via email or Telegram. Configure recipient, message template, and batch processing options.'),
+        category='advanced',
+        config=NotificationConfig,
+    ),
 }
 
 
@@ -602,14 +607,13 @@ def get_step_catalog() -> list[StepCatalogItem]:
     result: list[StepCatalogItem] = []
     for typ in STEP_TYPES.all(include_plot_aliases=False):
         info = STEP_CATALOG[typ]
-        config_model = cast(type[BaseModel], info['config'])
         result.append(
             {
                 'type': typ,
                 'label': STEP_TYPES.label(typ),
-                'description': cast(str, info['description']),
-                'category': cast(str, info['category']),
-                'config_schema': cast(dict[str, object], config_model.model_json_schema()),
+                'description': info.description,
+                'category': info.category,
+                'config_schema': info.config.model_json_schema(),
             },
         )
     return result
@@ -619,7 +623,7 @@ def _config_model(step_type: str) -> type[BaseModel]:
     """Return the config schema for a step type; plot aliases share the chart schema."""
     if not STEP_TYPES.has(step_type):
         raise ValueError(f"Unknown step type '{step_type}'")
-    return cast(type[BaseModel], STEP_CATALOG[STEP_TYPES.normalized(step_type)]['config'])
+    return STEP_CATALOG[STEP_TYPES.normalized(step_type)].config
 
 
 def normalize_step_config(step_type: str, config: dict) -> dict[str, object]:

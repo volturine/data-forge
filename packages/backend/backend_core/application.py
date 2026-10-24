@@ -1,5 +1,6 @@
 import asyncio
 import contextlib
+import gc
 import gzip
 import logging
 import mimetypes
@@ -28,7 +29,6 @@ from api import include_api_routes
 from backend_core import runtime_ipc
 from backend_core.api_execution_budget import (
     ApiDatabaseBudget,
-    ApiWorkAdmissionFull,
     BoundedThreadPoolExecutor,
     register_api_blocking_executor_lifecycle,
     register_bootstrap_executor_lifecycle,
@@ -60,12 +60,14 @@ from backend_core.logging import (
     RequestTimingMiddleware,
     configure_logging_off_loop,
     flush_request_logs,
+    scope_header,
     shutdown_logging,
 )
 from backend_core.namespace import namespace_scope, normalize_namespace
 from backend_core.namespaces_service import register_namespace
 from backend_core.runtime_notifications import handle_runtime_payload, recover_runtime_notifications, refresh_build_projections, refresh_lock_projections
 from backend_core.settings_store import seed_settings_from_env
+from modules.auth.dependencies import resolve_session_token
 from modules.udf import service as udf_service
 
 register_settings_bootstrap_hook(seed_settings_from_env)
@@ -204,12 +206,15 @@ class ReadinessProbe:
         self._inflight: Future[tuple[dict[str, str], bool]] | None = None
 
     async def run(self) -> tuple[dict[str, str], bool]:
+        register_clear_callback = False
         with self._lock:
             future = self._inflight
             if future is None or future.done():
                 future = self._executor.submit(self._check)
                 self._inflight = future
-                future.add_done_callback(self._clear)
+                register_clear_callback = True
+        if register_clear_callback:
+            future.add_done_callback(self._clear)
         return await asyncio.shield(asyncio.wrap_future(future))
 
     def _clear(self, completed: Future[tuple[dict[str, str], bool]]) -> None:
@@ -494,6 +499,9 @@ async def event_loop_lag_loop(
 async def lifespan(app: FastAPI) -> AsyncIterator[None]:
     async with AsyncExitStack() as cleanup:
         await _start_api_lifespan(app, cleanup)
+        # Scan startup's object graph before traffic can make a full collection
+        # hold the GIL long enough to starve Uvicorn's worker health reply.
+        await run_api_blocking(gc.collect, 2)
         yield
 
 
@@ -632,18 +640,9 @@ async def _recover_api_notifications() -> None:
 app = FastAPI(title=settings.app_name, version=settings.app_version, lifespan=lifespan)
 
 
-async def api_work_admission_full_handler(_request: Request, _exc: ApiWorkAdmissionFull) -> JSONResponse:
-    return JSONResponse(
-        status_code=503,
-        content={'detail': 'API execution capacity is full'},
-        headers={'Retry-After': '1'},
-    )
-
-
 app.add_exception_handler(AppError, cast(Any, app_error_handler))
 app.add_exception_handler(RequestValidationError, cast(Any, validation_error_handler))
 app.add_exception_handler(ClientDisconnect, cast(Any, client_disconnect_handler))
-app.add_exception_handler(ApiWorkAdmissionFull, cast(Any, api_work_admission_full_handler))
 app.add_exception_handler(Exception, generic_error_handler)
 
 # Namespaces already known to this process; avoids a DB roundtrip per request.
@@ -661,7 +660,7 @@ def _namespace_registered(session: Session, name: str) -> bool:
 def _has_valid_session(request: Request) -> bool:
     from modules.auth.service import validate_session
 
-    token = request.cookies.get('session_token') or request.headers.get('X-Session-Token')
+    token = resolve_session_token(request)
     if not token:
         return False
 
@@ -669,13 +668,6 @@ def _has_valid_session(request: Request) -> bool:
         return validate_session(session, token) is not None
 
     return run_settings_db(_check)
-
-
-def _scope_header(scope: Scope, name: bytes) -> str | None:
-    for header_name, header_value in scope.get('headers', []):
-        if header_name.lower() == name:
-            return header_value.decode('latin-1')
-    return None
 
 
 class NamespaceMiddleware:
@@ -704,7 +696,7 @@ class NamespaceMiddleware:
             await self.app(scope, receive, send)
             return
 
-        raw = _scope_header(scope, b'x-namespace')
+        raw = scope_header(scope, b'x-namespace')
         with namespace_scope(raw):
             if not auth_settings.auth_required:
                 if not (is_health_request and raw is None):

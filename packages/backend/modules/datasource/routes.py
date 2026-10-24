@@ -272,7 +272,7 @@ async def upload_file(
     has_header: bool = Form(True),
     skip_rows: int = Form(0),
     encoding: str = Form('utf8'),
-    user: User | None = Depends(get_current_user),
+    user: User = Depends(get_current_user),
 ):
     if not file.filename:
         raise HTTPException(status_code=400, detail='No filename provided')
@@ -314,7 +314,7 @@ async def upload_file(
             file_path=file_path,
             file_type=file_type.value,
             csv_options=csv_options.model_dump() if csv_options else None,
-            owner_id=user.id if user else None,
+            owner_id=user.id,
         )
         return await json_response(datasource)
     except AppError, HTTPException, ValueError:
@@ -333,7 +333,7 @@ async def upload_bulk(
     has_header: bool = Form(True),
     skip_rows: int = Form(0),
     encoding: str = Form('utf8'),
-    user: User | None = Depends(get_current_user),
+    user: User = Depends(get_current_user),
 ):
     if not files:
         raise HTTPException(status_code=400, detail='No files provided')
@@ -353,7 +353,7 @@ async def upload_bulk(
             detail='Bulk upload must use a single file type per batch',
         )
 
-    owner_id = user.id if user else None
+    owner_id = user.id
     results: list[schemas.BulkUploadResult] = []
     for file in files:
         if not file.filename:
@@ -589,7 +589,7 @@ async def confirm_excel(
     table_name: str | None = Form(None),
     named_range: str | None = Form(None),
     cell_range: str | None = Form(None),
-    user: User | None = Depends(get_current_user),
+    user: User = Depends(get_current_user),
 ):
     preflight_key = parse_preflight_id(preflight_id)
     preflight = await get_preflight(preflight_key)
@@ -621,7 +621,7 @@ async def confirm_excel(
         )
         resolved_sheet, resolved_start_row, resolved_start_col, resolved_end_col, resolved_end_row = resolved_selection(resolved)
         resolved_cell_range = cell_range
-        if not resolved_cell_range and (table_name or named_range or cell_range):
+        if not resolved_cell_range and (table_name or named_range):
             resolved_cell_range = format_excel_cell_range(
                 resolved_sheet,
                 resolved_start_row,
@@ -643,7 +643,7 @@ async def confirm_excel(
             table_name=table_name,
             named_range=named_range,
             cell_range=resolved_cell_range,
-            owner_id=user.id if user else None,
+            owner_id=user.id,
         )
     except Exception as e:
         await clear_preflight(preflight_key)
@@ -660,7 +660,7 @@ async def confirm_excel(
 @handle_errors(operation='connect datasource', value_error_status=400)
 async def connect_datasource(
     datasource: schemas.DataSourceCreate,
-    user: User | None = Depends(get_current_user),
+    user: User = Depends(get_current_user),
 ):
     """Connect a new datasource (database, Iceberg, or analysis type).
 
@@ -673,7 +673,7 @@ async def connect_datasource(
     if (error_message := source_type.connect_api_error_message) is not None:
         raise HTTPException(status_code=400, detail=error_message)
 
-    owner_id = user.id if user else None
+    owner_id = user.id
     if source_type == DataSourceType.FILE:
         file_config = await run_api_blocking(schemas.FileDataSourceConfig.model_validate, datasource.config)
         result = await create_remote_file_datasource(
@@ -728,39 +728,13 @@ async def list_internal_postgres_tables():
     return await run_api_blocking(run_db, service.list_internal_postgres_tables)
 
 
-def _toggle_internal_postgres_table(
-    session: Session,
-    request: schemas.InternalPostgresToggleRequest,
-    owner_id: str | None,
-) -> schemas.InternalPostgresTable:
-    if not request.enabled:
-        return service.set_internal_postgres_table_onboarded(session, request.schema_name, request.table_name, enabled=False)
-    if not service.internal_postgres_table_is_onboarded(session, request.schema_name, request.table_name):
-        query = service.internal_postgres_table_query(session, request.schema_name, request.table_name)
-        service.create_database_datasource_record(
-            session,
-            name=service.InternalPostgresOnboarding.datasource_name_for(request.schema_name, request.table_name),
-            description=service.InternalPostgresOnboarding.datasource_description_for(request.schema_name, request.table_name),
-            connection_string=service.InternalPostgresOnboarding.connection_string(),
-            query=query,
-            branch='master',
-            owner_id=owner_id,
-        )
-    return schemas.InternalPostgresTable(schema_name=request.schema_name, table_name=request.table_name, is_onboarded=True)
-
-
 @router.post('/internal-postgres/toggle', response_model=schemas.InternalPostgresTable)
 @handle_errors(operation='toggle internal Postgres table', value_error_status=400)
 async def toggle_internal_postgres_table(
     request: schemas.InternalPostgresToggleRequest,
-    user: User | None = Depends(get_current_user),
+    user: User = Depends(get_current_user),
 ):
-    return await run_api_blocking(
-        run_db,
-        _toggle_internal_postgres_table,
-        request,
-        user.id if user else None,
-    )
+    return await run_api_blocking(run_db, service.toggle_internal_postgres_table, request, user.id)
 
 
 @router.get('', response_model=list[schemas.DataSourceListItem], mcp=True)
@@ -788,12 +762,7 @@ async def get_lineage(
     Returns nodes (datasources and analyses) and edges showing data flow.
     Optionally filter by target_datasource_id or branch to scope the graph.
     """
-    datasource_id = None
-    if target_datasource_id:
-        try:
-            datasource_id = parse_datasource_id(target_datasource_id)
-        except HTTPException:
-            datasource_id = target_datasource_id
+    datasource_id = parse_datasource_id(target_datasource_id) if target_datasource_id else None
     return await run_api_blocking(
         run_db,
         build_lineage,
@@ -843,7 +812,7 @@ async def get_datasource_schema(
     await run_api_blocking(run_db, _require_active_datasource, datasource_id_value)
     if refresh:
         datasource = await run_api_blocking(run_db, service.get_datasource, datasource_id_value)
-        source = datasource.config.get('source') if isinstance(datasource.config, dict) else None
+        source = datasource.config.get('source')
         source_type = DataSourceType.read(source.get('source_type') if isinstance(source, dict) else None, default=None)
         if datasource.source_type == DataSourceType.ICEBERG and source_type is not None and source_type.supports_external_ingestion:
             await ingest_remote_datasource(datasource_id=datasource_id_value)

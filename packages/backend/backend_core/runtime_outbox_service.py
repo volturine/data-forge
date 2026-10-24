@@ -1,7 +1,7 @@
 import uuid
 from collections.abc import Sequence
 from dataclasses import dataclass
-from datetime import UTC, timedelta
+from datetime import timedelta
 
 from sqlalchemy import delete, or_, select
 from sqlmodel import Session
@@ -11,7 +11,7 @@ from backend_core.claiming import database_now, with_for_update_skip_locked
 from backend_core.config import settings
 from backend_core.domain.runtime.events import RuntimePayloadKind
 from backend_core.namespace import get_namespace
-from backend_core.notification_delivery import redact_secrets_in_text
+from backend_core.notification_delivery import DeliveryKind, redact_secrets_in_text
 from backend_core.persistence.runtime_events.models import (
     NotificationDeliveryPartReceipt,
     NotificationDeliveryReceipt,
@@ -20,6 +20,7 @@ from backend_core.persistence.runtime_events.models import (
 )
 from backend_core.runtime_work_service import RuntimeWorkKind
 from backend_core.sqlmodel_typing import col, sa
+from backend_core.time import aware_utc
 
 _SENSITIVE_ERROR_FIELDS = frozenset(
     {
@@ -58,7 +59,6 @@ _OUTBOX_DUE_QUERY = """
     ) AS scheduled_events
     WHERE next_attempt_at > statement_timestamp()
 """
-OUTBOX_WAKE_KIND = 'runtime_outbox_wakeup'
 STORAGE_CLEANUP_KIND = 'storage_cleanup'
 _ISOLATED_DELIVERY_KINDS = notification_delivery.EXTERNAL_DELIVERY_KINDS | {STORAGE_CLEANUP_KIND}
 
@@ -125,7 +125,7 @@ def _notify_dispatcher(session: Session, *, namespace: str) -> None:
     SQLite-backed unit tests do not have PostgreSQL NOTIFY and simply use the
     direct request-path dispatchers.
     """
-    runtime_ipc.notify_on_commit(session, {'kind': OUTBOX_WAKE_KIND, 'namespace': namespace})
+    runtime_ipc.notify_on_commit(session, {'kind': runtime_ipc.NotifyKind.OUTBOX, 'namespace': namespace})
 
 
 def list_pending_outbox_namespaces(session: Session) -> list[str]:
@@ -162,8 +162,7 @@ def enqueue_datasource_delete_notification(session: Session, *, datasource_id: s
 
 def dispatch_pending_events(session: Session, *, limit: int = 1) -> int:
     """Dispatch runtime wakes; external deliveries have isolated consumers."""
-    bind = session.get_bind()
-    if settings.distributed_runtime_enabled and getattr(getattr(bind, 'dialect', None), 'name', None) == 'postgresql':
+    if runtime_work_service.is_distributed_postgres(session):
         return _dispatch_postgres_runtime_events(session, limit=max(int(limit), 0))
 
     dispatched = 0
@@ -220,10 +219,8 @@ def _clear_namespace_pending_if_idle(session: Session) -> None:
     )
 
 
-def claim_external_deliveries(session: Session, *, kind: str, limit: int = 1) -> list[OutboxClaim]:
+def claim_external_deliveries(session: Session, *, kind: DeliveryKind, limit: int = 1) -> list[OutboxClaim]:
     """Claim work for one provider lane; the caller closes the session before sending."""
-    if kind not in notification_delivery.EXTERNAL_DELIVERY_KINDS:
-        raise ValueError(f'Unsupported external delivery kind: {kind!r}')
     return _claim_next_events(session, limit=limit, event_kinds=(kind,))
 
 
@@ -260,7 +257,7 @@ def record_external_delivery_part(session: Session, claim: OutboxClaim, *, part_
     Provider acceptance and this commit cannot be atomic. A crash in between
     remains at-least-once, but confirmed earlier parts are skipped on retries.
     """
-    if claim.event_kind != notification_delivery.TELEGRAM_DELIVERY_KIND:
+    if claim.event_kind != DeliveryKind.TELEGRAM:
         raise ValueError('Per-part progress is only supported for Telegram deliveries')
     if not part_key or len(part_key) > 128:
         raise ValueError('Telegram delivery part key is invalid')
@@ -269,12 +266,12 @@ def record_external_delivery_part(session: Session, claim: OutboxClaim, *, part_
     now = database_now(session, wall_clock=True)
     if (
         event is None
-        or event.kind != notification_delivery.TELEGRAM_DELIVERY_KIND
+        or event.kind != DeliveryKind.TELEGRAM
         or event.status != RuntimeOutboxStatus.DISPATCHING
         or event.claim_token != claim.claim_token
         or event.lease_generation != claim.lease_generation
         or event.lease_expires_at is None
-        or (event.lease_expires_at if event.lease_expires_at.tzinfo is not None else event.lease_expires_at.replace(tzinfo=UTC)) <= now
+        or aware_utc(event.lease_expires_at) <= now
     ):
         session.rollback()
         return False
@@ -318,7 +315,7 @@ def _claim_next_events(
         session.rollback()
         return []
 
-    telegram_event_ids = [event.id for event in events if event.kind == notification_delivery.TELEGRAM_DELIVERY_KIND]
+    telegram_event_ids = [event.id for event in events if event.kind == DeliveryKind.TELEGRAM]
     completed_parts_by_event: dict[str, set[str]] = {event_id: set() for event_id in telegram_event_ids}
     if telegram_event_ids:
         completed_part_rows = session.execute(
@@ -382,7 +379,7 @@ def _finalize_claims(
             receipt = session.get(NotificationDeliveryReceipt, event.id)
             if receipt is None:
                 session.add(NotificationDeliveryReceipt(event_id=event.id, kind=event.kind, delivered_at=now))
-        if error is None and event.kind == notification_delivery.TELEGRAM_DELIVERY_KIND:
+        if error is None and event.kind == DeliveryKind.TELEGRAM:
             session.execute(delete(NotificationDeliveryPartReceipt).where(NotificationDeliveryPartReceipt.event_id == event.id))
         poisoned = error is not None and event.kind != STORAGE_CLEANUP_KIND and event.attempts >= settings.runtime_outbox_max_attempts
         event.status = RuntimeOutboxStatus.DISPATCHED if error is None else RuntimeOutboxStatus.POISONED if poisoned else RuntimeOutboxStatus.FAILED

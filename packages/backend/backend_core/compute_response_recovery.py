@@ -8,6 +8,7 @@ from collections import defaultdict
 from collections.abc import Callable, Collection
 from concurrent.futures import ThreadPoolExecutor
 from dataclasses import dataclass, field
+from itertools import batched
 
 from backend_core import compute_requests_service
 from backend_core.database import run_db
@@ -176,8 +177,7 @@ class ComputeResponseRecovery:
                     grouped[state.namespace].append(request_id)
 
         for namespace, request_ids in grouped.items():
-            for offset in range(0, len(request_ids), _MAX_REQUESTS_PER_NAMESPACE_POLL):
-                batch = request_ids[offset : offset + _MAX_REQUESTS_PER_NAMESPACE_POLL]
+            for batch in batched(request_ids, _MAX_REQUESTS_PER_NAMESPACE_POLL, strict=False):
                 queued_at = time.monotonic()
 
                 try:

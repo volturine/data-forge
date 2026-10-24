@@ -10,6 +10,7 @@ from uuid import UUID
 from google.protobuf import json_format, message, struct_pb2
 
 from backend_core.domain.analysis.step_types import STEP_TYPES
+from backend_core.domain.compute.schemas import ComputeWorkerReusePolicy, ComputeWorkerScope, compute_worker_identity_resource_id
 from dataforge_protocol import analysis_pb2, compute_pb2, datasource_pb2, enums_pb2, errors_pb2
 from modules.datasource.schema_protocol import schema_info_payload
 
@@ -103,35 +104,27 @@ def _required_payload_str(payload: dict[str, object], key: str) -> str:
     return value.strip()
 
 
-def _resource_id_for_scope(payload: dict[str, object], key: str) -> str:
-    resource_id = _required_payload_str(payload, 'resource_id')
-    scoped_id = _required_payload_str(payload, key)
-    if resource_id != scoped_id:
-        raise ValueError(f'resource_id must match {key}')
-    return resource_id
-
-
 def _compute_worker_identity_from_payload(payload: dict[str, object]) -> compute_pb2.ComputeWorkerIdentity:
     scope = payload.get('scope')
     reuse_policy = payload.get('reuse_policy')
-    if scope == 'analysis_interactive':
-        resource_id = _resource_id_for_scope(payload, 'analysis_id')
+    if scope == ComputeWorkerScope.ANALYSIS_INTERACTIVE:
+        resource_id = compute_worker_identity_resource_id(payload, 'analysis_id')
         identity = compute_pb2.ComputeWorkerIdentity(
             scope=enums_pb2.COMPUTE_WORKER_SCOPE_ANALYSIS_INTERACTIVE, analysis_id=resource_id, resource_id=resource_id
         )
-    elif scope == 'datasource_preview':
-        resource_id = _resource_id_for_scope(payload, 'datasource_id')
+    elif scope == ComputeWorkerScope.DATASOURCE_PREVIEW:
+        resource_id = compute_worker_identity_resource_id(payload, 'datasource_id')
         identity = compute_pb2.ComputeWorkerIdentity(
             scope=enums_pb2.COMPUTE_WORKER_SCOPE_DATASOURCE_PREVIEW, datasource_id=resource_id, resource_id=resource_id
         )
-    elif scope == 'build':
-        resource_id = _resource_id_for_scope(payload, 'build_id')
+    elif scope == ComputeWorkerScope.BUILD:
+        resource_id = compute_worker_identity_resource_id(payload, 'build_id')
         identity = compute_pb2.ComputeWorkerIdentity(scope=enums_pb2.COMPUTE_WORKER_SCOPE_BUILD, build_id=resource_id, resource_id=resource_id)
     else:
         raise ValueError('engine identity scope is invalid')
-    if reuse_policy == 'shared':
+    if reuse_policy == ComputeWorkerReusePolicy.SHARED:
         identity.reuse_policy = enums_pb2.COMPUTE_WORKER_REUSE_POLICY_SHARED
-    elif reuse_policy == 'exclusive':
+    elif reuse_policy == ComputeWorkerReusePolicy.EXCLUSIVE:
         identity.reuse_policy = enums_pb2.COMPUTE_WORKER_REUSE_POLICY_EXCLUSIVE
     else:
         raise ValueError('engine identity reuse_policy is invalid')

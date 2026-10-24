@@ -27,14 +27,14 @@ async def list_udfs(
 @handle_errors(operation='create UDF')
 async def create_udf(
     data: schemas.UdfCreateSchema,
-    user: User | None = Depends(get_current_user),
+    user: User = Depends(get_current_user),
 ):
     """Create a new user-defined function.
 
     Requires: name, code (Python expression using Polars), signature (input dtypes and output dtype).
     Use GET /udf to see existing UDFs. Use GET /analysis/step-types to see how UDFs are used in pipelines.
     """
-    owner_id = user.id if user else None
+    owner_id = user.id
     return await run_api_blocking(run_db, service.create_udf, data, owner_id=owner_id)
 
 

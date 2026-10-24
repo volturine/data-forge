@@ -49,6 +49,7 @@ from modules.analysis.schemas import (
 )
 from modules.analysis.step_schemas import get_step_catalog, normalize_step_config
 from modules.analysis_versions import service as version_service
+from modules.export.generators import export_slug
 
 
 def _to_response(analysis: Analysis, *, is_favorite: bool = False) -> AnalysisResponseSchema:
@@ -93,13 +94,8 @@ def _save_pipeline(session: Session, analysis: Analysis, pipeline: PipelineDefin
     session.commit()
 
 
-def _slugify(value: str) -> str:
-    normalized = re.sub(r'[^a-zA-Z0-9]+', '_', value.strip().lower()).strip('_')
-    return normalized or 'analysis'
-
-
 def _default_output_name(analysis_name: str, tab_name: str, index: int) -> str:
-    return _slugify(f'{analysis_name}_{tab_name or f"tab_{index + 1}"}')
+    return export_slug(f'{analysis_name}_{tab_name or f"tab_{index + 1}"}', fallback='analysis')
 
 
 def _build_output_config(analysis_name: str, tab_name: str, branch: str, index: int) -> dict[str, Any]:
@@ -320,29 +316,15 @@ def _validate_analysis_payload(
     if not data.tabs:
         raise ValueError('Analysis requires at least one tab')
     tabs_payload = [PipelineTab.from_dict(tab.model_dump()) for tab in data.tabs]
-    for tab in tabs_payload:
-        if not tab.output.result_id:
-            raise ValueError('Analysis tab missing output.result_id')
-        if not tab.output.filename:
-            raise ValueError('Analysis tab missing output.filename')
-        if not tab.output.format:
-            raise ValueError('Analysis tab missing output.format')
 
     tab_output_map: dict[str, str] = {}
     for tab in tabs_payload:
-        if tab.id and tab.output.result_id:
+        if tab.id:
             tab_output_map[tab.id] = tab.output.result_id
 
     datasource_ids: list[str] = []
     for tab in tabs_payload:
         ds = tab.datasource
-        branch = ds.config.get('branch')
-        if not isinstance(branch, str) or not branch.strip():
-            raise ValueError('Analysis tab datasource.config.branch is required')
-        ds.config['branch'] = branch.strip()
-
-        if not ds.id:
-            raise ValueError('Analysis tab missing datasource.id')
 
         if ds.analysis_tab_id is not None:
             expected = tab_output_map.get(str(ds.analysis_tab_id))
@@ -381,8 +363,7 @@ def _validate_analysis_payload(
             if not step.id.strip():
                 raise ValueError('Pipeline step id is required')
             step.config = normalize_step_config(step.type, step.config)
-            if step.id:
-                step_ids.add(step.id)
+            step_ids.add(step.id)
             for dep_id in step.depends_on:
                 if dep_id not in step_ids:
                     raise ValueError(f"Step depends on unknown step '{dep_id}'")
@@ -531,13 +512,12 @@ def duplicate_analysis(
         new_output_id = str(uuid.uuid4())
         output_id_map[old_output_id] = new_output_id
         output['result_id'] = new_output_id
-        branch = str(((output.get('iceberg') or {}) if isinstance(output.get('iceberg'), dict) else {}).get('branch') or 'master')
         output_name = _default_output_name(name, str(tab.get('name') or f'tab_{index + 1}'), index)
         output['filename'] = output_name
         iceberg = output.get('iceberg')
         if isinstance(iceberg, dict):
             iceberg['table_name'] = output_name
-            iceberg['branch'] = str(iceberg.get('branch') or branch)
+            iceberg['branch'] = str(iceberg.get('branch') or 'master')
 
         steps = tab.get('steps', [])
         if not isinstance(steps, list):
@@ -551,8 +531,6 @@ def duplicate_analysis(
             step['id'] = new_step_id
 
     for tab in tabs:
-        if not isinstance(tab, dict):
-            continue
         parent_id = tab.get('parent_id')
         if parent_id is not None:
             mapped_parent_id = tab_id_map.get(str(parent_id))
@@ -841,6 +819,7 @@ def add_step(
     depends_on: list[str] | None = None,
 ) -> PipelineStep:
     analysis = _require_analysis(session, analysis_id)
+    normalized_config = normalize_step_config(step_type, config)
 
     version_service.create_version(session, analysis)
 
@@ -857,8 +836,8 @@ def add_step(
     # in-scope. External ids must be in the visible input catalog (404 if outside).
     pipeline_source_ids = tab_ids | {t.datasource.id for t in pipeline.tabs if t.datasource.id}
 
-    referenced_ids = [str(right_source)] if (right_source := config.get('right_source')) else []
-    sources = config.get('sources')
+    referenced_ids = [str(right_source)] if (right_source := normalized_config.get('right_source')) else []
+    sources = normalized_config.get('sources')
     if isinstance(sources, list):
         referenced_ids.extend(src for src in sources if isinstance(src, str))
     for src_id in referenced_ids:
@@ -868,7 +847,7 @@ def add_step(
     step = PipelineStep(
         id=str(uuid.uuid4()),
         type=step_type,
-        config=config,
+        config=normalized_config,
         depends_on=depends_on or [],
         is_applied=True,
     )
@@ -921,8 +900,8 @@ def update_step(
 
     if step_type is not None:
         step.type = step_type
-    if config is not None:
-        step.config = config
+    if step_type is not None or config is not None:
+        step.config = normalize_step_config(step.type, step.config if config is None else config)
 
     _save_pipeline(session, analysis, pipeline)
     session.refresh(analysis)

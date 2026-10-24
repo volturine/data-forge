@@ -258,8 +258,11 @@ class TestNamespaceMiddleware:
         namespace = f'fresh-{uuid.uuid4().hex[:8]}'
 
         def _seed(session):
-            from modules.auth.service import create_session, create_user
+            from backend_core.transactions import committed
+            from modules.auth.service import stage_create_session, stage_create_user
 
+            create_user = committed(stage_create_user, refresh=True)
+            create_session = committed(stage_create_session, refresh=True)
             user = create_user(session, f'{namespace}@example.com', 'Password123', 'NS Owner')
             return create_session(session, user.id, 'pytest-agent', '127.0.0.1')
 

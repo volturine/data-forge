@@ -8,6 +8,7 @@ import os
 import threading
 import uuid
 from collections.abc import Awaitable, Callable
+from enum import StrEnum
 
 import psycopg
 from pydantic import BaseModel
@@ -15,6 +16,7 @@ from sqlalchemy import text
 from sqlmodel import Session
 
 from backend_core.api_execution_budget import run_api_blocking
+from backend_core.claiming import is_postgres
 from backend_core.domain.runtime.events import RuntimePayloadKind
 
 logger = logging.getLogger(__name__)
@@ -24,8 +26,20 @@ logger = logging.getLogger(__name__)
 API_PROCESS_ID = uuid.uuid4().hex
 
 _CHANNEL = 'runtime_events'
-CHAT_TURN_WAKE_KIND = 'chat_turn'
-CHAT_EVENT_WAKE_KIND = 'chat_event'
+
+
+class NotifyKind(StrEnum):
+    """The ``kind`` discriminator of payloads sent on the runtime NOTIFY channel."""
+
+    CHAT_EVENT = 'chat_event'
+    CHAT_TURN = 'chat_turn'
+    LOCK = 'lock'
+    OUTBOX = 'runtime_outbox_wakeup'
+    SETTINGS_CHANGED = 'settings_changed'
+    TELEGRAM_DETECTION = 'telegram_detection'
+    TELEGRAM_DETECTION_RESULT = 'telegram_detection_result'
+
+
 _database_url_provider: Callable[[], str] | None = None
 type RuntimePayloadHandler = Callable[[dict[str, object]], Awaitable[None]]
 type RuntimeRecovery = Callable[[], Awaitable[None]]
@@ -244,8 +258,7 @@ def notify_on_commit(session: Session, payload: dict[str, object]) -> None:
     wake become visible atomically without opening a second connection. Other
     dialects (SQLite unit tests) have no NOTIFY and skip it.
     """
-    bind = session.get_bind()
-    if getattr(getattr(bind, 'dialect', None), 'name', None) != 'postgresql':
+    if not is_postgres(session):
         return
     session.execute(
         text('SELECT pg_notify(:channel, :payload)'),
@@ -263,7 +276,7 @@ def notify_api_lock(
         status_payload = status_payload.model_dump(mode='json')
     _send_postgres_message(
         {
-            'kind': 'lock',
+            'kind': NotifyKind.LOCK,
             'namespace': namespace,
             'resource_type': resource_type,
             'resource_id': resource_id,

@@ -17,11 +17,11 @@ from backend_core.api_execution_budget import run_api_blocking
 from backend_core.database import RuntimeCoordinatorFenced, run_settings_db
 from backend_core.exceptions import SettingsConfigurationError
 from backend_core.live_hubs import KeyedVersionHub
-from backend_core.runtime_ipc import CHAT_EVENT_WAKE_KIND, CHAT_TURN_WAKE_KIND, notify_on_commit
+from backend_core.runtime_ipc import NotifyKind, notify_on_commit
 from backend_core.secrets import decrypt_secret, encrypt_secret
 from backend_core.sqlmodel_typing import col
-from modules.chat.models import ChatEvent, ChatMessage, ChatSession, ChatTurn
-from modules.chat.sessions import ACTIVE_TURN_STATUSES, MAX_EVENTS, MAX_MESSAGES, normalize_epoch_milliseconds
+from modules.chat.models import ChatEvent, ChatMessage, ChatSession, ChatTurn, ChatTurnStatus
+from modules.chat.sessions import ACTIVE_TURN_STATUSES, MAX_EVENTS, MAX_MESSAGES, ChatSessionBusy, normalize_epoch_milliseconds
 
 _CHAT_CREDENTIAL_DECRYPTION_ERROR = 'Chat credentials could not be decrypted; update the session credentials and try again.'
 logger = logging.getLogger(__name__)
@@ -60,7 +60,11 @@ def _verify_claim(db: Session, turn_id: str, claim_token: str, generation: int) 
         raise ChatClaimRevoked('Chat turn was removed')
     if turn.coordinator_generation is not None and turn.coordinator_generation != generation:
         raise RuntimeCoordinatorFenced(f'Chat turn generation {generation} was fenced by generation {turn.coordinator_generation}')
-    if turn.coordinator_generation != generation or turn.claim_token != claim_token or turn.status not in ('running', 'awaiting_confirmation'):
+    if (
+        turn.coordinator_generation != generation
+        or turn.claim_token != claim_token
+        or turn.status not in (ChatTurnStatus.RUNNING, ChatTurnStatus.AWAITING_CONFIRMATION)
+    ):
         raise ChatClaimRevoked('Chat turn claim was revoked or is no longer active')
     return turn
 
@@ -77,7 +81,7 @@ def _append_event(db: Session, *, session_id: str, turn_id: str | None, payload:
     sequence = int(row.sequence)
     old_events = select(col(ChatEvent.sequence)).where(col(ChatEvent.session_id) == session_id).order_by(col(ChatEvent.sequence).desc()).offset(MAX_EVENTS)
     db.execute(delete(ChatEvent).where(col(ChatEvent.session_id) == session_id, col(ChatEvent.sequence).in_(old_events)))
-    notify_on_commit(db, {'kind': CHAT_EVENT_WAKE_KIND, 'session_id': session_id, 'sequence': sequence})
+    notify_on_commit(db, {'kind': NotifyKind.CHAT_EVENT, 'session_id': session_id, 'sequence': sequence})
     return sequence
 
 
@@ -119,7 +123,7 @@ def _enqueue(
         select(col(ChatTurn.id)).where(col(ChatTurn.session_id) == session_id, col(ChatTurn.status).in_(ACTIVE_TURN_STATUSES))
     ).scalar_one_or_none()
     if active is not None:
-        raise RuntimeError('Agent busy')
+        raise ChatSessionBusy('Agent busy')
     turn_id = secrets.token_urlsafe(18)
     turn = ChatTurn(
         id=turn_id,
@@ -129,14 +133,14 @@ def _enqueue(
         tool_ids=tool_ids,
         namespace=namespace,
         session_token_encrypted=encrypt_secret(session_token),
-        status='queued',
+        status=ChatTurnStatus.QUEUED,
         checkpoint={},
     )
     db.add(turn)
     db.flush()
     _append_message(db, session_id=session_id, turn_id=turn_id, message={'role': 'user', 'content': content})
     _append_event(db, session_id=session_id, turn_id=turn_id, payload={'type': 'message', 'role': 'user', 'content': content})
-    notify_on_commit(db, {'kind': CHAT_TURN_WAKE_KIND, 'session_id': session_id, 'turn_id': turn_id})
+    notify_on_commit(db, {'kind': NotifyKind.CHAT_TURN, 'session_id': session_id, 'turn_id': turn_id})
     db.commit()
     return turn_id
 
@@ -147,9 +151,9 @@ def _claim_batch(db: Session, *, generation: int, limit: int) -> list[TurnClaim]
         .join(ChatSession, col(ChatSession.id) == col(ChatTurn.session_id))
         .where(
             or_(
-                col(ChatTurn.status) == 'queued',
+                col(ChatTurn.status) == ChatTurnStatus.QUEUED,
                 and_(
-                    col(ChatTurn.status) == 'awaiting_confirmation',
+                    col(ChatTurn.status) == ChatTurnStatus.AWAITING_CONFIRMATION,
                     or_(col(ChatTurn.confirmation_decision).is_not(None), col(ChatTurn.stop_requested).is_(True)),
                 ),
             ),
@@ -165,7 +169,7 @@ def _claim_batch(db: Session, *, generation: int, limit: int) -> list[TurnClaim]
             session_token = decrypt_secret(turn.session_token_encrypted)
             api_key = decrypt_secret(session.api_key)
         except SettingsConfigurationError:
-            turn.status = 'failed'
+            turn.status = ChatTurnStatus.FAILED
             turn.claim_token = None
             turn.coordinator_generation = None
             turn.confirmation_decision = None
@@ -184,8 +188,8 @@ def _claim_batch(db: Session, *, generation: int, limit: int) -> list[TurnClaim]
         turn.claim_token = claim_token
         turn.coordinator_generation = generation
         turn.updated_at = datetime.now(UTC)
-        if turn.status == 'queued':
-            turn.status = 'running'
+        if turn.status == ChatTurnStatus.QUEUED:
+            turn.status = ChatTurnStatus.RUNNING
         claims.append(
             TurnClaim(
                 id=turn.id,
@@ -228,14 +232,14 @@ def _recover(db: Session, *, generation: int) -> int:
         turn.claim_token = None
         turn.coordinator_generation = None
         turn.updated_at = datetime.now(UTC)
-        if turn.status == 'queued' or phase == 'tool_ready':
-            turn.status = 'queued'
+        if turn.status == ChatTurnStatus.QUEUED or phase == 'tool_ready':
+            turn.status = ChatTurnStatus.QUEUED
             recovered += 1
             continue
-        if turn.status == 'awaiting_confirmation':
+        if turn.status == ChatTurnStatus.AWAITING_CONFIRMATION:
             recovered += 1
             continue
-        turn.status = 'interrupted'
+        turn.status = ChatTurnStatus.INTERRUPTED
         _append_event(
             db,
             session_id=turn.session_id,
@@ -258,7 +262,7 @@ def _request_stop(db: Session, *, session_id: str, user_id: str) -> bool:
         return False
     turn.stop_requested = True
     turn.updated_at = datetime.now(UTC)
-    notify_on_commit(db, {'kind': CHAT_TURN_WAKE_KIND, 'session_id': session_id, 'turn_id': turn.id})
+    notify_on_commit(db, {'kind': NotifyKind.CHAT_TURN, 'session_id': session_id, 'turn_id': turn.id})
     db.commit()
     return True
 
@@ -269,7 +273,7 @@ def _confirm(db: Session, *, session_id: str, user_id: str, approved: bool) -> b
         .where(
             col(ChatTurn.session_id) == session_id,
             col(ChatTurn.user_id) == user_id,
-            col(ChatTurn.status) == 'awaiting_confirmation',
+            col(ChatTurn.status) == ChatTurnStatus.AWAITING_CONFIRMATION,
             col(ChatTurn.confirmation_decision).is_(None),
         )
         .with_for_update()
@@ -278,7 +282,7 @@ def _confirm(db: Session, *, session_id: str, user_id: str, approved: bool) -> b
         return False
     turn.confirmation_decision = approved
     turn.updated_at = datetime.now(UTC)
-    notify_on_commit(db, {'kind': CHAT_TURN_WAKE_KIND, 'session_id': session_id, 'turn_id': turn.id})
+    notify_on_commit(db, {'kind': NotifyKind.CHAT_TURN, 'session_id': session_id, 'turn_id': turn.id})
     db.commit()
     return True
 
@@ -317,7 +321,7 @@ class ChatTurnStore:
     def release_confirmation(self, *, turn_id: str, claim_token: str, generation: int) -> None:
         def release(db: Session) -> None:
             turn = _verify_claim(db, turn_id, claim_token, generation)
-            if turn.status != 'awaiting_confirmation':
+            if turn.status != ChatTurnStatus.AWAITING_CONFIRMATION:
                 raise RuntimeError('Chat turn is not awaiting confirmation')
             turn.claim_token = None
             db.commit()
@@ -332,7 +336,14 @@ class ChatTurnStore:
         return run_settings_db(read)
 
     def set_checkpoint(
-        self, *, turn_id: str, claim_token: str, generation: int, checkpoint: dict[str, Any], status: str | None = None, clear_confirmation: bool = False
+        self,
+        *,
+        turn_id: str,
+        claim_token: str,
+        generation: int,
+        checkpoint: dict[str, Any],
+        status: ChatTurnStatus | None = None,
+        clear_confirmation: bool = False,
     ) -> None:
         def write(db: Session) -> None:
             turn = _verify_claim(db, turn_id, claim_token, generation)
@@ -364,7 +375,7 @@ class ChatTurnStore:
 
         return run_settings_db(write)
 
-    def finish(self, *, turn_id: str, claim_token: str, generation: int, status: str) -> None:
+    def finish(self, *, turn_id: str, claim_token: str, generation: int, status: ChatTurnStatus) -> None:
         def write(db: Session) -> None:
             turn = _verify_claim(db, turn_id, claim_token, generation)
             turn.status = status

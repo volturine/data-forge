@@ -4,6 +4,8 @@ import logging
 import threading
 import time
 from concurrent.futures import ThreadPoolExecutor
+from types import SimpleNamespace
+from unittest.mock import AsyncMock
 
 import pytest
 from fastapi.middleware.cors import CORSMiddleware
@@ -45,6 +47,48 @@ def _frontend_request(accept_encoding: str | None = None, path: str = '/') -> Re
 
 
 class TestUvicornSettings:
+    @pytest.mark.asyncio
+    async def test_lifespan_waits_for_bootstrap_collection_off_loop(self, monkeypatch: pytest.MonkeyPatch) -> None:
+        from backend_core import application
+
+        loop = asyncio.get_running_loop()
+        loop_thread_id = threading.get_ident()
+        collection_started = asyncio.Event()
+        entered = asyncio.Event()
+        shutdown = asyncio.Event()
+        release_collection = threading.Event()
+        collections: list[tuple[int, int]] = []
+        bootstrap = AsyncMock(return_value=None)
+
+        def collect(generation: int) -> int:
+            assert bootstrap.await_count == 1
+            collections.append((generation, threading.get_ident()))
+            loop.call_soon_threadsafe(collection_started.set)
+            if not release_collection.wait(timeout=5):
+                raise TimeoutError('bootstrap collection was not released')
+            return 0
+
+        monkeypatch.setattr(application, '_start_api_lifespan', bootstrap)
+        monkeypatch.setattr(application, 'gc', SimpleNamespace(collect=collect))
+
+        async def serve() -> None:
+            async with application.lifespan(application.app):
+                entered.set()
+                await shutdown.wait()
+
+        serving = asyncio.create_task(serve())
+        try:
+            await asyncio.wait_for(collection_started.wait(), timeout=2)
+            assert not entered.is_set()
+            assert [generation for generation, _ in collections] == [2]
+            assert collections[0][1] != loop_thread_id
+            release_collection.set()
+            await asyncio.wait_for(entered.wait(), timeout=2)
+        finally:
+            release_collection.set()
+            shutdown.set()
+            await asyncio.wait_for(serving, timeout=2)
+
     @pytest.mark.asyncio
     async def test_prewarm_starts_all_configured_anyio_threads(self) -> None:
         import anyio.to_thread

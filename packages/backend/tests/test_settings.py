@@ -15,6 +15,7 @@ from sqlalchemy import text
 from sqlmodel import Session, create_engine
 
 from backend_core.secrets import MASKED_SECRET, decrypt_secret, encrypt_secret
+from backend_core.settings_projection import SmtpSettings
 from tests.http_client import TestClient
 
 
@@ -39,8 +40,11 @@ async def smtp_loop_errors() -> AsyncIterator[list[dict[str, object]]]:
         loop.set_exception_handler(previous_handler)
 
 
-async def _smtp_settings_lookup(_operation: object) -> dict[str, object]:
-    return {'host': 'smtp.test.com', 'port': 587, 'user': 'user@test.com', 'password': 'pw'}
+_TEST_SMTP = SmtpSettings(host='smtp.test.com', port=587, user='user@test.com', password='pw')
+
+
+async def _smtp_settings_lookup(_operation: object) -> SmtpSettings:
+    return _TEST_SMTP
 
 
 def _use_smtp_test_executor(monkeypatch, executor: object, deadline: float = 12.0) -> None:
@@ -150,7 +154,7 @@ class TestNamespaceDatabaseConcurrency:
     def test_pool_snapshot_identifies_checked_out_connection_owner(self, monkeypatch, tmp_path) -> None:
         from backend_core import database
 
-        engine = database._create_engine(f'sqlite:///{tmp_path / "pool.db"}', pool_name='tenant')
+        engine = database._create_engine(f'sqlite:///{tmp_path / "pool.db"}')
         monkeypatch.setattr(database, 'tenant_engine', engine)
         monkeypatch.setattr(database, 'settings_engine', None)
         monkeypatch.setattr(database, '_engine_override', None)
@@ -253,7 +257,7 @@ class TestUpdateSettings:
             },
         )
         assert resp.status_code == 200
-        assert get_resolved_smtp()['password'] == 'pw'
+        assert get_resolved_smtp().password == 'pw'
         assert get_resolved_telegram_settings()['token'] == 'bot999:xyz'
         assert get_resolved_openrouter_key() == 'sk-live'
 
@@ -447,7 +451,7 @@ class TestTestSmtp:
         async def _blocked_lookup(_operation):
             waiting.set()
             await continue_lookup.wait()
-            return {'host': 'smtp.test.com', 'port': 587, 'user': 'user@test.com', 'password': 'pw'}
+            return _TEST_SMTP
 
         with ThreadPoolExecutor(max_workers=1) as executor:
             _use_smtp_test_executor(monkeypatch, executor)
@@ -1134,12 +1138,7 @@ class TestSettingsRuntimeReads:
 
             assert notifications == [{'kind': 'settings_changed'}]
 
-            assert get_resolved_smtp() == {
-                'host': 'smtp.one.test',
-                'port': 587,
-                'user': 'first',
-                'password': 'pw-one',
-            }
+            assert get_resolved_smtp() == SmtpSettings(host='smtp.one.test', port=587, user='first', password='pw-one')
 
             # Simulate another API child committing a settings change.
             with engine.begin() as connection:
@@ -1147,12 +1146,7 @@ class TestSettingsRuntimeReads:
                     cast(Any, AppSettings).__table__.update().where(AppSettings.id == 1).values(smtp_host='smtp.two.test', smtp_port=465, smtp_user='second')
                 )
 
-            assert get_resolved_smtp() == {
-                'host': 'smtp.two.test',
-                'port': 465,
-                'user': 'second',
-                'password': 'pw-one',
-            }
+            assert get_resolved_smtp() == SmtpSettings(host='smtp.two.test', port=465, user='second', password='pw-one')
         finally:
             clear_settings_engine_override()
 

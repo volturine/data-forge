@@ -1,34 +1,45 @@
+import json
 import logging
 
 import pytest
 from fastapi import FastAPI
-from starlette.requests import ClientDisconnect
+from starlette.requests import ClientDisconnect, Request
 
-from backend_core.error_handlers import _log_app_error, client_disconnect_handler, handle_errors
-from backend_core.exceptions import ClientDisconnectedError, PipelineExecutionCancelledError, PipelineExecutionError
+from backend_core.error_handlers import app_error_handler, client_disconnect_handler, handle_errors
+from backend_core.exceptions import AppError, ClientDisconnectedError, PipelineExecutionCancelledError, PipelineExecutionError
 from tests.http_client import TestClient
 
 
-def test_expected_engine_shutdown_cancellation_is_logged_without_traceback(caplog):
-    cancellation = PipelineExecutionCancelledError('Compute request cancelled because its compute worker was shut down')
-
+@pytest.mark.asyncio
+@pytest.mark.parametrize(
+    ('error', 'expected_status', 'expected_level'),
+    [
+        pytest.param(PipelineExecutionCancelledError('Compute worker stopped', job_id='job-1'), 409, logging.INFO, id='typed-shutdown-cancellation'),
+        pytest.param(PipelineExecutionError('Preview failed', job_id='job-1'), 500, logging.ERROR, id='execution-failure'),
+        pytest.param(
+            AppError('Queued input changed', error_code='STALE_COMPUTE_INPUT', details={'datasource_id': 'ds-1'}), 409, logging.INFO, id='stale-input'
+        ),
+        pytest.param(AppError('Worker stopped', error_code='JOB_CANCELLED', details={'operation': 'preview'}), 409, logging.INFO, id='worker-cancellation'),
+    ],
+)
+async def test_app_errors_preserve_response_status_details_and_log_severity(
+    error: AppError,
+    expected_status: int,
+    expected_level: int,
+    caplog: pytest.LogCaptureFixture,
+) -> None:
     with caplog.at_level(logging.INFO, logger='backend_core.error_handlers'):
-        _log_app_error(cancellation, status=500)
+        response = await app_error_handler(Request({'type': 'http'}), error)
 
+    assert response.status_code == expected_status
+    assert json.loads(bytes(response.body)) == {
+        'detail': error.message,
+        'error_code': error.error_code,
+        'details': error.details,
+    }
     record = caplog.records[-1]
-    assert record.levelno == logging.INFO
-    assert record.exc_info is None
-
-
-def test_pipeline_execution_failure_still_logs_as_error(caplog):
-    failure = PipelineExecutionError('preview failed')
-
-    with caplog.at_level(logging.INFO, logger='backend_core.error_handlers'):
-        _log_app_error(failure, status=500)
-
-    record = caplog.records[-1]
-    assert record.levelno == logging.ERROR
-    assert record.exc_info is not None
+    assert record.levelno == expected_level
+    assert (record.exc_info is not None) == (expected_status >= 500)
 
 
 @pytest.mark.asyncio

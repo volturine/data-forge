@@ -2,14 +2,19 @@ import base64
 from collections.abc import Callable
 from dataclasses import dataclass
 from email.message import EmailMessage
+from enum import StrEnum
 
 from backend_core import http as http_client
 from backend_core.settings_projection import get_resolved_smtp, get_resolved_telegram_settings
 from backend_core.smtp import send_smtp_message
 
-EMAIL_DELIVERY_KIND = 'email_delivery'
-TELEGRAM_DELIVERY_KIND = 'telegram_delivery'
-EXTERNAL_DELIVERY_KINDS = frozenset({EMAIL_DELIVERY_KIND, TELEGRAM_DELIVERY_KIND})
+
+class DeliveryKind(StrEnum):
+    EMAIL = 'email_delivery'
+    TELEGRAM = 'telegram_delivery'
+
+
+EXTERNAL_DELIVERY_KINDS = frozenset(DeliveryKind)
 _TELEGRAM_BASE_URL = 'https://api.telegram.org'
 _REDACTED = '[REDACTED]'
 
@@ -28,14 +33,13 @@ def redact_secrets_in_text(message: str, *secrets: str) -> str:
 
 
 def deliver(payload: dict[str, object], *, event_id: str, progress: DeliveryProgress | None = None) -> None:
-    kind = payload.get('kind')
-    if kind == EMAIL_DELIVERY_KIND:
-        _deliver_email(payload, event_id=event_id)
-        return
-    if kind == TELEGRAM_DELIVERY_KIND:
-        _deliver_telegram(payload, progress or DeliveryProgress())
-        return
-    raise ValueError(f'Unsupported notification delivery kind: {kind!r}')
+    match payload.get('kind'):
+        case DeliveryKind.EMAIL:
+            _deliver_email(payload, event_id=event_id)
+        case DeliveryKind.TELEGRAM:
+            _deliver_telegram(payload, progress or DeliveryProgress())
+        case kind:
+            raise ValueError(f'Unsupported notification delivery kind: {kind!r}')
 
 
 def _attachments(payload: dict[str, object]) -> list[dict[str, str]]:
@@ -54,14 +58,10 @@ def _required_text(payload: dict[str, object], field: str) -> str:
 
 def _deliver_email(payload: dict[str, object], *, event_id: str) -> None:
     smtp = get_resolved_smtp()
-    host = str(smtp.get('host', ''))
-    port = int(str(smtp.get('port', 587)))
-    user = str(smtp.get('user', ''))
-    password = str(smtp.get('password', ''))
-    if not host or not user:
+    if not smtp.host or not smtp.user:
         raise ValueError('SMTP is not configured')
     message = EmailMessage()
-    message['From'] = user
+    message['From'] = smtp.user
     message['To'] = _required_text(payload, 'to')
     message['Subject'] = _required_text(payload, 'subject')
     message['Message-ID'] = f'<{event_id}@data-forge>'
@@ -78,7 +78,7 @@ def _deliver_email(payload: dict[str, object], *, event_id: str) -> None:
             subtype=subtype,
             filename=attachment['filename'],
         )
-    send_smtp_message(host, port, user, password, message)
+    send_smtp_message(smtp.host, smtp.port, smtp.user, smtp.password, message)
 
 
 def _deliver_telegram(payload: dict[str, object], progress: DeliveryProgress) -> None:

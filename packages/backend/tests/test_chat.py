@@ -18,8 +18,8 @@ from backend_core.database import get_settings_engine
 from backend_core.sqlmodel_typing import col
 from modules.chat.chat_http import ChatHttpError
 from modules.chat.consumer import ChatTurnConsumer, TurnRuntime
-from modules.chat.models import ChatEvent, ChatMessage, ChatTurn
-from modules.chat.sessions import session_store
+from modules.chat.models import ChatEvent, ChatMessage, ChatTurn, ChatTurnStatus
+from modules.chat.sessions import ChatSessionBusy, session_store
 from modules.chat.store import ChatTurnStore
 from modules.mcp.models import MCPHttpMethod, MCPToolDefinition
 from tests.http_client import TestClient
@@ -109,10 +109,8 @@ def test_concurrent_api_store_instances_claim_one_turn(client: TestClient) -> No
 def _attempt_enqueue(store: ChatTurnStore, session_id: str, content: str) -> str:
     try:
         return _enqueue(store, session_id, content)
-    except RuntimeError as exc:
-        if str(exc) == 'Agent busy':
-            return 'busy'
-        raise
+    except ChatSessionBusy:
+        return 'busy'
 
 
 def test_stop_and_confirmation_are_visible_across_store_instances(client: TestClient) -> None:
@@ -126,7 +124,7 @@ def test_stop_and_confirmation_are_visible_across_store_instances(client: TestCl
         claim_token=claim.claim_token,
         generation=3,
         checkpoint={'phase': 'awaiting_confirmation', 'tool_call': {'tool_id': 'datasource_delete'}},
-        status='awaiting_confirmation',
+        status=ChatTurnStatus.AWAITING_CONFIRMATION,
     )
 
     assert api_child.confirm(session_id=session_id, user_id=claim.user_id, approved=True) is True
@@ -154,7 +152,7 @@ def test_owner_recovery_interrupts_uncertain_work_and_reclaims_confirmation(clie
         claim_token=claims[waiting_id].claim_token,
         generation=4,
         checkpoint={'phase': 'awaiting_confirmation', 'tool_call': {'tool_id': 'datasource_delete'}},
-        status='awaiting_confirmation',
+        status=ChatTurnStatus.AWAITING_CONFIRMATION,
     )
 
     assert store.recover(generation=5) == 2
@@ -325,7 +323,7 @@ async def test_confirmation_restart_preserves_decision_and_remaining_calls(clien
             'tool_call': {'id': 'call-1', 'tool_id': 'first', 'method': 'POST', 'path': '/api/v1/first', 'args': {}},
             'remaining_calls': calls[1:],
         },
-        status='awaiting_confirmation',
+        status=ChatTurnStatus.AWAITING_CONFIRMATION,
     )
     assert store.confirm(session_id=runtime.id, user_id=runtime.user_id, approved=approved)
     store.recover(generation=12)
@@ -349,7 +347,7 @@ def test_old_claim_cannot_append_after_confirmation_takeover(client: TestClient)
     _enqueue(store, runtime_session, 'takeover')
     old = store.claim_batch(generation=13, limit=1)[0]
     store.set_checkpoint(
-        turn_id=old.id, claim_token=old.claim_token, generation=13, checkpoint={'phase': 'awaiting_confirmation'}, status='awaiting_confirmation'
+        turn_id=old.id, claim_token=old.claim_token, generation=13, checkpoint={'phase': 'awaiting_confirmation'}, status=ChatTurnStatus.AWAITING_CONFIRMATION
     )
     store.recover(generation=14)
     assert store.confirm(session_id=runtime_session, user_id=old.user_id, approved=True)

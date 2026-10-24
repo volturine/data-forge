@@ -14,10 +14,10 @@ from backend_core.error_handlers import handle_errors
 from backend_core.namespace import get_namespace, reset_namespace, set_namespace_context
 from backend_core.websocket import (
     is_disconnect_runtime_error,
-    resolve_websocket_session_token,
     safe_close_websocket,
     safe_send_json,
 )
+from modules.auth.dependencies import resolve_session_token
 from modules.locks import schemas, service, watchers
 from modules.mcp.router import MCPRouter
 
@@ -31,7 +31,7 @@ async def _require_websocket_user(websocket: WebSocket) -> str:
     owner_id = await run_api_blocking(
         run_settings_db,
         resolve_lock_owner_id,
-        resolve_websocket_session_token(websocket),
+        resolve_session_token(websocket),
         websocket.query_params.get('editor_client_id'),
     )
     if owner_id is None:

@@ -68,7 +68,7 @@ def test_critical_db_helpers_run_sessions_on_their_reserved_engines(monkeypatch)
 
 
 def test_database_statement_timing_collects_sql_and_commit_costs() -> None:
-    engine = database._create_engine('sqlite:///:memory:', pool_name='statement-timing')
+    engine = database._create_engine('sqlite:///:memory:')
     metrics: dict[str, object] = {'sql_count': 0, 'sql_ms': 0.0, 'commit_ms': 0.0}
 
     with database.database_statement_timing(metrics), Session(engine) as session:

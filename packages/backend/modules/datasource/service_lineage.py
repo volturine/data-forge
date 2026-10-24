@@ -55,10 +55,9 @@ def build_lineage(
         target = datasource_map.get(target_datasource_id)
         if not target:
             return {'nodes': [], 'edges': []}
-        if isinstance(target.config, dict):
-            namespace_name = target.config.get('namespace_name')
-            if namespace_name and namespace_name != get_namespace():
-                return {'nodes': [], 'edges': []}
+        namespace_name = target.config.get('namespace_name')
+        if namespace_name and namespace_name != get_namespace():
+            return {'nodes': [], 'edges': []}
 
     ds_to_consumers: dict[str, set[str]] = {}
     for dep in deps:
@@ -86,7 +85,7 @@ def build_lineage(
     def datasource_branch(ds: DataSource) -> str | None:
         if target_datasource_id and ds.id == target_datasource_id and branch is not None:
             return branch
-        value = ds.config.get('branch') if isinstance(ds.config, dict) else None
+        value = ds.config.get('branch')
         return None if value is None else str(value)
 
     def add_datasource_node(ds: DataSource) -> str:

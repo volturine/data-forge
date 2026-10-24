@@ -110,7 +110,7 @@ def _wait_for_scheduled_build(db_url: str, schedule_id: str) -> tuple[str, str]:
         assert not failure, f'Scheduled build enqueue failed for {schedule_id} at {failure}'
         row = _scalar(
             db_url,
-            "SELECT concat(id, '|', status) FROM \"default\".build_runs WHERE schedule_id = %s ORDER BY created_at DESC LIMIT 1",
+            'SELECT concat(id, \'|\', status) FROM "default".build_runs WHERE schedule_id = %s ORDER BY created_at DESC LIMIT 1',
             (schedule_id,),
         )
         if row:
@@ -127,7 +127,16 @@ def _wait_for_scheduled_build(db_url: str, schedule_id: str) -> tuple[str, str]:
         db_url,
         "SELECT string_agg(concat(kind, ':', id, ':', active_jobs, ':', COALESCE(stopped_at::text, '')), ',') FROM public.runtime_workers",
     )
-    raise AssertionError(f'Timed out waiting for scheduled build {schedule_id}; schedule={schedule_state}; workers={workers}')
+    schedule_work = _scalar(
+        db_url,
+        "SELECT concat(pending, '|', COALESCE(due_at::text, ''), '|', generation) FROM public.runtime_namespace_work WHERE namespace = %s AND kind = %s",
+        ('default', 'schedule'),
+    )
+    wake_count = _scalar(db_url, 'SELECT count(*) FROM public.runtime_namespace_work_wakes WHERE namespace = %s AND kind = %s', ('default', 'schedule'))
+    raise AssertionError(
+        f'Timed out waiting for scheduled build {schedule_id}; schedule={schedule_state}; workers={workers}; '
+        f'schedule_work={schedule_work}; schedule_wakes={wake_count}'
+    )
 
 
 def check_manual_and_scheduled_builds(api_url: str, db_url: str, email: str, password: str) -> None:
@@ -141,8 +150,10 @@ def check_manual_and_scheduled_builds(api_url: str, db_url: str, email: str, pas
         schedule_id = str(schedule.json()['id'])
 
         run_at = (datetime.now(UTC) - timedelta(minutes=1)).replace(tzinfo=None)
-        with psycopg.connect(db_url, autocommit=True) as connection:
+        # Publish the wake with the forced due time, even if the create wake was already consumed.
+        with psycopg.connect(db_url) as connection:
             connection.execute('UPDATE "default".schedules SET next_run = %s WHERE id = %s', (run_at, schedule_id))
+            connection.execute('INSERT INTO public.runtime_namespace_work_wakes (namespace, kind) VALUES (%s, %s)', ('default', 'schedule'))
 
         scheduled_build_id, status = _wait_for_scheduled_build(db_url, schedule_id)
         assert status == 'completed', f'Scheduled build {scheduled_build_id} ended {status}'

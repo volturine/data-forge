@@ -21,7 +21,7 @@ from backend_core.domain.step_config_enums import (
     PivotAggregateFunction,
 )
 from backend_core.persistence.datasource.models import DataSource
-from modules.analysis.step_schemas import FilterConfig
+from modules.analysis.step_schemas import FilterConditionSchema, FilterConfig
 from modules.export.models import CodeExportFormat
 
 _POLARS_CAST_MAP = {
@@ -240,26 +240,21 @@ def _scan_expression(datasource: DataSource | None, path_const: str) -> tuple[st
     )
 
 
-def _polars_filter_expr(condition: dict[str, Any]) -> str | None:
-    column = condition.get('column')
-    if not isinstance(column, str) or not column:
+def _polars_filter_expr(condition: FilterConditionSchema) -> str | None:
+    if not condition.column:
         return None
-    operator = FilterOperator.read(condition.get('operator'), default=FilterOperator.EQUAL)
-    if operator is None:
-        return None
-    value_type = FilterValueType.read(condition.get('value_type'), default=FilterValueType.STRING)
-    compare_column = condition.get('compare_column')
-    column_expr = f'pl.col({json.dumps(column)})'
+    operator = condition.operator
+    column_expr = f'pl.col({json.dumps(condition.column)})'
 
     if operator == FilterOperator.IS_NULL:
         return f'{column_expr}.is_null()'
     if operator == FilterOperator.IS_NOT_NULL:
         return f'{column_expr}.is_not_null()'
 
-    if value_type == FilterValueType.COLUMN and isinstance(compare_column, str) and compare_column:
-        rhs = f'pl.col({json.dumps(compare_column)})'
+    if condition.value_type == FilterValueType.COLUMN and condition.compare_column:
+        rhs = f'pl.col({json.dumps(condition.compare_column)})'
     else:
-        rhs = _safe_py(condition.get('value'))
+        rhs = _safe_py(condition.value)
 
     if actual := operator.polars_binary_token:
         return f'{column_expr} {actual} {rhs}'
@@ -278,26 +273,21 @@ def _polars_filter_expr(condition: dict[str, Any]) -> str | None:
     return None
 
 
-def _sql_filter_expr(condition: dict[str, Any]) -> str | None:
-    column = condition.get('column')
-    if not isinstance(column, str) or not column:
+def _sql_filter_expr(condition: FilterConditionSchema) -> str | None:
+    if not condition.column:
         return None
-    operator = FilterOperator.read(condition.get('operator'), default=FilterOperator.EQUAL)
-    if operator is None:
-        return None
-    value_type = FilterValueType.read(condition.get('value_type'), default=FilterValueType.STRING)
-    compare_column = condition.get('compare_column')
-    lhs = _sql_quote(column)
+    operator = condition.operator
+    lhs = _sql_quote(condition.column)
 
     if operator == FilterOperator.IS_NULL:
         return f'{lhs} IS NULL'
     if operator == FilterOperator.IS_NOT_NULL:
         return f'{lhs} IS NOT NULL'
 
-    if value_type == FilterValueType.COLUMN and isinstance(compare_column, str) and compare_column:
-        rhs = _sql_quote(compare_column)
+    if condition.value_type == FilterValueType.COLUMN and condition.compare_column:
+        rhs = _sql_quote(condition.compare_column)
     else:
-        value = condition.get('value')
+        value = condition.value
         if operator.is_membership:
             items = value if isinstance(value, list) else [value]
             rhs = '(' + ', '.join(_sql_literal(item) for item in items) + ')'
@@ -409,12 +399,11 @@ def sql_step_renderer(*step_types: str) -> Callable[[SqlStepRenderer], SqlStepRe
 
 @polars_step_renderer(STEP_TYPES.filter.value)
 def render_polars_filter(context: PolarsStepRenderContext) -> str:
-    conditions = [condition.model_dump(mode='json', exclude_none=True) for condition in FilterConfig.model_validate(context.config).conditions]
-    logic = FilterLogic.read(str(context.config.get('logic', FilterLogic.AND.value)).upper(), default=FilterLogic.AND)
-    exprs = [expr for cond in conditions if isinstance(cond, dict) if (expr := _polars_filter_expr(cond))]
+    config = FilterConfig.model_validate(context.config)
+    exprs = [expr for condition in config.conditions if (expr := _polars_filter_expr(condition))]
     if not exprs:
         return context.alias_current(warning=f"Filter step in tab '{context.tab.name}' has no valid conditions")
-    joiner = ' & ' if logic == FilterLogic.AND else ' | '
+    joiner = ' & ' if config.logic == FilterLogic.AND else ' | '
     return context.assign(f'{context.current_var}.filter({joiner.join(exprs)})')
 
 
@@ -643,12 +632,11 @@ def render_unsupported_polars_step(context: PolarsStepRenderContext) -> str:
 
 @sql_step_renderer(STEP_TYPES.filter.value)
 def render_sql_filter(context: SqlStepRenderContext) -> SqlStepRenderResult:
-    conditions = [condition.model_dump(mode='json', exclude_none=True) for condition in FilterConfig.model_validate(context.config).conditions]
-    logic = FilterLogic.read(str(context.config.get('logic', FilterLogic.AND.value)).upper(), default=FilterLogic.AND)
-    exprs = [expr for cond in conditions if isinstance(cond, dict) if (expr := _sql_filter_expr(cond))]
+    config = FilterConfig.model_validate(context.config)
+    exprs = [expr for condition in config.conditions if (expr := _sql_filter_expr(condition))]
     if not exprs:
         return context.result(warning=f"Filter step in tab '{context.tab.name}' has no valid SQL conditions")
-    joiner = ' AND ' if logic == FilterLogic.AND else ' OR '
+    joiner = ' AND ' if config.logic == FilterLogic.AND else ' OR '
     return context.result(f'SELECT * FROM {context.current_cte} WHERE ' + joiner.join(exprs))
 
 
@@ -853,7 +841,7 @@ def generate_polars_code(
             context = PolarsStepRenderContext(
                 tab=tab,
                 step_type=step.type,
-                config=step.config if isinstance(step.config, dict) else {},
+                config=step.config,
                 current_var=current_var,
                 next_var=next_var,
                 tab_last_var=tab_last_var,
@@ -867,14 +855,9 @@ def generate_polars_code(
         lines.append(f'{tab_slug}_result = {current_var}')
         lines.append('')
 
-    target_var = tab_last_var.get(selection.target_tab.id)
-    if target_var:
-        lines.append(f'result = {target_var}.collect()')
-        lines.append('print(result)')
-    else:
-        lines.append('result = pl.DataFrame()')
-        lines.append('print(result)')
-        warn(f"Could not resolve target tab '{selection.target_tab.name}' for final collect")
+    target_var = tab_last_var[selection.target_tab.id]
+    lines.append(f'result = {target_var}.collect()')
+    lines.append('print(result)')
 
     return '\n'.join(lines).strip() + '\n', warnings
 
@@ -940,7 +923,7 @@ def generate_sql_code(
             context = SqlStepRenderContext(
                 tab=tab,
                 step_type=step.type,
-                config=step.config if isinstance(step.config, dict) else {},
+                config=step.config,
                 current_cte=current_cte,
                 tab_final_cte=tab_final_cte,
                 warnings=warnings,
@@ -957,12 +940,8 @@ def generate_sql_code(
 
         tab_final_cte[tab.id] = current_cte
 
-    final_cte = tab_final_cte.get(selection.target_tab.id)
-    if final_cte is None:
-        warn(f"Could not resolve target tab '{selection.target_tab.name}' for final SELECT")
-        query = 'SELECT 1 WHERE FALSE'
-    else:
-        query = f'SELECT * FROM {final_cte}'
+    final_cte = tab_final_cte[selection.target_tab.id]
+    query = f'SELECT * FROM {final_cte}'
 
     sql = '\n'.join(header_lines) + 'WITH\n' + ',\n'.join(ctes) + '\n' + query + ';\n'
     return sql, warnings

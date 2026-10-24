@@ -30,6 +30,7 @@ from backend_core.persistence.analysis.models import Analysis
 from backend_core.persistence.datasource.models import DataSource
 from backend_core.persistence.udfs.models import Udf
 from backend_core.sqlmodel_typing import sa
+from backend_core.transactions import committed
 from modules.auth import commands as auth_commands, routes as auth_routes
 from modules.auth.commands import change_password, delete_user_account, revoke_session, unlink_provider, update_profile
 from modules.auth.dependencies import _resolve_user, get_current_user
@@ -46,21 +47,28 @@ from modules.auth.schemas import UserPublic
 from modules.auth.service import (
     _DEFAULT_USER_LOCK_ID,
     _acquire_default_user_lock,
-    create_session,
-    create_user,
-    create_verification_token,
     ensure_default_user,
-    find_or_create_oauth_user,
     get_user_by_email,
     get_user_by_id,
     hash_password,
-    revoke_all_sessions,
+    stage_create_session,
+    stage_create_user,
+    stage_create_verification_token,
+    stage_find_or_create_oauth_user,
+    stage_revoke_all_sessions,
+    stage_validate_verification_token,
     validate_password,
     validate_session,
-    validate_verification_token,
     verify_password,
 )
 from tests.http_client import TestClient
+
+create_user = committed(stage_create_user, refresh=True)
+create_session = committed(stage_create_session, refresh=True)
+create_verification_token = committed(stage_create_verification_token)
+find_or_create_oauth_user = committed(stage_find_or_create_oauth_user, refresh=True)
+revoke_all_sessions = committed(stage_revoke_all_sessions)
+validate_verification_token = committed(stage_validate_verification_token)
 
 
 def _make_postgres_engine(prefix: str = 'auth', *, schema_name: str | None = None):

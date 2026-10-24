@@ -13,6 +13,14 @@ DEFAULT_OLLAMA_MODEL = 'llama3.2'
 
 
 @dataclass(frozen=True, slots=True)
+class SmtpSettings:
+    host: str
+    port: int
+    user: str
+    password: str
+
+
+@dataclass(frozen=True, slots=True)
 class ResolvedSettingsSnapshot:
     exists: bool
     smtp_host: str = ''
@@ -42,24 +50,16 @@ class ResolvedSettingsSnapshot:
             ollama_default_model=row.ollama_default_model or DEFAULT_OLLAMA_MODEL,
         )
 
-    def smtp_settings(self) -> dict[str, object]:
+    def smtp_settings(self) -> SmtpSettings:
         if self.exists and self.smtp_host:
-            return {
-                'host': self.smtp_host,
-                'port': self.smtp_port,
-                'user': self.smtp_user,
-                'password': self.smtp_password,
-            }
-        return {'host': '', 'port': DEFAULT_SMTP_PORT, 'user': '', 'password': ''}
+            return SmtpSettings(host=self.smtp_host, port=self.smtp_port, user=self.smtp_user, password=self.smtp_password)
+        return SmtpSettings(host='', port=DEFAULT_SMTP_PORT, user='', password='')
 
     def telegram_settings(self) -> dict[str, object]:
         if not self.exists:
             return {'enabled': False, 'token': ''}
         enabled = bool(self.telegram_bot_enabled and self.telegram_bot_token)
         return {'enabled': enabled, 'token': self.telegram_bot_token}
-
-    def openrouter_key(self) -> str:
-        return self.openrouter_api_key if self.exists else ''
 
     def ollama_settings(self) -> dict[str, str]:
         return {'endpoint_url': self.ollama_endpoint_url, 'default_model': self.ollama_default_model}
@@ -69,7 +69,7 @@ class ResolvedSettingsSnapshot:
 
 
 def read_stored_secret(row: AppSettings, field: str) -> str:
-    stored = str(getattr(row, field, '') or '')
+    stored = getattr(row, field)
     if not stored:
         return ''
     return decrypt_secret(stored)
@@ -90,7 +90,7 @@ def _get_resolved_snapshot() -> ResolvedSettingsSnapshot:
     return run_settings_db(_load_resolved_snapshot)
 
 
-def get_resolved_smtp() -> dict[str, object]:
+def get_resolved_smtp() -> SmtpSettings:
     return _get_resolved_snapshot().smtp_settings()
 
 

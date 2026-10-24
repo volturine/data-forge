@@ -1,17 +1,19 @@
-from datetime import UTC, datetime
+from datetime import datetime
 from typing import Annotated
 
 from pydantic import NaiveDatetime
 from sqlalchemy import UniqueConstraint
 from sqlmodel import Field, SQLModel
 
+from backend_core.time import naive_utc_now
+
 
 class RuntimeNamespace(SQLModel, table=True):  # type: ignore[call-arg]
     __tablename__ = 'runtime_namespaces'  # type: ignore[assignment]
 
     name: str = Field(primary_key=True)
-    created_at: Annotated[datetime, NaiveDatetime] = Field(default_factory=lambda: datetime.now(UTC).replace(tzinfo=None))
-    updated_at: Annotated[datetime, NaiveDatetime] = Field(default_factory=lambda: datetime.now(UTC).replace(tzinfo=None))
+    created_at: Annotated[datetime, NaiveDatetime] = Field(default_factory=naive_utc_now)
+    updated_at: Annotated[datetime, NaiveDatetime] = Field(default_factory=naive_utc_now)
 
 
 class NamespaceEngineCredential(SQLModel, table=True):  # type: ignore[call-arg]
@@ -23,4 +25,4 @@ class NamespaceEngineCredential(SQLModel, table=True):  # type: ignore[call-arg]
     role: str
     access_key: str = Field(unique=True)
     secret_key_encrypted: str
-    created_at: Annotated[datetime, NaiveDatetime] = Field(default_factory=lambda: datetime.now(UTC).replace(tzinfo=None))
+    created_at: Annotated[datetime, NaiveDatetime] = Field(default_factory=naive_utc_now)

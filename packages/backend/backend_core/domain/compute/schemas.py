@@ -1,4 +1,4 @@
-from datetime import UTC, datetime
+from datetime import datetime
 from typing import Annotated, ClassVar, Literal, Self
 
 from pydantic import (
@@ -18,6 +18,7 @@ from pydantic import (
 from backend_core.domain.analysis.step_types import STEP_TYPES
 from backend_core.domain.api_enums import ApiEnumValue
 from backend_core.domain.compute_worker_runs.schemas import ComputeWorkerRunKind
+from backend_core.time import aware_utc
 from dataforge_protocol import compute_pb2, enums_pb2
 
 
@@ -126,12 +127,8 @@ class AnalysisPipelineTab(BaseModel):
     @field_validator('steps')
     @classmethod
     def validate_steps(cls, value: list[dict]) -> list[dict]:
-        if not isinstance(value, list):
-            raise ValueError('Analysis pipeline tab steps must be a list')
         allowed_keys = {'id', 'type', 'config', 'depends_on', 'is_applied'}
         for index, step in enumerate(value):
-            if not isinstance(step, dict):
-                raise ValueError(f'Analysis pipeline step {index} must be a dict')
             unknown_keys = sorted(set(step) - allowed_keys)
             if unknown_keys:
                 raise ValueError(f'Analysis pipeline step {index} has unknown field(s): {", ".join(unknown_keys)}')
@@ -157,8 +154,6 @@ class AnalysisPipelineTab(BaseModel):
     @field_validator('output')
     @classmethod
     def validate_output(cls, value: dict) -> dict:
-        if not isinstance(value, dict):
-            raise ValueError('Analysis pipeline tab output must be a dict')
         output_id = value.get('result_id')
         if not isinstance(output_id, str) or not output_id.strip():
             raise ValueError('Analysis pipeline tab output.result_id is required')
@@ -180,7 +175,7 @@ class AnalysisPipelinePayload(BaseModel):
     @field_validator('tabs')
     @classmethod
     def validate_tabs(cls, value: list[AnalysisPipelineTab]) -> list[AnalysisPipelineTab]:
-        if not isinstance(value, list) or not value:
+        if not value:
             raise ValueError('analysis_pipeline.tabs must include at least one tab')
         return value
 
@@ -239,16 +234,16 @@ class SpawnComputeWorkerRequest(BaseModel):
     resource_config: ComputeWorkerResourceConfig | None = None
 
 
-def _required_compute_worker_identity_id(payload: dict[str, object], field_name: str) -> str:
+def required_compute_worker_identity_id(payload: dict[str, object], field_name: str) -> str:
     value = payload.get(field_name)
     if not isinstance(value, str) or not value.strip():
         raise ValueError(f'engine identity {field_name} is required')
     return value.strip()
 
 
-def _compute_worker_identity_resource_from_payload(payload: dict[str, object], field_name: str) -> str:
-    resource_id = _required_compute_worker_identity_id(payload, 'resource_id')
-    scoped_id = _required_compute_worker_identity_id(payload, field_name)
+def compute_worker_identity_resource_id(payload: dict[str, object], field_name: str) -> str:
+    resource_id = required_compute_worker_identity_id(payload, 'resource_id')
+    scoped_id = required_compute_worker_identity_id(payload, field_name)
     if resource_id != scoped_id:
         raise ValueError(f'engine identity resource_id must match {field_name}')
     return resource_id
@@ -260,24 +255,24 @@ def _compute_worker_identity_from_payload(value: object) -> compute_pb2.ComputeW
     if not isinstance(value, dict):
         raise ValueError('engine identity must be a protocol message or object payload')
     scope = value.get('scope')
-    if scope == 'analysis_interactive':
-        resource_id = _compute_worker_identity_resource_from_payload(value, 'analysis_id')
+    if scope == ComputeWorkerScope.ANALYSIS_INTERACTIVE:
+        resource_id = compute_worker_identity_resource_id(value, 'analysis_id')
         return compute_pb2.ComputeWorkerIdentity(
             scope=enums_pb2.COMPUTE_WORKER_SCOPE_ANALYSIS_INTERACTIVE,
             reuse_policy=enums_pb2.COMPUTE_WORKER_REUSE_POLICY_SHARED,
             analysis_id=resource_id,
             resource_id=resource_id,
         )
-    if scope == 'datasource_preview':
-        resource_id = _compute_worker_identity_resource_from_payload(value, 'datasource_id')
+    if scope == ComputeWorkerScope.DATASOURCE_PREVIEW:
+        resource_id = compute_worker_identity_resource_id(value, 'datasource_id')
         return compute_pb2.ComputeWorkerIdentity(
             scope=enums_pb2.COMPUTE_WORKER_SCOPE_DATASOURCE_PREVIEW,
             reuse_policy=enums_pb2.COMPUTE_WORKER_REUSE_POLICY_SHARED,
             datasource_id=resource_id,
             resource_id=resource_id,
         )
-    if scope == 'build':
-        resource_id = _compute_worker_identity_resource_from_payload(value, 'build_id')
+    if scope == ComputeWorkerScope.BUILD:
+        resource_id = compute_worker_identity_resource_id(value, 'build_id')
         return compute_pb2.ComputeWorkerIdentity(
             scope=enums_pb2.COMPUTE_WORKER_SCOPE_BUILD,
             reuse_policy=enums_pb2.COMPUTE_WORKER_REUSE_POLICY_EXCLUSIVE,
@@ -290,22 +285,22 @@ def _compute_worker_identity_from_payload(value: object) -> compute_pb2.ComputeW
 def _compute_worker_identity_to_payload(identity: compute_pb2.ComputeWorkerIdentity) -> dict[str, str]:
     if identity.scope == enums_pb2.COMPUTE_WORKER_SCOPE_ANALYSIS_INTERACTIVE and identity.HasField('analysis_id'):
         return {
-            'scope': 'analysis_interactive',
-            'reuse_policy': 'shared',
+            'scope': ComputeWorkerScope.ANALYSIS_INTERACTIVE.value,
+            'reuse_policy': ComputeWorkerReusePolicy.SHARED.value,
             'resource_id': identity.resource_id,
             'analysis_id': identity.analysis_id,
         }
     if identity.scope == enums_pb2.COMPUTE_WORKER_SCOPE_DATASOURCE_PREVIEW and identity.HasField('datasource_id'):
         return {
-            'scope': 'datasource_preview',
-            'reuse_policy': 'shared',
+            'scope': ComputeWorkerScope.DATASOURCE_PREVIEW.value,
+            'reuse_policy': ComputeWorkerReusePolicy.SHARED.value,
             'resource_id': identity.resource_id,
             'datasource_id': identity.datasource_id,
         }
     if identity.scope == enums_pb2.COMPUTE_WORKER_SCOPE_BUILD and identity.HasField('build_id'):
         return {
-            'scope': 'build',
-            'reuse_policy': 'exclusive',
+            'scope': ComputeWorkerScope.BUILD.value,
+            'reuse_policy': ComputeWorkerReusePolicy.EXCLUSIVE.value,
             'resource_id': identity.resource_id,
             'build_id': identity.build_id,
         }
@@ -568,19 +563,6 @@ class StepRowCountResponse(BaseModel):
     row_count: int
 
 
-class BuildStatus(ApiEnumValue):
-    SUCCESS: ClassVar[Self]
-    WARNING: ClassVar[Self]
-
-    @classmethod
-    def coerce(cls, value: object) -> BuildStatus:
-        return cls.read(value, default=cls.SUCCESS) or cls.SUCCESS
-
-
-BuildStatus.SUCCESS = BuildStatus(enums_pb2.BUILD_STATUS_SUCCESS)
-BuildStatus.WARNING = BuildStatus(enums_pb2.BUILD_STATUS_WARNING)
-
-
 class BuildTabStatus(ApiEnumValue):
     SUCCESS: ClassVar[Self]
     FAILED: ClassVar[Self]
@@ -588,15 +570,6 @@ class BuildTabStatus(ApiEnumValue):
 
 BuildTabStatus.SUCCESS = BuildTabStatus(enums_pb2.BUILD_TAB_STATUS_SUCCESS)
 BuildTabStatus.FAILED = BuildTabStatus(enums_pb2.BUILD_TAB_STATUS_FAILED)
-
-
-class ComputeRunStatus(ApiEnumValue):
-    SUCCESS: ClassVar[Self]
-    FAILED: ClassVar[Self]
-
-
-ComputeRunStatus.SUCCESS = ComputeRunStatus(enums_pb2.COMPUTE_RUN_STATUS_SUCCESS)
-ComputeRunStatus.FAILED = ComputeRunStatus(enums_pb2.COMPUTE_RUN_STATUS_FAILED)
 
 
 class BuildTabResult(BaseModel):
@@ -631,10 +604,6 @@ class BuildLifecycleStatus(ApiEnumValue):
     def is_terminal(self) -> bool:
         return self in {BuildLifecycleStatus.COMPLETED, BuildLifecycleStatus.FAILED, BuildLifecycleStatus.CANCELLED}
 
-    @classmethod
-    def coerce(cls, value: object) -> BuildLifecycleStatus:
-        return cls.read(value, default=cls.QUEUED) or cls.QUEUED
-
 
 BuildLifecycleStatus.QUEUED = BuildLifecycleStatus(enums_pb2.BUILD_LIFECYCLE_STATUS_QUEUED)
 BuildLifecycleStatus.RUNNING = BuildLifecycleStatus(enums_pb2.BUILD_LIFECYCLE_STATUS_RUNNING)
@@ -662,10 +631,6 @@ class BuildLogLevel(ApiEnumValue):
     INFO: ClassVar[Self]
     WARNING: ClassVar[Self]
     ERROR: ClassVar[Self]
-
-    @classmethod
-    def coerce(cls, value: object) -> BuildLogLevel:
-        return cls.read(value, default=cls.INFO) or cls.INFO
 
 
 BuildLogLevel.INFO = BuildLogLevel(enums_pb2.BUILD_LOG_LEVEL_INFO)
@@ -793,7 +758,7 @@ class BuildRunDetail(BuildRunSummary):
     request_json: dict[str, object] | None = None
 
     def cancel_duration_ms(self, *, cancelled_at: datetime) -> int:
-        started_at = self.started_at if self.started_at.tzinfo is not None else self.started_at.replace(tzinfo=UTC)
+        started_at = aware_utc(self.started_at)
         elapsed_from_start = max(int((cancelled_at - started_at).total_seconds() * 1000), 0)
         return max(self.elapsed_ms, elapsed_from_start)
 
@@ -935,35 +900,27 @@ class BuildLogEvent(BuildStreamEvent):
     step_id: str | None = None
 
 
-class BuildCompleteEvent(BuildStreamEvent):
-    type: Literal['complete'] = 'complete'
-    progress: float = 1.0
-    elapsed_ms: int
-    total_steps: int
-    tabs_built: int
-    results: list[BuildTabResult]
-    duration_ms: int
-
-
-class BuildFailedEvent(BuildStreamEvent):
-    type: Literal['failed'] = 'failed'
+class BuildTerminalEvent(BuildStreamEvent):
     progress: float
     elapsed_ms: int
     total_steps: int
     tabs_built: int
     results: list[BuildTabResult]
     duration_ms: int
+
+
+class BuildCompleteEvent(BuildTerminalEvent):
+    type: Literal['complete'] = 'complete'
+    progress: float = 1.0
+
+
+class BuildFailedEvent(BuildTerminalEvent):
+    type: Literal['failed'] = 'failed'
     error: str | None = None
 
 
-class BuildCancelledEvent(BuildStreamEvent):
+class BuildCancelledEvent(BuildTerminalEvent):
     type: Literal['cancelled'] = 'cancelled'
-    progress: float
-    elapsed_ms: int
-    total_steps: int
-    tabs_built: int
-    results: list[BuildTabResult]
-    duration_ms: int
     cancelled_at: datetime
     cancelled_by: str | None = None
 

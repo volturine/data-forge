@@ -44,35 +44,22 @@ class BuildRun(SQLModel, table=True):  # type: ignore[call-arg, assignment]
     def apply_terminal_event(self, event: compute_schemas.BuildEvent) -> bool:
         if self.status_kind().is_terminal:
             return False
-        if isinstance(event, compute_schemas.BuildCompleteEvent):
-            self.status = BuildRunStatus.COMPLETED
-            self.progress = event.progress
-            self.elapsed_ms = event.elapsed_ms
-            self.total_steps = event.total_steps
-            self.duration_ms = event.duration_ms
-            self.error_message = None
-            self.completed_at = event.emitted_at
+        terminal_status = BuildRun.terminal_status_for_event(event)
+        if terminal_status is None or not isinstance(event, compute_schemas.BuildTerminalEvent):
             return True
+        self.status = terminal_status
+        self.progress = event.progress
+        self.elapsed_ms = event.elapsed_ms
+        self.total_steps = event.total_steps
+        self.duration_ms = event.duration_ms
+        self.completed_at = event.emitted_at
+        self.error_message = None
         if isinstance(event, compute_schemas.BuildFailedEvent):
-            self.status = BuildRunStatus.FAILED
-            self.progress = event.progress
-            self.elapsed_ms = event.elapsed_ms
-            self.total_steps = event.total_steps
-            self.duration_ms = event.duration_ms
             self.error_message = event.error
-            self.completed_at = event.emitted_at
-            return True
         if isinstance(event, compute_schemas.BuildCancelledEvent):
-            self.status = BuildRunStatus.CANCELLED
-            self.progress = event.progress
-            self.elapsed_ms = event.elapsed_ms
-            self.total_steps = event.total_steps
-            self.duration_ms = event.duration_ms
             self.error_message = 'Build cancelled'
             self.cancelled_at = event.cancelled_at
             self.cancelled_by = event.cancelled_by
-            self.completed_at = event.emitted_at
-            return True
         return True
 
     def status_kind(self) -> BuildRunStatus:

@@ -164,10 +164,10 @@ async def test_bounded_executor_keeps_started_cancelled_work_admitted_until_sett
 
 
 def test_api_admission_overflow_maps_to_retryable_http_503() -> None:
-    from starlette.requests import Request
+    from fastapi import FastAPI
 
-    from backend_core.application import api_work_admission_full_handler, app
     from backend_core.error_handlers import handle_errors
+    from tests.http_client import TestClient
 
     @handle_errors(operation='test bounded API work')
     async def route():
@@ -176,14 +176,17 @@ def test_api_admission_overflow_maps_to_retryable_http_503() -> None:
     with pytest.raises(ApiWorkAdmissionFull):
         asyncio.run(route())
 
-    request = Request({'type': 'http', 'method': 'GET', 'path': '/', 'headers': []})
-    capacity_error = ApiWorkAdmissionFull()
-    response = asyncio.run(api_work_admission_full_handler(request, capacity_error))
+    probe = FastAPI()
 
-    assert app.exception_handlers[ApiWorkAdmissionFull] is api_work_admission_full_handler
+    @probe.get('/')
+    async def overflow() -> None:
+        await route()
+
+    response = TestClient(probe).get('/')
+
     assert response.status_code == 503
     assert response.headers['retry-after'] == '1'
-    assert response.body == b'{"detail":"API execution capacity is full"}'
+    assert response.content == b'{"detail":"API execution capacity is full"}'
 
 
 def test_api_blocking_work_queue_is_independent_of_socket_limit(monkeypatch) -> None:
