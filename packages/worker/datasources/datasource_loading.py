@@ -9,7 +9,6 @@ from typing import Any, Literal
 
 import polars as pl
 import psycopg
-from openpyxl import load_workbook
 
 from runtime.config import settings
 from runtime.domain.datasource.source_types import DataSourceFileType, DataSourceLoadType, IcebergReader
@@ -84,6 +83,8 @@ def has_excel_bounds(config: dict[str, Any]) -> bool:
 
 
 def _read_excel_bounds(config: dict[str, Any]) -> pl.LazyFrame:
+    from openpyxl import load_workbook
+
     file_path = config.get("file_path")
     sheet_name = config.get("sheet_name")
     start_row = _as_int(config.get("start_row"))

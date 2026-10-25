@@ -15,7 +15,6 @@ from importlib import import_module
 from pathlib import Path
 
 import grpc
-import requests
 
 from dataforge_protocol import compute_worker_runtime_pb2, compute_worker_runtime_pb2_grpc
 from runtime.config import settings
@@ -339,6 +338,8 @@ def _execute_job(
             raise ValueError("row_limit and offset must be integers")
         result_data = polars_compute.execute_preview(datasource_config, steps, row_limit, offset, job_id, additional_datasources, progress_callback)
     elif kind == "export":
+        import requests
+
         artifact_url = payload.get("artifact_url")
         artifact_upload_url = payload.get("artifact_upload_url")
         export_format = payload.get("export_format", "csv")
