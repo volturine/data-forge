@@ -1,5 +1,5 @@
 import { test as baseTest, expect } from './fixtures.js';
-import type { Page } from '@playwright/test';
+import type { Page, Route } from '@playwright/test';
 import { nameForAnalysisId } from './utils/api.js';
 import { addStepAndOpenConfig, gotoAnalysisEditor } from './utils/analysis.js';
 import { dialogByHeading } from './utils/locators.js';
@@ -67,15 +67,57 @@ test.describe('UDF library in analysis', () => {
 	}) => {
 		const udf = `e2e_library_${uid()}`;
 		const cloneName = `${udf} (copy)`;
+		const editorChunkPattern = '**/_app/immutable/chunks/*.js';
+		const scriptUrls: string[] = [];
+		let abortedEditorEntries = 0;
+		const editorDownload = Promise.withResolvers<void>();
+		let editorChunkRouteInstalled = false;
+		const editorChunkRoute = async (route: Route) => {
+			scriptUrls.push(route.request().url());
+			const response = await route.fetch();
+			if (abortedEditorEntries < 2 && (await response.text()).includes('udf-save-button')) {
+				if (abortedEditorEntries === 0) await editorDownload.promise;
+				abortedEditorEntries += 1;
+				await route.abort('failed');
+				return;
+			}
+			await route.fulfill({ response });
+		};
 		try {
 			await expect(page).toHaveURL(`/analysis/${udfAnalysis.id}`);
 
 			await test.step('lists seeded UDFs and filters created metadata by name', async () => {
+				await page.route(editorChunkPattern, editorChunkRoute);
+				editorChunkRouteInstalled = true;
+				const libraryRequestStart = scriptUrls.length;
 				await gotoUdfLibrary(page);
 				const library = dialogByHeading(page, 'UDF Library');
 				await expect(library.locator('[data-udf-card="Ratio"]')).toBeVisible();
 				await expect(library.locator('[data-udf-card="Coalesce"]')).toBeVisible();
 				await expect(library.locator('[data-udf-card="Normalize"]')).toBeVisible();
+				expect(scriptUrls.slice(libraryRequestStart)).toEqual([]);
+
+				await library.getByRole('button', { name: 'New UDF', exact: true }).click();
+				await expect(
+					page.getByRole('status').filter({ hasText: 'Loading UDF editor' })
+				).toBeVisible();
+				const backToLibrary = page.getByRole('button', {
+					name: 'Back to UDF library',
+					exact: true
+				});
+				await expect(backToLibrary).toBeVisible();
+				editorDownload.resolve();
+				await expect(page.getByRole('alert')).toContainText('Could not load the UDF editor');
+				await backToLibrary.click();
+				await expect(library).toBeVisible();
+				await library.getByRole('button', { name: 'New UDF', exact: true }).click();
+				await expect(page.getByRole('alert')).toContainText('Could not load the UDF editor');
+				await expect(page.getByRole('button', { name: 'Retry', exact: true })).toBeVisible();
+				expect(abortedEditorEntries).toBe(2);
+				await page.unroute(editorChunkPattern, editorChunkRoute);
+				editorChunkRouteInstalled = false;
+				await page.getByRole('button', { name: 'Retry', exact: true }).click();
+				await expect(page.locator('#udf-name')).toBeVisible();
 
 				await createUdfViaEditor(page, {
 					name: udf,
@@ -117,8 +159,13 @@ test.describe('UDF library in analysis', () => {
 				await expect(card).toHaveCount(0, { timeout: readyTimeoutMs() });
 			});
 		} finally {
-			await deleteUdfViaUI(page, cloneName);
-			await deleteUdfViaUI(page, udf);
+			editorDownload.resolve();
+			try {
+				if (editorChunkRouteInstalled) await page.unroute(editorChunkPattern, editorChunkRoute);
+			} finally {
+				await deleteUdfViaUI(page, cloneName);
+				await deleteUdfViaUI(page, udf);
+			}
 		}
 	});
 
