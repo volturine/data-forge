@@ -453,7 +453,7 @@ test-e2e-capacity-raw: _test-container-guard
     fi
     scripts/test_e2e.sh capacity
 
-test-e2e-concurrency browsers='50':
+test-e2e-concurrency browsers='50' repeats='1':
     #!/usr/bin/env bash
     set -euo pipefail
     browsers={{quote(browsers)}}
@@ -462,8 +462,15 @@ test-e2e-concurrency browsers='50':
         echo "Expected a positive browser count, got: $browsers" >&2
         exit 2
     fi
+    repeats={{quote(repeats)}}
+    repeats="${repeats#repeats=}"
+    if [[ ! "$repeats" =~ ^[1-9][0-9]*$ ]]; then
+        echo "Expected a positive repeat count, got: $repeats" >&2
+        exit 2
+    fi
     DATAFORGE_SKIP_PROTOCOL_GENERATE=1 E2E_SHARDS=1 PW_E2E_WORKERS=1 \
-        E2E_CONCURRENCY_BROWSERS="$browsers" PLAYWRIGHT_TEST_FILES=tests/concurrency.test.ts \
+        E2E_CONCURRENCY_BROWSERS="$browsers" E2E_CONCURRENCY_REPEATS="$repeats" \
+        PLAYWRIGHT_TEST_FILES=tests/concurrency.test.ts \
         TEST_TARGET=test-e2e scripts/test_container.sh
 
 # Containerized dev stack (source mounts + Vite). Uses the same host ports as
