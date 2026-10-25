@@ -69,6 +69,7 @@ class _ShutdownContainer:
         self.status = "running"
         self.attrs = {"State": {"ExitCode": 0, "OOMKilled": False}}
         self.wait_calls: list[tuple[float, str]] = []
+        self.stop_calls: list[int] = []
         self._wait = wait
         self._remove_fails = remove_fails
 
@@ -83,8 +84,9 @@ class _ShutdownContainer:
     def reload(self) -> None:
         self.actions.append("reload")
 
-    def stop(self, *, timeout: float) -> None:
+    def stop(self, *, timeout: int) -> None:
         self.actions.append("stop")
+        self.stop_calls.append(timeout)
         self.status = "exited"
 
     def remove(self, *, force: bool) -> None:
@@ -94,11 +96,14 @@ class _ShutdownContainer:
 
 
 class _ShutdownStub:
-    def __init__(self, actions: list[str]) -> None:
+    def __init__(self, actions: list[str], *, shutdown: Callable[[], None] | None = None) -> None:
         self.actions = actions
+        self._shutdown = shutdown
 
     def Shutdown(self, *_args, **_kwargs) -> None:  # noqa: N802 - generated gRPC method
         self.actions.append("shutdown")
+        if self._shutdown is not None:
+            self._shutdown()
 
 
 class _ShutdownHandle:
@@ -521,6 +526,42 @@ def test_shutdown_waits_for_container_exit_event_before_removal(monkeypatch, rem
         assert actions == ["shutdown", "wait", "reload", "remove", "close", "close"]
     else:
         assert actions == ["shutdown", "wait", "reload", "remove", "release-placement", "close", "close", "delete-artifact"]
+
+
+def test_shutdown_uses_one_cooperative_grace_budget(monkeypatch) -> None:
+    grace_seconds = 3
+    scenarios = (
+        (1.0, grace_seconds - 1.0, grace_seconds - 1.0, 0),
+        (grace_seconds, 0.0, None, 0),
+        (0.75, 0.5, grace_seconds - 0.75, 2),
+    )
+
+    def check_budget(rpc_elapsed: float, wait_elapsed: float, expected_wait: float | None, expected_stop: int) -> None:
+        actions: list[str] = []
+        now = 0.0
+
+        def advance_rpc(amount: float = rpc_elapsed) -> None:
+            nonlocal now
+            now += amount
+
+        def advance_wait(amount: float = wait_elapsed) -> None:
+            nonlocal now
+            now += amount
+
+        monkeypatch.setattr("runtime.docker_compute_worker.time.monotonic", lambda: now)
+        container = _ShutdownContainer(actions, wait=advance_wait)
+        engine = _shutdown_worker(monkeypatch, container, actions, grace_seconds=grace_seconds)
+        engine._stub = _ShutdownStub(actions, shutdown=advance_rpc)  # type: ignore[assignment]
+
+        engine.shutdown()
+
+        expected_wait_calls = [] if expected_wait is None else [(expected_wait, "not-running")]
+        assert container.wait_calls == expected_wait_calls
+        assert container.stop_calls == [expected_stop]
+        assert actions.index("remove") < actions.index("release-placement")
+
+    for scenario in scenarios:
+        check_budget(*scenario)
 
 
 @pytest.mark.parametrize("wait_seconds", [0.4, 1.25])

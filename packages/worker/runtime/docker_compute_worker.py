@@ -3,6 +3,7 @@ from __future__ import annotations
 import contextlib
 import json
 import logging
+import math
 import os
 import re
 import threading
@@ -1306,21 +1307,24 @@ class DockerComputeWorker(ComputeWorker):
             if not self._coordinator_can_mutate("compute worker-shutdown-rpc"):
                 self._detach_local_handles()
                 return
+            shutdown_deadline = time.monotonic() + settings.compute_worker_shutdown_grace_seconds
             if stub is not None:
                 with contextlib.suppress(Exception):
                     stub.Shutdown(
                         compute_worker_runtime_pb2.ComputeWorkerShutdownRequest(),
-                        timeout=settings.compute_worker_shutdown_grace_seconds,
+                        timeout=max(0.0, shutdown_deadline - time.monotonic()),
                         metadata=self._metadata(),
                     )
-            _wait_until_not_running(container, deadline=time.monotonic() + settings.compute_worker_shutdown_grace_seconds)
+            _wait_until_not_running(container, deadline=shutdown_deadline)
             with contextlib.suppress(Exception):
                 container.reload()
                 if container.status == "running":
                     if not self._coordinator_can_mutate("compute worker-container-stop"):
                         self._detach_local_handles()
                         return
-                    container.stop(timeout=settings.compute_worker_shutdown_grace_seconds)
+                    remaining_grace = max(0.0, shutdown_deadline - time.monotonic())
+                    stop_timeout = math.ceil(remaining_grace) if remaining_grace > 0 else 0
+                    container.stop(timeout=stop_timeout)
                     container.reload()
                 self._capture_termination(container)
             if not self._coordinator_can_mutate("compute worker-container-remove"):
