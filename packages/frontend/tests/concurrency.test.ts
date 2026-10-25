@@ -793,10 +793,18 @@ test.describe('Concurrent authenticated browser sessions', () => {
 						if (!response.ok()) return { index, status: response.status() };
 						const lock = (await response.json()) as { owner_id?: unknown } | null;
 						const lockOwnerId = typeof lock?.owner_id === 'string' ? lock.owner_id : null;
+						const expectedUserId = accountUserIds[index] ?? null;
 						return {
 							index,
-							lockOwnerAccountIndex: lockOwnerId ? accountUserIds.indexOf(lockOwnerId) : -1,
-							lockOwnedByExpectedAccount: lockOwnerId === accountUserIds[index]
+							lockOwnerAccountIndex: lockOwnerId
+								? accountUserIds.findIndex(
+										(userId) => userId !== null && lockOwnerId.startsWith(`${userId}:`)
+									)
+								: -1,
+							lockOwnedByExpectedAccount:
+								lockOwnerId !== null &&
+								expectedUserId !== null &&
+								lockOwnerId.startsWith(`${expectedUserId}:`)
 						};
 					} catch (error) {
 						return { index, error: String(error) };
