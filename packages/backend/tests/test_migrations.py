@@ -6,6 +6,8 @@ from typing import Any
 import pytest
 from psycopg.types.json import Jsonb
 from sqlalchemy import create_engine, inspect, text
+from sqlalchemy.dialects import postgresql
+from sqlalchemy.schema import CreateIndex
 from sqlmodel import SQLModel
 
 from backend_core import migrations, public_schema
@@ -20,6 +22,37 @@ def test_runtime_schema_has_one_shared_migration_head() -> None:
     assert sorted(path.name for path in versions_dir.glob('*.py')) == ['0001_runtime_schema.py', '0002_view_cache_enabled.py']
     assert _BASELINE_REVISION == 'runtime_schema_baseline'
     assert _SCHEMA_REVISION == 'view_cache_enabled'
+
+
+@pytest.mark.parametrize(
+    'schema',
+    [
+        'e2e-compute-worker-reload-bb3c31ed-a5b6-439a-bcbb-247357480621',
+        'a' + ('x' * 61) + 'z',
+    ],
+)
+def test_tenant_index_names_are_unique_for_long_schemas(schema: str) -> None:
+    migration_path = Path(__file__).parents[1] / 'database' / 'alembic' / 'versions' / '0001_runtime_schema.py'
+    scope_tables = runpy.run_path(str(migration_path))['_scope_tables']
+    _metadata, tables = scope_tables('tenant', schema)
+    dialect = postgresql.dialect()
+
+    compiled_indexes = [(table, index, str(CreateIndex(index).compile(dialect=dialect))) for table in tables for index in table.indexes]
+    identifiers = [statement.split(' ON ', 1)[0].rsplit(' ', 1)[-1].strip('"') for _table, _index, statement in compiled_indexes]
+
+    assert identifiers
+    assert len(identifiers) == len(set(identifiers))
+    assert all(len(identifier.encode('utf-8')) <= 63 for identifier in identifiers)
+
+    lock_token_index = next(
+        index
+        for table, index, _statement in compiled_indexes
+        if table.name == 'resource_locks' and tuple(column.name for column in index.columns) == ('lock_token',)
+    )
+    lock_token_statement = str(CreateIndex(lock_token_index).compile(dialect=dialect))
+    assert lock_token_index.unique
+    assert lock_token_statement.startswith('CREATE UNIQUE INDEX ')
+    assert 'ix_build_runs_datasource_completion' in identifiers
 
 
 def test_pivot_values_migration_rewrites_only_legacy_pivot_configs() -> None:

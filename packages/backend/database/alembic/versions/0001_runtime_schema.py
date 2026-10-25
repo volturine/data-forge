@@ -283,7 +283,8 @@ def _scope_tables(scope: str, schema: str) -> tuple[sa.MetaData, list[sa.Table]]
     from backend_core.database import _shared_tables, _tenant_tables
 
     source_tables = _shared_tables() if scope == 'public' else _tenant_tables()
-    metadata = sa.MetaData()
+    # Index names are already scoped by schema; excluding it avoids truncation collisions for long tenant names.
+    metadata = sa.MetaData(naming_convention={'ix': 'ix_%(table_name)s_%(column_0_name)s'})
     return metadata, [table.to_metadata(metadata, schema=schema) for table in source_tables]
 
 
