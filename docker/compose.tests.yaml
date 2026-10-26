@@ -6,7 +6,7 @@ services:
       - workspace:/app
 
   docker:
-    image: docker:29.9.0-dind
+    image: docker:29.9.2-dind
     privileged: true
     cgroup: private
     # Keep inner Docker bridges outside the outer Compose network; the runner
