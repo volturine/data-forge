@@ -1,13 +1,13 @@
-import hashlib
 import logging
 import uuid
 from dataclasses import dataclass, field
 from datetime import UTC, datetime
-from typing import Any, Final
+from typing import Any, TypedDict, Unpack
 
-from sqlalchemy import desc, or_, select, text
+from sqlalchemy import desc, or_, select
 from sqlmodel import Session
 
+from backend_core.claiming import advisory_xact_lock
 from backend_core.domain.compute import schemas as compute_schemas
 from backend_core.domain.compute.schemas import BuildLogLevel, BuildStepState
 from backend_core.domain.compute_worker_runs.schemas import (
@@ -26,12 +26,13 @@ from backend_core.domain.compute_worker_runs.schemas import (
     TimingDiff,
 )
 from backend_core.exceptions import ComputeWorkerRunComparisonError, compute_worker_run_not_found
-from backend_core.json_utils import copy_json_dict
+from backend_core.json_utils import copy_json_object
 from backend_core.namespace import get_namespace
 from backend_core.persistence.analysis.models import Analysis
 from backend_core.persistence.compute_worker_runs.models import ComputeWorkerRun
 from backend_core.persistence.datasource.models import DataSource
 from backend_core.sqlmodel_typing import col, sa
+from backend_core.time import aware_utc
 from backend_core.transactions import committed
 
 logger = logging.getLogger(__name__)
@@ -57,13 +58,6 @@ class ComputeWorkerRunPayload:
     execution_entries: list[dict[str, Any]] = field(default_factory=list)
     id: str = field(default_factory=lambda: str(uuid.uuid4()))
     idempotency_key: str | None = None
-
-
-class _UnsetType:
-    __slots__ = ()
-
-
-_UNSET: Final = _UnsetType()
 
 
 def normalize_step_timings(values: dict | None) -> dict[str, float]:
@@ -108,7 +102,7 @@ def stage_cancel_compute_worker_run(session: Session, run_id: str, *, cancelled_
 
     now = datetime.now(UTC)
     reason = f'Cancelled by {cancelled_by}' if cancelled_by else 'Cancelled'
-    existing = copy_json_dict(run.result_json) if isinstance(run.result_json, dict) else {}
+    existing = copy_json_object(run.result_json) or {}
     existing.pop('data', None)
     existing.pop('schema', None)
     existing['results'] = []
@@ -132,7 +126,7 @@ def stage_cancel_compute_worker_run(session: Session, run_id: str, *, cancelled_
     )
     existing['logs'] = logs
 
-    created_at = run.created_at if run.created_at.tzinfo is not None else run.created_at.replace(tzinfo=UTC)
+    created_at = aware_utc(run.created_at)
     duration_ms = max(int((now - created_at).total_seconds() * 1000), 0)
     stage_update_compute_worker_run(
         session,
@@ -175,14 +169,8 @@ def get_compute_worker_run(session: Session, run_id: str) -> ComputeWorkerRunRes
 
 
 def stage_create_compute_worker_run(session: Session, payload: ComputeWorkerRunPayload) -> ComputeWorkerRunResponseSchema:
-    if payload.idempotency_key is not None and getattr(session.get_bind().dialect, 'name', None) == 'postgresql':
-        lock_key = int.from_bytes(
-            hashlib.sha256(f'dataforge:compute-worker-run:{get_namespace()}:{payload.idempotency_key}'.encode()).digest()[:8],
-            byteorder='big',
-            signed=True,
-        )
-        session.execute(text('SELECT pg_advisory_xact_lock(:key)'), {'key': lock_key})
     if payload.idempotency_key is not None:
+        advisory_xact_lock(session, f'dataforge:compute-worker-run:{get_namespace()}:{payload.idempotency_key}')
         existing = session.get(ComputeWorkerRun, payload.id)
         if existing is not None:
             same_request = (
@@ -228,27 +216,31 @@ def stage_create_compute_worker_run(session: Session, payload: ComputeWorkerRunP
 create_compute_worker_run = committed(stage_create_compute_worker_run)
 
 
+class ComputeWorkerRunChanges(TypedDict, total=False):
+    analysis_id: str | None
+    datasource_id: str
+    kind: ComputeWorkerRunKind | str
+    status: ComputeWorkerRunStatus | str
+    request_json: dict[str, Any]
+    result_json: dict[str, Any] | None
+    error_message: str | None
+    completed_at: datetime | None
+    duration_ms: int | None
+    step_timings: dict[str, float] | None
+    query_plan: str | None
+    execution_entries: list[dict[str, Any]] | None
+    progress: float
+    current_step: str | None
+    triggered_by: str | None
+
+
 def stage_update_compute_worker_run(
     session: Session,
     run_id: str,
     *,
-    analysis_id: str | None | _UnsetType = _UNSET,
-    datasource_id: str | _UnsetType = _UNSET,
-    kind: ComputeWorkerRunKind | str | _UnsetType = _UNSET,
-    status: ComputeWorkerRunStatus | str | _UnsetType = _UNSET,
-    request_json: dict[str, Any] | _UnsetType = _UNSET,
-    result_json: dict[str, Any] | None | _UnsetType = _UNSET,
     merge_result_json: bool = True,
-    error_message: str | None | _UnsetType = _UNSET,
-    completed_at: datetime | None | _UnsetType = _UNSET,
-    duration_ms: int | None | _UnsetType = _UNSET,
-    step_timings: dict[str, float] | None | _UnsetType = _UNSET,
-    query_plan: str | None | _UnsetType = _UNSET,
-    execution_entries: list[dict[str, Any]] | None | _UnsetType = _UNSET,
-    progress: float | _UnsetType = _UNSET,
-    current_step: str | None | _UnsetType = _UNSET,
-    triggered_by: str | None | _UnsetType = _UNSET,
     serialize_response: bool = True,
+    **changes: Unpack[ComputeWorkerRunChanges],
 ) -> ComputeWorkerRunResponseSchema | bool:
     table = ComputeWorkerRun.metadata.tables[ComputeWorkerRun.__tablename__]
     run = session.execute(select(ComputeWorkerRun).where(table.c.id == run_id).where(table.c.namespace == get_namespace()).with_for_update()).scalars().first()
@@ -257,7 +249,7 @@ def stage_update_compute_worker_run(
 
     current_status = run.status_kind()
     if current_status.is_terminal:
-        requested_status = None if isinstance(status, _UnsetType) else ComputeWorkerRunStatus.require(status)
+        requested_status = ComputeWorkerRunStatus.require(changes['status']) if 'status' in changes else None
         rejected = requested_status is not None and requested_status != current_status
         if rejected:
             logger.warning('Rejected terminal status transition from %s to %s for run %s', current_status, requested_status, run_id)
@@ -267,37 +259,40 @@ def stage_update_compute_worker_run(
         serialized.applied = not rejected
         return serialized
 
-    if not isinstance(analysis_id, _UnsetType):
-        run.analysis_id = analysis_id
-    if not isinstance(datasource_id, _UnsetType):
-        run.datasource_id = datasource_id
-    if not isinstance(kind, _UnsetType):
-        run.kind = ComputeWorkerRunKind.require(kind).value
-    if not isinstance(status, _UnsetType):
-        run.status = ComputeWorkerRunStatus.require(status).value
-    if not isinstance(request_json, _UnsetType):
-        run.request_json = request_json
-    if not isinstance(result_json, _UnsetType):
-        base = copy_json_dict(run.result_json) if merge_result_json and isinstance(run.result_json, dict) else {}
+    # Order matters: result_json is merged before execution_entries rewrites it.
+    if 'analysis_id' in changes:
+        run.analysis_id = changes['analysis_id']
+    if 'datasource_id' in changes:
+        run.datasource_id = changes['datasource_id']
+    if 'kind' in changes:
+        run.kind = ComputeWorkerRunKind.require(changes['kind']).value
+    if 'status' in changes:
+        run.status = ComputeWorkerRunStatus.require(changes['status']).value
+    if 'request_json' in changes:
+        run.request_json = changes['request_json']
+    if 'result_json' in changes:
+        result_json = changes['result_json']
+        base = (copy_json_object(run.result_json) or {}) if merge_result_json else {}
         run.result_json = None if result_json is None else {**base, **result_json}
-    if not isinstance(error_message, _UnsetType):
-        run.error_message = error_message
-    if not isinstance(completed_at, _UnsetType):
-        run.completed_at = completed_at
-    if not isinstance(duration_ms, _UnsetType):
-        run.duration_ms = duration_ms
-    if not isinstance(step_timings, _UnsetType):
-        run.step_timings = normalize_step_timings(step_timings)
-    if not isinstance(query_plan, _UnsetType):
-        run.query_plan = query_plan
-    if not isinstance(progress, _UnsetType):
-        run.progress = float(progress)
-    if not isinstance(current_step, _UnsetType):
-        run.current_step = current_step
-    if not isinstance(triggered_by, _UnsetType):
-        run.triggered_by = triggered_by
-    if not isinstance(execution_entries, _UnsetType):
-        next_result_json = copy_json_dict(run.result_json) if isinstance(run.result_json, dict) else {}
+    if 'error_message' in changes:
+        run.error_message = changes['error_message']
+    if 'completed_at' in changes:
+        run.completed_at = changes['completed_at']
+    if 'duration_ms' in changes:
+        run.duration_ms = changes['duration_ms']
+    if 'step_timings' in changes:
+        run.step_timings = normalize_step_timings(changes['step_timings'])
+    if 'query_plan' in changes:
+        run.query_plan = changes['query_plan']
+    if 'progress' in changes:
+        run.progress = float(changes['progress'])
+    if 'current_step' in changes:
+        run.current_step = changes['current_step']
+    if 'triggered_by' in changes:
+        run.triggered_by = changes['triggered_by']
+    if 'execution_entries' in changes:
+        execution_entries = changes['execution_entries']
+        next_result_json = copy_json_object(run.result_json) or {}
         if execution_entries is None:
             next_result_json.pop('execution_entries', None)
         else:

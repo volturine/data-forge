@@ -1,11 +1,13 @@
 import { apiRequest } from './client';
 import type { ApiError } from './client';
 import type { ResultAsync } from 'neverthrow';
+import type { ComputeWorkerRunExecutionCategory } from '#lib/types/protocol-enum-tokens.js';
+import { withQuery } from './query';
 
 export interface ComputeWorkerRunExecutionEntry {
 	key: string;
 	label: string;
-	category: 'read' | 'step' | 'plan' | 'compute' | 'write';
+	category: ComputeWorkerRunExecutionCategory;
 	order: number;
 	duration_ms: number | null;
 	share_pct: number | null;
@@ -71,11 +73,12 @@ export interface DurationStatsParams {
 export function getDurationStats(
 	params?: DurationStatsParams
 ): ResultAsync<DurationStatsResponse, ApiError> {
-	const query = new URLSearchParams();
-	if (params?.analysis_id) query.set('analysis_id', params.analysis_id);
-	if (params?.datasource_id) query.set('datasource_id', params.datasource_id);
-	if (params?.kind) query.set('kind', params.kind);
-	if (params?.limit !== undefined) query.set('limit', String(params.limit));
-	const qs = query.toString();
-	return apiRequest<DurationStatsResponse>(`/v1/compute-worker-runs/stats${qs ? `?${qs}` : ''}`);
+	return apiRequest<DurationStatsResponse>(
+		withQuery('/v1/compute-worker-runs/stats', {
+			analysis_id: params?.analysis_id,
+			datasource_id: params?.datasource_id,
+			kind: params?.kind,
+			limit: params?.limit
+		})
+	);
 }

@@ -105,12 +105,10 @@ describe('AuthStore', () => {
 	});
 
 	describe('initial state', () => {
-		test('is unresolved with no user and not loading', () => {
+		test('is unresolved with no user', () => {
 			expect(store.user).toBeNull();
 			expect(store.status).toBe('unknown');
 			expect(store.authenticated).toBe(false);
-			expect(store.resolved).toBe(false);
-			expect(store.loading).toBe(false);
 		});
 	});
 
@@ -124,8 +122,6 @@ describe('AuthStore', () => {
 			expect(store.status).toBe('authenticated');
 			expect(store.user).toEqual(user);
 			expect(store.authenticated).toBe(true);
-			expect(store.resolved).toBe(true);
-			expect(store.loading).toBe(false);
 		});
 
 		test('401 sets unauthenticated', async () => {
@@ -136,7 +132,6 @@ describe('AuthStore', () => {
 			expect(store.status).toBe('unauthenticated');
 			expect(store.user).toBeNull();
 			expect(store.authenticated).toBe(false);
-			expect(store.resolved).toBe(true);
 			expect(store.bootstrapFailed).toBe(false);
 		});
 
@@ -147,7 +142,6 @@ describe('AuthStore', () => {
 
 			expect(store.status).toBe('failed');
 			expect(store.user).toBeNull();
-			expect(store.resolved).toBe(true);
 			expect(store.bootstrapFailed).toBe(true);
 			expect(store.error).toBe('Network error');
 		});
@@ -182,7 +176,6 @@ describe('AuthStore', () => {
 			expect(store.status).toBe('authenticated');
 			expect(store.user).toEqual(user);
 			expect(store.error).toBeNull();
-			expect(store.loading).toBe(false);
 			expect(mockGetMe).toHaveBeenCalledTimes(2);
 		});
 
@@ -205,7 +198,6 @@ describe('AuthStore', () => {
 			await Promise.all([firstRetry, secondRetry]);
 
 			expect(store.authenticated).toBe(true);
-			expect(store.loading).toBe(false);
 			expect(mockGetMe).toHaveBeenCalledTimes(2);
 		});
 
@@ -230,7 +222,6 @@ describe('AuthStore', () => {
 			expect(store.authenticated).toBe(true);
 			expect(store.user).toEqual(user);
 			expect(store.error).toBeNull();
-			expect(store.loading).toBe(false);
 		});
 	});
 
@@ -268,19 +259,6 @@ describe('AuthStore', () => {
 
 			expect(store.status).toBe('unauthenticated');
 			expect(store.user).toBeNull();
-			expect(store.error).toBeNull();
-		});
-	});
-
-	describe('clear', () => {
-		test('resets state', async () => {
-			mockMeSuccess(makeUser());
-			await store.resolve();
-
-			store.clear();
-
-			expect(store.user).toBeNull();
-			expect(store.status).toBe('unauthenticated');
 			expect(store.error).toBeNull();
 		});
 	});

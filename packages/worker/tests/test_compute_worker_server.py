@@ -29,12 +29,15 @@ def test_engine_rpc_pool_is_fixed_per_engine(monkeypatch) -> None:
     assert "max_concurrent_requests" not in captured
 
 
-def test_cold_compute_worker_server_import_does_not_load_polars_compute_runtime() -> None:
+def test_cold_compute_worker_imports_only_preview_dependencies() -> None:
     result = subprocess.run(
         [
             sys.executable,
             "-c",
-            "import sys; import runtime.compute_worker_server; assert 'runtime.polars_compute' not in sys.modules; assert 'polars' not in sys.modules",
+            "import sys; from runtime import compute_worker_server; "
+            "assert 'runtime.polars_compute' not in sys.modules; assert 'polars' not in sys.modules; "
+            "compute_worker_server._load_polars_compute(); "
+            "assert 'polars' in sys.modules; assert not {'requests', 'openpyxl'} & sys.modules.keys()",
         ],
         cwd=Path(__file__).parents[1],
         capture_output=True,
@@ -112,6 +115,8 @@ def test_compute_worker_server_rejects_invalid_token(engine_stub, metadata) -> N
 
 
 def test_export_stages_artifact_in_object_store(monkeypatch, tmp_path) -> None:
+    import requests
+
     staged: dict[str, object] = {}
 
     def execute_export(_datasource, _steps, output_path, export_format, _job_id, _additional, _progress):
@@ -131,7 +136,7 @@ def test_export_stages_artifact_in_object_store(monkeypatch, tmp_path) -> None:
     from runtime import polars_compute
 
     monkeypatch.setattr(polars_compute, "execute_export", execute_export)
-    monkeypatch.setattr(compute_worker_server.requests, "put", put)
+    monkeypatch.setattr(requests, "put", put)
 
     result = compute_worker_server._execute_job(
         job_id="job-1",

@@ -26,4 +26,12 @@ describe('pipeline step summaries', () => {
 
 		expect(summary).toBe('event_date.add(2 days) → shifted_date');
 	});
+
+	test('unpivot and sample summaries read the stored config fields', () => {
+		expect(
+			getStepTypeConfig('unpivot').summary({ id_vars: ['id'], value_vars: ['q1', 'q2'] })
+		).toBe('q1, q2 → (variable, value)');
+		expect(getStepTypeConfig('sample').summary({ fraction: 0.5, seed: null })).toBe('50%');
+		expect(getStepTypeConfig('sample').summary({ fraction: 0.5, seed: 7 })).toBe('50% (seed: 7)');
+	});
 });

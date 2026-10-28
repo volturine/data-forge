@@ -154,7 +154,7 @@
 					<div class={css({ fontSize: 'sm', color: 'fg.muted' })}>Computing stats...</div>
 				{:else if error}
 					<Callout tone="error">
-						{error instanceof Error ? error.message : 'Failed to load stats'}
+						{error?.message ?? 'Failed to load stats'}
 					</Callout>
 				{:else if stats}
 					<div class={css({ display: 'flex', gap: '6' })}>

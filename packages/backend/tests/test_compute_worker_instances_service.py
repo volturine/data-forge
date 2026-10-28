@@ -8,7 +8,7 @@ import pytest
 from sqlalchemy import event
 from sqlmodel import Session, select
 
-import backend_core.compute_worker_instances_service as compute_worker_instances_service
+from backend_core import compute_worker_instances_service
 from backend_core.compute_worker_instances_service import persist_compute_worker_snapshot
 from backend_core.domain.compute.base import ComputeWorkerStatusInfo
 from backend_core.domain.compute_worker_instances.models import ComputeWorkerInstanceStatus

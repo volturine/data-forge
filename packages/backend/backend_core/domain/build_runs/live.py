@@ -5,6 +5,8 @@ import threading
 from collections import Counter
 from dataclasses import dataclass
 
+from backend_core.live_hubs import discard_keyed_waiter, resolve_waiter
+
 
 @dataclass(frozen=True, slots=True)
 class BuildNotification:
@@ -62,7 +64,7 @@ class BuildNotificationHub:
                 self._namespace_version[namespace] = self._namespace_version.get(namespace, 0) + 1
                 waiters = self._namespace_waiters.pop(namespace, [])
             for loop, future in waiters:
-                loop.call_soon_threadsafe(self._resolve_waiter, future, notification)
+                loop.call_soon_threadsafe(resolve_waiter, future, notification)
             await asyncio.sleep(0)
 
     async def publish(self, notification: BuildNotification) -> None:
@@ -78,7 +80,7 @@ class BuildNotificationHub:
         for loop, future in [*build_waiters, *namespace_waiters]:
             if future.done():
                 continue
-            loop.call_soon_threadsafe(self._resolve_waiter, future, notification)
+            loop.call_soon_threadsafe(resolve_waiter, future, notification)
 
     async def wait_for_build(self, build_id: str, last_sequence: int = 0) -> BuildNotification:
         with self._lock:
@@ -95,7 +97,7 @@ class BuildNotificationHub:
         try:
             return await future
         finally:
-            await self._discard_waiter(self._build_waiters, build_id, future)
+            self._discard_waiter(self._build_waiters, build_id, future)
 
     async def wait_for_namespace(self, namespace: str, last_version: int = 0) -> BuildNotification:
         with self._lock:
@@ -114,7 +116,7 @@ class BuildNotificationHub:
         try:
             return await future
         finally:
-            await self._discard_waiter(self._namespace_waiters, namespace, future)
+            self._discard_waiter(self._namespace_waiters, namespace, future)
 
     def latest_namespace_sequence(self, namespace: str) -> int:
         with self._lock:
@@ -137,24 +139,11 @@ class BuildNotificationHub:
                     continue
                 loop.call_soon_threadsafe(future.cancel)
 
-    async def _discard_waiter(
+    def _discard_waiter(
         self, waiters: dict[str, list[tuple[asyncio.AbstractEventLoop, asyncio.Future[BuildNotification]]]], key: str, future: asyncio.Future[BuildNotification]
     ) -> None:
         with self._lock:
-            current = waiters.get(key)
-            if current is None:
-                return
-            next_waiters = [(loop, item) for loop, item in current if item is not future and not item.done()]
-            if next_waiters:
-                waiters[key] = next_waiters
-                return
-            waiters.pop(key, None)
-
-    @staticmethod
-    def _resolve_waiter(future: asyncio.Future[BuildNotification], notification: BuildNotification) -> None:
-        if future.done():
-            return
-        future.set_result(notification)
+            discard_keyed_waiter(waiters, key, future)
 
 
 hub = BuildNotificationHub()

@@ -10,10 +10,10 @@
 
 	interface Props {
 		schema: Schema;
-		config?: GroupByConfigData;
+		config: GroupByConfigData;
 	}
 
-	let { schema, config = $bindable({ group_by: [], aggregations: [] }) }: Props = $props();
+	let { schema, config = $bindable() }: Props = $props();
 
 	const safeAggregations = $derived(config.aggregations ?? []);
 

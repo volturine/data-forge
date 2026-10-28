@@ -98,6 +98,13 @@ export default defineConfig({
 						{
 							name: 'charts',
 							test: /\/node_modules\/@tanstack\/charts\//
+						},
+						{
+							name: 'shared',
+							minShareCount: 2,
+							entriesAware: true,
+							entriesAwareMergeThreshold: 5 * 1024,
+							priority: -1
 						}
 					]
 				}

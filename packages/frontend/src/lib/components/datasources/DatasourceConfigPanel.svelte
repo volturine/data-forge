@@ -10,8 +10,10 @@
 	} from '#lib/api/datasource.js';
 	import { BuildsStore } from '#lib/stores/builds.svelte.js';
 	import { CircleAlert } from '@lucide/svelte';
-	import type { DataSource, ColumnSchema } from '#lib/types/datasource.js';
+	import type { DataSource, ColumnSchema, CSVOptions, ExcelConfig } from '#lib/types/datasource.js';
 	import {
+		DEFAULT_CSV_OPTIONS,
+		DEFAULT_EXCEL_CONFIG,
 		datasourceFileConfig,
 		datasourceIsAnalysisOutput,
 		datasourceIsCsv,
@@ -22,54 +24,33 @@
 		datasourceNeedsExternalIngest,
 		datasourceSupportsSchemaRefresh
 	} from '#lib/types/datasource.js';
-	import type { FileDataSource, IcebergDataSource } from '#lib/types/datasource.js';
 	import ColumnStatsPanel from '#lib/components/datasources/ColumnStatsPanel.svelte';
 	import HealthChecksManager from '#lib/components/common/HealthChecksManager.svelte';
 	import ScheduleManager from '#lib/components/common/ScheduleManager.svelte';
 	import Callout from '#lib/components/ui/Callout.svelte';
 	import DatasourceGeneralTab from './DatasourceGeneralTab.svelte';
 	import DatasourceSchemaTab from './DatasourceSchemaTab.svelte';
-	import DatasourceCsvOptionsTab, { type CsvConfig } from './DatasourceCsvOptionsTab.svelte';
-	import DatasourceExcelOptionsTab, { type ExcelConfig } from './DatasourceExcelOptionsTab.svelte';
+	import DatasourceCsvOptionsTab from './DatasourceCsvOptionsTab.svelte';
+	import DatasourceExcelOptionsTab from './DatasourceExcelOptionsTab.svelte';
 	import DatasourceRunsTab from './DatasourceRunsTab.svelte';
 	import { resolveColumnType } from '#lib/utils/column-types.js';
 	import { css, tabButton } from '#lib/styles/panda.js';
 	import { useNamespace } from '#lib/stores/namespace.svelte.js';
 
-	function initialCsvConfig(ds: DataSource): CsvConfig {
-		if (!datasourceIsCsv(ds)) {
-			return {
-				delimiter: ',',
-				quote_char: '"',
-				has_header: true,
-				skip_rows: 0,
-				encoding: 'utf8'
-			};
-		}
+	function initialCsvConfig(ds: DataSource): CSVOptions {
+		if (!datasourceIsCsv(ds)) return { ...DEFAULT_CSV_OPTIONS };
 		const opts = datasourceFileConfig(ds)?.csv_options;
 		return {
-			delimiter: opts?.delimiter ?? ',',
-			quote_char: opts?.quote_char ?? '"',
-			has_header: opts?.has_header ?? true,
-			skip_rows: opts?.skip_rows ?? 0,
-			encoding: opts?.encoding ?? 'utf8'
+			delimiter: opts?.delimiter ?? DEFAULT_CSV_OPTIONS.delimiter,
+			quote_char: opts?.quote_char ?? DEFAULT_CSV_OPTIONS.quote_char,
+			has_header: opts?.has_header ?? DEFAULT_CSV_OPTIONS.has_header,
+			skip_rows: opts?.skip_rows ?? DEFAULT_CSV_OPTIONS.skip_rows,
+			encoding: opts?.encoding ?? DEFAULT_CSV_OPTIONS.encoding
 		};
 	}
 
 	function initialExcelConfig(ds: DataSource): ExcelConfig {
-		if (!datasourceIsExcel(ds)) {
-			return {
-				sheet_name: '',
-				table_name: '',
-				named_range: '',
-				cell_range: '',
-				start_row: 0,
-				start_col: 0,
-				end_col: 0,
-				end_row: null,
-				has_header: true
-			};
-		}
+		if (!datasourceIsExcel(ds)) return { ...DEFAULT_EXCEL_CONFIG };
 		const fileSource = datasourceFileConfig(ds);
 		const cellRangeValue = fileSource?.cell_range;
 		const sheetValue = fileSource?.sheet_name;
@@ -203,7 +184,7 @@
 		}
 	}));
 
-	let csvConfig = $state<CsvConfig>(initialCsvConfig(seed));
+	let csvConfig = $state<CSVOptions>(initialCsvConfig(seed));
 	let excelConfig = $state<ExcelConfig>(initialExcelConfig(seed));
 
 	const columns = $derived.by(() => {
@@ -255,26 +236,6 @@
 		}
 	}
 
-	function getFileSource(ds: DataSource) {
-		return datasourceFileConfig(ds);
-	}
-
-	function isCsv(ds: DataSource): boolean {
-		return datasourceIsCsv(ds);
-	}
-
-	function isExcel(ds: DataSource): boolean {
-		return datasourceIsExcel(ds);
-	}
-
-	function isFile(ds: DataSource): ds is FileDataSource {
-		return datasourceIsFile(ds);
-	}
-
-	function isIceberg(ds: DataSource): ds is IcebergDataSource {
-		return datasourceIsIceberg(ds);
-	}
-
 	// Bumped by every edit so a save clears the dirty state only when nothing was
 	// edited while its request was in flight.
 	let editGeneration = 0;
@@ -287,6 +248,36 @@
 	function markDirty() {
 		markEdited();
 		configDirty = true;
+	}
+
+	function configWithOptions(
+		ds: DataSource,
+		options: Record<string, unknown>
+	): Record<string, unknown> {
+		if (datasourceIsIceberg(ds)) {
+			return stripProtectedKeys({ ...ds.config, source: { ...ds.config.source, ...options } });
+		}
+		return stripProtectedKeys({ ...ds.config, ...options });
+	}
+
+	async function publishDatasource(datasourceId: string, next: DataSource | null) {
+		if (next) {
+			queryClient.setQueryData(['datasource', ns.value, datasourceId], next);
+			queryClient.setQueriesData<DataSource[]>(
+				{ queryKey: ['datasources', ns.value] },
+				(current) => (current ? current.map((d) => (d.id === datasourceId ? next : d)) : current)
+			);
+		}
+		await Promise.all([
+			queryClient.invalidateQueries({ queryKey: ['datasource', ns.value, datasourceId] }),
+			queryClient.invalidateQueries({ queryKey: ['datasources'] }),
+			queryClient.invalidateQueries({ queryKey: ['datasource-schema', datasourceId] }),
+			queryClient.invalidateQueries({ queryKey: ['iceberg-snapshots', datasourceId] })
+		]);
+		await queryClient.invalidateQueries({
+			queryKey: ['datasource-preview', ns.value, datasourceId]
+		});
+		onSave?.();
 	}
 
 	async function handleSave() {
@@ -303,28 +294,10 @@
 		};
 
 		if (configDirty) {
-			if (isCsv(datasourceQuery.data)) {
-				const csvOptions = {
-					delimiter: csvConfig.delimiter,
-					quote_char: csvConfig.quote_char,
-					has_header: csvConfig.has_header,
-					skip_rows: csvConfig.skip_rows,
-					encoding: csvConfig.encoding
-				};
-				if (isIceberg(datasourceQuery.data)) {
-					const existingSource = (datasourceQuery.data.config as Record<string, unknown>)
-						?.source as Record<string, unknown> | undefined;
-					update.config = stripProtectedKeys({
-						...datasourceQuery.data.config,
-						source: { ...existingSource, csv_options: csvOptions }
-					});
-				} else {
-					update.config = stripProtectedKeys({
-						...datasourceQuery.data.config,
-						csv_options: csvOptions
-					});
-				}
-			} else if (isExcel(datasourceQuery.data)) {
+			if (datasourceIsCsv(datasourceQuery.data)) {
+				const csvOptions: CSVOptions = { ...csvConfig };
+				update.config = configWithOptions(datasourceQuery.data, { csv_options: csvOptions });
+			} else if (datasourceIsExcel(datasourceQuery.data)) {
 				const excelOptions = {
 					sheet_name: excelConfig.sheet_name || null,
 					table_name: excelConfig.table_name || null,
@@ -336,20 +309,8 @@
 					end_row: excelConfig.end_row,
 					has_header: excelConfig.has_header
 				};
-				if (isIceberg(datasourceQuery.data)) {
-					const existingSource = (datasourceQuery.data.config as Record<string, unknown>)
-						?.source as Record<string, unknown> | undefined;
-					update.config = stripProtectedKeys({
-						...datasourceQuery.data.config,
-						source: { ...existingSource, ...excelOptions }
-					});
-				} else {
-					update.config = stripProtectedKeys({
-						...datasourceQuery.data.config,
-						...excelOptions
-					});
-				}
-			} else if (isFile(datasourceQuery.data)) {
+				update.config = configWithOptions(datasourceQuery.data, excelOptions);
+			} else if (datasourceIsFile(datasourceQuery.data)) {
 				update.config = stripProtectedKeys({ ...datasourceQuery.data.config });
 			}
 		}
@@ -367,20 +328,7 @@
 				refreshError = ingestResult.error.message || 'Failed to re-ingest datasource';
 				return;
 			}
-			queryClient.setQueryData(['datasource', ns.value, ds.id], ingestResult.value);
-			queryClient.setQueriesData<DataSource[]>(
-				{ queryKey: ['datasources', ns.value] },
-				(current) =>
-					current ? current.map((d) => (d.id === ds.id ? ingestResult.value : d)) : current
-			);
-			await Promise.all([
-				queryClient.invalidateQueries({ queryKey: ['datasource', ns.value, ds.id] }),
-				queryClient.invalidateQueries({ queryKey: ['datasources'] }),
-				queryClient.invalidateQueries({ queryKey: ['datasource-schema', ds.id] }),
-				queryClient.invalidateQueries({ queryKey: ['iceberg-snapshots', ds.id] })
-			]);
-			await queryClient.invalidateQueries({ queryKey: ['datasource-preview', ns.value, ds.id] });
-			onSave?.();
+			await publishDatasource(ds.id, ingestResult.value);
 		}
 	}
 
@@ -400,13 +348,15 @@
 			if (reingested) {
 				const ingestResult = await ingestDatasource(datasource.id);
 				if (ingestResult.isErr()) {
-					throw new Error(ingestResult.error.message);
+					refreshError = ingestResult.error.message;
+					return;
 				}
 				nextDatasource = ingestResult.value;
 			}
 			const result = await getDatasourceSchema(datasource.id, { refresh: !reingested });
 			if (result.isErr()) {
-				throw new Error(result.error.message);
+				refreshError = result.error.message;
+				return;
 			}
 			const nextSchema = result.value;
 			const nextColumns = nextSchema.columns.map((col) => ({
@@ -426,25 +376,8 @@
 			schemaChanged = added.length > 0 || removed.length > 0 || types.length > 0;
 			schemaDiff = schemaChanged ? { added, removed, types } : null;
 
-			if (nextDatasource) {
-				queryClient.setQueryData(['datasource', ns.value, datasource.id], nextDatasource);
-				queryClient.setQueriesData<DataSource[]>(
-					{ queryKey: ['datasources', ns.value] },
-					(current) =>
-						current ? current.map((d) => (d.id === datasource.id ? nextDatasource! : d)) : current
-				);
-			}
 			queryClient.setQueryData(['datasource-schema', datasource.id], nextSchema);
-			await Promise.all([
-				queryClient.invalidateQueries({ queryKey: ['datasource', ns.value, datasource.id] }),
-				queryClient.invalidateQueries({ queryKey: ['datasources'] }),
-				queryClient.invalidateQueries({ queryKey: ['datasource-schema', datasource.id] }),
-				queryClient.invalidateQueries({ queryKey: ['iceberg-snapshots', datasource.id] })
-			]);
-			await queryClient.invalidateQueries({
-				queryKey: ['datasource-preview', ns.value, datasource.id]
-			});
-			onSave?.();
+			await publishDatasource(datasource.id, nextDatasource);
 		} catch (error) {
 			refreshError = error instanceof Error ? error.message : 'Failed to ingest datasource schema';
 		} finally {
@@ -458,8 +391,8 @@
 	}
 
 	const ds = $derived(datasourceQuery.data ?? datasource);
-	const csv = $derived(isCsv(ds));
-	const excel = $derived(isExcel(ds));
+	const csv = $derived(datasourceIsCsv(ds));
+	const excel = $derived(datasourceIsExcel(ds));
 	const isOutputDatasource = $derived(datasourceIsAnalysisOutput(ds));
 	const scheduleAnalysisId = $derived(
 		isOutputDatasource
@@ -509,9 +442,7 @@
 					<div class={css({ display: 'flex', flexDirection: 'column', gap: '1' })}>
 						<p class={css({ margin: '0', fontWeight: 'semibold' })}>Error saving changes</p>
 						<p class={css({ margin: '0', fontSize: 'sm', opacity: '0.8' })}>
-							{updateMutation.error instanceof Error
-								? updateMutation.error.message
-								: 'Unknown error'}
+							{updateMutation.error?.message ?? 'Unknown error'}
 						</p>
 					</div>
 				</div>
@@ -664,7 +595,7 @@
 			/>
 		{:else if activeTab === 'excel' && excel}
 			<DatasourceExcelOptionsTab
-				filePath={getFileSource(ds)?.file_path ?? null}
+				filePath={datasourceFileConfig(ds)?.file_path ?? null}
 				bind:config={excelConfig}
 				pending={updateMutation.isPending}
 				{hasChanges}

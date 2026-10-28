@@ -142,9 +142,6 @@
 	const minColumnWidthPx = 220;
 	const defaultColumnWidthPx = 150;
 	const columnHoverDelayMs = 1000;
-	let panelWidth = $state(0);
-
-	let initialSize = $state(defaultColumnWidthPx);
 
 	const [sorting, setSorting] = createTableState<SortingState>([]);
 	const [columnSizing, setColumnSizing] = createTableState<ColumnSizingState>({});
@@ -157,8 +154,6 @@
 		startSize: null
 	});
 
-	// Non-reactive resize tracking to avoid table re-renders during resize
-	const resizeOffset = { delta: 0, start: 0 };
 	const [columnVisibility, setColumnVisibility] = createTableState<Record<string, boolean>>({});
 	const [columnOrder, setColumnOrder] = createTableState<string[]>([]);
 	const [columnPinning, setColumnPinning] = createTableState<ColumnPinningState>({
@@ -182,7 +177,7 @@
 			id: col,
 			accessorKey: col,
 			header: col,
-			size: initialSize,
+			size: defaultColumnWidthPx,
 			minSize: minColumnWidthPx
 		}))
 	);
@@ -241,16 +236,12 @@
 			const isResizing = next.isResizingColumn !== false;
 
 			if (wasResizing && isResizing) {
-				// During resize - update non-reactive offset only
-				resizeOffset.delta = next.deltaOffset ?? 0;
-				resizeOffset.start = next.startOffset ?? 0;
-				document.documentElement.style.setProperty('--resize-delta', `${resizeOffset.delta}px`);
+				// During resize - update the CSS variable only
+				document.documentElement.style.setProperty('--resize-delta', `${next.deltaOffset ?? 0}px`);
 				return;
 			}
 			// Resize start/end - update reactive state
 			setColumnResizing(next);
-			resizeOffset.delta = next.deltaOffset ?? 0;
-			resizeOffset.start = next.startOffset ?? 0;
 			if (!isResizing) {
 				document.documentElement.style.removeProperty('--resize-delta');
 			}
@@ -267,22 +258,9 @@
 	const compact = $derived(density === 'compact');
 
 	function normalizeSizing(next: ColumnSizingState): ColumnSizingState {
-		const safe = Object.fromEntries(
+		return Object.fromEntries(
 			Object.entries(next).map(([key, value]) => [key, Math.max(minColumnWidthPx, value)])
 		);
-		if (!panelWidth) return safe;
-		const currentOrder = columnOrder();
-		const order = currentOrder.length ? currentOrder : columns;
-		const visible = order.filter((col) => columnVisibility()[col] ?? true);
-		if (!visible.length) return safe;
-		const total = visible.reduce((sum, col) => {
-			const current = safe[col] ?? columnSizing()[col] ?? initialSize;
-			return sum + current;
-		}, 0);
-		if (total >= panelWidth) return safe;
-		const last = visible[visible.length - 1];
-		const lastSize = safe[last] ?? columnSizing()[last] ?? initialSize;
-		return { ...safe, [last]: lastSize + (panelWidth - total) };
 	}
 
 	function toggleColumnVisibility(columnId: string) {

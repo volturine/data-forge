@@ -7,6 +7,8 @@
 	import type { ExcelParams } from '#lib/api/excel.js';
 	import ExcelTableSelector from '#lib/components/common/ExcelTableSelector.svelte';
 	import type { BulkUploadResult } from '#lib/api/datasource.js';
+	import { DEFAULT_CSV_OPTIONS, DEFAULT_EXCEL_CONFIG } from '#lib/types/datasource.js';
+	import type { CSVOptions, ExcelConfig } from '#lib/types/datasource.js';
 
 	import { SvelteSet } from 'svelte/reactivity';
 	import { Check, X } from '@lucide/svelte';
@@ -23,17 +25,7 @@
 	let file = $state<File | null>(null);
 	let fileName = $state('');
 	let preflightId = $state<string | null>(null);
-	let excelConfig = $state({
-		sheet_name: '',
-		table_name: '',
-		named_range: '',
-		cell_range: '',
-		start_row: 0,
-		start_col: 0,
-		end_col: 0,
-		end_row: null as number | null,
-		has_header: true
-	});
+	let excelConfig = $state<ExcelConfig>({ ...DEFAULT_EXCEL_CONFIG });
 
 	// External database state
 	let dbName = $state('');
@@ -47,26 +39,12 @@
 	let showBulkResults = $state(false);
 	const allowedFileTypes = new SvelteSet(['csv', 'xlsx']);
 	let batchType = $state<'csv' | 'excel' | null>(null);
-	let csvDelimiter = $state(',');
-	let csvQuoteChar = $state('"');
-	let csvEncoding = $state('utf8');
-	let csvSkipRows = $state(0);
-	let csvHasHeader = $state(true);
+	let csvOptions = $state<CSVOptions>({ ...DEFAULT_CSV_OPTIONS });
 	let fileDescription = $state('');
 
 	function resetExcelState() {
 		preflightId = null;
-		excelConfig = {
-			sheet_name: '',
-			table_name: '',
-			named_range: '',
-			cell_range: '',
-			start_row: 0,
-			start_col: 0,
-			end_col: 0,
-			end_row: null,
-			has_header: true
-		};
+		excelConfig = { ...DEFAULT_EXCEL_CONFIG };
 	}
 
 	function applySelection(files: File[]) {
@@ -132,19 +110,12 @@
 		error = null;
 		showBulkResults = false;
 
-		const csvOptions =
-			batchType === 'csv'
-				? {
-						delimiter: csvDelimiter,
-						quote_char: csvQuoteChar,
-						has_header: csvHasHeader,
-						skip_rows: csvSkipRows,
-						encoding: csvEncoding
-					}
-				: undefined;
-		const result = await uploadBulkFiles(selectedFiles, csvOptions);
+		const result = await uploadBulkFiles(
+			selectedFiles,
+			batchType === 'csv' ? csvOptions : undefined
+		);
 		result.match(
-			(response: import('#lib/api/datasource.js').BulkUploadResponse) => {
+			(response) => {
 				bulkResults = response.results;
 				showBulkResults = true;
 				if (response.successful === response.total) {
@@ -154,23 +125,12 @@
 					goto(resolve('datasources'), { refreshAll: true });
 				}
 			},
-			(err: { message?: string }) => {
+			(err) => {
 				error = err.message || 'Bulk upload failed';
 			}
 		);
 
 		loading = false;
-	}
-
-	function clearBulkSelection() {
-		selectedFiles = [];
-		bulkResults = [];
-		showBulkResults = false;
-		file = null;
-		fileName = '';
-		fileDescription = '';
-		batchType = null;
-		resetExcelState();
 	}
 
 	function removeBulkFile(index: number) {
@@ -179,13 +139,7 @@
 			applySelection(selectedFiles);
 		}
 		if (selectedFiles.length === 0) {
-			bulkResults = [];
-			showBulkResults = false;
-			file = null;
-			fileName = '';
-			fileDescription = '';
-			batchType = null;
-			resetExcelState();
+			applySelection([]);
 		}
 	}
 
@@ -210,7 +164,6 @@
 			if (file.name.endsWith('.xlsx')) {
 				if (!preflightId) {
 					error = 'Run preflight to select table bounds before uploading';
-					loading = false;
 					return;
 				}
 				const params: ExcelParams = {
@@ -227,19 +180,12 @@
 				const result = await confirmExcel(preflightId, fileName, fileDescription, params);
 				if (result.isErr()) {
 					error = result.error.message || 'Upload failed';
-					loading = false;
 					return;
 				}
 				await gotoCreatedDatasource(result.value.id);
 				return;
 			}
-			const result = await uploadFile(file, fileName, fileDescription, {
-				delimiter: csvDelimiter,
-				quote_char: csvQuoteChar,
-				has_header: csvHasHeader,
-				skip_rows: csvSkipRows,
-				encoding: csvEncoding
-			});
+			const result = await uploadFile(file, fileName, fileDescription, csvOptions);
 			if (result.isErr()) {
 				error = result.error.message || 'Upload failed';
 				return;
@@ -415,7 +361,7 @@
 										color: 'accent.primary',
 										_hover: { textDecoration: 'underline' }
 									})}
-									onclick={clearBulkSelection}
+									onclick={() => applySelection([])}
 									disabled={loading}
 								>
 									Clear all
@@ -543,7 +489,7 @@
 								</label>
 								<select
 									id="csv-delimiter"
-									bind:value={csvDelimiter}
+									bind:value={csvOptions.delimiter}
 									disabled={loading}
 									class={input()}
 								>
@@ -568,7 +514,12 @@
 									})}>Quote</label
 								>
 
-								<select id="csv-quote" bind:value={csvQuoteChar} disabled={loading} class={input()}>
+								<select
+									id="csv-quote"
+									bind:value={csvOptions.quote_char}
+									disabled={loading}
+									class={input()}
+								>
 									<option value="&quot;">Double Quote (")</option>
 									<option value="'">Single Quote (')</option>
 									<option value="">None</option>
@@ -591,7 +542,7 @@
 								</label>
 								<select
 									id="csv-encoding"
-									bind:value={csvEncoding}
+									bind:value={csvOptions.encoding}
 									disabled={loading}
 									class={input()}
 								>
@@ -620,7 +571,7 @@
 									id="csv-skip-rows"
 									type="number"
 									min="0"
-									bind:value={csvSkipRows}
+									bind:value={csvOptions.skip_rows}
 									disabled={loading}
 									class={input()}
 								/>
@@ -630,7 +581,7 @@
 							<input
 								id="csv-header"
 								type="checkbox"
-								bind:checked={csvHasHeader}
+								bind:checked={csvOptions.has_header}
 								disabled={loading}
 								class={css({ width: 'iconSm', height: 'iconSm', cursor: 'pointer' })}
 							/>

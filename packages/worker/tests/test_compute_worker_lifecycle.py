@@ -180,7 +180,9 @@ async def test_existing_engine_request_admission_is_released_exactly_once(monkey
 
         with manager._capacity_changed:
             assert key not in manager._request_reservations
-            assert manager._find_idle_engine_locked()[0] == key
+            idle = manager._find_idle_engine_locked()
+            assert idle is not None
+            assert idle[0] == key
     finally:
         manager.shutdown_all()
 
@@ -1846,7 +1848,7 @@ def test_busy_engine_is_not_evicted_or_reaped_after_liveness_failure(monkeypatch
 
 
 @pytest.mark.parametrize("capacity", [1, 2])
-@pytest.mark.parametrize("restart_mode", ["dead", "reconfigured", "configure"])
+@pytest.mark.parametrize("restart_mode", ["dead", "reconfigured"])
 def test_engine_restart_transfers_its_capacity_once(monkeypatch, capacity: int, restart_mode: str) -> None:
     monkeypatch.setattr(settings, "compute_workers", capacity)
     monkeypatch.setattr(settings, "compute_warm_workers", 0)
@@ -1867,10 +1869,7 @@ def test_engine_restart_transfers_its_capacity_once(monkeypatch, capacity: int, 
         else:
             replacement_config = {"max_memory_mb": 5678}
 
-        if restart_mode == "configure":
-            second = manager.restart_engine_with_config(identity, replacement_config)
-        else:
-            second = manager.spawn_compute_worker(identity, resource_config=replacement_config)
+        second = manager.spawn_compute_worker(identity, resource_config=replacement_config)
 
         assert second.engine is not first.engine
         assert len(created) == 2

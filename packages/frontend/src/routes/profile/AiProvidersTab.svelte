@@ -1,9 +1,10 @@
 <script lang="ts">
 	import { onMount } from 'svelte';
-	import { CheckCircle, XCircle, Save, Loader2 } from '@lucide/svelte';
+	import { Save, Loader2 } from '@lucide/svelte';
 	import { getSettings, updateSettings, isMasked, MASKED_PLACEHOLDER } from '#lib/api/settings.js';
 	import type { AppSettings } from '#lib/api/settings.js';
 	import { listAIModels, testAIConnection } from '#lib/api/ai.js';
+	import FeedbackBanner from '#lib/components/ui/FeedbackBanner.svelte';
 	import { button, css, input, label } from '#lib/styles/panda.js';
 
 	let loading = $state(true);
@@ -88,23 +89,6 @@
 		);
 		testingProvider = null;
 	}
-
-	const feedbackStyle = (type: 'success' | 'error') =>
-		css({
-			display: 'flex',
-			alignItems: 'center',
-			gap: '2',
-			borderWidth: '1',
-			padding: '2',
-			fontSize: 'sm',
-			...(type === 'success'
-				? {
-						borderColor: 'border.success',
-						backgroundColor: 'bg.success',
-						color: 'fg.success'
-					}
-				: { borderColor: 'border.error', backgroundColor: 'bg.error', color: 'fg.error' })
-		});
 </script>
 
 {#if loading}
@@ -125,14 +109,7 @@
 {:else}
 	<div class={css({ display: 'flex', flexDirection: 'column', gap: '6' })}>
 		{#if feedback}
-			<div class={feedbackStyle(feedback.type)}>
-				{#if feedback.type === 'success'}
-					<CheckCircle size={14} />
-				{:else}
-					<XCircle size={14} />
-				{/if}
-				{feedback.message}
-			</div>
+			<FeedbackBanner kind={feedback.type} message={feedback.message} />
 		{/if}
 
 		<div

@@ -1,6 +1,7 @@
 <script lang="ts">
 	import { createMutation, createQuery, useQueryClient } from '@tanstack/svelte-query';
 	import { listUdfs, deleteUdf, exportUdfs, importUdfs, cloneUdf } from '#lib/api/udf.js';
+	import { downloadBlob } from '#lib/api/compute.js';
 	import type { Udf, UdfExport } from '#lib/types/udf.js';
 	import { Plus, Upload, Download, Copy, Trash2, Pencil, X } from '@lucide/svelte';
 	import ColumnTypeBadge from '#lib/components/common/ColumnTypeBadge.svelte';
@@ -87,13 +88,7 @@
 			return;
 		}
 		const payload = JSON.stringify(result.value, null, 2);
-		const blob = new Blob([payload], { type: 'application/json' });
-		const url = URL.createObjectURL(blob);
-		const link = document.createElement('a');
-		link.href = url;
-		link.download = 'udfs.json';
-		link.click();
-		URL.revokeObjectURL(url);
+		downloadBlob(new Blob([payload], { type: 'application/json' }), 'udfs.json');
 	}
 
 	async function handleImport() {
@@ -101,8 +96,7 @@
 		let payload: UdfExport;
 		try {
 			payload = JSON.parse(importText) as UdfExport;
-		} catch (err) {
-			void err;
+		} catch {
 			importError = 'Invalid JSON payload';
 			return;
 		}
@@ -250,7 +244,7 @@
 		</div>
 	{:else if query.isError}
 		<Callout tone="error">
-			{query.error instanceof Error ? query.error.message : 'Error loading UDFs.'}
+			{query.error?.message ?? 'Error loading UDFs.'}
 		</Callout>
 	{:else if query.data}
 		{#if actionError}

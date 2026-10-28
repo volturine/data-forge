@@ -45,6 +45,20 @@
             "UP",
             "B",
             "SIM",
+            "C4",
+            "PIE",
+            "PERF",
+            "FURB",
+            "RET",
+            "LOG",
+            "PLW0108",
+            "PLR0402",
+            "PLR1711",
+            "PLR1714",
+            "RUF006",
+            "RUF012",
+            "RUF021",
+            "RUF036",
         ]
 
         ignore = [
@@ -67,6 +81,10 @@
             "B008",
             "B904",
         ]
+
+        [tool.ruff.lint.per-file-ignores]
+            # Test doubles mimic objects with read-only class attributes.
+            "tests/**" = ["RUF012"]
 
         [tool.ruff.lint.isort]
             combine-as-imports = true

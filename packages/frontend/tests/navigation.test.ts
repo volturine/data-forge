@@ -1,4 +1,4 @@
-import type { Page } from '@playwright/test';
+import type { Page, Route, Request } from '@playwright/test';
 import { test, expect } from './fixtures.js';
 import { createLongRunningAnalysis } from './utils/api.js';
 import { screenshot } from './utils/visual.js';
@@ -47,11 +47,157 @@ test.describe('Navigation – page load smoke tests', () => {
 		await screenshot(page, 'navigation', 'home-page');
 	});
 
-	test('datasources page renders Data Sources heading', async ({ page }) => {
-		await page.goto('/datasources');
+	test('datasources page becomes interactive without animation frames', async ({ page }) => {
+		const fontWeights = [400, 500, 600, 700] as const;
+		const fontSampleText = 'Az09ĀЖӐΩắ';
+		const expectedFontSubsetCount = 6;
+		const googleFontRequestPattern = /^https:\/\/fonts\.(?:googleapis|gstatic)\.com(?:\/|$)/;
+		const blockedGoogleFontRequests: string[] = [];
+		const fontRequestUrls: string[] = [];
+		const abortGoogleFontRequest = async (route: Route): Promise<void> => {
+			blockedGoogleFontRequests.push(route.request().url());
+			await route.abort();
+		};
+		const recordFontRequest = (request: Request): void => {
+			if (request.resourceType() === 'font') fontRequestUrls.push(request.url());
+		};
+		page.on('request', recordFontRequest);
+
+		try {
+			await page.route(googleFontRequestPattern, abortGoogleFontRequest);
+			await page.addInitScript(() => {
+				const nativeRequestAnimationFrame = window.requestAnimationFrame.bind(window);
+				const nativeCancelAnimationFrame = window.cancelAnimationFrame.bind(window);
+				const queuedCallbacks = new Map<
+					number,
+					{ callback: FrameRequestCallback; nativeId?: number }
+				>();
+				let nextHeldId = -1;
+				let held = true;
+				const restoreCancellationWhenDrained = () => {
+					if (!held && queuedCallbacks.size === 0)
+						window.cancelAnimationFrame = nativeCancelAnimationFrame;
+				};
+
+				window.requestAnimationFrame = (callback) => {
+					if (!held) return nativeRequestAnimationFrame(callback);
+					const id = nextHeldId--;
+					queuedCallbacks.set(id, { callback });
+					return id;
+				};
+				window.cancelAnimationFrame = (id) => {
+					const pending = queuedCallbacks.get(id);
+					if (pending) {
+						if (pending.nativeId !== undefined) nativeCancelAnimationFrame(pending.nativeId);
+						queuedCallbacks.delete(id);
+						restoreCancellationWhenDrained();
+					} else if (id >= 0) nativeCancelAnimationFrame(id);
+				};
+				window.addEventListener(
+					'e2e-resume-animation-frame',
+					() => {
+						held = false;
+						window.requestAnimationFrame = nativeRequestAnimationFrame;
+						for (const [id, pending] of queuedCallbacks) {
+							pending.nativeId = nativeRequestAnimationFrame((timestamp) => {
+								queuedCallbacks.delete(id);
+								restoreCancellationWhenDrained();
+								pending.callback(timestamp);
+							});
+						}
+						restoreCancellationWhenDrained();
+					},
+					{ once: true }
+				);
+			});
+
+			try {
+				await page.goto('/datasources');
+				await expect(page.locator('aside[aria-label="Main navigation"]')).toHaveAttribute(
+					'data-shell-interactive',
+					'true',
+					{ timeout: readyTimeoutMs() }
+				);
+				await expect(page.getByRole('button', { name: 'Select namespace' })).toBeEnabled({
+					timeout: readyTimeoutMs()
+				});
+			} finally {
+				await page.evaluate(() => window.dispatchEvent(new Event('e2e-resume-animation-frame')));
+			}
+
+			await waitForLayoutReady(page);
+			await expect(page.getByRole('heading', { name: 'Data Sources' })).toBeVisible();
+			await expect(
+				page.locator(
+					'link[href^="https://fonts.googleapis.com"], link[href^="https://fonts.gstatic.com"]'
+				)
+			).toHaveCount(0);
+
+			const loadedFontFaces = await page.evaluate(
+				async ({ weights, sampleText, timeoutMs }) => {
+					let timeoutHandle: number | undefined;
+					const fontLoad = Promise.all(
+						weights.map(async (weight) => {
+							const faces = await document.fonts.load(
+								`${weight} 16px "JetBrains Mono"`,
+								sampleText
+							);
+							return {
+								weight,
+								faces: faces.map((face) => ({
+									family: face.family,
+									weight: face.weight,
+									style: face.style,
+									status: face.status
+								}))
+							};
+						})
+					);
+					const timeout = new Promise<never>((_, reject) => {
+						timeoutHandle = window.setTimeout(
+							() => reject(new Error('Timed out loading JetBrains Mono font faces')),
+							timeoutMs
+						);
+					});
+					try {
+						return await Promise.race([fontLoad, timeout]);
+					} finally {
+						if (timeoutHandle !== undefined) window.clearTimeout(timeoutHandle);
+					}
+				},
+				{ weights: [...fontWeights], sampleText: fontSampleText, timeoutMs: readyTimeoutMs() }
+			);
+
+			expect(loadedFontFaces.map(({ weight }) => weight)).toEqual([...fontWeights]);
+			for (const { weight, faces } of loadedFontFaces) {
+				expect(faces).toHaveLength(expectedFontSubsetCount);
+				expect(
+					faces.every(
+						(face) =>
+							face.family.replace(/^['"]|['"]$/g, '') === 'JetBrains Mono' &&
+							face.weight === String(weight) &&
+							face.style === 'normal' &&
+							face.status === 'loaded'
+					)
+				).toBe(true);
+			}
+			expect(blockedGoogleFontRequests).toHaveLength(0);
+
+			const pageOrigin = new URL(page.url()).origin;
+			expect(fontRequestUrls.length).toBeGreaterThan(0);
+			expect(fontRequestUrls.every((url) => new URL(url).origin === pageOrigin)).toBe(true);
+			await screenshot(page, 'navigation', 'datasources-page');
+		} finally {
+			await page.unroute(googleFontRequestPattern, abortGoogleFontRequest);
+			page.off('request', recordFontRequest);
+		}
+	});
+
+	test('legacy datasource detail URLs redirect to the datasource list', async ({ page }) => {
+		await page.goto('/datasources/legacy-id');
 		await waitForLayoutReady(page);
+		await expect(page).toHaveURL(/\/datasources\/?$/);
 		await expect(page.getByRole('heading', { name: 'Data Sources' })).toBeVisible();
-		await screenshot(page, 'navigation', 'datasources-page');
 	});
 
 	test('UDFs are not a sidebar destination', async ({ page }) => {
@@ -250,11 +396,14 @@ const OPENROUTER_CHAT_SETTINGS = {
 	public_idb_debug: false
 };
 
-/** Stub GET /api/v1/settings with an OpenRouter-configured profile, optionally slowing GETs. */
-async function stubChatSettings(page: Page, options: { delayGetMs?: number } = {}): Promise<void> {
+/** Stub GET /api/v1/settings with an OpenRouter-configured profile, optionally gating GETs. */
+async function stubChatSettings(
+	page: Page,
+	options: { getGate?: Promise<void> } = {}
+): Promise<void> {
 	await page.route('**/api/v1/settings', async (route) => {
-		if (options.delayGetMs && route.request().method() === 'GET') {
-			await new Promise((resolve) => setTimeout(resolve, options.delayGetMs));
+		if (route.request().method() === 'GET' && options.getGate) {
+			await options.getGate;
 		}
 		await route.fulfill({
 			status: 200,
@@ -371,9 +520,10 @@ test.describe('Navigation – chat panel smoke', () => {
 
 	test('first chat open stays neutral while provider settings and tools load', async ({ page }) => {
 		await page.addInitScript(() => localStorage.setItem('chat_session_id', 'session-1'));
-		await stubChatSettings(page, { delayGetMs: 800 });
+		const settingsGate = Promise.withResolvers<void>();
+		await stubChatSettings(page, { getGate: settingsGate.promise });
 		await page.route('**/api/v1/mcp/tools', async (route) => {
-			await new Promise((resolve) => setTimeout(resolve, 800));
+			await settingsGate.promise;
 			await route.fulfill({ status: 200, contentType: 'application/json', body: '[]' });
 		});
 		await page.route('**/api/v1/ai/chat/sessions', (route) =>
@@ -402,28 +552,33 @@ test.describe('Navigation – chat panel smoke', () => {
 			})
 		);
 
-		await gotoAuthedRoute(page, '/');
-		await page.reload();
-		const settingsRequest = page.waitForRequest(
-			(request) =>
-				request.method() === 'GET' && new URL(request.url()).pathname === '/api/v1/settings'
-		);
-		const toolsRequest = page.waitForRequest(
-			(request) =>
-				request.method() === 'GET' && new URL(request.url()).pathname === '/api/v1/mcp/tools'
-		);
-		await page.getByRole('button', { name: 'AI Assistant' }).click();
+		const trigger = page.getByRole('button', { name: 'AI Assistant' });
 		const panel = page.locator('#chat-panel');
-		await expect(panel).toBeVisible();
-		await Promise.all([settingsRequest, toolsRequest]);
+		try {
+			await gotoAuthedRoute(page, '/');
+			await page.reload();
+			const settingsRequest = page.waitForRequest(
+				(request) =>
+					request.method() === 'GET' && new URL(request.url()).pathname === '/api/v1/settings'
+			);
+			const toolsRequest = page.waitForRequest(
+				(request) =>
+					request.method() === 'GET' && new URL(request.url()).pathname === '/api/v1/mcp/tools'
+			);
+			await trigger.click();
+			await expect(panel).toBeVisible();
+			await Promise.all([settingsRequest, toolsRequest]);
 
-		await expect(panel.getByRole('status').first()).toContainText('Loading chat');
-		await expect(panel.getByRole('button', { name: 'Configure' })).toBeDisabled();
-		await expect(panel.getByText(/No AI provider is configured/)).toHaveCount(0);
-		await expect(panel.locator('select[title="Chat provider"]')).toHaveCount(0);
-		await expect(panel.getByText(/Ollama|settings unavailable|failed|not configured/i)).toHaveCount(
-			0
-		);
+			await expect(panel.getByRole('status').first()).toContainText('Loading chat');
+			await expect(panel.getByRole('button', { name: 'Configure' })).toBeDisabled();
+			await expect(panel.getByText(/No AI provider is configured/)).toHaveCount(0);
+			await expect(panel.locator('select[title="Chat provider"]')).toHaveCount(0);
+			await expect(
+				panel.getByText(/Ollama|settings unavailable|failed|not configured/i)
+			).toHaveCount(0);
+		} finally {
+			settingsGate.resolve();
+		}
 
 		await expect(panel.locator('select[title="Chat provider"]')).toHaveValue('openrouter', {
 			timeout: 5_000
@@ -432,7 +587,8 @@ test.describe('Navigation – chat panel smoke', () => {
 	});
 
 	test('chat reloads provider settings after saving them in Profile', async ({ page }) => {
-		let delayNextSettingsGet = false;
+		let holdNextSettingsGet = false;
+		const settingsGetGate = Promise.withResolvers<void>();
 		let settings: Record<string, unknown> = {
 			smtp_host: '',
 			smtp_port: 587,
@@ -448,9 +604,9 @@ test.describe('Navigation – chat panel smoke', () => {
 		};
 		await page.route('**/api/v1/settings', async (route) => {
 			if (route.request().method() === 'GET') {
-				if (delayNextSettingsGet) {
-					delayNextSettingsGet = false;
-					await new Promise((resolve) => setTimeout(resolve, 700));
+				if (holdNextSettingsGet) {
+					holdNextSettingsGet = false;
+					await settingsGetGate.promise;
 				}
 				await route.fulfill({
 					status: 200,
@@ -503,12 +659,21 @@ test.describe('Navigation – chat panel smoke', () => {
 		await expect(page.getByText('AI provider settings saved')).toBeVisible({ timeout: 5_000 });
 
 		await gotoAuthedRoute(page, '/');
-		delayNextSettingsGet = true;
-		await page.getByRole('button', { name: 'AI Assistant' }).click();
+		holdNextSettingsGet = true;
+		const settingsRequest = page.waitForRequest(
+			(request) =>
+				request.method() === 'GET' && new URL(request.url()).pathname === '/api/v1/settings'
+		);
 		panel = page.locator('#chat-panel');
-		await expect(panel.getByRole('status').first()).toContainText('Loading chat');
-		await expect(panel.getByText(/No AI provider is configured/)).toHaveCount(0);
-		await expect(panel.locator('select[title="Chat provider"]')).toHaveCount(0);
+		try {
+			await page.getByRole('button', { name: 'AI Assistant' }).click();
+			await settingsRequest;
+			await expect(panel.getByRole('status').first()).toContainText('Loading chat');
+			await expect(panel.getByText(/No AI provider is configured/)).toHaveCount(0);
+			await expect(panel.locator('select[title="Chat provider"]')).toHaveCount(0);
+		} finally {
+			settingsGetGate.resolve();
+		}
 		await expect(panel.locator('select[title="Chat provider"]')).toHaveValue('openrouter');
 		await expect(panel.getByText('Start a session and ask anything.')).toBeVisible({
 			timeout: 5_000

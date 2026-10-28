@@ -1,29 +1,17 @@
 from __future__ import annotations
 
+from collections.abc import Callable
 from dataclasses import dataclass
 from typing import Any, Protocol, runtime_checkable
 
-import polars as pl
 from pydantic import BaseModel, ConfigDict
 
+from dataforge_protocol import compute_pb2
 from runtime.domain.compute.result import ComputeWorkerResult
 
 
 class OperationParams(BaseModel):
     model_config = ConfigDict(extra="forbid")
-
-
-class OperationHandler(Protocol):
-    def __call__(
-        self,
-        lf: pl.LazyFrame,
-        params: dict[str, object],
-        *,
-        step_id: str,
-        right_lf: pl.LazyFrame | None = None,
-        right_sources: dict[str, pl.LazyFrame] | None = None,
-    ) -> pl.LazyFrame:
-        raise NotImplementedError
 
 
 @dataclass(slots=True)
@@ -77,9 +65,37 @@ class ComputeWorker(Protocol):
     resource_config: dict[str, Any]
     effective_resources: dict[str, Any]
     current_job_id: str | None
+    image_digest: str | None
+    termination_reason: str | None
+    exit_code: int | None
+    oom_killed: bool | None
 
     @property
     def process_id(self) -> int | None:
+        raise NotImplementedError
+
+    @property
+    def container_id(self) -> str | None:
+        raise NotImplementedError
+
+    @property
+    def docker_host(self) -> str | None:
+        raise NotImplementedError
+
+    @property
+    def lifecycle_status(self) -> str:
+        raise NotImplementedError
+
+    def bind_identity(
+        self,
+        identity: compute_pb2.ComputeWorkerIdentity,
+        *,
+        resource_config: dict[str, Any] | None = None,
+        namespace: str | None = None,
+    ) -> None:
+        raise NotImplementedError
+
+    def bind_capacity_notifier(self, notifier: Callable[[], None]) -> None:
         raise NotImplementedError
 
     def start(self) -> None:

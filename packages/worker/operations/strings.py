@@ -4,7 +4,7 @@ import polars as pl
 
 from operations.enums import StringTransformMethod
 from operations.validation import validate_regex_pattern
-from runtime.domain.compute.base import OperationHandler, OperationParams
+from runtime.domain.compute.base import OperationParams
 
 
 class StringTransformParams(OperationParams):
@@ -31,40 +31,37 @@ _STRING_METHODS: dict[StringTransformMethod, Callable[[pl.Expr], pl.Expr]] = {
 }
 
 
-class StringTransformHandler(OperationHandler):
-    def __call__(self, lf: pl.LazyFrame, params: dict, **_) -> pl.LazyFrame:
-        validated = StringTransformParams.model_validate(params)
-        target = validated.new_column or validated.column
-        if not target:
-            raise ValueError("string_transform requires new_column parameter")
+def string_transform(lf: pl.LazyFrame, params: StringTransformParams, **_) -> pl.LazyFrame:
+    target = params.new_column or params.column
+    if not target:
+        raise ValueError("string_transform requires new_column parameter")
 
-        base = pl.col(validated.column)
-        method_name = StringTransformMethod.read(validated.method)
-        method = _STRING_METHODS.get(method_name) if method_name is not None else None
-        if method:
-            return lf.with_columns(method(base).alias(target))
+    base = pl.col(params.column)
+    method = _STRING_METHODS.get(params.method)
+    if method:
+        return lf.with_columns(method(base).alias(target))
 
-        if validated.method == StringTransformMethod.SLICE:
-            start = validated.start or 0
-            length = None if validated.end is None else max(validated.end - start, 0)
-            return lf.with_columns(base.str.slice(start, length).alias(target))
+    if params.method == StringTransformMethod.SLICE:
+        start = params.start or 0
+        length = None if params.end is None else max(params.end - start, 0)
+        return lf.with_columns(base.str.slice(start, length).alias(target))
 
-        if validated.method == StringTransformMethod.REPLACE:
-            if not validated.pattern:
-                raise ValueError("string_transform replace requires pattern parameter")
-            validate_regex_pattern(validated.pattern)
-            return lf.with_columns(base.str.replace_all(validated.pattern, validated.replacement or "").alias(target))
+    if params.method == StringTransformMethod.REPLACE:
+        if not params.pattern:
+            raise ValueError("string_transform replace requires pattern parameter")
+        validate_regex_pattern(params.pattern)
+        return lf.with_columns(base.str.replace_all(params.pattern, params.replacement or "").alias(target))
 
-        if validated.method == StringTransformMethod.EXTRACT:
-            if not validated.pattern:
-                raise ValueError("string_transform extract requires pattern parameter")
-            validate_regex_pattern(validated.pattern)
-            return lf.with_columns(base.str.extract(validated.pattern, validated.group_index or 0).alias(target))
+    if params.method == StringTransformMethod.EXTRACT:
+        if not params.pattern:
+            raise ValueError("string_transform extract requires pattern parameter")
+        validate_regex_pattern(params.pattern)
+        return lf.with_columns(base.str.extract(params.pattern, params.group_index or 0).alias(target))
 
-        if validated.method == StringTransformMethod.SPLIT:
-            return lf.with_columns(base.str.split(validated.delimiter or " ").alias(target))
+    if params.method == StringTransformMethod.SPLIT:
+        return lf.with_columns(base.str.split(params.delimiter or " ").alias(target))
 
-        if validated.method == StringTransformMethod.SPLIT_TAKE:
-            return lf.with_columns(base.str.split(validated.delimiter or " ").list.get(validated.index or 0).alias(target))
+    if params.method == StringTransformMethod.SPLIT_TAKE:
+        return lf.with_columns(base.str.split(params.delimiter or " ").list.get(params.index or 0).alias(target))
 
-        raise ValueError(f"Unsupported string method: {validated.method}")
+    raise ValueError(f"Unsupported string method: {params.method}")

@@ -646,7 +646,8 @@ async def test_coordinator_notification_only_wakes_outbox(monkeypatch) -> None:
 
     wakes: list[str] = []
     callbacks = {'chat_wake': lambda: wakes.append('chat'), 'telegram_wake': lambda: wakes.append('telegram')}
-    await runtime_coordinator._handle_coordinator_notification({'kind': runtime_coordinator.OUTBOX_WAKE_KIND, 'namespace': 'tenant-a'}, **callbacks)
+    outbox_kind = runtime_coordinator.runtime_ipc.NotifyKind.OUTBOX
+    await runtime_coordinator._handle_coordinator_notification({'kind': outbox_kind, 'namespace': 'tenant-a'}, **callbacks)
     await runtime_coordinator._handle_coordinator_notification({'kind': 'compute_response', 'request_id': 'request-1'}, **callbacks)
     await runtime_coordinator._handle_coordinator_notification({'kind': 'chat_turn'}, **callbacks)
     await runtime_coordinator._handle_coordinator_notification({'kind': 'settings_changed'}, **callbacks)

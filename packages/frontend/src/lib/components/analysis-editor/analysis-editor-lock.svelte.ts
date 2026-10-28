@@ -5,6 +5,19 @@ import {
 } from '#lib/utils/analysis-lock-state.js';
 import { openLockSession, type LockSessionError } from '#lib/api/locks.js';
 
+export type SaveButtonState =
+	'pending' | 'locked' | 'readonly' | 'released' | 'saving' | 'dirty' | 'clean';
+
+const SAVE_LABELS = {
+	pending: 'Connecting...',
+	locked: 'Locked',
+	readonly: 'Read only',
+	released: 'Read only',
+	saving: 'Saving...',
+	dirty: 'Save',
+	clean: 'Saved'
+} satisfies Record<SaveButtonState, string>;
+
 export type EditorLockControllerDeps = {
 	validAnalysisId: () => string | null;
 	getDraftLoaded: () => boolean;
@@ -28,12 +41,11 @@ export function createEditorLockController(deps: EditorLockControllerDeps) {
 		}
 		return getEditorAccessState(lockMode);
 	});
-	const lockedByOther = $derived(lockMode === 'other');
 	const lockReadOnly = $derived(lockIntent === 'released' || isEditorReadOnly(lockMode));
 	const editorReadOnly = $derived(
 		lockReadOnly || !deps.getDraftLoaded() || remoteLockSyncPending || remoteLockSyncFailed
 	);
-	const saveButtonState = $derived.by(() => {
+	const saveButtonState = $derived.by((): SaveButtonState => {
 		if (editorAccessState === 'pending') return 'pending';
 		if (editorAccessState === 'locked') return 'locked';
 		if (editorAccessState === 'unavailable') return 'readonly';
@@ -42,15 +54,7 @@ export function createEditorLockController(deps: EditorLockControllerDeps) {
 		if (deps.getIsDirty()) return 'dirty';
 		return 'clean';
 	});
-	const saveButtonLabel = $derived.by(() => {
-		if (editorAccessState === 'pending') return 'Connecting...';
-		if (editorAccessState === 'locked') return 'Locked';
-		if (editorAccessState === 'unavailable') return 'Read only';
-		if (editorAccessState === 'released') return 'Read only';
-		if (deps.getIsSaving()) return 'Saving...';
-		if (deps.getIsDirty()) return 'Save';
-		return 'Saved';
-	});
+	const saveButtonLabel = $derived(SAVE_LABELS[saveButtonState]);
 	const lockButtonLabel = $derived.by(() => {
 		if (editorAccessState === 'editable') return 'Unlock';
 		if (editorAccessState === 'released') return 'Lock';
@@ -142,9 +146,6 @@ export function createEditorLockController(deps: EditorLockControllerDeps) {
 		get lockMode() {
 			return lockMode;
 		},
-		get lockIntent() {
-			return lockIntent;
-		},
 		get remoteLockSyncPending() {
 			return remoteLockSyncPending;
 		},
@@ -162,9 +163,6 @@ export function createEditorLockController(deps: EditorLockControllerDeps) {
 		},
 		get editorReadOnly() {
 			return editorReadOnly;
-		},
-		get lockedByOther() {
-			return lockedByOther;
 		},
 		get lockReadOnly() {
 			return lockReadOnly;

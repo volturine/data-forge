@@ -42,6 +42,8 @@ type LoadAnalysis = {
 	name: string;
 };
 
+type BrowserPerformanceSnapshot = { metrics: Array<{ name: string; value: number }> };
+
 type NavigationFailurePage = {
 	index: number;
 	kind: 'analysis' | 'datasource';
@@ -456,7 +458,7 @@ test.describe('Concurrent authenticated browser sessions', () => {
 				if (index > 0 && authRequired) {
 					const response = await context.request.post('/api/v1/auth/register', {
 						data: {
-							email: `e2e-load-${E2E_RUN_STAMP}-account-${index}@example.com`,
+							email: `e2e-load-${E2E_RUN_STAMP}-account-${index}-repeat-${testInfo.repeatEachIndex}@example.com`,
 							password: E2E_PASSWORD,
 							display_name: `E2E Load Account ${index + 1}`
 						}
@@ -501,7 +503,7 @@ test.describe('Concurrent authenticated browser sessions', () => {
 						page,
 						testInfo.workerIndex,
 						`${testInfo.title} tab ${index}`,
-						`${testInfo.testId}-tab-${index}`
+						`${testInfo.testId}-repeat-${testInfo.repeatEachIndex}-tab-${index}`
 					)
 				);
 			});
@@ -537,6 +539,16 @@ test.describe('Concurrent authenticated browser sessions', () => {
 
 			// Start all 30 distinct analysis transforms and all shared datasource
 			// previews together, so the probe measures the mixed 50-tab burst.
+			const rendererSession =
+				browserCount === 1 ? await pages[0].context().newCDPSession(pages[0]) : null;
+			if (rendererSession) {
+				await rendererSession.send('Performance.enable', { timeDomain: 'threadTicks' });
+			}
+			const rendererBeforeNavigation: BrowserPerformanceSnapshot | null = rendererSession
+				? await rendererSession.send('Performance.getMetrics')
+				: null;
+			const burstStartedAtEpochMs = Date.now();
+			const burstStartedAt = performance.now();
 			const navigationResults = await Promise.allSettled([
 				...analysisPages.map(async (page, index) => {
 					try {
@@ -564,6 +576,7 @@ test.describe('Concurrent authenticated browser sessions', () => {
 					}
 				})
 			]);
+			const navigationBatchMs = performance.now() - burstStartedAt;
 			const navigationFailures = navigationResults
 				.filter((result): result is PromiseRejectedResult => result.status === 'rejected')
 				.map((result) => result.reason);
@@ -584,6 +597,8 @@ test.describe('Concurrent authenticated browser sessions', () => {
 					await expect(page.locator('[data-column-id="id"]')).toBeVisible();
 				})
 			]);
+			const previewReadyAtEpochMs = Date.now();
+			const previewReadyBatchMs = performance.now() - burstStartedAt;
 			const previewFailures = previewResults
 				.filter((result): result is PromiseRejectedResult => result.status === 'rejected')
 				.map((result) => result.reason);
@@ -592,6 +607,45 @@ test.describe('Concurrent authenticated browser sessions', () => {
 					previewFailures,
 					`Load probe previews failed in ${previewFailures.length} of ${browserCount} tabs`
 				);
+			}
+			let rendererProfile: {
+				timeDomain: string;
+				beforeNavigation: BrowserPerformanceSnapshot | null;
+				ready: BrowserPerformanceSnapshot;
+				afterGc: BrowserPerformanceSnapshot;
+				scripts: Array<{ path: string; decodedBytes: number; encodedBytes: number }>;
+			} | null = null;
+			if (rendererSession) {
+				const ready: BrowserPerformanceSnapshot =
+					await rendererSession.send('Performance.getMetrics');
+				// Normalize retained heap after the usable-preview timestamp. Startup
+				// CPU is captured before this measurement-only collection.
+				await rendererSession.send('HeapProfiler.collectGarbage');
+				const afterGc: BrowserPerformanceSnapshot =
+					await rendererSession.send('Performance.getMetrics');
+				const scripts = await pages[0].evaluate(() =>
+					performance.getEntriesByType('resource').flatMap((entry) => {
+						const resource = entry as PerformanceResourceTiming;
+						const path = new URL(resource.name).pathname;
+						return path.endsWith('.js')
+							? [
+									{
+										path,
+										decodedBytes: resource.decodedBodySize,
+										encodedBytes: resource.encodedBodySize
+									}
+								]
+							: [];
+					})
+				);
+				rendererProfile = {
+					timeDomain: 'threadTicks',
+					beforeNavigation: rendererBeforeNavigation,
+					ready,
+					afterGc,
+					scripts
+				};
+				await rendererSession.detach();
 			}
 			await Promise.all([...pendingResponseReadsByPage.values()].flat());
 			const tabApiResponsesByPage = new Map(
@@ -678,9 +732,15 @@ test.describe('Concurrent authenticated browser sessions', () => {
 			const analysisPreviewLatencies = previewLatenciesForPages(analysisPages);
 			const datasourcePreviewLatencies = previewLatenciesForPages(datasourcePages);
 			const loadMetrics = {
+				repeatIndex: testInfo.repeatEachIndex,
 				browserTabs: browserCount,
 				accounts: accountCount,
 				browserProcesses: probeBrowsers.length,
+				burstStartedAtEpochMs,
+				previewReadyAtEpochMs,
+				navigationBatchMs,
+				previewReadyBatchMs,
+				rendererProfile,
 				previewTimingSource: 'API Server-Timing app;dur',
 				computePreviewResponses: tabComputePreviewResponses.length,
 				previewP50Ms: percentile(allPreviewLatencies, 0.5),
@@ -793,10 +853,18 @@ test.describe('Concurrent authenticated browser sessions', () => {
 						if (!response.ok()) return { index, status: response.status() };
 						const lock = (await response.json()) as { owner_id?: unknown } | null;
 						const lockOwnerId = typeof lock?.owner_id === 'string' ? lock.owner_id : null;
+						const expectedUserId = accountUserIds[index] ?? null;
 						return {
 							index,
-							lockOwnerAccountIndex: lockOwnerId ? accountUserIds.indexOf(lockOwnerId) : -1,
-							lockOwnedByExpectedAccount: lockOwnerId === accountUserIds[index]
+							lockOwnerAccountIndex: lockOwnerId
+								? accountUserIds.findIndex(
+										(userId) => userId !== null && lockOwnerId.startsWith(`${userId}:`)
+									)
+								: -1,
+							lockOwnedByExpectedAccount:
+								lockOwnerId !== null &&
+								expectedUserId !== null &&
+								lockOwnerId.startsWith(`${expectedUserId}:`)
 						};
 					} catch (error) {
 						return { index, error: String(error) };

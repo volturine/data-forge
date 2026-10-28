@@ -27,9 +27,8 @@ from backend_core.database import (
 )
 from backend_core.logging import configure_logging_off_loop
 from backend_core.public_schema import ensure_backend_public_tables
-from backend_core.runtime_integration_delivery import NotificationDeliveryDispatcher
+from backend_core.runtime_integration_delivery import run_notification_delivery
 from backend_core.runtime_outbox_dispatcher import OUTBOX_WAKE_HUB, RuntimeOutboxDispatcher
-from backend_core.runtime_outbox_service import OUTBOX_WAKE_KIND
 from backend_grpc.server import start_runtime_grpc_server
 from modules.chat.consumer import ChatTurnConsumer
 from modules.telegram.runtime import TelegramIntegrationRuntime
@@ -231,16 +230,14 @@ async def _handle_coordinator_notification(
     chat_wake: Callable[[], None],
     telegram_wake: Callable[[], None],
 ) -> None:
-    kind = payload.get('kind')
-    if kind == OUTBOX_WAKE_KIND:
-        namespace = payload.get('namespace')
-        OUTBOX_WAKE_HUB.publish(namespace if isinstance(namespace, str) and namespace else None)
-        return
-    if kind == runtime_ipc.CHAT_TURN_WAKE_KIND:
-        chat_wake()
-        return
-    if kind in {'settings_changed', 'telegram_detection'}:
-        telegram_wake()
+    match payload.get('kind'):
+        case runtime_ipc.NotifyKind.OUTBOX:
+            namespace = payload.get('namespace')
+            OUTBOX_WAKE_HUB.publish(namespace if isinstance(namespace, str) and namespace else None)
+        case runtime_ipc.NotifyKind.CHAT_TURN:
+            chat_wake()
+        case runtime_ipc.NotifyKind.SETTINGS_CHANGED | runtime_ipc.NotifyKind.TELEGRAM_DETECTION:
+            telegram_wake()
 
 
 async def _recover_coordinator_notifications(*, chat_wake: Callable[[], None], telegram_wake: Callable[[], None]) -> None:
@@ -510,7 +507,7 @@ async def _run_owned_epoch(process_stop_event: asyncio.Event, lease: RuntimeCoor
                     runtime_ipc.serve_api_notifications(listener, owner_stop_event, handler, recover=recover), name='coordinator-notifications'
                 ),
                 asyncio.create_task(RuntimeOutboxDispatcher().run(owner_stop_event), name='runtime-outbox'),
-                asyncio.create_task(NotificationDeliveryDispatcher().run(owner_stop_event), name='notification-delivery'),
+                asyncio.create_task(run_notification_delivery(owner_stop_event), name='notification-delivery'),
                 asyncio.create_task(_run_chat_turn_consumer(chat_consumer.run, owner_stop_event), name='chat-turn-consumer'),
                 asyncio.create_task(telegram_runtime.run(owner_stop_event), name='telegram-integration'),
             ]

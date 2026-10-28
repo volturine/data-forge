@@ -5,30 +5,24 @@
 	import { analysisStore } from '#lib/stores/analysis.svelte.js';
 	import { datasourceStore } from '#lib/stores/datasource.svelte.js';
 	import { schemaStore } from '#lib/stores/schema.svelte.js';
+	import { fetchSourceSchema } from '#lib/components/operations/source-schemas.js';
 	import DatasourcePicker from '#lib/components/common/DatasourcePicker.svelte';
 	import SectionHeader from '#lib/components/ui/SectionHeader.svelte';
 	import Callout from '#lib/components/ui/Callout.svelte';
 	import { css, stepConfig, label } from '#lib/styles/panda.js';
 	import { SvelteSet } from 'svelte/reactivity';
 
-	const defaultConfig: UnionByNameConfigData = {
-		sources: [],
-		allow_missing: true
-	};
-
 	interface Props {
 		schema: Schema;
-		config?: UnionByNameConfigData;
+		config: UnionByNameConfigData;
 	}
 
-	let { schema, config = $bindable(defaultConfig) }: Props = $props();
+	let { schema, config = $bindable() }: Props = $props();
 
 	const currentTabDatasource = $derived(analysisStore.activeTab?.datasource.id ?? null);
 	const currentDatasource = $derived(
 		datasourceStore.datasources.find((ds) => ds.id === currentTabDatasource)
 	);
-	const datasourceOptions = $derived(datasourceStore.datasources);
-	const ready = $derived(datasourceStore.loaded);
 
 	const loaded = new SvelteSet<string>();
 	let pending = $state(0);
@@ -41,22 +35,8 @@
 	async function loadSourceSchema(datasourceId: string, options: { forceRefresh?: boolean } = {}) {
 		loaded.add(datasourceId);
 		pending += 1;
-		if (options.forceRefresh) {
-			datasourceStore.clearSchemaCache(datasourceId);
-		}
 		try {
-			// Cache-first: join/union config only needs column metadata, not re-ingest.
-			const schemaInfo = await datasourceStore.getSchema(datasourceId, {
-				refresh: options.forceRefresh === true
-			});
-			const unionSchema: Schema = {
-				columns: schemaInfo.columns.map((c) => ({
-					name: c.name,
-					dtype: c.dtype,
-					nullable: c.nullable
-				})),
-				row_count: schemaInfo.row_count
-			};
+			const unionSchema = await fetchSourceSchema(datasourceId, options);
 			schemaStore.setJoinDatasource(datasourceId, unionSchema);
 			const { [datasourceId]: _removed, ...rest } = schemaErrors;
 			schemaErrors = rest;
@@ -85,7 +65,11 @@
 	});
 </script>
 
-<div class={stepConfig()} data-ready={ready || undefined} data-loading={loading || undefined}>
+<div
+	class={stepConfig()}
+	data-ready={datasourceStore.loaded || undefined}
+	data-loading={loading || undefined}
+>
 	<p
 		class={css({
 			marginTop: '0',
@@ -143,13 +127,13 @@
 			<SectionHeader>Union Sources</SectionHeader>
 		</div>
 
-		{#if datasourceOptions.length === 0}
+		{#if datasourceStore.datasources.length === 0}
 			<p class={css({ marginY: '2', fontStyle: 'italic', color: 'fg.muted' })}>
 				Add another datasource to enable unions.
 			</p>
 		{:else}
 			<DatasourcePicker
-				datasources={datasourceOptions}
+				datasources={datasourceStore.datasources}
 				bind:selected={config.sources}
 				mode="multi"
 				showChips={true}

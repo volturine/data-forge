@@ -105,8 +105,8 @@
 		void runLayout();
 	});
 
-	export function resetLineageView() {
-		void flowApi?.fitView();
+	export async function resetLineageView() {
+		await flowApi?.fitView();
 		syncZoom();
 	}
 

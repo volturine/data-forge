@@ -3,7 +3,8 @@
 import asyncio
 import threading
 import time
-from concurrent.futures import ThreadPoolExecutor
+from collections.abc import Callable
+from concurrent.futures import Future, ThreadPoolExecutor
 
 import pytest
 
@@ -61,7 +62,7 @@ class TestHealthEndpoints:
 
 
 def test_readiness_object_store_failure_does_not_expose_exception_detail(monkeypatch) -> None:
-    import backend_core.object_store_probe as object_store_probe
+    from backend_core import object_store_probe
     from backend_core.application import _readiness_checks
 
     def fail(*, namespace: str | None = None) -> str:
@@ -107,4 +108,48 @@ async def test_readiness_probe_coalesces_callers_and_survives_one_cancellation()
         assert calls == 1
     finally:
         release.set()
+        executor.shutdown(wait=True, cancel_futures=True)
+
+
+def test_readiness_probe_completed_future_does_not_deadlock(monkeypatch: pytest.MonkeyPatch) -> None:
+    from backend_core.application import ReadinessProbe
+
+    executor = ThreadPoolExecutor(max_workers=1, thread_name_prefix='readiness-completed-test')
+    results = [({'database': 'first'}, True), ({'database': 'second'}, False)]
+    calls = 0
+
+    def check() -> tuple[dict[str, str], bool]:
+        nonlocal calls
+        result = results[calls]
+        calls += 1
+        return result
+
+    def submit_immediately(
+        function: Callable[[], tuple[dict[str, str], bool]],
+    ) -> Future[tuple[dict[str, str], bool]]:
+        future: Future[tuple[dict[str, str], bool]] = Future()
+        future.set_result(function())
+        return future
+
+    monkeypatch.setattr(executor, 'submit', submit_immediately)
+    probe = ReadinessProbe(executor, check)
+
+    async def run_twice() -> tuple[tuple[dict[str, str], bool], tuple[dict[str, str], bool]]:
+        return await probe.run(), await probe.run()
+
+    outcome: Future[tuple[tuple[dict[str, str], bool], tuple[dict[str, str], bool]]] = Future()
+
+    def run_in_daemon_thread() -> None:
+        try:
+            outcome.set_result(asyncio.run(run_twice()))
+        except BaseException as error:
+            outcome.set_exception(error)
+
+    thread = threading.Thread(target=run_in_daemon_thread, name='readiness-completed-test', daemon=True)
+    thread.start()
+
+    try:
+        assert outcome.result(timeout=2) == (results[0], results[1])
+        assert calls == 2
+    finally:
         executor.shutdown(wait=True, cancel_futures=True)

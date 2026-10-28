@@ -21,7 +21,6 @@
 
 	let { open, validAnalysisId, scopeTabId, tabs, onClose }: Props = $props();
 
-	let exportScopeTabId = $state<string | null>(null);
 	let exportFormat = $state<CodeExportFormat>('polars');
 	let exportCopied = $state(false);
 	let exportError = $state<string | null>(null);
@@ -41,20 +40,12 @@
 	const exportFilename = $derived(exportResponse?.filename ?? '');
 	const exportLoading = $derived(exportLoadingByFormat[exportFormat]);
 	const exportScopeTabName = $derived.by(() => {
-		const id = exportScopeTabId;
-		if (!id) return null;
-		const tab = tabs.find((item) => item.id === id);
+		if (!scopeTabId) return null;
+		const tab = tabs.find((item) => item.id === scopeTabId);
 		return tab?.name ?? null;
 	});
 
-	function resetExportState() {
-		exportByFormat = { polars: null, sql: null };
-		exportLoadingByFormat = { polars: false, sql: false };
-		exportError = null;
-		exportCopied = false;
-	}
-
-	async function loadExportCode(format: CodeExportFormat, tabId = exportScopeTabId) {
+	async function loadExportCode(format: CodeExportFormat, tabId = scopeTabId) {
 		if (!validAnalysisId) return;
 		if (exportLoadingByFormat[format]) return;
 		exportLoadingByFormat = { ...exportLoadingByFormat, [format]: true };
@@ -101,18 +92,8 @@
 		downloadBlob(new Blob([exportCode], { type }), exportFilename);
 	}
 
-	function closeExportModal() {
-		onClose();
-		exportScopeTabId = null;
-		exportError = null;
-		exportCopied = false;
-	}
-
 	onMount(() => {
 		if (!open) return;
-		exportScopeTabId = scopeTabId;
-		exportFormat = 'polars';
-		resetExportState();
 		void loadExportCode('polars', scopeTabId);
 	});
 
@@ -154,7 +135,7 @@
 				transitionDuration: 'normal',
 				_hover: { backgroundColor: 'bg.hover', color: 'fg.primary' }
 			})}
-			onclick={closeExportModal}
+			onclick={onClose}
 			aria-label="Close export modal"
 		>
 			<X size={16} />
@@ -301,15 +282,13 @@
 			justifyContent: 'flex-end'
 		})}
 	>
-		<button class={button({ variant: 'secondary' })} onclick={closeExportModal} type="button"
-			>Close</button
-		>
+		<button class={button({ variant: 'secondary' })} onclick={onClose} type="button">Close</button>
 	</div>
 {/snippet}
 
 <BaseModal
 	{open}
-	onClose={closeExportModal}
+	{onClose}
 	closeOnEscape={true}
 	closeOnBackdrop={true}
 	panelClass={css({

@@ -1,20 +1,13 @@
 <script lang="ts">
 	import { Handle, Position, type NodeProps } from '@xyflow/svelte';
 	import type { Node } from '@xyflow/svelte';
-	import type { LineageNodeData } from './lineage-flow';
+	import { LINEAGE_KIND_LABELS, type LineageNodeData } from './lineage-flow';
 	import { css } from '#lib/styles/panda.js';
 	import { Database, GitBranch, Table, Workflow } from '@lucide/svelte';
 
 	type LineageNodeProps = NodeProps<Node<LineageNodeData, 'lineage'>>;
 
 	let { data }: LineageNodeProps = $props();
-
-	const kindLabel: Record<LineageNodeData['kind'], string> = {
-		source: 'Source',
-		output: 'Output',
-		internal: 'Internal',
-		analysis: 'Analysis'
-	};
 
 	const kindBorderColor: Record<LineageNodeData['kind'], string> = {
 		source: 'var(--colors-accent-primary)',
@@ -65,7 +58,7 @@
 	style:border-style={data.kind === 'internal' ? 'dashed' : 'solid'}
 	role="button"
 	tabindex="0"
-	aria-label={`${kindLabel[data.kind]} ${data.name}`}
+	aria-label={`${LINEAGE_KIND_LABELS[data.kind]} ${data.name}`}
 	title={data.name}
 	onkeydown={(event) => {
 		if (event.key === 'Enter' || event.key === ' ') {

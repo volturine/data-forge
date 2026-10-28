@@ -4,6 +4,8 @@ import logging
 import threading
 import time
 from concurrent.futures import ThreadPoolExecutor
+from types import SimpleNamespace
+from unittest.mock import AsyncMock
 
 import pytest
 from fastapi.middleware.cors import CORSMiddleware
@@ -46,6 +48,48 @@ def _frontend_request(accept_encoding: str | None = None, path: str = '/') -> Re
 
 class TestUvicornSettings:
     @pytest.mark.asyncio
+    async def test_lifespan_waits_for_bootstrap_collection_off_loop(self, monkeypatch: pytest.MonkeyPatch) -> None:
+        from backend_core import application
+
+        loop = asyncio.get_running_loop()
+        loop_thread_id = threading.get_ident()
+        collection_started = asyncio.Event()
+        entered = asyncio.Event()
+        shutdown = asyncio.Event()
+        release_collection = threading.Event()
+        collections: list[tuple[int, int]] = []
+        bootstrap = AsyncMock(return_value=None)
+
+        def collect(generation: int) -> int:
+            assert bootstrap.await_count == 1
+            collections.append((generation, threading.get_ident()))
+            loop.call_soon_threadsafe(collection_started.set)
+            if not release_collection.wait(timeout=5):
+                raise TimeoutError('bootstrap collection was not released')
+            return 0
+
+        monkeypatch.setattr(application, '_start_api_lifespan', bootstrap)
+        monkeypatch.setattr(application, 'gc', SimpleNamespace(collect=collect))
+
+        async def serve() -> None:
+            async with application.lifespan(application.app):
+                entered.set()
+                await shutdown.wait()
+
+        serving = asyncio.create_task(serve())
+        try:
+            await asyncio.wait_for(collection_started.wait(), timeout=2)
+            assert not entered.is_set()
+            assert [generation for generation, _ in collections] == [2]
+            assert collections[0][1] != loop_thread_id
+            release_collection.set()
+            await asyncio.wait_for(entered.wait(), timeout=2)
+        finally:
+            release_collection.set()
+            shutdown.set()
+            await asyncio.wait_for(serving, timeout=2)
+
+    @pytest.mark.asyncio
     async def test_prewarm_starts_all_configured_anyio_threads(self) -> None:
         import anyio.to_thread
 
@@ -55,7 +99,7 @@ class TestUvicornSettings:
             limiter.total_tokens = 3
             assert await _prewarm_anyio_thread_pool(3) == 3
             assert limiter.statistics().borrowed_tokens == 0
-            assert await anyio.to_thread.run_sync(lambda: threading.get_ident()) in {thread.ident for thread in threading.enumerate()}
+            assert await anyio.to_thread.run_sync(threading.get_ident) in {thread.ident for thread in threading.enumerate()}
         finally:
             limiter.total_tokens = original
 
@@ -92,7 +136,7 @@ class TestUvicornSettings:
 
     @pytest.mark.asyncio
     async def test_slow_request_diagnostics_return_cached_snapshot_without_waiting(self, monkeypatch) -> None:
-        import backend_core.application as application
+        from backend_core import application
 
         executor = ThreadPoolExecutor(max_workers=1, thread_name_prefix='snapshot-test')
         refresh_started = threading.Event()
@@ -138,7 +182,7 @@ class TestUvicornSettings:
     def test_api_uvicorn_disables_websocket_compression(self, monkeypatch) -> None:
         import uvicorn
 
-        import backend_core.application as application
+        from backend_core import application
 
         call: dict[str, object] = {}
 
@@ -286,18 +330,18 @@ class TestUvicornSettings:
         assert _resolve_uvicorn_limit_concurrency() == 100
 
     def test_main_module_no_longer_owns_scheduler_loop(self) -> None:
-        import backend_core.application as application
+        from backend_core import application
 
         assert not hasattr(application, 'scheduler_loop')
 
     def test_main_module_no_longer_owns_embedded_build_worker_toggle(self) -> None:
-        import backend_core.application as application
+        from backend_core import application
 
         assert not hasattr(application, '_should_start_embedded_build_worker')
 
     @pytest.mark.asyncio
     async def test_static_route_serves_prerendered_extensionless_document(self, monkeypatch, tmp_path) -> None:
-        import backend_core.application as application
+        from backend_core import application
 
         (tmp_path / 'login.html').write_text('<h1>Sign in</h1>', encoding='utf8')
         (tmp_path / '200.html').write_text('<script>spa fallback</script>', encoding='utf8')
@@ -311,7 +355,7 @@ class TestUvicornSettings:
 
     @pytest.mark.asyncio
     async def test_static_route_uses_loaded_frontend_asset_cache(self, monkeypatch, tmp_path) -> None:
-        import backend_core.application as application
+        from backend_core import application
 
         asset = tmp_path / '_app' / 'immutable' / 'entry.js'
         asset.parent.mkdir(parents=True)
@@ -348,7 +392,7 @@ class TestUvicornSettings:
         ],
     )
     async def test_static_route_negotiates_prepared_gzip(self, monkeypatch, tmp_path, accept_encoding: str | None, encoding: str | None) -> None:
-        import backend_core.application as application
+        from backend_core import application
 
         asset = tmp_path / '_app' / 'immutable' / 'entry.js'
         asset.parent.mkdir(parents=True)
@@ -383,7 +427,7 @@ class TestUvicornSettings:
 
     @pytest.mark.asyncio
     async def test_root_route_negotiates_gzip_and_version_metadata_is_not_immutable(self, monkeypatch, tmp_path) -> None:
-        import backend_core.application as application
+        from backend_core import application
 
         index = tmp_path / 'index.html'
         index_content = b'<html><body>data-forge frontend page</body></html>\n' * 128
@@ -408,7 +452,7 @@ class TestUvicornSettings:
         assert 'content-encoding' not in version_response.headers
 
     def test_frontend_asset_cache_skips_tiny_and_binary_gzip_candidates(self, monkeypatch, tmp_path) -> None:
-        import backend_core.application as application
+        from backend_core import application
 
         tiny = tmp_path / 'tiny.js'
         tiny.write_bytes(b'console.log(1);')
@@ -424,7 +468,7 @@ class TestUvicornSettings:
 
     @pytest.mark.asyncio
     async def test_frontend_asset_cache_supports_symlinked_build_root(self, monkeypatch, tmp_path) -> None:
-        import backend_core.application as application
+        from backend_core import application
 
         target = tmp_path / 'build-target'
         asset = target / '_app' / 'immutable' / 'entry.js'
@@ -447,7 +491,7 @@ class TestUvicornSettings:
 
     @pytest.mark.asyncio
     async def test_static_file_fallback_checks_filesystem_off_event_loop(self, monkeypatch, tmp_path) -> None:
-        import backend_core.application as application
+        from backend_core import application
 
         page = tmp_path / 'login.html'
         page.write_text('<html>login</html>')
@@ -473,7 +517,7 @@ class TestUvicornSettings:
 
     @pytest.mark.asyncio
     async def test_slow_request_snapshot_is_offloaded_and_coalesced(self, monkeypatch) -> None:
-        import backend_core.application as application
+        from backend_core import application
 
         loop_thread = threading.get_ident()
         snapshot_started = threading.Event()

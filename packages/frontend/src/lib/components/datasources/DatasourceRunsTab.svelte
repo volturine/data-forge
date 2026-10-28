@@ -19,7 +19,7 @@
 		computeWorkerRunDisplayKind,
 		computeWorkerRunKindLabel
 	} from '#lib/types/build-stream.js';
-	import type { PaginatedStatus } from '#lib/stores/paginated-store.svelte.js';
+	import type { BuildsStoreStatus } from '#lib/stores/builds.svelte.js';
 	import Callout from '#lib/components/ui/Callout.svelte';
 	import { formatDateDisplay, toEpochDisplay } from '#lib/utils/datetime.js';
 	import { css, chip, emptyText } from '#lib/styles/panda.js';
@@ -37,7 +37,7 @@
 		datasourceId: string;
 		builds: BuildRunSummary[];
 		onboardingBuilds?: BuildRunSummary[];
-		status: PaginatedStatus;
+		status: BuildsStoreStatus;
 		error: string | null;
 		showPreviews?: boolean;
 		onTogglePreviews: () => void;

@@ -52,30 +52,23 @@
 		statsOpen = false;
 	}
 
-	const resolvedDatasource = $derived(datasource ?? null);
 	const canPreviewDatasource = $derived(
-		!!resolvedDatasource && datasourceHasMaterializedSnapshot(resolvedDatasource)
+		!!datasource && datasourceHasMaterializedSnapshot(datasource)
 	);
 	const analysisPipeline = $derived.by(() => {
-		if (!resolvedDatasource) return null;
-		if (!datasourceConfig) return null;
-		return buildDatasourcePreviewPipelinePayload({
-			datasource: resolvedDatasource,
-			datasourceConfig
-		});
+		if (!datasource) return null;
+		return buildDatasourcePreviewPipelinePayload({ datasource, datasourceConfig });
 	});
 
-	const previewRequestState = $derived.by(() => {
+	const previewRequest = $derived.by(() => {
 		if (!analysisPipeline) return null;
 		return {
-			request: {
-				target_step_id: 'source',
-				datasource_id: datasourceId,
-				analysis_pipeline: analysisPipeline,
-				row_limit: rowLimit,
-				page
-			} satisfies StepPreviewRequest
-		};
+			target_step_id: 'source',
+			datasource_id: datasourceId,
+			analysis_pipeline: analysisPipeline,
+			row_limit: rowLimit,
+			page
+		} satisfies StepPreviewRequest;
 	});
 
 	const query = createQuery(() => ({
@@ -85,21 +78,20 @@
 			'datasource-preview',
 			ns.ready ? ns.value : null,
 			datasourceId,
-			previewRequestState
+			previewRequest
 		] as const,
 		queryFn: async ({ queryKey }): Promise<StepPreviewResponse> => {
-			const state = queryKey[3];
-			if (!state) throw new Error('Datasource preview command is not ready');
-			const signal = previewSignal(state.request, queryKey[1]);
-			return fetchPreviewQueryData(state.request, signal, () =>
+			const request = queryKey[3];
+			if (!request) throw new Error('Datasource preview command is not ready');
+			const signal = previewSignal(request, queryKey[1]);
+			return fetchPreviewQueryData(request, signal, () =>
 				queryClient.cancelQueries({ queryKey, exact: true })
 			);
 		},
 		staleTime: 30000,
 		refetchOnMount: false,
 		retry: false,
-		enabled:
-			ns.ready && !!datasourceId && !!previewRequestState && !ns.switching && canPreviewDatasource
+		enabled: ns.ready && !!datasourceId && !!previewRequest && !ns.switching && canPreviewDatasource
 	}));
 
 	const data = $derived(query.data);
@@ -108,7 +100,7 @@
 	// fetching state for the UI readiness contract just like inline previews do.
 	const isLoading = $derived(query.isFetching);
 	const error = $derived(query.error);
-	const errorMessage = $derived(error instanceof Error ? error.message : '');
+	const errorMessage = $derived(error?.message ?? '');
 	const previewState = $derived.by(() => {
 		if (!canPreviewDatasource) return 'inactive';
 		if (!analysisPipeline) return 'waiting-for-payload';

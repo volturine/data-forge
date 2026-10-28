@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 from dataclasses import dataclass, fields
+from functools import cached_property
 from typing import ClassVar, Final, Self
 
 from backend_core.domain.api_enums import ApiEnumValue
@@ -124,7 +125,7 @@ class StepType:
         return self.chart_type is not None
 
 
-@dataclass(frozen=True, slots=True)
+@dataclass(frozen=True)
 class StepTypes:
     select: StepType = StepType(value=PipelineStepType.SELECT.value, label='Select')
     drop: StepType = StepType(value=PipelineStepType.DROP.value, label='Drop')
@@ -180,12 +181,13 @@ class StepTypes:
         value=PipelineStepType.PLOT_BOXPLOT.value, label='Box Plot', normalized=PipelineStepType.CHART.value, chart_type=ChartType.BOXPLOT
     )
 
+    @cached_property
+    def _definitions_by_value(self) -> dict[str, StepType]:
+        definitions = [getattr(self, step_field.name) for step_field in fields(self)]
+        return {definition.value: definition for definition in definitions}
+
     def _definition_for(self, step_type: str) -> StepType | None:
-        for step_field in fields(self):
-            definition = getattr(self, step_field.name)
-            if definition.value == step_type:
-                return definition
-        return None
+        return self._definitions_by_value.get(step_type)
 
     def all(self, *, include_plot_aliases: bool = True) -> tuple[str, ...]:
         step_types = tuple(getattr(self, step_field.name).value for step_field in fields(self))

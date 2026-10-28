@@ -10,10 +10,10 @@
 
 	interface Props {
 		schema: Schema;
-		config?: { columns: string[]; descending: boolean[] | boolean };
+		config: { columns: string[]; descending: boolean[] | boolean };
 	}
 
-	let { schema, config = $bindable({ columns: [], descending: [] }) }: Props = $props();
+	let { schema, config = $bindable() }: Props = $props();
 
 	const safeConfig: { columns: string[]; descending: boolean[] } = $derived({
 		columns: config?.columns ?? [],

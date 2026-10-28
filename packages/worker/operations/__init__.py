@@ -1,69 +1,87 @@
-from operations.ai import AIHandler, AIParams
-from operations.datasource import DatasourceHandler, DatasourceParams
-from operations.deduplicate import DeduplicateHandler, DeduplicateParams
-from operations.download import DownloadHandler, DownloadParams
-from operations.drop import DropHandler, DropParams
-from operations.explode import ExplodeHandler, ExplodeParams
-from operations.export import ExportHandler, ExportParams
-from operations.expression import ExpressionHandler, ExpressionParams
-from operations.fill_null import FillNullHandler, FillNullParams
-from operations.filter import FilterHandler, FilterParams
-from operations.groupby import GroupByHandler, GroupByParams
-from operations.join import JoinHandler, JoinParams
-from operations.limit import LimitHandler, LimitParams
-from operations.notification import NotificationHandler, NotificationParams
-from operations.pivot import PivotHandler, PivotParams
-from operations.plot import ChartHandler, ChartParams
-from operations.rename import RenameHandler, RenameParams
-from operations.sample import SampleHandler, SampleParams
-from operations.select import SelectHandler, SelectParams
-from operations.sort import SortHandler, SortParams
-from operations.strings import StringTransformHandler, StringTransformParams
-from operations.timeseries import TimeseriesHandler, TimeseriesParams
-from operations.topk import TopKHandler, TopKParams
-from operations.union import UnionByNameHandler, UnionParams
-from operations.unpivot import UnpivotHandler, UnpivotParams
-from operations.view import ViewHandler, ViewParams
-from operations.with_columns import WithColumnsHandler, WithColumnsParams
-from runtime.domain.compute.base import OperationHandler, OperationParams
+from collections.abc import Callable
+from dataclasses import dataclass
+
+import polars as pl
+
+from operations import (
+    ai,
+    datasource,
+    deduplicate,
+    download,
+    drop,
+    explode,
+    export,
+    expression,
+    fill_null,
+    filter,
+    groupby,
+    join,
+    limit,
+    notification,
+    pivot,
+    plot,
+    rename,
+    sample,
+    select,
+    sort,
+    strings,
+    timeseries,
+    topk,
+    union,
+    unpivot,
+    view,
+    with_columns,
+)
+from runtime.domain.compute.base import OperationParams
 
 __all__ = [
-    "HANDLERS",
+    "OPERATIONS",
     "PARAM_MODELS",
-    "OperationHandler",
+    "Operation",
     "OperationParams",
 ]
 
-# One registry keeps every executable step's handler and parameter model in sync.
-_OPERATIONS: dict[str, tuple[OperationHandler, type[OperationParams]]] = {
-    "datasource": (DatasourceHandler(), DatasourceParams),
-    "ai": (AIHandler(), AIParams),
-    "deduplicate": (DeduplicateHandler(), DeduplicateParams),
-    "download": (DownloadHandler(), DownloadParams),
-    "drop": (DropHandler(), DropParams),
-    "explode": (ExplodeHandler(), ExplodeParams),
-    "export": (ExportHandler(), ExportParams),
-    "fill_null": (FillNullHandler(), FillNullParams),
-    "filter": (FilterHandler(), FilterParams),
-    "groupby": (GroupByHandler(), GroupByParams),
-    "join": (JoinHandler(), JoinParams),
-    "limit": (LimitHandler(), LimitParams),
-    "notification": (NotificationHandler(), NotificationParams),
-    "pivot": (PivotHandler(), PivotParams),
-    "rename": (RenameHandler(), RenameParams),
-    "sample": (SampleHandler(), SampleParams),
-    "select": (SelectHandler(), SelectParams),
-    "sort": (SortHandler(), SortParams),
-    "string_transform": (StringTransformHandler(), StringTransformParams),
-    "timeseries": (TimeseriesHandler(), TimeseriesParams),
-    "topk": (TopKHandler(), TopKParams),
-    "union_by_name": (UnionByNameHandler(), UnionParams),
-    "unpivot": (UnpivotHandler(), UnpivotParams),
-    "view": (ViewHandler(), ViewParams),
-    "with_columns": (WithColumnsHandler(), WithColumnsParams),
-    "expression": (ExpressionHandler(), ExpressionParams),
-    "chart": (ChartHandler(), ChartParams),
+
+def passthrough(lf: pl.LazyFrame, params: OperationParams, **_) -> pl.LazyFrame:
+    """Return the input frame unchanged; the step's parameters are validated during conversion."""
+    return lf
+
+
+@dataclass(frozen=True, slots=True)
+class Operation:
+    params: type[OperationParams]
+    apply: Callable[..., pl.LazyFrame]
+
+
+# One registry keeps every executable step's function and parameter model in sync.
+OPERATIONS: dict[str, Operation] = {
+    "datasource": Operation(datasource.DatasourceParams, datasource.datasource),
+    "ai": Operation(ai.AIParams, ai.ai),
+    "deduplicate": Operation(deduplicate.DeduplicateParams, deduplicate.deduplicate),
+    "download": Operation(download.DownloadParams, passthrough),
+    "drop": Operation(drop.DropParams, drop.drop),
+    "explode": Operation(explode.ExplodeParams, explode.explode),
+    "export": Operation(export.ExportParams, passthrough),
+    "fill_null": Operation(fill_null.FillNullParams, fill_null.fill_null),
+    "filter": Operation(filter.FilterParams, filter.filter),
+    "groupby": Operation(groupby.GroupByParams, groupby.groupby),
+    "join": Operation(join.JoinParams, join.join),
+    "limit": Operation(limit.LimitParams, limit.limit),
+    "notification": Operation(notification.NotificationParams, notification.notification),
+    "pivot": Operation(pivot.PivotParams, pivot.pivot),
+    "rename": Operation(rename.RenameParams, rename.rename),
+    "sample": Operation(sample.SampleParams, sample.sample),
+    "select": Operation(select.SelectParams, select.select),
+    "sort": Operation(sort.SortParams, sort.sort),
+    "string_transform": Operation(strings.StringTransformParams, strings.string_transform),
+    "timeseries": Operation(timeseries.TimeseriesParams, timeseries.timeseries),
+    "topk": Operation(topk.TopKParams, topk.topk),
+    "union_by_name": Operation(union.UnionParams, union.union_by_name),
+    "unpivot": Operation(unpivot.UnpivotParams, unpivot.unpivot),
+    "view": Operation(view.ViewParams, passthrough),
+    "with_columns": Operation(with_columns.WithColumnsParams, with_columns.with_columns),
+    "expression": Operation(expression.ExpressionParams, expression.expression),
+    "chart": Operation(plot.ChartParams, passthrough),
 }
 
-HANDLERS: dict[str, OperationHandler] = {name: handler for name, (handler, _params) in _OPERATIONS.items()}
-PARAM_MODELS: dict[str, type[OperationParams]] = {name: params for name, (_handler, params) in _OPERATIONS.items()}
+PARAM_MODELS: dict[str, type[OperationParams]] = {name: operation.params for name, operation in OPERATIONS.items()}

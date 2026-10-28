@@ -2,58 +2,35 @@
 	import type { Schema } from '#lib/types/schema.js';
 	import type { StringMethodsConfigData } from '#lib/types/operation-config.js';
 	import ColumnDropdown from '#lib/components/common/ColumnDropdown.svelte';
+	import { getColumnTypeConfig } from '#lib/utils/column-types.js';
 	import { css, label, stepConfig, input } from '#lib/styles/panda.js';
 
 	interface Props {
 		schema: Schema;
-		config?: StringMethodsConfigData;
+		config: StringMethodsConfigData;
 	}
 
-	let {
-		schema,
-		config = $bindable({
-			column: '',
-			method: 'uppercase',
-			new_column: '',
-			start: 0,
-			end: null,
-			pattern: '',
-			replacement: '',
-			group_index: 0,
-			delimiter: ' ',
-			index: 0
-		})
-	}: Props = $props();
+	let { schema, config = $bindable() }: Props = $props();
 
 	const methods = [
-		{ value: 'uppercase', label: 'Uppercase', params: [] },
-		{ value: 'lowercase', label: 'Lowercase', params: [] },
-		{ value: 'title', label: 'Title Case', params: [] },
-		{ value: 'strip', label: 'Strip (Trim)', params: [] },
-		{ value: 'lstrip', label: 'Left Strip', params: [] },
-		{ value: 'rstrip', label: 'Right Strip', params: [] },
-		{ value: 'length', label: 'String Length', params: [] },
-		{ value: 'slice', label: 'Substring (Slice)', params: ['start', 'end'] },
-		{ value: 'replace', label: 'Replace Text', params: ['pattern', 'replacement'] },
-		{ value: 'extract', label: 'Extract (Regex)', params: ['pattern', 'group_index'] },
-		{ value: 'split', label: 'Split to List', params: ['delimiter'] },
-		{ value: 'split_take', label: 'Split & Take', params: ['delimiter', 'index'] }
+		{ value: 'uppercase', label: 'Uppercase' },
+		{ value: 'lowercase', label: 'Lowercase' },
+		{ value: 'title', label: 'Title Case' },
+		{ value: 'strip', label: 'Strip (Trim)' },
+		{ value: 'lstrip', label: 'Left Strip' },
+		{ value: 'rstrip', label: 'Right Strip' },
+		{ value: 'length', label: 'String Length' },
+		{ value: 'slice', label: 'Substring (Slice)' },
+		{ value: 'replace', label: 'Replace Text' },
+		{ value: 'extract', label: 'Extract (Regex)' },
+		{ value: 'split', label: 'Split to List' },
+		{ value: 'split_take', label: 'Split & Take' }
 	];
 
-	const stringColumns = $derived(
-		schema.columns.filter(
-			(col) =>
-				col.dtype.toLowerCase().includes('str') ||
-				col.dtype.toLowerCase().includes('string') ||
-				col.dtype.toLowerCase() === 'utf8'
-		)
-	);
-
-	const currentMethod = $derived(methods.find((m) => m.value === config.method));
-
-	function needsParam(param: string): boolean {
-		return currentMethod?.params.includes(param) || false;
-	}
+	// `.str` operations apply to String columns only (not Struct or Categorical).
+	const isStringColumn = (col: { dtype: string }) =>
+		getColumnTypeConfig(col.dtype).canonicalName === 'String';
+	const stringColumns = $derived(schema.columns.filter(isStringColumn));
 </script>
 
 <div class={stepConfig()} role="region" aria-label="String methods configuration">
@@ -87,10 +64,7 @@
 			value={config.column ?? ''}
 			onChange={(val) => (config.column = val)}
 			placeholder="Select string column..."
-			filter={(col) =>
-				col.dtype.toLowerCase().includes('str') ||
-				col.dtype.toLowerCase().includes('string') ||
-				col.dtype.toLowerCase() === 'utf8'}
+			filter={isStringColumn}
 		/>
 		{#if stringColumns.length === 0}
 			<p
@@ -157,7 +131,7 @@
 		</select>
 	</div>
 
-	{#if needsParam('start') || needsParam('end')}
+	{#if config.method === 'slice'}
 		<div
 			class={css({
 				marginBottom: '0',
@@ -261,7 +235,7 @@
 		</div>
 	{/if}
 
-	{#if needsParam('pattern') && needsParam('replacement')}
+	{#if config.method === 'replace'}
 		<div
 			class={css({
 				marginBottom: '0',
@@ -364,7 +338,7 @@
 		</div>
 	{/if}
 
-	{#if needsParam('pattern') && needsParam('group_index')}
+	{#if config.method === 'extract'}
 		<div
 			class={css({
 				marginBottom: '0',
@@ -467,7 +441,7 @@
 		</div>
 	{/if}
 
-	{#if needsParam('delimiter') && !needsParam('index')}
+	{#if config.method === 'split'}
 		<div
 			class={css({
 				marginBottom: '0',
@@ -533,7 +507,7 @@
 		</div>
 	{/if}
 
-	{#if needsParam('delimiter') && needsParam('index')}
+	{#if config.method === 'split_take'}
 		<div
 			class={css({
 				marginBottom: '0',

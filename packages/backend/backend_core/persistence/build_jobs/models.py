@@ -4,6 +4,7 @@ from sqlalchemy import BigInteger, Column, DateTime, Integer, String
 from sqlmodel import Field, SQLModel
 
 from backend_core.domain.build_jobs.models import BuildJobStatus
+from backend_core.time import aware_utc
 
 
 class BuildJob(SQLModel, table=True):  # type: ignore[call-arg, assignment]
@@ -23,8 +24,8 @@ class BuildJob(SQLModel, table=True):  # type: ignore[call-arg, assignment]
         return BuildJobStatus.require(self.status)
 
     def age_seconds(self, *, now: dt.datetime) -> float:
-        created_at = self.created_at.astimezone(dt.UTC) if self.created_at.tzinfo is not None else self.created_at.replace(tzinfo=dt.UTC)
-        current = now.astimezone(dt.UTC) if now.tzinfo is not None else now.replace(tzinfo=dt.UTC)
+        created_at = aware_utc(self.created_at)
+        current = aware_utc(now)
         return max((current - created_at).total_seconds(), 0.0)
 
     id: str = Field(sa_column=Column(String, primary_key=True))

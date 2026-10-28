@@ -3,19 +3,9 @@
 	import { preflightExcel, preflightExcelFromPath, previewExcel } from '#lib/api/excel.js';
 	import type { ExcelParams } from '#lib/api/excel.js';
 	import DataTable from '#lib/components/common/DataTable.svelte';
+	import { DEFAULT_EXCEL_CONFIG } from '#lib/types/datasource.js';
+	import type { ExcelConfig } from '#lib/types/datasource.js';
 	import { css, button, input, label } from '#lib/styles/panda.js';
-
-	interface ExcelConfig {
-		sheet_name: string;
-		table_name: string;
-		named_range: string;
-		cell_range: string;
-		start_row: number;
-		start_col: number;
-		end_col: number;
-		end_row: number | null;
-		has_header: boolean;
-	}
 
 	interface Props {
 		mode: 'upload' | 'config';
@@ -112,15 +102,15 @@
 
 	function normalizeConfig(value: Partial<ExcelConfig>): ExcelConfig {
 		return {
-			sheet_name: value.sheet_name ?? '',
-			table_name: value.table_name ?? '',
-			named_range: value.named_range ?? '',
-			cell_range: value.cell_range ?? '',
-			start_row: value.start_row ?? 0,
-			start_col: value.start_col ?? 0,
-			end_col: value.end_col ?? 0,
-			end_row: value.end_row ?? null,
-			has_header: value.has_header ?? true
+			sheet_name: value.sheet_name ?? DEFAULT_EXCEL_CONFIG.sheet_name,
+			table_name: value.table_name ?? DEFAULT_EXCEL_CONFIG.table_name,
+			named_range: value.named_range ?? DEFAULT_EXCEL_CONFIG.named_range,
+			cell_range: value.cell_range ?? DEFAULT_EXCEL_CONFIG.cell_range,
+			start_row: value.start_row ?? DEFAULT_EXCEL_CONFIG.start_row,
+			start_col: value.start_col ?? DEFAULT_EXCEL_CONFIG.start_col,
+			end_col: value.end_col ?? DEFAULT_EXCEL_CONFIG.end_col,
+			end_row: value.end_row ?? DEFAULT_EXCEL_CONFIG.end_row,
+			has_header: value.has_header ?? DEFAULT_EXCEL_CONFIG.has_header
 		};
 	}
 
@@ -144,11 +134,8 @@
 		initialized = true;
 	}
 
-	async function runPreflight(token?: number): Promise<void> {
-		const current = token ?? preflightToken;
-		error = null;
-		previewLoading = true;
-		const params: ExcelParams = {
+	function buildExcelParams(): ExcelParams {
+		return {
 			sheet_name: selectedSheet || undefined,
 			start_row: startRow,
 			start_col: startCol,
@@ -159,6 +146,13 @@
 			cell_range: cellRangeInput.trim() || undefined,
 			end_row: endRowManual && endRow !== null ? endRow : undefined
 		};
+	}
+
+	async function runPreflight(token?: number): Promise<void> {
+		const current = token ?? preflightToken;
+		error = null;
+		previewLoading = true;
+		const params = buildExcelParams();
 
 		const result =
 			mode === 'upload'
@@ -206,18 +200,10 @@
 		if (!preflightId || !selectedSheet) return;
 		error = null;
 		previewLoading = true;
-		const params: ExcelParams & { sheet_name: string } = {
-			sheet_name: selectedSheet,
-			start_row: startRow,
-			start_col: startCol,
-			end_col: endCol,
-			has_header: excelHeader,
-			table_name: selectedTable || undefined,
-			named_range: selectedRange || undefined,
-			cell_range: cellRangeInput.trim() || undefined,
-			end_row: endRowManual && endRow !== null ? endRow : undefined
-		};
-		const result = await previewExcel(preflightId, params);
+		const result = await previewExcel(preflightId, {
+			...buildExcelParams(),
+			sheet_name: selectedSheet
+		});
 		result.match(
 			(data) => {
 				previewGrid = data.preview;

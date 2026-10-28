@@ -21,7 +21,7 @@ vi.mock('#lib/stores/namespace.svelte.js', () => ({
 	isNamespaceReady: () => true
 }));
 
-const { apiRequest, apiConditionalRequestWithHeaders } = await import('./client');
+const { apiBlobRequest, apiRequest, apiConditionalRequestWithHeaders } = await import('./client');
 
 describe('api client cache policy', () => {
 	beforeEach(() => {
@@ -135,16 +135,227 @@ describe('api client cache policy', () => {
 		}
 	});
 
-	test('generates a request ID before a fetch that later aborts', async () => {
+	test('classifies aborts before and during response-body reads', async () => {
 		vi.stubGlobal('fetch', vi.fn().mockRejectedValue(new DOMException('Aborted', 'AbortError')));
 
-		const result = await apiRequest('/v1/test');
+		const beforeResponseResult = await apiRequest('/v1/test');
 		const requestInit = vi.mocked(fetch).mock.calls[0]?.[1];
 		const requestId = new Headers(requestInit?.headers).get('X-Request-ID');
 
-		expect(result.isErr()).toBe(true);
+		expect(beforeResponseResult.isErr()).toBe(true);
+		if (beforeResponseResult.isErr()) {
+			expect(beforeResponseResult.error.type).toBe('network');
+			expect(beforeResponseResult.error.code).toBe('ABORTED');
+		}
 		expect(requestId).toMatch(
 			/^[0-9a-f]{8}-[0-9a-f]{4}-4[0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/i
+		);
+
+		const timeoutError = new Error('Deadline elapsed');
+		timeoutError.name = 'TimeoutError';
+		vi.stubGlobal('fetch', vi.fn().mockRejectedValue(timeoutError));
+		const directTimeoutResult = await apiRequest('/v1/test');
+		expect(directTimeoutResult.isErr()).toBe(true);
+		if (directTimeoutResult.isErr()) {
+			expect(directTimeoutResult.error).toMatchObject({
+				type: 'network',
+				message: 'Request timed out',
+				code: 'TIMEOUT'
+			});
+		}
+
+		const rejectJsonAfterAbort = async (signalReason: unknown, bodyError: unknown) => {
+			const controller = new AbortController();
+			const bodyGate = Promise.withResolvers<never>();
+			const response = new Response('{"ok":true}', {
+				status: 200,
+				headers: { 'Content-Type': 'application/json' }
+			});
+			vi.spyOn(response, 'json').mockReturnValue(bodyGate.promise);
+			vi.stubGlobal('fetch', vi.fn().mockResolvedValue(response));
+
+			const request = apiRequest('/v1/test', { signal: controller.signal });
+			await vi.waitFor(() => expect(response.json).toHaveBeenCalled());
+			controller.abort(signalReason);
+			bodyGate.reject(bodyError);
+			return await request;
+		};
+
+		const callerAbortError = new Error('Aborted');
+		callerAbortError.name = 'AbortError';
+		const bodyAbortCases = [
+			{
+				signalReason: new DOMException('Deadline elapsed', 'TimeoutError'),
+				bodyError: new DOMException('Aborted', 'AbortError'),
+				expected: { type: 'network', message: 'Request timed out', code: 'TIMEOUT' }
+			},
+			{
+				signalReason: new Error('Caller cancelled'),
+				bodyError: callerAbortError,
+				expected: { type: 'network', message: 'Request was cancelled', code: 'ABORTED' }
+			}
+		] as const;
+		for (const bodyAbortCase of bodyAbortCases) {
+			const result = await rejectJsonAfterAbort(
+				bodyAbortCase.signalReason,
+				bodyAbortCase.bodyError
+			);
+			expect(result.isErr()).toBe(true);
+			if (result.isErr()) expect(result.error).toMatchObject(bodyAbortCase.expected);
+		}
+		expect(mockTrack).not.toHaveBeenCalled();
+
+		const blobController = new AbortController();
+		const blobBodyGate = Promise.withResolvers<never>();
+		const blobResponse = new Response('blob body', { status: 200 });
+		vi.spyOn(blobResponse, 'blob').mockReturnValue(blobBodyGate.promise);
+		vi.stubGlobal('fetch', vi.fn().mockResolvedValue(blobResponse));
+		const blobRequest = apiBlobRequest('/v1/test', { signal: blobController.signal });
+		await vi.waitFor(() => expect(blobResponse.blob).toHaveBeenCalled());
+		blobController.abort(new DOMException('Aborted', 'AbortError'));
+		blobBodyGate.reject(new DOMException('Aborted', 'AbortError'));
+		const blobResult = await blobRequest;
+		expect(blobResult.isErr()).toBe(true);
+		if (blobResult.isErr()) {
+			expect(blobResult.error).toMatchObject({
+				type: 'network',
+				message: 'Request was cancelled',
+				code: 'ABORTED'
+			});
+		}
+		expect(mockTrack).not.toHaveBeenCalled();
+
+		const namespaceBodyGate = Promise.withResolvers<never>();
+		const namespaceResponse = new Response('{"ok":true}', {
+			status: 200,
+			headers: { 'Content-Type': 'application/json' }
+		});
+		vi.spyOn(namespaceResponse, 'json').mockReturnValue(namespaceBodyGate.promise);
+		vi.stubGlobal('fetch', vi.fn().mockResolvedValue(namespaceResponse));
+		const namespaceRequest = apiRequest('/v1/test');
+		await vi.waitFor(() => expect(namespaceResponse.json).toHaveBeenCalled());
+		window.dispatchEvent(new Event('dataforge:namespace-will-change'));
+		namespaceBodyGate.reject(new DOMException('Aborted', 'AbortError'));
+		const namespaceResult = await namespaceRequest;
+		expect(namespaceResult.isErr()).toBe(true);
+		if (namespaceResult.isErr()) {
+			expect(namespaceResult.error).toMatchObject({
+				type: 'network',
+				message: 'Request cancelled because the namespace changed'
+			});
+		}
+		expect(mockTrack).not.toHaveBeenCalled();
+
+		const deferErrorBodyRead = async (options?: RequestInit) => {
+			const bodyGate = Promise.withResolvers<string>();
+			const response = new Response('{"detail":"missing"}', { status: 404 });
+			vi.spyOn(response, 'text').mockReturnValue(bodyGate.promise);
+			vi.stubGlobal('fetch', vi.fn().mockResolvedValue(response));
+			const request = apiRequest('/v1/test', options);
+			await vi.waitFor(() => expect(response.text).toHaveBeenCalled());
+			return { bodyGate, request };
+		};
+
+		const timeoutController = new AbortController();
+		const timeoutErrorBody = await deferErrorBodyRead({ signal: timeoutController.signal });
+		timeoutController.abort(new DOMException('Deadline elapsed', 'TimeoutError'));
+		timeoutErrorBody.bodyGate.reject(new DOMException('Aborted', 'AbortError'));
+		const timeoutErrorBodyResult = await timeoutErrorBody.request;
+		expect(timeoutErrorBodyResult.isErr()).toBe(true);
+		if (timeoutErrorBodyResult.isErr()) {
+			expect(timeoutErrorBodyResult.error).toMatchObject({
+				type: 'network',
+				message: 'Request timed out',
+				code: 'TIMEOUT'
+			});
+		}
+
+		const callerController = new AbortController();
+		const callerErrorBody = await deferErrorBodyRead({ signal: callerController.signal });
+		callerController.abort(new Error('Caller cancelled'));
+		callerErrorBody.bodyGate.reject(new DOMException('Aborted', 'AbortError'));
+		const callerErrorBodyResult = await callerErrorBody.request;
+		expect(callerErrorBodyResult.isErr()).toBe(true);
+		if (callerErrorBodyResult.isErr()) {
+			expect(callerErrorBodyResult.error).toMatchObject({
+				type: 'network',
+				message: 'Request was cancelled',
+				code: 'ABORTED'
+			});
+		}
+
+		const callerResolveController = new AbortController();
+		const callerResolvedErrorBody = await deferErrorBodyRead({
+			signal: callerResolveController.signal
+		});
+		callerResolveController.abort(new Error('Caller cancelled'));
+		callerResolvedErrorBody.bodyGate.resolve('{"detail":"missing"}');
+		const callerResolvedErrorBodyResult = await callerResolvedErrorBody.request;
+		expect(callerResolvedErrorBodyResult.isErr()).toBe(true);
+		if (callerResolvedErrorBodyResult.isErr()) {
+			expect(callerResolvedErrorBodyResult.error).toMatchObject({
+				type: 'network',
+				message: 'Request was cancelled',
+				code: 'ABORTED'
+			});
+		}
+
+		const namespaceErrorBody = await deferErrorBodyRead();
+		window.dispatchEvent(new Event('dataforge:namespace-will-change'));
+		namespaceErrorBody.bodyGate.resolve('{"detail":"missing"}');
+		const namespaceErrorBodyResult = await namespaceErrorBody.request;
+		expect(namespaceErrorBodyResult.isErr()).toBe(true);
+		if (namespaceErrorBodyResult.isErr()) {
+			expect(namespaceErrorBodyResult.error).toMatchObject({
+				type: 'network',
+				message: 'Request cancelled because the namespace changed'
+			});
+		}
+		expect(mockTrack).not.toHaveBeenCalled();
+
+		mockTrack.mockClear();
+		const readFailureResponse = new Response('', {
+			status: 503,
+			statusText: 'Service Unavailable'
+		});
+		vi.spyOn(readFailureResponse, 'text').mockRejectedValue(new Error('Error body read failed'));
+		vi.stubGlobal('fetch', vi.fn().mockResolvedValue(readFailureResponse));
+		const readFailureResult = await apiRequest('/v1/test');
+		expect(readFailureResult.isErr()).toBe(true);
+		if (readFailureResult.isErr()) {
+			expect(readFailureResult.error).toMatchObject({
+				type: 'http',
+				message: 'Error body read failed',
+				status: 503,
+				statusText: 'Service Unavailable'
+			});
+		}
+		expect(mockTrack).toHaveBeenCalledTimes(1);
+		expect(mockTrack).toHaveBeenCalledWith(
+			expect.objectContaining({
+				event: 'api_error',
+				meta: { status: 503, statusText: 'Service Unavailable' }
+			})
+		);
+		mockTrack.mockClear();
+
+		vi.stubGlobal(
+			'fetch',
+			vi.fn().mockResolvedValue(
+				new Response('{', {
+					status: 200,
+					headers: { 'Content-Type': 'application/json' }
+				})
+			)
+		);
+		const malformedJsonResult = await apiRequest('/v1/test');
+		expect(malformedJsonResult.isErr()).toBe(true);
+		if (malformedJsonResult.isErr()) {
+			expect(malformedJsonResult.error.type).toBe('parse');
+			expect(malformedJsonResult.error.message).toBe('Failed to parse response JSON');
+		}
+		expect(mockTrack).toHaveBeenCalledWith(
+			expect.objectContaining({ event: 'api_error', meta: { type: 'parse' } })
 		);
 	});
 
@@ -171,13 +382,15 @@ describe('api client cache policy', () => {
 			method: () => 'GET',
 			postData: () => null,
 			headers: () => ({ 'x-request-id': 'client-request-id' }),
+			timing: () => ({ startTime: 1_000, requestStart: 0, responseStart: -1, responseEnd: -1 }),
 			failure: () => ({ errorText: 'net::ERR_ABORTED' })
 		} as unknown as Request;
 		const successfulRequest = {
 			url: () => 'https://app.example/api/v1/auth/me',
 			method: () => 'GET',
 			postData: () => null,
-			headers: () => ({ 'x-request-id': 'successful-client-request-id' })
+			headers: () => ({ 'x-request-id': 'successful-client-request-id' }),
+			timing: () => ({ startTime: 1_100, requestStart: 5, responseStart: 35, responseEnd: 42 })
 		} as unknown as Request;
 		const response = {
 			request: () => successfulRequest,
@@ -202,12 +415,17 @@ describe('api client cache policy', () => {
 				clientRequestId: string | null;
 				requestId: string | null;
 				failureText: string | null;
+				browserTimingStartEpochMs: number | null;
+				browserTimingResponseEndMs: number | null;
 			}[];
 			expect(entries[0]?.clientRequestId).toBe('client-request-id');
 			expect(entries[0]?.requestId).toBeNull();
 			expect(entries[0]?.failureText).toBe('net::ERR_ABORTED');
+			expect(entries[0]?.browserTimingStartEpochMs).toBe(1_000);
+			expect(entries[0]?.browserTimingResponseEndMs).toBeNull();
 			expect(entries[1]?.clientRequestId).toBe('successful-client-request-id');
 			expect(entries[1]?.requestId).toBe('server-request-id');
+			expect(entries[1]?.browserTimingResponseEndMs).toBe(42);
 		} finally {
 			rmSync(dir, { recursive: true, force: true });
 			vi.unstubAllEnvs();
@@ -288,7 +506,11 @@ describe('api conditional requests', () => {
 	test('still surfaces HTTP errors as ApiError', async () => {
 		vi.stubGlobal(
 			'fetch',
-			vi.fn().mockResolvedValue(new Response('{"detail":"missing"}', { status: 404 }))
+			vi
+				.fn()
+				.mockResolvedValue(
+					new Response('{"detail":"missing","error_code":"not_found"}', { status: 404 })
+				)
 		);
 
 		const result = await apiConditionalRequestWithHeaders<{ ok: boolean }>('/v1/test', {
@@ -296,6 +518,19 @@ describe('api conditional requests', () => {
 		});
 
 		expect(result.isErr()).toBe(true);
-		if (result.isErr()) expect(result.error.status).toBe(404);
+		if (result.isErr()) {
+			expect(result.error).toMatchObject({
+				type: 'http',
+				message: 'missing',
+				status: 404,
+				code: 'not_found'
+			});
+		}
+		expect(mockTrack).toHaveBeenCalledWith(
+			expect.objectContaining({
+				event: 'api_error',
+				meta: expect.objectContaining({ status: 404 })
+			})
+		);
 	});
 });

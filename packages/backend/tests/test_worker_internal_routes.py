@@ -202,7 +202,7 @@ class FakeGrpcContext:
 
 @pytest.mark.asyncio
 async def test_get_engine_credentials_aborts_on_grpc_event_loop(monkeypatch: pytest.MonkeyPatch) -> None:
-    import backend_core.namespace_credentials_service as namespace_credentials_service
+    from backend_core import namespace_credentials_service
 
     async def allow_internal_call(_context) -> None:
         return None
@@ -1429,7 +1429,7 @@ async def test_compute_request_claim_targets_one_namespace_without_scanning(monk
     def fake_run_db(func, *args, **kwargs):
         if func is backend_grpc_server.compute_requests_service.claim_next_request:
             claimed_namespaces.append(get_namespace())
-            return None
+            return
         raise AssertionError(f'Unexpected tenant database callback: {func!r}')
 
     monkeypatch.setattr(backend_grpc_server, 'run_settings_db', fake_run_settings_db)

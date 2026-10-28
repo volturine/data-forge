@@ -214,11 +214,7 @@ export function openLockSession(options: LockSessionOptions): LockSession {
 			// This tab already holds the lock under a newer token. Adopting it
 			// avoids rotating the token again and locking the editor until TTL.
 			if (closingAfterRelease) {
-				if (ownedToken !== null && lock.lock_token === ownedToken) {
-					if (!release()) finishClose();
-				} else {
-					finishClose();
-				}
+				finishClose();
 				return;
 			}
 			awaitingAcquire = false;
@@ -236,6 +232,21 @@ export function openLockSession(options: LockSessionOptions): LockSession {
 
 		ownedToken = null;
 		options.onStatus(lock, false);
+	}
+
+	function handleDisconnect(): void {
+		clearTimer();
+		socket = null;
+		if (closed || closingAfterRelease) {
+			closed = true;
+			closingAfterRelease = false;
+			releasePending = false;
+			clearReleaseCloseTimer();
+			opened = false;
+			return;
+		}
+		resetOwnership();
+		scheduleReconnect();
 	}
 
 	function connect(): void {
@@ -271,35 +282,8 @@ export function openLockSession(options: LockSessionOptions): LockSession {
 			if (closingAfterRelease) finishClose();
 		});
 
-		socket.addEventListener('close', () => {
-			clearTimer();
-			socket = null;
-			if (closed || closingAfterRelease) {
-				closed = true;
-				closingAfterRelease = false;
-				releasePending = false;
-				clearReleaseCloseTimer();
-				opened = false;
-				return;
-			}
-			resetOwnership();
-			scheduleReconnect();
-		});
-
-		socket.addEventListener('error', () => {
-			clearTimer();
-			socket = null;
-			if (closed || closingAfterRelease) {
-				closed = true;
-				closingAfterRelease = false;
-				releasePending = false;
-				clearReleaseCloseTimer();
-				opened = false;
-				return;
-			}
-			resetOwnership();
-			scheduleReconnect();
-		});
+		socket.addEventListener('close', handleDisconnect);
+		socket.addEventListener('error', handleDisconnect);
 	}
 
 	connect();

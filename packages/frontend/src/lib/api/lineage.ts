@@ -2,6 +2,7 @@ import { apiRequest } from './client';
 import type { ResultAsync } from 'neverthrow';
 import type { ApiError } from './client';
 import type { SourceType } from '#lib/types/datasource.js';
+import { withQuery } from './query';
 
 export type NodeKind = 'source' | 'output' | 'internal' | 'analysis';
 export type EdgeType = 'uses' | 'produces' | 'chains' | 'consumes_internal';
@@ -36,11 +37,12 @@ export interface LineageParams {
 }
 
 export function getLineage(params: LineageParams = {}): ResultAsync<LineageResponse, ApiError> {
-	const search = new URLSearchParams();
-	if (params.target) search.set('target_datasource_id', params.target);
-	if (params.branch) search.set('branch', params.branch);
-	if (params.mode && params.mode !== 'full') search.set('mode', params.mode);
-	if (params.internals) search.set('include_internals', 'true');
-	const suffix = search.toString() ? `?${search.toString()}` : '';
-	return apiRequest<LineageResponse>(`/v1/datasource/lineage${suffix}`);
+	return apiRequest<LineageResponse>(
+		withQuery('/v1/datasource/lineage', {
+			target_datasource_id: params.target,
+			branch: params.branch,
+			mode: params.mode === 'full' ? undefined : params.mode,
+			include_internals: params.internals
+		})
+	);
 }

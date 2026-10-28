@@ -34,16 +34,29 @@ export function getEditorClientId(): string {
 	}
 }
 
-async function initClientId(): Promise<void> {
-	if (!browser) return;
-	const existing = await idbGet<string>('client_id');
-	if (existing) {
-		clientIdValue = existing;
-		return;
-	}
-	const id = uuid();
-	clientIdValue = id;
-	await idbSet('client_id', id);
+let clientIdInitialization: Promise<void> | null = null;
+
+function initClientId(): Promise<void> {
+	if (!browser) return Promise.resolve();
+	if (clientIdInitialization) return clientIdInitialization;
+	if (clientIdValue) return Promise.resolve();
+
+	const initialization = Promise.resolve().then(async () => {
+		const existing = await idbGet<string>('client_id');
+		if (existing) {
+			clientIdValue = existing;
+			return;
+		}
+		const id = uuid();
+		clientIdValue = id;
+		await idbSet('client_id', id);
+	});
+	clientIdInitialization = initialization;
+	const clear = (): void => {
+		if (clientIdInitialization === initialization) clientIdInitialization = null;
+	};
+	void initialization.then(clear, clear);
+	return initialization;
 }
 
 // Generate a hash from fingerprint for server storage

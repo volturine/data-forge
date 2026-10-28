@@ -74,10 +74,10 @@ def resolve_iceberg_branch_metadata_path(
             branch_url = join_object_store_url(normalized, branch)
             with_branch = list_metadata_files(branch_url)
             if with_branch:
-                return resolve_iceberg_metadata_path(branch_url, namespace_name=namespace_name, data_root=data_root)
+                return with_branch[-1]
         return resolve_iceberg_metadata_path(normalized, namespace_name=namespace_name, data_root=data_root, fallback_file=fallback_file)
     path = Path(normalized)
-    if path.suffix == ".metadata.json" or path.name == "metadata" or path.is_file():
+    if path.name == "metadata" or path.is_file():
         return resolve_iceberg_metadata_path(metadata_path, namespace_name=namespace_name, data_root=data_root)
     if branch:
         branch_path = path / branch

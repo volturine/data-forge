@@ -3,7 +3,8 @@ from __future__ import annotations
 import asyncio
 import logging
 from collections import defaultdict
-from collections.abc import Awaitable, Callable
+from collections.abc import Awaitable, Callable, Collection
+from itertools import batched
 
 from sqlalchemy import tuple_
 from sqlmodel import Session, col, select
@@ -18,8 +19,8 @@ from backend_core.domain.runtime.events import RuntimePayloadKind
 from backend_core.namespace import namespace_scope
 from backend_core.persistence.build_runs.models import BuildRun
 from backend_core.persistence.locks.models import ResourceLock
+from backend_core.runtime_ipc import NotifyKind
 from backend_core.runtime_outbox_dispatcher import OUTBOX_WAKE_HUB
-from backend_core.runtime_outbox_service import OUTBOX_WAKE_KIND
 from modules.locks import watchers as lock_watchers
 from modules.locks.schemas import LockStatusResponse, LockWebsocketStatusMessage
 
@@ -27,7 +28,7 @@ logger = logging.getLogger(__name__)
 _PROJECTION_RECOVERY_BATCH_SIZE = 128
 
 
-def _read_build_sequences(namespace: str, build_ids: list[str]) -> dict[str, int]:
+def _read_build_sequences(namespace: str, build_ids: Collection[str]) -> dict[str, int]:
     def read(session: Session) -> dict[str, int]:
         rows = session.exec(select(BuildRun.id, BuildRun.next_event_sequence).where(col(BuildRun.id).in_(build_ids))).all()
         return {build_id: max(sequence - 1, 0) for build_id, sequence in rows}
@@ -41,8 +42,7 @@ async def refresh_build_projections() -> None:
     for namespace, build_id in build_hub.active_builds():
         grouped[namespace].append(build_id)
     for namespace, build_ids in grouped.items():
-        for offset in range(0, len(build_ids), _PROJECTION_RECOVERY_BATCH_SIZE):
-            batch = build_ids[offset : offset + _PROJECTION_RECOVERY_BATCH_SIZE]
+        for batch in batched(build_ids, _PROJECTION_RECOVERY_BATCH_SIZE, strict=False):
             sequences = await run_api_blocking(_read_build_sequences, namespace, batch)
             for build_id, sequence in sequences.items():
                 # publish preserves a newer sequence if a notification raced
@@ -69,8 +69,7 @@ async def refresh_lock_projections() -> None:
     for (namespace, resource_type, resource_id), version in await lock_watchers.registry.active_keys():
         grouped[namespace].append((resource_type, resource_id, version))
     for namespace, targets in grouped.items():
-        for offset in range(0, len(targets), _PROJECTION_RECOVERY_BATCH_SIZE):
-            batch = targets[offset : offset + _PROJECTION_RECOVERY_BATCH_SIZE]
+        for batch in batched(targets, _PROJECTION_RECOVERY_BATCH_SIZE, strict=False):
             statuses = await run_api_blocking(_read_lock_statuses, namespace, [(resource_type, resource_id) for resource_type, resource_id, _version in batch])
             for resource_type, resource_id, version in batch:
                 payload = LockWebsocketStatusMessage(resource_type=resource_type, resource_id=resource_id, lock=statuses.get((resource_type, resource_id)))
@@ -116,30 +115,31 @@ async def _handle_lock_payload(payload: dict[str, object]) -> None:
 
 
 async def handle_runtime_payload(payload: dict[str, object]) -> None:
-    if payload.get('kind') == 'telegram_detection_result':
-        request_id = payload.get('request_id')
-        if isinstance(request_id, str):
-            from modules.telegram.runtime import notify_detection_result
+    match payload.get('kind'):
+        case NotifyKind.TELEGRAM_DETECTION_RESULT:
+            request_id = payload.get('request_id')
+            if isinstance(request_id, str):
+                from modules.telegram.runtime import notify_detection_result
 
-            notify_detection_result(request_id)
-        return
-    if payload.get('kind') == runtime_ipc.CHAT_EVENT_WAKE_KIND:
-        session_id = payload.get('session_id')
-        sequence = payload.get('sequence')
-        if isinstance(session_id, str):
-            from modules.chat.store import chat_stream_recovery
+                notify_detection_result(request_id)
+            return
+        case NotifyKind.CHAT_EVENT:
+            session_id = payload.get('session_id')
+            sequence = payload.get('sequence')
+            if isinstance(session_id, str):
+                from modules.chat.store import chat_stream_recovery
 
-            chat_stream_recovery.publish(session_id, sequence if isinstance(sequence, int) else None)
-        return
-    if payload.get('kind') == runtime_ipc.CHAT_TURN_WAKE_KIND:
-        return
-    if payload.get('kind') == OUTBOX_WAKE_KIND:
-        namespace = payload.get('namespace')
-        OUTBOX_WAKE_HUB.publish(namespace if isinstance(namespace, str) and namespace else None)
-        return
-    if payload.get('kind') == 'lock':
-        await _handle_lock_payload(payload)
-        return
+                chat_stream_recovery.publish(session_id, sequence if isinstance(sequence, int) else None)
+            return
+        case NotifyKind.CHAT_TURN:
+            return
+        case NotifyKind.OUTBOX:
+            namespace = payload.get('namespace')
+            OUTBOX_WAKE_HUB.publish(namespace if isinstance(namespace, str) and namespace else None)
+            return
+        case NotifyKind.LOCK:
+            await _handle_lock_payload(payload)
+            return
     kind = RuntimePayloadKind.from_payload(payload)
     if kind == RuntimePayloadKind.BUILD:
         namespace = payload.get('namespace')

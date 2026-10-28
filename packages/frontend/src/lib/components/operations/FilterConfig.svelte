@@ -2,8 +2,7 @@
 	import type { Schema } from '#lib/types/schema.js';
 	import type {
 		FilterCondition as Condition,
-		FilterConfigData,
-		FilterValueType as ValueType
+		FilterConfigData
 	} from '#lib/types/operation-config.js';
 	import type { FilterOperator } from '#lib/types/protocol-enum-tokens.js';
 	import { X, Plus } from '@lucide/svelte';
@@ -17,7 +16,7 @@
 
 	interface Props {
 		schema: Schema;
-		config?: FilterConfigData;
+		config: FilterConfigData;
 	}
 
 	const defaultCondition: Condition = {
@@ -27,8 +26,7 @@
 		value_type: 'string'
 	};
 
-	let { schema, config = $bindable({ conditions: [defaultCondition], logic: 'AND' }) }: Props =
-		$props();
+	let { schema, config = $bindable() }: Props = $props();
 
 	const conditions = $derived(config.conditions ?? [defaultCondition]);
 
@@ -80,12 +78,12 @@
 	function addCondition() {
 		config.conditions = [
 			...conditions,
-			{ column: '', operator: '=', value: '', value_type: 'string' as ValueType }
+			{ column: '', operator: '=', value: '', value_type: 'string' }
 		];
 	}
 
 	function updateCondition(idx: number, updates: Partial<Condition>, coerce = true) {
-		const next = { ...conditions[idx], ...updates } as Condition;
+		const next: Condition = { ...conditions[idx], ...updates };
 		if (coerce && next.value_type === 'number' && typeof next.value === 'string') {
 			const trimmed = next.value.trim();
 			next.value = trimmed === '' ? '' : Number(trimmed);
@@ -180,9 +178,6 @@
 		const str = String(val);
 		// If already in datetime-local format (YYYY-MM-DDTHH:MM), return as-is
 		if (/^\d{4}-\d{2}-\d{2}T\d{2}:\d{2}/.test(str)) return str.slice(0, 16);
-		// If ISO format with Z or offset, parse and format without TZ conversion
-		const match = /^(\d{4}-\d{2}-\d{2})T(\d{2}:\d{2})/.exec(str);
-		if (match) return `${match[1]}T${match[2]}`;
 		// If date-only format (YYYY-MM-DD), return as-is (no time component)
 		if (/^\d{4}-\d{2}-\d{2}$/.test(str)) return str;
 		return '';
@@ -192,8 +187,6 @@
 		if (!val) return '';
 		if (Array.isArray(val)) return '';
 		const str = String(val);
-		// If already in date format (YYYY-MM-DD), return as-is
-		if (/^\d{4}-\d{2}-\d{2}$/.test(str)) return str;
 		// Extract date part from ISO string
 		const match = /^(\d{4}-\d{2}-\d{2})/.exec(str);
 		if (match) return match[1];

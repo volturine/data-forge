@@ -3,12 +3,13 @@ from pickle import dumps, loads
 
 import polars as pl
 import pytest
+from pydantic import ValidationError
 
 from dataforge_protocol import enums_pb2
 from operations.enums import FilterOperator, TimeComponent
 from operations.fill_null import cast_value, get_polars_type
-from operations.filter import FilterOperatorDefinition
-from operations.groupby import GroupByAggregationDefinition
+from operations.filter import FilterParams
+from operations.groupby import GroupByParams
 from operations.timeseries import TimeseriesParams
 from runtime.config import settings
 from runtime.export_formats import get_export_format
@@ -35,14 +36,14 @@ def test_filter_operator_round_trips_through_pickle():
     assert operator.number == enums_pb2.FILTER_OPERATOR_DOUBLE_EQUAL
 
 
-def test_filter_operator_definition_invalid():
+def test_filter_operator_invalid_is_rejected_by_params():
     with pytest.raises(ValueError, match="Unsupported filter operator"):
-        FilterOperatorDefinition.require("nope")
+        FilterParams.model_validate({"conditions": [{"column": "a", "operator": "nope", "value": 1}]})
 
 
-def test_groupby_aggregation_definition_invalid():
-    with pytest.raises(ValueError, match="Unsupported aggregation"):
-        GroupByAggregationDefinition.require("nope")
+def test_groupby_aggregation_function_invalid_is_rejected_by_params():
+    with pytest.raises(ValidationError, match="Unsupported GroupByAggregationFunction"):
+        GroupByParams.model_validate({"group_by": ["a"], "aggregations": [{"column": "a", "function": "nope"}]})
 
 
 def test_timeseries_extractor_and_duration():
@@ -65,9 +66,8 @@ def test_timeseries_extractor_invalid():
 
 
 def test_timeseries_duration_invalid():
-    params = TimeseriesParams.model_validate({"column": "ts", "operation_type": "add", "new_column": "bad", "unit": "nope"})
-    with pytest.raises(ValueError, match="Unsupported duration unit"):
-        params.duration_expr(1)
+    with pytest.raises(ValidationError, match="Unsupported DurationUnit"):
+        TimeseriesParams.model_validate({"column": "ts", "operation_type": "add", "new_column": "bad", "unit": "nope"})
 
 
 def test_export_format():

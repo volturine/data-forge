@@ -32,13 +32,7 @@ def _response_json_object(resp: httpx.Response, *, operation: str) -> dict[str, 
     data: object = resp.json()
     if not isinstance(data, dict):
         raise ChatHttpError(f'OpenRouter {operation} returned a non-object JSON response')
-
-    result: dict[str, Any] = {}
-    for key, value in data.items():
-        if not isinstance(key, str):
-            raise ChatHttpError(f'OpenRouter {operation} returned a JSON object with a non-string key')
-        result[key] = value
-    return result
+    return data
 
 
 def _headers(api_key: str) -> dict[str, str]:

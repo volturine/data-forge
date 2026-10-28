@@ -1,6 +1,5 @@
-import type { Schema } from '#lib/types/schema.js';
+import type { Column, Schema } from '#lib/types/schema.js';
 import type { PipelineStep } from '#lib/types/analysis.js';
-import type { ColumnInfo } from '#lib/types/schema.js';
 import { isChartStep } from '#lib/components/pipeline/utils.js';
 import {
 	emptySchema,
@@ -68,12 +67,12 @@ function clearCount(input: Schema | null): Schema {
 export function selectTransform(input: Schema | null, config: StepConfig): Schema {
 	if (!input) return EMPTY;
 
-	const columns = config.columns as string[] | undefined;
+	const columns = config.columns;
 	if (!columns || columns.length === 0) {
 		return { columns: input.columns, row_count: null };
 	}
 
-	const casts = (config.cast_map ?? {}) as Record<string, string>;
+	const casts = config.cast_map ?? {};
 
 	return {
 		columns: input.columns
@@ -90,7 +89,7 @@ export function selectTransform(input: Schema | null, config: StepConfig): Schem
 export function dropTransform(input: Schema | null, config: StepConfig): Schema {
 	if (!input) return EMPTY;
 
-	const columns = config.columns as string[] | undefined;
+	const columns = config.columns;
 	if (!columns || columns.length === 0) {
 		return { columns: input.columns, row_count: null };
 	}
@@ -104,7 +103,7 @@ export function dropTransform(input: Schema | null, config: StepConfig): Schema 
 export function renameTransform(input: Schema | null, config: StepConfig): Schema {
 	if (!input) return EMPTY;
 
-	const mapping = (config.column_mapping ?? config.mapping) as Record<string, string> | undefined;
+	const mapping = config.column_mapping ?? config.mapping;
 	if (!mapping || Object.keys(mapping).length === 0) {
 		return { columns: input.columns, row_count: null };
 	}
@@ -140,11 +139,8 @@ function aggregationResultDtype(
 export function groupbyTransform(input: Schema | null, config: StepConfig): Schema {
 	if (!input) return EMPTY;
 
-	const groupBy = config.group_by as string[] | undefined;
-	const aggregations = config.aggregations as
-		| Array<{ column: string; function?: string; agg?: string; alias?: string }>
-		| Record<string, string | Array<{ column: string; agg: string }>>
-		| undefined;
+	const groupBy = config.group_by;
+	const aggregations = config.aggregations;
 
 	const result: typeof input.columns = [];
 
@@ -188,8 +184,8 @@ export function groupbyTransform(input: Schema | null, config: StepConfig): Sche
 export function fillNullTransform(input: Schema | null, config: StepConfig): Schema {
 	if (!input) return EMPTY;
 
-	const strategy = config.strategy as string | undefined;
-	const fillType = normalizeDtype(config.value_type as string | undefined);
+	const strategy = config.strategy;
+	const fillType = normalizeDtype(config.value_type);
 	const targets = config.columns ?? null;
 	const clearsNulls = strategy !== undefined;
 
@@ -225,7 +221,7 @@ export function withColumnsTransform(input: Schema | null, config: StepConfig): 
 			}
 			return { name, dtype: 'Any', nullable: true };
 		})
-		.filter((col): col is ColumnInfo => col !== null);
+		.filter((col): col is Column => col !== null);
 
 	const additionsByName = new Map(additions.map((col) => [col.name, col]));
 	const updated = input.columns.map((col) => additionsByName.get(col.name) ?? col);
@@ -271,7 +267,7 @@ export function unpivotTransform(input: Schema | null, _config: StepConfig): Sch
 export function explodeTransform(input: Schema | null, config: StepConfig): Schema {
 	if (!input) return EMPTY;
 
-	const column = config.explode_column as string | undefined;
+	const column = config.explode_column;
 	const hasColumn = input.columns.some((col) => col.name === column);
 
 	return {
@@ -313,7 +309,7 @@ export function timeseriesTransform(input: Schema | null, config: StepConfig): S
 	else if (operationType === 'diff') dtype = 'Duration';
 	else dtype = input.columns.find((c) => c.name === column)?.dtype ?? 'Datetime';
 
-	const newCol: ColumnInfo = { name: newColumn, dtype, nullable: false };
+	const newCol: Column = { name: newColumn, dtype, nullable: false };
 	const exists = input.columns.some((c) => c.name === newColumn);
 	return {
 		columns: exists
@@ -351,9 +347,8 @@ export function valueCountsTransform(input: Schema | null, _config: StepConfig):
 export function expressionTransform(input: Schema | null, config: StepConfig): Schema {
 	if (!input) return EMPTY;
 
-	const expression = config.expression as string | undefined;
-	const columnName =
-		(config.column_name as string | undefined) || (config.target_column as string | undefined);
+	const expression = config.expression;
+	const columnName = (config.column_name as string | undefined) || config.target_column;
 
 	if (!expression || !columnName) {
 		return { columns: input.columns, row_count: null };
@@ -377,10 +372,10 @@ export function joinTransform(
 ): Schema {
 	if (!input) return rightSchema ?? EMPTY;
 
-	const how = (config.how as string) ?? 'inner';
-	const suffix = (config.suffix as string) ?? '_right';
+	const how = config.how ?? 'inner';
+	const suffix = config.suffix ?? '_right';
 
-	const rightColumns = config.right_columns as string[] | undefined;
+	const rightColumns = config.right_columns;
 
 	const safeRightSchema = rightSchema ?? EMPTY;
 
@@ -409,7 +404,7 @@ export function unionByNameTransform(
 
 	const allowMissing = config.allow_missing !== false;
 	const schemas = [input, ...unionSchemas];
-	const merged = unionByName(schemas, allowMissing);
+	const merged = unionByName(schemas);
 
 	if (allowMissing) return merged;
 

@@ -281,18 +281,3 @@ export function getFileTypeConfig(fileType: FileType): FileTypeConfig {
 export function getSourceTypeConfig(sourceType: SourceType): FileTypeConfig {
 	return SOURCE_TYPE_REGISTRY[sourceType];
 }
-
-/**
- * Get all supported file types
- *
- * @returns Array of all file type identifiers
- *
- * @example
- * ```typescript
- * const types = getAllFileTypes();
- * // ['csv', 'parquet', 'json', 'ndjson', 'excel', ...]
- * ```
- */
-export function getAllFileTypes(): FileType[] {
-	return Object.keys(FILE_TYPE_REGISTRY) as FileType[];
-}

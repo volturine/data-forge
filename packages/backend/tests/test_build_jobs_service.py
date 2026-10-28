@@ -1,6 +1,7 @@
 import uuid
 from datetime import UTC, datetime, timedelta
 
+import pytest
 from sqlmodel import Session
 
 from backend_core import build_jobs_service
@@ -39,7 +40,7 @@ def test_build_recovery_refreshes_the_namespace_wake_marker(monkeypatch, test_db
     assert options['namespace'] == 'default'
 
 
-def test_claim_assigns_unique_fencing_identity(test_db_session: Session) -> None:
+def test_claim_assigns_unique_fencing_identity(test_db_session: Session, monkeypatch: pytest.MonkeyPatch) -> None:
     job = build_jobs_service.create_job(
         test_db_session,
         build_id=str(uuid.uuid4()),
@@ -47,6 +48,8 @@ def test_claim_assigns_unique_fencing_identity(test_db_session: Session) -> None
         max_attempts=2,
     )
 
+    stamp = datetime.now(UTC)
+    monkeypatch.setattr(build_jobs_service, 'database_lease_clock', lambda _session, _fallback: stamp)
     claimed = build_jobs_service.claim_next_job(test_db_session, worker_id='worker:one')
 
     assert claimed is not None
@@ -56,13 +59,12 @@ def test_claim_assigns_unique_fencing_identity(test_db_session: Session) -> None
     assert claimed.claim_token is not None
     assert claimed.lease_generation == 1
     assert claimed.attempts == 1
-    assert claimed.claimed_at is not None
-    assert claimed.last_renewed_at is not None
-    assert claimed.lease_expires_at is not None
-    assert abs((claimed.lease_expires_at - claimed.claimed_at).total_seconds() - CLAIM_DELIVERY_LEASE_SECONDS) < 0.01
+    assert claimed.claimed_at == stamp
+    assert claimed.last_renewed_at == stamp
+    assert claimed.lease_expires_at == stamp + timedelta(seconds=CLAIM_DELIVERY_LEASE_SECONDS)
 
 
-def test_renew_extends_only_the_active_claim(test_db_session: Session) -> None:
+def test_renew_extends_only_the_active_claim(test_db_session: Session, monkeypatch: pytest.MonkeyPatch) -> None:
     build_jobs_service.create_job(
         test_db_session,
         build_id=str(uuid.uuid4()),
@@ -76,6 +78,8 @@ def test_renew_extends_only_the_active_claim(test_db_session: Session) -> None:
     test_db_session.add(claimed)
     test_db_session.commit()
     previous_expiry = claimed.lease_expires_at
+    stamp = datetime.now(UTC)
+    monkeypatch.setattr(build_jobs_service, 'database_lease_clock', lambda _session, _fallback: stamp)
 
     renewed = build_jobs_service.renew_job_lease(
         test_db_session,
@@ -87,9 +91,9 @@ def test_renew_extends_only_the_active_claim(test_db_session: Session) -> None:
 
     assert renewed is not None
     assert renewed.lease_expires_at is not None
-    assert renewed.last_renewed_at is not None
+    assert renewed.last_renewed_at == stamp
     assert renewed.lease_expires_at > previous_expiry
-    assert abs((renewed.lease_expires_at - renewed.last_renewed_at).total_seconds() - settings.runtime_work_lease_ttl_seconds) < 0.01
+    assert renewed.lease_expires_at == stamp + timedelta(seconds=settings.runtime_work_lease_ttl_seconds)
     assert renewed.claim_token == claimed.claim_token
     assert renewed.lease_generation == claimed.lease_generation
     assert renewed.attempts == claimed.attempts

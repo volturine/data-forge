@@ -3,7 +3,7 @@ import threading
 
 import pytest
 
-from backend_core.notification_delivery import EMAIL_DELIVERY_KIND
+from backend_core.notification_delivery import DeliveryKind
 from backend_core.runtime_integration_delivery import IntegrationDeliveryDispatcher
 from backend_core.runtime_outbox_dispatcher import RuntimeOutboxDispatcher
 from backend_core.runtime_outbox_service import OutboxClaim
@@ -14,8 +14,8 @@ def _claim() -> OutboxClaim:
         event_id='event-1',
         claim_token='claim-1',
         lease_generation=1,
-        event_kind=EMAIL_DELIVERY_KIND,
-        payload={'kind': EMAIL_DELIVERY_KIND, 'to': 'test@example.com'},
+        event_kind=DeliveryKind.EMAIL,
+        payload={'kind': DeliveryKind.EMAIL, 'to': 'test@example.com'},
     )
 
 
@@ -34,14 +34,14 @@ async def test_blocked_external_provider_does_not_block_runtime_wake_lane() -> N
         return 1
 
     delivery = IntegrationDeliveryDispatcher(
-        kind=EMAIL_DELIVERY_KIND,
+        kind=DeliveryKind.EMAIL,
         claim_delivery=lambda _namespace, _limit: [_claim()],
         finalize_delivery=lambda _namespace, _claim, error: error is None,
         deliver=deliver,
     )
     runtime = RuntimeOutboxDispatcher(
         dispatch_namespace=dispatch_wake,
-        list_namespaces=lambda: [],
+        list_namespaces=list,
     )
 
     delivery_task = asyncio.create_task(delivery.dispatch_namespace('default'))
@@ -69,7 +69,7 @@ async def test_canceled_delivery_finishes_claim_finalization_before_stopping() -
         return True
 
     dispatcher = IntegrationDeliveryDispatcher(
-        kind=EMAIL_DELIVERY_KIND,
+        kind=DeliveryKind.EMAIL,
         claim_delivery=lambda _namespace, _limit: [_claim()],
         finalize_delivery=finalize,
         deliver=deliver,
@@ -100,7 +100,7 @@ async def test_canceled_claim_joins_and_logs_its_started_database_operation(capl
         raise RuntimeError('late claim failure')
 
     dispatcher = IntegrationDeliveryDispatcher(
-        kind=EMAIL_DELIVERY_KIND,
+        kind=DeliveryKind.EMAIL,
         claim_delivery=claim,
     )
     task = asyncio.create_task(dispatcher.dispatch_namespace('default'))
@@ -137,7 +137,7 @@ async def test_failed_delivery_is_finalized_for_durable_retry() -> None:
         return True
 
     dispatcher = IntegrationDeliveryDispatcher(
-        kind=EMAIL_DELIVERY_KIND,
+        kind=DeliveryKind.EMAIL,
         claim_delivery=lambda _namespace, _limit: [_claim()],
         finalize_delivery=finalize,
         deliver=deliver,

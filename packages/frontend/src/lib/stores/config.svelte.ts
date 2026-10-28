@@ -2,7 +2,6 @@ import { getConfig, type FrontendConfig } from '#lib/api/config.js';
 
 export class ConfigStore {
 	config = $state<FrontendConfig | null>(null);
-	loading = $state(false);
 	error = $state<string | null>(null);
 	private fetched = false;
 	private pending: Promise<void> | null = null;
@@ -11,7 +10,6 @@ export class ConfigStore {
 		if (this.fetched) return;
 		if (this.pending) return this.pending;
 
-		this.loading = true;
 		this.error = null;
 
 		const request = (async () => {
@@ -26,16 +24,10 @@ export class ConfigStore {
 		})();
 
 		this.pending = request.finally(() => {
-			this.loading = false;
 			this.pending = null;
 		});
 
 		return this.pending;
-	}
-
-	/** True once fetch settled (success or failure). Used to leave the bootstrap spinner. */
-	get settled(): boolean {
-		return this.fetched || this.error !== null;
 	}
 
 	/**
@@ -46,26 +38,6 @@ export class ConfigStore {
 		this.fetched = false;
 		this.pending = null;
 		return this.fetch();
-	}
-
-	get auditLogBatchSize(): number {
-		return this.config?.log_client_batch_size ?? 20;
-	}
-
-	get auditLogFlushIntervalMs(): number {
-		return this.config?.log_client_flush_interval_ms ?? 5000;
-	}
-
-	get auditLogDedupeWindowMs(): number {
-		return this.config?.log_client_dedupe_window_ms ?? 500;
-	}
-
-	get auditLogFlushCooldownMs(): number {
-		return this.config?.log_client_flush_cooldown_ms ?? 3000;
-	}
-
-	get logQueueMaxSize(): number {
-		return this.config?.log_queue_max_size ?? 2000;
 	}
 
 	get publicIdbDebug(): boolean {

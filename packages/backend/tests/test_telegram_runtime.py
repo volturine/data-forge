@@ -253,6 +253,7 @@ async def test_failed_update_does_not_advance_offset(monkeypatch) -> None:
             return 0
         if function is store.advance_update_id:
             advances.append(kwargs['next_update_id'])
+        return None
 
     monkeypatch.setattr(actor, '_database', database)
     monkeypatch.setattr(runtime.bot, 'handle_update', AsyncMock(side_effect=httpx.ConnectError('provider unavailable')))

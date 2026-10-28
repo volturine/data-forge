@@ -1,6 +1,7 @@
 import { apiRequest } from './client';
 import type { ResultAsync } from 'neverthrow';
 import type { ApiError } from './client';
+import { withQuery } from './query';
 
 export type CheckType =
 	| 'row_count'
@@ -81,23 +82,26 @@ export interface ListHealthChecksParams {
 export function listHealthChecks(
 	params: ListHealthChecksParams
 ): ResultAsync<HealthCheck[], ApiError> {
-	const query = new URLSearchParams();
-	if (params.datasourceId) query.set('datasource_id', params.datasourceId);
-	if (params.search) query.set('search', params.search);
-	if (params.limit !== undefined) query.set('limit', String(params.limit));
-	if (params.offset !== undefined) query.set('offset', String(params.offset));
-	return apiRequest<HealthCheck[]>(`/v1/healthchecks?${query.toString()}`);
+	return apiRequest<HealthCheck[]>(
+		withQuery('/v1/healthchecks', {
+			datasource_id: params.datasourceId,
+			search: params.search,
+			limit: params.limit,
+			offset: params.offset
+		})
+	);
 }
 
 export function listAllHealthChecks(
 	params?: ListHealthChecksParams
 ): ResultAsync<HealthCheck[], ApiError> {
-	const query = new URLSearchParams();
-	if (params?.search) query.set('search', params.search);
-	if (params?.limit !== undefined) query.set('limit', String(params.limit));
-	if (params?.offset !== undefined) query.set('offset', String(params.offset));
-	const qs = query.toString();
-	return apiRequest<HealthCheck[]>(`/v1/healthchecks/all${qs ? `?${qs}` : ''}`);
+	return apiRequest<HealthCheck[]>(
+		withQuery('/v1/healthchecks/all', {
+			search: params?.search,
+			limit: params?.limit,
+			offset: params?.offset
+		})
+	);
 }
 
 export function createHealthCheck(payload: HealthCheckCreate): ResultAsync<HealthCheck, ApiError> {

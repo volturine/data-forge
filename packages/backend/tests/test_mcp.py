@@ -98,15 +98,12 @@ class TestMCPToolListing:
         for tool in [t for t in tools if t['method'] == 'DELETE']:
             assert tool['safety'] == MCPToolSafety.MUTATING.value
 
-        ds_delete = [t for t in tools if t['method'] == 'DELETE' and '/datasource/' in t['path']]
-        assert len(ds_delete) > 0
-        for tool in ds_delete:
-            assert tool['confirm_required'] is True
-
-        analysis_delete = [t for t in tools if t['method'] == 'DELETE' and '/analysis/' in t['path']]
-        assert len(analysis_delete) > 0
-        for tool in analysis_delete:
-            assert tool['confirm_required'] is True
+        # Deleting datasources, analyses (and their versions/steps), schedules and
+        # health checks from chat always needs the user's confirmation.
+        for prefix in ('/datasource/', '/analysis/', '/schedules/', '/healthchecks/'):
+            deletes = [t for t in tools if t['method'] == 'DELETE' and f'/api/v1{prefix}' in t['path']]
+            assert deletes, prefix
+            assert all(tool['confirm_required'] is True for tool in deletes), prefix
 
 
 class TestMCPCallPreview:

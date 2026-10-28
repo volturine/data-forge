@@ -205,7 +205,7 @@ def test_manager_commits_staged_parquet_files_and_replaces_existing_table_atomic
     catalog = InMemoryCatalog("datasource-import-tests", warehouse=(tmp_path / "warehouse").as_uri())
     catalog.create_namespace("clean")
     monkeypatch.setattr(execution, "load_runtime_catalog", lambda *_args, **_kwargs: catalog)
-    monkeypatch.setattr(execution, "object_store_storage_options", lambda: {})
+    monkeypatch.setattr(execution, "object_store_storage_options", dict)
     monkeypatch.setattr(execution, "object_store_url", lambda *_args, **_kwargs: (tmp_path / "warehouse").as_uri())
     monkeypatch.setattr(execution, "get_namespace", lambda: "default")
 
@@ -409,7 +409,7 @@ def test_reingest_accumulates_snapshots_on_the_published_table(tmp_path, monkeyp
     catalog = InMemoryCatalog("reingest-history-tests", warehouse=(tmp_path / "warehouse").as_uri())
     catalog.create_namespace("clean")
     monkeypatch.setattr(execution, "load_runtime_catalog", lambda *_args, **_kwargs: catalog)
-    monkeypatch.setattr(execution, "object_store_storage_options", lambda: {})
+    monkeypatch.setattr(execution, "object_store_storage_options", dict)
     monkeypatch.setattr(execution, "object_store_url", lambda *_args, **_kwargs: (tmp_path / "warehouse").as_uri())
     monkeypatch.setattr(execution, "get_namespace", lambda: "default")
 

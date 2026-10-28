@@ -63,13 +63,7 @@ describe('ConfigStore', () => {
 	describe('initial state', () => {
 		test('is empty before fetch and getters return defaults', () => {
 			expect(store.config).toBeNull();
-			expect(store.loading).toBe(false);
 			expect(store.error).toBeNull();
-			expect(store.auditLogBatchSize).toBe(20);
-			expect(store.auditLogFlushIntervalMs).toBe(5000);
-			expect(store.auditLogDedupeWindowMs).toBe(500);
-			expect(store.auditLogFlushCooldownMs).toBe(3000);
-			expect(store.logQueueMaxSize).toBe(2000);
 			expect(store.publicIdbDebug).toBe(false);
 			expect(store.smtpEnabled).toBe(false);
 			expect(store.telegramEnabled).toBe(false);
@@ -79,14 +73,13 @@ describe('ConfigStore', () => {
 	});
 
 	describe('fetch success', () => {
-		test('populates config and clears loading', async () => {
+		test('populates config', async () => {
 			const cfg = makeConfig();
 			mockSuccess(cfg);
 
 			await store.fetch();
 
 			expect(store.config).toEqual(cfg);
-			expect(store.loading).toBe(false);
 			expect(store.error).toBeNull();
 		});
 
@@ -108,22 +101,20 @@ describe('ConfigStore', () => {
 	});
 
 	describe('fetch error', () => {
-		test('sets error message and clears loading without retry', async () => {
+		test('sets error message without retry', async () => {
 			mockError('Network failure');
 
 			await store.fetch();
 
 			expect(store.error).toBe('Network failure');
-			expect(store.loading).toBe(false);
 			expect(store.config).toBeNull();
-			expect(store.settled).toBe(true);
 			expect(mockGetConfig).toHaveBeenCalledTimes(1);
 		});
 
 		test('getters still return defaults after error', async () => {
 			mockError('boom');
 			await store.fetch();
-			expect(store.auditLogBatchSize).toBe(20);
+			expect(store.authRequired).toBe(true);
 		});
 	});
 

@@ -22,7 +22,9 @@ vi.mock('./websocket', () => ({
 		return { close: () => {} };
 	},
 	createOwnedWebSocket: vi.fn(),
-	closeOwnedWebSocket: vi.fn()
+	closeOwnedWebSocket: vi.fn(),
+	isErrorMessage: (msg: Record<string, unknown>) =>
+		msg.type === 'error' && typeof msg.error === 'string'
 }));
 
 const { connectBuildDetailStream, connectBuildListStream } = await import('./build-stream');

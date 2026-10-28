@@ -15,8 +15,6 @@ from importlib import import_module
 from pathlib import Path
 
 import grpc
-import requests
-from google.protobuf.timestamp_pb2 import Timestamp
 
 from dataforge_protocol import compute_worker_runtime_pb2, compute_worker_runtime_pb2_grpc
 from runtime.config import settings
@@ -24,6 +22,7 @@ from runtime.domain.compute.result import ComputeWorkerResult
 from runtime.environment import read_env, read_int
 from runtime.json_values import dict_to_struct, encode_json_bytes
 from runtime.object_store import reset_object_store_client
+from runtime.protocol_mapping import datetime_to_timestamp
 
 logger = logging.getLogger(__name__)
 
@@ -317,7 +316,7 @@ def _execute_job(
     payload: dict[str, object],
     progress_callback: Callable[[dict[str, object]], None],
 ) -> ComputeWorkerResult:
-    if kind.startswith("datasource_") or kind.startswith("excel_"):
+    if kind.startswith(("datasource_", "excel_")):
         return ComputeWorkerResult(
             job_id=job_id,
             data=_execute_datasource_job(kind, payload, progress_callback),
@@ -339,6 +338,8 @@ def _execute_job(
             raise ValueError("row_limit and offset must be integers")
         result_data = polars_compute.execute_preview(datasource_config, steps, row_limit, offset, job_id, additional_datasources, progress_callback)
     elif kind == "export":
+        import requests
+
         artifact_url = payload.get("artifact_url")
         artifact_upload_url = payload.get("artifact_upload_url")
         export_format = payload.get("export_format", "csv")
@@ -408,12 +409,6 @@ def _result_message(result: ComputeWorkerResult) -> compute_worker_runtime_pb2.C
         message.write_duration_ms = result.write_duration_ms
     if result.collect_duration_ms is not None:
         message.collect_duration_ms = result.collect_duration_ms
-    return message
-
-
-def _timestamp(value: datetime) -> Timestamp:
-    message = Timestamp()
-    message.FromDatetime(value)
     return message
 
 
@@ -597,7 +592,7 @@ class PolarsComputeWorkerServicer(compute_worker_runtime_pb2_grpc.PolarsComputeW
                             compute_worker_runtime_pb2.ComputeWorkerJobEvent(
                                 job_id=request.job_id,
                                 sequence=max(sequence + 1, state.next_sequence),
-                                emitted_at=_timestamp(datetime.now(UTC)),
+                                emitted_at=datetime_to_timestamp(datetime.now(UTC)),
                                 result=_result_message(state.result),
                             )
                         )
@@ -610,12 +605,12 @@ class PolarsComputeWorkerServicer(compute_worker_runtime_pb2_grpc.PolarsComputeW
                             continue
                         event = dict(raw_event)
                         sequence = event_sequence
-                        emitted_at = datetime.fromisoformat(str(event.pop("emitted_at")).replace("Z", "+00:00"))
+                        emitted_at = datetime.fromisoformat(str(event.pop("emitted_at")))
                         batch.append(
                             compute_worker_runtime_pb2.ComputeWorkerJobEvent(
                                 job_id=request.job_id,
                                 sequence=event_sequence,
-                                emitted_at=_timestamp(emitted_at),
+                                emitted_at=datetime_to_timestamp(emitted_at),
                                 progress_json=encode_json_bytes(event),
                             )
                         )
@@ -625,7 +620,7 @@ class PolarsComputeWorkerServicer(compute_worker_runtime_pb2_grpc.PolarsComputeW
                                 compute_worker_runtime_pb2.ComputeWorkerJobEvent(
                                     job_id=request.job_id,
                                     sequence=sequence + 1,
-                                    emitted_at=_timestamp(datetime.now(UTC)),
+                                    emitted_at=datetime_to_timestamp(datetime.now(UTC)),
                                     result=_result_message(state.result),
                                 )
                             )

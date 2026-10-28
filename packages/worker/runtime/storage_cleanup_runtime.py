@@ -10,8 +10,9 @@ from typing import Protocol
 from pyiceberg.exceptions import NoSuchNamespaceError, NoSuchTableError
 from sqlalchemy import text
 
-from dataforge_protocol import compute_pb2, enums_pb2
+from dataforge_protocol import compute_pb2
 from runtime.compute_manager import ProcessManager
+from runtime.domain.compute.identity import datasource_compute_worker_identity
 from runtime.executors import run_cleanup_in_thread, run_control_in_thread
 from runtime.iceberg_catalog import load_runtime_catalog
 from runtime.live_hubs import VersionHub
@@ -102,12 +103,7 @@ def delete_cleanup_target(claim: StorageCleanupClaim) -> None:
 
 
 async def process_cleanup(manager: ProcessManager, client: StorageCleanupClient, claim: StorageCleanupClaim) -> bool:
-    identity = compute_pb2.ComputeWorkerIdentity(
-        scope=enums_pb2.COMPUTE_WORKER_SCOPE_DATASOURCE_PREVIEW,
-        reuse_policy=enums_pb2.COMPUTE_WORKER_REUSE_POLICY_SHARED,
-        resource_id=claim.resource_id,
-        datasource_id=claim.resource_id,
-    )
+    identity = datasource_compute_worker_identity(claim.resource_id)
     if await run_control_in_thread(_has_active_datasource_writer, manager, identity, namespace=claim.namespace):
         await client.complete_storage_cleanup_async(claim, error="Datasource writer has not settled")
         return False

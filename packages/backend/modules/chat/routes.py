@@ -28,7 +28,7 @@ from dataforge_protocol import enums_pb2
 from modules.auth.dependencies import get_current_user
 from modules.auth.models import User
 from modules.chat.chat_http import ChatHttpError, chat_with_tools, list_models
-from modules.chat.models import ChatSession
+from modules.chat.models import ChatSession, ChatTurnStatus
 from modules.chat.sessions import ChatSessionBusy, normalize_epoch_milliseconds, session_store
 from modules.chat.store import ChatClaimRevoked, ConfirmationPending, chat_stream_recovery, chat_turn_store
 from modules.mcp.executor import call_tool
@@ -417,7 +417,7 @@ async def _execute_tool_calls(
         if tool.confirm_required:
             await session.set_checkpoint(
                 {'phase': 'awaiting_confirmation', 'tool_call': call, 'remaining_calls': remaining_calls},
-                status='awaiting_confirmation',
+                status=ChatTurnStatus.AWAITING_CONFIRMATION,
             )
             await session.push_event({'type': 'tool_confirm', 'tool_id': tool_id, 'method': method, 'path': path, 'args': normalized})
             if not await session.wait_for_confirm():
@@ -441,7 +441,7 @@ async def _run_agent_turn(
     api_key = _provider_api_key(provider, session.api_key)
     if provider.requires_session_api_key and not api_key:
         await session.push_event({'type': 'error', 'content': 'No API key configured'})
-        await session.finish('failed')
+        await session.finish(ChatTurnStatus.FAILED)
         return
 
     turn_start = time.monotonic()
@@ -470,7 +470,7 @@ async def _run_agent_turn(
             assistant_content = await session.run_sync_provider(client.generate, prompt, model=session.model, options=None)
             await session.append_message({'role': 'assistant', 'content': assistant_content})
             await session.push_event({'type': 'message', 'role': 'assistant', 'content': assistant_content})
-            await session.finish('completed')
+            await session.finish(ChatTurnStatus.COMPLETED)
             return
 
         all_tools = [t for t in registry if t.safety == MCPToolSafety.SAFE] + [t for t in registry if t.safety == MCPToolSafety.MUTATING]
@@ -576,7 +576,13 @@ async def _run_agent_turn(
         await session.push_event({'type': 'error', 'content': 'Internal error'})
     finally:
         logger.info('chat turn end session=%s elapsed=%.2fs tools=%d', session.id, time.monotonic() - turn_start, tool_count)
-    status = 'interrupted' if session.owner_stopping else 'failed' if session.failed or session.stop_requested else 'completed'
+    status = (
+        ChatTurnStatus.INTERRUPTED
+        if session.owner_stopping
+        else ChatTurnStatus.FAILED
+        if session.failed or session.stop_requested
+        else ChatTurnStatus.COMPLETED
+    )
     await session.finish(status)
 
 
@@ -645,9 +651,7 @@ async def send_message(request: Request, body: MessageRequest, user: User = Depe
             namespace=get_namespace(),
             session_token=session_token,
         )
-    except RuntimeError as exc:
-        if str(exc) != 'Agent busy':
-            raise
+    except ChatSessionBusy as exc:
         raise HTTPException(status_code=409, detail='Agent busy') from exc
     except LookupError as exc:
         raise HTTPException(status_code=404, detail='Session not found') from exc

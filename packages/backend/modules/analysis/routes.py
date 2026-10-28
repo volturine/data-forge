@@ -23,7 +23,7 @@ from modules.analysis.revisions import (
     set_response_headers as set_analysis_revision_headers,
     version as analysis_version,
 )
-from modules.analysis.step_schemas import get_step_catalog, normalize_step_config
+from modules.analysis.step_schemas import get_step_catalog
 from modules.analysis.templates import get_template, list_templates
 from modules.auth.dependencies import get_current_user, get_current_user_id
 from modules.auth.models import User
@@ -75,8 +75,7 @@ async def create_analysis(
     (with result_id, format, filename), and optionally steps.
     Use GET /api/v1/analysis/step-types to discover valid step types and their config schemas.
     """
-    owner_id = user.id
-    result = await run_api_blocking(run_db, service.create_analysis, data, owner_id=owner_id)
+    result = await run_api_blocking(run_db, service.create_analysis, data, owner_id=user.id)
     return await executor_client.json_response(result)
 
 
@@ -114,8 +113,7 @@ async def import_analysis(
     user: User = Depends(get_current_user),
 ):
     """Import an analysis pipeline definition and persist it as a new analysis."""
-    owner_id = user.id
-    result = await run_api_blocking(run_db, service.import_analysis, data, owner_id=owner_id)
+    result = await run_api_blocking(run_db, service.import_analysis, data, owner_id=user.id)
     return await executor_client.json_response(result)
 
 
@@ -190,13 +188,12 @@ async def duplicate_analysis(
     user: User = Depends(get_current_user),
 ):
     """Duplicate an analysis while regenerating output identities and derived references."""
-    owner_id = user.id
     result = await run_api_blocking(
         run_db,
         service.duplicate_analysis,
         parse_analysis_id(analysis_id),
         data,
-        owner_id=owner_id,
+        owner_id=user.id,
     )
     return await executor_client.json_response(result)
 
@@ -315,35 +312,13 @@ async def preview_analysis(
     # durable preview command used for identity and single-flight deduplication.
     analysis_payload = {'analysis_id': analysis_id_value, **analysis_payload}
 
-    tabs = analysis_payload.get('tabs', [])
-    if not isinstance(tabs, list):
-        raise HTTPException(status_code=400, detail='pipeline tabs must be a list')
-    selected = next((tab for tab in tabs if tab.get('steps')), None)
-    if not selected:
-        raise HTTPException(status_code=400, detail='pipeline payload missing tab steps')
-    datasource = selected.get('datasource')
-    if not isinstance(datasource, dict):
-        raise HTTPException(status_code=400, detail='Analysis tab datasource must be a dict')
-    datasource_id = datasource.get('id')
-    steps = selected.get('steps', [])
-    if not datasource_id:
-        raise HTTPException(status_code=400, detail='Analysis tab missing datasource.id')
-    if not isinstance(steps, list):
-        raise HTTPException(status_code=400, detail='Analysis tab steps must be a list')
-    config = datasource.get('config') or {}
-    if not isinstance(config, dict):
-        raise HTTPException(status_code=400, detail='Analysis tab datasource.config must be a dict')
-    branch = config.get('branch')
-    if not isinstance(branch, str) or not branch.strip():
-        raise HTTPException(status_code=400, detail='Analysis tab datasource.config.branch is required')
-    output_config = selected.get('output')
-    if not isinstance(output_config, dict):
-        raise HTTPException(status_code=400, detail='Analysis tab output must be a dict')
-
     analysis_pipeline = await run_api_blocking(
         compute_schemas.AnalysisPipelinePayload.model_validate,
         analysis_payload,
     )
+    selected = next((tab for tab in analysis_pipeline.tabs if tab.steps), None)
+    if selected is None:
+        raise HTTPException(status_code=400, detail='pipeline payload missing tab steps')
     preview = await executor_client.preview_step(
         compute_schemas.StepPreviewRequest(
             analysis_id=analysis_id_value,
@@ -353,7 +328,7 @@ async def preview_analysis(
                 analysis_id=analysis_id_value,
                 resource_id=analysis_id_value,
             ),
-            target_step_id=steps[-1]['id'] if steps else 'source',
+            target_step_id=selected.steps[-1]['id'],
             analysis_pipeline=analysis_pipeline,
             row_limit=50,
             page=1,
@@ -439,13 +414,12 @@ async def add_step(
     analysis_id_value = parse_analysis_id(analysis_id)
 
     def add(session: Session):
-        normalized_config = normalize_step_config(data.type, data.config)
         return service.add_step(
             session,
             analysis_id_value,
             tab_id,
             data.type,
-            normalized_config,
+            data.config,
             data.position,
             data.depends_on,
         )
@@ -481,29 +455,14 @@ async def update_step(
     analysis_id_value = parse_analysis_id(analysis_id)
 
     def update(session: Session):
-        normalized_config = data.config
-        if data.type and data.config:
-            if not step_id.strip():
-                raise ValueError('Pipeline step id is required')
-            normalized_config = normalize_step_config(data.type, data.config)
-        elif data.type and not data.config:
-            existing = service.get_step(session, analysis_id_value, tab_id, step_id)
-            if not step_id.strip():
-                raise ValueError('Pipeline step id is required')
-            normalize_step_config(data.type, existing.config)
-        elif data.config and not data.type:
-            existing = service.get_step(session, analysis_id_value, tab_id, step_id)
-            existing_type = existing.type
-            if existing_type:
-                if not step_id.strip():
-                    raise ValueError('Pipeline step id is required')
-                normalized_config = normalize_step_config(existing_type, data.config)
+        if not step_id.strip():
+            raise ValueError('Pipeline step id is required')
         return service.update_step(
             session,
             analysis_id_value,
             tab_id,
             step_id,
-            normalized_config,
+            data.config,
             data.type,
         )
 

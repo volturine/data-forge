@@ -234,8 +234,6 @@ export interface TopKConfigData {
 }
 
 export interface UnpivotConfigData {
-	index?: Field<ProtocolUnpivotConfigJson, 'idVars'>;
-	on?: Field<ProtocolUnpivotConfigJson, 'valueVars'>;
 	id_vars?: Field<ProtocolUnpivotConfigJson, 'idVars'>;
 	value_vars?: Field<ProtocolUnpivotConfigJson, 'valueVars'>;
 	variable_name?: Field<ProtocolUnpivotConfigJson, 'variableName'>;

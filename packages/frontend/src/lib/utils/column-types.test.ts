@@ -160,7 +160,6 @@ describe('COLUMN_TYPE_REGISTRY consistency', () => {
 			expect(config.category).toBeTruthy();
 			expect(config.icon).toBeDefined();
 			expect(config.description).toBeTruthy();
-			expect(Array.isArray(config.aliases)).toBe(true);
 		}
 	});
 });

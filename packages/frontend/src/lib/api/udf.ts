@@ -3,6 +3,7 @@ import type { ResultAsync } from 'neverthrow';
 import { apiRequest } from './client';
 import type { ApiError } from './client';
 import type { Udf, UdfClone, UdfCreate, UdfExport, UdfImport, UdfUpdate } from '#lib/types/udf.js';
+import { withQuery } from './query';
 
 export function listUdfs(
 	params?: {
@@ -12,13 +13,14 @@ export function listUdfs(
 	},
 	options?: RequestInit
 ): ResultAsync<Udf[], ApiError> {
-	const search = new URLSearchParams();
-	if (params?.q) search.set('q', params.q);
-	if (params?.dtype_key) search.set('dtype_key', params.dtype_key);
-	if (params?.tag) search.set('tag', params.tag);
-	const query = search.toString();
-	const endpoint = query ? `/v1/udf?${query}` : '/v1/udf';
-	return apiRequest<Udf[]>(endpoint, options);
+	return apiRequest<Udf[]>(
+		withQuery('/v1/udf', {
+			q: params?.q,
+			dtype_key: params?.dtype_key,
+			tag: params?.tag
+		}),
+		options
+	);
 }
 
 export function createUdf(data: UdfCreate): ResultAsync<Udf, ApiError> {

@@ -42,7 +42,7 @@ _BOOTSTRAP_SECRET_FIELDS = (
 
 
 def _warn_bootstrap_secret_missing(name: str) -> None:
-    logging.warning('Skipping %s bootstrap because SETTINGS_ENCRYPTION_KEY is not set', name)
+    logger.warning('Skipping %s bootstrap because SETTINGS_ENCRYPTION_KEY is not set', name)
 
 
 def _notify_settings_changed(session: Session) -> None:
@@ -64,7 +64,7 @@ def ensure_openrouter_key_populated(session: Session) -> str:
     row = session.get(AppSettings, 1)
     if row is None:
         return ''
-    if str(row.openrouter_api_key or ''):
+    if row.openrouter_api_key:
         return read_stored_secret(row, 'openrouter_api_key')
     from backend_core.config import settings as app_settings
 
@@ -96,7 +96,7 @@ def seed_settings_from_env(session: Session) -> None:
     if row and row.env_bootstrap_complete:
         # Other saved settings stay as the user left them. An empty OpenRouter
         # key is still filled from the deployment so chat and Profile Test share it.
-        if not str(row.openrouter_api_key or ''):
+        if not row.openrouter_api_key:
             ensure_openrouter_key_populated(session)
         return
     if not row:

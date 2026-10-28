@@ -8,7 +8,7 @@ from collections.abc import Callable
 
 import polars as pl
 
-from operations import HANDLERS
+from operations import OPERATIONS
 from operations.datasource import load_datasource
 from operations.plot import ChartParams, compute_chart_data, compute_overlay_datasets
 from operations.step_converter import BackendStep, convert_step_format
@@ -86,7 +86,7 @@ def _build_pipeline_details(
 
         dependency_map[step_id] = dep_id
         dependents.setdefault(dep_id, []).append(step_id)
-        in_degree[step_id] = in_degree.get(step_id, 0) + 1
+        in_degree[step_id] += 1
 
     queue = deque(step_id for step_id, degree in in_degree.items() if degree == 0)
     ordered_steps: list[dict] = []
@@ -94,7 +94,7 @@ def _build_pipeline_details(
         current_id = queue.popleft()
         ordered_steps.append(step_map[current_id])
         for child_id in dependents.get(current_id, []):
-            in_degree[child_id] = in_degree.get(child_id, 0) - 1
+            in_degree[child_id] -= 1
             if in_degree[child_id] == 0:
                 queue.append(child_id)
 
@@ -494,11 +494,9 @@ def apply_step(
     operation = step.operation
     if not operation:
         raise ValueError("Step operation is required")
-    params = step.params
 
-    handler = HANDLERS.get(operation)
-
-    if not handler:
+    definition = OPERATIONS.get(operation)
+    if definition is None:
         raise ValueError(f"Unsupported operation: {operation}")
 
-    return handler(lf, params, right_lf=right_lf, right_sources=right_sources, step_id=step_id)
+    return definition.apply(lf, step.config, right_lf=right_lf, right_sources=right_sources, step_id=step_id)

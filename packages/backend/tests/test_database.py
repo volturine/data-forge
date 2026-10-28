@@ -68,7 +68,7 @@ def test_critical_db_helpers_run_sessions_on_their_reserved_engines(monkeypatch)
 
 
 def test_database_statement_timing_collects_sql_and_commit_costs() -> None:
-    engine = database._create_engine('sqlite:///:memory:', pool_name='statement-timing')
+    engine = database._create_engine('sqlite:///:memory:')
     metrics: dict[str, object] = {'sql_count': 0, 'sql_ms': 0.0, 'commit_ms': 0.0}
 
     with database.database_statement_timing(metrics), Session(engine) as session:
@@ -176,7 +176,7 @@ def test_namespace_migration_holds_advisory_lock_without_checking_out_pool_conne
         finally:
             lock_entered = False
 
-    monkeypatch.setattr(database, 'get_settings_engine', lambda: PostgresEngine())
+    monkeypatch.setattr(database, 'get_settings_engine', PostgresEngine)
     monkeypatch.setattr(database, '_postgres_advisory_lock', advisory_lock)
     monkeypatch.setattr('backend_core.migrations.ensure_database_exists', lambda _url: None)
 

@@ -47,7 +47,7 @@
 	// by the root layout. The browser flag only marks client hydration; waiting
 	// for authStore.loading here made a slow probe leave a visible but disabled
 	// registration form.
-	const hydrated = $derived(browser);
+	const hydrated = browser;
 </script>
 
 <div

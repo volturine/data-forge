@@ -23,7 +23,7 @@ from backend_core.config import settings
 from backend_core.database import RuntimeCoordinatorFenced
 from modules.auth.models import User
 from modules.chat.consumer import ChatTurnConsumer, TurnRuntime
-from modules.chat.models import ChatSession, ChatTurn
+from modules.chat.models import ChatSession, ChatTurn, ChatTurnStatus
 from modules.chat.sessions import session_store
 from modules.chat.store import ChatClaimRevoked, ChatTurnStore, TurnClaim, _verify_claim
 from modules.mcp.models import MCPHttpMethod, MCPToolDefinition
@@ -76,8 +76,8 @@ def _claim(turn_id: str = 'removed') -> TurnClaim:
     )
 
 
-@pytest.mark.parametrize('status', ['queued', 'running', 'awaiting_confirmation'])
-def test_delete_conflicts_with_active_turn(status: str) -> None:
+@pytest.mark.parametrize('status', [ChatTurnStatus.QUEUED, ChatTurnStatus.RUNNING, ChatTurnStatus.AWAITING_CONFIRMATION])
+def test_delete_conflicts_with_active_turn(status: ChatTurnStatus) -> None:
     session = session_store.create('openrouter', 'test', 'key', user_id='user')
     store = ChatTurnStore()
     turn_id = store.enqueue(session_id=session.id, user_id='user', content='run', tool_ids=[], namespace='default', session_token='token')

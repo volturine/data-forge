@@ -25,13 +25,9 @@ def test_api_route_handlers_do_not_receive_sync_sqlalchemy_sessions() -> None:
             for argument in arguments:
                 annotation = argument.annotation
                 has_session_annotation = annotation is not None and any(
-                    isinstance(part, ast.Name)
-                    and part.id == 'Session'
-                    or isinstance(part, ast.Attribute)
-                    and part.attr == 'Session'
-                    or isinstance(part, ast.Constant)
-                    and isinstance(part.value, str)
-                    and part.value.endswith('Session')
+                    (isinstance(part, ast.Name) and part.id == 'Session')
+                    or (isinstance(part, ast.Attribute) and part.attr == 'Session')
+                    or (isinstance(part, ast.Constant) and isinstance(part.value, str) and part.value.endswith('Session'))
                     for part in ast.walk(annotation)
                 )
                 if has_session_annotation:

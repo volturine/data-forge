@@ -82,7 +82,7 @@ async def get_version(analysis_id: AnalysisId, version: int):
     return result
 
 
-@router.delete('/{analysis_id}/versions/{version}', mcp=True)
+@router.delete('/{analysis_id}/versions/{version}', mcp=True, mcp_confirm_required=True)
 @handle_errors(operation='delete analysis version')
 async def delete_version(
     analysis_id: AnalysisId,

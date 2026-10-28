@@ -1400,6 +1400,27 @@ class TestUpdateStep:
         assert result['type'] == 'limit'
         assert result['config']['n'] == 25
 
+    def test_update_step_type_only_stores_normalized_config(self, client, sample_analysis: Analysis):
+        tab_id = sample_analysis.pipeline_definition['tabs'][0]['id']
+        step_id = sample_analysis.pipeline_definition['tabs'][0]['steps'][0]['id']
+        payload = {'type': 'filter'}
+
+        response = client.put(
+            f'/api/v1/analysis/{sample_analysis.id}/tabs/{tab_id}/steps/{step_id}',
+            json=payload,
+        )
+
+        assert response.status_code == 200
+        assert response.json()['config']['conditions'] == [
+            {
+                'column': 'age',
+                'operator': '>',
+                'value': 30,
+                'value_type': 'string',
+                'compare_column': None,
+            }
+        ]
+
     def test_update_step_not_found(self, client, sample_analysis: Analysis):
         tab_id = sample_analysis.pipeline_definition['tabs'][0]['id']
         payload = {'config': {'columns': 'not-a-list'}}
@@ -1664,4 +1685,14 @@ class TestStepValidation:
             'depends_on': ['nonexistent_step'],
         }
         response = client.post(f'/api/v1/analysis/{sample_analysis.id}/tabs/{tab_id}/steps', json=payload)
+        assert response.status_code == 400
+
+
+class TestAnalysisPreview:
+    def test_preview_rejects_non_object_tab_with_400(self, client, sample_analysis: Analysis):
+        response = client.post(
+            f'/api/v1/analysis/{sample_analysis.id}/preview',
+            json={'pipeline': {'tabs': ['not-a-tab']}},
+        )
+
         assert response.status_code == 400

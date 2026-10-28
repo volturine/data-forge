@@ -12,7 +12,7 @@ from runtime.executors import _ExecutorLane, _run_in_executor
 @pytest.mark.asyncio
 async def test_executor_submission_queue_stays_bounded_under_burst() -> None:
     executor = ThreadPoolExecutor(max_workers=1)
-    lane = _ExecutorLane(executor, max_pending=3)
+    lane = _ExecutorLane("test", executor, max_pending=3)
     started = threading.Event()
     release = threading.Event()
 
@@ -20,7 +20,7 @@ async def test_executor_submission_queue_stays_bounded_under_burst() -> None:
         started.set()
         assert release.wait(timeout=3)
 
-    tasks = [asyncio.create_task(_run_in_executor(lane, "test", blocking_work, None)) for _ in range(20)]
+    tasks = [asyncio.create_task(_run_in_executor(lane, blocking_work, None)) for _ in range(20)]
     try:
         assert await asyncio.to_thread(started.wait, 1)
         await asyncio.sleep(0.05)
@@ -35,7 +35,7 @@ async def test_executor_submission_queue_stays_bounded_under_burst() -> None:
 @pytest.mark.asyncio
 async def test_cancelled_pending_submission_does_not_consume_admission() -> None:
     executor = ThreadPoolExecutor(max_workers=1)
-    lane = _ExecutorLane(executor, max_pending=1)
+    lane = _ExecutorLane("test", executor, max_pending=1)
     started = threading.Event()
     release = threading.Event()
 
@@ -43,8 +43,8 @@ async def test_cancelled_pending_submission_does_not_consume_admission() -> None
         started.set()
         assert release.wait(timeout=3)
 
-    first = asyncio.create_task(_run_in_executor(lane, "test", blocking_work, None))
-    pending = asyncio.create_task(_run_in_executor(lane, "test", lambda: None, None))
+    first = asyncio.create_task(_run_in_executor(lane, blocking_work, None))
+    pending = asyncio.create_task(_run_in_executor(lane, lambda: None, None))
     try:
         assert await asyncio.to_thread(started.wait, 1)
         await asyncio.sleep(0)
@@ -53,7 +53,7 @@ async def test_cancelled_pending_submission_does_not_consume_admission() -> None
             await pending
         release.set()
         await first
-        assert await _run_in_executor(lane, "test", lambda: "accepted", None) == "accepted"
+        assert await _run_in_executor(lane, lambda: "accepted", None) == "accepted"
     finally:
         release.set()
         await asyncio.gather(first, pending, return_exceptions=True)
@@ -63,7 +63,7 @@ async def test_cancelled_pending_submission_does_not_consume_admission() -> None
 @pytest.mark.asyncio
 async def test_running_cancellation_keeps_admission_until_thread_settles() -> None:
     executor = ThreadPoolExecutor(max_workers=1)
-    lane = _ExecutorLane(executor, max_pending=1)
+    lane = _ExecutorLane("test", executor, max_pending=1)
     started = threading.Event()
     release = threading.Event()
     later_started = threading.Event()
@@ -75,12 +75,12 @@ async def test_running_cancellation_keeps_admission_until_thread_settles() -> No
     def later_work() -> None:
         later_started.set()
 
-    running = asyncio.create_task(_run_in_executor(lane, "test", blocking_work, None))
+    running = asyncio.create_task(_run_in_executor(lane, blocking_work, None))
     later = None
     try:
         assert await asyncio.to_thread(started.wait, 1)
         running.cancel()
-        later = asyncio.create_task(_run_in_executor(lane, "test", later_work, None))
+        later = asyncio.create_task(_run_in_executor(lane, later_work, None))
         await asyncio.sleep(0.05)
         assert not later_started.is_set()
         assert lane._semaphore(asyncio.get_running_loop())._value == 0
@@ -91,7 +91,7 @@ async def test_running_cancellation_keeps_admission_until_thread_settles() -> No
         assert later_started.is_set()
     finally:
         release.set()
-        await asyncio.gather(running, *(tuple([later]) if later is not None else ()), return_exceptions=True)
+        await asyncio.gather(running, *((later,) if later is not None else ()), return_exceptions=True)
         executor.shutdown(wait=True)
 
 
@@ -99,7 +99,7 @@ async def test_running_cancellation_keeps_admission_until_thread_settles() -> No
 @pytest.mark.parametrize("expected_error", [False, True])
 async def test_cancelled_executor_retrieves_work_errors_and_reports_unexpected_failures(caplog, expected_error: bool) -> None:
     executor = ThreadPoolExecutor(max_workers=1)
-    lane = _ExecutorLane(executor, max_pending=1)
+    lane = _ExecutorLane("test", executor, max_pending=1)
     started = threading.Event()
     stop_requested = threading.Event()
     release = threading.Event()
@@ -116,7 +116,7 @@ async def test_cancelled_executor_retrieves_work_errors_and_reports_unexpected_f
             raise BuildCancelledError("build-id")
         raise RuntimeError("Unexpected work failure")
 
-    task = asyncio.create_task(_run_in_executor(lane, "test", work, stop_requested.set, expected_cancel_errors=(BuildCancelledError,)))
+    task = asyncio.create_task(_run_in_executor(lane, work, stop_requested.set, expected_cancel_errors=(BuildCancelledError,)))
     try:
         assert await asyncio.to_thread(started.wait, 5)
         task.cancel()
@@ -147,7 +147,7 @@ async def test_cancelled_executor_retrieves_work_errors_and_reports_unexpected_f
 @pytest.mark.asyncio
 async def test_cancel_callback_failure_is_reported_and_work_is_still_joined(caplog) -> None:
     executor = ThreadPoolExecutor(max_workers=1)
-    lane = _ExecutorLane(executor, max_pending=1)
+    lane = _ExecutorLane("test", executor, max_pending=1)
     started = threading.Event()
     stop_requested = threading.Event()
     release = threading.Event()
@@ -161,7 +161,7 @@ async def test_cancel_callback_failure_is_reported_and_work_is_still_joined(capl
         stop_requested.set()
         raise RuntimeError("Stop request failed")
 
-    task = asyncio.create_task(_run_in_executor(lane, "test", work, cancel_work, expected_cancel_errors=(BuildCancelledError,)))
+    task = asyncio.create_task(_run_in_executor(lane, work, cancel_work, expected_cancel_errors=(BuildCancelledError,)))
     try:
         assert await asyncio.to_thread(started.wait, 5)
         task.cancel()

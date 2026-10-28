@@ -40,7 +40,6 @@ from backend_core.validation import (
 )
 from backend_core.websocket import (
     is_disconnect_runtime_error,
-    resolve_websocket_session_token,
     safe_close_websocket,
     safe_send_json,
     safe_send_json_error,
@@ -48,8 +47,7 @@ from backend_core.websocket import (
     websocket_disconnected,
 )
 from dataforge_protocol import compute_pb2, enums_pb2
-from modules.analysis.step_schemas import normalize_pipeline_step_configs_for_protocol
-from modules.auth.dependencies import get_current_user
+from modules.auth.dependencies import get_current_user, resolve_session_token
 from modules.auth.models import User
 from modules.compute import commands, executor_client, iceberg_service, representations
 from modules.datasource import service as datasource_service
@@ -89,7 +87,7 @@ def _resolve_websocket_user(websocket: WebSocket) -> User | None:
 
     from modules.auth.service import ensure_default_user, validate_session
 
-    token = resolve_websocket_session_token(websocket)
+    token = resolve_session_token(websocket)
 
     def _lookup(session: Session) -> User | None:
         if token:
@@ -221,8 +219,6 @@ async def _require_websocket_user(websocket: WebSocket) -> User:
 
 
 def _analysis_name(session: Session, analysis_id: str) -> str:
-    if not analysis_id:
-        return 'Build'
     analysis = session.get(Analysis, analysis_id)
     return analysis.name if analysis and analysis.name else analysis_id
 
@@ -356,7 +352,7 @@ async def delete_iceberg_snapshot(
 
     Warning: deleting snapshots removes the ability to time-travel to that point.
     """
-    return await run_api_blocking(run_db, iceberg_service.delete_iceberg_snapshot, parse_datasource_id(datasource_id), str(snapshot_id))
+    return await run_api_blocking(run_db, iceberg_service.delete_iceberg_snapshot, parse_datasource_id(datasource_id), snapshot_id)
 
 
 @router.post('/builds', response_model=schemas.BuildRunDetail)
@@ -369,39 +365,23 @@ async def start_build(
     # worker heartbeat into a lost build; dispatch below will wake the manager
     # when it is available.
     # Normalizing the complete build payload is CPU work; keep it off the API event loop.
-    pipeline = await run_api_blocking(lambda: normalize_pipeline_step_configs_for_protocol(request.pipeline_payload()))
-    analysis_id = str(pipeline.get('analysis_id') or '')
+    request_json = await run_api_blocking(scheduler_service.build_request_json, request)
+    analysis_id = request.analysis_pipeline.analysis_id
     analysis_name = await run_api_blocking(run_db, _analysis_name, analysis_id)
     namespace = get_namespace()
     started_at = _utcnow()
     build_id = str(uuid.uuid4())
-    raw_tabs = pipeline.get('tabs')
-    tabs = raw_tabs if isinstance(raw_tabs, list) else []
-    selected_tab = next(
-        (tab for tab in tabs if isinstance(tab, dict) and isinstance(tab.get('id'), str) and tab.get('id') == request.tab_id),
-        None,
-    )
-    if not isinstance(selected_tab, dict):
+    selected_tab = next((tab for tab in request.analysis_pipeline.tabs if tab.id == request.tab_id), None)
+    if selected_tab is None:
         raise HTTPException(status_code=404, detail=f'Build request tab {request.tab_id} not found in analysis pipeline')
-    selected_datasource = selected_tab.get('datasource')
-    current_datasource_id = selected_datasource.get('id') if isinstance(selected_datasource, dict) else None
-    current_tab_name = selected_tab.get('name')
     data_plane = None
     placeholders: list[commands.OutputPlaceholder] = []
-    for tab in tabs:
-        if not isinstance(tab, dict):
-            continue
-        tab_id = tab.get('id')
-        output = tab.get('output')
-        if not isinstance(tab_id, str) or not isinstance(output, dict):
-            continue
-        result_id = output.get('result_id')
-        if not isinstance(result_id, str):
-            continue
+    for tab in request.analysis_pipeline.tabs:
+        output = tab.output
+        result_id = output['result_id']
         iceberg = output.get('iceberg')
         table_name = iceberg.get('table_name') if isinstance(iceberg, dict) else None
-        filename = output.get('filename')
-        output_name = table_name if isinstance(table_name, str) and table_name.strip() else filename
+        output_name = table_name if isinstance(table_name, str) and table_name.strip() else output['filename']
         branch_name = iceberg.get('branch') if isinstance(iceberg, dict) else None
         namespace_name = iceberg.get('namespace') if isinstance(iceberg, dict) else None
         placeholder_config: dict[str, object] | None = None
@@ -418,7 +398,7 @@ async def start_build(
                 'warehouse': warehouse_path,
                 'namespace': namespace_name if isinstance(namespace_name, str) and namespace_name.strip() else 'outputs',
                 'table': table_name,
-                'table_name': output_name if isinstance(output_name, str) and output_name.strip() else table_name,
+                'table_name': output_name,
                 'metadata_path': await run_api_blocking(data_plane.build_object_url, 'exports', str(result_id), namespace=namespace),
                 'branch': branch_name,
                 'namespace_name': namespace,
@@ -427,8 +407,8 @@ async def start_build(
         placeholders.append(
             commands.OutputPlaceholder(
                 result_id=result_id,
-                tab_id=tab_id,
-                name=output_name if isinstance(output_name, str) else None,
+                tab_id=tab.id,
+                name=output_name,
                 source_type=placeholder_source_type,
                 config=placeholder_config,
             )
@@ -438,12 +418,12 @@ async def start_build(
         namespace=namespace,
         analysis_id=analysis_id,
         analysis_name=analysis_name,
-        request_json={'analysis_pipeline': {'analysis_id': pipeline['analysis_id'], 'tabs': pipeline['tabs']}, 'tab_id': request.tab_id},
+        request_json=request_json,
         starter_json=await executor_client.model_payload(schemas.BuildStarter.for_user(user), mode='json'),
         current_kind=ComputeWorkerRunKind.BUILD.value,
-        current_datasource_id=current_datasource_id if isinstance(current_datasource_id, str) else None,
+        current_datasource_id=selected_tab.datasource.id,
         current_tab_id=request.tab_id,
-        current_tab_name=current_tab_name if isinstance(current_tab_name, str) else None,
+        current_tab_name=selected_tab.name,
         current_output_id=None,
         current_output_name=None,
         total_tabs=1,
@@ -699,7 +679,7 @@ async def _send_websocket_failure(
         return
     if isinstance(exc, RuntimeError) and is_disconnect_runtime_error(exc):
         return
-    logger.error('%s websocket error: %s', label, exc, exc_info=True)
+    logger.error('%s websocket error: %s', label, exc, exc_info=exc)
     await safe_send_json_error(websocket, error_message(error='An internal error occurred'))
 
 

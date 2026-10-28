@@ -1,8 +1,4 @@
-import {
-	getAnalysisWithHeaders,
-	type AnalysisDetail,
-	type AnalysisDetailResult
-} from '#lib/api/analysis.js';
+import { getAnalysisWithHeaders, type AnalysisDetailResult } from '#lib/api/analysis.js';
 
 export const analysisQueryKey = (analysisId: string) => ['analysis', analysisId] as const;
 
@@ -17,5 +13,3 @@ export async function fetchAnalysis(
 	}
 	return result.value;
 }
-
-export type { AnalysisDetail };

@@ -3,14 +3,22 @@ import uuid
 from collections.abc import Callable, Collection, Sequence
 from dataclasses import dataclass
 from datetime import datetime, timedelta
-from typing import Any, TypedDict, cast
+from typing import Any, TypedDict
 
 from sqlalchemy import and_, case, or_, select, text, update
 from sqlalchemy.orm import load_only
 from sqlmodel import Session
 
 from backend_core import compute_worker_runs_service, runtime_ipc, runtime_work_service
-from backend_core.claiming import CLAIM_DELIVERY_LEASE_SECONDS, claim_by_lease_owner, database_lease_clock, database_now, with_for_update_skip_locked
+from backend_core.claiming import (
+    CLAIM_DELIVERY_LEASE_SECONDS,
+    advisory_key,
+    claim_by_lease_owner,
+    database_lease_clock,
+    database_now,
+    is_postgres,
+    with_for_update_skip_locked,
+)
 from backend_core.config import settings
 from backend_core.domain.compute_requests.models import (
     command_envelope,
@@ -95,7 +103,7 @@ _SHARED_FLIGHT_COMMANDS = {
     enums_pb2.COMPUTE_REQUEST_KIND_PREVIEW: 'preview',
     enums_pb2.COMPUTE_REQUEST_KIND_SCHEMA: 'schema',
     enums_pb2.COMPUTE_REQUEST_KIND_ROW_COUNT: 'row_count',
-    **{kind: 'datasource' for kind in DATASOURCE_FLIGHT_REQUEST_KINDS},
+    **dict.fromkeys(DATASOURCE_FLIGHT_REQUEST_KINDS, 'datasource'),
 }
 
 
@@ -124,14 +132,7 @@ class TerminalComputeRequest:
     artifact_content_type: str | None
 
 
-@dataclass(frozen=True, slots=True)
-class ComputeWorkerRunFinalization:
-    run_id: str
-    fields: dict[str, object]
-    merge_result_json: bool = False
-
-
-class _ComputeWorkerRunFinalizationFields(TypedDict, total=False):
+class ComputeWorkerRunFinalizationFields(TypedDict, total=False):
     analysis_id: str | None
     datasource_id: str
     kind: ComputeWorkerRunKind | str
@@ -147,6 +148,13 @@ class _ComputeWorkerRunFinalizationFields(TypedDict, total=False):
     progress: float
     current_step: str | None
     triggered_by: str | None
+
+
+@dataclass(frozen=True, slots=True)
+class ComputeWorkerRunFinalization:
+    run_id: str
+    fields: ComputeWorkerRunFinalizationFields
+    merge_result_json: bool = False
 
 
 def _request_priority_clause(table):
@@ -192,7 +200,7 @@ def _snapshot_input_revisions(session: Session, command: compute_pb2.ComputeComm
         .order_by(col(DataSource.id))
         .with_for_update(read=True)
     ).all()
-    revisions = {datasource_id: revision for datasource_id, revision in rows}
+    revisions = dict(rows)
     for datasource_id in sorted(datasource_ids):
         revision = revisions.get(datasource_id)
         if revision is None:
@@ -200,12 +208,8 @@ def _snapshot_input_revisions(session: Session, command: compute_pb2.ComputeComm
         command.input_revisions.add(datasource_id=datasource_id, revision=revision)
 
 
-def _advisory_key(name: str) -> int:
-    return int.from_bytes(hashlib.sha256(name.encode()).digest()[:8], 'big', signed=True)
-
-
 def _try_advisory_xact_lock(session: Session, key: int) -> bool:
-    if getattr(getattr(session.get_bind(), 'dialect', None), 'name', None) != 'postgresql':
+    if not is_postgres(session):
         return True
     return bool(session.execute(text('SELECT pg_try_advisory_xact_lock(:key)'), {'key': key}).scalar_one())
 
@@ -214,7 +218,7 @@ def _engine_claim_lock_key(request: ComputeRequest) -> int | None:
     identity = _engine_claim_identity(request)
     if identity is None:
         return None
-    return _advisory_key('dataforge:compute-engine-claim:' + ':'.join(str(part) for part in identity))
+    return advisory_key('dataforge:compute-engine-claim:' + ':'.join(str(part) for part in identity))
 
 
 def _engine_claim_identity(request: ComputeRequest) -> tuple[str, int, int, str] | None:
@@ -359,7 +363,7 @@ def _stage_request(
         # PostgreSQL advisory transaction locking serializes only equal keys;
         # misses recheck under the lock before creation. Active and cached
         # followers use the lock-free lookup above.
-        if not _try_advisory_xact_lock(session, _advisory_key(f'dataforge:compute-flight:{namespace}:{flight_key}')):
+        if not _try_advisory_xact_lock(session, advisory_key(f'dataforge:compute-flight:{namespace}:{flight_key}')):
             # Never park an API database connection behind another viewer of
             # the same preview. The HTTP layer retries after closing this
             # short transaction, leaving the connection available to other
@@ -474,14 +478,18 @@ def stage_shared_flight_request(
 create_request = committed(stage_request, refresh=True)
 
 
-def command_envelope_for_request(request: ComputeRequest):
-    envelope = compute_pb2.ComputeCommandEnvelope.FromString(request.command_envelope)
+def _require_envelope_matches(request: ComputeRequest | TerminalComputeRequest, envelope_kind: enums_pb2.ComputeRequestKind, *, label: str) -> None:
     row_kind = kind_from_proto(request.kind)
-    if kind_from_proto(envelope.kind) != row_kind:
+    if kind_from_proto(envelope_kind) != row_kind:
         raise ValueError(
-            f'Compute request {request.id} envelope kind {compute_request_kind_name(kind_from_proto(envelope.kind))!r} '
+            f'Compute request {request.id} {label} kind {compute_request_kind_name(kind_from_proto(envelope_kind))!r} '
             f'does not match row kind {compute_request_kind_name(row_kind)!r}'
         )
+
+
+def command_envelope_for_request(request: ComputeRequest):
+    envelope = compute_pb2.ComputeCommandEnvelope.FromString(request.command_envelope)
+    _require_envelope_matches(request, envelope.kind, label='envelope')
     if envelope.correlation_id != request.id:
         raise ValueError(f'Compute request {request.id} envelope correlation id {envelope.correlation_id!r} does not match request id')
     return envelope
@@ -491,12 +499,7 @@ def response_payload(request: ComputeRequest | TerminalComputeRequest) -> dict[s
     if request.response_envelope is None:
         raise ValueError(f'Compute request {request.id} has no response envelope')
     envelope = compute_pb2.ComputeResponseEnvelope.FromString(request.response_envelope)
-    row_kind = kind_from_proto(request.kind)
-    if kind_from_proto(envelope.kind) != row_kind:
-        raise ValueError(
-            f'Compute request {request.id} response kind {compute_request_kind_name(kind_from_proto(envelope.kind))!r} '
-            f'does not match row kind {compute_request_kind_name(row_kind)!r}'
-        )
+    _require_envelope_matches(request, envelope.kind, label='response')
     row_status = status_from_proto(request.status)
     if status_from_proto(envelope.status) != row_status:
         raise ValueError(
@@ -1143,13 +1146,12 @@ def _stage_compute_worker_run_finalization(
         raise ValueError(f'Preview compute worker run must finish with status {expected_status.value}')
     if 'completed_at' not in finalization.fields:
         raise ValueError('Preview compute worker run finalization requires completed_at')
-    fields = cast(_ComputeWorkerRunFinalizationFields, finalization.fields)
     result = compute_worker_runs_service.stage_update_compute_worker_run(
         session,
         finalization.run_id,
         merge_result_json=finalization.merge_result_json,
         serialize_response=False,
-        **fields,
+        **finalization.fields,
     )
     if result is not True:
         raise ValueError(f'Preview compute worker run {finalization.run_id} rejected its terminal status transition')

@@ -3,7 +3,7 @@ from datetime import UTC, datetime, timedelta
 from backend_core import runtime_outbox_service
 from backend_core.config import settings
 from backend_core.domain.runtime.events import RuntimePayloadKind
-from backend_core.notification_delivery import EMAIL_DELIVERY_KIND, TELEGRAM_DELIVERY_KIND
+from backend_core.notification_delivery import DeliveryKind
 from backend_core.persistence.runtime_events.models import (
     NotificationDeliveryPartReceipt,
     NotificationDeliveryReceipt,
@@ -15,7 +15,7 @@ def test_dispatch_pending_events_marks_event_dispatched(test_db_session, monkeyp
     payloads: list[dict[str, object]] = []
     event = runtime_outbox_service.enqueue_build_job_notification(test_db_session)
 
-    monkeypatch.setattr('backend_core.runtime_outbox_service.runtime_ipc.notify_runtime_payload', lambda payload: payloads.append(payload))
+    monkeypatch.setattr('backend_core.runtime_outbox_service.runtime_ipc.notify_runtime_payload', payloads.append)
 
     dispatched = runtime_outbox_service.dispatch_pending_events(test_db_session)
 
@@ -66,7 +66,7 @@ def test_dispatch_pending_events_quarantines_poison_event(test_db_session, monke
 def test_runtime_dispatch_leaves_external_delivery_for_its_lane(test_db_session, monkeypatch) -> None:
     event = runtime_outbox_service.enqueue_notification_delivery(
         test_db_session,
-        {'kind': TELEGRAM_DELIVERY_KIND, 'chat_id': '123', 'message': 'Ready', 'bot_token': '12345:SECRET-TOKEN', 'attachments': []},
+        {'kind': DeliveryKind.TELEGRAM, 'chat_id': '123', 'message': 'Ready', 'bot_token': '12345:SECRET-TOKEN', 'attachments': []},
     )
     test_db_session.commit()
     monkeypatch.setattr('backend_core.runtime_outbox_service.runtime_ipc.notify_runtime_payload', lambda _payload: None)
@@ -78,7 +78,7 @@ def test_runtime_dispatch_leaves_external_delivery_for_its_lane(test_db_session,
     assert event.status == RuntimeOutboxStatus.PENDING
     assert event.attempts == 0
 
-    claims = runtime_outbox_service.claim_external_deliveries(test_db_session, kind=TELEGRAM_DELIVERY_KIND)
+    claims = runtime_outbox_service.claim_external_deliveries(test_db_session, kind=DeliveryKind.TELEGRAM)
 
     test_db_session.refresh(event)
     assert [claim.event_id for claim in claims] == [event.id]
@@ -90,10 +90,10 @@ def test_external_claim_delivery_uses_stable_outbox_id_and_records_receipt(test_
     deliveries: list[tuple[dict[str, object], str]] = []
     event = runtime_outbox_service.enqueue_notification_delivery(
         test_db_session,
-        {'kind': EMAIL_DELIVERY_KIND, 'to': 'test@example.com', 'subject': 'Ready', 'body': 'Done', 'attachments': []},
+        {'kind': DeliveryKind.EMAIL, 'to': 'test@example.com', 'subject': 'Ready', 'body': 'Done', 'attachments': []},
     )
     test_db_session.commit()
-    claims = runtime_outbox_service.claim_external_deliveries(test_db_session, kind=EMAIL_DELIVERY_KIND)
+    claims = runtime_outbox_service.claim_external_deliveries(test_db_session, kind=DeliveryKind.EMAIL)
     assert len(claims) == 1
     claim = claims[0]
     monkeypatch.setattr(
@@ -108,21 +108,21 @@ def test_external_claim_delivery_uses_stable_outbox_id_and_records_receipt(test_
     assert deliveries == [({**event.payload_json, 'event_id': event.id}, event.id)]
     receipt = test_db_session.get(NotificationDeliveryReceipt, event.id)
     assert receipt is not None
-    assert receipt.kind == EMAIL_DELIVERY_KIND
+    assert receipt.kind == DeliveryKind.EMAIL
 
 
 def test_external_claim_detects_prior_receipt_without_redelivering(test_db_session) -> None:
     event = runtime_outbox_service.enqueue_notification_delivery(
         test_db_session,
-        {'kind': EMAIL_DELIVERY_KIND, 'to': 'test@example.com', 'subject': 'Ready', 'body': 'Done', 'attachments': []},
+        {'kind': DeliveryKind.EMAIL, 'to': 'test@example.com', 'subject': 'Ready', 'body': 'Done', 'attachments': []},
     )
     test_db_session.commit()
-    test_db_session.add(NotificationDeliveryReceipt(event_id=event.id, kind=EMAIL_DELIVERY_KIND, delivered_at=datetime.now(UTC)))
+    test_db_session.add(NotificationDeliveryReceipt(event_id=event.id, kind=DeliveryKind.EMAIL, delivered_at=datetime.now(UTC)))
     event.status = RuntimeOutboxStatus.FAILED
     test_db_session.add(event)
     test_db_session.commit()
 
-    claim = runtime_outbox_service.claim_external_deliveries(test_db_session, kind=EMAIL_DELIVERY_KIND)[0]
+    claim = runtime_outbox_service.claim_external_deliveries(test_db_session, kind=DeliveryKind.EMAIL)[0]
     assert claim.already_delivered
     assert runtime_outbox_service.finalize_external_delivery(test_db_session, claim)
 
@@ -130,27 +130,27 @@ def test_external_claim_detects_prior_receipt_without_redelivering(test_db_sessi
 def test_external_claim_filters_by_provider_kind(test_db_session) -> None:
     email = runtime_outbox_service.enqueue_notification_delivery(
         test_db_session,
-        {'kind': EMAIL_DELIVERY_KIND, 'to': 'test@example.com', 'subject': 'Ready', 'body': 'Done'},
+        {'kind': DeliveryKind.EMAIL, 'to': 'test@example.com', 'subject': 'Ready', 'body': 'Done'},
     )
     telegram = runtime_outbox_service.enqueue_notification_delivery(
         test_db_session,
-        {'kind': TELEGRAM_DELIVERY_KIND, 'chat_id': '123', 'message': 'Ready'},
+        {'kind': DeliveryKind.TELEGRAM, 'chat_id': '123', 'message': 'Ready'},
     )
     test_db_session.commit()
 
-    email_claim = runtime_outbox_service.claim_external_deliveries(test_db_session, kind=EMAIL_DELIVERY_KIND)[0]
+    email_claim = runtime_outbox_service.claim_external_deliveries(test_db_session, kind=DeliveryKind.EMAIL)[0]
     assert email_claim.event_id == email.id
-    telegram_claim = runtime_outbox_service.claim_external_deliveries(test_db_session, kind=TELEGRAM_DELIVERY_KIND)[0]
+    telegram_claim = runtime_outbox_service.claim_external_deliveries(test_db_session, kind=DeliveryKind.TELEGRAM)[0]
     assert telegram_claim.event_id == telegram.id
 
 
 def test_external_delivery_failure_is_redacted_and_retryable(test_db_session) -> None:
     event = runtime_outbox_service.enqueue_notification_delivery(
         test_db_session,
-        {'kind': TELEGRAM_DELIVERY_KIND, 'chat_id': '123', 'message': 'Ready', 'bot_token': '12345:SECRET-TOKEN', 'attachments': []},
+        {'kind': DeliveryKind.TELEGRAM, 'chat_id': '123', 'message': 'Ready', 'bot_token': '12345:SECRET-TOKEN', 'attachments': []},
     )
     test_db_session.commit()
-    claim = runtime_outbox_service.claim_external_deliveries(test_db_session, kind=TELEGRAM_DELIVERY_KIND)[0]
+    claim = runtime_outbox_service.claim_external_deliveries(test_db_session, kind=DeliveryKind.TELEGRAM)[0]
 
     assert runtime_outbox_service.finalize_external_delivery(
         test_db_session,
@@ -168,10 +168,10 @@ def test_external_delivery_failure_is_redacted_and_retryable(test_db_session) ->
 def test_telegram_delivery_progress_survives_retry_and_rejects_stale_claim(test_db_session) -> None:
     event = runtime_outbox_service.enqueue_notification_delivery(
         test_db_session,
-        {'kind': TELEGRAM_DELIVERY_KIND, 'chat_id': '123', 'message': 'Ready', 'attachments': [{'filename': 'one.csv'}]},
+        {'kind': DeliveryKind.TELEGRAM, 'chat_id': '123', 'message': 'Ready', 'attachments': [{'filename': 'one.csv'}]},
     )
     test_db_session.commit()
-    first_claim = runtime_outbox_service.claim_external_deliveries(test_db_session, kind=TELEGRAM_DELIVERY_KIND)[0]
+    first_claim = runtime_outbox_service.claim_external_deliveries(test_db_session, kind=DeliveryKind.TELEGRAM)[0]
 
     assert first_claim.completed_parts == frozenset()
     assert runtime_outbox_service.record_external_delivery_part(test_db_session, first_claim, part_key='message')
@@ -180,7 +180,7 @@ def test_telegram_delivery_progress_survives_retry_and_rejects_stale_claim(test_
     event.lease_expires_at = datetime.now(UTC) - timedelta(seconds=1)
     test_db_session.add(event)
     test_db_session.commit()
-    retry_claim = runtime_outbox_service.claim_external_deliveries(test_db_session, kind=TELEGRAM_DELIVERY_KIND)[0]
+    retry_claim = runtime_outbox_service.claim_external_deliveries(test_db_session, kind=DeliveryKind.TELEGRAM)[0]
 
     assert retry_claim.claim_token != first_claim.claim_token
     assert retry_claim.completed_parts == frozenset({'message'})
@@ -198,16 +198,16 @@ def test_telegram_delivery_progress_survives_retry_and_rejects_stale_claim(test_
 def test_external_delivery_finalization_rejects_stale_lease(test_db_session) -> None:
     event = runtime_outbox_service.enqueue_notification_delivery(
         test_db_session,
-        {'kind': EMAIL_DELIVERY_KIND, 'to': 'test@example.com', 'subject': 'Ready', 'body': 'Done'},
+        {'kind': DeliveryKind.EMAIL, 'to': 'test@example.com', 'subject': 'Ready', 'body': 'Done'},
     )
     test_db_session.commit()
-    first_claim = runtime_outbox_service.claim_external_deliveries(test_db_session, kind=EMAIL_DELIVERY_KIND)[0]
+    first_claim = runtime_outbox_service.claim_external_deliveries(test_db_session, kind=DeliveryKind.EMAIL)[0]
 
     test_db_session.refresh(event)
     event.lease_expires_at = datetime.now(UTC) - timedelta(seconds=1)
     test_db_session.add(event)
     test_db_session.commit()
-    second_claim = runtime_outbox_service.claim_external_deliveries(test_db_session, kind=EMAIL_DELIVERY_KIND)[0]
+    second_claim = runtime_outbox_service.claim_external_deliveries(test_db_session, kind=DeliveryKind.EMAIL)[0]
 
     assert second_claim.claim_token != first_claim.claim_token
     assert second_claim.lease_generation == first_claim.lease_generation + 1

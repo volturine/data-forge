@@ -2,15 +2,12 @@
 
 from dataforge_protocol import errors_pb2
 
-ErrorCodeInput = int | str | None
+ErrorCodeInput = str | None
 
 
 def _coerce_error_code(error_code: ErrorCodeInput) -> int:
     if error_code is None:
         return errors_pb2.ERROR_CODE_UNSPECIFIED
-    if isinstance(error_code, int):
-        errors_pb2.ErrorCode.Name(error_code)
-        return error_code
     return errors_pb2.ErrorCode.Value(f'ERROR_CODE_{error_code}')
 
 

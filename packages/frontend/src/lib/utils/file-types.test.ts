@@ -3,7 +3,6 @@ import {
 	detectFileType,
 	getFileTypeConfig,
 	getSourceTypeConfig,
-	getAllFileTypes,
 	FILE_TYPE_REGISTRY,
 	SOURCE_TYPE_REGISTRY
 } from './file-types';
@@ -151,15 +150,9 @@ describe('getSourceTypeConfig', () => {
 	});
 });
 
-describe('getAllFileTypes', () => {
-	test('returns all types from registry', () => {
-		const types = getAllFileTypes();
-		const registryKeys = Object.keys(FILE_TYPE_REGISTRY) as FileType[];
-		expect(types).toEqual(registryKeys);
-	});
-
+describe('FILE_TYPE_REGISTRY', () => {
 	test('includes csv, parquet, json, and unknown', () => {
-		const types = getAllFileTypes();
+		const types = Object.keys(FILE_TYPE_REGISTRY) as FileType[];
 		expect(types).toContain('csv');
 		expect(types).toContain('parquet');
 		expect(types).toContain('json');

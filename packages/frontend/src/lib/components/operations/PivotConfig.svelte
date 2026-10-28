@@ -16,17 +16,12 @@
 
 	interface Props {
 		schema: Schema;
-		config?: PivotConfigData;
+		config: PivotConfigData;
 		onConfigChange?: () => void;
 		outputColumns?: string[];
 	}
 
-	let {
-		schema,
-		config = $bindable({ index: [], columns: '', value_columns: [], aggregate_function: 'first' }),
-		onConfigChange,
-		outputColumns = []
-	}: Props = $props();
+	let { schema, config = $bindable(), onConfigChange, outputColumns = [] }: Props = $props();
 
 	const safeIndex = $derived(Array.isArray(config.index) ? config.index : []);
 	const safeValueColumns = $derived(

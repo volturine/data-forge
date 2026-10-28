@@ -9,7 +9,7 @@ from pydantic import ConfigDict
 
 from datasources.datasource_loading import load_datasource_frame
 from operations.step_converter import convert_step_format
-from runtime.domain.compute.base import OperationHandler, OperationParams
+from runtime.domain.compute.base import OperationParams
 from runtime.domain.datasource.source_types import DataSourceLoadType, DataSourceType, IcebergReader
 
 _SOURCE_TYPES = frozenset(
@@ -55,19 +55,8 @@ class DatasourceParams(OperationParams):
     reader: IcebergReader | None = None
 
 
-class DatasourceHandler(OperationHandler):
-    def __call__(self, lf: pl.LazyFrame, params: dict, **_) -> pl.LazyFrame:
-        validated = DatasourceParams.model_validate(params)
-        source_type = validated.source_type.value
-        if source_type not in _SOURCE_TYPES:
-            allowed = ", ".join(sorted(_SOURCE_TYPES))
-            raise ValueError(f"Unsupported source type: {validated.source_type}. Allowed: {allowed}")
-        if source_type != DataSourceType.ANALYSIS.value:
-            return load_datasource_frame(validated.model_dump(mode="json"))
-        pipeline = validated.analysis_pipeline
-        if isinstance(pipeline, dict) and pipeline.get("analysis_id"):
-            return _load_analysis_pipeline(pipeline, str(pipeline["analysis_id"]), validated.analysis_tab_id)
-        raise ValueError("analysis_pipeline is required for analysis datasource loading")
+def datasource(lf: pl.LazyFrame, params: DatasourceParams, **_) -> pl.LazyFrame:
+    return _load_validated_datasource(params)
 
 
 _analysis_stack_var: contextvars.ContextVar[tuple[tuple[str, str | None], ...]] = contextvars.ContextVar(
@@ -132,17 +121,9 @@ def _resolve_pipeline_datasource(pipeline: dict, datasource: dict) -> dict:
     return {"source_type": source_type.value, **config}
 
 
-def step_source_payload(step_config: dict, source_id: str) -> dict | None:
-    direct = step_config.get("right_source_datasource")
-    if isinstance(direct, dict) and direct.get("id") == source_id:
-        return direct
-    many = step_config.get("source_datasources")
-    if not isinstance(many, list):
-        return None
-    return next(
-        (item for item in many if isinstance(item, dict) and isinstance(item.get("id"), str) and item.get("id") == source_id),
-        None,
-    )
+def pipeline_datasource_payload(pipeline: dict, datasource_id: str) -> dict | None:
+    """Return the tab datasource reference that reads datasource_id, if any tab does."""
+    return next((tab["datasource"] for tab in pipeline.get("tabs", []) if tab.get("datasource", {}).get("id") == datasource_id), None)
 
 
 def _get_analysis_cache(key: str) -> pl.LazyFrame | None:
@@ -178,9 +159,9 @@ def _resolve_tab_chain(tabs: list[dict], target_tab_id: str) -> list[dict]:
     tab_input: dict[str, str] = {}
     for tab in tabs:
         tid = tab.get("id")
-        output = tab.get("output") if isinstance(tab, dict) else None
+        output = tab.get("output")
         output_id = output.get("result_id") if isinstance(output, dict) else None
-        datasource = tab.get("datasource") if isinstance(tab, dict) else None
+        datasource = tab.get("datasource")
         input_id = datasource.get("id") if isinstance(datasource, dict) else None
         if tid and output_id:
             output_to_tab[str(output_id)] = tab
@@ -260,7 +241,7 @@ def _build_tab_pipeline(
         )
         cache[step_id] = base_frame
 
-    output = tab.get("output") if isinstance(tab, dict) else None
+    output = tab.get("output")
     output_id = output.get("result_id") if isinstance(output, dict) else None
     if output_id:
         cache[str(output_id)] = base_frame
@@ -274,7 +255,7 @@ def _build_analysis_from_pipeline(pipeline: dict, analysis_tab_id: str | None) -
         raise ValueError("Analysis pipeline missing tabs")
 
     selected = _resolve_analysis_tab(tabs, analysis_tab_id)
-    target_id = selected.get("id") if selected else None
+    target_id = selected.get("id")
     if not target_id:
         raise ValueError("Analysis pipeline missing tab id")
 
@@ -311,12 +292,8 @@ def _collect_analysis_sources(
         config = step.get("config", {})
         if not isinstance(config, dict):
             continue
-        right_source_id = config.get("right_source") or config.get("rightDataSource")
-
+        right_source_id = config.get("right_source")
         union_sources = config.get("sources", [])
-        if isinstance(union_sources, str):
-            union_sources = [union_sources]
-
         source_ids = ([right_source_id] if right_source_id else []) + union_sources
 
         for source_id in source_ids:
@@ -333,8 +310,8 @@ def _collect_analysis_sources(
                     "analysis_pipeline": pipeline,
                 }
             else:
-                raw = step_source_payload(config, str(source_id))
-                if not isinstance(raw, dict):
+                raw = pipeline_datasource_payload(pipeline, str(source_id))
+                if raw is None:
                     raise ValueError(f"Analysis pipeline missing datasource config for {source_id}")
                 next_config = _resolve_pipeline_datasource(pipeline, raw)
                 if DataSourceType.read(next_config.get("source_type"), default=None) == DataSourceType.ANALYSIS:
@@ -345,4 +322,17 @@ def _collect_analysis_sources(
 
 
 def load_datasource(config: dict) -> pl.LazyFrame:
-    return DatasourceHandler()(pl.LazyFrame(), config)
+    return _load_validated_datasource(DatasourceParams.model_validate(config))
+
+
+def _load_validated_datasource(validated: DatasourceParams) -> pl.LazyFrame:
+    source_type = validated.source_type.value
+    if source_type not in _SOURCE_TYPES:
+        allowed = ", ".join(sorted(_SOURCE_TYPES))
+        raise ValueError(f"Unsupported source type: {validated.source_type}. Allowed: {allowed}")
+    if source_type != DataSourceType.ANALYSIS.value:
+        return load_datasource_frame(validated.model_dump(mode="json"))
+    pipeline = validated.analysis_pipeline
+    if isinstance(pipeline, dict) and pipeline.get("analysis_id"):
+        return _load_analysis_pipeline(pipeline, str(pipeline["analysis_id"]), validated.analysis_tab_id)
+    raise ValueError("analysis_pipeline is required for analysis datasource loading")

@@ -7,14 +7,14 @@ from functools import partial
 
 from backend_core import notification_delivery, runtime_outbox_service
 from backend_core.live_hubs import VersionHub
-from backend_core.notification_delivery import EMAIL_DELIVERY_KIND, TELEGRAM_DELIVERY_KIND, DeliveryProgress
+from backend_core.notification_delivery import DeliveryKind, DeliveryProgress
 from backend_core.runtime_outbox_dispatcher import OUTBOX_WAKE_HUB, NamespaceWakeDispatcher, run_namespace_db
 from backend_core.runtime_outbox_service import OutboxClaim
 
 _DEFAULT_RECOVERY_SECONDS = 5.0
 _DELIVERY_EXECUTORS = {
-    EMAIL_DELIVERY_KIND: ThreadPoolExecutor(max_workers=1, thread_name_prefix='email-delivery'),
-    TELEGRAM_DELIVERY_KIND: ThreadPoolExecutor(max_workers=1, thread_name_prefix='telegram-delivery'),
+    DeliveryKind.EMAIL: ThreadPoolExecutor(max_workers=1, thread_name_prefix='email-delivery'),
+    DeliveryKind.TELEGRAM: ThreadPoolExecutor(max_workers=1, thread_name_prefix='telegram-delivery'),
 }
 
 ClaimDelivery = Callable[[str, int], list[OutboxClaim]]
@@ -22,14 +22,11 @@ FinalizeDelivery = Callable[[str, OutboxClaim, str | None], bool]
 Deliver = Callable[[dict[str, object], str, DeliveryProgress], None]
 
 
-class NotificationDeliveryDispatcher:
-    """Supervise independent email and Telegram durable delivery lanes."""
-
-    async def run(self, stop_event: asyncio.Event) -> None:
-        """Run both provider lanes under one cancellable lifecycle."""
-        async with asyncio.TaskGroup() as group:
-            for kind in (EMAIL_DELIVERY_KIND, TELEGRAM_DELIVERY_KIND):
-                group.create_task(IntegrationDeliveryDispatcher(kind=kind).run(stop_event), name=f'{kind}-dispatcher')
+async def run_notification_delivery(stop_event: asyncio.Event) -> None:
+    """Supervise independent email and Telegram durable delivery lanes under one cancellable lifecycle."""
+    async with asyncio.TaskGroup() as group:
+        for kind in DeliveryKind:
+            group.create_task(IntegrationDeliveryDispatcher(kind=kind).run(stop_event), name=f'{kind}-dispatcher')
 
 
 class IntegrationDeliveryDispatcher(NamespaceWakeDispatcher):
@@ -38,7 +35,7 @@ class IntegrationDeliveryDispatcher(NamespaceWakeDispatcher):
     def __init__(
         self,
         *,
-        kind: str,
+        kind: DeliveryKind,
         poll_seconds: float = _DEFAULT_RECOVERY_SECONDS,
         namespace_refresh_seconds: float = _DEFAULT_RECOVERY_SECONDS,
         batch_size: int = 1,
@@ -48,8 +45,6 @@ class IntegrationDeliveryDispatcher(NamespaceWakeDispatcher):
         deliver: Deliver | None = None,
         wake_hub: VersionHub = OUTBOX_WAKE_HUB,
     ) -> None:
-        if kind not in _DELIVERY_EXECUTORS:
-            raise ValueError(f'Unsupported external delivery kind: {kind!r}')
         super().__init__(
             executor=_DELIVERY_EXECUTORS[kind],
             log_name='Integration delivery',

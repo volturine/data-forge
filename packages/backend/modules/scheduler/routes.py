@@ -62,7 +62,7 @@ async def update_schedule(
     return await run_api_blocking(run_db, commands.update_schedule, parse_schedule_id(schedule_id), payload)
 
 
-@router.delete('/{schedule_id}', status_code=204, mcp=True)
+@router.delete('/{schedule_id}', status_code=204, mcp=True, mcp_confirm_required=True)
 @handle_errors(operation='delete schedule')
 async def delete_schedule(schedule_id: ScheduleId):
     """Delete a schedule by ID. Use GET /schedules to find schedule IDs."""

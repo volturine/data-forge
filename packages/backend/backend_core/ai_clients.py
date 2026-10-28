@@ -1,4 +1,3 @@
-import json
 import logging
 from collections.abc import Sequence
 
@@ -173,23 +172,3 @@ def get_ai_client(
     if not resolved_key:
         raise ValueError('OPENROUTER_API_KEY not configured')
     return OpenRouterClient(resolved_key)
-
-
-def parse_request_options(raw: str | dict | None) -> dict | None:
-    """Parse request_options from frontend (may be JSON string or dict)."""
-    if raw is None:
-        return None
-    if isinstance(raw, dict):
-        return raw
-    if isinstance(raw, str):
-        raw = raw.strip()
-        if not raw:
-            return None
-        try:
-            parsed = json.loads(raw)
-        except json.JSONDecodeError as exc:
-            raise ValueError(f'Invalid JSON in request_options: {exc}') from exc
-        if not isinstance(parsed, dict):
-            raise ValueError('request_options must be a JSON object')
-        return parsed
-    return None

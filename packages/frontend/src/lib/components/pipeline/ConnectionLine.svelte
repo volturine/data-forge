@@ -3,20 +3,11 @@
 	import { css } from '#lib/styles/panda.js';
 
 	interface Props {
-		fromStepIndex: number;
-		toStepIndex: number;
-		totalSteps: number;
 		highlighted?: boolean;
 		arrow?: boolean;
 	}
 
-	let {
-		fromStepIndex: _fromStepIndex,
-		toStepIndex: _toStepIndex,
-		totalSteps: _totalSteps,
-		highlighted = false,
-		arrow = true
-	}: Props = $props();
+	let { highlighted = false, arrow = true }: Props = $props();
 
 	const width = 12;
 	const height = 12;

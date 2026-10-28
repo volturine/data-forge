@@ -9,24 +9,19 @@
 
 	interface Props {
 		schema: Schema;
-		config?: FillNullConfigData;
+		config: FillNullConfigData;
 	}
 
-	let {
-		schema,
-		config = $bindable({ strategy: 'literal', columns: [], value: '', value_type: 'Utf8' })
-	}: Props = $props();
+	let { schema, config = $bindable() }: Props = $props();
 
 	const strategies = [
-		{ value: 'literal', label: 'Fill with Value', needsValue: true, needsColumns: true },
-		{ value: 'forward', label: 'Forward Fill', needsValue: false, needsColumns: true },
-		{ value: 'backward', label: 'Backward Fill', needsValue: false, needsColumns: true },
-		{ value: 'mean', label: 'Fill with Mean', needsValue: false, needsColumns: true },
-		{ value: 'median', label: 'Fill with Median', needsValue: false, needsColumns: true },
-		{ value: 'drop_rows', label: 'Drop Rows with Nulls', needsValue: false, needsColumns: true }
+		{ value: 'literal', label: 'Fill with Value' },
+		{ value: 'forward', label: 'Forward Fill' },
+		{ value: 'backward', label: 'Backward Fill' },
+		{ value: 'mean', label: 'Fill with Mean' },
+		{ value: 'median', label: 'Fill with Median' },
+		{ value: 'drop_rows', label: 'Drop Rows with Nulls' }
 	];
-
-	const currentStrategy = $derived(strategies.find((s) => s.value === config.strategy));
 </script>
 
 <div class={stepConfig()} role="region" aria-label="Fill null configuration">
@@ -74,7 +69,7 @@
 		</select>
 	</div>
 
-	{#if currentStrategy?.needsValue}
+	{#if config.strategy === 'literal'}
 		<div
 			class={css(
 				{

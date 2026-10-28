@@ -13,6 +13,7 @@ from typing import Any, cast
 
 import polars as pl
 import pytest
+from operation_support import run_operation
 from pydantic import ValidationError
 
 from builds.build_live import RuntimeBuild
@@ -20,8 +21,8 @@ from dataforge_protocol import analysis_pb2, compute_pb2, datasource_pb2, enums_
 from datasources import execution as datasource_execution
 from operations.download import DownloadParams
 from operations.export import ExportParams
-from operations.notification import NotificationHandler, NotificationParams
-from operations.plot import ChartHandler, ChartParams, compute_chart_data
+from operations.notification import NotificationParams
+from operations.plot import ChartParams, compute_chart_data
 from operations.step_converter import analysis_pipeline_to_execution_payload
 from runtime import compute_request_runtime, compute_service, datasource_delete_runtime, worker_runtime_client
 from runtime.compute_manager import (
@@ -33,6 +34,7 @@ from runtime.compute_manager import (
 from runtime.compute_service import ExportDatasourceResult
 from runtime.domain.compute import schemas as compute_schemas
 from runtime.domain.compute.base import ComputeWorkerStatusInfo
+from runtime.domain.compute_worker_runs.schemas import ComputeWorkerRunExecutionCategory
 from runtime.executors import (
     CLEANUP_EXECUTOR,
     COMPUTE_EXECUTOR,
@@ -43,7 +45,7 @@ from runtime.executors import (
     run_engine_io_in_thread,
 )
 from runtime.polars_compute import _build_pipeline_details, classify_engine_error
-from runtime.worker_runtime_client import BackendWorkerRpcError, PendingDatasourceDelete
+from runtime.worker_runtime_client import BackendWorkerRpcError, ExecutionEntry, PendingDatasourceDelete
 
 # ---------------------------------------------------------------------------
 # Build runtime regressions
@@ -285,7 +287,7 @@ async def test_cancelled_compute_lease_follower_does_not_cancel_shared_rpc() -> 
             renewed_ids.extend(request_id for request_id, _token, _generation in renewals)
             rpc_started.set()
             await release_rpc.wait()
-            return {request_id: 30 for request_id in renewed_ids}
+            return dict.fromkeys(renewed_ids, 30)
 
     batcher = worker_runtime_client._ComputeLeaseRenewalBatcher(batch_window_seconds=0)
 
@@ -504,7 +506,6 @@ async def test_compute_request_claims_share_a_bounded_control_plane(monkeypatch)
         peak = max(peak, active)
         await asyncio.sleep(0.02)
         active -= 1
-        return None
 
     monkeypatch.setattr(compute_request_runtime, "next_compute_request", fake_next_request)
     claim_capacity = compute_request_runtime.compute_request_claim_worker_count()
@@ -528,15 +529,17 @@ async def test_compute_request_claims_share_a_bounded_control_plane(monkeypatch)
 
 def test_compute_worker_run_execution_entry_proto_uses_typed_fields() -> None:
     entry = worker_runtime_client._compute_worker_run_execution_entry_proto(
-        {
-            "key": "filter",
-            "label": "Filter",
-            "category": "step",
-            "order": 0,
-            "duration_ms": 12.5,
-            "share_pct": 100.0,
-            "metadata": {"step_type": "filter"},
-        }
+        ExecutionEntry(
+            key="filter",
+            label="Filter",
+            category=ComputeWorkerRunExecutionCategory.STEP,
+            order=0,
+            duration_ms=12.5,
+            share_pct=100.0,
+            optimized_plan=None,
+            unoptimized_plan=None,
+            step_type="filter",
+        )
     )
 
     assert isinstance(entry, compute_pb2.ComputeWorkerRunExecutionEntry)
@@ -554,9 +557,9 @@ def test_compute_worker_run_execution_entries_normalize_invalid_timing_metrics()
         total_duration_ms=1,
     )
 
-    assert [entry["key"] for entry in entries] == ["compute"]
-    assert entries[0]["duration_ms"] == 250.0
-    assert entries[0]["share_pct"] == 100.0
+    assert [entry.key for entry in entries] == ["compute"]
+    assert entries[0].duration_ms == 250.0
+    assert entries[0].share_pct == 100.0
 
 
 def test_export_operation_params_accept_generated_enum_numbers() -> None:
@@ -592,14 +595,17 @@ def test_compute_worker_run_update_proto_uses_typed_patch_fields() -> None:
             "duration_ms": 42,
             "step_timings": {"filter": 2.5},
             "execution_entries": [
-                {
-                    "key": "filter",
-                    "label": "Filter",
-                    "category": "step",
-                    "order": 0,
-                    "duration_ms": 2.5,
-                    "metadata": {"step_type": "filter"},
-                }
+                ExecutionEntry(
+                    key="filter",
+                    label="Filter",
+                    category=ComputeWorkerRunExecutionCategory.STEP,
+                    order=0,
+                    duration_ms=2.5,
+                    share_pct=None,
+                    optimized_plan=None,
+                    unoptimized_plan=None,
+                    step_type="filter",
+                )
             ],
             "progress": 1.0,
             "current_step": None,
@@ -635,7 +641,7 @@ def test_compute_worker_run_finalization_uses_the_existing_typed_update() -> Non
 
 
 def test_compute_worker_status_result_proto_uses_typed_snapshot_fields() -> None:
-    status = worker_runtime_client._compute_worker_status_result_proto(
+    status = worker_runtime_client.compute_worker_status_result_proto(
         ComputeWorkerStatusInfo(
             analysis_id="analysis-1",
             resource_id="datasource-1",
@@ -651,7 +657,8 @@ def test_compute_worker_status_result_proto_uses_typed_snapshot_fields() -> None
             last_activity=datetime.now(UTC).isoformat(),
             current_job_id="job-1",
             resource_config={"max_threads": 2},
-            effective_resources={"max_threads": 2, "max_memory_mb": 1024},
+            # Effective resources reflect the host and may exceed user override limits.
+            effective_resources={"max_threads": 128, "max_memory_mb": 1024},
             defaults={"max_threads": 2, "max_memory_mb": 1024, "streaming_chunk_size": 500},
             scope="datasource_preview",
             reuse_policy="shared",
@@ -664,6 +671,7 @@ def test_compute_worker_status_result_proto_uses_typed_snapshot_fields() -> None
 
     assert status.status == enums_pb2.COMPUTE_WORKER_STATUS_HEALTHY
     assert status.resource_config.max_threads == 2
+    assert status.effective_resources.max_threads == 128
     assert status.effective_resources.max_memory_mb == 1024
     assert status.defaults.streaming_chunk_size == 500
     assert status.scope == enums_pb2.COMPUTE_WORKER_SCOPE_DATASOURCE_PREVIEW
@@ -843,6 +851,18 @@ def test_analysis_pipeline_protocol_view_config_uses_worker_service_key() -> Non
     assert step_config == {"row_limit": 100}
 
 
+def test_build_timeout_warning_reaches_the_build_as_an_integer() -> None:
+    pipeline = _single_step_pipeline(
+        analysis_pb2.AnalysisPipelineStep(id="view-1", step_type=enums_pb2.STEP_TYPE_VIEW, config=analysis_pb2.StepConfig(view=analysis_pb2.ViewConfig()))
+    )
+    pipeline.tabs[0].output.build_timeout_warning_ms = 1500
+
+    payload = analysis_pipeline_to_execution_payload(pipeline)
+
+    # int64 decodes to a JSON string; the build must still compare it as a number.
+    assert compute_service._output_timeout_warning_ms(payload, "tab-1") == 1500
+
+
 def test_analysis_pipeline_protocol_step_type_drives_service_step_type() -> None:
     pipeline = _single_step_pipeline(
         analysis_pb2.AnalysisPipelineStep(
@@ -918,7 +938,7 @@ def test_preview_compute_request_uses_typed_command_not_legacy_payload(monkeypat
         def fail_compute_request(self, **_kwargs):
             raise AssertionError("request should not fail")
 
-    monkeypatch.setattr(compute_request_runtime, "worker_runtime_client", lambda: _Client())
+    monkeypatch.setattr(compute_request_runtime, "worker_runtime_client", _Client)
     monkeypatch.setattr(compute_request_runtime.service, "preview_step", fake_preview_step)
 
     claimed = compute_request_runtime.ClaimedComputeRequest(
@@ -1001,7 +1021,7 @@ async def test_same_engine_waiter_does_not_overtake_other_engine(monkeypatch) ->
             third_started.set()
         function(claimed, manager)
 
-    monkeypatch.setattr(compute_request_runtime, "worker_runtime_client", lambda: _Client())
+    monkeypatch.setattr(compute_request_runtime, "worker_runtime_client", _Client)
     monkeypatch.setattr(compute_request_runtime, "_renew_compute_lease", _keep_lease_alive)
     monkeypatch.setattr(compute_request_runtime, "run_compute_in_thread", run_in_thread)
     monkeypatch.setattr(compute_request_runtime, "_execute_request_sync", lambda *_args: None)
@@ -1069,7 +1089,7 @@ async def test_compute_capacity_race_releases_manager_admission_before_retry(mon
         race_wait_started.set()
         await race_wait_release.wait()
 
-    monkeypatch.setattr(compute_request_runtime, "worker_runtime_client", lambda: _Client())
+    monkeypatch.setattr(compute_request_runtime, "worker_runtime_client", _Client)
     monkeypatch.setattr(compute_request_runtime, "_renew_compute_lease", _keep_lease_alive)
     monkeypatch.setattr(compute_request_runtime, "run_compute_in_thread", run_in_thread)
     monkeypatch.setattr(compute_request_runtime, "_wait_after_engine_capacity_race", wait_after_capacity_race)
@@ -1488,10 +1508,23 @@ def test_shutdown_compute_request_removes_active_engine_and_emits_empty_snapshot
         process_id = 1234
         resource_config: dict[str, object] = {}
         effective_resources: dict[str, object] = {}
+        container_id = None
+        image_digest = None
+        docker_host = None
+        termination_reason = None
+        exit_code = None
+        oom_killed = None
 
         def __init__(self) -> None:
             self.alive = False
             self.shutdown_calls = 0
+
+        def bind_capacity_notifier(self, _notifier) -> None:
+            return None
+
+        @property
+        def lifecycle_status(self) -> str:
+            return "running" if self.current_job_id else "idle"
 
         def start(self) -> None:
             self.alive = True
@@ -1523,7 +1556,7 @@ def test_shutdown_compute_request_removes_active_engine_and_emits_empty_snapshot
         def fail_compute_request(self, **_kwargs):
             raise AssertionError("request should not fail")
 
-    monkeypatch.setattr(compute_request_runtime, "worker_runtime_client", lambda: _Client())
+    monkeypatch.setattr(compute_request_runtime, "worker_runtime_client", _Client)
 
     manager = ProcessManager(engine_factory=lambda _identity, _resource_config: cast(Any, engine), on_snapshot=snapshots.append)
     manager.spawn_compute_worker(identity)
@@ -1571,7 +1604,7 @@ def test_shutdown_compute_request_is_idempotent_when_engine_already_absent(monke
         def fail_compute_request(self, **_kwargs):
             raise AssertionError("missing engines must complete shutdown successfully")
 
-    monkeypatch.setattr(compute_request_runtime, "worker_runtime_client", lambda: _Client())
+    monkeypatch.setattr(compute_request_runtime, "worker_runtime_client", _Client)
     manager = ProcessManager(engine_factory=lambda _identity, _resource_config: cast(Any, object()))
     claimed = compute_request_runtime.ClaimedComputeRequest(
         id="req-missing-shutdown",
@@ -1628,7 +1661,7 @@ def test_compute_request_maps_missing_datasource_to_error_result(monkeypatch) ->
         def complete_compute_request(self, **kwargs):
             completed.append(kwargs["response"])
 
-    monkeypatch.setattr(compute_request_runtime, "worker_runtime_client", lambda: _Client())
+    monkeypatch.setattr(compute_request_runtime, "worker_runtime_client", _Client)
 
     claimed = compute_request_runtime.ClaimedComputeRequest(
         id="req-404",
@@ -1681,7 +1714,7 @@ def test_retired_compute_request_lease_drains_without_error_log(monkeypatch, cap
                 error_code="FAILED_PRECONDITION",
             )
 
-    monkeypatch.setattr(compute_request_runtime, "worker_runtime_client", lambda: _Client())
+    monkeypatch.setattr(compute_request_runtime, "worker_runtime_client", _Client)
     claimed = compute_request_runtime.ClaimedComputeRequest(
         id="req-retired",
         namespace="default",
@@ -1855,10 +1888,10 @@ async def test_run_analysis_build_stream_shuts_down_build_engine_after_completio
 class TestNotificationHandler:
     def test_validates_params(self):
         """Invalid params raise ValidationError."""
-        handler = NotificationHandler()
         lf = pl.DataFrame({"a": [1]}).lazy()
         with pytest.raises(ValidationError):
-            handler(
+            run_operation(
+                "notification",
                 lf,
                 {
                     "method": "invalid_method",
@@ -2031,9 +2064,9 @@ class TestChartHandlerPassThrough:
     """Chart handler must return input lf unchanged (pass-through for DAG)."""
 
     def test_pass_through_preserves_schema(self):
-        handler = ChartHandler()
         lf = _chart_frame()
-        result = handler(
+        result = run_operation(
+            "chart",
             lf,
             {
                 "chart_type": "bar",
@@ -2046,9 +2079,8 @@ class TestChartHandlerPassThrough:
         assert result.collect_schema().names() == lf.collect_schema().names()
 
     def test_pass_through_data_unchanged(self):
-        handler = ChartHandler()
         lf = _chart_frame()
-        result = handler(lf, {"chart_type": "scatter", "x_column": "category", "y_column": "value"})
+        result = run_operation("chart", lf, {"chart_type": "scatter", "x_column": "category", "y_column": "value"})
         assert result.collect().height == lf.collect().height
         assert result.collect().columns == lf.collect().columns
 
@@ -2504,35 +2536,22 @@ class TestStepTimingLabels:
 
 
 # ---------------------------------------------------------------------------
-# ChartParams sort_by / group_sort_by coercion
+# ChartParams sort_by / group_sort_by parsing
 # ---------------------------------------------------------------------------
 
 
-class TestChartParamsSortByCoercion:
-    def test_invalid_sort_by_coerces_to_none(self):
-        params = ChartParams.model_validate({"chart_type": "bar", "x_column": "cat", "sort_by": "rank"})
-        assert params.sort_by is None
-
-    def test_invalid_group_sort_by_coerces_to_none(self):
-        params = ChartParams.model_validate({"chart_type": "bar", "x_column": "cat", "group_sort_by": "total"})
-        assert params.group_sort_by is None
-
-    def test_valid_sort_by_preserved(self):
-        params = ChartParams.model_validate({"chart_type": "bar", "x_column": "cat", "sort_by": "y"})
+class TestChartParamsSortBy:
+    @pytest.mark.parametrize("sort_by", ["y", enums_pb2.SORT_BY_Y], ids=["token", "protocol-int"])
+    def test_sort_by_accepts_tokens_and_protocol_integers(self, sort_by):
+        # Protocol step configs carry enums as integers; they must not be dropped.
+        params = ChartParams.model_validate({"chart_type": "bar", "x_column": "cat", "sort_by": sort_by, "group_sort_by": enums_pb2.GROUP_SORT_BY_VALUE})
         assert params.sort_by == enums_pb2.SORT_BY_Y
+        assert params.group_sort_by == enums_pb2.GROUP_SORT_BY_VALUE
 
-    def test_invalid_sort_by_does_not_raise_in_compute(self):
-        lf = pl.DataFrame({"cat": ["A", "B"], "val": [1.0, 2.0]}).lazy()
-        result = compute_chart_data(
-            lf,
-            {
-                "chart_type": "bar",
-                "x_column": "cat",
-                "y_column": "val",
-                "sort_by": "rank",
-            },
-        ).collect()
-        assert result.height == 2
+    @pytest.mark.parametrize("field", ["sort_by", "group_sort_by"])
+    def test_unknown_sort_tokens_are_rejected(self, field):
+        with pytest.raises(ValidationError):
+            ChartParams.model_validate({"chart_type": "bar", "x_column": "cat", field: "rank"})
 
 
 # ---------------------------------------------------------------------------
@@ -2573,11 +2592,9 @@ class TestSafeBuiltinsUdf:
             self._run_udf(code)
 
     def test_dunder_escape_blocked_before_exec(self):
-        from operations.with_columns import WithColumnsHandler
-
-        handler = WithColumnsHandler()
         with pytest.raises(ValueError, match="forbidden dunder access"):
-            handler(
+            run_operation(
+                "with_columns",
                 pl.DataFrame({"id": [1]}).lazy(),
                 {
                     "expressions": [

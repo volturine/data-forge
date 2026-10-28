@@ -2,14 +2,12 @@
 
 import polars as pl
 
-from runtime.domain.compute.base import OperationHandler, OperationParams
+from runtime.domain.compute.base import OperationParams
 
 
 class DropParams(OperationParams):
     columns: list[str]
 
 
-class DropHandler(OperationHandler):
-    def __call__(self, lf: pl.LazyFrame, params: dict, **_) -> pl.LazyFrame:
-        validated = DropParams.model_validate(params)
-        return lf.drop(validated.columns)
+def drop(lf: pl.LazyFrame, params: DropParams, **_) -> pl.LazyFrame:
+    return lf.drop(params.columns)

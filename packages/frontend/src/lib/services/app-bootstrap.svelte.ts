@@ -35,7 +35,7 @@ export class AppBootstrap {
 	private settled = $state(false);
 
 	/**
-	 * Kick bootstrap once. Safe to call from layout `onMount`.
+	 * Start once from client init; layout `onMount` callers join the same attempt.
 	 */
 	start(): Promise<void> {
 		if (this.run) return this.run;

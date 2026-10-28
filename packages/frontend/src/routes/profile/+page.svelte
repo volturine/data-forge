@@ -3,8 +3,9 @@
 	import { goto } from '$app/navigation';
 	import { resolve } from '$app/paths';
 	import { SvelteSet } from 'svelte/reactivity';
-	import { css, tabButton } from '#lib/styles/panda.js';
+	import { css } from '#lib/styles/panda.js';
 	import { useNamespace } from '#lib/stores/namespace.svelte.js';
+	import TabList from '#lib/components/ui/TabList.svelte';
 	import AccountTab from './AccountTab.svelte';
 	import PreferencesTab from './PreferencesTab.svelte';
 	import NotificationsTab from './NotificationsTab.svelte';
@@ -21,12 +22,8 @@
 
 	type TabKey = (typeof tabs)[number]['key'];
 
-	const validKeys = new Set<string>(tabs.map((t) => t.key));
-
 	function resolveTab(hash: string): TabKey {
-		const key = hash.replace('#', '');
-		if (validKeys.has(key)) return key as TabKey;
-		return 'account';
+		return tabs.find((t) => t.key === hash.replace('#', ''))?.key ?? 'account';
 	}
 
 	const activeTab = $derived(resolveTab(page.url.hash));
@@ -40,20 +37,6 @@
 			replaceState: true,
 			reset: false
 		});
-	}
-
-	function handleTabKeydown(event: KeyboardEvent, index: number) {
-		const count = tabs.length;
-		let next = -1;
-		if (event.key === 'ArrowRight') next = (index + 1) % count;
-		if (event.key === 'ArrowLeft') next = (index - 1 + count) % count;
-		if (event.key === 'Home') next = 0;
-		if (event.key === 'End') next = count - 1;
-		if (next < 0) return;
-		event.preventDefault();
-		selectTab(tabs[next].key);
-		const target = document.getElementById(`tab-${tabs[next].key}`);
-		target?.focus();
 	}
 </script>
 
@@ -78,31 +61,7 @@
 		</p>
 	</div>
 
-	<div
-		class={css({
-			display: 'flex',
-			gap: '0',
-			borderBottomWidth: '1'
-		})}
-		role="tablist"
-		aria-label="Profile sections"
-	>
-		{#each tabs as tab, i (tab.key)}
-			<button
-				id={`tab-${tab.key}`}
-				class={tabButton({ active: activeTab === tab.key, size: 'lg' })}
-				onclick={() => selectTab(tab.key)}
-				onkeydown={(e) => handleTabKeydown(e, i)}
-				role="tab"
-				aria-selected={activeTab === tab.key}
-				aria-controls={`panel-${tab.key}`}
-				tabindex={activeTab === tab.key ? 0 : -1}
-				type="button"
-			>
-				{tab.label}
-			</button>
-		{/each}
-	</div>
+	<TabList {tabs} active={activeTab} onSelect={selectTab} label="Profile sections" size="lg" />
 
 	{#if activeTab === 'account'}
 		<div id="panel-account" role="tabpanel" aria-labelledby="tab-account">

@@ -11,6 +11,14 @@ from dataforge_protocol import compute_pb2, enums_pb2
 
 
 class FakeEngine:
+    # Plain class attributes keep these assignable on instances and overridable by subclass properties.
+    container_id: str | None = None
+    image_digest: str | None = None
+    termination_reason: str | None = None
+    exit_code: int | None = None
+    oom_killed: bool | None = None
+    docker_host: str | None = None
+
     def __init__(self, resource_id: str, resource_config: dict | None = None) -> None:
         self.analysis_id = resource_id
         self.resource_config = resource_config or {}
@@ -20,8 +28,15 @@ class FakeEngine:
         self._capacity_notifier = None
         self.cancelled_jobs: list[str | None] = []
 
+    def bind_identity(self, identity: compute_pb2.ComputeWorkerIdentity, *, resource_config: dict | None = None, namespace: str | None = None) -> None:
+        return None
+
     def bind_capacity_notifier(self, notifier) -> None:
         self._capacity_notifier = notifier
+
+    @property
+    def lifecycle_status(self) -> str:
+        return "running" if self.current_job_id else "idle"
 
     @property
     def process_id(self) -> int | None:

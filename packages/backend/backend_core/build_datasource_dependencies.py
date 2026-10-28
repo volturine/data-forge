@@ -3,7 +3,8 @@ from __future__ import annotations
 from sqlmodel import Session
 
 from backend_core import datasource_delete_service
-from backend_core.datasource_lifecycle import lock_datasource_lifecycle, uses_postgres_advisory_locks
+from backend_core.claiming import is_postgres
+from backend_core.datasource_lifecycle import lock_datasource_lifecycle
 from backend_core.domain.compute.schemas import AnalysisPipelinePayload
 
 
@@ -55,5 +56,5 @@ def lock_active_datasources(session: Session, *, namespace: str, datasource_ids:
         datasource_delete_service.get_active_datasource(
             session,
             datasource_id,
-            for_update=not uses_postgres_advisory_locks(session),
+            for_update=not is_postgres(session),
         )

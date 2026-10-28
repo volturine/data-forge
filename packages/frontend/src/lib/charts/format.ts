@@ -1,17 +1,10 @@
 import { formatEpoch, parsePlainDateTime } from '#lib/utils/temporal.js';
+import { isRecord } from '#lib/utils/json.js';
+import type { ChartType } from '#lib/types/protocol-enum-tokens.js';
 import { stringValue, type ChartRow } from './preparation';
 
+export type { ChartType };
 export type ChartConfig = Record<string, unknown>;
-export type ChartType =
-	| 'bar'
-	| 'horizontal_bar'
-	| 'area'
-	| 'heatgrid'
-	| 'line'
-	| 'pie'
-	| 'histogram'
-	| 'scatter'
-	| 'boxplot';
 
 export const CHART_PALETTE = [
 	'var(--colors-indigo-500)',
@@ -160,7 +153,7 @@ export function truncateLabel(text: string, maxChars: number): string {
 export function overlayRowsOf(metadata: Record<string, unknown> | null | undefined): ChartRow[] {
 	const raw = metadata?.overlays;
 	if (!Array.isArray(raw)) return [];
-	return raw.filter((item) => item && typeof item === 'object') as ChartRow[];
+	return raw.filter(isRecord);
 }
 
 export function overlaySeriesLabel(overlay: ChartRow): string {
@@ -174,5 +167,13 @@ export function overlaySeriesLabel(overlay: ChartRow): string {
 export function referenceLinesOf(metadata: Record<string, unknown> | null | undefined): ChartRow[] {
 	const raw = metadata?.reference_lines;
 	if (!Array.isArray(raw)) return [];
-	return raw.filter((item) => item && typeof item === 'object') as ChartRow[];
+	return raw.filter(isRecord);
+}
+
+export function referenceAxisOf(line: ChartRow): string {
+	return readString(line, 'axis') || readString(line, 'target_axis') || 'y';
+}
+
+export function referencePositionOf(line: ChartRow): string {
+	return readString(line, 'y_axis_position') || readString(line, 'target_axis');
 }

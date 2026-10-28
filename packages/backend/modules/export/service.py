@@ -24,27 +24,26 @@ def export_analysis_code(
     session: Session,
     analysis_id: str,
     *,
-    format_name: CodeExportFormat | str,
+    format_name: CodeExportFormat,
     tab_id: str | None = None,
 ) -> CodeExportResult:
     analysis = session.get(Analysis, analysis_id)
     if not analysis:
         raise analysis_not_found(analysis_id)
 
-    export_format = CodeExportFormat.require(format_name)
     selection = select_tabs(analysis.pipeline, tab_id)
 
     datasource_ids = {tab.datasource.id for tab in selection.ordered_tabs if tab.datasource.id and tab.datasource.analysis_tab_id is None}
     datasources_by_id = {datasource_id: datasource for datasource_id in datasource_ids if (datasource := session.get(DataSource, datasource_id)) is not None}
 
-    code, warnings = generate_code(export_format, selection, datasources_by_id)
+    code, warnings = generate_code(format_name, selection, datasources_by_id)
 
     tab_suffix = export_slug(selection.target_tab.name, fallback='item') if tab_id and selection.target_tab.name else 'pipeline'
-    filename = f'{export_slug(analysis.name, fallback="analysis")}_{tab_suffix}.{export_format.file_extension}'
+    filename = f'{export_slug(analysis.name, fallback="analysis")}_{tab_suffix}.{format_name.file_extension}'
     return CodeExportResult(
         code=code,
         warnings=warnings,
         filename=filename,
         tab_id=tab_id,
-        format=export_format,
+        format=format_name,
     )

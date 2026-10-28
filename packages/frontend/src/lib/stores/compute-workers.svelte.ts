@@ -1,9 +1,5 @@
 import type { ComputeWorkerStatusResponse } from '#lib/types/compute.js';
-import {
-	connectComputeWorkersStream,
-	shutdownAnalysisComputeWorker as shutdownAnalysisComputeWorkerApi,
-	shutdownComputeWorkerByIdentity
-} from '#lib/api/compute.js';
+import { connectComputeWorkersStream, shutdownComputeWorkerByIdentity } from '#lib/api/compute.js';
 import { ReconnectionManager } from './reconnection-manager';
 import { SvelteSet } from 'svelte/reactivity';
 import { computeWorkerIdentityKey } from '#lib/nxt/compute-worker.js';
@@ -154,22 +150,6 @@ export class ComputeWorkersStore {
 					this.computeWorkers = this.computeWorkers.filter(
 						(item) => computeWorkerIdentityKey(item) !== key
 					);
-					this.error = null;
-					return;
-				}
-				this.error = err.message;
-				throw new Error(err.message);
-			}
-		);
-	}
-
-	async shutdownAnalysisComputeWorker(analysisId: string): Promise<void> {
-		await shutdownAnalysisComputeWorkerApi(analysisId).match(
-			() => {
-				this.error = null;
-			},
-			(err) => {
-				if (err.status === 404) {
 					this.error = null;
 					return;
 				}

@@ -10,7 +10,7 @@ import type {
 	ComputeWorkerRunExecutionCategoryJson,
 	ComputeWorkerRunKindJson
 } from '#lib/protocol/dataforge_protocol/enums_pb.js';
-import type { BuildEvent, BuildTabResult } from '#lib/types/build-stream.js';
+import type { BuildEvent, BuildEventContext, BuildTabResult } from '#lib/types/build-stream.js';
 import {
 	BUILD_LOG_LEVEL_JSON_TOKENS,
 	BUILD_TAB_STATUS_JSON_TOKENS,
@@ -23,6 +23,7 @@ import type {
 	BuildTabStatus,
 	ComputeWorkerRunKind
 } from '#lib/types/protocol-enum-tokens.js';
+import { isRecord } from '#lib/utils/json.js';
 
 type BuildEventOneofKey =
 	| 'cancelled'
@@ -35,21 +36,6 @@ type BuildEventOneofKey =
 	| 'stepCompleted'
 	| 'stepFailed'
 	| 'stepStarted';
-
-type BuildEventBase = Pick<
-	BuildEvent,
-	| 'analysis_id'
-	| 'build_id'
-	| 'current_datasource_id'
-	| 'current_kind'
-	| 'current_output_id'
-	| 'current_output_name'
-	| 'emitted_at'
-	| 'compute_worker_run_id'
-	| 'sequence'
-	| 'tab_id'
-	| 'tab_name'
->;
 
 const EVENT_KEYS: BuildEventOneofKey[] = [
 	'cancelled',
@@ -64,17 +50,13 @@ const EVENT_KEYS: BuildEventOneofKey[] = [
 	'stepStarted'
 ];
 
-function isObject(value: unknown): value is Record<string, unknown> {
-	return typeof value === 'object' && value !== null;
-}
-
 function hasProtocolEventCase(value: Record<string, unknown>): boolean {
-	return EVENT_KEYS.filter((key) => isObject(value[key])).length === 1;
+	return EVENT_KEYS.filter((key) => isRecord(value[key])).length === 1;
 }
 
 export function isProtocolBuildEvent(value: unknown): value is BuildEventJson {
-	if (!isObject(value)) return false;
-	if (!isObject(value.context)) return false;
+	if (!isRecord(value)) return false;
+	if (!isRecord(value.context)) return false;
 	return hasProtocolEventCase(value);
 }
 
@@ -132,7 +114,7 @@ function stepTypeToken(kind: BuildStepKindJson | undefined): string | null {
 	return null;
 }
 
-function baseFromContext(context: BuildEventContextJson | undefined): BuildEventBase | null {
+function baseFromContext(context: BuildEventContextJson | undefined): BuildEventContext | null {
 	if (context === undefined) return null;
 	const buildId = requiredString(context.buildId);
 	const analysisId = requiredString(context.analysisId);

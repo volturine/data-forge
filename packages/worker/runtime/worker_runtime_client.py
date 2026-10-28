@@ -30,7 +30,10 @@ from dataforge_protocol import (
     worker_runtime_pb2,
     worker_runtime_pb2_grpc,
 )
+from runtime.domain.compute import schemas
 from runtime.domain.compute.base import ComputeWorkerStatusInfo
+from runtime.domain.compute_worker_runs.schemas import ComputeWorkerRunExecutionCategory
+from runtime.domain.healthcheck_models import HealthCheckType
 from runtime.json_values import dict_to_struct
 from runtime.protocol_mapping import (
     datetime_to_timestamp,
@@ -304,9 +307,17 @@ def frozen_datasource_metadata(namespace: str, datasource_id: str) -> Datasource
 class HealthCheckSpec:
     id: str
     name: str
-    check_type: str
+    check_type: HealthCheckType
     config: dict[str, object]
     critical: bool
+
+
+@dataclass(frozen=True, slots=True)
+class ComputeWorkerRunState:
+    status: str | None
+    result_json: dict[str, object]
+    cancelled_at: str | None
+    cancelled_by: str | None
 
 
 @dataclass(frozen=True)
@@ -412,6 +423,19 @@ def _storage_cleanup_claim_from_proto(row: worker_runtime_pb2.WorkerStorageClean
             for field in ("catalog_identifier", "catalog_type", "catalog_uri", "warehouse", "catalog_namespace", "catalog_table", "catalog_family_prefix")
         },
     )
+
+
+@dataclass(frozen=True, slots=True)
+class ExecutionEntry:
+    key: str
+    label: str
+    category: ComputeWorkerRunExecutionCategory
+    order: int
+    duration_ms: float | None
+    share_pct: float | None
+    optimized_plan: str | None
+    unoptimized_plan: str | None
+    step_type: str | None
 
 
 @dataclass(frozen=True)
@@ -666,15 +690,11 @@ class WorkerRuntimeClient:
                 delay = min(delay * 2, 2.0)
 
     def heartbeat_worker(self, *, worker_id: str, active_jobs: int | None = None, timeout_seconds: float | None = None) -> None:
-        request = worker_runtime_pb2.RuntimeWorkerHeartbeatRequest(worker_id=worker_id)
-        if active_jobs is not None:
-            request.active_jobs = active_jobs
+        request = worker_runtime_pb2.RuntimeWorkerHeartbeatRequest(worker_id=worker_id, active_jobs=active_jobs)
         self._unary("HeartbeatWorker", request, timeout=self._control_timeout(timeout_seconds))
 
     async def heartbeat_worker_async(self, *, worker_id: str, active_jobs: int | None = None, timeout_seconds: float | None = None) -> None:
-        request = worker_runtime_pb2.RuntimeWorkerHeartbeatRequest(worker_id=worker_id)
-        if active_jobs is not None:
-            request.active_jobs = active_jobs
+        request = worker_runtime_pb2.RuntimeWorkerHeartbeatRequest(worker_id=worker_id, active_jobs=active_jobs)
         await self._unary_async("HeartbeatWorker", request, timeout=self._control_timeout(timeout_seconds))
 
     async def stop_worker_async(self, *, worker_id: str, timeout_seconds: float | None = None) -> None:
@@ -814,13 +834,10 @@ class WorkerRuntimeClient:
                 status=enums_pb2.COMPUTE_REQUEST_STATUS_COMPLETED,
                 response=response,
             ),
+            artifact_path=artifact_path,
+            artifact_name=artifact_name,
+            artifact_content_type=artifact_content_type,
         )
-        if artifact_path is not None:
-            request.artifact_path = artifact_path
-        if artifact_name is not None:
-            request.artifact_name = artifact_name
-        if artifact_content_type is not None:
-            request.artifact_content_type = artifact_content_type
         if compute_worker_run_finalization is not None:
             request.engine_run_finalization.CopyFrom(_compute_worker_run_finalization_proto(compute_worker_run_finalization))
         self._unary("CompleteComputeRequest", request, timeout=self._control_timeout(timeout_seconds))
@@ -884,13 +901,10 @@ class WorkerRuntimeClient:
             prefix_url=prefix_url,
             artifact_url=manifest_url,
             catalog_identifier=catalog_identifier,
+            compute_request_id=compute_request_id,
+            job_id=job_id,
+            build_id=build_id,
         )
-        if compute_request_id is not None:
-            request.compute_request_id = compute_request_id
-        if job_id is not None:
-            request.job_id = job_id
-        if build_id is not None:
-            request.build_id = build_id
         if not self._unary("RegisterDatasourceStage", request).value:
             raise RuntimeError("Datasource staging cleanup intents were not accepted")
 
@@ -904,9 +918,7 @@ class WorkerRuntimeClient:
         return bool(response.value)
 
     async def complete_storage_cleanup_async(self, claim: StorageCleanupClaim, *, error: str | None = None) -> bool:
-        request = worker_runtime_pb2.WorkerCompleteStorageCleanupRequest(claim=claim.protocol_claim())
-        if error is not None:
-            request.error = error
+        request = worker_runtime_pb2.WorkerCompleteStorageCleanupRequest(claim=claim.protocol_claim(), error=error)
         response = await self._unary_async("CompleteStorageCleanup", request)
         return bool(response.value)
 
@@ -936,13 +948,10 @@ class WorkerRuntimeClient:
             worker_id=worker_id,
             claim_token=claim_token,
             lease_generation=lease_generation,
+            description=description,
+            owner_id=owner_id,
+            schema_info=schema_info,
         )
-        if description is not None:
-            request.description = description
-        if owner_id is not None:
-            request.owner_id = owner_id
-        if schema_info is not None:
-            request.schema_info.CopyFrom(schema_info)
         response = self._unary("PublishDatasourceCreate", request, timeout=self._timeout_seconds)
         return _validated_datasource_record(response.datasource)
 
@@ -969,15 +978,11 @@ class WorkerRuntimeClient:
             worker_id=worker_id,
             claim_token=claim_token,
             lease_generation=lease_generation,
+            schema_info=schema_info,
+            compute_request_id=compute_request_id,
+            job_id=job_id,
+            build_id=build_id,
         )
-        if schema_info is not None:
-            request.schema_info.CopyFrom(schema_info)
-        if compute_request_id is not None:
-            request.compute_request_id = compute_request_id
-        if job_id is not None:
-            request.job_id = job_id
-        if build_id is not None:
-            request.build_id = build_id
         response = self._unary("PublishDatasourceIngest", request, timeout=self._timeout_seconds)
         return _validated_datasource_record(response.datasource)
 
@@ -1080,11 +1085,8 @@ class WorkerRuntimeClient:
         analysis_id: str | None,
         is_hidden: bool | None,
         keep_schema_cache: bool,
-        job_id: str | None,
-        build_id: str | None,
+        publication: ClaimedBuildJob | None,
         worker_id: str | None,
-        claim_token: str | None,
-        lease_generation: int | None,
         build_result_json: dict[str, object] | None,
         notification_deliveries: Sequence[Mapping[str, object]],
     ) -> DatasourceMetadata:
@@ -1097,26 +1099,23 @@ class WorkerRuntimeClient:
             schema_info=schema_info_proto(schema_cache),
             keep_schema_cache=keep_schema_cache,
             notification_delivery=[_notification_delivery_proto(delivery) for delivery in notification_deliveries],
+            analysis_id=analysis_id,
+            is_hidden=is_hidden,
         )
-        claim_values = (job_id, build_id, worker_id, claim_token, lease_generation, build_result_json)
-        if any(value is not None for value in claim_values):
-            if any(value is None for value in claim_values):
-                raise ValueError("Output publication claim fields must be provided together")
-            request.job_id = cast(str, job_id)
-            request.build_id = cast(str, build_id)
-            request.worker_id = cast(str, worker_id)
-            request.claim_token = cast(str, claim_token)
-            request.lease_generation = cast(int, lease_generation)
-            request.build_result.CopyFrom(dict_to_struct(cast(dict[str, object], build_result_json)))
-        if analysis_id is not None:
-            request.analysis_id = analysis_id
-        if is_hidden is not None:
-            request.is_hidden = is_hidden
+        if publication is not None:
+            if worker_id is None or build_result_json is None:
+                raise ValueError("Output publication requires worker_id and build_result_json")
+            request.job_id = publication.job_id
+            request.build_id = publication.build_id
+            request.worker_id = worker_id
+            request.claim_token = publication.claim_token
+            request.lease_generation = publication.lease_generation
+            request.build_result.CopyFrom(dict_to_struct(build_result_json))
         try:
             response = self._unary("UpsertOutputDatasource", request, timeout=self._timeout_seconds)
         except BackendWorkerRpcError as exc:
-            if exc.error_code == "FAILED_PRECONDITION" and job_id is not None:
-                raise BuildJobLeaseLost(f"Build job {job_id} output publication was rejected because its lease is no longer active") from exc
+            if exc.error_code == "FAILED_PRECONDITION" and publication is not None:
+                raise BuildJobLeaseLost(f"Build job {publication.job_id} output publication was rejected because its lease is no longer active") from exc
             raise
         return DatasourceMetadata(
             found=True,
@@ -1135,7 +1134,7 @@ class WorkerRuntimeClient:
             HealthCheckSpec(
                 id=check.id,
                 name=check.name,
-                check_type=proto_value_to_enum_name(enums_pb2.HealthCheckType, "HEALTH_CHECK_TYPE", check.check_type),
+                check_type=HealthCheckType.require(check.check_type),
                 config=struct_to_dict(check.config),
                 critical=check.critical,
             )
@@ -1156,13 +1155,7 @@ class WorkerRuntimeClient:
         status: str,
         request_json: dict[str, object],
         result_json: dict[str, object] | None = None,
-        error_message: str | None = None,
         created_at: datetime | None = None,
-        completed_at: datetime | None = None,
-        duration_ms: int | None = None,
-        step_timings: dict[str, float] | None = None,
-        query_plan: str | None = None,
-        execution_entries: list[dict[str, object]] | None = None,
         progress: float = 0.0,
         current_step: str | None = None,
         triggered_by: str | None = None,
@@ -1174,31 +1167,16 @@ class WorkerRuntimeClient:
             kind=enum_to_proto_value("COMPUTE_WORKER_RUN_KIND", kind),
             status=enum_to_proto_value("COMPUTE_WORKER_RUN_STATUS", status),
             request=dict_to_struct(request_json),
-            execution_entry=[_compute_worker_run_execution_entry_proto(entry) for entry in execution_entries or []],
             progress=progress,
+            analysis_id=analysis_id,
+            current_step=current_step,
+            triggered_by=triggered_by,
+            idempotency_key=idempotency_key,
         )
-        if analysis_id is not None:
-            request.analysis_id = analysis_id
         if result_json is not None:
             request.result.CopyFrom(dict_to_struct(result_json))
-        if error_message is not None:
-            request.error_message = error_message
         if created_at is not None:
             request.created_at.CopyFrom(datetime_to_timestamp(created_at))
-        if completed_at is not None:
-            request.completed_at.CopyFrom(datetime_to_timestamp(completed_at))
-        if duration_ms is not None:
-            request.duration_ms = duration_ms
-        if step_timings is not None:
-            request.timing_by_key.update({str(key): float(value) for key, value in step_timings.items()})
-        if query_plan is not None:
-            request.query_plan = query_plan
-        if current_step is not None:
-            request.current_step = current_step
-        if triggered_by is not None:
-            request.triggered_by = triggered_by
-        if idempotency_key is not None:
-            request.idempotency_key = idempotency_key
 
         def create():
             return self._stub.CreateComputeWorkerRun(request, timeout=self._control_timeout(), metadata=self._metadata())
@@ -1223,16 +1201,16 @@ class WorkerRuntimeClient:
         )
         self._unary("UpdateComputeWorkerRun", request)
 
-    def compute_worker_run_state(self, *, namespace: str, run_id: str) -> dict[str, object] | None:
+    def compute_worker_run_state(self, *, namespace: str, run_id: str) -> ComputeWorkerRunState | None:
         response = self._unary("GetComputeWorkerRunState", worker_runtime_pb2.WorkerComputeWorkerRunStateRequest(namespace=namespace, run_id=run_id))
         if not response.found:
             return None
-        return {
-            "status": _optional_proto_enum_name(response, "status", enums_pb2.ComputeWorkerRunStatus, "COMPUTE_WORKER_RUN_STATUS"),
-            "result_json": optional_struct_to_dict(response, "result") or {},
-            "cancelled_at": _optional_timestamp_iso(response, "cancelled_at"),
-            "cancelled_by": _optional_field(response, "cancelled_by"),
-        }
+        return ComputeWorkerRunState(
+            status=_optional_proto_enum_name(response, "status", enums_pb2.ComputeWorkerRunStatus, "COMPUTE_WORKER_RUN_STATUS"),
+            result_json=optional_struct_to_dict(response, "result") or {},
+            cancelled_at=_optional_timestamp_iso(response, "cancelled_at"),
+            cancelled_by=_optional_field(response, "cancelled_by"),
+        )
 
     async def fail_build_job_async(
         self,
@@ -1300,7 +1278,7 @@ class WorkerRuntimeClient:
         worker_id: str,
         claim_token: str,
         lease_generation: int,
-        event: dict[str, object],
+        event: schemas.BuildEvent,
         resource_config_json: dict[str, object] | None = None,
     ) -> int | None:
         request = worker_runtime_pb2.WorkerPersistBuildEventRequest(
@@ -1365,7 +1343,7 @@ class WorkerRuntimeClient:
         request = worker_runtime_pb2.WorkerPersistComputeWorkerSnapshotRequest(
             worker_id=worker_id,
             namespace=namespace,
-            engine_status=[_compute_worker_status_result_proto(status) for status in statuses],
+            engine_status=[compute_worker_status_result_proto(status) for status in statuses],
         )
         self._unary("PersistComputeWorkerSnapshot", request)
 
@@ -1393,17 +1371,13 @@ class WorkerRuntimeClient:
             prompts=prompts,
             model=model,
             options=dict_to_struct(options),
+            endpoint_url=endpoint_url,
+            api_key=api_key,
         )
-        if endpoint_url is not None:
-            request.endpoint_url = endpoint_url
-        if api_key is not None:
-            request.api_key = api_key
         return list(self._unary("GenerateAI", request, timeout=self._timeout_seconds).outputs)
 
     def telegram_targets(self, *, namespace: str, datasource_id: str | None = None, active_subscribers: bool = False) -> list[TelegramTarget]:
-        request = worker_runtime_pb2.WorkerTelegramTargetsRequest(namespace=namespace, active_subscribers=active_subscribers)
-        if datasource_id is not None:
-            request.datasource_id = datasource_id
+        request = worker_runtime_pb2.WorkerTelegramTargetsRequest(namespace=namespace, active_subscribers=active_subscribers, datasource_id=datasource_id)
         response = self._unary("GetTelegramTargets", request, timeout=self._timeout_seconds)
         return [TelegramTarget(chat_id=target.chat_id, bot_token=target.bot_token) for target in response.targets]
 
@@ -1646,34 +1620,24 @@ def _optional_mapping_float(payload: Mapping[str, object], key: str) -> float | 
     return float(value)
 
 
-def _compute_worker_run_execution_entry_proto(payload: Mapping[str, object]) -> compute_pb2.ComputeWorkerRunExecutionEntry:
-    entry = compute_pb2.ComputeWorkerRunExecutionEntry(
-        key=_required_mapping_str(payload, "key"),
-        label=_required_mapping_str(payload, "label"),
-        category=enum_to_proto_value("COMPUTE_WORKER_RUN_EXECUTION_CATEGORY", _required_mapping_str(payload, "category")),
-        order=_required_mapping_int(payload, "order"),
+def _compute_worker_run_execution_entry_proto(entry: ExecutionEntry) -> compute_pb2.ComputeWorkerRunExecutionEntry:
+    message = compute_pb2.ComputeWorkerRunExecutionEntry(
+        key=entry.key,
+        label=entry.label,
+        category=enum_to_proto_value("COMPUTE_WORKER_RUN_EXECUTION_CATEGORY", entry.category.value),
+        order=entry.order,
     )
-    for field in ("duration_ms", "share_pct"):
-        number = _optional_mapping_float(payload, field)
-        if number is not None:
-            setattr(entry, field, number)
-    for field in ("optimized_plan", "unoptimized_plan"):
-        text = payload.get(field)
-        if text is None:
-            continue
-        if not isinstance(text, str):
-            raise RuntimeError(f"Payload field {field} must be a string: {payload!r}")
-        setattr(entry, field, text)
-    step_type = payload.get("step_type")
-    metadata = payload.get("metadata")
-    if step_type is None and isinstance(metadata, Mapping):
-        step_type = metadata.get("step_type")
-    if step_type is None:
-        return entry
-    if not isinstance(step_type, str):
-        raise RuntimeError(f"Engine run execution entry step_type must be a string: {payload!r}")
-    entry.step_type = enum_to_proto_value("STEP_TYPE", step_type)
-    return entry
+    if entry.duration_ms is not None:
+        message.duration_ms = entry.duration_ms
+    if entry.share_pct is not None:
+        message.share_pct = entry.share_pct
+    if entry.optimized_plan is not None:
+        message.optimized_plan = entry.optimized_plan
+    if entry.unoptimized_plan is not None:
+        message.unoptimized_plan = entry.unoptimized_plan
+    if entry.step_type is not None:
+        message.step_type = enum_to_proto_value("STEP_TYPE", entry.step_type)
+    return message
 
 
 def _engine_resource_config_proto(payload: Mapping[str, object]) -> compute_pb2.ComputeWorkerResourceConfig:
@@ -1687,7 +1651,7 @@ def _engine_resource_config_proto(payload: Mapping[str, object]) -> compute_pb2.
     return config
 
 
-def _compute_worker_status_result_proto(status_info: ComputeWorkerStatusInfo) -> compute_pb2.ComputeWorkerStatusResult:
+def compute_worker_status_result_proto(status_info: ComputeWorkerStatusInfo) -> compute_pb2.ComputeWorkerStatusResult:
     if not status_info.resource_id:
         raise RuntimeError(f"Engine status resource_id must be a non-empty string: {status_info!r}")
     status = compute_pb2.ComputeWorkerStatusResult(
@@ -1768,8 +1732,6 @@ def _compute_worker_run_update_proto(fields: Mapping[str, object]) -> worker_run
             raise RuntimeError(f"Payload field execution_entries must be a list: {fields!r}")
         update.execution_entries.SetInParent()
         for entry in entries:
-            if not isinstance(entry, Mapping):
-                raise RuntimeError(f"Execution entry must be an object: {entry!r}")
             update.execution_entries.entries.append(_compute_worker_run_execution_entry_proto(entry))
     if "progress" in fields:
         progress = _optional_mapping_float(fields, "progress")
@@ -1827,72 +1789,13 @@ def _enum_number_from_token(enum_descriptor: Any, value: object, *, field_name: 
 def _build_resource_config_proto(payload: Mapping[str, object]) -> compute_pb2.BuildResourceConfigSummary:
     config = compute_pb2.BuildResourceConfigSummary()
     for key in ("max_threads", "max_memory_mb", "streaming_chunk_size"):
-        value = _optional_event_int(payload, key)
+        value = payload.get(key)
         if value is not None:
             setattr(config, key, value)
     return config
 
 
-def _required_event_str(payload: Mapping[str, object], key: str) -> str:
-    value = payload.get(key)
-    if not isinstance(value, str) or not value.strip():
-        raise ValueError(f"build event {key} is required")
-    return value
-
-
-def _optional_event_str(payload: Mapping[str, object], key: str) -> str | None:
-    value = payload.get(key)
-    if value is None:
-        return None
-    if not isinstance(value, str):
-        raise ValueError(f"build event {key} must be a string")
-    return value
-
-
-def _optional_event_int(payload: Mapping[str, object], key: str) -> int | None:
-    value = payload.get(key)
-    if value is None:
-        return None
-    if isinstance(value, bool) or not isinstance(value, int):
-        raise ValueError(f"build event {key} must be an integer")
-    return value
-
-
-def _required_event_int(payload: Mapping[str, object], key: str) -> int:
-    value = _optional_event_int(payload, key)
-    if value is None:
-        raise ValueError(f"build event {key} is required")
-    return value
-
-
-def _optional_event_float(payload: Mapping[str, object], key: str) -> float | None:
-    value = payload.get(key)
-    if value is None:
-        return None
-    if isinstance(value, bool) or not isinstance(value, int | float):
-        raise ValueError(f"build event {key} must be numeric")
-    return float(value)
-
-
-def _required_event_float(payload: Mapping[str, object], key: str) -> float:
-    value = _optional_event_float(payload, key)
-    if value is None:
-        raise ValueError(f"build event {key} is required")
-    return value
-
-
-def _event_datetime(payload: Mapping[str, object], key: str) -> datetime:
-    value = payload.get(key)
-    if isinstance(value, datetime):
-        return value
-    if isinstance(value, str) and value.strip():
-        return datetime.fromisoformat(value.replace("Z", "+00:00"))
-    raise ValueError(f"build event {key} is required")
-
-
-def _build_step_kind_proto(step_type: object) -> compute_pb2.BuildStepKind:
-    if not isinstance(step_type, str) or not step_type.strip():
-        raise ValueError("build step event step_type is required")
+def _build_step_kind_proto(step_type: str) -> compute_pb2.BuildStepKind:
     message = compute_pb2.BuildStepKind()
     try:
         message.pipeline = _enum_number_from_token(enums_pb2.StepType.DESCRIPTOR, step_type, field_name="step_type")
@@ -1905,117 +1808,111 @@ def _build_step_kind_proto(step_type: object) -> compute_pb2.BuildStepKind:
         return message
 
 
-def _build_tab_result_proto(payload: Mapping[str, object]) -> compute_pb2.BuildTabResult:
-    message = compute_pb2.BuildTabResult(
-        tab_id=_required_event_str(payload, "tab_id"),
-        tab_name=_required_event_str(payload, "tab_name"),
+def _build_tab_result_proto(result: schemas.BuildTabResult) -> compute_pb2.BuildTabResult:
+    return compute_pb2.BuildTabResult(
+        tab_id=result.tab_id,
+        tab_name=result.tab_name,
+        status=_enum_number_from_token(enums_pb2.BuildTabStatus.DESCRIPTOR, result.status, field_name="status"),
+        output_id=result.output_id,
+        output_name=result.output_name,
+        error=result.error,
     )
-    message.status = _enum_number_from_token(enums_pb2.BuildTabStatus.DESCRIPTOR, payload.get("status"), field_name="status")
-    for field in ("output_id", "output_name", "error"):
-        value = _optional_event_str(payload, field)
-        if value is not None:
-            setattr(message, field, value)
-    return message
 
 
-def _build_terminal_event_proto(payload: Mapping[str, object]) -> compute_pb2.BuildTerminalEvent:
+def _build_terminal_event_proto(
+    event: schemas.BuildCompleteEvent | schemas.BuildFailedEvent | schemas.BuildCancelledEvent,
+) -> compute_pb2.BuildTerminalEvent:
     message = compute_pb2.BuildTerminalEvent(
-        progress=_required_event_float(payload, "progress"),
-        elapsed_ms=_required_event_int(payload, "elapsed_ms"),
-        total_steps=_required_event_int(payload, "total_steps"),
-        tabs_built=_required_event_int(payload, "tabs_built"),
-        duration_ms=_required_event_int(payload, "duration_ms"),
+        progress=event.progress,
+        elapsed_ms=event.elapsed_ms,
+        total_steps=event.total_steps,
+        tabs_built=event.tabs_built,
+        duration_ms=event.duration_ms,
     )
-    results = payload.get("results")
-    if not isinstance(results, list):
-        raise ValueError("build terminal event results must be a list")
-    for result in results:
-        if not isinstance(result, Mapping):
-            raise ValueError("build terminal event results must be objects")
+    for result in event.results:
         message.results.append(_build_tab_result_proto(result))
-    error = _optional_event_str(payload, "error")
-    if error is not None:
-        message.error = error
-    if payload.get("cancelled_at") is not None:
-        message.cancelled_at.CopyFrom(datetime_to_timestamp(_event_datetime(payload, "cancelled_at")))
-    cancelled_by = _optional_event_str(payload, "cancelled_by")
-    if cancelled_by is not None:
-        message.cancelled_by = cancelled_by
+    match event:
+        case schemas.BuildFailedEvent():
+            if event.error is not None:
+                message.error = event.error
+        case schemas.BuildCancelledEvent():
+            message.cancelled_at.CopyFrom(datetime_to_timestamp(event.cancelled_at))
+            if event.cancelled_by is not None:
+                message.cancelled_by = event.cancelled_by
     return message
 
 
-def _build_event_proto(namespace: str, payload: Mapping[str, object]) -> compute_pb2.BuildEvent:
+def _set_build_step_event_fields(
+    step: Any,
+    event: schemas.BuildStepStartEvent | schemas.BuildStepCompleteEvent | schemas.BuildStepFailedEvent,
+) -> None:
+    # The three step messages share these fields but are distinct proto types.
+    step.build_step_index = event.build_step_index
+    step.step_index = event.step_index
+    step.step_id = event.step_id
+    step.step_name = event.step_name
+    step.total_steps = event.total_steps
+    step.step_kind.CopyFrom(_build_step_kind_proto(event.step_type))
+
+
+def _build_event_proto(namespace: str, event: schemas.BuildEvent) -> compute_pb2.BuildEvent:
     context = compute_pb2.BuildEventContext(
-        build_id=_required_event_str(payload, "build_id"),
-        analysis_id=_required_event_str(payload, "analysis_id"),
-        emitted_at=datetime_to_timestamp(_event_datetime(payload, "emitted_at")),
+        build_id=event.build_id,
+        analysis_id=event.analysis_id,
+        emitted_at=datetime_to_timestamp(event.emitted_at),
     )
-    sequence = _optional_event_int(payload, "sequence")
-    if sequence is not None:
-        context.sequence = sequence
-    current_kind = payload.get("current_kind")
-    if current_kind is not None:
-        context.current_kind = _enum_number_from_token(enums_pb2.ComputeWorkerRunKind.DESCRIPTOR, current_kind, field_name="current_kind")
+    if event.sequence is not None:
+        context.sequence = event.sequence
+    if event.current_kind is not None:
+        context.current_kind = _enum_number_from_token(enums_pb2.ComputeWorkerRunKind.DESCRIPTOR, event.current_kind, field_name="current_kind")
     for field in ("current_datasource_id", "tab_id", "tab_name", "current_output_id", "current_output_name", "compute_worker_run_id"):
-        value = _optional_event_str(payload, field)
+        value = getattr(event, field)
         if value is not None:
             setattr(context, field, value)
-
     message = compute_pb2.BuildEvent(context=context, namespace=namespace)
-    match _required_event_str(payload, "type"):
-        case "plan":
-            message.plan.optimized_plan = _required_event_str(payload, "optimized_plan")
-            message.plan.unoptimized_plan = _required_event_str(payload, "unoptimized_plan")
-        case ("step_start" | "step_complete" | "step_failed") as event_type:
-            # The three step messages share these fields but are distinct proto types.
-            step: Any = {"step_start": message.step_started, "step_complete": message.step_completed, "step_failed": message.step_failed}[event_type]
-            step.build_step_index = _required_event_int(payload, "build_step_index")
-            step.step_index = _required_event_int(payload, "step_index")
-            step.step_id = _required_event_str(payload, "step_id")
-            step.step_name = _required_event_str(payload, "step_name")
-            if event_type == "step_complete":
-                message.step_completed.duration_ms = _required_event_int(payload, "duration_ms")
-                row_count = _optional_event_int(payload, "row_count")
-                if row_count is not None:
-                    message.step_completed.row_count = row_count
-            if event_type == "step_failed":
-                message.step_failed.error = _required_event_str(payload, "error")
-            step.total_steps = _required_event_int(payload, "total_steps")
-            step.step_kind.CopyFrom(_build_step_kind_proto(payload.get("step_type")))
-        case "progress":
-            message.progress.progress = _required_event_float(payload, "progress")
-            message.progress.elapsed_ms = _required_event_int(payload, "elapsed_ms")
-            optional_values: dict[str, object] = {
-                "estimated_remaining_ms": _optional_event_int(payload, "estimated_remaining_ms"),
-                "current_step": _optional_event_str(payload, "current_step"),
-                "current_step_index": _optional_event_int(payload, "current_step_index"),
-            }
-            for field, optional_value in optional_values.items():
-                if optional_value is not None:
-                    setattr(message.progress, field, optional_value)
-            message.progress.total_steps = _required_event_int(payload, "total_steps")
-        case "resources":
-            message.resources.cpu_percent = _required_event_float(payload, "cpu_percent")
-            message.resources.memory_mb = _required_event_float(payload, "memory_mb")
-            memory_limit_mb = _optional_event_float(payload, "memory_limit_mb")
-            if memory_limit_mb is not None:
-                message.resources.memory_limit_mb = memory_limit_mb
-            message.resources.active_threads = _required_event_int(payload, "active_threads")
-            max_threads = _optional_event_int(payload, "max_threads")
-            if max_threads is not None:
-                message.resources.max_threads = max_threads
-        case "log":
-            message.log.level = _enum_number_from_token(enums_pb2.BuildLogLevel.DESCRIPTOR, payload.get("level"), field_name="level")
-            message.log.message = _required_event_str(payload, "message")
+    match event:
+        case schemas.BuildPlanEvent():
+            message.plan.optimized_plan = event.optimized_plan
+            message.plan.unoptimized_plan = event.unoptimized_plan
+        case schemas.BuildStepStartEvent():
+            _set_build_step_event_fields(message.step_started, event)
+        case schemas.BuildStepCompleteEvent():
+            _set_build_step_event_fields(message.step_completed, event)
+            message.step_completed.duration_ms = event.duration_ms
+            if event.row_count is not None:
+                message.step_completed.row_count = event.row_count
+        case schemas.BuildStepFailedEvent():
+            _set_build_step_event_fields(message.step_failed, event)
+            message.step_failed.error = event.error
+        case schemas.BuildProgressEvent():
+            message.progress.progress = event.progress
+            message.progress.elapsed_ms = event.elapsed_ms
+            for field in ("estimated_remaining_ms", "current_step", "current_step_index"):
+                value = getattr(event, field)
+                if value is not None:
+                    setattr(message.progress, field, value)
+            message.progress.total_steps = event.total_steps
+        case schemas.BuildResourceEvent():
+            message.resources.cpu_percent = event.cpu_percent
+            message.resources.memory_mb = event.memory_mb
+            if event.memory_limit_mb is not None:
+                message.resources.memory_limit_mb = event.memory_limit_mb
+            message.resources.active_threads = event.active_threads
+            if event.max_threads is not None:
+                message.resources.max_threads = event.max_threads
+        case schemas.BuildLogEvent():
+            message.log.level = _enum_number_from_token(enums_pb2.BuildLogLevel.DESCRIPTOR, event.level, field_name="level")
+            message.log.message = event.message
             for field in ("step_name", "step_id"):
-                value = _optional_event_str(payload, field)
+                value = getattr(event, field)
                 if value is not None:
                     setattr(message.log, field, value)
-        case ("complete" | "failed" | "cancelled") as event_type:
-            terminal = {"complete": message.completed, "failed": message.failed, "cancelled": message.cancelled}[event_type]
-            terminal.CopyFrom(_build_terminal_event_proto(payload))
-        case event_type:
-            raise ValueError(f"Unsupported build event type: {event_type!r}")
+        case schemas.BuildCompleteEvent():
+            message.completed.CopyFrom(_build_terminal_event_proto(event))
+        case schemas.BuildFailedEvent():
+            message.failed.CopyFrom(_build_terminal_event_proto(event))
+        case schemas.BuildCancelledEvent():
+            message.cancelled.CopyFrom(_build_terminal_event_proto(event))
     return message
 
 

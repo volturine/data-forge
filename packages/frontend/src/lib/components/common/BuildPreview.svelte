@@ -65,32 +65,15 @@
 		store.remaining !== null && store.remaining > 0 ? formatDuration(store.remaining) : null
 	);
 	const durationLabel = $derived(store.duration !== null ? formatDuration(store.duration) : null);
-	const maxStepDuration = $derived.by(() => {
-		let max = 0;
-		for (const step of store.steps) {
-			if (step.duration !== null && step.duration > max) max = step.duration;
-		}
-		return max;
-	});
+	const maxStepDuration = $derived(Math.max(0, ...store.steps.map((step) => step.duration ?? 0)));
 	const slowestStepIndex = $derived.by(() => {
-		let max = -1;
-		let index = -1;
-		for (let i = 0; i < store.steps.length; i += 1) {
-			const duration = store.steps[i].duration;
-			if (duration !== null && duration > max) {
-				max = duration;
-				index = i;
-			}
-		}
-		return index;
+		const max = Math.max(-1, ...store.steps.map((step) => step.duration ?? -1));
+		if (max === -1) return -1;
+		return store.steps.findIndex((step) => step.duration === max);
 	});
-	const totalStepDuration = $derived.by(() => {
-		let total = 0;
-		for (const step of store.steps) {
-			if (step.duration !== null) total += step.duration;
-		}
-		return total;
-	});
+	const totalStepDuration = $derived(
+		store.steps.reduce((total, step) => total + (step.duration ?? 0), 0)
+	);
 	const hasConfig = $derived(store.resourceConfig !== null);
 	const hasResources = $derived(store.latestResources !== null || store.resourceHistory.length > 0);
 	const hasPlans = $derived(store.queryPlans.length > 0);

@@ -14,6 +14,8 @@
 		Search
 	} from '@lucide/svelte';
 	import ConfirmDialog from '#lib/components/common/ConfirmDialog.svelte';
+	import { createDatasourceLookupQuery } from '#lib/components/common/datasource-lookup.js';
+	import { createDeleteConfirm } from '#lib/components/common/delete-confirm.svelte.js';
 	import ScheduleCreateForm from './schedule-manager/ScheduleCreateForm.svelte';
 	import ScheduleList from './schedule-manager/ScheduleList.svelte';
 	import { useNamespace } from '#lib/stores/namespace.svelte.js';
@@ -38,8 +40,6 @@
 	let searchQuery = $state('');
 	const effectiveSearch = $derived(externalSearch ?? searchQuery);
 	let schedPage = $state(1);
-
-	let deleteConfirmId = $state<string | null>(null);
 
 	const schedulesQuery = createQuery(() => ({
 		queryKey: [
@@ -74,17 +74,7 @@
 		enabled: !ns.switching
 	}));
 
-	const datasourcesQuery = createQuery(() => ({
-		queryKey: ['datasources-lookup', ns.value, 'include-hidden'],
-		queryFn: async () => {
-			const result = await listDatasources(true, { cache: 'no-store' });
-			if (result.isErr()) throw new Error(result.error.message);
-			return result.value;
-		},
-		staleTime: 0,
-		refetchOnMount: 'always',
-		enabled: !ns.switching
-	}));
+	const datasourcesQuery = createDatasourceLookupQuery(ns);
 
 	const datasourceMap = $derived(
 		new SvelteMap((datasourcesQuery.data ?? []).map((ds) => [ds.id, ds] as [string, DataSource]))
@@ -147,19 +137,7 @@
 		toggleMut.mutate({ id: schedule.id, enabled: !schedule.enabled });
 	}
 
-	function handleDelete(id: string) {
-		deleteConfirmId = id;
-	}
-
-	function confirmDelete() {
-		if (!deleteConfirmId) return;
-		deleteMut.mutate(deleteConfirmId);
-		deleteConfirmId = null;
-	}
-
-	function cancelDelete() {
-		deleteConfirmId = null;
-	}
+	const deleteConfirm = createDeleteConfirm((id) => deleteMut.mutate(id));
 
 	function openCreate() {
 		void listDatasources(true, { cache: 'no-store' }).match(
@@ -179,12 +157,12 @@
 </script>
 
 <ConfirmDialog
-	show={deleteConfirmId !== null}
+	show={deleteConfirm.pendingId !== null}
 	heading="Delete Schedule"
 	message="Are you sure you want to delete this schedule? This action cannot be undone."
 	confirmText="Delete"
-	onConfirm={confirmDelete}
-	onCancel={cancelDelete}
+	onConfirm={deleteConfirm.confirm}
+	onCancel={deleteConfirm.cancel}
 />
 
 <div class={css({ display: 'flex', flexDirection: 'column', height: '100%', width: '100%' })}>
@@ -428,13 +406,8 @@
 				color: 'fg.error'
 			})}
 		>
-			{datasourcesQuery.error instanceof Error
-				? datasourcesQuery.error.message
-				: allSchedulesQuery.error instanceof Error
-					? allSchedulesQuery.error.message
-					: schedulesQuery.error instanceof Error
-						? schedulesQuery.error.message
-						: 'Error loading schedules.'}
+			{(datasourcesQuery.error ?? allSchedulesQuery.error ?? schedulesQuery.error)?.message ??
+				'Error loading schedules.'}
 		</div>
 	{:else if schedules.length === 0 && !creating && !hasSearch}
 		<div
@@ -482,7 +455,7 @@
 			togglePending={toggleMut.isPending}
 			deletePending={deleteMut.isPending}
 			onToggle={handleToggle}
-			onDelete={handleDelete}
+			onDelete={deleteConfirm.request}
 		/>
 	{/if}
 

@@ -6,7 +6,6 @@ from typing import Any, cast
 import pytest
 
 from dataforge_protocol import analysis_pb2, compute_pb2, enums_pb2
-from operations.step_converter import analysis_pipeline_to_execution_payload
 from runtime import compute_request_runtime, compute_service
 
 
@@ -117,7 +116,7 @@ async def test_pipeline_only_download_admission_cancels_its_exact_job_on_lease_l
         enums_pb2.COMPUTE_REQUEST_KIND_DOWNLOAD,
         compute_pb2.ComputeCommand(download=download),
     )
-    expected_identity = compute_service.default_stateless_compute_worker_identity(analysis_pipeline_to_execution_payload(download.analysis_pipeline))
+    expected_identity = compute_service.default_stateless_compute_worker_identity(download.analysis_pipeline.analysis_id)
 
     task = asyncio.create_task(compute_request_runtime._execute_request(claimed, cast(Any, Manager())))
     await asyncio.wait_for(execution_started.wait(), timeout=1)

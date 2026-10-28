@@ -8,10 +8,10 @@
 
 	interface Props {
 		schema: Schema;
-		config?: DropConfigData;
+		config: DropConfigData;
 	}
 
-	let { schema, config = $bindable({ columns: [] }) }: Props = $props();
+	let { schema, config = $bindable() }: Props = $props();
 
 	const safeColumns = $derived(Array.isArray(config.columns) ? config.columns : []);
 </script>

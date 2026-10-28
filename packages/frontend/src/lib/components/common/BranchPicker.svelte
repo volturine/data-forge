@@ -31,16 +31,13 @@
 	let searchValue = $state('');
 	let popoverRect = $state({ left: 0, top: 0, width: 240 });
 
-	const normalizedBranches = $derived(branches);
 	const trimmedSearch = $derived(searchValue.trim());
 	const canCreate = $derived(
-		allowCreate &&
-			trimmedSearch.length > 0 &&
-			!normalizedBranches.some((branch) => branch === trimmedSearch)
+		allowCreate && trimmedSearch.length > 0 && !branches.some((branch) => branch === trimmedSearch)
 	);
 	const currentValue = $derived(value ?? 'master');
 	const options = $derived.by(() => {
-		const base = normalizedBranches.map(
+		const base = branches.map(
 			(branch) =>
 				({
 					id: branch,
@@ -48,7 +45,7 @@
 					kind: 'branch'
 				}) satisfies BranchOption
 		);
-		const current = value?.trim?.() ?? '';
+		const current = value?.trim() ?? '';
 		const hasCurrent = current && !base.some((option) => option.id === current);
 		const extras = hasCurrent
 			? ([{ id: current, label: current, kind: 'branch' }] satisfies BranchOption[])

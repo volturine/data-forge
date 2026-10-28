@@ -1,6 +1,7 @@
 import type { ResultAsync } from 'neverthrow';
 import { apiRequest } from './client';
 import type { ApiError } from './client';
+import { withQuery } from './query';
 
 export interface Schedule {
 	id: string;
@@ -45,13 +46,14 @@ export interface ListSchedulesParams {
 }
 
 export function listSchedules(params?: ListSchedulesParams): ResultAsync<Schedule[], ApiError> {
-	const query = new URLSearchParams();
-	if (params?.datasourceId) query.set('datasource_id', params.datasourceId);
-	if (params?.search) query.set('search', params.search);
-	if (params?.limit !== undefined) query.set('limit', String(params.limit));
-	if (params?.offset !== undefined) query.set('offset', String(params.offset));
-	const qs = query.toString();
-	return apiRequest<Schedule[]>(`/v1/schedules${qs ? `?${qs}` : ''}`);
+	return apiRequest<Schedule[]>(
+		withQuery('/v1/schedules', {
+			datasource_id: params?.datasourceId,
+			search: params?.search,
+			limit: params?.limit,
+			offset: params?.offset
+		})
+	);
 }
 
 export function createSchedule(payload: ScheduleCreate): ResultAsync<Schedule, ApiError> {

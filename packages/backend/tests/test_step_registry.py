@@ -17,7 +17,7 @@ def test_step_catalog_matches_public_step_types() -> None:
 def test_generated_frontend_protocol_exports_catalog_configs() -> None:
     content = FRONTEND_PROTOCOL_ANALYSIS.read_text()
     for step_type, entry in STEP_CATALOG.items():
-        config_model = entry['config']
+        config_model = entry.config
         assert isinstance(config_model, type)
         model_name = config_model.__name__
         assert f'export type {model_name}' in content, step_type

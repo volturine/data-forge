@@ -1,18 +1,14 @@
 """Explode list columns operation."""
 
 import polars as pl
+from pydantic import Field
 
-from runtime.domain.compute.base import OperationHandler, OperationParams
+from runtime.domain.compute.base import OperationParams
 
 
 class ExplodeParams(OperationParams):
-    columns: list[str] | str
+    columns: list[str] = Field(min_length=1)
 
 
-class ExplodeHandler(OperationHandler):
-    def __call__(self, lf: pl.LazyFrame, params: dict, **_) -> pl.LazyFrame:
-        validated = ExplodeParams.model_validate(params)
-        columns = [validated.columns] if isinstance(validated.columns, str) else validated.columns
-        if not columns:
-            raise ValueError("Explode requires at least one column")
-        return lf.explode(columns)
+def explode(lf: pl.LazyFrame, params: ExplodeParams, **_) -> pl.LazyFrame:
+    return lf.explode(params.columns)

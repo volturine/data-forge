@@ -23,7 +23,7 @@ export function buildStepTypeLabel(stepType: string): string {
 }
 
 export function buildStepLabel(stepName: string | null | undefined, stepType: string): string {
-	if (typeof stepName === 'string' && stepName.trim() && !isOpaqueStepName(stepName)) {
+	if (typeof stepName === 'string' && !isOpaqueStepName(stepName)) {
 		if (stepName.trim().toLowerCase() === stepType.trim().toLowerCase()) {
 			return buildStepTypeLabel(stepType);
 		}

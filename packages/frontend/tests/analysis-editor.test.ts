@@ -1,4 +1,5 @@
 import { test, expect } from './fixtures.js';
+import type { Route } from '@playwright/test';
 import { createDatasource, createAnalysis } from './utils/api.js';
 import { gotoAnalysisEditor, waitForEditorReload } from './utils/analysis.js';
 import { deleteAnalysisViaUI, deleteDatasourceViaUI } from './utils/ui-cleanup.js';
@@ -379,33 +380,122 @@ test.describe('Analyses – save persistence', () => {
 		const id = uid();
 		const analysis = `E2E Apply Cancel ${id}`;
 		const aId = await createAnalysis(request, analysis, sharedDatasourceId);
+		const stepConfigBodyRequests: string[] = [];
+		const activeChunkRoutes = new Set<Promise<void>>();
+		const stepConfigChunkPattern = '**/_app/immutable/chunks/*.js';
+		let routeInstalled = false;
+		let allowChunkRetry = false;
+		let releaseFirstChunk!: () => void;
+		const firstChunkGate = new Promise<void>((resolve) => {
+			releaseFirstChunk = resolve;
+		});
+
+		const handleStepConfigChunk = async (route: Route) => {
+			const response = await route.fetch({ timeout: 15_000 });
+			const body = await response.text();
+			const isStepConfigBody =
+				body.includes('data-step-config') && body.includes('Choose at least one row field');
+			if (!isStepConfigBody) {
+				await route.fulfill({ response, body });
+				return;
+			}
+
+			stepConfigBodyRequests.push(route.request().url());
+			if (!allowChunkRetry) {
+				await firstChunkGate;
+				await route.abort('failed');
+				return;
+			}
+			await route.fulfill({ response, body });
+		};
+		const stepConfigChunkRoute = (route: Route): Promise<void> => {
+			const handling = handleStepConfigChunk(route);
+			activeChunkRoutes.add(handling);
+			return handling.finally(() => activeChunkRoutes.delete(handling));
+		};
+
 		try {
+			await page.route(stepConfigChunkPattern, stepConfigChunkRoute);
+			routeInstalled = true;
 			await gotoAnalysisEditor(page, aId);
+			await expect(page.getByRole('heading', { name: 'No step selected' })).toBeVisible();
+			expect(stepConfigBodyRequests).toHaveLength(0);
 
-			// Add a filter step and open config
+			// Adding a step selects it and starts the one lazy body import.
 			await page.locator('button[data-step="filter"]').click();
-			const canvasNode = await latestNode(page, 'filter');
-			await expect(canvasNode).toBeVisible({ timeout: 5_000 });
-			await canvasNode.click();
+			const filterNode = await latestNode(page, 'filter');
+			await expect.poll(() => stepConfigBodyRequests.length, { timeout: 5_000 }).toBeGreaterThan(0);
+			await expect(page.getByTestId('step-config-load-status')).toBeVisible();
+			await expect(page.getByRole('button', { name: 'Close step configuration' })).toBeVisible();
 
-			const configPanel = page.locator('[data-step-config="filter"]');
+			// Change selection while the matching body response is gated, then close the loader.
+			await page.locator('button[data-step="limit"]').click();
+			const limitNode = await latestNode(page, 'limit');
+			await expect(page.locator('[data-step-config-loading="limit"]')).toBeVisible();
+			await page.getByRole('button', { name: 'Close step configuration' }).click();
+			await expect(page.getByRole('heading', { name: 'No step selected' })).toBeVisible();
+			await expect(page.locator('[data-step-config]')).toHaveCount(0);
+
+			// Select filter again before releasing the failed body response.
+			await filterNode.locator('[data-action="edit"]').click();
+			await expect(page.getByTestId('step-config-load-status')).toBeVisible();
+			releaseFirstChunk();
+			await expect(page.getByTestId('step-config-load-error')).toBeVisible();
+			await expect(page.getByRole('button', { name: 'Back to steps' })).toBeVisible();
+			await expect(page.getByRole('button', { name: 'Close step configuration' })).toBeVisible();
+
+			const failedEntryRequestCount = stepConfigBodyRequests.length;
+			allowChunkRetry = true;
+			await page.getByRole('button', { name: 'Retry' }).click();
+			await expect
+				.poll(() => stepConfigBodyRequests.length, { timeout: 5_000 })
+				.toBeGreaterThan(failedEntryRequestCount);
+			const firstChunkUrl = stepConfigBodyRequests[0];
+			const retryChunkUrl = stepConfigBodyRequests[stepConfigBodyRequests.length - 1];
+			expect(new URL(retryChunkUrl ?? '').pathname).toBe(new URL(firstChunkUrl ?? '').pathname);
+
+			const filterPanel = page.locator('[data-step-config="filter"]');
+			await expect(filterPanel).toBeVisible({ timeout: 5_000 });
+			const filterApplyBtn = filterPanel.getByRole('button', { name: 'Apply' });
+			const filterCancelBtn = filterPanel.getByRole('button', { name: 'Cancel' });
+			await expect(filterApplyBtn).toBeVisible();
+			await expect(filterCancelBtn).toBeVisible();
+			// New filter step is unapplied, so both controls start enabled.
+			await expect(filterApplyBtn).toBeEnabled();
+			await expect(filterCancelBtn).toBeEnabled();
+			await filterApplyBtn.click();
+			await expect(filterApplyBtn).toBeDisabled({ timeout: 5_000 });
+			await expect(filterCancelBtn).toBeDisabled({ timeout: 5_000 });
+
+			// Extend the case with a real draft edit and Cancel restore on a limit step.
+			await limitNode.locator('[data-action="edit"]').click();
+			const configPanel = page.locator('[data-step-config="limit"]');
 			await expect(configPanel).toBeVisible({ timeout: 5_000 });
-
 			const applyBtn = configPanel.getByRole('button', { name: 'Apply' });
 			const cancelBtn = configPanel.getByRole('button', { name: 'Cancel' });
+			const limitInput = configPanel.locator('[data-testid="limit-rows-input"]');
+			await expect(limitInput).toHaveValue('100');
 			await expect(applyBtn).toBeVisible();
 			await expect(cancelBtn).toBeVisible();
-
-			// New step: is_applied=false → both buttons enabled
+			await limitInput.fill('77');
+			await cancelBtn.click();
+			await expect(limitInput).toHaveValue('100');
 			await expect(applyBtn).toBeEnabled();
-			await expect(cancelBtn).toBeEnabled();
-
-			// Click Apply — marks step as applied → hasChanges becomes false
+			await limitInput.fill('77');
 			await applyBtn.click();
 			await expect(applyBtn).toBeDisabled({ timeout: 5_000 });
 			await expect(cancelBtn).toBeDisabled({ timeout: 5_000 });
 		} finally {
-			await deleteAnalysisViaUI(page, analysis);
+			releaseFirstChunk();
+			try {
+				// Finish owned handlers before unroute can resume their requests itself.
+				while (activeChunkRoutes.size > 0) {
+					await Promise.allSettled([...activeChunkRoutes]);
+				}
+				if (routeInstalled) await page.unroute(stepConfigChunkPattern, stepConfigChunkRoute);
+			} finally {
+				await deleteAnalysisViaUI(page, analysis);
+			}
 		}
 	});
 });

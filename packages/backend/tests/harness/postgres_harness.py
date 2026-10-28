@@ -258,8 +258,7 @@ def run_concurrently[T](actions: Sequence[Callable[[], T]], *, timeout: float = 
 def _drain_stream(stream, chunks: list[str]) -> None:
     if stream is None:
         return
-    for line in stream:
-        chunks.append(line)
+    chunks.extend(stream)
 
 
 @dataclass

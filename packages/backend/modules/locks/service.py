@@ -43,8 +43,13 @@ def lookup_lock_status(session: Session, resource_type: str, resource_id: str) -
         return None, False
     now = _utcnow()
     if lock.is_expired(now=now):
-        _delete_expired_lock(session, resource_type, resource_id, now)
-        return None, True
+        if _delete_expired_lock(session, resource_type, resource_id, now):
+            return None, True
+        # A concurrent reacquire can replace the expired row before cleanup.
+        session.expire_all()
+        lock = get_lock(session, resource_type, resource_id)
+        if lock is None:
+            return None, False
     return _status(lock, now), False
 
 

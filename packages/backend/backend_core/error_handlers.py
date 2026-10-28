@@ -45,6 +45,8 @@ ERROR_CODE_STATUS_MAP: dict[int, int] = {
     errors_pb2.ERROR_CODE_DATASOURCE_CONNECTION_ERROR: 502,
     errors_pb2.ERROR_CODE_DATASOURCE_SNAPSHOT_ERROR: 409,
     errors_pb2.ERROR_CODE_ENGINE_BUSY: 409,
+    errors_pb2.ERROR_CODE_JOB_CANCELLED: 409,
+    errors_pb2.ERROR_CODE_STALE_COMPUTE_INPUT: 409,
     errors_pb2.ERROR_CODE_FILE_SIZE_EXCEEDED: 413,
     errors_pb2.ERROR_CODE_PIPELINE_EXECUTION_ERROR: 500,
     errors_pb2.ERROR_CODE_SETTINGS_CONFIGURATION_ERROR: 500,
@@ -58,6 +60,8 @@ ERROR_CODE_STATUS_MAP: dict[int, int] = {
 
 
 def status_for_app_error(exc: AppError) -> int:
+    if isinstance(exc, PipelineExecutionCancelledError):
+        return 409
     return ERROR_CODE_STATUS_MAP.get(exc.error_code_value, 500)
 
 
@@ -80,7 +84,7 @@ def _log_app_error(exc: AppError, status: int) -> None:
         # produce a traceback or trip the E2E error scanner.
         logger.info(msg, extra=extra)
     elif status >= 500:
-        logger.error(msg, extra=extra, exc_info=True)
+        logger.error(msg, extra=extra, exc_info=exc)
     elif status in (401, 403):
         # Authentication and authorization failures stay visible: repeated
         # rejections are a signal worth reading in the logs.
@@ -98,7 +102,7 @@ def _raise_http(exc: Exception, operation: str, value_error_status: int | None) 
         raise exc
     if isinstance(exc, ValueError):
         raise HTTPException(status_code=value_error_status or 400, detail=str(exc)) from exc
-    logger.error('Failed to %s: %s', operation, type(exc).__name__, exc_info=True)
+    logger.error('Failed to %s: %s', operation, type(exc).__name__, exc_info=exc)
     raise HTTPException(status_code=500, detail='An internal error occurred') from exc
 
 
@@ -172,7 +176,7 @@ async def client_disconnect_handler(_request: Request, _exc: Exception) -> Respo
 
 async def generic_error_handler(_request: Request, exc: Exception) -> Response:
     """Global fallback handler — never leaks internal details."""
-    logger.error('Unhandled exception: %s', type(exc).__name__, exc_info=True)
+    logger.error('Unhandled exception: %s', type(exc).__name__, exc_info=exc)
     return JSONResponse(
         status_code=500,
         content=_error_body('An internal error occurred', 'INTERNAL_ERROR'),

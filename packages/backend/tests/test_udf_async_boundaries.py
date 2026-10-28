@@ -35,7 +35,7 @@ async def test_udf_route_owns_session_inside_bounded_api_thread(monkeypatch: pyt
         observations['used_session'] = session
         return []
 
-    monkeypatch.setattr(database, '_get_tenant_engine', lambda: object())
+    monkeypatch.setattr(database, '_get_tenant_engine', object)
     monkeypatch.setattr(database, 'Session', OwnedSession)
     monkeypatch.setattr(udf_routes.service, 'list_udfs', list_udfs)
 

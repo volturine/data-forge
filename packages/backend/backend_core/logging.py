@@ -12,7 +12,7 @@ import threading
 import time
 import urllib.parse
 import uuid
-from collections.abc import Awaitable, Callable
+from collections.abc import Awaitable, Callable, Mapping
 from concurrent.futures import Future, ThreadPoolExecutor, wait
 from datetime import UTC, datetime
 from typing import Any, Protocol, cast
@@ -403,8 +403,8 @@ def _metric_ms(metrics: dict[str, object], name: str) -> float:
     return float(value) if isinstance(value, (int, float)) and not isinstance(value, bool) else 0.0
 
 
-def _header_value(headers: list[tuple[bytes, bytes]], name: bytes) -> str | None:
-    for header_name, value in headers:
+def scope_header(scope: Mapping[str, Any], name: bytes) -> str | None:
+    for header_name, value in scope.get('headers') or []:
         if header_name.lower() == name:
             return value.decode('latin-1')
     return None
@@ -435,7 +435,7 @@ class RequestTimingMiddleware:
 
     async def __call__(self, scope: dict[str, Any], receive: AsgiReceive, send: AsgiSend) -> None:
         path = str(scope.get('path') or '')
-        is_api_or_health = path == '/api' or path.startswith('/api/') or path == '/health' or path.startswith('/health/')
+        is_api_or_health = path in {'/api', '/health'} or path.startswith(('/api/', '/health/'))
         if scope.get('type') != 'http' or not is_api_or_health:
             await self.app(scope, receive, send)
             return
@@ -444,7 +444,7 @@ class RequestTimingMiddleware:
         response_started_at: float | None = None
         response_status: int | None = None
         state = scope.setdefault('state', {})
-        request_id = state.get('request_id') or _header_value(scope.get('headers') or [], b'x-request-id') or uuid.uuid4().hex
+        request_id = state.get('request_id') or scope_header(scope, b'x-request-id') or uuid.uuid4().hex
         state['request_id'] = request_id
         database_metrics: dict[str, object] = {}
 
@@ -616,22 +616,19 @@ class RequestLoggingMiddleware:
 
         response_logged = False
         response_status = 500
-        response_headers: list[tuple[bytes, bytes]] = []
         response_body: bytes | None = None
 
         def submit_response_log() -> None:
             nonlocal response_logged
             duration_ms = (self.get_time() - start) * 1000
-            content_type = _header_value(response_headers, b'content-type')
-            self._submit_request_log(request, response_status, content_type, duration_ms, request_id, body_for_log, response_body)
+            self._submit_request_log(request, response_status, duration_ms, request_id, body_for_log, response_body)
             response_logged = True
 
         async def send_wrapper(message: AsgiMessage) -> None:
-            nonlocal response_status, response_headers, response_body
+            nonlocal response_status, response_body
             if message['type'] == 'http.response.start':
                 response_status = int(message['status'])
-                response_headers = list(message.get('headers', []))
-                headers = [item for item in response_headers if item[0].lower() != b'x-request-id']
+                headers = [item for item in message.get('headers', []) if item[0].lower() != b'x-request-id']
                 headers.append((b'x-request-id', request_id.encode()))
                 message = {**message, 'headers': headers}
             elif message['type'] == 'http.response.body':
@@ -651,7 +648,7 @@ class RequestLoggingMiddleware:
             return
         except Exception as exc:
             duration_ms = (self.get_time() - start) * 1000
-            self._submit_request_log(request, None, None, duration_ms, request_id, body_for_log, None, error=str(exc))
+            self._submit_request_log(request, None, duration_ms, request_id, body_for_log, None, error=str(exc))
             raise
         if not response_logged:
             submit_response_log()
@@ -688,7 +685,6 @@ class RequestLoggingMiddleware:
         self,
         request: Request,
         response_status: int | None,
-        response_content_type: str | None,
         duration_ms: float,
         request_id: str,
         request_body: bytes | None,
