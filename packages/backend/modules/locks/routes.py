@@ -287,15 +287,22 @@ async def lock_websocket(websocket: WebSocket) -> None:
 
                 token_value = message.lock_token or watch_token
                 if token_value is not None:
-                    lock = await _heartbeat_lock(watch_type, watch_id, owner_id, token_value, message.ttl_seconds)
-                    if lock.lock_token != token_value:
-                        # This socket's token was rotated. Tell it the live lock
-                        # without adopting that token, so disconnect cannot release it.
-                        await _send_status(websocket, watch_type, watch_id, lock)
+                    try:
+                        lock = await _heartbeat_lock(watch_type, watch_id, owner_id, token_value, message.ttl_seconds)
+                    except HTTPException as exc:
+                        if exc.status_code != 409:
+                            raise
+                        watch_token = None
+                        # The lease may have expired; report canonical status before the client reacquires.
+                    else:
+                        if lock.lock_token != token_value:
+                            # This socket's token was rotated. Tell it the live lock
+                            # without adopting that token, so disconnect cannot release it.
+                            await _send_status(websocket, watch_type, watch_id, lock)
+                            continue
+                        watch_token = token_value
+                        await _notify_watchers(watch_type, watch_id, lock)
                         continue
-                    watch_token = token_value
-                    await _notify_watchers(watch_type, watch_id, lock)
-                    continue
 
                 status, cleaned = await _lookup_lock_status(watch_type, watch_id)
                 if cleaned:

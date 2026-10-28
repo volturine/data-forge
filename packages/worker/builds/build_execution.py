@@ -13,6 +13,7 @@ from runtime import compute_service as service
 from runtime.build_events import build_event
 from runtime.compute_manager import COMPUTE_WORKER_ADMISSION_PRIORITY_LIFECYCLE, ComputeWorkerCapacityFull, ProcessManager
 from runtime.domain.compute import schemas
+from runtime.domain.compute.identity import datasource_compute_worker_identity
 from runtime.domain.compute_worker_runs.schemas import ComputeWorkerRunKind
 from runtime.domain.datasource.models import DataSourceTargetKind
 from runtime.executors import run_compute_in_thread, run_control_in_thread, run_shutdown_in_thread
@@ -183,12 +184,7 @@ async def _run_queued_build_job(
             from datasources import execution as datasource_execution
             from runtime.config import settings as worker_settings
 
-            datasource_identity = compute_pb2.ComputeWorkerIdentity(
-                scope=enums_pb2.COMPUTE_WORKER_SCOPE_DATASOURCE_PREVIEW,
-                reuse_policy=enums_pb2.COMPUTE_WORKER_REUSE_POLICY_SHARED,
-                datasource_id=datasource_id,
-                resource_id=datasource_id,
-            )
+            datasource_identity = datasource_compute_worker_identity(datasource_id)
             step_id = f"{build.build_id}:ingest"
             step_name = "Ingest"
             await _emit_build_event(

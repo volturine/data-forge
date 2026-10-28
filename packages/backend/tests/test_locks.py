@@ -280,6 +280,30 @@ class TestLockRoutes:
         assert stored.owner_id == 'owner-thief'
         assert stored.lock_token == 'thief-token'
 
+    def test_status_lookup_preserves_concurrent_reacquire(self, test_db_session, test_engine, monkeypatch) -> None:
+        from modules.locks import service as locks_service
+
+        resource_id = 'analysis-cas-status'
+        expired = datetime.now(UTC).replace(tzinfo=None) - timedelta(seconds=1)
+        self._seed_lock(test_db_session, resource_id, owner='owner-a', token='expired-token', expires_at=expired)
+        raced = self._patch_stale_read_with_takeover(monkeypatch, test_engine, 'analysis', resource_id)
+
+        status, cleaned = locks_service.lookup_lock_status(test_db_session, 'analysis', resource_id)
+
+        assert raced['done'] is True
+        assert cleaned is False
+        assert status is not None
+        assert status.owner_id == 'owner-thief'
+        assert status.lock_token == 'thief-token'
+        assert status.is_expired is False
+        test_db_session.expire_all()
+        stored = test_db_session.get(ResourceLock, ('analysis', resource_id))
+        assert stored is not None
+        assert stored.owner_id == status.owner_id
+        assert stored.lock_token == status.lock_token
+        assert ResourceLock.as_utc(stored.expires_at) == ResourceLock.as_utc(status.expires_at)
+        assert ResourceLock.as_utc(stored.last_heartbeat) == ResourceLock.as_utc(status.last_heartbeat)
+
     def test_heartbeat_lock_cas_rejects_superseded_token(self, test_db_session, test_engine) -> None:
         from modules.locks import service as locks_service
 
@@ -349,6 +373,86 @@ class TestLockRoutes:
 
 
 class TestLockWebsocket:
+    @pytest.mark.parametrize(
+        'replace_with_foreign_owner',
+        [False, True],
+        ids=['expired-free', 'foreign-replacement'],
+    )
+    def test_ping_after_lease_expiry_reports_canonical_status(
+        self,
+        client,
+        test_db_session,
+        monkeypatch,
+        replace_with_foreign_owner: bool,
+    ) -> None:
+        from modules.locks import service as locks_service
+
+        monkeypatch.setattr('backend_core.auth_config.settings.auth_required', False)
+        clock = {'now': datetime.now(UTC).replace(tzinfo=None)}
+        monkeypatch.setattr(locks_service, '_utcnow', lambda: clock['now'])
+        resource_id = 'analysis-ws-expired-ping'
+        foreign_expiry = None
+        foreign_heartbeat = None
+
+        with client.websocket_connect('/api/v1/locks/ws') as websocket:
+            assert websocket.receive_json() == {'type': 'connected'}
+            websocket.send_json({'action': 'watch', 'resource_type': 'analysis', 'resource_id': resource_id})
+            assert websocket.receive_json()['lock'] is None
+            websocket.send_json({'action': 'acquire', 'ttl_seconds': 5})
+            acquired = websocket.receive_json()
+            assert acquired['type'] == 'status'
+            assert acquired['lock'] is not None
+            stale_token = acquired['lock']['lock_token']
+            clock['now'] += timedelta(seconds=6)
+
+            if replace_with_foreign_owner:
+                test_db_session.expire_all()
+                lock = test_db_session.get(ResourceLock, ('analysis', resource_id))
+                assert lock is not None
+                lock.owner_id = 'foreign-owner'
+                lock.lock_token = 'foreign-token'
+                lock.acquired_at = clock['now']
+                lock.last_heartbeat = clock['now']
+                lock.expires_at = clock['now'] + timedelta(seconds=60)
+                foreign_expiry = lock.expires_at
+                foreign_heartbeat = lock.last_heartbeat
+                test_db_session.commit()
+
+            websocket.send_json({'action': 'ping', 'lock_token': stale_token})
+            pinged = websocket.receive_json()
+            assert pinged['type'] == 'status'
+            if replace_with_foreign_owner:
+                assert pinged['lock']['owner_id'] == 'foreign-owner'
+                assert pinged['lock']['lock_token'] == 'foreign-token'
+                websocket.send_json({'action': 'acquire'})
+                conflict = websocket.receive_json()
+                assert conflict['type'] == 'error'
+                assert conflict['status_code'] == 409
+            else:
+                assert pinged == {
+                    'type': 'status',
+                    'resource_type': 'analysis',
+                    'resource_id': resource_id,
+                    'lock': None,
+                }
+                websocket.send_json({'action': 'acquire'})
+                reacquired = websocket.receive_json()
+                assert reacquired['type'] == 'status'
+                assert reacquired['lock']['lock_token'] != stale_token
+
+        test_db_session.expire_all()
+        stored = test_db_session.get(ResourceLock, ('analysis', resource_id))
+        if replace_with_foreign_owner:
+            assert stored is not None
+            assert foreign_expiry is not None
+            assert foreign_heartbeat is not None
+            assert stored.owner_id == 'foreign-owner'
+            assert stored.lock_token == 'foreign-token'
+            assert ResourceLock.as_utc(stored.expires_at) == ResourceLock.as_utc(foreign_expiry)
+            assert ResourceLock.as_utc(stored.last_heartbeat) == ResourceLock.as_utc(foreign_heartbeat)
+        else:
+            assert stored is None
+
     def test_watch_can_acquire_and_release_over_websocket(self, client, monkeypatch) -> None:
         monkeypatch.setattr('backend_core.auth_config.settings.auth_required', False)
         owner = run_settings_db(ensure_default_user)

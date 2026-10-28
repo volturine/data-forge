@@ -9,10 +9,24 @@ from backend_core.compute_worker_live import ComputeWorkerRegistry
 from backend_core.domain.compute import schemas
 
 
-def test_compute_worker_snapshot_uses_compute_worker_json_field() -> None:
+def test_compute_worker_snapshot_uses_compute_worker_json_field(monkeypatch: pytest.MonkeyPatch) -> None:
     payload = schemas.ComputeWorkersSnapshotMessage(compute_workers=[], total=0).model_dump(mode='json')
 
     assert payload == {'type': 'snapshot', 'compute_workers': [], 'total': 0}
+    monkeypatch.setattr(engine_live.compute_worker_instance_service, 'list_engine_projection', lambda *_args, **_kwargs: [object()])
+    monkeypatch.setattr(
+        engine_live.compute_worker_instance_service,
+        'serialize_compute_worker_instance',
+        lambda *_args, **_kwargs: {
+            'resource_id': 'analysis-1',
+            'status': schemas.ComputeWorkerStatus.HEALTHY,
+            'docker_host': 'compute-east',
+        },
+    )
+    populated = engine_live.load_compute_worker_snapshot(object(), namespace='tenant-a', defaults={}).model_dump(mode='json')
+
+    assert populated['total'] == 1
+    assert populated['compute_workers'][0]['docker_host'] == 'compute-east'
 
 
 @pytest.mark.asyncio

@@ -30,6 +30,7 @@ from runtime.compute_manager import (
 from runtime.compute_request_context import reset_compute_request_id, set_compute_request_id
 from runtime.config import settings
 from runtime.domain.compute import schemas as compute_schemas
+from runtime.domain.compute.identity import datasource_compute_worker_identity
 from runtime.domain.compute_requests.live import ComputeRequestWake, request_hub
 from runtime.domain.domain_enums import domain_token
 from runtime.exceptions import AppError, StaleComputeInputError, status_for_app_error
@@ -1359,12 +1360,7 @@ def _compute_worker_identity_for_claimed(claimed: ClaimedComputeRequest) -> comp
             resource_id = command.preflight.preflight_id
         else:
             resource_id = getattr(command, command_name).datasource_id
-        return compute_pb2.ComputeWorkerIdentity(
-            scope=enums_pb2.COMPUTE_WORKER_SCOPE_DATASOURCE_PREVIEW,
-            reuse_policy=enums_pb2.COMPUTE_WORKER_REUSE_POLICY_SHARED,
-            datasource_id=resource_id,
-            resource_id=resource_id,
-        )
+        return datasource_compute_worker_identity(resource_id)
     if kind == enums_pb2.COMPUTE_REQUEST_KIND_SHUTDOWN_ENGINE:
         # Shutdown frees capacity; never waits for a slot.
         return None

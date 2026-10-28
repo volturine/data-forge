@@ -187,6 +187,7 @@ class ComputeWorkerStatusSchema(BaseModel):
     resource_id: str
     status: ComputeWorkerStatus
     container_id: str | None = None
+    docker_host: str | None = None
     image_digest: str | None = None
     lifecycle_status: str | None = None
     termination_reason: str | None = None
