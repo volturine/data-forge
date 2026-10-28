@@ -44,13 +44,18 @@ type LoadAnalysis = {
 
 type BrowserPerformanceSnapshot = { metrics: Array<{ name: string; value: number }> };
 
+type PageState = {
+	index: number;
+	url: string;
+};
+
 type NavigationFailurePage = {
 	index: number;
 	kind: 'analysis' | 'datasource';
 	page: Page;
 	failedAtEpochMs: number;
 	failedAtMonotonicMs: number;
-	state: Promise<{ pageState: unknown; snapshotReceivedAtEpochMs: number }>;
+	state: Promise<{ pageState: PageState; snapshotReceivedAtEpochMs: number }>;
 };
 
 type PageDiagnostics = {
@@ -184,7 +189,7 @@ async function capturePageState(
 	page: Page,
 	index: number,
 	datasourceName: string
-): Promise<unknown> {
+): Promise<PageState> {
 	const snapshot = page.evaluate((targetDatasourceName) => {
 		const describe = (element: Element | null) => {
 			if (!element) return null;
@@ -295,10 +300,10 @@ async function capturePageState(
 			resourceCount: performance.getEntriesByType('resource').length
 		};
 	}, datasourceName);
-	const timeout = new Promise<unknown>((resolve) =>
+	const timeout = new Promise<{ snapshotError: string }>((resolve) =>
 		setTimeout(() => resolve({ snapshotError: 'page evaluation exceeded 2 seconds' }), 2_000)
 	);
-	return { index, url: page.url(), ...((await Promise.race([snapshot, timeout])) as object) };
+	return { index, url: page.url(), ...(await Promise.race([snapshot, timeout])) };
 }
 
 async function createLoadAnalysis(
@@ -398,6 +403,27 @@ test.describe('Concurrent authenticated browser sessions', () => {
 		const accountContexts: BrowserContext[] = [];
 		const analyses: LoadAnalysis[] = [];
 		let pages: Page[] = [];
+		const navigationCalls = new Map<
+			Page,
+			{ startedAtEpochMs: number; returnedPromiseAtEpochMs: number | null; timeoutMs: number }
+		>();
+		const observeNavigationCall = (
+			page: Page,
+			navigate: (timeoutMs: number) => Promise<void>
+		): Promise<void> => {
+			const timeoutMs = readyTimeoutMs();
+			if (browserCount === 1) return navigate(timeoutMs);
+			// Bound the synchronous helper call without adding browser commands or waits.
+			const call = {
+				startedAtEpochMs: Date.now(),
+				returnedPromiseAtEpochMs: null as number | null,
+				timeoutMs
+			};
+			navigationCalls.set(page, call);
+			const navigation = navigate(timeoutMs);
+			call.returnedPromiseAtEpochMs = Date.now();
+			return navigation;
+		};
 		const requestTracesByPage = new Map<Page, RequestTrace | null>();
 		const previewBodiesByPage = new Map<Page, string[]>();
 		const diagnosticsByPage = new Map<Page, PageDiagnostics>();
@@ -552,7 +578,9 @@ test.describe('Concurrent authenticated browser sessions', () => {
 			const navigationResults = await Promise.allSettled([
 				...analysisPages.map(async (page, index) => {
 					try {
-						await gotoAnalysisEditor(page, analyses[index].id, readyTimeoutMs());
+						await observeNavigationCall(page, (timeoutMs) =>
+							gotoAnalysisEditor(page, analyses[index].id, timeoutMs)
+						);
 					} catch (error) {
 						captureNavigationFailure(page, index, 'analysis');
 						throw new Error(`analysis tab ${index} editor navigation failed: ${String(error)}`, {
@@ -566,7 +594,9 @@ test.describe('Concurrent authenticated browser sessions', () => {
 						// Opening the datasource route by ID selects the same UI preview as
 						// clicking its row, without making a saturated 50-page browser spend
 						// the navigation phase on 20 pointer-action acknowledgements.
-						await gotoAuthedRoute(page, `/datasources/${sharedDatasource.id}`, readyTimeoutMs());
+						await observeNavigationCall(page, (timeoutMs) =>
+							gotoAuthedRoute(page, `/datasources/${sharedDatasource.id}`, timeoutMs)
+						);
 						await waitForDatasourceList(page, readyTimeoutMs());
 					} catch (error) {
 						captureNavigationFailure(page, tabIndex, 'datasource');
@@ -733,6 +763,11 @@ test.describe('Concurrent authenticated browser sessions', () => {
 			const datasourcePreviewLatencies = previewLatenciesForPages(datasourcePages);
 			const loadMetrics = {
 				repeatIndex: testInfo.repeatEachIndex,
+				...(browserCount > 1
+					? {
+							navigationCalls: pages.map((page, index) => ({ index, ...navigationCalls.get(page) }))
+						}
+					: {}),
 				browserTabs: browserCount,
 				accounts: accountCount,
 				browserProcesses: probeBrowsers.length,
@@ -782,7 +817,8 @@ test.describe('Concurrent authenticated browser sessions', () => {
 									startedMsAgo: Date.now() - pending.startedAt
 								}));
 								const diagnostic = {
-									...(state.pageState as object),
+									...state.pageState,
+									navigationCall: navigationCalls.get(failure.page),
 									navigationFailureKind: failure.kind,
 									failedAtEpochMs: failure.failedAtEpochMs,
 									failedAtMonotonicMs: failure.failedAtMonotonicMs,
@@ -824,7 +860,8 @@ test.describe('Concurrent authenticated browser sessions', () => {
 									startedMsAgo: Date.now() - pending.startedAt
 								}));
 								return {
-									...((await capturePageState(page, index, sharedDatasource.name)) as object),
+									...(await capturePageState(page, index, sharedDatasource.name)),
+									navigationCall: navigationCalls.get(page),
 									...diagnosticsByPage.get(page),
 									pendingPreviewRequests
 								};
