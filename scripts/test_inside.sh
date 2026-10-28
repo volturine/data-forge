@@ -77,6 +77,27 @@ case "$target" in
         ;;
 esac
 
+case "$target" in
+    test-backend-unit|test-backend-integration|test-worker)
+        # xdist sees the host CPU count even when this runner has a fractional
+        # quota. Respect that quota and CPU affinity; retain explicit overrides.
+        if [ -z "${PYTEST_XDIST_AUTO_NUM_WORKERS:-}" ] && [ -r /sys/fs/cgroup/cpu.max ]; then
+            read -r cpu_quota cpu_period < /sys/fs/cgroup/cpu.max
+            if [[ "$cpu_quota" =~ ^[0-9]+$ ]] && [[ "$cpu_period" =~ ^[1-9][0-9]*$ ]] && [ "$cpu_quota" -gt 0 ]; then
+                quota_workers=$(((cpu_quota + cpu_period - 1) / cpu_period))
+                affinity_workers="$(python -c 'import os; print(len(os.sched_getaffinity(0)))')"
+                if [ "$quota_workers" -gt "$affinity_workers" ]; then
+                    quota_workers="$affinity_workers"
+                fi
+                export PYTEST_XDIST_AUTO_NUM_WORKERS="$quota_workers"
+            fi
+        fi
+        if [ -n "${PYTEST_XDIST_AUTO_NUM_WORKERS:-}" ]; then
+            echo "Pytest automatic worker budget: ${PYTEST_XDIST_AUTO_NUM_WORKERS}"
+        fi
+        ;;
+esac
+
 scanner=(uv run --project /app/packages/backend python /app/scripts/scan_warnings.py)
 if [ "$target" = test-e2e ] || [ "$target" = test-e2e-capacity ]; then
     scanner+=(--ignore-pattern 'InvalidCredentialsError: Invalid email or password')
