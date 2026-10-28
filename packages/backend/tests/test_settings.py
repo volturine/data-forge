@@ -994,27 +994,56 @@ class TestSeedSettingsFromEnv:
             assert row.smtp_port == 587
             assert row.telegram_bot_enabled is False
 
-    def test_password_seed_logs_warning_until_encryption_key_exists(self, monkeypatch, caplog) -> None:
+    @pytest.mark.parametrize(
+        ('field', 'bootstrap_complete'),
+        [
+            ('smtp_password', False),
+            ('telegram_bot_token', False),
+            ('openrouter_api_key', False),
+            ('openrouter_api_key', True),
+        ],
+    )
+    def test_secret_seed_warns_without_logging_values_until_encryption_key_exists(self, monkeypatch, caplog, field, bootstrap_complete) -> None:
         from backend_core.config import settings as app_settings
         from backend_core.persistence.settings.models import AppSettings
         from backend_core.settings_store import seed_settings_from_env
 
+        secret_value = 'unit-test-bootstrap-credential'
         monkeypatch.setattr(app_settings, 'smtp_host', 'mail.example.com', raising=False)
-        monkeypatch.setattr(app_settings, 'smtp_password', 'secret', raising=False)
+        for secret_field in ('smtp_password', 'telegram_bot_token', 'openrouter_api_key'):
+            monkeypatch.setattr(app_settings, secret_field, '', raising=False)
+        monkeypatch.setattr(app_settings, field, secret_value, raising=False)
         monkeypatch.delenv('SETTINGS_ENCRYPTION_KEY', raising=False)
         monkeypatch.setattr(app_settings, 'settings_encryption_key', '', raising=False)
 
         engine = self._make_engine()
         with Session(engine) as session:
+            if bootstrap_complete:
+                session.add(AppSettings(id=1, smtp_host='mail.example.com', env_bootstrap_complete=True))
+                session.commit()
             with caplog.at_level('WARNING'):
                 seed_settings_from_env(session)
 
             row = session.get(AppSettings, 1)
             assert row is not None
             assert row.smtp_host == 'mail.example.com'
-            assert row.smtp_password == ''
-            assert row.env_bootstrap_complete is False
-            assert 'SETTINGS_ENCRYPTION_KEY' in caplog.text
+            assert getattr(row, field) == ''
+            assert row.env_bootstrap_complete is bootstrap_complete
+            assert [record.getMessage() for record in caplog.records if record.name == 'backend_core.settings_store'] == [
+                'Skipping secret bootstrap because SETTINGS_ENCRYPTION_KEY is not set'
+            ]
+            assert secret_value not in caplog.text
+
+            caplog.clear()
+            monkeypatch.setenv('SETTINGS_ENCRYPTION_KEY', 'test-key')
+            monkeypatch.setattr(app_settings, 'settings_encryption_key', 'test-key', raising=False)
+            seed_settings_from_env(session)
+            session.refresh(row)
+
+            assert decrypt_secret(getattr(row, field)) == secret_value
+            assert row.env_bootstrap_complete is True
+            assert not [record for record in caplog.records if record.name == 'backend_core.settings_store']
+            assert secret_value not in caplog.text
 
     def test_lifespan_bot_check_uses_decrypted_settings_db(self, monkeypatch):
         from backend_core import database

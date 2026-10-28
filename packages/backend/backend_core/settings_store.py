@@ -34,15 +34,10 @@ _BOOTSTRAP_STRING_FIELDS = (
     ('ollama_endpoint_url', 'ollama_base_url'),
     ('ollama_default_model', 'ollama_default_model'),
 )
-_BOOTSTRAP_SECRET_FIELDS = (
-    ('smtp_password', 'smtp_password', 'SMTP password'),
-    ('telegram_bot_token', 'telegram_bot_token', 'Telegram token'),
-    ('openrouter_api_key', 'openrouter_api_key', 'OpenRouter key'),
-)
 
 
-def _warn_bootstrap_secret_missing(name: str) -> None:
-    logger.warning('Skipping %s bootstrap because SETTINGS_ENCRYPTION_KEY is not set', name)
+def _warn_bootstrap_secret_missing() -> None:
+    logger.warning('Skipping secret bootstrap because SETTINGS_ENCRYPTION_KEY is not set')
 
 
 def _notify_settings_changed(session: Session) -> None:
@@ -74,7 +69,7 @@ def ensure_openrouter_key_populated(session: Session) -> str:
     try:
         row.openrouter_api_key = encrypt_secret(deployment)
     except SettingsConfigurationError:
-        _warn_bootstrap_secret_missing('OpenRouter key')
+        _warn_bootstrap_secret_missing()
         return ''
     _notify_settings_changed(session)
     session.commit()
@@ -114,15 +109,15 @@ def seed_settings_from_env(session: Session) -> None:
         row.smtp_port = app_settings.smtp_port
         changed = True
     bootstrap_complete = True
-    for row_field, settings_field, label in _BOOTSTRAP_SECRET_FIELDS:
-        value = getattr(app_settings, settings_field)
-        if not getattr(row, row_field) and value:
+    for field in _SECRET_FIELDS:
+        value = getattr(app_settings, field)
+        if not getattr(row, field) and value:
             try:
-                setattr(row, row_field, encrypt_secret(value))
+                setattr(row, field, encrypt_secret(value))
                 changed = True
             except SettingsConfigurationError:
                 bootstrap_complete = False
-                _warn_bootstrap_secret_missing(label)
+                _warn_bootstrap_secret_missing()
     if not row.telegram_bot_enabled and app_settings.telegram_bot_enabled:
         row.telegram_bot_enabled = app_settings.telegram_bot_enabled
         changed = True
