@@ -3,7 +3,7 @@
 	import { page } from '$app/state';
 	import { afterNavigate, goto } from '$app/navigation';
 	import { resolve } from '$app/paths';
-	import { onMount } from 'svelte';
+	import { onMount, tick } from 'svelte';
 	import { idbGet, idbSet } from '#lib/utils/indexeddb.js';
 	import favicon from '#lib/assets/favicon.svg';
 	import { button, css, spinner } from '#lib/styles/panda.js';
@@ -26,6 +26,10 @@
 	import { AppLifecycle } from '#lib/services/app-lifecycle.js';
 	import { appBootstrap } from '#lib/services/app-bootstrap.svelte.js';
 	import { installAuditListeners, setAuditPage, track } from '#lib/utils/audit-log.js';
+	import '@fontsource/jetbrains-mono/400.css';
+	import '@fontsource/jetbrains-mono/500.css';
+	import '@fontsource/jetbrains-mono/600.css';
+	import '@fontsource/jetbrains-mono/700.css';
 	import '../../styled-system/styles.css';
 
 	let { children } = $props();
@@ -122,16 +126,13 @@
 
 	function enableShell(_node: HTMLElement): () => void {
 		shellInteractive = false;
-		let frameA = 0;
-		let frameB = 0;
-		frameA = window.requestAnimationFrame(() => {
-			frameB = window.requestAnimationFrame(() => {
-				shellInteractive = true;
-			});
+		let active = true;
+		// Bindings are ready after the DOM flush, even when browser paints are deferred.
+		void tick().then(() => {
+			if (active) shellInteractive = true;
 		});
 		return () => {
-			window.cancelAnimationFrame(frameA);
-			window.cancelAnimationFrame(frameB);
+			active = false;
 			shellInteractive = false;
 		};
 	}
@@ -439,15 +440,6 @@
 
 <svelte:head>
 	<link rel="icon" href={favicon} />
-
-	<link rel="preconnect" href="https://fonts.googleapis.com" />
-
-	<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin="anonymous" />
-
-	<link
-		href="https://fonts.googleapis.com/css2?family=JetBrains+Mono:wght@400;500;600;700&display=swap"
-		rel="stylesheet"
-	/>
 	<title>Data Analysis Platform</title>
 </svelte:head>
 

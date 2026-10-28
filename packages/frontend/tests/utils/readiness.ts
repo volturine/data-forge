@@ -153,7 +153,6 @@ export async function waitForLayoutReady(page: Page, timeout = readyTimeoutMs())
 	const shellState = mainNavigation(page)
 		.and(page.locator('[data-shell-interactive="true"]'))
 		.or(bootstrapError)
-		.filter({ visible: true })
 		.first();
 	await expect(shellState).toBeVisible({ timeout });
 	if (await bootstrapError.isVisible()) {

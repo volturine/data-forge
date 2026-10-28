@@ -458,7 +458,7 @@ test.describe('Concurrent authenticated browser sessions', () => {
 				if (index > 0 && authRequired) {
 					const response = await context.request.post('/api/v1/auth/register', {
 						data: {
-							email: `e2e-load-${E2E_RUN_STAMP}-account-${index}@example.com`,
+							email: `e2e-load-${E2E_RUN_STAMP}-account-${index}-repeat-${testInfo.repeatEachIndex}@example.com`,
 							password: E2E_PASSWORD,
 							display_name: `E2E Load Account ${index + 1}`
 						}

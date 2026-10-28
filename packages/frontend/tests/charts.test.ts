@@ -1,4 +1,5 @@
 import { test, expect } from './fixtures.js';
+import type { Route } from '@playwright/test';
 import { createImportedAnalysis } from './utils/api.js';
 import { gotoAnalysisEditor } from './utils/analysis.js';
 import { deleteAnalysisViaUI } from './utils/ui-cleanup.js';
@@ -137,7 +138,9 @@ test.describe('Charts – chart types render', () => {
 								{
 									id: stepId,
 									type: 'chart',
-									config: spec.config,
+									// Imports normalize applied state; keep the bar unconfigured until UI Apply.
+									config:
+										spec.chart_type === 'bar' ? { ...spec.config, x_column: '' } : spec.config,
 									depends_on: [],
 									is_applied: true
 								}
@@ -147,8 +150,99 @@ test.describe('Charts – chart types render', () => {
 				},
 				{ [datasourceRef]: sharedChartDatasource.id }
 			);
+			const rendererChunkPattern = '**/_app/immutable/chunks/*.js';
+			let rendererRequestMatched = false;
+			let rendererAbortCount = 0;
+			const releaseRendererAbort = Promise.withResolvers<void>();
+			const rendererHandlerCompleted = Promise.withResolvers<void>();
+			const pendingRendererRouteHandlers = new Set<Promise<void>>();
+			const handleRendererChunk = async (route: Route): Promise<void> => {
+				const response = await route.fetch();
+				const responseText = await response.text();
+				if (
+					!rendererRequestMatched &&
+					responseText.includes('chart.csv') &&
+					responseText.includes('chart-preview')
+				) {
+					rendererRequestMatched = true;
+					try {
+						await releaseRendererAbort.promise;
+						rendererAbortCount += 1;
+						await route.abort('failed');
+					} finally {
+						rendererHandlerCompleted.resolve();
+					}
+					return;
+				}
+				await route.fulfill({ response });
+			};
+			const rendererChunkRoute = async (route: Route): Promise<void> => {
+				const handler = handleRendererChunk(route);
+				pendingRendererRouteHandlers.add(handler);
+				try {
+					await handler;
+				} finally {
+					pendingRendererRouteHandlers.delete(handler);
+				}
+			};
 			try {
+				if (spec.chart_type === 'bar') {
+					await page.route(rendererChunkPattern, rendererChunkRoute);
+				}
 				await gotoAnalysisEditor(page, aId);
+				if (spec.chart_type === 'bar') {
+					const preview = page.locator('[data-testid="chart-preview-container"]');
+					await expect(preview).toBeVisible();
+					await expect(preview).toHaveAttribute('data-preview-state', 'inactive');
+					await expect(preview).toContainText('Configure chart to preview');
+					await expect(preview).not.toHaveAttribute('data-preview-error');
+					expect(rendererRequestMatched).toBe(false);
+
+					const chartNode = page.locator('[data-step-type="chart"]');
+					await chartNode.locator('[data-action="edit"]').click();
+					const configPanel = page.locator('[data-step-config="chart"]');
+					await expect(configPanel).toBeVisible();
+					await configPanel
+						.getByRole('group', { name: 'X Column' })
+						.locator('button[aria-expanded]')
+						.click();
+					await page.locator(`[data-column-option="${spec.config.x_column}"]`).click();
+					await configPanel.getByRole('button', { name: 'Apply', exact: true }).click();
+
+					await expect.poll(() => rendererRequestMatched, { timeout: readyTimeoutMs() }).toBe(true);
+					// Deactivate while the renderer is in flight, then apply again before it fails.
+					await chartNode.locator('[data-action="toggle"]').click();
+					await expect(preview).toHaveAttribute('data-preview-state', 'inactive');
+					await expect(preview).toContainText('Apply to preview');
+					await expect(preview).not.toHaveAttribute('data-preview-error');
+					await chartNode.locator('[data-action="edit"]').click();
+					await expect(configPanel).toBeVisible();
+					await configPanel.getByRole('button', { name: 'Apply', exact: true }).click();
+					await expect(preview).toBeVisible();
+					await expect(preview).toHaveAttribute('data-preview-state', 'loading');
+					await expect(preview.getByRole('status')).toContainText('Loading chart...');
+					await expect(preview).not.toHaveAttribute('data-preview-ready', 'true');
+					await expect(preview).toHaveAttribute('data-preview-query-status', 'success', {
+						timeout: readyTimeoutMs()
+					});
+
+					releaseRendererAbort.resolve();
+					await expect(preview).toHaveAttribute('data-preview-state', 'error', {
+						timeout: readyTimeoutMs()
+					});
+					await expect(preview).not.toHaveAttribute('data-preview-ready', 'true');
+					await expect(preview).toHaveAttribute(
+						'data-preview-error',
+						'Could not load chart renderer.'
+					);
+					await expect(preview.getByRole('alert')).toContainText('Could not load chart renderer.');
+					const retryRenderer = preview.getByRole('button', { name: 'Retry', exact: true });
+					await expect(retryRenderer).toBeVisible();
+					await rendererHandlerCompleted.promise;
+					expect(rendererAbortCount).toBe(1);
+					await page.unroute(rendererChunkPattern, rendererChunkRoute);
+					await retryRenderer.click();
+				}
 				await waitForChartPreviewReady(page, spec.chart_type === 'heatgrid' ? 150_000 : undefined);
 				const chart = page.locator('[data-testid="chart-preview"]');
 				await expect(chart.locator('svg').first()).toBeVisible({ timeout: readyTimeoutMs() });
@@ -162,6 +256,12 @@ test.describe('Charts – chart types render', () => {
 				}
 				await screenshot(page, 'charts', spec.chart_type);
 			} finally {
+				if (spec.chart_type === 'bar') {
+					releaseRendererAbort.resolve();
+					await page.unroute(rendererChunkPattern, rendererChunkRoute);
+					if (rendererRequestMatched) await rendererHandlerCompleted.promise;
+					await Promise.allSettled([...pendingRendererRouteHandlers]);
+				}
 				await deleteAnalysisViaUI(page, analysisName);
 			}
 		});

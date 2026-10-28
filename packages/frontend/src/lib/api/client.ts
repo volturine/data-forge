@@ -89,34 +89,45 @@ function buildHeaders(options?: RequestInit): Headers {
 function handleErrorResponse(
 	response: Response,
 	endpoint: string,
-	options?: RequestInit
+	options: RequestInit | undefined,
+	classifyCancellation: (error: unknown) => ApiError | undefined
 ): ResultAsync<never, ApiError> {
-	track({
-		event: 'api_error',
-		action: options?.method ?? 'GET',
-		page: typeof window !== 'undefined' ? window.location.pathname : undefined,
-		target: endpoint,
-		meta: { status: response.status, statusText: response.statusText }
-	});
-	return ResultAsync.fromPromise(response.text(), (error) =>
-		createApiError(
+	return ResultAsync.fromPromise(response.text(), (error) => {
+		const cancellationError = classifyCancellation(error);
+		if (cancellationError) return cancellationError;
+		return createApiError(
 			'http',
 			error instanceof Error ? error.message : response.statusText,
 			response.status,
 			response.statusText
-		)
-	).andThen((raw) => {
-		let message = raw || response.statusText;
-		let code: string | undefined;
-		try {
-			const parsed = JSON.parse(raw);
-			if (typeof parsed.detail === 'string') message = parsed.detail;
-			if (typeof parsed.error_code === 'string') code = parsed.error_code;
-		} catch {
-			// raw text is fine as fallback
-		}
-		return err(createApiError('http', message, response.status, response.statusText, code));
-	});
+		);
+	})
+		.andThen((raw) => {
+			const cancellationError = classifyCancellation(undefined);
+			if (cancellationError) return err(cancellationError);
+
+			let message = raw || response.statusText;
+			let code: string | undefined;
+			try {
+				const parsed = JSON.parse(raw);
+				if (typeof parsed.detail === 'string') message = parsed.detail;
+				if (typeof parsed.error_code === 'string') code = parsed.error_code;
+			} catch {
+				// raw text is fine as fallback
+			}
+			return err(createApiError('http', message, response.status, response.statusText, code));
+		})
+		.orTee((error) => {
+			if (error.type !== 'http') return;
+
+			track({
+				event: 'api_error',
+				action: options?.method ?? 'GET',
+				page: typeof window !== 'undefined' ? window.location.pathname : undefined,
+				target: endpoint,
+				meta: { status: response.status, statusText: response.statusText }
+			});
+		});
 }
 
 /** Bound for app-shell bootstrap probes (config + session). Compute stays unbounded. */
@@ -135,12 +146,23 @@ function isAbortError(error: unknown): boolean {
 	);
 }
 
+function isTimeoutError(error: unknown): boolean {
+	return (
+		(error instanceof DOMException && error.name === 'TimeoutError') ||
+		(error instanceof Error && error.name === 'TimeoutError')
+	);
+}
+
 function parseJsonBody<T>(
 	response: Response,
 	endpoint: string,
-	options?: RequestInit
+	options: RequestInit | undefined,
+	classifyCancellation: (error: unknown) => ApiError | undefined
 ): ResultAsync<T, ApiError> {
-	return ResultAsync.fromPromise(response.json() as Promise<T>, (): ApiError => {
+	return ResultAsync.fromPromise(response.json() as Promise<T>, (error): ApiError => {
+		const cancellationError = classifyCancellation(error);
+		if (cancellationError) return cancellationError;
+
 		trackParseError(endpoint, options?.method);
 		return createApiError('parse', 'Failed to parse response JSON');
 	});
@@ -149,7 +171,10 @@ function parseJsonBody<T>(
 function apiFetch<T>(
 	endpoint: string,
 	options: RequestInit | undefined,
-	parse: (response: Response) => ResultAsync<T, ApiError>
+	parse: (
+		response: Response,
+		classifyCancellation: (error: unknown) => ApiError | undefined
+	) => ResultAsync<T, ApiError>
 ): ResultAsync<T, ApiError> {
 	const headers = buildHeaders(options);
 	// A 304 is a success for conditional requests — let it reach the parse callback.
@@ -166,6 +191,21 @@ function apiFetch<T>(
 		(signal): signal is AbortSignal => signal !== undefined
 	);
 	const signal = combineSignals(signals);
+	const classifyCancellation = (error: unknown): ApiError | undefined => {
+		if (namespaceController.signal.aborted) {
+			return createApiError('network', 'Request cancelled because the namespace changed');
+		}
+
+		if (isTimeoutError(error) || (callerSignal?.aborted && isTimeoutError(callerSignal.reason))) {
+			return createApiError('network', 'Request timed out', undefined, undefined, 'TIMEOUT');
+		}
+
+		if (callerSignal?.aborted || isAbortError(error)) {
+			return createApiError('network', 'Request was cancelled', undefined, undefined, 'ABORTED');
+		}
+
+		return undefined;
+	};
 	const request = {
 		...options,
 		headers,
@@ -175,26 +215,16 @@ function apiFetch<T>(
 	const result = ResultAsync.fromPromise(
 		fetch(buildApiUrl(endpoint), request),
 		(error): ApiError => {
-			if (namespaceController.signal.aborted) {
-				return createApiError('network', 'Request cancelled because the namespace changed');
-			}
-			if (callerSignal?.aborted || isAbortError(error)) {
-				return createApiError(
-					'network',
-					callerSignal
-						? `Request timed out or was aborted (bootstrap budget ${BOOTSTRAP_API_TIMEOUT_MS}ms)`
-						: error instanceof Error
-							? error.message
-							: 'Network error'
-				);
-			}
-			return createApiError('network', error instanceof Error ? error.message : 'Network error');
+			return (
+				classifyCancellation(error) ??
+				createApiError('network', error instanceof Error ? error.message : 'Network error')
+			);
 		}
 	).andThen((response) => {
 		if (!response.ok && !(allowsNotModified && response.status === 304)) {
-			return handleErrorResponse(response, endpoint, options);
+			return handleErrorResponse(response, endpoint, options, classifyCancellation);
 		}
-		return parse(response).andThen((value) => {
+		return parse(response, classifyCancellation).andThen((value) => {
 			const namespace = currentNamespace();
 			if (requestNamespace && (requestEpoch !== namespaceEpoch || requestNamespace !== namespace)) {
 				return err(createApiError('network', 'Response discarded because the namespace changed'));
@@ -209,9 +239,9 @@ function apiFetch<T>(
 }
 
 export function apiRequest<T>(endpoint: string, options?: RequestInit): ResultAsync<T, ApiError> {
-	return apiFetch(endpoint, options, (response) => {
+	return apiFetch(endpoint, options, (response, classifyCancellation) => {
 		if (response.status === 204) return okAsync(undefined as T);
-		return parseJsonBody<T>(response, endpoint, options);
+		return parseJsonBody<T>(response, endpoint, options, classifyCancellation);
 	});
 }
 
@@ -219,10 +249,10 @@ export function apiRequestWithHeaders<T>(
 	endpoint: string,
 	options?: RequestInit
 ): ResultAsync<ApiResponse<T>, ApiError> {
-	return apiFetch(endpoint, options, (response) => {
+	return apiFetch(endpoint, options, (response, classifyCancellation) => {
 		if (response.status === 204)
 			return okAsync({ data: undefined as T, headers: response.headers });
-		return parseJsonBody<T>(response, endpoint, options).map((data) => ({
+		return parseJsonBody<T>(response, endpoint, options, classifyCancellation).map((data) => ({
 			data,
 			headers: response.headers
 		}));
@@ -235,11 +265,11 @@ export function apiConditionalRequestWithHeaders<T>(
 	return apiFetch(
 		endpoint,
 		options,
-		(response): ResultAsync<ApiConditionalResponse<T>, ApiError> => {
+		(response, classifyCancellation): ResultAsync<ApiConditionalResponse<T>, ApiError> => {
 			if (response.status === 304) return okAsync({ notModified: true, headers: response.headers });
 			if (response.status === 204)
 				return okAsync({ notModified: false, headers: response.headers, data: undefined as T });
-			return parseJsonBody<T>(response, endpoint, options).map((data) => ({
+			return parseJsonBody<T>(response, endpoint, options, classifyCancellation).map((data) => ({
 				notModified: false,
 				data,
 				headers: response.headers
@@ -251,8 +281,11 @@ export function apiBlobRequest(
 	endpoint: string,
 	options?: RequestInit
 ): ResultAsync<Blob, ApiError> {
-	return apiFetch(endpoint, options, (response) =>
-		ResultAsync.fromPromise(response.blob(), (): ApiError => {
+	return apiFetch(endpoint, options, (response, classifyCancellation) =>
+		ResultAsync.fromPromise(response.blob(), (error): ApiError => {
+			const cancellationError = classifyCancellation(error);
+			if (cancellationError) return cancellationError;
+
 			trackParseError(endpoint, options?.method);
 			return createApiError('parse', 'Failed to read response');
 		})

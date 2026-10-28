@@ -3,7 +3,6 @@
 	import type { PipelineStep } from '#lib/types/analysis.js';
 	import { drag, type DropTarget } from '#lib/stores/drag.svelte.js';
 	import InlineDataTable from '#lib/components/pipeline/InlineDataTable.svelte';
-	import ChartPreview from '#lib/components/pipeline/ChartPreview.svelte';
 	import { createQuery } from '@tanstack/svelte-query';
 	import {
 		previewStepData,
@@ -33,6 +32,8 @@
 	import { SvelteMap } from 'svelte/reactivity';
 	import { css, spinner } from '#lib/styles/panda.js';
 
+	type ChartPreviewConstructor = typeof import('./ChartPreview.svelte').default;
+
 	interface Props {
 		step: PipelineStep;
 		analysisId?: string;
@@ -59,6 +60,10 @@
 
 	const isChart = $derived(isChartStepType(step.type));
 	const namespace = $derived(isNamespaceReady() ? requireNamespace() : null);
+	let ChartPreviewComponent: ChartPreviewConstructor | null = $state(null);
+	let chartRendererLoadError = $state(false);
+	let chartRendererRetryAttempt = $state(0);
+	const chartRendererLoadErrorMessage = 'Could not load chart renderer.';
 
 	const chartHeight = $derived(
 		isChart ? (step.config?.chart_height as string | undefined) : undefined
@@ -98,6 +103,37 @@
 		);
 	});
 	const chartConfigured = $derived(((step.config?.x_column as string | undefined) ?? '') !== '');
+	const chartRendererEligible = $derived(
+		isChart && isApplied && chartConfigured && !!analysisId && !!datasourceId
+	);
+
+	$effect(() => {
+		// Keep renderer loading keyed to activation and explicit retries only.
+		void chartRendererRetryAttempt;
+
+		if (!chartRendererEligible) {
+			ChartPreviewComponent = null;
+			chartRendererLoadError = false;
+			return;
+		}
+
+		let active = true;
+		ChartPreviewComponent = null;
+		chartRendererLoadError = false;
+
+		void import('./ChartPreview.svelte')
+			.then(({ default: component }) => {
+				if (active) ChartPreviewComponent = component;
+			})
+			.catch(() => {
+				if (active) chartRendererLoadError = true;
+			});
+
+		return () => {
+			active = false;
+		};
+	});
+
 	const chartPreviewRequest = $derived.by(() => {
 		if (!targetAnalysisPipeline || !analysisId) return null;
 		return {
@@ -141,15 +177,24 @@
 			chartConfigured
 	}));
 	const chartPreviewState = $derived.by(() => {
-		if (!isChart || !isApplied || !chartConfigured) return 'inactive';
+		if (!isChart) return 'inactive';
+		if (!isApplied || !chartConfigured) return 'inactive';
+		if (chartRendererLoadError) return 'error';
 		if (!targetAnalysisPipeline || !datasourceId || !analysisId) return 'waiting-for-payload';
 		if (chartQuery.error) return 'error';
-		if (analysisStore.previews.paused || chartQuery.isFetching) return 'loading';
+		if (analysisStore.previews.paused || chartQuery.isFetching || !ChartPreviewComponent)
+			return 'loading';
 		if (chartQuery.data) return 'ready';
 		return 'idle';
 	});
 	const chartPreviewError = $derived(
-		chartQuery.error instanceof Error ? chartQuery.error.message : ''
+		!isApplied || !chartConfigured
+			? ''
+			: chartQuery.error instanceof Error
+				? chartQuery.error.message
+				: chartRendererLoadError
+					? chartRendererLoadErrorMessage
+					: ''
 	);
 
 	const rowCounts = new SvelteMap<string, number>();
@@ -626,7 +671,7 @@
 				data-preview-has-data={chartQuery.data ? 'true' : 'false'}
 				data-preview-error={chartPreviewError || undefined}
 			>
-				{#if !isApplied}
+				{#if !isApplied || !chartConfigured}
 					<div
 						class={css({
 							display: 'flex',
@@ -646,8 +691,9 @@
 							<span>Apply to preview</span>
 						{/if}
 					</div>
-				{:else if chartQuery.error}
+				{:else if chartQuery.error || chartRendererLoadError}
 					<div
+						role={chartRendererLoadError ? 'alert' : undefined}
 						class={css({
 							borderTopWidth: '1',
 							borderTopColor: 'border.error',
@@ -657,10 +703,22 @@
 							color: 'fg.error'
 						})}
 					>
-						{chartQuery.error.message}
+						{chartPreviewError}
+						{#if chartRendererLoadError && !chartQuery.error}
+							<button
+								type="button"
+								class={css({ marginLeft: '2', textDecoration: 'underline', cursor: 'pointer' })}
+								onclick={() => {
+									chartRendererRetryAttempt += 1;
+								}}
+							>
+								Retry
+							</button>
+						{/if}
 					</div>
-				{:else if analysisStore.previews.paused || chartQuery.isFetching}
+				{:else if analysisStore.previews.paused || chartQuery.isFetching || (isApplied && chartConfigured && !ChartPreviewComponent)}
 					<div
+						role="status"
 						class={css({
 							display: 'flex',
 							alignItems: 'center',
@@ -674,8 +732,8 @@
 						<span class={spinner({ size: 'sm' })}></span>
 						Loading chart...
 					</div>
-				{:else if chartQuery.data}
-					<ChartPreview
+				{:else if chartQuery.data && ChartPreviewComponent}
+					<ChartPreviewComponent
 						data={chartQuery.data.data}
 						chartType={(step.config.chart_type as
 							| 'bar'

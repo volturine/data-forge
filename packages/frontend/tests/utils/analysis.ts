@@ -32,7 +32,7 @@ async function waitForAnalysisEditor(
 	// browser burst cannot make this locator strict-mode ambiguous.
 	const editor = page.locator('[role="application"][data-editor-access-state]');
 	const loadError = page.locator('[data-testid="analysis-load-error"]');
-	const kitError = page.getByText('Internal Error');
+	const kitError = page.getByText('Internal Error', { exact: true });
 	// Fail fast on product/error UI — no soft-reload (app must work first try).
 	const editorState = editor.or(loadError).or(kitError).filter({ visible: true }).first();
 	await expect(editorState).toBeVisible({ timeout: remaining() });

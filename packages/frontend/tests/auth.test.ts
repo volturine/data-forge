@@ -1,4 +1,4 @@
-import { test, expect } from '@playwright/test';
+import { test, expect, type Route } from '@playwright/test';
 import { uid } from './utils/uid.js';
 import { e2eBaseURL } from './utils/base-url.js';
 
@@ -64,11 +64,25 @@ test.describe('Auth – registration flow', () => {
 });
 
 test.describe('Auth – login flow', () => {
-	test('login with wrong password shows error message', async ({ browser }) => {
+	test('login stays interactive during bootstrap and rejects a wrong password', async ({
+		browser
+	}) => {
 		const context = await browser.newContext({ baseURL });
 		const page = await context.newPage();
+		const gate = Promise.withResolvers<void>();
+		const intercepted = new Set<string>();
+		const holdBootstrap = async (route: Route) => {
+			if (route.request().method() === 'GET') {
+				intercepted.add(new URL(route.request().url()).pathname);
+				await gate.promise;
+			}
+			await route.continue();
+		};
 		try {
-			await page.goto('/login');
+			await page.route('**/api/v1/config', holdBootstrap);
+			await page.route('**/api/v1/auth/me', holdBootstrap);
+			await page.goto('/login', { waitUntil: 'commit' });
+			await expect.poll(() => intercepted.size, { timeout: 5_000 }).toBe(2);
 			await expect(page.getByRole('heading', { name: 'Sign in' })).toBeVisible({ timeout: 5_000 });
 			await expect(page.locator('#email')).toBeVisible();
 			await expect(page.locator('#password')).toBeVisible();
@@ -83,7 +97,12 @@ test.describe('Auth – login flow', () => {
 				timeout: 5_000
 			});
 		} finally {
-			await context.close();
+			gate.resolve();
+			try {
+				await page.unrouteAll({ behavior: 'wait' });
+			} finally {
+				await context.close();
+			}
 		}
 	});
 });

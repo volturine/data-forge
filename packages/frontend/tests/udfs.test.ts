@@ -13,7 +13,7 @@ import {
 } from './utils/readiness.js';
 import { uid } from './utils/uid.js';
 import { createAnalysisViaUi } from './utils/user-flows.js';
-import { deleteAnalysisViaUI, deleteUdfViaUI } from './utils/ui-cleanup.js';
+import { cleanupUdfs, deleteAnalysisViaUI, deleteUdfViaUI } from './utils/ui-cleanup.js';
 import { screenshot } from './utils/visual.js';
 
 type UdfAnalysis = { id: string; name: string };
@@ -68,14 +68,18 @@ test.describe('UDF library in analysis', () => {
 		const udf = `e2e_library_${uid()}`;
 		const cloneName = `${udf} (copy)`;
 		const editorChunkPattern = '**/_app/immutable/chunks/*.js';
-		const scriptUrls: string[] = [];
+		const editorScriptUrls: string[] = [];
+		const activeChunkRoutes = new Set<Promise<void>>();
 		let abortedEditorEntries = 0;
 		const editorDownload = Promise.withResolvers<void>();
 		let editorChunkRouteInstalled = false;
-		const editorChunkRoute = async (route: Route) => {
-			scriptUrls.push(route.request().url());
-			const response = await route.fetch();
-			if (abortedEditorEntries < 2 && (await response.text()).includes('udf-save-button')) {
+		const handleEditorChunk = async (route: Route) => {
+			const response = await route.fetch({ timeout: 15_000 });
+			const body = await response.text();
+			const isUdfEditor = body.includes('udf-save-button');
+			const isCodeMirror = body.includes('cm-editor') && body.includes('cm-content');
+			if (isUdfEditor || isCodeMirror) editorScriptUrls.push(route.request().url());
+			if (abortedEditorEntries < 2 && isUdfEditor) {
 				if (abortedEditorEntries === 0) await editorDownload.promise;
 				abortedEditorEntries += 1;
 				await route.abort('failed');
@@ -83,19 +87,31 @@ test.describe('UDF library in analysis', () => {
 			}
 			await route.fulfill({ response });
 		};
+		const editorChunkRoute = (route: Route): Promise<void> => {
+			const handling = handleEditorChunk(route);
+			activeChunkRoutes.add(handling);
+			return handling.finally(() => activeChunkRoutes.delete(handling));
+		};
+		const settleEditorChunks = async (): Promise<void> => {
+			while (activeChunkRoutes.size > 0) {
+				await Promise.allSettled([...activeChunkRoutes]);
+			}
+		};
 		try {
 			await expect(page).toHaveURL(`/analysis/${udfAnalysis.id}`);
 
 			await test.step('lists seeded UDFs and filters created metadata by name', async () => {
 				await page.route(editorChunkPattern, editorChunkRoute);
 				editorChunkRouteInstalled = true;
-				const libraryRequestStart = scriptUrls.length;
+				const libraryRequestStart = editorScriptUrls.length;
 				await gotoUdfLibrary(page);
 				const library = dialogByHeading(page, 'UDF Library');
 				await expect(library.locator('[data-udf-card="Ratio"]')).toBeVisible();
 				await expect(library.locator('[data-udf-card="Coalesce"]')).toBeVisible();
 				await expect(library.locator('[data-udf-card="Normalize"]')).toBeVisible();
-				expect(scriptUrls.slice(libraryRequestStart)).toEqual([]);
+				// Opening the library may load step forms, but never the editor or CodeMirror.
+				await expect.poll(() => activeChunkRoutes.size).toBe(0);
+				expect(editorScriptUrls.slice(libraryRequestStart)).toEqual([]);
 
 				await library.getByRole('button', { name: 'New UDF', exact: true }).click();
 				await expect(
@@ -114,6 +130,7 @@ test.describe('UDF library in analysis', () => {
 				await expect(page.getByRole('alert')).toContainText('Could not load the UDF editor');
 				await expect(page.getByRole('button', { name: 'Retry', exact: true })).toBeVisible();
 				expect(abortedEditorEntries).toBe(2);
+				await settleEditorChunks();
 				await page.unroute(editorChunkPattern, editorChunkRoute);
 				editorChunkRouteInstalled = false;
 				await page.getByRole('button', { name: 'Retry', exact: true }).click();
@@ -161,10 +178,10 @@ test.describe('UDF library in analysis', () => {
 		} finally {
 			editorDownload.resolve();
 			try {
+				await settleEditorChunks();
 				if (editorChunkRouteInstalled) await page.unroute(editorChunkPattern, editorChunkRoute);
 			} finally {
-				await deleteUdfViaUI(page, cloneName);
-				await deleteUdfViaUI(page, udf);
+				await cleanupUdfs(page, [cloneName, udf]);
 			}
 		}
 	});
@@ -206,7 +223,7 @@ test.describe('UDF library in analysis', () => {
 			await importDialog.getByRole('button', { name: 'Cancel', exact: true }).click();
 			await expect(importDialog).toBeHidden();
 
-			await deleteUdfViaUI(page, udf, { strict: true });
+			await deleteUdfViaUI(page, udf);
 			const ownImport = JSON.stringify({ udfs: ownUdfs });
 			await library.getByRole('button', { name: 'Import', exact: true }).click();
 			const roundtripDialog = page.getByRole('dialog', { name: /Import UDFs/i });
@@ -217,7 +234,7 @@ test.describe('UDF library in analysis', () => {
 				timeout: readyTimeoutMs()
 			});
 		} finally {
-			await deleteUdfViaUI(page, udf);
+			await cleanupUdfs(page, [udf]);
 		}
 	});
 
@@ -293,8 +310,7 @@ test.describe('UDF library in analysis', () => {
 				await expect(page.locator('.cm-editor')).toContainText('return value');
 			});
 		} finally {
-			await deleteUdfViaUI(page, signatureUdf);
-			await deleteUdfViaUI(page, rejectedUdf);
+			await cleanupUdfs(page, [signatureUdf, rejectedUdf]);
 		}
 	});
 
@@ -382,9 +398,7 @@ test.describe('UDF library in analysis', () => {
 			await expect(page.locator('.cm-editor')).toContainText('return numerator / denominator');
 			await screenshot(page, 'udfs', 'analysis-editor-save-as-new');
 		} finally {
-			await deleteUdfViaUI(page, predefinedCopy);
-			await deleteUdfViaUI(page, copy);
-			await deleteUdfViaUI(page, udf);
+			await cleanupUdfs(page, [predefinedCopy, copy, udf]);
 		}
 	});
 
@@ -424,7 +438,7 @@ test.describe('UDF library in analysis', () => {
 			await gotoUdfLibrary(page);
 			await expect(page.locator(`[data-udf-card="${udf}"]`)).toBeVisible();
 		} finally {
-			await deleteUdfViaUI(page, udf);
+			await cleanupUdfs(page, [udf]);
 		}
 	});
 
@@ -434,10 +448,10 @@ test.describe('UDF library in analysis', () => {
 		const code = 'def udf(value):\n    return value * 9.0 / 5.0 + 32\n';
 		await page.locator('.cm-content').fill(code);
 		const editor = page.locator('.cm-editor');
-		await expect(editor.locator('.cm-code-keyword').first()).toHaveText('def');
-		await expect(editor.locator('.cm-code-number').first()).toHaveText('9.0');
 
 		async function expectThemeColors(): Promise<void> {
+			await expect(editor.locator('.cm-code-keyword').first()).toHaveText('def');
+			await expect(editor.locator('.cm-code-number').first()).toHaveText('9.0');
 			const colors = await editor.evaluate((element) => {
 				const content = element.querySelector('.cm-content');
 				const outerSurface = element.parentElement?.parentElement;

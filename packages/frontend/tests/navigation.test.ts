@@ -1,4 +1,4 @@
-import type { Page } from '@playwright/test';
+import type { Page, Route, Request } from '@playwright/test';
 import { test, expect } from './fixtures.js';
 import { createLongRunningAnalysis } from './utils/api.js';
 import { screenshot } from './utils/visual.js';
@@ -47,11 +47,150 @@ test.describe('Navigation – page load smoke tests', () => {
 		await screenshot(page, 'navigation', 'home-page');
 	});
 
-	test('datasources page renders Data Sources heading', async ({ page }) => {
-		await page.goto('/datasources');
-		await waitForLayoutReady(page);
-		await expect(page.getByRole('heading', { name: 'Data Sources' })).toBeVisible();
-		await screenshot(page, 'navigation', 'datasources-page');
+	test('datasources page becomes interactive without animation frames', async ({ page }) => {
+		const fontWeights = [400, 500, 600, 700] as const;
+		const fontSampleText = 'Az09ĀЖӐΩắ';
+		const expectedFontSubsetCount = 6;
+		const googleFontRequestPattern = /^https:\/\/fonts\.(?:googleapis|gstatic)\.com(?:\/|$)/;
+		const blockedGoogleFontRequests: string[] = [];
+		const fontRequestUrls: string[] = [];
+		const abortGoogleFontRequest = async (route: Route): Promise<void> => {
+			blockedGoogleFontRequests.push(route.request().url());
+			await route.abort();
+		};
+		const recordFontRequest = (request: Request): void => {
+			if (request.resourceType() === 'font') fontRequestUrls.push(request.url());
+		};
+		page.on('request', recordFontRequest);
+
+		try {
+			await page.route(googleFontRequestPattern, abortGoogleFontRequest);
+			await page.addInitScript(() => {
+				const nativeRequestAnimationFrame = window.requestAnimationFrame.bind(window);
+				const nativeCancelAnimationFrame = window.cancelAnimationFrame.bind(window);
+				const queuedCallbacks = new Map<
+					number,
+					{ callback: FrameRequestCallback; nativeId?: number }
+				>();
+				let nextHeldId = -1;
+				let held = true;
+				const restoreCancellationWhenDrained = () => {
+					if (!held && queuedCallbacks.size === 0)
+						window.cancelAnimationFrame = nativeCancelAnimationFrame;
+				};
+
+				window.requestAnimationFrame = (callback) => {
+					if (!held) return nativeRequestAnimationFrame(callback);
+					const id = nextHeldId--;
+					queuedCallbacks.set(id, { callback });
+					return id;
+				};
+				window.cancelAnimationFrame = (id) => {
+					const pending = queuedCallbacks.get(id);
+					if (pending) {
+						if (pending.nativeId !== undefined) nativeCancelAnimationFrame(pending.nativeId);
+						queuedCallbacks.delete(id);
+						restoreCancellationWhenDrained();
+					} else if (id >= 0) nativeCancelAnimationFrame(id);
+				};
+				window.addEventListener(
+					'e2e-resume-animation-frame',
+					() => {
+						held = false;
+						window.requestAnimationFrame = nativeRequestAnimationFrame;
+						for (const [id, pending] of queuedCallbacks) {
+							pending.nativeId = nativeRequestAnimationFrame((timestamp) => {
+								queuedCallbacks.delete(id);
+								restoreCancellationWhenDrained();
+								pending.callback(timestamp);
+							});
+						}
+						restoreCancellationWhenDrained();
+					},
+					{ once: true }
+				);
+			});
+
+			try {
+				await page.goto('/datasources');
+				await expect(page.locator('aside[aria-label="Main navigation"]')).toHaveAttribute(
+					'data-shell-interactive',
+					'true',
+					{ timeout: readyTimeoutMs() }
+				);
+				await expect(page.getByRole('button', { name: 'Select namespace' })).toBeEnabled({
+					timeout: readyTimeoutMs()
+				});
+			} finally {
+				await page.evaluate(() => window.dispatchEvent(new Event('e2e-resume-animation-frame')));
+			}
+
+			await waitForLayoutReady(page);
+			await expect(page.getByRole('heading', { name: 'Data Sources' })).toBeVisible();
+			await expect(
+				page.locator(
+					'link[href^="https://fonts.googleapis.com"], link[href^="https://fonts.gstatic.com"]'
+				)
+			).toHaveCount(0);
+
+			const loadedFontFaces = await page.evaluate(
+				async ({ weights, sampleText, timeoutMs }) => {
+					let timeoutHandle: number | undefined;
+					const fontLoad = Promise.all(
+						weights.map(async (weight) => {
+							const faces = await document.fonts.load(
+								`${weight} 16px "JetBrains Mono"`,
+								sampleText
+							);
+							return {
+								weight,
+								faces: faces.map((face) => ({
+									family: face.family,
+									weight: face.weight,
+									style: face.style,
+									status: face.status
+								}))
+							};
+						})
+					);
+					const timeout = new Promise<never>((_, reject) => {
+						timeoutHandle = window.setTimeout(
+							() => reject(new Error('Timed out loading JetBrains Mono font faces')),
+							timeoutMs
+						);
+					});
+					try {
+						return await Promise.race([fontLoad, timeout]);
+					} finally {
+						if (timeoutHandle !== undefined) window.clearTimeout(timeoutHandle);
+					}
+				},
+				{ weights: [...fontWeights], sampleText: fontSampleText, timeoutMs: readyTimeoutMs() }
+			);
+
+			expect(loadedFontFaces.map(({ weight }) => weight)).toEqual([...fontWeights]);
+			for (const { weight, faces } of loadedFontFaces) {
+				expect(faces).toHaveLength(expectedFontSubsetCount);
+				expect(
+					faces.every(
+						(face) =>
+							face.family.replace(/^['"]|['"]$/g, '') === 'JetBrains Mono' &&
+							face.weight === String(weight) &&
+							face.style === 'normal' &&
+							face.status === 'loaded'
+					)
+				).toBe(true);
+			}
+			expect(blockedGoogleFontRequests).toHaveLength(0);
+
+			const pageOrigin = new URL(page.url()).origin;
+			expect(fontRequestUrls.length).toBeGreaterThan(0);
+			expect(fontRequestUrls.every((url) => new URL(url).origin === pageOrigin)).toBe(true);
+			await screenshot(page, 'navigation', 'datasources-page');
+		} finally {
+			await page.unroute(googleFontRequestPattern, abortGoogleFontRequest);
+			page.off('request', recordFontRequest);
+		}
 	});
 
 	test('legacy datasource detail URLs redirect to the datasource list', async ({ page }) => {
