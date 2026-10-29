@@ -6,7 +6,7 @@ ARG JUST_VERSION=1.51.0
 FROM oven/bun:${BUN_VERSION} AS bun
 FROM node:26-slim AS node-runtime
 FROM ghcr.io/astral-sh/uv:${UV_VERSION} AS uv
-FROM docker:29.9.0-cli AS docker-cli
+FROM docker:29.9.2-cli AS docker-cli
 
 FROM python:${PYTHON_VERSION}-slim-trixie
 ARG JUST_VERSION
