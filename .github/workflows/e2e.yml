@@ -19,8 +19,12 @@ jobs:
     runs-on: [self-hosted, linux, x64]
     timeout-minutes: 35
     env:
+      TEST_CPUS: "6"
+      TEST_MEMORY_MB: "10240"
       E2E_SHARDS: "3"
       E2E_API_WORKERS: "4"
+      E2E_CONCURRENCY_BROWSERS: "50"
+      E2E_CONCURRENCY_REPEATS: "2"
       # Configure this dedicated key in both Actions and Dependabot secrets.
       E2E_OPENROUTER_API_KEY: ${{ secrets.E2E_OPENROUTER_API_KEY }}
       # Leave compute headroom for previews and cleanup during browser tests.

@@ -247,7 +247,7 @@ just dev            # Start API, runtime coordinator, scheduler, worker, and fro
 just format         # Format all code (ruff + prettier)
 just check          # Run ruff + mypy + svelte-check + eslint
 just test           # Run backend pytest + frontend Vitest
-just test-e2e       # Run Playwright end-to-end tests
+just test-e2e       # Run browser/runtime tests and two 50-tab stress repeats
 just verify         # Format + static checks only
 just prod           # Build frontend and start production server
 ```
