@@ -247,6 +247,13 @@ def stage_ensure_default_user(session: Session) -> User:
 ensure_default_user = committed(stage_ensure_default_user, refresh=True)
 
 
+def get_or_seed_default_user(session: Session) -> User:
+    user = get_user_by_id(session, _DEFAULT_USER_ID)
+    if user is not None:
+        return user
+    return ensure_default_user(session)
+
+
 def stage_create_user(
     session: Session,
     email: str,
