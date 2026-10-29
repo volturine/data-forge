@@ -1,6 +1,6 @@
 <script lang="ts">
 	import { onDestroy } from 'svelte';
-	import type { PipelineStep } from '#lib/types/analysis.js';
+	import type { AnalysisTabDatasourceConfig, PipelineStep } from '#lib/types/analysis.js';
 	import { drag, type DropTarget } from '#lib/stores/drag.svelte.js';
 	import InlineDataTable from '#lib/components/pipeline/InlineDataTable.svelte';
 	import { createQuery } from '@tanstack/svelte-query';
@@ -11,18 +11,16 @@
 		downloadStep,
 		type StepPreviewResponse
 	} from '#lib/api/compute.js';
-	import { applySteps, stepsThroughTarget } from '#lib/utils/pipeline.js';
+	import { stepsThroughTarget } from '#lib/utils/pipeline.js';
 	import { hashPipeline } from '#lib/utils/hash.js';
 	import { toComputeError } from '#lib/utils/compute-error.js';
 	import { GripVertical, Hash, RefreshCw, Copy, Trash2 } from '@lucide/svelte';
 	import { analysisStore } from '#lib/stores/analysis.svelte.js';
-	import { datasourceStore } from '#lib/stores/datasource.svelte.js';
 	import { isNamespaceReady, requireNamespace } from '#lib/stores/namespace.svelte.js';
 	import { getStepTypeConfig } from '#lib/components/pipeline/utils.js';
 	import { isChartStepType } from '#lib/types/pipeline-step.js';
 	import {
-		buildAnalysisPipelinePayload,
-		buildDatasourceConfig,
+		type AnalysisPipelinePayload,
 		buildTargetPreviewPipelinePayload
 	} from '#lib/utils/analysis-pipeline.js';
 	import {
@@ -38,7 +36,9 @@
 		step: PipelineStep;
 		analysisId?: string;
 		datasourceId?: string;
-		allSteps?: PipelineStep[];
+		analysisPipeline: AnalysisPipelinePayload | null;
+		appliedSteps: PipelineStep[];
+		baseDatasourceConfig: AnalysisTabDatasourceConfig | null;
 		onEdit: (id: string) => void;
 		onDelete: (id: string) => void;
 		onToggleApply: (id: string) => void;
@@ -50,7 +50,9 @@
 		step,
 		analysisId,
 		datasourceId,
-		allSteps = [],
+		analysisPipeline,
+		appliedSteps,
+		baseDatasourceConfig,
 		onEdit,
 		onDelete,
 		onToggleApply,
@@ -86,14 +88,6 @@
 	const isApplied = $derived(step.is_applied !== false);
 
 	// Chart preview query (only for chart/plot steps) — run after apply
-	const analysisPipeline = $derived.by(() => {
-		if (!analysisId) return null;
-		return buildAnalysisPipelinePayload(
-			analysisId,
-			analysisStore.tabs,
-			datasourceStore.datasources
-		);
-	});
 	const targetAnalysisPipeline = $derived.by(() => {
 		if (!analysisPipeline) return null;
 		return buildTargetPreviewPipelinePayload(
@@ -202,16 +196,11 @@
 	const rowCountLoads = new SvelteMap<string, boolean>();
 	const rowCountErrors = new SvelteMap<string, string>();
 
-	const rowCountPipeline = $derived(stepsThroughTarget(applySteps(allSteps), step.id));
+	const rowCountPipeline = $derived(stepsThroughTarget(appliedSteps, step.id));
 	const rowCountPipelineKey = $derived(hashPipeline(rowCountPipeline));
 	const targetPipelineKey = $derived(JSON.stringify(targetAnalysisPipeline ?? {}));
 	const rowCountDatasourceConfig = $derived.by(() => {
-		const config = buildDatasourceConfig({
-			analysisId: analysisId ?? null,
-			tab: analysisStore.activeTab ?? null,
-			tabs: analysisStore.tabs,
-			datasources: datasourceStore.datasources
-		});
+		const config = baseDatasourceConfig;
 		if (config) {
 			if (targetAnalysisPipeline && 'analysis_pipeline' in config) {
 				return { ...config, analysis_pipeline: targetAnalysisPipeline };
@@ -634,8 +623,9 @@
 					<InlineDataTable
 						{analysisId}
 						{datasourceId}
-						pipeline={allSteps}
+						{appliedSteps}
 						stepId={step.id}
+						{targetAnalysisPipeline}
 						rowLimit={previewRowLimit}
 					/>
 				{/key}

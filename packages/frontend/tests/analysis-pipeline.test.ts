@@ -3,7 +3,7 @@ import type { Page } from '@playwright/test';
 import { createImportedAnalysis, type E2ERequest } from './utils/api.js';
 import { gotoAnalysisEditor } from './utils/analysis.js';
 import { deleteAnalysisViaUI } from './utils/ui-cleanup.js';
-import { waitForInlinePreviewReady } from './utils/readiness.js';
+import { readyTimeoutMs, waitForInlinePreviewReady } from './utils/readiness.js';
 import { uid } from './utils/uid.js';
 import { screenshot } from './utils/visual.js';
 
@@ -662,6 +662,116 @@ test.describe('Pipeline data verification', () => {
 
 			await screenshot(page, 'analysis/pipeline', 'chained-filter-sort-limit');
 		} finally {
+			await leaveAnalysisPage(page);
+			await deleteAnalysisViaUI(page, aName, { skipNavigation: true });
+		}
+	});
+
+	test('applying an upstream filter invalidates target row counts and inline preview', async ({
+		page,
+		request
+	}) => {
+		const aName = `E2E Pipe Prefix Counts ${uid()}`;
+		const info = await createPipelineAnalysis(request, aName, dsId, [
+			{
+				type: 'filter',
+				config: {
+					conditions: [{ column: 'age', operator: '>', value: '20', value_type: 'number' }],
+					logic: 'AND'
+				}
+			},
+			{ type: 'limit', config: { n: 2 } }
+		]);
+		const previewTargetStepIds: string[] = [];
+		const rowCountTargetStepIds: string[] = [];
+		const onComputeRequest = (incoming: import('@playwright/test').Request) => {
+			if (incoming.method() !== 'POST') return;
+			const path = new URL(incoming.url()).pathname;
+			const isPreview = path.endsWith('/api/v1/compute/preview');
+			const isRowCount = path.endsWith('/api/v1/compute/row-count');
+			if (!isPreview && !isRowCount) return;
+			let body: {
+				analysis_id?: string;
+				analysis_pipeline?: { analysis_id?: string };
+				target_step_id?: string;
+			};
+			try {
+				body = incoming.postDataJSON() as typeof body;
+			} catch {
+				return;
+			}
+			const requestAnalysisId = body.analysis_id ?? body.analysis_pipeline?.analysis_id;
+			if (requestAnalysisId !== info.analysisId || !body.target_step_id) return;
+			if (isPreview) previewTargetStepIds.push(body.target_step_id);
+			if (isRowCount) rowCountTargetStepIds.push(body.target_step_id);
+		};
+		page.on('request', onComputeRequest);
+
+		try {
+			await navigateAndWaitForTable(page, info.analysisId);
+			const table = page.locator('[data-testid="inline-data-table"]');
+			const filterNode = page.locator('[data-step-type="filter"]');
+			const limitNode = page.locator('[data-step-type="limit"]');
+			const [filterStepId, limitStepId, viewStepId] = await Promise.all([
+				filterNode.getAttribute('data-step-id'),
+				limitNode.getAttribute('data-step-id'),
+				page.locator('[data-step-type="view"]').getAttribute('data-step-id')
+			]);
+			if (!filterStepId || !limitStepId || !viewStepId) {
+				throw new Error('Imported pipeline nodes have no step identity');
+			}
+			expect(new Set([filterStepId, limitStepId, viewStepId]).size).toBe(3);
+			await expect(table.locator('tbody tr')).toHaveCount(2);
+			await expect(table.getByText('Alice', { exact: true })).toBeVisible();
+			await expect(table.getByText('Bob', { exact: true })).toBeVisible();
+
+			const filterCountButton = filterNode.locator('[data-testid="step-row-count-button"]');
+			await expect(filterCountButton).toBeEnabled({ timeout: readyTimeoutMs() });
+			await filterCountButton.click();
+			await expect(filterNode.locator('[data-testid="step-row-count"]')).toContainText('3 rows', {
+				timeout: readyTimeoutMs()
+			});
+
+			const limitCountButton = limitNode.locator('[data-testid="step-row-count-button"]');
+			await expect(limitCountButton).toBeEnabled({ timeout: readyTimeoutMs() });
+			await limitCountButton.click();
+			await expect(limitNode.locator('[data-testid="step-row-count"]')).toContainText('2 rows', {
+				timeout: readyTimeoutMs()
+			});
+
+			await filterNode.locator('[data-action="edit"]').click();
+			const configPanel = page.locator('[data-step-config="filter"]');
+			await expect(configPanel).toBeVisible();
+			await configPanel.locator('[data-testid="filter-value-input-0"]').fill('30');
+			const applyButton = configPanel.getByRole('button', { name: 'Apply', exact: true });
+			await applyButton.click();
+			await expect(applyButton).toBeDisabled({ timeout: 5_000 });
+			await waitForInlinePreviewReady(page);
+
+			await expect(table.locator('tbody tr')).toHaveCount(1);
+			await expect(table.getByText('Charlie', { exact: true })).toBeVisible();
+			await expect(table.getByText('Alice', { exact: true })).not.toBeVisible();
+			await expect(table.getByText('Bob', { exact: true })).not.toBeVisible();
+			await expect(filterNode.locator('[data-testid="step-row-count"]')).toHaveCount(0);
+			await expect(limitNode.locator('[data-testid="step-row-count"]')).toHaveCount(0);
+
+			await expect(filterCountButton).toBeEnabled({ timeout: readyTimeoutMs() });
+			await filterCountButton.click();
+			await expect(filterNode.locator('[data-testid="step-row-count"]')).toContainText('1 rows', {
+				timeout: readyTimeoutMs()
+			});
+
+			await expect(limitCountButton).toBeEnabled({ timeout: readyTimeoutMs() });
+			await limitCountButton.click();
+			await expect(limitNode.locator('[data-testid="step-row-count"]')).toContainText('1 rows', {
+				timeout: readyTimeoutMs()
+			});
+
+			expect(previewTargetStepIds.length).toBeGreaterThanOrEqual(2);
+			expect(previewTargetStepIds.every((stepId) => stepId === viewStepId)).toBe(true);
+			expect(rowCountTargetStepIds).toEqual([filterStepId, limitStepId, filterStepId, limitStepId]);
+		} finally {
+			page.off('request', onComputeRequest);
 			await leaveAnalysisPage(page);
 			await deleteAnalysisViaUI(page, aName, { skipNavigation: true });
 		}

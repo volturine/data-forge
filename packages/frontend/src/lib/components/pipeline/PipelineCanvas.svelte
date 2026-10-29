@@ -13,6 +13,13 @@
 	import { ClipboardPaste, Plus, Eye, ArrowDown } from '@lucide/svelte';
 	import { stepTypes } from './utils';
 	import { isChartStepType } from '#lib/types/pipeline-step.js';
+	import { analysisStore } from '#lib/stores/analysis.svelte.js';
+	import { datasourceStore } from '#lib/stores/datasource.svelte.js';
+	import { applySteps } from '#lib/utils/pipeline.js';
+	import {
+		buildAnalysisPipelinePayload,
+		buildDatasourceConfig
+	} from '#lib/utils/analysis-pipeline.js';
 
 	export interface ClipboardStep {
 		type: string;
@@ -63,6 +70,24 @@
 		onResourceConfigChange,
 		readOnly = false
 	}: Props = $props();
+
+	const analysisPipeline = $derived.by(() => {
+		if (!analysisId) return null;
+		return buildAnalysisPipelinePayload(
+			analysisId,
+			analysisStore.tabs,
+			datasourceStore.datasources
+		);
+	});
+	const appliedSteps = $derived(applySteps(steps));
+	const baseDatasourceConfig = $derived.by(() =>
+		buildDatasourceConfig({
+			analysisId: analysisId ?? null,
+			tab: analysisStore.activeTab ?? null,
+			tabs: analysisStore.tabs,
+			datasources: datasourceStore.datasources
+		})
+	);
 
 	const canDrop = $derived(!readOnly && drag.active);
 	const hoverIndex = $derived(drag.target?.index ?? null);
@@ -529,7 +554,9 @@
 					{step}
 					{analysisId}
 					{datasourceId}
-					allSteps={steps}
+					{analysisPipeline}
+					{appliedSteps}
+					{baseDatasourceConfig}
 					onEdit={onStepClick}
 					onDelete={onStepDelete}
 					onToggleApply={onStepToggle}
