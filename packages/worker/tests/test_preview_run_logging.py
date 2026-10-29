@@ -255,3 +255,47 @@ def test_row_count_records_run_when_engine_acquire_fails(sample_datasource) -> N
     fields = internal_client.update_compute_worker_run.call_args.kwargs["fields"]
     assert fields["status"] == "failed"
     assert fields["error_message"] == "Timed out waiting for engine listener"
+
+
+def test_download_step_finalizes_validation_failure_without_query_plan(sample_datasource) -> None:
+    from runtime.exceptions import PipelineValidationError
+
+    class _ValidationFailureEngine(_PreviewEngine):
+        def preview(self, *_args, **_kwargs) -> str:
+            job_id = "download-job"
+            self.current_job_id = job_id
+            self._result = ComputeWorkerResult(
+                job_id=job_id,
+                data=None,
+                error="boom",
+                error_kind="value_error",
+            )
+            return job_id
+
+    analysis_id = f"download-failure-{uuid.uuid4()}"
+    pipeline = _pipeline(sample_datasource, analysis_id)
+    internal_client = _internal_client_mock()
+    internal_client.compute_worker_run_state.return_value = None
+    manager = ProcessManager(engine_factory=_ValidationFailureEngine)
+
+    try:
+        with (
+            patch("runtime.compute_service.client_from_env", return_value=internal_client),
+            pytest.raises(PipelineValidationError, match="boom"),
+        ):
+            compute_service.download_step(
+                manager=manager,
+                target_step_id="source",
+                analysis_pipeline=pipeline,
+                analysis_id=analysis_id,
+                tab_id="tab1",
+            )
+    finally:
+        manager.shutdown_all()
+
+    internal_client.create_compute_worker_run.assert_called_once()
+    internal_client.update_compute_worker_run.assert_called_once()
+    fields = internal_client.update_compute_worker_run.call_args.kwargs["fields"]
+    assert fields["status"] == "failed"
+    assert fields["error_message"] == "boom"
+    assert "query_plan" not in fields
