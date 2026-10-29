@@ -3,25 +3,16 @@ import type { Analysis, AnalysisTab, AnalysisUpdate, PipelineStep } from '#lib/t
 import type { SchemaInfo } from '#lib/types/datasource.js';
 import type { ComputeWorkerResourceConfig } from '#lib/types/compute.js';
 import { getAnalysisWithHeaders, updateAnalysis, type AnalysisDetail } from '#lib/api/analysis.js';
-import {
-	buildOutputConfig,
-	ensureTabDefaults,
-	generateOutputName,
-	validatePipelineTabs
-} from '#lib/utils/analysis-tab.js';
+import { ensureTabDefaults, validatePipelineTabs } from '#lib/utils/analysis-tab.js';
 import { normalizeConfig } from '#lib/utils/step-config-defaults.js';
 import { isChartStep, normalizeStepType } from '#lib/components/pipeline/utils.js';
 import { track } from '#lib/utils/audit-log.js';
-import { cloneJson, isRecord } from '#lib/utils/json.js';
+import { cloneJson } from '#lib/utils/json.js';
 import { uuid } from '#lib/utils/uuid.js';
 import { SvelteMap } from 'svelte/reactivity';
 import { ResultAsync, errAsync, ok } from 'neverthrow';
 import type { ApiError } from '#lib/api/client.js';
 import { PreviewState } from '#lib/editor/preview-state.svelte.js';
-
-function cloneConfig<T extends Record<string, unknown>>(config: T): T {
-	return cloneJson(config);
-}
 
 function slugifyOutputName(name: string): string {
 	const trimmed = name.trim();
@@ -47,14 +38,10 @@ export class AnalysisStore {
 	resourceConfig = $state<ComputeWorkerResourceConfig | null>(null);
 	loading = $state(false);
 	error = $state<string | null>(null);
-	loadId = $state(0);
+	private loadId = 0;
 	lastSaved = $state<{ name: string; description: string | null } | null>(null);
 	readonly previews = new PreviewState();
 	currentRevision = $state<string | null>(null);
-
-	async initialize(namespace: string): Promise<void> {
-		await this.previews.initialize(namespace);
-	}
 
 	activeTab: AnalysisTab | null = $derived(
 		this.tabs.find((tab) => tab.id === this.activeTabId) ?? this.tabs[0] ?? null
@@ -66,7 +53,7 @@ export class AnalysisStore {
 		if (!tab || !analysisId) return null;
 		const sourceTabId = tab.datasource.analysis_tab_id;
 		if (sourceTabId) {
-			return `output:${analysisId}:${String(sourceTabId)}`;
+			return `output:${analysisId}:${sourceTabId}`;
 		}
 		return tab.datasource.id;
 	});
@@ -75,14 +62,11 @@ export class AnalysisStore {
 
 	applyAnalysis(analysis: Analysis): void {
 		const previousId = this.current?.id ?? null;
-		this.current = analysis;
-		this.currentRevision = String(analysis.revision);
-		this.lastSaved = { name: analysis.name, description: analysis.description ?? null };
 		if (previousId !== analysis.id) {
 			this.activeTabId = null;
 			this.sourceSchemas.clear();
 		}
-		this.resolveTabs(analysis);
+		this.applyDetail(analysis, String(analysis.revision));
 	}
 
 	loadAnalysis(id: string): ResultAsync<void, ApiError> {
@@ -96,13 +80,7 @@ export class AnalysisStore {
 			.andThen((result) => {
 				if ('notModified' in result) return ok(undefined);
 				if (this.loadId !== token) return ok(undefined);
-				this.current = result.analysis;
-				this.currentRevision = result.version;
-				this.lastSaved = {
-					name: result.analysis.name,
-					description: result.analysis.description ?? null
-				};
-				this.resolveTabs(result.analysis);
+				this.applyDetail(result.analysis, result.version);
 				return ok(undefined);
 			})
 			.mapErr((error) => {
@@ -113,25 +91,29 @@ export class AnalysisStore {
 			});
 	}
 
+	private applyDetail(analysis: Analysis, revision: string): void {
+		this.current = analysis;
+		this.currentRevision = revision;
+		this.lastSaved = { name: analysis.name, description: analysis.description };
+		this.resolveTabs(analysis);
+	}
+
 	private resolveTabs(analysis: Analysis): void {
 		const tabs = (analysis.pipeline_definition as { tabs?: AnalysisTab[] })?.tabs;
 		if (tabs?.length) {
 			this.applyTabs(tabs);
 			return;
 		}
-		this.applyTabs(this.buildTabs([]));
+		this.applyTabs([]);
 	}
 
 	isDirty(): boolean {
 		if (!this.current) return false;
 		const saved = this.lastSaved ?? {
 			name: this.current.name,
-			description: this.current.description ?? null
+			description: this.current.description
 		};
-		if (
-			this.current.name !== saved.name ||
-			(this.current.description ?? null) !== saved.description
-		)
+		if (this.current.name !== saved.name || this.current.description !== saved.description)
 			return true;
 		return JSON.stringify(this.tabs) !== JSON.stringify(this.savedTabs);
 	}
@@ -157,7 +139,7 @@ export class AnalysisStore {
 		step.depends_on = parentId ? [parentId] : [];
 		const newSteps = [...steps, step].map((item) => ({
 			...item,
-			config: cloneConfig(item.config)
+			config: cloneJson(item.config)
 		}));
 		this.updateTabSteps(this.activeTab.id, newSteps);
 		this.logStep('add', step, { index: newSteps.length - 1 });
@@ -213,7 +195,7 @@ export class AnalysisStore {
 			const depends_on = Array.isArray(step.depends_on)
 				? step.depends_on
 				: index > 0
-					? [steps[index - 1]!.id]
+					? [steps[index - 1].id]
 					: [];
 			const is_applied = typeof step.is_applied === 'boolean' ? step.is_applied : true;
 			return {
@@ -234,16 +216,14 @@ export class AnalysisStore {
 	}
 
 	addTab(tab: AnalysisTab): void {
-		const newTab = { ...tab, steps: tab.steps ?? [] };
-		this.tabs = [...this.tabs, newTab];
-		this.activeTabId = newTab.id;
+		this.tabs = [...this.tabs, tab];
+		this.activeTabId = tab.id;
 	}
 
 	duplicateTab(tabId: string): AnalysisTab | null {
 		const sourceIndex = this.tabs.findIndex((tab) => tab.id === tabId);
 		if (sourceIndex < 0) return null;
 		const sourceTab = this.tabs[sourceIndex];
-		if (!sourceTab) return null;
 
 		const nextName = nextDuplicateTabName(this.tabs, sourceTab.name);
 		const nextTabId = `tab-${uuid()}`;
@@ -259,8 +239,6 @@ export class AnalysisStore {
 
 		const duplicatedSteps: PipelineStep[] = [];
 		for (const step of sourceTab.steps) {
-			const mappedStepId = stepIdMap[step.id];
-			if (!mappedStepId) return null;
 			const dependsOn: string[] = [];
 			for (const depId of step.depends_on ?? []) {
 				const mappedDepId = stepIdMap[depId];
@@ -269,7 +247,7 @@ export class AnalysisStore {
 			}
 			duplicatedSteps.push({
 				...step,
-				id: mappedStepId,
+				id: stepIdMap[step.id],
 				config: cloneJson(step.config),
 				depends_on: dependsOn
 			});
@@ -280,7 +258,7 @@ export class AnalysisStore {
 			result_id: nextOutputId,
 			filename: nextFilename
 		};
-		if (isRecord(sourceIceberg)) {
+		if (sourceIceberg) {
 			duplicatedOutput.iceberg = {
 				...sourceIceberg,
 				table_name: nextFilename
@@ -347,21 +325,10 @@ export class AnalysisStore {
 		}
 
 		nextPipeline.splice(index, 0, step);
-		const nextSteps = nextPipeline.map((item) => ({ ...item, config: cloneConfig(item.config) }));
+		const nextSteps = nextPipeline.map((item) => ({ ...item, config: cloneJson(item.config) }));
 		this.updateTabSteps(this.activeTab.id, nextSteps);
 		this.logStep('insert', step, { index });
 		return true;
-	}
-
-	addBranchStep(step: PipelineStep, parentId: string | null): void {
-		if (!this.activeTab) return;
-		step.depends_on = parentId ? [parentId] : [];
-		const newSteps = [...this.activeTab.steps, step].map((item) => ({
-			...item,
-			config: cloneConfig(item.config)
-		}));
-		this.updateTabSteps(this.activeTab.id, newSteps);
-		this.logStep('branch', step, { parent_id: parentId });
 	}
 
 	updateStep(id: string, updates: Partial<PipelineStep>): void {
@@ -371,7 +338,7 @@ export class AnalysisStore {
 				? {
 						...step,
 						...updates,
-						config: cloneConfig(updates.config ?? step.config)
+						config: cloneJson(updates.config ?? step.config)
 					}
 				: step
 		);
@@ -380,7 +347,7 @@ export class AnalysisStore {
 
 	updateStepConfig(id: string, config: Record<string, unknown>): void {
 		if (!this.activeTab) return;
-		const safeConfig = cloneConfig(config);
+		const safeConfig = cloneJson(config);
 		const nextPipeline = this.activeTab.steps.map((step) =>
 			step.id === id ? { ...step, config: safeConfig } : step
 		);
@@ -389,60 +356,6 @@ export class AnalysisStore {
 		if (!step) return;
 		const keys = Object.keys(safeConfig);
 		this.logStep('update', step, { keys, count: keys.length });
-		const analysisId = this.current?.id ?? null;
-		const datasourceId = this.activeTab.datasource.id;
-		if (!analysisId) return;
-		const configSnapshot = this.activeTab.datasource.config as Record<string, unknown>;
-		const snapshotId =
-			(configSnapshot.time_travel_snapshot_id as string | null | undefined) ?? null;
-		const snapshotMs =
-			(configSnapshot.time_travel_snapshot_timestamp_ms as number | null | undefined) ?? null;
-		const snapshotKey = `${snapshotId ?? 'latest'}:${snapshotMs ?? 0}`;
-		const edges: Record<string, string[]> = {};
-		for (const item of nextPipeline) {
-			for (const dep of item.depends_on ?? []) {
-				(edges[dep] ??= []).push(item.id);
-			}
-		}
-		const reachable: Record<string, true> = {};
-		const stack = [id];
-		while (stack.length) {
-			const current = stack.pop();
-			if (!current) continue;
-			if (reachable[current]) continue;
-			reachable[current] = true;
-			const next = edges[current] ?? [];
-			for (const child of next) {
-				if (!reachable[child]) stack.push(child);
-			}
-		}
-		for (const item of nextPipeline) {
-			if (item.type !== 'view') continue;
-			if (!reachable[item.id]) continue;
-			const rowLimit = typeof item.config?.rowLimit === 'number' ? item.config.rowLimit : 100;
-			const runKey = `${analysisId}:${datasourceId}:${snapshotKey}:${rowLimit}:${item.id}`;
-			this.previews.setRun(runKey, true);
-		}
-		// Invalidate previews in dependent tabs that use this tab as input
-		const activeTabId = this.activeTab.id;
-		for (const tab of this.tabs) {
-			if (tab.id === activeTabId) continue;
-			const sourceTabId = tab.datasource.analysis_tab_id;
-			if (String(sourceTabId ?? '') !== activeTabId) continue;
-			const depDatasourceId = tab.datasource.id;
-			const depConfig = tab.datasource.config as Record<string, unknown>;
-			const depSnapshotId =
-				(depConfig.time_travel_snapshot_id as string | null | undefined) ?? null;
-			const depSnapshotMs =
-				(depConfig.time_travel_snapshot_timestamp_ms as number | null | undefined) ?? null;
-			const depSnapshotKey = `${depSnapshotId ?? 'latest'}:${depSnapshotMs ?? 0}`;
-			for (const item of tab.steps) {
-				if (item.type !== 'view') continue;
-				const rowLimit = typeof item.config?.rowLimit === 'number' ? item.config.rowLimit : 100;
-				const runKey = `${analysisId}:${depDatasourceId}:${depSnapshotKey}:${rowLimit}:${item.id}`;
-				this.previews.setRun(runKey, true);
-			}
-		}
 	}
 
 	removeStep(id: string): void {
@@ -466,16 +379,6 @@ export class AnalysisStore {
 
 		this.updateTabSteps(this.activeTab.id, nextPipeline);
 		this.logStep('remove', removedStep, { parent_id: removedParentId });
-	}
-
-	reorderSteps(fromIndex: number, toIndex: number): void {
-		if (!this.activeTab) return;
-		const steps = [...this.activeTab.steps];
-		const [moved] = steps.splice(fromIndex, 1);
-		const movedCopy = { ...moved, config: cloneConfig(moved.config) };
-		steps.splice(toIndex, 0, movedCopy);
-		this.updateTabSteps(this.activeTab.id, steps);
-		this.logStep('reorder', movedCopy, { from: fromIndex, to: toIndex });
 	}
 
 	/**
@@ -562,7 +465,7 @@ export class AnalysisStore {
 			this.loading = false;
 			return errAsync({
 				type: 'parse' as const,
-				message: errors[0]?.message ?? 'Pipeline validation failed'
+				message: errors[0].message
 			});
 		}
 		const update: AnalysisUpdate = {
@@ -582,17 +485,7 @@ export class AnalysisStore {
 
 		return updateAnalysis(this.current.id, update, version)
 			.andThen(({ analysis: updated, etag, version: nextVersion }) => {
-				this.current = updated;
-				this.currentRevision = nextVersion;
-				this.lastSaved = { name: updated.name, description: updated.description ?? null };
-				const tabs = (updated.pipeline_definition as { tabs?: AnalysisTab[] })?.tabs ?? [];
-				const sanitized = this.normalizeTabSteps(tabs).map((tab, i) => ensureTabDefaults(tab, i));
-				this.tabs = sanitized;
-				this.savedTabs = cloneJson(sanitized);
-				if (!this.activeTabId || !tabs.some((tab) => tab.id === this.activeTabId)) {
-					this.activeTabId = this.tabs[0]?.id ?? null;
-				}
-				this.loading = false;
+				this.applyDetail(updated, nextVersion);
 				return ok({ analysis: updated, etag, version: nextVersion });
 			})
 			.mapErr((error) => {
@@ -611,13 +504,6 @@ export class AnalysisStore {
 		this.sourceSchemas.set(datasourceId, schema);
 	}
 
-	clearSourceSchemas(): void {
-		this.sourceSchemas.clear();
-
-		this.error = null;
-		this.loading = false;
-	}
-
 	setResourceConfig(config: ComputeWorkerResourceConfig | null): void {
 		this.resourceConfig = config;
 	}
@@ -634,28 +520,6 @@ export class AnalysisStore {
 		this.loading = false;
 		this.error = null;
 		this.previews.paused = false;
-	}
-
-	buildTabs(datasourceIds: string[]): AnalysisTab[] {
-		return datasourceIds.map((datasourceId, index) => {
-			const name = `Source ${index + 1}`;
-			return {
-				id: `tab-${datasourceId}`,
-				name,
-				parent_id: null,
-				datasource: {
-					id: datasourceId,
-					analysis_tab_id: null,
-					config: { branch: 'master' }
-				},
-				output: buildOutputConfig({
-					outputId: uuid(),
-					name: generateOutputName(),
-					branch: 'master'
-				}),
-				steps: []
-			};
-		});
 	}
 }
 

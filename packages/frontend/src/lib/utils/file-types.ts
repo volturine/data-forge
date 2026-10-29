@@ -48,17 +48,6 @@ export type FileType =
  */
 export type SourceType = 'database' | 'iceberg' | 'file' | 'analysis' | 'derived' | 'duckdb';
 
-export type SourceCategory = 'file' | 'database' | 'analysis' | 'derived' | 'duckdb';
-
-export const SOURCE_TYPE_CATEGORY: Record<SourceType, SourceCategory> = {
-	file: 'file',
-	iceberg: 'file',
-	database: 'database',
-	analysis: 'analysis',
-	derived: 'derived',
-	duckdb: 'duckdb'
-};
-
 /**
  * Complete configuration for a file type
  */
@@ -291,23 +280,4 @@ export function getFileTypeConfig(fileType: FileType): FileTypeConfig {
  */
 export function getSourceTypeConfig(sourceType: SourceType): FileTypeConfig {
 	return SOURCE_TYPE_REGISTRY[sourceType];
-}
-
-export function getSourceTypeCategory(sourceType: SourceType): SourceCategory {
-	return SOURCE_TYPE_CATEGORY[sourceType];
-}
-
-/**
- * Get all supported file types
- *
- * @returns Array of all file type identifiers
- *
- * @example
- * ```typescript
- * const types = getAllFileTypes();
- * // ['csv', 'parquet', 'json', 'ndjson', 'excel', ...]
- * ```
- */
-export function getAllFileTypes(): FileType[] {
-	return Object.keys(FILE_TYPE_REGISTRY) as FileType[];
 }

@@ -1,11 +1,12 @@
 <script lang="ts">
+	import { onDestroy } from 'svelte';
 	import { SvelteFlow, MiniMap, type Node, type Edge, type OnMove } from '@xyflow/svelte';
 	import type { LineageNode, LineageResponse } from '#lib/api/lineage.js';
 	import LineageNodeView from './LineageNode.svelte';
 	import LineageFlowController, { type LineageFlowApi } from './LineageFlowController.svelte';
 	import {
 		buildFlowGraph,
-		computeLineageLayout,
+		createLineageLayoutEngine,
 		type LineageFlowNode,
 		type LineageLayoutMode
 	} from './lineage-flow';
@@ -31,11 +32,19 @@
 	}: Props = $props();
 
 	const nodeTypes = { lineage: LineageNodeView };
+	const layoutEngine = createLineageLayoutEngine();
 
 	let flowNodes = $state.raw<LineageFlowNode[]>([]);
 	let flowEdges = $state.raw<Edge[]>([]);
 	let flowApi: LineageFlowApi | null = $state(null);
+	let layoutFailure = $state<string | null>(null);
 	let layoutSeq = 0;
+	let preserveFallbackStatusForGrid = false;
+
+	onDestroy(() => {
+		layoutSeq += 1;
+		layoutEngine.dispose();
+	});
 
 	function syncZoom() {
 		const zoom = flowApi?.getZoom();
@@ -55,18 +64,39 @@
 		const seq = ++layoutSeq;
 		const response = lineage;
 		const mode = layoutMode;
+		const preserveFallbackStatus = preserveFallbackStatusForGrid && mode === 'grid';
+		preserveFallbackStatusForGrid = false;
 		if (response.nodes.length === 0) {
+			layoutFailure = null;
 			flowNodes = [];
 			flowEdges = [];
 			return;
 		}
-		const positions = await computeLineageLayout(response, mode);
-		if (seq !== layoutSeq) return;
-		const graph = buildFlowGraph(response, positions, mode);
-		flowNodes = graph.nodes;
-		flowEdges = graph.edges;
-		flowApi?.fitView();
-		syncZoom();
+		if (!preserveFallbackStatus) layoutFailure = null;
+
+		try {
+			const positions = await layoutEngine.compute(response, mode);
+			if (seq !== layoutSeq) return;
+			const graph = buildFlowGraph(response, positions, mode);
+			flowNodes = graph.nodes;
+			flowEdges = graph.edges;
+			flowApi?.fitView();
+			syncZoom();
+		} catch (error) {
+			if (seq !== layoutSeq) return;
+			const positions = await layoutEngine.compute(response, 'grid');
+			if (seq !== layoutSeq) return;
+			const graph = buildFlowGraph(response, positions, 'grid');
+			flowNodes = graph.nodes;
+			flowEdges = graph.edges;
+			layoutFailure = error instanceof Error ? error.message : String(error);
+			if (mode !== 'grid') {
+				preserveFallbackStatusForGrid = true;
+				layoutMode = 'grid';
+			}
+			flowApi?.fitView();
+			syncZoom();
+		}
 	}
 
 	$effect(() => {
@@ -75,8 +105,8 @@
 		void runLayout();
 	});
 
-	export function resetLineageView() {
-		void flowApi?.fitView();
+	export async function resetLineageView() {
+		await flowApi?.fitView();
 		syncZoom();
 	}
 
@@ -147,6 +177,27 @@
 			})}
 		>
 			<p class={css({ fontSize: 'sm', color: 'fg.tertiary' })}>No lineage data available.</p>
+		</div>
+	{/if}
+	{#if layoutFailure}
+		<div
+			role="status"
+			aria-live="polite"
+			title={layoutFailure}
+			class={css({
+				position: 'absolute',
+				top: '3',
+				left: '3',
+				paddingX: '3',
+				paddingY: '2',
+				borderWidth: '1',
+				backgroundColor: 'bg.primary',
+				color: 'fg.warning',
+				fontSize: 'xs'
+			})}
+			data-testid="lineage-layout-fallback"
+		>
+			Layered layout failed; showing grid. Choose horizontal or vertical to retry.
 		</div>
 	{/if}
 </div>

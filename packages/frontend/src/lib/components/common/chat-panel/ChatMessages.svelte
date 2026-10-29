@@ -18,6 +18,7 @@
 	import { timelineDateSeparator, timelineEntriesAreGrouped } from '#lib/chat/presentation.js';
 	import { timeAgo } from '#lib/utils/markdown.js';
 	import { nowEpochMs } from '#lib/utils/temporal.js';
+	import { subscribeVisibleClock } from '#lib/utils/visible-clock.js';
 	import ChatMessageBubble from './ChatMessageBubble.svelte';
 	import ToolCallCard from './ToolCallCard.svelte';
 
@@ -124,38 +125,33 @@
 		'What tools are available?'
 	];
 
+	let timestampTick = $state(nowEpochMs());
+	onMount(() => subscribeVisibleClock(60_000, (tick) => (timestampTick = tick)));
+
 	let elapsedTick = $state(nowEpochMs());
-	onMount(() => {
-		const iv = setInterval(() => {
-			elapsedTick = nowEpochMs();
-		}, 1000);
-		return () => clearInterval(iv);
+	const hasRunningTools = $derived(chatStore.toolCalls.some((tool) => tool.status === 'running'));
+	// Elapsed tool labels need timer side effects only while a tool is running.
+	$effect(() => {
+		if (!hasRunningTools) return;
+		return subscribeVisibleClock(1000, (tick) => {
+			elapsedTick = tick;
+		});
 	});
 
-	function collapseAllTools() {
+	function setAllToolsExpanded(expanded: boolean) {
 		for (const tc of chatStore.toolCalls) {
-			tc.expanded = false;
-		}
-	}
-
-	function expandAllTools() {
-		for (const tc of chatStore.toolCalls) {
-			tc.expanded = true;
+			tc.expanded = expanded;
 		}
 	}
 
 	const hasToolCalls = $derived(chatStore.toolCalls.length > 0);
+	const anyToolExpanded = $derived(chatStore.toolCalls.some((tc) => tc.expanded));
 
 	const showQuickReplies = $derived.by(() => {
 		if (chatStore.loading) return false;
 		if (chatStore.mode !== 'plan') return false;
-		for (let i = chatStore.timeline.length - 1; i >= 0; i--) {
-			const entry = chatStore.timeline[i];
-			if (entry.kind === 'message') {
-				return entry.item.role === 'assistant';
-			}
-		}
-		return false;
+		const lastMessage = chatStore.timeline.findLast((entry) => entry.kind === 'message');
+		return lastMessage?.item.role === 'assistant';
 	});
 </script>
 
@@ -346,7 +342,7 @@
 											fontFamily: 'mono'
 										})}
 									>
-										{session.model} · {timeAgo(session.created_at)}
+										{session.model} · {timeAgo(session.created_at, timestampTick)}
 									</span>
 								</button>
 								<button
@@ -400,14 +396,10 @@
 					fontFamily: 'mono',
 					_hover: { color: 'fg.primary' }
 				})}
-				onclick={() => {
-					const anyExpanded = chatStore.toolCalls.some((tc) => tc.expanded);
-					if (anyExpanded) collapseAllTools();
-					else expandAllTools();
-				}}
+				onclick={() => setAllToolsExpanded(!anyToolExpanded)}
 				type="button"
 			>
-				{chatStore.toolCalls.some((tc) => tc.expanded) ? 'Collapse all tools' : 'Expand all tools'}
+				{anyToolExpanded ? 'Collapse all tools' : 'Expand all tools'}
 			</button>
 		</div>
 	{/if}
@@ -433,7 +425,7 @@
 			</div>
 		{/if}
 		{#if entry.kind === 'message'}
-			<ChatMessageBubble msg={entry.item} {grouped} />
+			<ChatMessageBubble msg={entry.item} {grouped} now={timestampTick} />
 		{:else}
 			<ToolCallCard tc={entry.item} tick={elapsedTick} />
 		{/if}

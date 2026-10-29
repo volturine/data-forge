@@ -96,18 +96,45 @@ two dev modes are mutually exclusive by design: run either one, not both.
 
 ## Production compose
 
-Use the base compose file directly with `docker/env/prod.env`:
+Use the checked self-host path. `docker-init` writes a git-ignored
+`env/prod.local.env` from `env/prod.env` with generated secrets; pass a
+hand-edited copy of the template instead if you prefer:
 
 ```bash
-docker compose --env-file docker/env/prod.env -p dataforge-prod -f docker/compose.yaml pull
-docker compose --env-file docker/env/prod.env -p dataforge-prod -f docker/compose.yaml up -d
+just docker-init
+just docker-check docker/env/prod.local.env dataforge-prod
+just docker-up docker/env/prod.local.env dataforge-prod
 ```
 
+`docker-check` resolves the Compose file and checks that role images, required
+secrets, the database URL, object-store keys, and the worker compute image are
+configured. It does not contact or change the Docker daemon, and its output
+names affected services and keys without printing resolved values. `docker-up`
+repeats the check, pulls the worker's resolved `COMPUTE_WORKER_IMAGE` first,
+then runs Compose `pull` and `up -d --wait --wait-timeout 180`. Use
+`--wait-timeout` with `scripts/deploy.py` to choose a different positive timeout.
+
 All five `DF_*_IMAGE` values must refer to the same Data-Forge release. The
-worker manager starts compute workers dynamically, so pull their image before startup:
+worker manager starts compute workers dynamically, so its image must be
+available before startup. If running Compose directly, the equivalent order is
+to render the configuration without displaying it, pull the worker environment's
+compute image, pull Compose images, then start and wait:
 
 ```bash
-docker pull "$(grep '^DF_COMPUTE_WORKER_IMAGE=' docker/env/prod.env | cut -d= -f2-)"
+set -euo pipefail
+compose=(docker compose --env-file docker/env/prod.env -p dataforge-prod -f docker/compose.yaml)
+compute_image="$("${compose[@]}" config --format json | python3 -c 'import json,sys; print(json.load(sys.stdin)["services"]["worker"]["environment"]["COMPUTE_WORKER_IMAGE"])')"
+docker pull "$compute_image"
+"${compose[@]}" pull
+"${compose[@]}" up -d --wait --wait-timeout 180
+```
+
+The raw Compose sequence does not perform the helper's placeholder and required
+value checks. To stop the deployment while preserving its volumes, use Compose
+`down` without `-v`:
+
+```bash
+docker compose --env-file docker/env/prod.env -p dataforge-prod -f docker/compose.yaml down
 ```
 
 Set `DF_DOCKER_SOCKET_PATH` and `DF_DOCKER_GID` for the host Docker socket. This

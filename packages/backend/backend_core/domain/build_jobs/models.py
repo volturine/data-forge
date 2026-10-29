@@ -19,10 +19,6 @@ class BuildJobStatus(ApiEnumValue):
         return self in {BuildJobStatus.LEASED, BuildJobStatus.RUNNING}
 
     @property
-    def is_reclaimable(self) -> bool:
-        return self.is_active
-
-    @property
     def is_terminal(self) -> bool:
         return self in {BuildJobStatus.COMPLETED, BuildJobStatus.FAILED, BuildJobStatus.CANCELLED}
 

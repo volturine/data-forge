@@ -2,7 +2,6 @@
 	import { untrack } from 'svelte';
 	import { X } from '@lucide/svelte';
 	import type { Udf, UdfCreate } from '#lib/types/udf.js';
-	import UdfEditor from '#lib/components/udfs/UdfEditor.svelte';
 	import UdfLibrary from '#lib/components/udfs/UdfLibrary.svelte';
 	import BaseModal from '#lib/components/ui/BaseModal.svelte';
 	import PanelHeader from '#lib/components/ui/PanelHeader.svelte';
@@ -27,6 +26,7 @@
 	let dirty = $state(false);
 	let saving = $state(false);
 	let discardIntent = $state<DiscardIntent>(null);
+	let editorAttempt = $state(0);
 
 	function requestClose() {
 		if (saving) return;
@@ -139,6 +139,11 @@
 />
 
 {#snippet content()}
+	{#snippet backToLibrary()}
+		<button class={button({ variant: 'secondary' })} onclick={requestBack} type="button">
+			Back to UDF library
+		</button>
+	{/snippet}
 	<PanelHeader>
 		{#snippet title()}
 			<h2 id="udf-modal-title" class={css({ margin: '0', fontSize: 'md' })} use:focusHeading={view}>
@@ -220,15 +225,40 @@
 		<UdfLibrary {onSelect} onEdit={handleEdit} onCreate={handleCreate} />
 	{:else}
 		{#key selectedUdf?.id ?? (selectedDraft ? 'draft' : 'new')}
-			<UdfEditor
-				initialUdf={selectedUdf}
-				initialDraft={selectedDraft}
-				onSave={handleSaved}
-				onBack={requestBack}
-				onApply={selectedDraft && onApply ? handleApply : undefined}
-				bind:dirty
-				bind:saving
-			/>
+			{#key editorAttempt}
+				{#await import('#lib/components/udfs/UdfEditor.svelte')}
+					<div class={css({ padding: '4', color: 'fg.muted', fontSize: 'sm' })}>
+						<p role="status" class={css({ margin: '0 0 3' })}>Loading UDF editor…</p>
+						{@render backToLibrary()}
+					</div>
+				{:then { default: UdfEditor }}
+					<UdfEditor
+						initialUdf={selectedUdf}
+						initialDraft={selectedDraft}
+						onSave={handleSaved}
+						onBack={requestBack}
+						onApply={selectedDraft && onApply ? handleApply : undefined}
+						bind:dirty
+						bind:saving
+					/>
+				{:catch}
+					<div class={css({ padding: '4' })}>
+						<p role="alert" class={css({ margin: '0 0 3', color: 'fg.secondary', fontSize: 'sm' })}>
+							Could not load the UDF editor. Check your connection and try again.
+						</p>
+						<div class={css({ display: 'flex', gap: '2' })}>
+							{@render backToLibrary()}
+							<button
+								class={button({ variant: 'secondary' })}
+								onclick={() => (editorAttempt += 1)}
+								type="button"
+							>
+								Retry
+							</button>
+						</div>
+					</div>
+				{/await}
+			{/key}
 		{/key}
 	{/if}
 {/snippet}

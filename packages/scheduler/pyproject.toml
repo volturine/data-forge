@@ -28,6 +28,20 @@
             "UP",
             "B",
             "SIM",
+            "C4",
+            "PIE",
+            "PERF",
+            "FURB",
+            "RET",
+            "LOG",
+            "PLW0108",
+            "PLR0402",
+            "PLR1711",
+            "PLR1714",
+            "RUF006",
+            "RUF012",
+            "RUF021",
+            "RUF036",
         ]
 
         ignore = [

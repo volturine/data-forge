@@ -1,6 +1,6 @@
 <script lang="ts">
 	import { browser } from '$app/env';
-	import { afterNavigate } from '$app/navigation';
+	import { page } from '$app/state';
 	import { resolve } from '$app/paths';
 	import { css, button, spinner } from '#lib/styles/panda.js';
 	import { verifyEmail, resendVerification } from '#lib/api/auth.js';
@@ -10,18 +10,9 @@
 	let resending = $state(false);
 	let resent = $state(false);
 
-	let token = $state<string | null>(null);
-
-	// /verify is prerendered, so reading page.url.searchParams during SSR is
-	// invalid. Read the browser URL after hydration and after every client
-	// navigation so a token link updates the UI without a reload workaround.
-	if (browser) {
-		const updateToken = () => {
-			token = new URL(window.location.href).searchParams.get('token');
-		};
-		updateToken();
-		afterNavigate(updateToken);
-	}
+	// /verify is prerendered, so query parameters only exist in the browser, where
+	// the page store stays reactive across client navigation.
+	const token = $derived(browser ? page.url.searchParams.get('token') : null);
 
 	$effect(() => {
 		const currentToken = token;

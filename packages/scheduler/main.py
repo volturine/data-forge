@@ -24,6 +24,12 @@ _TOKEN_METADATA_KEY = "x-internal-token"
 _HEARTBEAT_RPC_TIMEOUT_SECONDS = 5.0
 
 
+class SchedulerRpcError(RuntimeError):
+    def __init__(self, code: grpc.StatusCode, details: str) -> None:
+        super().__init__(f"Backend scheduler gRPC failed with {code.name}: {details}")
+        self.code = code
+
+
 @dataclass(frozen=True)
 class SchedulerSettings:
     internal_grpc_target: str
@@ -107,7 +113,7 @@ class SchedulerApiClient:
                 remaining = deadline - time.monotonic()
                 if code != grpc.StatusCode.UNAVAILABLE or remaining <= 0:
                     details = exc.details() or f"Backend scheduler gRPC call to {self._target} failed"
-                    raise RuntimeError(f"Backend scheduler gRPC failed with {code.name}: {details}") from exc
+                    raise SchedulerRpcError(code, details) from exc
                 await asyncio.sleep(min(1.0, remaining))
 
 
@@ -156,8 +162,6 @@ async def scheduler_loop(
                         _log_run_due_result(result)
             except RuntimeError as exc:
                 logger.info("Backend temporarily unavailable to scheduler; retrying: %s", exc)
-                await _sleep_until_tick_or_stop(stop_event, check_interval_seconds)
-                continue
             await _sleep_until_tick_or_stop(stop_event, check_interval_seconds)
     finally:
         health.stopped()
@@ -187,13 +191,8 @@ def _log_run_due_result(result: scheduler_runtime_pb2.SchedulerRunDueResponse) -
 
 
 async def _sleep_until_tick_or_stop(stop_event: asyncio.Event, seconds: float) -> None:
-    sleep_task = asyncio.create_task(asyncio.sleep(seconds))
-    stop_task = asyncio.create_task(stop_event.wait())
-    _, pending = await asyncio.wait({sleep_task, stop_task}, return_when=asyncio.FIRST_COMPLETED)
-    for task in pending:
-        task.cancel()
-    if pending:
-        await asyncio.gather(*pending, return_exceptions=True)
+    with contextlib.suppress(TimeoutError):
+        await asyncio.wait_for(stop_event.wait(), seconds)
 
 
 async def _heartbeat_loop(*, client: SchedulerClient, stop_event: asyncio.Event, worker_id: str, heartbeat_seconds: float, health: DispatcherHealth) -> None:
@@ -208,17 +207,13 @@ async def _heartbeat_loop(*, client: SchedulerClient, stop_event: asyncio.Event,
                 health.registered()
                 needs_registration = False
             await client.heartbeat(worker_id=worker_id, timeout_seconds=_HEARTBEAT_RPC_TIMEOUT_SECONDS)
-        except RuntimeError as exc:
+        except Exception as exc:
             needs_registration = True
             health.registration_changed(False)
-            if "DEADLINE_EXCEEDED" in str(exc) or "UNAVAILABLE" in str(exc):
+            if isinstance(exc, SchedulerRpcError) and exc.code in {grpc.StatusCode.DEADLINE_EXCEEDED, grpc.StatusCode.UNAVAILABLE}:
                 logger.warning("Scheduler heartbeat delayed; retrying on the next interval: %s", exc)
             else:
                 logger.exception("Scheduler heartbeat failed")
-        except Exception:
-            needs_registration = True
-            health.registration_changed(False)
-            logger.exception("Scheduler heartbeat failed")
 
 
 def install_stop_handlers(stop_event: asyncio.Event) -> None:

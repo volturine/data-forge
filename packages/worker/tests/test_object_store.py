@@ -142,7 +142,7 @@ def test_multipart_object_upload_streams_bounded_parts_and_commits(monkeypatch) 
             calls.append(("complete", kwargs))
 
     monkeypatch.setattr(object_store, "ensure_bucket_exists", lambda _bucket: None)
-    monkeypatch.setattr(object_store, "_client", lambda: Client())
+    monkeypatch.setattr(object_store, "_client", Client)
     monkeypatch.setattr(object_store, "_MULTIPART_PART_SIZE", 4)
 
     upload = object_store.MultipartObjectUpload("s3://analytics/uploads/data.csv", content_type="text/csv", max_bytes=6)
@@ -180,7 +180,7 @@ def test_multipart_object_upload_aborts_after_limit_exceeded(monkeypatch) -> Non
             calls.append("abort")
 
     monkeypatch.setattr(object_store, "ensure_bucket_exists", lambda _bucket: None)
-    monkeypatch.setattr(object_store, "_client", lambda: Client())
+    monkeypatch.setattr(object_store, "_client", Client)
     upload = object_store.MultipartObjectUpload("s3://analytics/uploads/data.csv", content_type=None, max_bytes=3)
 
     with pytest.raises(ValueError, match="exceeds 3 byte limit"):

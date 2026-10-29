@@ -1,9 +1,8 @@
 <script lang="ts">
 	import { onDestroy } from 'svelte';
-	import type { PipelineStep } from '#lib/types/analysis.js';
+	import type { AnalysisTabDatasourceConfig, PipelineStep } from '#lib/types/analysis.js';
 	import { drag, type DropTarget } from '#lib/stores/drag.svelte.js';
 	import InlineDataTable from '#lib/components/pipeline/InlineDataTable.svelte';
-	import ChartPreview from '#lib/components/pipeline/ChartPreview.svelte';
 	import { createQuery } from '@tanstack/svelte-query';
 	import {
 		previewStepData,
@@ -12,28 +11,34 @@
 		downloadStep,
 		type StepPreviewResponse
 	} from '#lib/api/compute.js';
-	import { applySteps, stepsThroughTarget } from '#lib/utils/pipeline.js';
+	import { stepsThroughTarget } from '#lib/utils/pipeline.js';
 	import { hashPipeline } from '#lib/utils/hash.js';
 	import { toComputeError } from '#lib/utils/compute-error.js';
 	import { GripVertical, Hash, RefreshCw, Copy, Trash2 } from '@lucide/svelte';
 	import { analysisStore } from '#lib/stores/analysis.svelte.js';
-	import { datasourceStore } from '#lib/stores/datasource.svelte.js';
 	import { isNamespaceReady, requireNamespace } from '#lib/stores/namespace.svelte.js';
-	import { getStepTypeConfig, isChartStep } from '#lib/components/pipeline/utils.js';
+	import { getStepTypeConfig } from '#lib/components/pipeline/utils.js';
+	import { isChartStepType } from '#lib/types/pipeline-step.js';
 	import {
-		buildAnalysisPipelinePayload,
-		buildDatasourceConfig,
+		type AnalysisPipelinePayload,
 		buildTargetPreviewPipelinePayload
 	} from '#lib/utils/analysis-pipeline.js';
+	import {
+		createPreviewRequestCancellation,
+		PREVIEW_QUERY_GC_TIME
+	} from '#lib/utils/preview-query.js';
 	import { SvelteMap } from 'svelte/reactivity';
 	import { css, spinner } from '#lib/styles/panda.js';
 
+	type ChartPreviewConstructor = typeof import('./ChartPreview.svelte').default;
+
 	interface Props {
 		step: PipelineStep;
-		index: number;
 		analysisId?: string;
 		datasourceId?: string;
-		allSteps?: PipelineStep[];
+		analysisPipeline: AnalysisPipelinePayload | null;
+		appliedSteps: PipelineStep[];
+		baseDatasourceConfig: AnalysisTabDatasourceConfig | null;
 		onEdit: (id: string) => void;
 		onDelete: (id: string) => void;
 		onToggleApply: (id: string) => void;
@@ -43,10 +48,11 @@
 
 	let {
 		step,
-		index: _index,
 		analysisId,
 		datasourceId,
-		allSteps = [],
+		analysisPipeline,
+		appliedSteps,
+		baseDatasourceConfig,
 		onEdit,
 		onDelete,
 		onToggleApply,
@@ -54,16 +60,18 @@
 		readOnly = false
 	}: Props = $props();
 
-	const isChart = $derived(isChartStep(step.type));
+	const isChart = $derived(isChartStepType(step.type));
 	const namespace = $derived(isNamespaceReady() ? requireNamespace() : null);
+	let ChartPreviewComponent: ChartPreviewConstructor | null = $state(null);
+	let chartRendererLoadError = $state(false);
+	let chartRendererRetryAttempt = $state(0);
+	const chartRendererLoadErrorMessage = 'Could not load chart renderer.';
 
 	const chartHeight = $derived(
 		isChart ? (step.config?.chart_height as string | undefined) : undefined
 	);
 
-	const nodeWidthClass = $derived.by(() => {
-		return css({ width: '60%' });
-	});
+	const nodeWidthClass = css({ width: '60%' });
 
 	const chartHeightPx = $derived.by(() => {
 		if (chartHeight === 'small') return 260;
@@ -80,14 +88,6 @@
 	const isApplied = $derived(step.is_applied !== false);
 
 	// Chart preview query (only for chart/plot steps) — run after apply
-	const analysisPipeline = $derived.by(() => {
-		if (!analysisId) return null;
-		return buildAnalysisPipelinePayload(
-			analysisId,
-			analysisStore.tabs,
-			datasourceStore.datasources
-		);
-	});
 	const targetAnalysisPipeline = $derived.by(() => {
 		if (!analysisPipeline) return null;
 		return buildTargetPreviewPipelinePayload(
@@ -97,6 +97,37 @@
 		);
 	});
 	const chartConfigured = $derived(((step.config?.x_column as string | undefined) ?? '') !== '');
+	const chartRendererEligible = $derived(
+		isChart && isApplied && chartConfigured && !!analysisId && !!datasourceId
+	);
+
+	$effect(() => {
+		// Keep renderer loading keyed to activation and explicit retries only.
+		void chartRendererRetryAttempt;
+
+		if (!chartRendererEligible) {
+			ChartPreviewComponent = null;
+			chartRendererLoadError = false;
+			return;
+		}
+
+		let active = true;
+		ChartPreviewComponent = null;
+		chartRendererLoadError = false;
+
+		void import('./ChartPreview.svelte')
+			.then(({ default: component }) => {
+				if (active) ChartPreviewComponent = component;
+			})
+			.catch(() => {
+				if (active) chartRendererLoadError = true;
+			});
+
+		return () => {
+			active = false;
+		};
+	});
+
 	const chartPreviewRequest = $derived.by(() => {
 		if (!targetAnalysisPipeline || !analysisId) return null;
 		return {
@@ -110,8 +141,7 @@
 		};
 	});
 	// The query can start synchronously, so its cancellation state must already exist.
-	let previewRequestKey: string | null = null;
-	let previewRequestController = new AbortController();
+	const previewRequestCancellation = createPreviewRequestCancellation();
 
 	const chartQuery = createQuery(() => ({
 		// The request captured in the cache key is also the request executed;
@@ -120,14 +150,14 @@
 		queryFn: async ({ queryKey }): Promise<StepPreviewResponse> => {
 			const request = queryKey[2];
 			if (!request) throw new Error('Chart preview command is not ready');
-			const signal = previewSignal(request);
+			const signal = previewRequestCancellation.signalFor(request);
 			const result = await previewStepData(request, { signal });
 			throwIfAborted(signal);
 			if (result.isErr()) throw toComputeError(result.error);
 			return result.value;
 		},
 		staleTime: Infinity,
-		gcTime: Infinity,
+		gcTime: PREVIEW_QUERY_GC_TIME,
 		refetchOnMount: false,
 		retry: false,
 		enabled:
@@ -141,15 +171,24 @@
 			chartConfigured
 	}));
 	const chartPreviewState = $derived.by(() => {
-		if (!isChart || !isApplied || !chartConfigured) return 'inactive';
+		if (!isChart) return 'inactive';
+		if (!isApplied || !chartConfigured) return 'inactive';
+		if (chartRendererLoadError) return 'error';
 		if (!targetAnalysisPipeline || !datasourceId || !analysisId) return 'waiting-for-payload';
 		if (chartQuery.error) return 'error';
-		if (analysisStore.previews.paused || chartQuery.isFetching) return 'loading';
+		if (analysisStore.previews.paused || chartQuery.isFetching || !ChartPreviewComponent)
+			return 'loading';
 		if (chartQuery.data) return 'ready';
 		return 'idle';
 	});
 	const chartPreviewError = $derived(
-		chartQuery.error instanceof Error ? chartQuery.error.message : ''
+		!isApplied || !chartConfigured
+			? ''
+			: chartQuery.error instanceof Error
+				? chartQuery.error.message
+				: chartRendererLoadError
+					? chartRendererLoadErrorMessage
+					: ''
 	);
 
 	const rowCounts = new SvelteMap<string, number>();
@@ -157,16 +196,11 @@
 	const rowCountLoads = new SvelteMap<string, boolean>();
 	const rowCountErrors = new SvelteMap<string, string>();
 
-	const rowCountPipeline = $derived(stepsThroughTarget(applySteps(allSteps), step.id));
+	const rowCountPipeline = $derived(stepsThroughTarget(appliedSteps, step.id));
 	const rowCountPipelineKey = $derived(hashPipeline(rowCountPipeline));
 	const targetPipelineKey = $derived(JSON.stringify(targetAnalysisPipeline ?? {}));
 	const rowCountDatasourceConfig = $derived.by(() => {
-		const config = buildDatasourceConfig({
-			analysisId: analysisId ?? null,
-			tab: analysisStore.activeTab ?? null,
-			tabs: analysisStore.tabs,
-			datasources: datasourceStore.datasources
-		});
+		const config = baseDatasourceConfig;
 		if (config) {
 			if (targetAnalysisPipeline && 'analysis_pipeline' in config) {
 				return { ...config, analysis_pipeline: targetAnalysisPipeline };
@@ -191,22 +225,8 @@
 	const previewRowLimit = $derived(
 		typeof step.config?.rowLimit === 'number' ? step.config.rowLimit : 100
 	);
-	const tableResetKey = $derived(
-		`${analysisId ?? ''}:${datasourceId ?? ''}:${step.id}:${previewRowLimit}:${rowCountPipelineKey}:${targetPipelineKey}:${JSON.stringify(rowCountDatasourceConfig)}`
-	);
+	const tableResetKey = $derived(`${rowCountKey}:${previewRowLimit}`);
 	let rowCountAbortController: AbortController | null = null;
-
-	function previewSignal(request: Parameters<typeof previewStepData>[0]): AbortSignal {
-		const nextKey = JSON.stringify(request);
-		if (previewRequestKey !== nextKey || previewRequestController.signal.aborted) {
-			if (previewRequestKey !== null && !previewRequestController.signal.aborted) {
-				previewRequestController.abort();
-			}
-			previewRequestKey = nextKey;
-			previewRequestController = new AbortController();
-		}
-		return previewRequestController.signal;
-	}
 
 	async function calculateRowCount() {
 		if (!analysisId || !targetAnalysisPipeline) return;
@@ -228,17 +248,12 @@
 				},
 				{ signal: controller.signal }
 			);
-			throwIfAborted(controller.signal);
+			if (controller.signal.aborted) return;
 			if (result.isOk()) {
 				rowCounts.set(requestKey, result.value.row_count);
 			} else {
 				rowCounts.delete(requestKey);
 				rowCountErrors.set(requestKey, result.error.message);
-			}
-		} catch (error) {
-			if (!controller.signal.aborted) {
-				rowCounts.delete(requestKey);
-				rowCountErrors.set(requestKey, error instanceof Error ? error.message : String(error));
 			}
 		} finally {
 			if (rowCountAbortController === controller) {
@@ -249,7 +264,7 @@
 	}
 
 	let copyFeedback = $state(false);
-	let copyTimer = $state<number | null>(null);
+	let copyTimer: number | null = null;
 
 	async function copyStepToClipboard() {
 		const payload = JSON.stringify({
@@ -267,22 +282,20 @@
 	}
 
 	onDestroy(() => {
-		previewRequestController.abort();
+		previewRequestCancellation.dispose();
 		rowCountAbortController?.abort();
 		if (copyTimer !== null) window.clearTimeout(copyTimer);
 	});
 
+	// Is this node being dragged?
 	let dragging = $state(false);
-	let clickConsumed = $state(false);
-	let longPressTimer = $state<number | null>(null);
-	let pointerStartX = $state<number | null>(null);
-	let pointerStartY = $state<number | null>(null);
+	let clickConsumed = false;
+	let longPressTimer: number | null = null;
+	let pointerStartX: number | null = null;
+	let pointerStartY: number | null = null;
 
 	const longPressDelay = 180;
 	const dragThreshold = 8;
-
-	// Is this node being dragged?
-	let isDragging = $state(false);
 
 	// Is another node being dragged (not this one)?
 	const isOtherDragging = $derived(drag.active && drag.stepId !== step.id);
@@ -294,7 +307,7 @@
 		clickConsumed = false;
 	}
 
-	async function handleDownload() {
+	function handleDownload() {
 		if (!analysisId || !analysisPipeline) return;
 
 		downloadStep({
@@ -332,7 +345,6 @@
 	function initiateDrag(event: PointerEvent) {
 		dragging = true;
 		clickConsumed = true;
-		isDragging = true;
 		if (event.cancelable) {
 			event.preventDefault();
 		}
@@ -375,7 +387,6 @@
 		const wasDragging = dragging;
 		dragging = false;
 		clickConsumed = wasDragging;
-		isDragging = false;
 		cancelLongPress();
 	}
 </script>
@@ -385,7 +396,7 @@
 	class={[
 		'step-node',
 		nodeWidthClass,
-		isDragging &&
+		dragging &&
 			css({
 				opacity: '0.4',
 				filter: 'grayscale(1)'
@@ -612,8 +623,9 @@
 					<InlineDataTable
 						{analysisId}
 						{datasourceId}
-						pipeline={allSteps}
+						{appliedSteps}
 						stepId={step.id}
+						{targetAnalysisPipeline}
 						rowLimit={previewRowLimit}
 					/>
 				{/key}
@@ -649,7 +661,7 @@
 				data-preview-has-data={chartQuery.data ? 'true' : 'false'}
 				data-preview-error={chartPreviewError || undefined}
 			>
-				{#if !isApplied}
+				{#if !isApplied || !chartConfigured}
 					<div
 						class={css({
 							display: 'flex',
@@ -669,8 +681,9 @@
 							<span>Apply to preview</span>
 						{/if}
 					</div>
-				{:else if chartQuery.error}
+				{:else if chartQuery.error || chartRendererLoadError}
 					<div
+						role={chartRendererLoadError ? 'alert' : undefined}
 						class={css({
 							borderTopWidth: '1',
 							borderTopColor: 'border.error',
@@ -680,10 +693,22 @@
 							color: 'fg.error'
 						})}
 					>
-						{chartQuery.error.message}
+						{chartPreviewError}
+						{#if chartRendererLoadError && !chartQuery.error}
+							<button
+								type="button"
+								class={css({ marginLeft: '2', textDecoration: 'underline', cursor: 'pointer' })}
+								onclick={() => {
+									chartRendererRetryAttempt += 1;
+								}}
+							>
+								Retry
+							</button>
+						{/if}
 					</div>
-				{:else if analysisStore.previews.paused || chartQuery.isFetching}
+				{:else if analysisStore.previews.paused || chartQuery.isFetching || (isApplied && chartConfigured && !ChartPreviewComponent)}
 					<div
+						role="status"
 						class={css({
 							display: 'flex',
 							alignItems: 'center',
@@ -697,8 +722,8 @@
 						<span class={spinner({ size: 'sm' })}></span>
 						Loading chart...
 					</div>
-				{:else if chartQuery.data}
-					<ChartPreview
+				{:else if chartQuery.data && ChartPreviewComponent}
+					<ChartPreviewComponent
 						data={chartQuery.data.data}
 						chartType={(step.config.chart_type as
 							| 'bar'

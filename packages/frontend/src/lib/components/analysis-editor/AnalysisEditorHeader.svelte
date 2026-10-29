@@ -16,6 +16,7 @@
 	} from '@lucide/svelte';
 	import { css } from '#lib/styles/panda.js';
 	import type { EditorAccessState } from '#lib/utils/analysis-lock-state.js';
+	import type { SaveButtonState } from '#lib/components/analysis-editor/analysis-editor-lock.svelte.js';
 	import type { AnalysisTab } from '#lib/types/analysis.js';
 
 	interface Props {
@@ -29,7 +30,7 @@
 		editorAccessState: EditorAccessState;
 		isDirty: boolean;
 		isSaving: boolean;
-		saveButtonState: string;
+		saveButtonState: SaveButtonState;
 		saveButtonLabel: string;
 		lockButtonLabel: string;
 		lockButtonDisabled: boolean;

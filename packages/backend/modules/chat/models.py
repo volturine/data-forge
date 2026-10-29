@@ -1,9 +1,19 @@
 import time
 from datetime import datetime
+from enum import StrEnum
 from typing import Any
 
 from sqlalchemy import JSON, BigInteger, Boolean, CheckConstraint, Column, DateTime, ForeignKey, Index, Integer, String, Text, text
 from sqlmodel import Field, SQLModel
+
+
+class ChatTurnStatus(StrEnum):
+    QUEUED = 'queued'
+    RUNNING = 'running'
+    AWAITING_CONFIRMATION = 'awaiting_confirmation'
+    COMPLETED = 'completed'
+    FAILED = 'failed'
+    INTERRUPTED = 'interrupted'
 
 
 class ChatSession(SQLModel, table=True):
@@ -39,7 +49,7 @@ class ChatTurn(SQLModel, table=True):
     tool_ids: list[str] = Field(sa_column=Column(JSON, nullable=False))
     namespace: str = Field(sa_column=Column(String, nullable=False))
     session_token_encrypted: str = Field(sa_column=Column(Text, nullable=False))
-    status: str = Field(default='queued', sa_column=Column(String, nullable=False, server_default='queued'))
+    status: str = Field(default=ChatTurnStatus.QUEUED, sa_column=Column(String, nullable=False, server_default='queued'))
     checkpoint: dict[str, Any] = Field(default_factory=dict, sa_column=Column(JSON, nullable=False, server_default='{}'))
     stop_requested: bool = Field(default=False, sa_column=Column(Boolean, nullable=False, server_default=text('false')))
     confirmation_decision: bool | None = Field(default=None, sa_column=Column(Boolean, nullable=True))

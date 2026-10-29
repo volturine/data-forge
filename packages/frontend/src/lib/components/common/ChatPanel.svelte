@@ -21,22 +21,43 @@
 	import { stopGeneration as stopChatGeneration } from '#lib/api/chat.js';
 	import { ChatPanelLayout } from '#lib/chat/panel-layout.svelte.js';
 	import ConfirmDialog from '#lib/components/common/ConfirmDialog.svelte';
-	import ChatMessages from './chat-panel/ChatMessages.svelte';
-	import ChatComposer from './chat-panel/ChatComposer.svelte';
-	import ChatConfigPanel from './chat-panel/ChatConfigPanel.svelte';
-	import ChatToolsPanel from './chat-panel/ChatToolsPanel.svelte';
-	import ChatSessionsPanel from './chat-panel/ChatSessionsPanel.svelte';
 
 	const queryClient = useQueryClient();
 
-	let configOpen = $state(false);
-	let toolsOpen = $state(false);
-	let sessionsOpen = $state(false);
+	// The panel body (markdown rendering, tool cards, config and session panels)
+	// loads on first open instead of shipping with every page's shell. A failed
+	// load is retried the next time the panel opens.
+	function importPanelComponents() {
+		return Promise.all([
+			import('./chat-panel/ChatMessages.svelte'),
+			import('./chat-panel/ChatComposer.svelte'),
+			import('./chat-panel/ChatConfigPanel.svelte'),
+			import('./chat-panel/ChatToolsPanel.svelte'),
+			import('./chat-panel/ChatSessionsPanel.svelte')
+		]).then(([messages, composer, config, tools, sessions]) => ({
+			ChatMessages: messages.default,
+			ChatComposer: composer.default,
+			ChatConfigPanel: config.default,
+			ChatToolsPanel: tools.default,
+			ChatSessionsPanel: sessions.default
+		}));
+	}
+	let panelComponents: ReturnType<typeof importPanelComponents> | null = null;
+	function loadPanelComponents() {
+		panelComponents ??= importPanelComponents().catch((error: unknown) => {
+			panelComponents = null;
+			throw error;
+		});
+		return panelComponents;
+	}
+
+	type OpenPanel = 'config' | 'tools' | 'sessions';
+	let openPanel = $state<OpenPanel | null>(null);
 	let inputValue = $state('');
 	let inputEl = $state<HTMLTextAreaElement | undefined>();
 	let messagesRef = $state<{ resetScroll(): void } | undefined>();
 	const layout = new ChatPanelLayout();
-	const anyPanelOpen = $derived(configOpen || toolsOpen || sessionsOpen);
+	const anyPanelOpen = $derived(openPanel !== null);
 	if (typeof window !== 'undefined') layout.restore();
 
 	function focusInput() {
@@ -82,26 +103,19 @@
 		focusInput();
 	}
 
-	function togglePanel(panel: 'config' | 'tools' | 'sessions') {
-		if (panel === 'config') {
-			configOpen = !configOpen;
-			toolsOpen = false;
-			sessionsOpen = false;
-			if (configOpen && chatStore.models.length === 0) {
-				void chatStore.loadModels();
-			}
-		} else if (panel === 'tools') {
-			toolsOpen = !toolsOpen;
-			configOpen = false;
-			sessionsOpen = false;
-		} else if (panel === 'sessions') {
-			sessionsOpen = !sessionsOpen;
-			configOpen = false;
-			toolsOpen = false;
-			if (sessionsOpen) {
-				void chatStore.loadSessions();
-			}
+	function togglePanel(panel: OpenPanel) {
+		openPanel = openPanel === panel ? null : panel;
+		if (openPanel === 'config' && chatStore.models.length === 0) {
+			void chatStore.loadModels();
 		}
+		if (openPanel === 'sessions') {
+			void chatStore.loadSessions();
+		}
+	}
+
+	// A save can finish after another panel was opened; only the config panel's own close applies.
+	function closeConfigPanel() {
+		if (openPanel === 'config') openPanel = null;
 	}
 
 	function onPatch(e: Event) {
@@ -128,10 +142,8 @@
 	// Overlay config for the panel — two-level escape: close sub-panels first, then close panel.
 	const chatOverlayConfig = $derived<OverlayConfig>({
 		onEscape: () => {
-			if (configOpen || toolsOpen || sessionsOpen) {
-				configOpen = false;
-				toolsOpen = false;
-				sessionsOpen = false;
+			if (openPanel !== null) {
+				openPanel = null;
 				return;
 			}
 			chatStore.close();
@@ -162,298 +174,319 @@
 />
 
 {#if chatStore.open}
-	<div
-		id="chat-panel"
-		class={css({
-			position: 'fixed',
-			bottom: '0',
-			right: '4',
-			display: 'flex',
-			flexDirection: 'column',
-			backgroundColor: 'bg.panel',
-			borderWidth: '1',
-			borderTopRadius: 'lg',
-			boxShadow: 'lg',
-			zIndex: 'overlay',
-			userSelect: layout.isResizing ? 'none' : 'auto',
-			overflow: 'hidden'
-		})}
-		style:width="{layout.panelWidth}px"
-		style:height="{layout.activeHeight}px"
-		use:overlayStack.action={chatOverlayConfig}
-		use:focusPanel
-	>
-		<!-- Corner resize handle (top-left) -->
+	{#await loadPanelComponents() then { ChatMessages, ChatComposer, ChatConfigPanel, ChatToolsPanel, ChatSessionsPanel }}
 		<div
-			role="separator"
-			tabindex="-1"
+			id="chat-panel"
 			class={css({
-				position: 'absolute',
-				top: '0',
-				left: '0',
-				width: '12px',
-				height: '12px',
-				cursor: 'nwse-resize',
-				zIndex: '1',
-				borderTopLeftRadius: 'lg',
-				touchAction: 'none'
-			})}
-			onpointerdown={(event) => layout.startCornerResize(event)}
-		></div>
-
-		<!-- Left edge resize handle -->
-		<div
-			role="separator"
-			aria-orientation="vertical"
-			tabindex="-1"
-			class={css({
-				position: 'absolute',
-				top: '12px',
-				left: '0',
+				position: 'fixed',
 				bottom: '0',
-				width: '6px',
-				cursor: 'ew-resize',
-				zIndex: '1',
-				touchAction: 'none',
-				_hover: { backgroundColor: 'border.primary' }
-			})}
-			onpointerdown={(event) => layout.startWidthResize(event)}
-		></div>
-
-		<!-- Top edge resize handle -->
-		<div
-			role="separator"
-			aria-orientation="horizontal"
-			tabindex="-1"
-			class={css({
-				position: 'relative',
-				height: '6px',
-				cursor: 'ns-resize',
-				flexShrink: '0',
+				right: '4',
+				display: 'flex',
+				flexDirection: 'column',
+				backgroundColor: 'bg.panel',
+				borderWidth: '1',
 				borderTopRadius: 'lg',
-				touchAction: 'none',
-				_before: {
-					content: '""',
-					position: 'absolute',
-					top: '-4px',
-					left: '12px',
-					right: '0',
-					bottom: '0'
-				},
-				_hover: { backgroundColor: 'border.primary' }
+				boxShadow: 'lg',
+				zIndex: 'overlay',
+				userSelect: layout.isResizing ? 'none' : 'auto',
+				overflow: 'hidden'
 			})}
-			onpointerdown={(event) => layout.startHeightResize(event)}
-		></div>
-
-		<!-- Header -->
-		<div
-			class={css({
-				borderBottomWidth: '1',
-				flexShrink: '0'
-			})}
+			style:width="{layout.panelWidth}px"
+			style:height="{layout.activeHeight}px"
+			use:overlayStack.action={chatOverlayConfig}
+			use:focusPanel
 		>
-			<!-- Top row: mode toggle + action buttons -->
+			<!-- Corner resize handle (top-left) -->
+			<div
+				role="separator"
+				tabindex="-1"
+				class={css({
+					position: 'absolute',
+					top: '0',
+					left: '0',
+					width: '12px',
+					height: '12px',
+					cursor: 'nwse-resize',
+					zIndex: '1',
+					borderTopLeftRadius: 'lg',
+					touchAction: 'none'
+				})}
+				onpointerdown={(event) => layout.startCornerResize(event)}
+			></div>
+
+			<!-- Left edge resize handle -->
+			<div
+				role="separator"
+				aria-orientation="vertical"
+				tabindex="-1"
+				class={css({
+					position: 'absolute',
+					top: '12px',
+					left: '0',
+					bottom: '0',
+					width: '6px',
+					cursor: 'ew-resize',
+					zIndex: '1',
+					touchAction: 'none',
+					_hover: { backgroundColor: 'border.primary' }
+				})}
+				onpointerdown={(event) => layout.startWidthResize(event)}
+			></div>
+
+			<!-- Top edge resize handle -->
+			<div
+				role="separator"
+				aria-orientation="horizontal"
+				tabindex="-1"
+				class={css({
+					position: 'relative',
+					height: '6px',
+					cursor: 'ns-resize',
+					flexShrink: '0',
+					borderTopRadius: 'lg',
+					touchAction: 'none',
+					_before: {
+						content: '""',
+						position: 'absolute',
+						top: '-4px',
+						left: '12px',
+						right: '0',
+						bottom: '0'
+					},
+					_hover: { backgroundColor: 'border.primary' }
+				})}
+				onpointerdown={(event) => layout.startHeightResize(event)}
+			></div>
+
+			<!-- Header -->
 			<div
 				class={css({
-					display: 'flex',
-					alignItems: 'center',
-					justifyContent: 'space-between',
-					paddingX: '3',
-					paddingY: '1.5'
+					borderBottomWidth: '1',
+					flexShrink: '0'
 				})}
 			>
-				<div class={css({ display: 'flex', alignItems: 'center', gap: '2' })}>
-					<!-- Mode toggle -->
-					<div
-						class={css({
-							display: 'flex',
-							borderRadius: 'md',
-							overflow: 'hidden',
-							borderWidth: '1',
-							flexShrink: '0'
-						})}
-					>
-						<button
+				<!-- Top row: mode toggle + action buttons -->
+				<div
+					class={css({
+						display: 'flex',
+						alignItems: 'center',
+						justifyContent: 'space-between',
+						paddingX: '3',
+						paddingY: '1.5'
+					})}
+				>
+					<div class={css({ display: 'flex', alignItems: 'center', gap: '2' })}>
+						<!-- Mode toggle -->
+						<div
 							class={css({
 								display: 'flex',
-								alignItems: 'center',
-								gap: '1',
-								paddingX: '2',
-								paddingY: '1',
-								fontSize: '11px',
-								fontWeight: 'medium',
-								border: 'none',
-								cursor: 'pointer',
-								backgroundColor: chatStore.mode === 'plan' ? 'bg.accent' : 'transparent',
-								color: chatStore.mode === 'plan' ? 'fg.primary' : 'fg.muted',
-								_hover: chatStore.mode === 'plan' ? {} : { backgroundColor: 'bg.tertiary' }
+								borderRadius: 'md',
+								overflow: 'hidden',
+								borderWidth: '1',
+								flexShrink: '0'
 							})}
-							onclick={() => chatStore.setMode('plan')}
-							type="button"
-							title="Plan mode: read-only, proposes plans"
 						>
-							<Eye size={10} />
-							Plan
+							<button
+								class={css({
+									display: 'flex',
+									alignItems: 'center',
+									gap: '1',
+									paddingX: '2',
+									paddingY: '1',
+									fontSize: '11px',
+									fontWeight: 'medium',
+									border: 'none',
+									cursor: 'pointer',
+									backgroundColor: chatStore.mode === 'plan' ? 'bg.accent' : 'transparent',
+									color: chatStore.mode === 'plan' ? 'fg.primary' : 'fg.muted',
+									_hover: chatStore.mode === 'plan' ? {} : { backgroundColor: 'bg.tertiary' }
+								})}
+								onclick={() => chatStore.setMode('plan')}
+								type="button"
+								title="Plan mode: read-only, proposes plans"
+							>
+								<Eye size={10} />
+								Plan
+							</button>
+							<button
+								class={css({
+									display: 'flex',
+									alignItems: 'center',
+									gap: '1',
+									paddingX: '2',
+									paddingY: '1',
+									fontSize: '11px',
+									fontWeight: 'medium',
+									border: 'none',
+									borderLeftWidth: '1',
+									cursor: 'pointer',
+									backgroundColor: chatStore.mode === 'execute' ? 'fg.primary' : 'transparent',
+									color: chatStore.mode === 'execute' ? 'bg.panel' : 'fg.muted',
+									_hover: chatStore.mode === 'execute' ? {} : { backgroundColor: 'bg.tertiary' }
+								})}
+								onclick={() => chatStore.setMode('execute')}
+								type="button"
+								title="Execute mode: full access, auto-executes"
+							>
+								<Play size={10} />
+								Execute
+							</button>
+						</div>
+						{#if chatStore.loading}
+							<LoaderCircle
+								size={10}
+								class={css({ animation: 'spin 1s linear infinite', flexShrink: '0' })}
+							/>
+						{/if}
+					</div>
+					<div class={css({ display: 'flex', gap: '0.5', flexShrink: '0' })}>
+						<button
+							class={[
+								css({
+									display: 'inline-flex',
+									alignItems: 'center',
+									justifyContent: 'center',
+									borderWidth: '1',
+									backgroundColor: 'bg.primary',
+									padding: '2',
+									color: 'fg.secondary',
+									transitionProperty: 'color, background-color, border-color, opacity',
+									transitionDuration: '160ms',
+									transitionTimingFunction: 'ease',
+									_hover: { backgroundColor: 'bg.hover', color: 'fg.primary' }
+								}),
+								openPanel === 'tools' && css({ color: 'fg.primary' })
+							]}
+							onclick={() => togglePanel('tools')}
+							title="Tools"
+							aria-label="Tools"
+						>
+							<Wrench size={13} />
 						</button>
 						<button
-							class={css({
-								display: 'flex',
-								alignItems: 'center',
-								gap: '1',
-								paddingX: '2',
-								paddingY: '1',
-								fontSize: '11px',
-								fontWeight: 'medium',
-								border: 'none',
-								borderLeftWidth: '1',
-								cursor: 'pointer',
-								backgroundColor: chatStore.mode === 'execute' ? 'fg.primary' : 'transparent',
-								color: chatStore.mode === 'execute' ? 'bg.panel' : 'fg.muted',
-								_hover: chatStore.mode === 'execute' ? {} : { backgroundColor: 'bg.tertiary' }
-							})}
-							onclick={() => chatStore.setMode('execute')}
-							type="button"
-							title="Execute mode: full access, auto-executes"
+							class={[
+								css({
+									display: 'inline-flex',
+									alignItems: 'center',
+									justifyContent: 'center',
+									borderWidth: '1',
+									backgroundColor: 'bg.primary',
+									padding: '2',
+									color: 'fg.secondary',
+									transitionProperty: 'color, background-color, border-color, opacity',
+									transitionDuration: '160ms',
+									transitionTimingFunction: 'ease',
+									_hover: { backgroundColor: 'bg.hover', color: 'fg.primary' }
+								}),
+								openPanel === 'sessions' && css({ color: 'fg.primary' })
+							]}
+							onclick={() => togglePanel('sessions')}
+							title="Sessions"
+							aria-label="Sessions"
 						>
-							<Play size={10} />
-							Execute
+							<History size={13} />
+						</button>
+						<button
+							class={[
+								css({
+									display: 'inline-flex',
+									alignItems: 'center',
+									justifyContent: 'center',
+									borderWidth: '1',
+									backgroundColor: 'bg.primary',
+									padding: '2',
+									color: 'fg.secondary',
+									transitionProperty: 'color, background-color, border-color, opacity',
+									transitionDuration: '160ms',
+									transitionTimingFunction: 'ease',
+									_hover: { backgroundColor: 'bg.hover', color: 'fg.primary' }
+								}),
+								openPanel === 'config' && css({ color: 'fg.primary' })
+							]}
+							onclick={() => togglePanel('config')}
+							disabled={chatStore.initState === 'loading'}
+							title="Configure"
+							aria-label="Configure"
+						>
+							<Settings2 size={13} />
+						</button>
+						<button
+							class={iconButton()}
+							onclick={() => (layout.maximized = !layout.maximized)}
+							title={layout.maximized ? 'Minimize' : 'Expand'}
+							aria-label={layout.maximized ? 'Minimize' : 'Expand'}
+						>
+							{#if layout.maximized}<Minimize2 size={13} />{:else}<Maximize2 size={13} />{/if}
+						</button>
+						<button
+							class={iconButton()}
+							onclick={() => void chatStore.newSession()}
+							disabled={chatStore.initState === 'loading'}
+							title="New session"
+							aria-label="New session"
+						>
+							<Plus size={13} />
+						</button>
+						<button
+							class={iconButton()}
+							onclick={() => chatStore.close()}
+							title="Close chat (Esc)"
+							aria-label="Close chat"
+						>
+							<X size={13} />
 						</button>
 					</div>
-					{#if chatStore.loading}
-						<LoaderCircle
-							size={10}
-							class={css({ animation: 'spin 1s linear infinite', flexShrink: '0' })}
-						/>
-					{/if}
-				</div>
-				<div class={css({ display: 'flex', gap: '0.5', flexShrink: '0' })}>
-					<button
-						class={[
-							css({
-								display: 'inline-flex',
-								alignItems: 'center',
-								justifyContent: 'center',
-								borderWidth: '1',
-								backgroundColor: 'bg.primary',
-								padding: '2',
-								color: 'fg.secondary',
-								transitionProperty: 'color, background-color, border-color, opacity',
-								transitionDuration: '160ms',
-								transitionTimingFunction: 'ease',
-								_hover: { backgroundColor: 'bg.hover', color: 'fg.primary' }
-							}),
-							toolsOpen && css({ color: 'fg.primary' })
-						]}
-						onclick={() => togglePanel('tools')}
-						title="Tools"
-						aria-label="Tools"
-					>
-						<Wrench size={13} />
-					</button>
-					<button
-						class={[
-							css({
-								display: 'inline-flex',
-								alignItems: 'center',
-								justifyContent: 'center',
-								borderWidth: '1',
-								backgroundColor: 'bg.primary',
-								padding: '2',
-								color: 'fg.secondary',
-								transitionProperty: 'color, background-color, border-color, opacity',
-								transitionDuration: '160ms',
-								transitionTimingFunction: 'ease',
-								_hover: { backgroundColor: 'bg.hover', color: 'fg.primary' }
-							}),
-							sessionsOpen && css({ color: 'fg.primary' })
-						]}
-						onclick={() => togglePanel('sessions')}
-						title="Sessions"
-						aria-label="Sessions"
-					>
-						<History size={13} />
-					</button>
-					<button
-						class={[
-							css({
-								display: 'inline-flex',
-								alignItems: 'center',
-								justifyContent: 'center',
-								borderWidth: '1',
-								backgroundColor: 'bg.primary',
-								padding: '2',
-								color: 'fg.secondary',
-								transitionProperty: 'color, background-color, border-color, opacity',
-								transitionDuration: '160ms',
-								transitionTimingFunction: 'ease',
-								_hover: { backgroundColor: 'bg.hover', color: 'fg.primary' }
-							}),
-							configOpen && css({ color: 'fg.primary' })
-						]}
-						onclick={() => togglePanel('config')}
-						disabled={chatStore.initState === 'loading'}
-						title="Configure"
-						aria-label="Configure"
-					>
-						<Settings2 size={13} />
-					</button>
-					<button
-						class={iconButton()}
-						onclick={() => (layout.maximized = !layout.maximized)}
-						title={layout.maximized ? 'Minimize' : 'Expand'}
-						aria-label={layout.maximized ? 'Minimize' : 'Expand'}
-					>
-						{#if layout.maximized}<Minimize2 size={13} />{:else}<Maximize2 size={13} />{/if}
-					</button>
-					<button
-						class={iconButton()}
-						onclick={() => void chatStore.newSession()}
-						disabled={chatStore.initState === 'loading'}
-						title="New session"
-						aria-label="New session"
-					>
-						<Plus size={13} />
-					</button>
-					<button
-						class={iconButton()}
-						onclick={() => chatStore.close()}
-						title="Close chat (Esc)"
-						aria-label="Close chat"
-					>
-						<X size={13} />
-					</button>
 				</div>
 			</div>
-		</div>
 
-		<!-- Config panel -->
-		{#if configOpen && chatStore.initState !== 'loading'}
-			<ChatConfigPanel maximized={layout.maximized} onClose={() => (configOpen = false)} />
-		{/if}
+			<!-- Config panel -->
+			{#if openPanel === 'config' && chatStore.initState !== 'loading'}
+				<ChatConfigPanel maximized={layout.maximized} onClose={closeConfigPanel} />
+			{/if}
 
-		{#if toolsOpen}
-			<ChatToolsPanel maximized={layout.maximized} />
-		{/if}
+			{#if openPanel === 'tools'}
+				<ChatToolsPanel maximized={layout.maximized} />
+			{/if}
 
-		{#if sessionsOpen}
-			<ChatSessionsPanel maximized={layout.maximized} />
-		{/if}
+			{#if openPanel === 'sessions'}
+				<ChatSessionsPanel maximized={layout.maximized} />
+			{/if}
 
-		{#if layout.maximized || !anyPanelOpen}
-			<ChatMessages
-				bind:this={messagesRef}
-				onSendPrompt={(text) => void handleSendPrompt(text)}
-				onFocusInput={focusInput}
+			{#if layout.maximized || !anyPanelOpen}
+				<ChatMessages
+					bind:this={messagesRef}
+					onSendPrompt={(text) => void handleSendPrompt(text)}
+					onFocusInput={focusInput}
+				/>
+			{/if}
+
+			<ChatComposer
+				bind:inputValue
+				bind:textareaEl={inputEl}
+				onSend={handleSend}
+				onStop={stopGeneration}
 			/>
-		{/if}
-
-		<ChatComposer
-			bind:inputValue
-			bind:textareaEl={inputEl}
-			onSend={handleSend}
-			onStop={stopGeneration}
-		/>
-	</div>
+		</div>
+	{:catch}
+		<div
+			role="alert"
+			class={css({
+				position: 'fixed',
+				bottom: '4',
+				right: '4',
+				paddingX: '3',
+				paddingY: '2',
+				backgroundColor: 'bg.panel',
+				borderWidth: '1',
+				borderRadius: 'md',
+				boxShadow: 'lg',
+				zIndex: 'overlay',
+				fontSize: 'sm'
+			})}
+		>
+			Chat could not be loaded. Close and reopen it to try again.
+		</div>
+	{/await}
 {/if}
 
 <style>

@@ -26,6 +26,7 @@
 	import { css, spinner } from '#lib/styles/panda.js';
 	import { useNamespace } from '#lib/stores/namespace.svelte.js';
 	import {
+		datasourceBranches,
 		datasourceIsAnalysisOutput,
 		datasourceNeedsExternalIngest
 	} from '#lib/types/datasource.js';
@@ -115,7 +116,7 @@
 			: datasources
 	);
 	const selectedDatasource = $derived.by(() => {
-		if (!activeSelectedId || !namespaceReady || ns.switching) return null;
+		if (!activeSelectedId) return null;
 		const listedDatasource = datasources.find((d) => d.id === activeSelectedId);
 		const detailedDatasource = selectedDatasourceQuery.data;
 		if (!detailedDatasource) return listedDatasource ?? null;
@@ -127,10 +128,9 @@
 			schema_cache: detailedDatasource.schema_cache ?? listedDatasource.schema_cache
 		};
 	});
-	const previewDatasource = $derived(selectedDatasource);
-	const effectiveConfig = $derived.by(() => snapshotConfig ?? previewDatasource?.config ?? null);
+	const effectiveConfig = $derived.by(() => snapshotConfig ?? selectedDatasource?.config ?? null);
 	const previewKey = $derived.by(() => {
-		const ds = previewDatasource;
+		const ds = selectedDatasource;
 		const config = effectiveConfig;
 		if (!ds || !config) return '';
 		// Metadata changes must not remount and cancel an unchanged preview command.
@@ -203,8 +203,7 @@
 	}
 
 	const branchOptions = $derived.by(() => {
-		const config = (selectedDatasource?.config ?? {}) as Record<string, unknown>;
-		const branches = (config.branches as string[] | undefined) ?? [];
+		const branches = selectedDatasource ? datasourceBranches(selectedDatasource) : [];
 		const cleaned = branches.map((branch) => branch.trim()).filter((branch) => branch.length > 0);
 		const next = cleaned.includes('master') ? cleaned : ['master', ...cleaned];
 		const active = activeBranch.trim();
@@ -340,7 +339,7 @@
 		<div class={css({ flex: '1', overflowY: 'auto' })}>
 			{#if ns.status === 'failed'}
 				<Callout tone="error">Namespace is unavailable: {ns.error ?? 'Unknown error'}</Callout>
-			{:else if !namespaceReady || query.isPending || query.isLoading || (query.isFetching && !query.data)}
+			{:else if !namespaceReady || query.isPending || (query.isFetching && !query.data)}
 				<div
 					class={css({
 						display: 'flex',
@@ -353,7 +352,7 @@
 				</div>
 			{:else if query.isError}
 				<Callout tone="error">
-					Error: {query.error instanceof Error ? query.error.message : 'Unknown error'}
+					Error: {query.error?.message ?? 'Unknown error'}
 				</Callout>
 			{:else if datasources.length === 0}
 				<div class={css({ padding: '8', textAlign: 'center' })}>
@@ -639,25 +638,14 @@
 					<div class={css({ flex: '1', minHeight: '0', overflow: 'auto' })}>
 						{#if showComparison}
 							<BuildComparisonPanel datasource={selectedDatasource} branch={activeBranch} />
-						{:else if previewDatasource}
+						{:else}
 							{#key previewKey}
 								<DatasourcePreview
-									datasourceId={previewDatasource.id}
-									datasource={previewDatasource}
-									datasourceConfig={effectiveConfig ?? previewDatasource.config}
+									datasourceId={selectedDatasource.id}
+									datasource={selectedDatasource}
+									datasourceConfig={effectiveConfig ?? selectedDatasource.config}
 								/>
 							{/key}
-						{:else}
-							<div
-								class={css({
-									display: 'flex',
-									alignItems: 'center',
-									justifyContent: 'center',
-									height: '100%'
-								})}
-							>
-								<div class={spinner()}></div>
-							</div>
 						{/if}
 					</div>
 				</div>

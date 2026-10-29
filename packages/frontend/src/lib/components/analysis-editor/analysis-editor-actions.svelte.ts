@@ -2,7 +2,6 @@ import { analysisStore } from '#lib/stores/analysis.svelte.js';
 import type { PipelineStep, AnalysisTab } from '#lib/types/analysis.js';
 import { getDefaultConfig } from '#lib/utils/step-config-defaults.js';
 import { buildOutputConfig, generateOutputName } from '#lib/utils/analysis-tab.js';
-import { isChartStep } from '#lib/components/pipeline/utils.js';
 import { nowEpochMs } from '#lib/utils/temporal.js';
 import { uuid } from '#lib/utils/uuid.js';
 import { cloneJson } from '#lib/utils/json.js';
@@ -28,20 +27,7 @@ export function createAnalysisEditorActions(deps: AnalysisEditorActionsDeps) {
 			config: getDefaultConfig(type) as Record<string, unknown>,
 			depends_on: []
 		};
-		const isChart = isChartStep(type);
-		if (type === 'view') {
-			return { ...base, is_applied: true } as PipelineStep;
-		}
-		if (isChart) {
-			return { ...base, is_applied: false } as PipelineStep;
-		}
-		return { ...base, is_applied: false } as PipelineStep;
-	}
-
-	function buildInitialSteps(): PipelineStep[] {
-		const step = buildStep('view');
-		step.depends_on = [];
-		return [step];
+		return { ...base, is_applied: type === 'view' };
 	}
 
 	function handleAddStep(type: string) {
@@ -103,9 +89,11 @@ export function createAnalysisEditorActions(deps: AnalysisEditorActionsDeps) {
 		deps.markUnsaved();
 	}
 
-	function handleAddTab(datasourceId: string, name: string) {
+	function handleAddTab(datasourceId: string, name: string, analysisTabId: string | null) {
 		if (deps.editorReadOnly()) return;
-		const tabId = `tab-${datasourceId}-${nowEpochMs()}`;
+		const tabId = analysisTabId
+			? `tab-analysis-${datasourceId}-${nowEpochMs()}`
+			: `tab-${datasourceId}-${nowEpochMs()}`;
 		const output = buildOutputConfig({
 			outputId: uuid(),
 			name: generateOutputName(),
@@ -117,69 +105,30 @@ export function createAnalysisEditorActions(deps: AnalysisEditorActionsDeps) {
 			parent_id: null,
 			datasource: {
 				id: datasourceId,
-				analysis_tab_id: null,
+				analysis_tab_id: analysisTabId,
 				config: { branch: 'master' }
 			},
 			output,
-			steps: buildInitialSteps()
+			steps: [buildStep('view')]
 		});
-		analysisStore.setActiveTab(tabId);
-		closeDatasourceModalOnly();
+		const analysisId = deps.analysisId();
+		if (analysisTabId && analysisId) {
+			analysisStore.sourceSchemas.delete(`output:${analysisId}:${analysisTabId}`);
+		}
+		closeDatasourceModal();
 		deps.markUnsaved();
 	}
 
-	function handleAddAnalysisTab(
-		datasourceId: string,
-		sourceAnalysisId: string,
-		name: string,
-		sourceTabId: string | null
-	) {
-		if (deps.editorReadOnly()) return;
-		if (
-			modalMode === 'change' &&
-			deps.analysisId() &&
-			sourceAnalysisId === deps.analysisId() &&
-			sourceTabId === analysisStore.activeTabId
-		) {
-			flashTabError('Select a different tab to avoid using the current tab as its own source.');
-			return;
-		}
-		const tabId = `tab-analysis-${datasourceId}-${nowEpochMs()}`;
-		const output = buildOutputConfig({
-			outputId: uuid(),
-			name: generateOutputName(),
-			branch: 'master'
-		});
-		analysisStore.addTab({
-			id: tabId,
-			name,
-			parent_id: null,
-			datasource: {
-				id: datasourceId,
-				analysis_tab_id: sourceTabId,
-				config: { branch: 'master' }
-			},
-			output,
-			steps: buildInitialSteps()
-		});
-		analysisStore.setActiveTab(tabId);
-		if (deps.analysisId() && sourceTabId) {
-			analysisStore.sourceSchemas.delete(`output:${deps.analysisId()}:${String(sourceTabId)}`);
-		}
-		closeDatasourceModalOnly();
-		deps.markUnsaved();
-	}
-
-	function handleChangeDatasource(datasourceId: string) {
+	function handleChangeDatasource(datasourceId: string, analysisTabId: string | null) {
 		if (deps.editorReadOnly()) return;
 		const active = deps.activeTab();
 		if (!active) return;
 		analysisStore.updateTab(active.id, {
-			datasource: { ...active.datasource, id: datasourceId, analysis_tab_id: null }
+			datasource: { ...active.datasource, id: datasourceId, analysis_tab_id: analysisTabId }
 		});
 		const schemaKey = deps.schemaKey();
 		if (schemaKey) analysisStore.sourceSchemas.delete(schemaKey);
-		closeDatasourceModalOnly();
+		closeDatasourceModal();
 		deps.markUnsaved();
 	}
 
@@ -190,40 +139,25 @@ export function createAnalysisEditorActions(deps: AnalysisEditorActionsDeps) {
 	) {
 		if (deps.editorReadOnly()) return;
 		if (source === 'analysis') {
-			const analysisId = deps.analysisId();
-			if (!analysisId) return;
-			const analysisTabId = datasourceId;
-			const sourceTab = analysisStore.tabs.find((item) => item.id === String(analysisTabId));
-			const outputId =
-				typeof sourceTab?.output.result_id === 'string' ? sourceTab.output.result_id : null;
+			if (!deps.analysisId()) return;
+			const sourceTab = analysisStore.tabs.find((item) => item.id === datasourceId);
+			const outputId = sourceTab?.output.result_id;
 			if (!outputId) {
 				flashTabError('Selected analysis tab is missing an output datasource.');
 				return;
 			}
 			if (modalMode === 'change') {
-				const active = deps.activeTab();
-				if (!active) return;
-				analysisStore.updateTab(active.id, {
-					datasource: {
-						...active.datasource,
-						id: outputId,
-						analysis_tab_id: analysisTabId
-					}
-				});
-				const schemaKey = deps.schemaKey();
-				if (schemaKey) analysisStore.sourceSchemas.delete(schemaKey);
-				closeDatasourceModalOnly();
-				deps.markUnsaved();
+				handleChangeDatasource(outputId, datasourceId);
 				return;
 			}
-			handleAddAnalysisTab(outputId as string, analysisId, name, analysisTabId);
+			handleAddTab(outputId, name, datasourceId);
 			return;
 		}
 		if (modalMode === 'change') {
-			handleChangeDatasource(datasourceId);
+			handleChangeDatasource(datasourceId, null);
 			return;
 		}
-		handleAddTab(datasourceId, name);
+		handleAddTab(datasourceId, name, null);
 	}
 
 	function handleRemoveTab(tabId: string) {
@@ -273,7 +207,7 @@ export function createAnalysisEditorActions(deps: AnalysisEditorActionsDeps) {
 
 	let showDatasourceModal = $state(false);
 
-	function closeDatasourceModalOnly() {
+	function closeDatasourceModal() {
 		showDatasourceModal = false;
 		tabError = '';
 	}
@@ -290,35 +224,23 @@ export function createAnalysisEditorActions(deps: AnalysisEditorActionsDeps) {
 		}, 5000);
 	}
 
-	function dismissTabError() {
-		tabError = '';
-	}
-
 	function clearTabErrorTimer() {
 		if (tabErrorTimer !== null) window.clearTimeout(tabErrorTimer);
 	}
 
 	return {
-		buildStep,
-		buildInitialSteps,
 		handleAddStep,
 		handleInsertStep,
 		handlePasteStep,
 		handleMoveStep,
 		handleDeleteStep,
 		handleToggleStep,
-		handleAddTab,
-		handleAddAnalysisTab,
-		handleChangeDatasource,
 		handleDatasourceSelect,
 		handleRemoveTab,
-		handleDuplicateTab,
 		handleDuplicateActiveTab,
 		handleRenameSourceTab,
 		openDatasourceModal,
-		closeDatasourceModal: closeDatasourceModalOnly,
-		flashTabError,
-		dismissTabError,
+		closeDatasourceModal,
 		clearTabErrorTimer,
 		get modalMode() {
 			return modalMode;
@@ -328,9 +250,6 @@ export function createAnalysisEditorActions(deps: AnalysisEditorActionsDeps) {
 		},
 		get showDatasourceModal() {
 			return showDatasourceModal;
-		},
-		set showDatasourceModal(value: boolean) {
-			showDatasourceModal = value;
 		},
 		get tabError() {
 			return tabError;

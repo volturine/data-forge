@@ -5,7 +5,7 @@ import uuid
 from datetime import UTC, datetime
 from typing import Any
 
-from sqlalchemy import inspect, select, text
+from sqlalchemy import func, inspect, select, text
 from sqlalchemy.orm import defer
 from sqlmodel import Session
 
@@ -29,6 +29,7 @@ from modules.datasource.schemas import (
     DataSourceResponse,
     DataSourceUpdate,
     InternalPostgresTable,
+    InternalPostgresToggleRequest,
 )
 
 logger = logging.getLogger(__name__)
@@ -173,23 +174,6 @@ class InternalPostgresOnboarding:
             raise ValueError(f'Internal Postgres table {schema_name}.{table_name} does not exist')
         return self.query_for(schema_name, table_name)
 
-    def is_onboarded(self, schema_name: str, table_name: str) -> bool:
-        self.table_query(schema_name, table_name)
-        return bool(self.matching_datasources(schema_name, table_name))
-
-    def set_onboarded(self, schema_name: str, table_name: str, *, enabled: bool) -> InternalPostgresTable:
-        self.table_query(schema_name, table_name)
-        matches = self.matching_datasources(schema_name, table_name)
-        if enabled:
-            return InternalPostgresTable(
-                schema_name=schema_name,
-                table_name=table_name,
-                is_onboarded=bool(matches),
-            )
-        for datasource in matches:
-            delete_datasource(self.session, datasource.id)
-        return InternalPostgresTable(schema_name=schema_name, table_name=table_name, is_onboarded=False)
-
 
 _SECRET_CONFIG_KEYS = ('connection_string', 'catalog_uri')
 
@@ -259,19 +243,12 @@ def _last_build_completed_at_map(session: Session, analysis_ids: set[str]) -> di
     if not analysis_ids:
         return {}
     rows = session.execute(
-        select(col(BuildRun.analysis_id), col(BuildRun.completed_at))
+        select(col(BuildRun.analysis_id), func.max(col(BuildRun.completed_at)))
         .where(col(BuildRun.analysis_id).in_(sorted(analysis_ids)))
         .where(col(BuildRun.status) == BuildRunStatus.COMPLETED)
+        .group_by(col(BuildRun.analysis_id))
     ).all()
-    latest: dict[str, datetime] = {}
-    for analysis_id, completed_at in rows:
-        if completed_at is None:
-            continue
-        completed_at = _aware_utc(completed_at)
-        previous = latest.get(analysis_id)
-        if previous is None or completed_at > previous:
-            latest[analysis_id] = completed_at
-    return latest
+    return {analysis_id: _aware_utc(completed_at) for analysis_id, completed_at in rows if completed_at is not None}
 
 
 def _apply_last_data_update[DatasourceResponseT: (DataSourceResponse, DataSourceListItem)](
@@ -309,26 +286,29 @@ def list_internal_postgres_tables(session: Session) -> list[InternalPostgresTabl
     return InternalPostgresOnboarding(session).list_tables()
 
 
-def internal_postgres_table_query(session: Session, schema_name: str, table_name: str) -> str:
-    return InternalPostgresOnboarding(session).table_query(schema_name, table_name)
-
-
-def internal_postgres_table_is_onboarded(
+def toggle_internal_postgres_table(
     session: Session,
-    schema_name: str,
-    table_name: str,
-) -> bool:
-    return InternalPostgresOnboarding(session).is_onboarded(schema_name, table_name)
-
-
-def set_internal_postgres_table_onboarded(
-    session: Session,
-    schema_name: str,
-    table_name: str,
-    *,
-    enabled: bool,
+    request: InternalPostgresToggleRequest,
+    owner_id: str | None,
 ) -> InternalPostgresTable:
-    return InternalPostgresOnboarding(session).set_onboarded(schema_name, table_name, enabled=enabled)
+    onboarding = InternalPostgresOnboarding(session)
+    query = onboarding.table_query(request.schema_name, request.table_name)
+    matches = onboarding.matching_datasources(request.schema_name, request.table_name)
+    if not request.enabled:
+        for datasource in matches:
+            delete_datasource(session, datasource.id)
+        return InternalPostgresTable(schema_name=request.schema_name, table_name=request.table_name, is_onboarded=False)
+    if not matches:
+        create_database_datasource_record(
+            session,
+            name=InternalPostgresOnboarding.datasource_name_for(request.schema_name, request.table_name),
+            description=InternalPostgresOnboarding.datasource_description_for(request.schema_name, request.table_name),
+            connection_string=InternalPostgresOnboarding.connection_string(),
+            query=query,
+            branch='master',
+            owner_id=owner_id,
+        )
+    return InternalPostgresTable(schema_name=request.schema_name, table_name=request.table_name, is_onboarded=True)
 
 
 def create_placeholder_output_datasource(
@@ -355,11 +335,11 @@ def create_placeholder_output_datasource(
             raise ValueError(
                 f"Output result_id '{result_id}' conflicts with an existing datasource not managed by analysis outputs",
             )
-        next_config = dict(existing.config) if isinstance(existing.config, dict) else {}
+        next_config = dict(existing.config)
         if config is not None:
             next_config = {**config, **next_config}
         next_config['analysis_tab_id'] = analysis_tab_id
-        next_source_type = DataSourceType.require(source_type).value
+        next_source_type = source_type.value
         changed = (
             next_config != existing.config
             or existing.source_type != next_source_type
@@ -378,7 +358,7 @@ def create_placeholder_output_datasource(
     datasource = DataSource(
         id=result_id,
         name=name or result_id,
-        source_type=DataSourceType.require(source_type).value,
+        source_type=source_type.value,
         config={**(config or {}), 'analysis_tab_id': analysis_tab_id},
         created_by_analysis_id=analysis_id,
         created_by=DataSourceCreatedBy.ANALYSIS.value,
@@ -498,7 +478,7 @@ def update_column_descriptions(
 
 def _datasource_response(session: Session, datasource: DataSource) -> DataSourceResponse:
     response = DataSourceResponse.model_validate(datasource)
-    response.output_of_tab_id = datasource.config.get('analysis_tab_id') if isinstance(datasource.config, dict) else None
+    response.output_of_tab_id = datasource.config.get('analysis_tab_id')
     analysis_id = datasource.created_by_analysis_id
     last_build_completed_at = _last_build_completed_at_map(session, {analysis_id}).get(analysis_id) if analysis_id else None
     return _apply_last_data_update(response, datasource, last_build_completed_at)
@@ -528,7 +508,7 @@ def list_datasources(session: Session, include_hidden: bool = False) -> list[Dat
         item = DataSourceListItem.model_validate(ds)
         item.config = _masked_config(item.config)
         item.row_count = _coerce_row_count(list_row_count)
-        item.output_of_tab_id = ds.config.get('analysis_tab_id') if isinstance(ds.config, dict) else None
+        item.output_of_tab_id = ds.config.get('analysis_tab_id')
         analysis_id = ds.created_by_analysis_id
         item = _apply_last_data_update(
             item,
@@ -555,11 +535,9 @@ def update_datasource(
         datasource.name = update.name
         changed = True
 
-    if 'description' in update.model_fields_set:
-        description = DataSourceDescriptionModel.normalize_description(update.description)
-        if description != datasource.description:
-            datasource.description = description
-            changed = True
+    if 'description' in update.model_fields_set and update.description != datasource.description:
+        datasource.description = update.description
+        changed = True
 
     if update.is_hidden is not None and update.is_hidden != datasource.is_hidden:
         datasource.is_hidden = update.is_hidden

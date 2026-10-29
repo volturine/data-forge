@@ -1,4 +1,5 @@
 import { afterEach, beforeEach, describe, expect, test, vi } from 'vitest';
+import { MockWebSocket } from '#lib/test-utils/mock-websocket.js';
 import { openLockSession } from './locks';
 
 vi.mock('#lib/stores/clientIdentity.svelte.js', () => ({
@@ -10,43 +11,6 @@ vi.mock('#lib/stores/namespace.svelte.js', () => ({
 	requireNamespace: () => 'default',
 	isNamespaceReady: () => true
 }));
-
-type Listener = (event?: { data?: string; code?: number; reason?: string }) => void;
-
-class MockWebSocket {
-	static OPEN = 1;
-	static instances: MockWebSocket[] = [];
-
-	url: string;
-	readyState = MockWebSocket.OPEN;
-	sent: string[] = [];
-	closeCalls = 0;
-	private listeners = new Map<string, Listener[]>();
-
-	constructor(url: string) {
-		this.url = url;
-		MockWebSocket.instances.push(this);
-	}
-
-	addEventListener(type: string, listener: Listener) {
-		this.listeners.set(type, [...(this.listeners.get(type) ?? []), listener]);
-	}
-
-	send(message: string) {
-		this.sent.push(message);
-	}
-
-	close() {
-		this.closeCalls += 1;
-		this.emit('close', { code: 1000, reason: '' });
-	}
-
-	emit(type: string, event?: { data?: string; code?: number; reason?: string }) {
-		for (const listener of this.listeners.get(type) ?? []) {
-			listener(event);
-		}
-	}
-}
 
 describe('openLockSession', () => {
 	beforeEach(() => {
@@ -229,7 +193,7 @@ describe('openLockSession', () => {
 		session.close();
 
 		expect(JSON.parse(socket.sent[2])).toEqual({ action: 'release', lock_token: 'tok-release' });
-		expect(socket.closeCalls).toBe(0);
+		expect(socket.closeCalls).toHaveLength(0);
 
 		socket.emit('message', {
 			data: JSON.stringify({
@@ -239,7 +203,7 @@ describe('openLockSession', () => {
 				lock: null
 			})
 		});
-		expect(socket.closeCalls).toBe(1);
+		expect(socket.closeCalls).toHaveLength(1);
 	});
 
 	test('reconnects and re-watches after a transient close', () => {

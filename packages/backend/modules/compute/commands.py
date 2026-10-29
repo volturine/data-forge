@@ -82,7 +82,7 @@ def start_build(session: Session, command: StartBuildCommand) -> None:
         current_output_id=command.current_output_id,
         current_output_name=command.current_output_name,
         total_tabs=command.total_tabs,
-        datasource_ids=datasource_ids,
+        datasource_ids=build_datasource_dependencies.build_datasource_ids(pipeline),
         created_at=command.started_at,
         started_at=command.started_at,
     )

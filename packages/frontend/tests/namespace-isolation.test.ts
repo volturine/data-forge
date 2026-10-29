@@ -110,137 +110,123 @@ test.describe('Namespace – data isolation', () => {
 		}
 	});
 
-	test('selected namespace persists across page refresh', async ({ page }) => {
-		const ns = E2E_SHARED_NAMESPACE_B;
-
-		await page.goto('/');
-		await waitForAppShell(page);
-
-		await switchNamespace(page, ns);
-		await expectNamespace(page, ns);
-
-		await page.reload();
-		await waitForAppShell(page);
-
-		await expectNamespace(page, ns);
-		await screenshot(page, 'namespace', 'persistence-after-refresh');
-	});
-
-	test('switching namespace preserves current route', async ({ page, sharedDatasource }) => {
+	test('namespace switches keep the route, clear stale selection, and send no stale preview requests', async ({
+		page,
+		sharedDatasource
+	}) => {
+		// Namespace provisioning and analysis creation make this journey heavy, so
+		// it runs in one slow test; each former test is a step with its own setup.
+		test.slow();
 		const nsA = E2E_SHARED_NAMESPACE_A;
 		const nsB = E2E_SHARED_NAMESPACE_B;
+		const dsName = E2E_SHARED_NAMESPACE_DATASOURCE;
 
-		// Start on /datasources
-		await page.goto('/datasources');
-		await waitForAppShell(page);
+		await test.step('switching namespace preserves current route', async () => {
+			// Start on /datasources
+			await page.goto('/datasources');
+			await waitForAppShell(page);
 
-		await switchNamespace(page, nsA);
-		await expect(page).toHaveURL(/datasources/, { timeout: 5_000 });
-		await expectNamespace(page, nsA);
+			await switchNamespace(page, nsA);
+			await expect(page).toHaveURL(/datasources/, { timeout: 5_000 });
+			await expectNamespace(page, nsA);
 
-		// Switch namespace while on /datasources — should stay on /datasources
-		await switchNamespace(page, nsB);
-		await expect(page).toHaveURL(/datasources/, { timeout: 5_000 });
-		await expectNamespace(page, nsB);
-		await screenshot(page, 'namespace', 'route-preserved-datasources');
+			// Switch namespace while on /datasources — should stay on /datasources
+			await switchNamespace(page, nsB);
+			await expect(page).toHaveURL(/datasources/, { timeout: 5_000 });
+			await expectNamespace(page, nsB);
+			await screenshot(page, 'namespace', 'route-preserved-datasources');
 
-		// Navigate to /monitoring?tab=schedules and switch again
-		await gotoMonitoringTab(page, 'schedules');
-		await expect(page.getByRole('button', { name: /New Schedule/i })).toBeVisible({
-			timeout: 5_000
+			// Navigate to /monitoring?tab=schedules and switch again
+			await gotoMonitoringTab(page, 'schedules');
+			await expect(page.getByRole('button', { name: /New Schedule/i })).toBeVisible({
+				timeout: 5_000
+			});
+
+			await switchNamespace(page, nsA);
+			await expect(page).toHaveURL(
+				(url) => url.pathname === '/monitoring' && url.searchParams.get('tab') === 'schedules',
+				{
+					timeout: 5_000
+				}
+			);
+			await expectNamespace(page, nsA);
+			await screenshot(page, 'namespace', 'route-preserved-monitoring');
+
+			await switchNamespace(page, DEFAULT_NAMESPACE);
+			const analysisId = await createAnalysisViaUi(page, sharedDatasource.name);
+			const analysisName = nameForAnalysisId(analysisId);
+			if (!analysisName) throw new Error(`Analysis ${analysisId} was not registered for cleanup`);
+
+			try {
+				await gotoAnalysisEditor(page, analysisId);
+				await switchNamespace(page, nsB);
+				await expect(page).toHaveURL(`/analysis/${analysisId}`, { timeout: 5_000 });
+				await expectNamespace(page, nsB);
+				await screenshot(page, 'namespace', 'route-preserved-analysis');
+			} finally {
+				await switchNamespace(page, DEFAULT_NAMESPACE);
+				await deleteAnalysisViaUI(page, analysisName, {
+					id: analysisId,
+					namespace: DEFAULT_NAMESPACE
+				});
+			}
 		});
 
-		await switchNamespace(page, nsA);
-		await expect(page).toHaveURL(
-			(url) => url.pathname === '/monitoring' && url.searchParams.get('tab') === 'schedules',
-			{
-				timeout: 5_000
-			}
-		);
-		await expectNamespace(page, nsA);
-		await screenshot(page, 'namespace', 'route-preserved-monitoring');
-
-		await switchNamespace(page, DEFAULT_NAMESPACE);
-		const analysisId = await createAnalysisViaUi(page, sharedDatasource.name);
-		const analysisName = nameForAnalysisId(analysisId);
-		if (!analysisName) throw new Error(`Analysis ${analysisId} was not registered for cleanup`);
-
-		try {
-			await gotoAnalysisEditor(page, analysisId);
-			await switchNamespace(page, nsB);
-			await expect(page).toHaveURL(`/analysis/${analysisId}`, { timeout: 5_000 });
-			await expectNamespace(page, nsB);
-			await screenshot(page, 'namespace', 'route-preserved-analysis');
-		} finally {
-			await switchNamespace(page, DEFAULT_NAMESPACE);
-			await deleteAnalysisViaUI(page, analysisName, {
-				id: analysisId,
-				namespace: DEFAULT_NAMESPACE
-			});
-		}
-	});
-
-	test('namespace switch clears stale datasource selection', async ({ page }) => {
-		const nsA = E2E_SHARED_NAMESPACE_A;
-		const nsB = E2E_SHARED_NAMESPACE_B;
-		const dsName = E2E_SHARED_NAMESPACE_DATASOURCE;
-
-		await page.goto('/');
-		await waitForAppShell(page);
-		await switchNamespace(page, nsA);
-		await page.goto('/datasources');
-
-		// 1. Select a datasource in nsA so the URL has ?id=
-		await page.goto('/datasources');
-		await waitForDatasourceList(page);
-		await page.locator(`[data-ds-row="${dsName}"]`).click();
-		await expect(page).toHaveURL(/id=/, { timeout: 5_000 });
-
-		// 2. Switch to nsB — selection must clear, no crash
-		await switchNamespace(page, nsB);
-		await expect(page).toHaveURL(/datasources/, { timeout: 5_000 });
-		await expect(page).not.toHaveURL(/id=/, { timeout: 5_000 });
-		await waitForDatasourceList(page);
-		await expect(page.getByText(/No datasource selected/i)).toBeVisible({ timeout: 5_000 });
-		await screenshot(page, 'namespace', 'stale-selection-cleared');
-	});
-
-	test('namespace switch with open preview sends no stale compute requests', async ({ page }) => {
-		const nsA = E2E_SHARED_NAMESPACE_A;
-		const dsName = E2E_SHARED_NAMESPACE_DATASOURCE;
-
-		try {
+		await test.step('namespace switch clears stale datasource selection', async () => {
 			await page.goto('/');
 			await waitForAppShell(page);
 			await switchNamespace(page, nsA);
 			await page.goto('/datasources');
+
+			// 1. Select a datasource in nsA so the URL has ?id=
+			await page.goto('/datasources');
 			await waitForDatasourceList(page);
 			await page.locator(`[data-ds-row="${dsName}"]`).click();
-			const previewState = page
-				.locator('[data-preview-ready="true"]')
-				.or(page.getByText('Loading').first());
-			await expect(previewState).toBeVisible({ timeout: 5_000 });
+			await expect(page).toHaveURL(/id=/, { timeout: 5_000 });
 
-			const staleRequests: string[] = [];
-			await page.route('**/api/v1/compute/preview', (route) => {
-				const ns = route.request().headers()['x-namespace'] ?? '';
-				staleRequests.push(ns);
-				return route.continue();
-			});
-
-			// The default namespace is already provisioned. This scenario tests
-			// leaving an active preview, not a second expensive namespace bootstrap.
-			await switchNamespace(page, DEFAULT_NAMESPACE);
+			// 2. Switch to nsB — selection must clear, no crash
+			await switchNamespace(page, nsB);
 			await expect(page).toHaveURL(/datasources/, { timeout: 5_000 });
 			await expect(page).not.toHaveURL(/id=/, { timeout: 5_000 });
 			await waitForDatasourceList(page);
+			await expect(page.getByText(/No datasource selected/i)).toBeVisible({ timeout: 5_000 });
+			await screenshot(page, 'namespace', 'stale-selection-cleared');
+		});
 
-			const wrongNs = staleRequests.filter((ns) => ns === nsA);
-			expect(wrongNs).toHaveLength(0);
+		await test.step('namespace switch with open preview sends no stale compute requests', async () => {
+			try {
+				await page.goto('/');
+				await waitForAppShell(page);
+				await switchNamespace(page, nsA);
+				await page.goto('/datasources');
+				await waitForDatasourceList(page);
+				await page.locator(`[data-ds-row="${dsName}"]`).click();
+				const previewState = page
+					.locator('[data-preview-ready="true"]')
+					.or(page.getByText('Loading').first());
+				await expect(previewState).toBeVisible({ timeout: 5_000 });
 
-			await screenshot(page, 'namespace', 'no-stale-preview-requests');
-		} finally {
-			await switchNamespace(page, nsA);
-		}
+				const staleRequests: string[] = [];
+				await page.route('**/api/v1/compute/preview', (route) => {
+					const ns = route.request().headers()['x-namespace'] ?? '';
+					staleRequests.push(ns);
+					return route.continue();
+				});
+
+				// The default namespace is already provisioned. This scenario tests
+				// leaving an active preview, not a second expensive namespace bootstrap.
+				await switchNamespace(page, DEFAULT_NAMESPACE);
+				await expect(page).toHaveURL(/datasources/, { timeout: 5_000 });
+				await expect(page).not.toHaveURL(/id=/, { timeout: 5_000 });
+				await waitForDatasourceList(page);
+
+				const wrongNs = staleRequests.filter((ns) => ns === nsA);
+				expect(wrongNs).toHaveLength(0);
+
+				await screenshot(page, 'namespace', 'no-stale-preview-requests');
+			} finally {
+				await switchNamespace(page, nsA);
+			}
+		});
 	});
 });

@@ -8,10 +8,10 @@
 
 	interface Props {
 		schema: Schema;
-		config?: RenameConfigData;
+		config: RenameConfigData;
 	}
 
-	let { schema, config = $bindable({ column_mapping: {} }) }: Props = $props();
+	let { schema, config = $bindable() }: Props = $props();
 
 	let formOldName = $state('');
 	let formNewName = $state('');

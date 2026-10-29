@@ -5,18 +5,14 @@
 
 	interface Props {
 		schema: Schema;
-		config?: { column?: string; k?: number; descending?: boolean };
+		config: { column?: string; k?: number; descending?: boolean };
 	}
 
-	let { schema, config = $bindable({ column: '', k: 10, descending: false }) }: Props = $props();
+	let { schema, config = $bindable() }: Props = $props();
 
 	function setK(value: string) {
 		const num = parseInt(value, 10);
 		config.k = isNaN(num) ? 10 : num;
-	}
-
-	function setDescending(checked: boolean) {
-		config.descending = checked;
 	}
 </script>
 
@@ -64,7 +60,7 @@
 				data-testid="topk-descending-checkbox"
 				type="checkbox"
 				checked={config.descending}
-				onchange={(e) => setDescending(e.currentTarget.checked)}
+				onchange={(e) => (config.descending = e.currentTarget.checked)}
 				aria-describedby="topk-descending-help"
 			/>
 			<span>Descending (largest first)</span>

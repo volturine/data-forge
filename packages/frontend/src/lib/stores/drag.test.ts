@@ -14,7 +14,7 @@ describe('DragState', () => {
 	});
 
 	describe('initial state', () => {
-		test('all fields are null/default', () => {
+		test('all fields are null/default and no flags are set', () => {
 			expect(state.type).toBeNull();
 			expect(state.stepId).toBeNull();
 			expect(state.source).toBeNull();
@@ -24,17 +24,8 @@ describe('DragState', () => {
 			expect(state.pointerX).toBeNull();
 			expect(state.pointerY).toBeNull();
 			expect(state.capturedElement).toBeNull();
-		});
-
-		test('active is false', () => {
 			expect(state.active).toBe(false);
-		});
-
-		test('isReorder is false', () => {
 			expect(state.isReorder).toBe(false);
-		});
-
-		test('isInsert is false', () => {
 			expect(state.isInsert).toBe(false);
 		});
 	});
@@ -50,18 +41,10 @@ describe('DragState', () => {
 			expect(state.pointerY).toBe(200);
 		});
 
-		test('clears stepId', () => {
-			state.start('filter', 'library', 1, 0, 0);
-			expect(state.stepId).toBeNull();
-		});
-
-		test('sets active to true', () => {
+		test('sets active, clears stepId, and sets isInsert for library source', () => {
 			state.start('filter', 'library', 1, 0, 0);
 			expect(state.active).toBe(true);
-		});
-
-		test('sets isInsert for library source', () => {
-			state.start('filter', 'library', 1, 0, 0);
+			expect(state.stepId).toBeNull();
 			expect(state.isInsert).toBe(true);
 			expect(state.isReorder).toBe(false);
 		});
@@ -95,13 +78,9 @@ describe('DragState', () => {
 			expect(state.pointerY).toBe(60);
 		});
 
-		test('sets active to true', () => {
+		test('sets active and isReorder for canvas move', () => {
 			state.startMove('step-1', 'filter', 1, 0, 0);
 			expect(state.active).toBe(true);
-		});
-
-		test('sets isReorder for canvas move', () => {
-			state.startMove('step-1', 'filter', 1, 0, 0);
 			expect(state.isReorder).toBe(true);
 			expect(state.isInsert).toBe(false);
 		});
@@ -169,6 +148,7 @@ describe('DragState', () => {
 			expect(state.pointerX).toBeNull();
 			expect(state.pointerY).toBeNull();
 			expect(state.active).toBe(false);
+			expect(state.isInsert).toBe(false);
 		});
 
 		test('resets after startMove', () => {
@@ -343,27 +323,6 @@ describe('DragState', () => {
 	});
 
 	describe('derived flags after state transitions', () => {
-		test('active becomes false after end', () => {
-			state.start('filter', 'library', 1, 0, 0);
-			expect(state.active).toBe(true);
-			state.end();
-			expect(state.active).toBe(false);
-		});
-
-		test('isInsert becomes false after end', () => {
-			state.start('filter', 'library', 1, 0, 0);
-			expect(state.isInsert).toBe(true);
-			state.end();
-			expect(state.isInsert).toBe(false);
-		});
-
-		test('isReorder becomes false after end', () => {
-			state.startMove('step-1', 'filter', 1, 0, 0);
-			expect(state.isReorder).toBe(true);
-			state.end();
-			expect(state.isReorder).toBe(false);
-		});
-
 		test('start after end works normally', () => {
 			state.start('filter', 'library', 1, 0, 0);
 			state.end();

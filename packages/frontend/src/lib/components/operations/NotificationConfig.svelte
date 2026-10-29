@@ -12,27 +12,13 @@
 	import { css, input, label, stepConfig } from '#lib/styles/panda.js';
 
 	interface Props {
-		config?: NotificationConfigData;
+		config: NotificationConfigData;
 		schema: Schema;
 		configFlags?: { smtpEnabled: boolean; telegramEnabled: boolean };
 	}
 
-	const defaultConfig: NotificationConfigData = {
-		method: 'email',
-		recipient: '',
-		subscriber_ids: [],
-		bot_token: '',
-		recipient_source: 'manual',
-		recipient_column: '',
-		input_columns: [],
-		output_column: 'notification_status',
-		message_template: '{{message}}',
-		subject_template: 'Notification',
-		batch_size: 10
-	};
-
 	let {
-		config = $bindable(defaultConfig),
+		config = $bindable(),
 		schema,
 		configFlags = { smtpEnabled: true, telegramEnabled: true }
 	}: Props = $props();
@@ -76,10 +62,6 @@
 		);
 	});
 
-	function handleColumnsChange(columns: string[]) {
-		config.input_columns = columns;
-	}
-
 	function handleMethodChange(next: 'email' | 'telegram') {
 		const prev = config.method;
 		config.method = next;
@@ -95,10 +77,6 @@
 		if (config.recipient_source !== 'column') {
 			config.recipient_source = 'manual';
 		}
-	}
-
-	function handleRecipientColumnChange(column: string) {
-		config.recipient_column = column;
 	}
 
 	function handleRecipientSourceChange(source: 'manual' | 'column') {
@@ -204,7 +182,7 @@
 					<ColumnDropdown
 						{schema}
 						value={recipientColumn}
-						onChange={handleRecipientColumnChange}
+						onChange={(column) => (config.recipient_column = column)}
 						placeholder="Select recipient column..."
 						filter={(col) =>
 							col.dtype.toLowerCase().includes('string') ||
@@ -355,7 +333,7 @@
 		<MultiSelectColumnDropdown
 			{schema}
 			value={inputColumns}
-			onChange={handleColumnsChange}
+			onChange={(columns) => (config.input_columns = columns)}
 			placeholder="Select column(s)..."
 			showSelectAll={false}
 		/>

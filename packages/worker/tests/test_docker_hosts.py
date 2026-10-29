@@ -3,8 +3,8 @@ from __future__ import annotations
 import docker
 import pytest
 import requests
+from worker_test_support import FakeDockerClient, ProbeClient, compute_worker_identity
 
-from dataforge_protocol import compute_pb2, enums_pb2
 from runtime.compute_worker_credentials import ObjectStoreCredentials
 from runtime.config import settings
 from runtime.docker_compute_worker import (
@@ -42,30 +42,11 @@ class _Clock:
         return self.now
 
 
-class _ProbeClient:
-    def __init__(self, *, cpus: int = 4, fail: bool = False) -> None:
-        self.cpus = cpus
-        self.fail = fail
-        self.images = type("Images", (), {"get": staticmethod(lambda _name: type("Image", (), {"id": "sha256:img"})())})()
-        self.networks = type("Networks", (), {"get": staticmethod(lambda _name: object())})()
-
-    def ping(self) -> bool:
-        if self.fail:
-            raise requests.exceptions.ConnectionError("daemon unreachable")
-        return True
-
-    def info(self) -> dict[str, object]:
-        return {"NCPU": self.cpus}
-
-    def close(self) -> None:
-        return None
-
-
 def _ready(registry: DockerHostRegistry, monkeypatch, *, cpus: dict[str, int] | None = None, failing: set[str] = frozenset()) -> None:
     cpus = cpus or {}
     monkeypatch.setattr(
         "runtime.docker_hosts.open_docker_client",
-        lambda spec, **_kwargs: _ProbeClient(cpus=cpus.get(spec.name, 4), fail=spec.name in failing),
+        lambda spec, **_kwargs: ProbeClient(cpus=cpus.get(spec.name, 4), fail=spec.name in failing),
     )
     registry.probe_all()
 
@@ -120,16 +101,6 @@ def test_host_list_fills_omitted_fields_from_single_host_defaults() -> None:
     assert node_c.uses_published_ports
 
 
-def test_legacy_host_network_field_is_accepted_with_a_warning(caplog) -> None:
-    raw = '[{"name":"local","docker_host":"unix:///var/run/docker.sock","engine_network":"legacy-net"}]'
-
-    with caplog.at_level("WARNING"):
-        (host,) = parse_docker_hosts(raw, **_DEFAULTS)
-
-    assert host.compute_worker_network == "legacy-net"
-    assert "Deprecated compute-worker host field engine_network" in caplog.text
-
-
 @pytest.mark.parametrize(
     ("raw", "message"),
     [
@@ -143,6 +114,7 @@ def test_legacy_host_network_field_is_accepted_with_a_warning(caplog) -> None:
         ('[{"name": "a", "docker_host": "tcp://a:2375", "connect_host": "a", "max_workers": -1}]', "max_workers"),
         ('[{"name": "a", "docker_host": "tcp://a:2375", "connect_host": "a", "max_workers": true}]', "max_workers"),
         ('[{"name": "a", "docker_host": "unix:///var/run/docker.sock", "tls_cert_path": "/certs"}]', "tls_cert_path"),
+        ('[{"name": "a", "docker_host": "unix:///var/run/docker.sock", "engine_network": "net"}]', "unknown fields: engine_network"),
     ],
 )
 def test_invalid_host_lists_are_rejected(raw: str, message: str) -> None:
@@ -241,7 +213,7 @@ def test_launch_context_does_not_hold_the_registry_lock_during_daemon_calls(monk
     registry = DockerHostRegistry([_spec("a")], compute_worker_image="compute-worker:test")
     seen: list[bool] = []
 
-    class Client(_ProbeClient):
+    class Client(ProbeClient):
         def info(self) -> dict[str, object]:
             seen.append(registry._lock.locked())
             return super().info()
@@ -253,7 +225,7 @@ def test_launch_context_does_not_hold_the_registry_lock_during_daemon_calls(monk
     # The second call serves the cached values without touching the daemon.
     registry.launch_context(registry.get("a"), Client(cpus=99))
     assert seen == [False]
-    assert registry.launch_context(registry.get("a"), _ProbeClient())[0] == 3
+    assert registry.launch_context(registry.get("a"), ProbeClient())[0] == 3
 
 
 def test_hosts_never_probed_are_not_placement_candidates() -> None:
@@ -291,15 +263,6 @@ def test_health_monitor_probes_every_host_periodically(monkeypatch) -> None:
 # ---------------------------------------------------------------------------
 
 
-def _identity() -> compute_pb2.ComputeWorkerIdentity:
-    return compute_pb2.ComputeWorkerIdentity(
-        scope=enums_pb2.COMPUTE_WORKER_SCOPE_ANALYSIS_INTERACTIVE,
-        reuse_policy=enums_pb2.COMPUTE_WORKER_REUSE_POLICY_SHARED,
-        resource_id="analysis-1",
-        analysis_id="analysis-1",
-    )
-
-
 _TWO_HOSTS = (
     '[{"name": "a", "docker_host": "tcp://10.0.0.5:2375", "connect_host": "10.0.0.5"},'
     ' {"name": "b", "docker_host": "tcp://10.0.0.6:2375", "connect_host": "10.0.0.6"}]'
@@ -308,7 +271,7 @@ _TWO_HOSTS = (
 
 def _prepare_launch(monkeypatch, *, clients: dict[str, object]) -> DockerHostRegistry:
     monkeypatch.setattr(settings, "compute_worker_docker_hosts", _TWO_HOSTS)
-    monkeypatch.setattr("runtime.docker_hosts.open_docker_client", lambda _spec, **_kwargs: _ProbeClient())
+    monkeypatch.setattr("runtime.docker_hosts.open_docker_client", lambda _spec, **_kwargs: ProbeClient())
     registry = docker_host_registry()
     assert all(registry.probe_all().values())
     monkeypatch.setattr("runtime.docker_compute_worker.open_docker_client", lambda spec, **_kwargs: clients[spec.name])
@@ -362,7 +325,7 @@ def test_engine_launch_fails_over_to_the_next_host_after_a_docker_error(monkeypa
     broken = _HostClient("a", events, create_error=docker.errors.APIError("daemon exploded"))  # type: ignore[attr-defined]
     healthy = _HostClient("b", events)
     registry = _prepare_launch(monkeypatch, clients={"a": broken, "b": healthy})
-    engine = DockerComputeWorker(_identity(), namespace="tenant-a")
+    engine = DockerComputeWorker(compute_worker_identity(), namespace="tenant-a")
     monkeypatch.setattr(engine, "_await_listening", lambda: events.append("listener-ready"))
     monkeypatch.setattr(engine, "_initialize", lambda **_kwargs: events.append("initialize"))
     monkeypatch.setattr(engine, "_heartbeat_loop", lambda: None)
@@ -413,7 +376,7 @@ def test_engine_that_exits_during_start_does_not_fail_over_or_exclude_the_host(m
     events: list[str] = []
     clients = {"a": _HostClient("a", events), "b": _HostClient("b", events)}
     registry = _prepare_launch(monkeypatch, clients=clients)
-    engine = DockerComputeWorker(_identity(), namespace="tenant-a")
+    engine = DockerComputeWorker(compute_worker_identity(), namespace="tenant-a")
 
     def await_listening() -> None:
         raise ComputeWorkerStartTimeout("Timed out waiting for engine listener; container status=exited", container_status="exited")
@@ -484,7 +447,7 @@ def test_engine_launch_reports_every_host_when_all_fail(monkeypatch) -> None:
         "b": _HostClient("b", events, create_error=OSError("b is down")),
     }
     registry = _prepare_launch(monkeypatch, clients=clients)
-    engine = DockerComputeWorker(_identity(), namespace="tenant-a")
+    engine = DockerComputeWorker(compute_worker_identity(), namespace="tenant-a")
 
     with pytest.raises(RuntimeError, match="every eligible Docker host") as excinfo:
         engine.start()
@@ -511,31 +474,19 @@ def test_reconciliation_frees_the_slot_of_a_detached_container(monkeypatch) -> N
     engine._detach_local_handles()
     assert registry.snapshot()[0].placements == 3
 
-    class Api:
-        def containers(self, *, all: bool, filters: dict[str, object]):
-            return [
-                {"Id": "a-detached", "State": "running"},
-                {"Id": "a-already-gone", "State": "exited"},
-                {"Id": "a-stuck", "State": "exited"},
-            ]
-
-        def remove_container(self, container_id: str, *, force: bool) -> None:
-            if container_id == "a-already-gone":
-                raise docker.errors.NotFound("gone")
-            if container_id == "a-stuck":
-                raise RuntimeError("daemon busy")
-
-    class Client:
-        api = Api()
-
-        def close(self) -> None:
-            return None
+    client_a = FakeDockerClient(
+        [
+            {"Id": "a-detached", "State": "running"},
+            {"Id": "a-already-gone", "State": "exited"},
+            {"Id": "a-stuck", "State": "exited"},
+        ],
+        remove_errors={"a-already-gone": docker.errors.NotFound("gone"), "a-stuck": RuntimeError("daemon busy")},
+    )
 
     def open_client(spec: DockerHostSpec, **_kwargs):
-        return Client() if spec.name == "a" else _HostClient("b", [])
+        return client_a if spec.name == "a" else FakeDockerClient([])
 
     monkeypatch.setattr("runtime.docker_compute_worker.open_docker_client", open_client)
-    monkeypatch.setattr(_HostClient, "api", property(lambda self: type("Api", (), {"containers": lambda *_a, **_k: []})()), raising=False)
 
     # Removed and already-absent containers give their slots back; the one
     # the daemon would not remove keeps its slot until a later sweep.
@@ -544,37 +495,19 @@ def test_reconciliation_frees_the_slot_of_a_detached_container(monkeypatch) -> N
 
 
 def test_reconciliation_sweeps_every_host_and_skips_unreachable_ones(monkeypatch) -> None:
-    removed: list[str] = []
     monkeypatch.setattr(settings, "compute_worker_docker_hosts", _TWO_HOSTS)
     monkeypatch.setattr(settings, "deployment_id", "test-deployment")
-
-    class Api:
-        def __init__(self, name: str) -> None:
-            self.name = name
-
-        def containers(self, *, all: bool, filters: dict[str, object]):
-            assert all and filters == {"label": ["io.dataforge.managed=true", "io.dataforge.deployment=test-deployment"]}
-            return [{"Id": f"{self.name}-stopped", "State": "exited"}]
-
-        def remove_container(self, container_id: str, *, force: bool) -> None:
-            assert force
-            removed.append(container_id)
-
-    class Client:
-        def __init__(self, name: str) -> None:
-            self.api = Api(name)
-
-        def close(self) -> None:
-            return None
+    client_a = FakeDockerClient([{"Id": "a-stopped", "State": "exited"}])
 
     def open_client(spec: DockerHostSpec, **_kwargs):
         if spec.name == "b":
             raise requests.exceptions.ConnectionError("b is down")
-        return Client(spec.name)
+        return client_a
 
     monkeypatch.setattr("runtime.docker_compute_worker.open_docker_client", open_client)
 
     assert reconcile_deployment_containers() == 1
-    assert removed == ["a-stopped"]
+    assert client_a.filters == [{"label": ["io.dataforge.managed=true", "io.dataforge.deployment=test-deployment"]}]
+    assert client_a.removed == ["a-stopped"]
     statuses = {status.name: status for status in docker_host_registry().snapshot()}
     assert "b is down" in str(statuses["b"].last_error)

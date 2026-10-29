@@ -2,8 +2,8 @@
 	import { ChevronDown, LoaderCircle, Send, Square, Timer, WifiOff } from '@lucide/svelte';
 	import { css, iconButton } from '#lib/styles/panda.js';
 	import { chatStore } from '#lib/stores/chat.svelte.js';
-	import type { ChatProvider } from '#lib/stores/chat.svelte.js';
-	import { formatTokens } from '#lib/chat/presentation.js';
+	import type { ChatProvider, ConnectionStatus } from '#lib/stores/chat.svelte.js';
+	import { filterChatModels, formatTokens } from '#lib/chat/presentation.js';
 
 	interface Props {
 		inputValue?: string;
@@ -53,31 +53,15 @@
 		}
 	}
 
-	const pickerModels = $derived(
-		modelPickerSearch
-			? chatStore.models.filter(
-					(m) =>
-						m.id.toLowerCase().includes(modelPickerSearch.toLowerCase()) ||
-						m.name.toLowerCase().includes(modelPickerSearch.toLowerCase())
-				)
-			: chatStore.models
-	);
+	const pickerModels = $derived(filterChatModels(chatStore.models, modelPickerSearch));
 
-	const connectionColor = $derived(
-		chatStore.connection === 'connected'
-			? 'fg.success'
-			: chatStore.connection === 'reconnecting'
-				? 'fg.warning'
-				: 'fg.muted'
-	);
-
-	const connectionLabel = $derived(
-		chatStore.connection === 'connected'
-			? 'Connected'
-			: chatStore.connection === 'reconnecting'
-				? `Reconnecting\u2026`
-				: 'Disconnected'
-	);
+	const connectionPresentation = {
+		connected: { color: 'fg.success', label: 'Connected' },
+		reconnecting: { color: 'fg.warning', label: `Reconnecting\u2026` },
+		disconnected: { color: 'fg.muted', label: 'Disconnected' }
+	} satisfies Record<ConnectionStatus, { color: string; label: string }>;
+	const connectionColor = $derived(connectionPresentation[chatStore.connection].color);
+	const connectionLabel = $derived(connectionPresentation[chatStore.connection].label);
 
 	const lastPromptTokens = $derived(chatStore.lastTurnUsage?.prompt_tokens ?? 0);
 	const contextPct = $derived(

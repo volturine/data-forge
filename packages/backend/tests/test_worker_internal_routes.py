@@ -202,7 +202,7 @@ class FakeGrpcContext:
 
 @pytest.mark.asyncio
 async def test_get_engine_credentials_aborts_on_grpc_event_loop(monkeypatch: pytest.MonkeyPatch) -> None:
-    import backend_core.namespace_credentials_service as namespace_credentials_service
+    from backend_core import namespace_credentials_service
 
     async def allow_internal_call(_context) -> None:
         return None
@@ -1096,31 +1096,6 @@ async def test_internal_worker_grpc_fails_job_and_build_run_atomically(test_db_s
     assert len(build_runs_service.list_build_events_after(test_db_session, build_id)) == 1
 
 
-@pytest.mark.asyncio
-async def test_internal_worker_grpc_counts_and_releases_jobs(test_db_session: Session, monkeypatch: pytest.MonkeyPatch) -> None:
-    context = _context(monkeypatch)
-    worker_id = f'local-worker:{uuid.uuid4()}'
-    build_id = str(uuid.uuid4())
-    job = build_jobs_service.create_job(test_db_session, build_id=build_id, namespace='default')
-    servicer = WorkerRuntimeServicer()
-
-    queued = await servicer.GetQueuedBuildJobCount(common_pb2.EmptyRequest(namespace='default'), context)
-    assert queued.count >= 1
-
-    await servicer.ClaimBuildJob(
-        common_pb2.RuntimeWorkerRequest(worker_id=worker_id, protocol_version=2, target_namespace='default'),
-        context,
-    )
-    released = await servicer.ReleaseBuildWorkerJobs(
-        common_pb2.RuntimeWorkerRequest(worker_id=worker_id, protocol_version=2, target_namespace='default'),
-        context,
-    )
-    assert released.count == 1
-    test_db_session.refresh(job)
-    assert job.status == BuildJobStatus.QUEUED
-    assert job.lease_owner is None
-
-
 @pytest.mark.parametrize('build_already_completed', [False, True])
 @pytest.mark.asyncio
 async def test_build_job_count_recovers_exhausted_scheduled_job(
@@ -1179,9 +1154,7 @@ async def test_build_job_count_recovers_exhausted_scheduled_job(
     test_db_session.commit()
 
     await WorkerRuntimeServicer().ReconcileExpiredBuildJobs(common_pb2.EmptyRequest(namespace='default'), context)
-    count = await WorkerRuntimeServicer().GetQueuedBuildJobCount(common_pb2.EmptyRequest(namespace='default'), context)
 
-    assert count.count == 0
     test_db_session.expire_all()
     assert reconcile_schedule_run(test_db_session, build_id=build_id) is not None
     test_db_session.expire_all()
@@ -1456,7 +1429,7 @@ async def test_compute_request_claim_targets_one_namespace_without_scanning(monk
     def fake_run_db(func, *args, **kwargs):
         if func is backend_grpc_server.compute_requests_service.claim_next_request:
             claimed_namespaces.append(get_namespace())
-            return None
+            return
         raise AssertionError(f'Unexpected tenant database callback: {func!r}')
 
     monkeypatch.setattr(backend_grpc_server, 'run_settings_db', fake_run_settings_db)

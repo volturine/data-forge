@@ -13,7 +13,7 @@ logger = logging.getLogger(__name__)
 
 def resource_summary(engine: ComputeWorker) -> dict[str, int | None]:
     # Runtime engines expose effective_resources after their process handshake.
-    effective = engine.effective_resources if getattr(engine, "effective_resources", None) else {}
+    effective = engine.effective_resources or {}
     return {
         key: int(value) if isinstance(value, int) else None
         for key, value in {

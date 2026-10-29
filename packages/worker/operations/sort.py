@@ -3,7 +3,7 @@
 import polars as pl
 from pydantic import Field
 
-from runtime.domain.compute.base import OperationHandler, OperationParams
+from runtime.domain.compute.base import OperationParams
 
 
 class SortParams(OperationParams):
@@ -12,8 +12,6 @@ class SortParams(OperationParams):
     descending_all: bool | None = None
 
 
-class SortHandler(OperationHandler):
-    def __call__(self, lf: pl.LazyFrame, params: dict, **_) -> pl.LazyFrame:
-        validated = SortParams.model_validate(params)
-        descending: list[bool] | bool = validated.descending_all if validated.descending_all is not None else validated.descending
-        return lf.sort(validated.columns, descending=descending, maintain_order=True)
+def sort(lf: pl.LazyFrame, params: SortParams, **_) -> pl.LazyFrame:
+    descending: list[bool] | bool = params.descending_all if params.descending_all is not None else params.descending
+    return lf.sort(params.columns, descending=descending, maintain_order=True)

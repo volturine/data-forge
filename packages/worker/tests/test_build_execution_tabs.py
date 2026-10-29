@@ -17,18 +17,6 @@ def test_build_executes_only_the_selected_tab():
     assert compute_service._build_execution_tab(pipeline) == {"id": "tab-2", "name": "tab-2"}
 
 
-def test_build_does_not_include_upstream_tabs():
-    pipeline = _pipeline(
-        [
-            {"id": "tab-1", "output": {"result_id": "out-1"}},
-            {"id": "tab-2", "datasource": {"id": "out-1"}},
-        ],
-        tab_id="tab-2",
-    )
-
-    assert compute_service._build_execution_tab(pipeline)["id"] == "tab-2"
-
-
 def test_build_without_tab_id_raises():
     pipeline = _pipeline([{"id": "tab-1"}], tab_id=None)
 

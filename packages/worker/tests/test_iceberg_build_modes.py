@@ -1,10 +1,11 @@
 import uuid
-from contextlib import nullcontext
+from contextlib import contextmanager, nullcontext
 from datetime import UTC, datetime
 from types import SimpleNamespace
-from unittest.mock import MagicMock, patch
+from unittest.mock import MagicMock, call, patch
 
 import pyarrow as pa  # type: ignore[import-untyped]
+import pytest
 from pyiceberg.schema import Schema as IcebergSchema
 from pyiceberg.types import NestedField, StringType
 
@@ -12,7 +13,7 @@ from runtime.compute_service import _schema_cache_payload_from_arrow, export_dat
 from runtime.domain.compute.base import ComputeWorkerResult
 from runtime.iceberg_metadata import sync_iceberg_schema
 from runtime.namespace import namespace_paths
-from runtime.worker_runtime_client import ClaimedBuildJob
+from runtime.worker_runtime_client import ClaimedBuildJob, ComputeWorkerRunState
 
 
 class TestSyncIcebergSchema:
@@ -24,93 +25,61 @@ class TestSyncIcebergSchema:
         mock_table.update_schema.return_value = mock_update
         return mock_table, mock_update
 
-    def test_no_changes_returns_false(self):
-        table, update = self._make_table(
-            [
-                NestedField(1, "a", StringType()),
-                NestedField(2, "b", StringType()),
-            ],
-        )
-        new_schema = pa.schema([pa.field("a", pa.string()), pa.field("b", pa.string())])
+    @pytest.mark.parametrize(
+        ("current_columns", "new_schema", "expected_changed", "expected_deleted", "expected_union"),
+        [
+            pytest.param(
+                ["a", "b"],
+                pa.schema([pa.field("a", pa.string()), pa.field("b", pa.string())]),
+                False,
+                [],
+                False,
+                id="test_no_changes_returns_false",
+            ),
+            pytest.param(
+                ["a", "b", "c"],
+                pa.schema([pa.field("a", pa.string())]),
+                True,
+                ["b", "c"],
+                False,
+                id="test_delete_removed_columns",
+            ),
+            pytest.param(
+                ["a"],
+                pa.schema([pa.field("a", pa.string()), pa.field("b", pa.int64()), pa.field("c", pa.float64())]),
+                True,
+                [],
+                True,
+                id="test_add_new_columns",
+            ),
+            pytest.param(
+                ["keep", "remove"],
+                pa.schema([pa.field("keep", pa.string()), pa.field("new_col", pa.float64())]),
+                True,
+                ["remove"],
+                True,
+                id="test_delete_and_add_combined",
+            ),
+        ],
+    )
+    def test_sync_iceberg_schema_branches(
+        self,
+        current_columns: list[str],
+        new_schema: pa.Schema,
+        expected_changed: bool,
+        expected_deleted: list[str],
+        expected_union: bool,
+    ) -> None:
+        fields = [NestedField(field_id, name, StringType()) for field_id, name in enumerate(current_columns, start=1)]
+        table, update = self._make_table(fields)
 
         result = sync_iceberg_schema(table, new_schema)
 
-        assert result is False
-        table.update_schema.assert_not_called()
-
-    def test_delete_removed_columns(self):
-        table, update = self._make_table(
-            [
-                NestedField(1, "a", StringType()),
-                NestedField(2, "b", StringType()),
-                NestedField(3, "c", StringType()),
-            ],
-        )
-        new_schema = pa.schema([pa.field("a", pa.string())])
-
-        result = sync_iceberg_schema(table, new_schema)
-
-        assert result is True
-        update.delete_column.assert_any_call("b")
-        update.delete_column.assert_any_call("c")
-        assert update.delete_column.call_count == 2
-        update.commit.assert_called_once()
-
-    def test_add_new_columns(self):
-        table, update = self._make_table(
-            [
-                NestedField(1, "a", StringType()),
-            ],
-        )
-        new_schema = pa.schema(
-            [
-                pa.field("a", pa.string()),
-                pa.field("b", pa.int64()),
-                pa.field("c", pa.float64()),
-            ]
-        )
-
-        result = sync_iceberg_schema(table, new_schema)
-
-        assert result is True
-        update.union_by_name.assert_called_once_with(new_schema)
-        update.commit.assert_called_once()
-
-    def test_delete_and_add_combined(self):
-        table, update = self._make_table(
-            [
-                NestedField(1, "keep", StringType()),
-                NestedField(2, "remove", StringType()),
-            ],
-        )
-        new_schema = pa.schema(
-            [
-                pa.field("keep", pa.string()),
-                pa.field("new_col", pa.float64()),
-            ],
-        )
-
-        result = sync_iceberg_schema(table, new_schema)
-
-        assert result is True
-        update.delete_column.assert_called_once_with("remove")
-        update.union_by_name.assert_called_once_with(new_schema)
-        update.commit.assert_called_once()
-
-    def test_only_deletions_no_union_call(self):
-        table, update = self._make_table(
-            [
-                NestedField(1, "a", StringType()),
-                NestedField(2, "b", StringType()),
-            ],
-        )
-        new_schema = pa.schema([pa.field("a", pa.string())])
-
-        sync_iceberg_schema(table, new_schema)
-
-        update.delete_column.assert_called_once_with("b")
-        update.union_by_name.assert_not_called()
-        update.commit.assert_called_once()
+        assert result is expected_changed
+        assert table.update_schema.called == expected_changed
+        assert update.delete_column.call_args_list == [call(name) for name in expected_deleted]
+        assert update.union_by_name.call_args_list == ([call(new_schema)] if expected_union else [])
+        assert update.commit.call_args_list == ([call()] if expected_changed else [])
 
 
 class TestBuildModeWiring:
@@ -175,7 +144,7 @@ class TestBuildModeWiring:
     def _make_internal_client_mock(self, output_ds_id: str) -> MagicMock:
         client = MagicMock()
         client.create_compute_worker_run.return_value = "run-1"
-        client.compute_worker_run_state.return_value = {"result_json": {}}
+        client.compute_worker_run_state.return_value = ComputeWorkerRunState(status=None, result_json={}, cancelled_at=None, cancelled_by=None)
         client.list_healthchecks.return_value = []
         client.analysis_name.return_value = "Test Analysis"
         client.telegram_targets.return_value = []
@@ -201,37 +170,79 @@ class TestBuildModeWiring:
         mock_parquet_file.iter_batches.return_value = iter(())
         return mock_parquet_file
 
-    def test_full_mode_calls_overwrite(self, sample_datasource: SimpleNamespace):
-        output_ds_id = str(uuid.uuid4())
-        pipeline = self._make_pipeline(sample_datasource, output_ds_id, build_mode="full")
-        mock_catalog, mock_table, mock_arrow = self._setup_mocks(table_exists=True)
-
+    @contextmanager
+    def _export_patches(self, mock_catalog: MagicMock, mock_arrow: MagicMock, internal_client: MagicMock):
         with (
             patch("runtime.compute_service.load_runtime_catalog", return_value=mock_catalog),
             patch("runtime.compute_service.pq.read_table", return_value=mock_arrow),
             patch("runtime.compute_service.pq.ParquetFile", return_value=self._mock_parquet_file()),
-            patch("runtime.compute_service.sync_iceberg_schema", return_value=False) as mock_sync,
             patch("runtime.compute_service.os.path.getsize", return_value=100),
             patch("runtime.compute_service.ensure_bucket_exists"),
-            patch("runtime.compute_service.client_from_env", return_value=self._make_internal_client_mock(output_ds_id)),
+            patch("runtime.compute_service.client_from_env", return_value=internal_client),
+        ):
+            yield
+
+    def _run_export(self, sample_datasource: SimpleNamespace, build_mode: str | None, table_exists: bool) -> SimpleNamespace:
+        output_ds_id = str(uuid.uuid4())
+        pipeline = self._make_pipeline(sample_datasource, output_ds_id, build_mode=build_mode or "full")
+        export_kwargs: dict = {}
+        if build_mode is None:
+            # Omit the key so export_data's own default is what gets exercised.
+            del pipeline["tabs"][0]["output"]["build_mode"]
+        else:
+            export_kwargs["build_mode"] = build_mode
+        mock_catalog, mock_table, mock_arrow = self._setup_mocks(table_exists=table_exists)
+        with (
+            self._export_patches(mock_catalog, mock_arrow, self._make_internal_client_mock(output_ds_id)),
+            patch("runtime.compute_service.sync_iceberg_schema", return_value=False) as mock_sync,
         ):
             export_data(
                 manager=self._make_manager_mock(),
                 target_step_id="source",
                 analysis_pipeline=pipeline,
                 filename="test_out",
-                iceberg_options={
-                    "namespace": "ns",
-                    "table_name": "tbl",
-                    "branch": "master",
-                },
+                iceberg_options={"namespace": "ns", "table_name": "tbl", "branch": "master"},
                 result_id=output_ds_id,
-                build_mode="full",
+                **export_kwargs,
             )
+        return SimpleNamespace(
+            catalog=mock_catalog,
+            table=mock_table,
+            arrow=mock_arrow,
+            sync=mock_sync,
+            identifier=f"ns.{output_ds_id}_master",
+        )
 
-        mock_sync.assert_called_once_with(mock_table, mock_arrow.schema)
-        mock_table.overwrite.assert_called_once_with(mock_arrow)
-        mock_table.append.assert_not_called()
+    @pytest.mark.parametrize(
+        ("build_mode", "table_exists", "expected_sync_calls", "expected_overwrites", "expected_appends"),
+        [
+            pytest.param("full", True, 1, 1, 0, id="test_full_mode_calls_overwrite"),
+            pytest.param("incremental", True, 0, 0, 1, id="test_incremental_mode_calls_append"),
+            pytest.param("recreate", True, 1, 1, 0, id="test_recreate_mode_overwrites_existing_table_without_drop"),
+            # With no table every build mode creates the table then appends, so this row also covers
+            # test_new_table_always_creates_and_appends.
+            pytest.param("recreate", False, 0, 0, 1, id="test_recreate_mode_no_table_skips_drop"),
+            # None leaves build_mode out entirely, exercising export_data's default.
+            pytest.param(None, True, 1, 1, 0, id="test_default_build_mode_is_full"),
+        ],
+    )
+    def test_build_mode_wiring(
+        self,
+        sample_datasource: SimpleNamespace,
+        build_mode: str | None,
+        table_exists: bool,
+        expected_sync_calls: int,
+        expected_overwrites: int,
+        expected_appends: int,
+    ) -> None:
+        run = self._run_export(sample_datasource, build_mode, table_exists)
+
+        run.catalog.drop_table.assert_not_called()
+        assert run.catalog.create_table.call_count == (0 if table_exists else 1)
+        assert run.catalog.load_table.call_args_list == ([call(run.identifier)] if table_exists else [])
+        assert run.sync.call_args_list == [call(run.table, run.arrow.schema)] * expected_sync_calls
+        assert run.table.overwrite.call_args_list == [call(run.arrow)] * expected_overwrites
+        assert run.table.append.call_args_list == [call(run.arrow)] * expected_appends
 
     def test_queued_full_build_writes_claim_table_before_publication(self, sample_datasource: SimpleNamespace):
         output_ds_id = str(uuid.uuid4())
@@ -249,14 +260,7 @@ class TestBuildModeWiring:
             lease_ttl_seconds=60,
         )
 
-        with (
-            patch("runtime.compute_service.load_runtime_catalog", return_value=mock_catalog),
-            patch("runtime.compute_service.pq.read_table", return_value=mock_arrow),
-            patch("runtime.compute_service.pq.ParquetFile", return_value=self._mock_parquet_file()),
-            patch("runtime.compute_service.os.path.getsize", return_value=100),
-            patch("runtime.compute_service.ensure_bucket_exists"),
-            patch("runtime.compute_service.client_from_env", return_value=internal_client),
-        ):
+        with self._export_patches(mock_catalog, mock_arrow, internal_client):
             export_data(
                 manager=self._make_manager_mock(),
                 target_step_id="source",
@@ -277,169 +281,8 @@ class TestBuildModeWiring:
         mock_table.overwrite.assert_called_once_with(mock_arrow)
         mock_table.append.assert_not_called()
         publication = internal_client.upsert_output_datasource.call_args.kwargs
-        assert publication["job_id"] == "job-1"
-        assert publication["claim_token"] == "claim-token-1"
-        assert publication["lease_generation"] == 3
+        assert publication["publication"].job_id == "job-1"
+        assert publication["publication"].claim_token == "claim-token-1"
+        assert publication["publication"].lease_generation == 3
         assert publication["config"]["table"].endswith("_claim_claim_token_1")
         assert "/claims/claim-token-1" in publication["config"]["metadata_path"]
-
-    def test_incremental_mode_calls_append(self, sample_datasource: SimpleNamespace):
-        output_ds_id = str(uuid.uuid4())
-        pipeline = self._make_pipeline(sample_datasource, output_ds_id, build_mode="incremental")
-        mock_catalog, mock_table, mock_arrow = self._setup_mocks(table_exists=True)
-
-        with (
-            patch("runtime.compute_service.load_runtime_catalog", return_value=mock_catalog),
-            patch("runtime.compute_service.pq.read_table", return_value=mock_arrow),
-            patch("runtime.compute_service.pq.ParquetFile", return_value=self._mock_parquet_file()),
-            patch("runtime.compute_service.sync_iceberg_schema") as mock_sync,
-            patch("runtime.compute_service.os.path.getsize", return_value=100),
-            patch("runtime.compute_service.ensure_bucket_exists"),
-            patch("runtime.compute_service.client_from_env", return_value=self._make_internal_client_mock(output_ds_id)),
-        ):
-            export_data(
-                manager=self._make_manager_mock(),
-                target_step_id="source",
-                analysis_pipeline=pipeline,
-                filename="test_out",
-                iceberg_options={
-                    "namespace": "ns",
-                    "table_name": "tbl",
-                    "branch": "master",
-                },
-                result_id=output_ds_id,
-                build_mode="incremental",
-            )
-
-        mock_sync.assert_not_called()
-        mock_table.append.assert_called_once_with(mock_arrow)
-        mock_table.overwrite.assert_not_called()
-
-    def test_new_table_always_creates_and_appends(self, sample_datasource: SimpleNamespace):
-        output_ds_id = str(uuid.uuid4())
-        pipeline = self._make_pipeline(sample_datasource, output_ds_id, build_mode="full")
-        mock_catalog, mock_table, mock_arrow = self._setup_mocks(table_exists=False)
-
-        with (
-            patch("runtime.compute_service.load_runtime_catalog", return_value=mock_catalog),
-            patch("runtime.compute_service.pq.read_table", return_value=mock_arrow),
-            patch("runtime.compute_service.pq.ParquetFile", return_value=self._mock_parquet_file()),
-            patch("runtime.compute_service.os.path.getsize", return_value=100),
-            patch("runtime.compute_service.ensure_bucket_exists"),
-            patch("runtime.compute_service.client_from_env", return_value=self._make_internal_client_mock(output_ds_id)),
-        ):
-            export_data(
-                manager=self._make_manager_mock(),
-                target_step_id="source",
-                analysis_pipeline=pipeline,
-                filename="test_out",
-                iceberg_options={
-                    "namespace": "ns",
-                    "table_name": "tbl",
-                    "branch": "master",
-                },
-                result_id=output_ds_id,
-                build_mode="full",
-            )
-
-        mock_catalog.create_table.assert_called_once()
-        mock_table.append.assert_called_once_with(mock_arrow)
-
-    def test_recreate_mode_overwrites_existing_table_without_drop(self, sample_datasource: SimpleNamespace):
-        output_ds_id = str(uuid.uuid4())
-        pipeline = self._make_pipeline(sample_datasource, output_ds_id, build_mode="recreate")
-        mock_catalog, mock_table, mock_arrow = self._setup_mocks(table_exists=True)
-        with (
-            patch("runtime.compute_service.load_runtime_catalog", return_value=mock_catalog),
-            patch("runtime.compute_service.pq.read_table", return_value=mock_arrow),
-            patch("runtime.compute_service.pq.ParquetFile", return_value=self._mock_parquet_file()),
-            patch("runtime.compute_service.os.path.getsize", return_value=100),
-            patch("runtime.compute_service.ensure_bucket_exists"),
-            patch("runtime.compute_service.client_from_env", return_value=self._make_internal_client_mock(output_ds_id)),
-        ):
-            export_data(
-                manager=self._make_manager_mock(),
-                target_step_id="source",
-                analysis_pipeline=pipeline,
-                filename="test_out",
-                iceberg_options={
-                    "namespace": "ns",
-                    "table_name": "tbl",
-                    "branch": "master",
-                },
-                result_id=output_ds_id,
-                build_mode="recreate",
-            )
-
-        # A drop purges metadata files that concurrent readers may still be
-        # resolving; rebuilds must swap snapshots atomically instead.
-        mock_catalog.drop_table.assert_not_called()
-        mock_catalog.load_table.assert_called_once_with(f"ns.{output_ds_id}_master")
-        mock_catalog.create_table.assert_not_called()
-        mock_table.overwrite.assert_called_once_with(mock_arrow)
-
-    def test_recreate_mode_no_table_skips_drop(self, sample_datasource: SimpleNamespace):
-        output_ds_id = str(uuid.uuid4())
-        pipeline = self._make_pipeline(sample_datasource, output_ds_id, build_mode="recreate")
-        mock_catalog, mock_table, mock_arrow = self._setup_mocks(table_exists=False)
-
-        with (
-            patch("runtime.compute_service.load_runtime_catalog", return_value=mock_catalog),
-            patch("runtime.compute_service.pq.read_table", return_value=mock_arrow),
-            patch("runtime.compute_service.pq.ParquetFile", return_value=self._mock_parquet_file()),
-            patch("runtime.compute_service.os.path.getsize", return_value=100),
-            patch("runtime.compute_service.ensure_bucket_exists"),
-            patch("runtime.compute_service.client_from_env", return_value=self._make_internal_client_mock(output_ds_id)),
-        ):
-            export_data(
-                manager=self._make_manager_mock(),
-                target_step_id="source",
-                analysis_pipeline=pipeline,
-                filename="test_out",
-                iceberg_options={
-                    "namespace": "ns",
-                    "table_name": "tbl",
-                    "branch": "master",
-                },
-                result_id=output_ds_id,
-                build_mode="recreate",
-            )
-
-        mock_catalog.drop_table.assert_not_called()
-        mock_catalog.create_table.assert_called_once()
-        mock_table.append.assert_called_once_with(mock_arrow)
-
-    def test_default_build_mode_is_full(self, sample_datasource: SimpleNamespace):
-        output_ds_id = str(uuid.uuid4())
-        pipeline = self._make_pipeline(sample_datasource, output_ds_id)
-        del pipeline["tabs"][0]["output"]["build_mode"]
-        mock_catalog, mock_table, mock_arrow = self._setup_mocks(table_exists=True)
-
-        with (
-            patch("runtime.compute_service.load_runtime_catalog", return_value=mock_catalog),
-            patch("runtime.compute_service.pq.read_table", return_value=mock_arrow),
-            patch("runtime.compute_service.pq.ParquetFile", return_value=self._mock_parquet_file()),
-            patch(
-                "runtime.compute_service.resolve_iceberg_metadata_path",
-                return_value="/tmp/iceberg/warehouse/ns/tbl/metadata/v1.metadata.json",
-            ),
-            patch("runtime.compute_service.sync_iceberg_schema", return_value=False) as mock_sync,
-            patch("runtime.compute_service.os.path.getsize", return_value=100),
-            patch("runtime.compute_service.ensure_bucket_exists"),
-            patch("runtime.compute_service.client_from_env", return_value=self._make_internal_client_mock(output_ds_id)),
-        ):
-            export_data(
-                manager=self._make_manager_mock(),
-                target_step_id="source",
-                analysis_pipeline=pipeline,
-                filename="test_out",
-                iceberg_options={
-                    "namespace": "ns",
-                    "table_name": "tbl",
-                    "branch": "master",
-                },
-                result_id=output_ds_id,
-            )
-
-        mock_sync.assert_called_once()
-        mock_table.overwrite.assert_called_once()

@@ -4,12 +4,16 @@
 		getLineage,
 		type LineageNode,
 		type LineageResponse,
-		type LineageMode,
-		type NodeKind
+		type LineageMode
 	} from '#lib/api/lineage.js';
 	import { listDatasources } from '#lib/api/datasource.js';
 	import LineageGraph from '#lib/components/common/LineageGraph.svelte';
 	import ScheduleManager from '#lib/components/common/ScheduleManager.svelte';
+	import {
+		LINEAGE_KIND_LABELS,
+		type LineageLayoutMode
+	} from '#lib/components/common/lineage-flow.js';
+	import { datasourceBranches } from '#lib/types/datasource.js';
 	import {
 		Loader,
 		X,
@@ -22,11 +26,11 @@
 		ZoomIn,
 		ZoomOut,
 		Layers,
-		GitBranch
+		GitBranch,
+		type LucideIcon
 	} from '@lucide/svelte';
 	import { css, button, toggleButton, chip } from '#lib/styles/panda.js';
 
-	type LayoutMode = 'horizontal' | 'vertical' | 'grid';
 	type LineageGraphApi = {
 		resetLineageView: () => void;
 		zoomInView: () => void;
@@ -53,9 +57,8 @@
 
 	const branchOptions = $derived.by(() => {
 		const selected = outputDatasources.find((ds) => ds.id === selectedDatasourceId);
-		const config = (selected?.config ?? {}) as Record<string, unknown>;
-		const branches = config.branches as string[] | undefined;
-		if (!branches || branches.length === 0) return ['master'];
+		const branches = selected ? datasourceBranches(selected) : [];
+		if (branches.length === 0) return ['master'];
 		return branches;
 	});
 
@@ -81,34 +84,14 @@
 	const lineage = $derived(query.data ?? emptyLineage);
 
 	let selectedNode = $state<LineageNode | null>(null);
-	let layoutMode = $state<LayoutMode>('horizontal');
+	let layoutMode = $state<LineageLayoutMode>('horizontal');
 	let zoomPercent = $state(100);
 	let graphRef = $state<LineageGraphApi | null>(null);
-
-	function closePanel() {
-		selectedNode = null;
-	}
 
 	const selectedRawId = $derived(
 		selectedNode ? selectedNode.id.split(':').slice(1).join(':') : null
 	);
 	const selectedType = $derived(selectedNode?.type ?? null);
-
-	function setLayout(mode: LayoutMode) {
-		layoutMode = mode;
-	}
-
-	function zoomIn() {
-		graphRef?.zoomInView();
-	}
-
-	function zoomOut() {
-		graphRef?.zoomOutView();
-	}
-
-	function resetView() {
-		graphRef?.resetLineageView();
-	}
 
 	function handleDatasourceChange(event: Event) {
 		const target = event.currentTarget as HTMLSelectElement;
@@ -121,12 +104,16 @@
 		selectedBranch = target.value;
 	}
 
-	const kindLabel: Record<NodeKind, string> = {
-		source: 'Source',
-		output: 'Output',
-		internal: 'Internal',
-		analysis: 'Analysis'
-	};
+	const layoutOptions: Array<{
+		value: LineageLayoutMode;
+		label: string;
+		title: string;
+		icon: LucideIcon;
+	}> = [
+		{ value: 'horizontal', label: 'Horizontal', title: 'Horizontal tree layout', icon: ArrowRight },
+		{ value: 'vertical', label: 'Vertical', title: 'Vertical tree layout', icon: ArrowDown },
+		{ value: 'grid', label: 'Grid', title: 'Grid layout', icon: LayoutGrid }
+	];
 
 	const modeOptions: Array<{ value: LineageMode; label: string }> = [
 		{ value: 'full', label: 'Full' },
@@ -281,36 +268,18 @@
 			></div>
 
 			<span class={css({ marginRight: '2', fontSize: 'xs', color: 'fg.muted' })}>Layout</span>
-			<button
-				class={layoutMode === 'horizontal'
-					? button({ variant: 'primary', size: 'sm' })
-					: button({ variant: 'ghost', size: 'sm' })}
-				onclick={() => setLayout('horizontal')}
-				title="Horizontal tree layout"
-			>
-				<ArrowRight size={14} />
-				<span class={css({ fontSize: 'xs' })}>Horizontal</span>
-			</button>
-			<button
-				class={layoutMode === 'vertical'
-					? button({ variant: 'primary', size: 'sm' })
-					: button({ variant: 'ghost', size: 'sm' })}
-				onclick={() => setLayout('vertical')}
-				title="Vertical tree layout"
-			>
-				<ArrowDown size={14} />
-				<span class={css({ fontSize: 'xs' })}>Vertical</span>
-			</button>
-			<button
-				class={layoutMode === 'grid'
-					? button({ variant: 'primary', size: 'sm' })
-					: button({ variant: 'ghost', size: 'sm' })}
-				onclick={() => setLayout('grid')}
-				title="Grid layout"
-			>
-				<LayoutGrid size={14} />
-				<span class={css({ fontSize: 'xs' })}>Grid</span>
-			</button>
+			{#each layoutOptions as layout (layout.value)}
+				<button
+					class={layoutMode === layout.value
+						? button({ variant: 'primary', size: 'sm' })
+						: button({ variant: 'ghost', size: 'sm' })}
+					onclick={() => (layoutMode = layout.value)}
+					title={layout.title}
+				>
+					<layout.icon size={14} />
+					<span class={css({ fontSize: 'xs' })}>{layout.label}</span>
+				</button>
+			{/each}
 
 			<div
 				class={css({
@@ -321,15 +290,23 @@
 				})}
 			></div>
 
-			<button class={button({ variant: 'ghost', size: 'sm' })} onclick={zoomIn} title="Zoom in">
+			<button
+				class={button({ variant: 'ghost', size: 'sm' })}
+				onclick={() => graphRef?.zoomInView()}
+				title="Zoom in"
+			>
 				<ZoomIn size={14} />
 			</button>
-			<button class={button({ variant: 'ghost', size: 'sm' })} onclick={zoomOut} title="Zoom out">
+			<button
+				class={button({ variant: 'ghost', size: 'sm' })}
+				onclick={() => graphRef?.zoomOutView()}
+				title="Zoom out"
+			>
 				<ZoomOut size={14} />
 			</button>
 			<button
 				class={button({ variant: 'ghost', size: 'sm' })}
-				onclick={resetView}
+				onclick={() => graphRef?.resetLineageView()}
 				title="Reset view"
 			>
 				<RotateCcw size={14} />
@@ -381,7 +358,7 @@
 							color: 'fg.muted'
 						})}
 					>
-						{selectedNode ? kindLabel[selectedNode.node_kind] : 'Details'}
+						{selectedNode ? LINEAGE_KIND_LABELS[selectedNode.node_kind] : 'Details'}
 					</div>
 					<div
 						class={css({
@@ -406,7 +383,7 @@
 							padding: '1',
 							'&:hover:not(:disabled)': { backgroundColor: 'bg.hover', color: 'fg.primary' }
 						})}
-						onclick={closePanel}
+						onclick={() => (selectedNode = null)}
 						title="Close panel"
 						aria-label="Close panel"
 					>
@@ -432,7 +409,7 @@
 							<span
 								class={chip({ tone: selectedNode.node_kind === 'internal' ? 'neutral' : 'accent' })}
 							>
-								{kindLabel[selectedNode.node_kind]}
+								{LINEAGE_KIND_LABELS[selectedNode.node_kind]}
 							</span>
 						</div>
 						{#if selectedNode.source_type}

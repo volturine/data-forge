@@ -1,8 +1,7 @@
 import uuid
 from datetime import UTC, datetime, timedelta
 
-from sqlalchemy import text
-from sqlalchemy.exc import OperationalError
+import pytest
 from sqlmodel import Session
 
 from backend_core import build_jobs_service
@@ -41,7 +40,7 @@ def test_build_recovery_refreshes_the_namespace_wake_marker(monkeypatch, test_db
     assert options['namespace'] == 'default'
 
 
-def test_claim_assigns_unique_fencing_identity(test_db_session: Session) -> None:
+def test_claim_assigns_unique_fencing_identity(test_db_session: Session, monkeypatch: pytest.MonkeyPatch) -> None:
     job = build_jobs_service.create_job(
         test_db_session,
         build_id=str(uuid.uuid4()),
@@ -49,6 +48,8 @@ def test_claim_assigns_unique_fencing_identity(test_db_session: Session) -> None
         max_attempts=2,
     )
 
+    stamp = datetime.now(UTC)
+    monkeypatch.setattr(build_jobs_service, 'database_lease_clock', lambda _session, _fallback: stamp)
     claimed = build_jobs_service.claim_next_job(test_db_session, worker_id='worker:one')
 
     assert claimed is not None
@@ -58,13 +59,12 @@ def test_claim_assigns_unique_fencing_identity(test_db_session: Session) -> None
     assert claimed.claim_token is not None
     assert claimed.lease_generation == 1
     assert claimed.attempts == 1
-    assert claimed.claimed_at is not None
-    assert claimed.last_renewed_at is not None
-    assert claimed.lease_expires_at is not None
-    assert abs((claimed.lease_expires_at - claimed.claimed_at).total_seconds() - CLAIM_DELIVERY_LEASE_SECONDS) < 0.01
+    assert claimed.claimed_at == stamp
+    assert claimed.last_renewed_at == stamp
+    assert claimed.lease_expires_at == stamp + timedelta(seconds=CLAIM_DELIVERY_LEASE_SECONDS)
 
 
-def test_renew_extends_only_the_active_claim(test_db_session: Session) -> None:
+def test_renew_extends_only_the_active_claim(test_db_session: Session, monkeypatch: pytest.MonkeyPatch) -> None:
     build_jobs_service.create_job(
         test_db_session,
         build_id=str(uuid.uuid4()),
@@ -78,6 +78,8 @@ def test_renew_extends_only_the_active_claim(test_db_session: Session) -> None:
     test_db_session.add(claimed)
     test_db_session.commit()
     previous_expiry = claimed.lease_expires_at
+    stamp = datetime.now(UTC)
+    monkeypatch.setattr(build_jobs_service, 'database_lease_clock', lambda _session, _fallback: stamp)
 
     renewed = build_jobs_service.renew_job_lease(
         test_db_session,
@@ -89,9 +91,9 @@ def test_renew_extends_only_the_active_claim(test_db_session: Session) -> None:
 
     assert renewed is not None
     assert renewed.lease_expires_at is not None
-    assert renewed.last_renewed_at is not None
+    assert renewed.last_renewed_at == stamp
     assert renewed.lease_expires_at > previous_expiry
-    assert abs((renewed.lease_expires_at - renewed.last_renewed_at).total_seconds() - settings.runtime_work_lease_ttl_seconds) < 0.01
+    assert renewed.lease_expires_at == stamp + timedelta(seconds=settings.runtime_work_lease_ttl_seconds)
     assert renewed.claim_token == claimed.claim_token
     assert renewed.lease_generation == claimed.lease_generation
     assert renewed.attempts == claimed.attempts
@@ -273,103 +275,6 @@ def _claim_and_expire(session: Session, *, worker_id: str) -> BuildJob:
     return claimed
 
 
-def test_release_worker_jobs_selects_rows_with_for_update_skip_locked(test_db_session: Session, monkeypatch) -> None:
-    claimed = _claim_and_expire(test_db_session, worker_id='worker:one')
-
-    captured = []
-    original_execute = test_db_session.execute
-
-    def spy_execute(statement, *args, **kwargs):
-        captured.append(statement)
-        return original_execute(statement, *args, **kwargs)
-
-    monkeypatch.setattr(test_db_session, 'execute', spy_execute)
-
-    released = build_jobs_service.release_worker_jobs(test_db_session, worker_id='worker:one')
-
-    assert [job.id for job in released] == [claimed.id]
-    select_stmts = [stmt for stmt in captured if getattr(stmt, '_for_update_arg', None) is not None]
-    assert len(select_stmts) == 1
-    assert select_stmts[0]._for_update_arg.skip_locked
-
-
-def test_release_worker_jobs_blocks_concurrent_transition_until_committed(test_db_session, test_engine, monkeypatch) -> None:
-    claimed = _claim_and_expire(test_db_session, worker_id='worker:one')
-
-    competitor_outcome: dict[str, bool] = {}
-    original_commit = test_db_session.commit
-
-    def racing_commit() -> None:
-        if 'blocked' not in competitor_outcome:
-            try:
-                with test_engine.connect() as conn:
-                    conn.execute(text("SET LOCAL lock_timeout = '300ms'"))
-                    conn.execute(
-                        text("UPDATE build_jobs SET status = 'FAILED' WHERE id = :job_id"),
-                        {'job_id': claimed.id},
-                    )
-                competitor_outcome['blocked'] = False
-            except OperationalError:
-                competitor_outcome['blocked'] = True
-        original_commit()
-
-    monkeypatch.setattr(test_db_session, 'commit', racing_commit)
-
-    released = build_jobs_service.release_worker_jobs(test_db_session, worker_id='worker:one')
-
-    assert [job.id for job in released] == [claimed.id]
-    assert competitor_outcome['blocked'] is True
-
-    test_db_session.expire_all()
-    current = test_db_session.get(BuildJob, claimed.id)
-    assert current is not None
-    assert current.status == BuildJobStatus.QUEUED
-    assert current.lease_owner is None
-    assert current.claim_token is None
-
-
-def test_release_worker_jobs_does_not_requeue_after_concurrent_reclaim(test_db_session, test_engine, monkeypatch) -> None:
-    claimed = _claim_and_expire(test_db_session, worker_id='worker:one')
-    previous_generation = claimed.lease_generation
-    previous_attempts = claimed.attempts
-
-    def thief_is_blocked() -> bool:
-        with Session(test_engine) as other:
-            stolen = build_jobs_service.claim_next_job(other, worker_id='worker:thief')
-            other.rollback()
-        return stolen is None
-
-    original_commit = test_db_session.commit
-    state: dict[str, bool] = {}
-
-    def racing_commit() -> None:
-        if 'checked' not in state:
-            state['checked'] = True
-            # While the release transaction holds the row locks, a competing
-            # scheduler using SKIP LOCKED cannot see the rows to reclaim them.
-            state['thief_blocked'] = thief_is_blocked()
-        original_commit()
-
-    monkeypatch.setattr(test_db_session, 'commit', racing_commit)
-
-    released = build_jobs_service.release_worker_jobs(test_db_session, worker_id='worker:one')
-
-    assert [job.id for job in released] == [claimed.id]
-    assert state['thief_blocked'] is True
-
-    test_db_session.expire_all()
-    current = test_db_session.get(BuildJob, claimed.id)
-    assert current is not None
-    assert current.status == BuildJobStatus.QUEUED
-    assert current.lease_owner is None
-
-    thief = build_jobs_service.claim_next_job(test_db_session, worker_id='worker:thief')
-    assert thief is not None
-    assert thief.id == claimed.id
-    assert thief.lease_generation == previous_generation + 1
-    assert thief.attempts == previous_attempts + 1
-
-
 def _claim_active(session: Session, *, worker_id: str) -> BuildJob:
     build_jobs_service.create_job(
         session,
@@ -380,21 +285,3 @@ def _claim_active(session: Session, *, worker_id: str) -> BuildJob:
     claimed = build_jobs_service.claim_next_job(session, worker_id=worker_id)
     assert claimed is not None
     return claimed
-
-
-def test_release_worker_jobs_leaves_other_workers_untouched(test_db_session: Session) -> None:
-    mine = _claim_active(test_db_session, worker_id='worker:one')
-    theirs = _claim_active(test_db_session, worker_id='worker:two')
-
-    mine.lease_expires_at = datetime.now(UTC) - timedelta(seconds=1)
-    test_db_session.add(mine)
-    test_db_session.commit()
-
-    released = build_jobs_service.release_worker_jobs(test_db_session, worker_id='worker:one')
-
-    assert [job.id for job in released] == [mine.id]
-    test_db_session.expire_all()
-    still_theirs = test_db_session.get(BuildJob, theirs.id)
-    assert still_theirs is not None
-    assert still_theirs.status == BuildJobStatus.RUNNING
-    assert still_theirs.lease_owner == 'worker:two'

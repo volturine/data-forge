@@ -86,10 +86,8 @@ keys into the worker container with an extra `volumes:` entry on the `worker`
 service; the manager reads `~/.ssh` for `ssh://` hosts.
 
 An empty `DF_COMPUTE_WORKER_DOCKER_HOSTS` keeps the single-host behavior.
-Deprecated `DF_ENGINE_*` and `ENGINE_*` environment names remain accepted for
-one release and emit a warning when read. The old JSON field `engine_network`
-also remains accepted for one release; use `compute_worker_network` in new
-host entries.
+Host entries accept only the fields shown above plus `compute_worker_network`;
+an unknown field such as the removed `engine_network` is rejected at startup.
 
 ## Verify
 

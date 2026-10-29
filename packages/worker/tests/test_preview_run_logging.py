@@ -1,43 +1,25 @@
 import uuid
-from typing import Any, cast
 from unittest.mock import MagicMock, patch
 
 import pytest
+from worker_test_support import FakeEngine
 
 from runtime import compute_service
 from runtime.compute_manager import ProcessManager
 from runtime.domain.compute.result import ComputeWorkerResult
 
 
-class _PreviewEngine:
+class _PreviewEngine(FakeEngine):
+    """A fake engine whose preview job completes with a five-row result."""
+
     def __init__(self, identity, resource_config) -> None:
-        self.analysis_id = identity.resource_id
-        self.resource_config = resource_config or {}
+        super().__init__(identity.resource_id, resource_config)
         self.effective_resources = {"max_threads": 1}
-        self.current_job_id: str | None = None
-        self._alive = False
         self._result: ComputeWorkerResult | None = None
-        self._capacity_notifier = None
 
     @property
     def process_id(self) -> int | None:
         return None
-
-    @property
-    def last_known_alive(self) -> bool:
-        return self._alive
-
-    def bind_capacity_notifier(self, notifier) -> None:
-        self._capacity_notifier = notifier
-
-    def start(self) -> None:
-        self._alive = True
-
-    def is_process_alive(self) -> bool:
-        return self._alive
-
-    def check_health(self) -> bool:
-        return self._alive
 
     def preview(self, *_args, **_kwargs) -> str:
         job_id = "preview-job"
@@ -64,9 +46,6 @@ class _PreviewEngine:
 
     def get_progress_event(self, *_args, **_kwargs):
         return None
-
-    def shutdown(self) -> None:
-        self._alive = False
 
 
 def _pipeline(sample_datasource, analysis_id: str) -> dict[str, object]:
@@ -112,7 +91,7 @@ def test_preview_step_persists_compute_worker_run_by_default(sample_datasource, 
     caplog.set_level("WARNING", logger="runtime.compute_service")
     analysis_id = f"preview-log-{uuid.uuid4()}"
     pipeline = _pipeline(sample_datasource, analysis_id)
-    manager = ProcessManager(engine_factory=lambda identity, config: cast(Any, _PreviewEngine(identity, config)))
+    manager = ProcessManager(engine_factory=_PreviewEngine)
     internal_client = _internal_client_mock()
     try:
         with patch("runtime.compute_service.client_from_env", return_value=internal_client):
@@ -153,7 +132,7 @@ def test_preview_step_skips_compute_worker_run_persistence_when_disabled(sample_
     monkeypatch.setattr(compute_service.settings, "persist_preview_runs", False)
     analysis_id = f"preview-no-log-{uuid.uuid4()}"
     pipeline = _pipeline(sample_datasource, analysis_id)
-    manager = ProcessManager(engine_factory=lambda identity, config: cast(Any, _PreviewEngine(identity, config)))
+    manager = ProcessManager(engine_factory=_PreviewEngine)
     internal_client = _internal_client_mock()
     try:
         with patch("runtime.compute_service.client_from_env", return_value=internal_client):
@@ -181,7 +160,7 @@ def test_preview_step_finalizes_run_when_engine_fails(sample_datasource, monkeyp
     pipeline = _pipeline(sample_datasource, analysis_id)
     internal_client = _internal_client_mock()
 
-    manager = ProcessManager(engine_factory=lambda identity, config: cast(Any, _PreviewEngine(identity, config)))
+    manager = ProcessManager(engine_factory=_PreviewEngine)
     with (
         patch("runtime.compute_service.client_from_env", return_value=internal_client),
         patch.object(manager, "acquire_engine", side_effect=RuntimeError("engine failed")),
@@ -207,8 +186,6 @@ def test_preview_step_finalizes_run_when_engine_fails(sample_datasource, monkeyp
 
 
 def test_hydrate_udfs_loads_code_for_protocol_enum_number(monkeypatch) -> None:
-    from unittest.mock import MagicMock
-
     client = MagicMock()
     client.udf_codes.return_value = {"udf-1": "def udf(value):\n    return value\n"}
     monkeypatch.setattr(compute_service, "client_from_env", lambda: client)
@@ -233,8 +210,6 @@ def test_hydrate_udfs_loads_code_for_protocol_enum_number(monkeypatch) -> None:
 
 
 def test_hydrate_udfs_missing_library_udf_fails(monkeypatch) -> None:
-    from unittest.mock import MagicMock
-
     client = MagicMock()
     client.udf_codes.return_value = {}
     monkeypatch.setattr(compute_service, "client_from_env", lambda: client)
@@ -258,7 +233,7 @@ def test_row_count_records_run_when_engine_acquire_fails(sample_datasource) -> N
     pipeline = _pipeline(sample_datasource, analysis_id)
     internal_client = _internal_client_mock()
     internal_client.compute_worker_run_state.return_value = None
-    manager = ProcessManager(engine_factory=lambda identity, config: cast(Any, _PreviewEngine(identity, config)))
+    manager = ProcessManager(engine_factory=_PreviewEngine)
 
     with (
         patch("runtime.compute_service.client_from_env", return_value=internal_client),

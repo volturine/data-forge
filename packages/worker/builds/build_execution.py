@@ -5,14 +5,15 @@ import contextlib
 import logging
 import time
 from collections.abc import AsyncIterator
-from datetime import UTC, datetime
 
 from builds.build_live import RuntimeBuild
 from dataforge_protocol import compute_pb2, enums_pb2
 from operations.step_converter import analysis_pipeline_to_execution_payload
 from runtime import compute_service as service
+from runtime.build_events import build_event
 from runtime.compute_manager import COMPUTE_WORKER_ADMISSION_PRIORITY_LIFECYCLE, ComputeWorkerCapacityFull, ProcessManager
 from runtime.domain.compute import schemas
+from runtime.domain.compute.identity import datasource_compute_worker_identity
 from runtime.domain.compute_worker_runs.schemas import ComputeWorkerRunKind
 from runtime.domain.datasource.models import DataSourceTargetKind
 from runtime.executors import run_compute_in_thread, run_control_in_thread, run_shutdown_in_thread
@@ -67,7 +68,7 @@ async def _emit_build_event(
     worker_id: str,
     payload: schemas.BuildEvent,
     *,
-    resource_config_json: dict[str, object] | None = None,
+    build: RuntimeBuild,
 ) -> None:
     token = set_namespace_context(claim.namespace)
     try:
@@ -79,8 +80,8 @@ async def _emit_build_event(
             worker_id=worker_id,
             claim_token=claim.claim_token,
             lease_generation=claim.lease_generation,
-            event=payload.model_dump(mode="json"),
-            resource_config_json=resource_config_json,
+            event=payload,
+            resource_config_json=build.resource_config_json,
         )
         if sequence is None:
             raise BuildJobLeaseLost(f"Build job {claim.job_id} event was rejected because its lease is no longer active")
@@ -102,12 +103,7 @@ async def _run_build_task(
             manager=manager,
             pipeline=pipeline,
             build=build,
-            emitter=lambda payload: _emit_build_event(
-                claim,
-                worker_id,
-                payload,
-                resource_config_json=build.resource_config_json,
-            ),
+            emitter=lambda payload: _emit_build_event(claim, worker_id, payload, build=build),
             publication_claim=claim,
             worker_id=worker_id,
         )
@@ -118,26 +114,23 @@ async def _run_build_task(
         await _emit_build_event(
             claim,
             worker_id,
-            schemas.BuildFailedEvent(
-                build_id=build.build_id,
-                analysis_id=build.analysis_id,
-                emitted_at=datetime.now(UTC),
-                current_kind=ComputeWorkerRunKind.parse(build.current_kind),
-                current_datasource_id=build.current_datasource_id,
-                tab_id=build.current_tab_id,
-                tab_name=build.current_tab_name,
-                current_output_id=build.current_output_id,
-                current_output_name=build.current_output_name,
-                compute_worker_run_id=build.current_compute_worker_run_id,
-                progress=0.0,
-                elapsed_ms=0,
-                total_steps=build.total_steps,
-                tabs_built=0,
-                results=[],
-                duration_ms=0,
-                error="Build failed due to an internal error",
+            build_event(
+                build,
+                build.analysis_id,
+                {
+                    "type": schemas.BuildEventType.FAILED,
+                    "tab_id": build.current_tab_id,
+                    "tab_name": build.current_tab_name,
+                    "progress": 0.0,
+                    "elapsed_ms": 0,
+                    "total_steps": build.total_steps,
+                    "tabs_built": 0,
+                    "results": [],
+                    "duration_ms": 0,
+                    "error": "Build failed due to an internal error",
+                },
             ),
-            resource_config_json=build.resource_config_json,
+            build=build,
         )
     finally:
         reset_namespace(token)
@@ -191,36 +184,28 @@ async def _run_queued_build_job(
             from datasources import execution as datasource_execution
             from runtime.config import settings as worker_settings
 
-            datasource_identity = compute_pb2.ComputeWorkerIdentity(
-                scope=enums_pb2.COMPUTE_WORKER_SCOPE_DATASOURCE_PREVIEW,
-                reuse_policy=enums_pb2.COMPUTE_WORKER_REUSE_POLICY_SHARED,
-                datasource_id=datasource_id,
-                resource_id=datasource_id,
-            )
+            datasource_identity = datasource_compute_worker_identity(datasource_id)
             step_id = f"{build.build_id}:ingest"
             step_name = "Ingest"
             await _emit_build_event(
                 claim,
                 worker_id,
-                schemas.BuildStepStartEvent(
-                    build_id=build.build_id,
-                    analysis_id=build.analysis_id,
-                    emitted_at=datetime.now(UTC),
-                    current_kind=ComputeWorkerRunKind.parse(build.current_kind),
-                    current_datasource_id=build.current_datasource_id,
-                    tab_id=build.current_tab_id,
-                    tab_name=build.current_tab_name,
-                    current_output_id=build.current_output_id,
-                    current_output_name=build.current_output_name,
-                    compute_worker_run_id=None,
-                    build_step_index=0,
-                    step_index=0,
-                    step_id=step_id,
-                    step_name=step_name,
-                    step_type="read",
-                    total_steps=1,
+                build_event(
+                    build,
+                    build.analysis_id,
+                    {
+                        "type": schemas.BuildEventType.STEP_START,
+                        "tab_id": build.current_tab_id,
+                        "tab_name": build.current_tab_name,
+                        "build_step_index": 0,
+                        "step_index": 0,
+                        "step_id": step_id,
+                        "step_name": step_name,
+                        "step_type": "read",
+                        "total_steps": 1,
+                    },
                 ),
-                resource_config_json=build.resource_config_json,
+                build=build,
             )
             started = time.perf_counter()
             try:
@@ -244,50 +229,44 @@ async def _run_queued_build_job(
                 await _emit_build_event(
                     claim,
                     worker_id,
-                    schemas.BuildStepFailedEvent(
-                        build_id=build.build_id,
-                        analysis_id=build.analysis_id,
-                        emitted_at=datetime.now(UTC),
-                        current_kind=ComputeWorkerRunKind.parse(build.current_kind),
-                        current_datasource_id=build.current_datasource_id,
-                        tab_id=build.current_tab_id,
-                        tab_name=build.current_tab_name,
-                        current_output_id=build.current_output_id,
-                        current_output_name=build.current_output_name,
-                        compute_worker_run_id=None,
-                        build_step_index=0,
-                        step_index=0,
-                        step_id=step_id,
-                        step_name=step_name,
-                        step_type="read",
-                        error=str(exc),
-                        total_steps=1,
+                    build_event(
+                        build,
+                        build.analysis_id,
+                        {
+                            "type": schemas.BuildEventType.STEP_FAILED,
+                            "tab_id": build.current_tab_id,
+                            "tab_name": build.current_tab_name,
+                            "build_step_index": 0,
+                            "step_index": 0,
+                            "step_id": step_id,
+                            "step_name": step_name,
+                            "step_type": "read",
+                            "error": str(exc),
+                            "total_steps": 1,
+                        },
                     ),
-                    resource_config_json=build.resource_config_json,
+                    build=build,
                 )
                 await _emit_build_event(
                     claim,
                     worker_id,
-                    schemas.BuildFailedEvent(
-                        build_id=build.build_id,
-                        analysis_id=build.analysis_id,
-                        emitted_at=datetime.now(UTC),
-                        current_kind=ComputeWorkerRunKind.parse(build.current_kind),
-                        current_datasource_id=build.current_datasource_id,
-                        tab_id=build.current_tab_id,
-                        tab_name=build.current_tab_name,
-                        current_output_id=build.current_output_id,
-                        current_output_name=build.current_output_name,
-                        compute_worker_run_id=None,
-                        progress=0.0,
-                        elapsed_ms=elapsed_ms,
-                        total_steps=1,
-                        tabs_built=0,
-                        results=[],
-                        duration_ms=elapsed_ms,
-                        error=str(exc),
+                    build_event(
+                        build,
+                        build.analysis_id,
+                        {
+                            "type": schemas.BuildEventType.FAILED,
+                            "tab_id": build.current_tab_id,
+                            "tab_name": build.current_tab_name,
+                            "progress": 0.0,
+                            "elapsed_ms": elapsed_ms,
+                            "total_steps": 1,
+                            "tabs_built": 0,
+                            "results": [],
+                            "duration_ms": elapsed_ms,
+                            "error": str(exc),
+                        },
                     ),
-                    resource_config_json=build.resource_config_json,
+                    build=build,
                 )
                 return
             elapsed_ms = int((time.perf_counter() - started) * 1000)
@@ -295,82 +274,77 @@ async def _run_queued_build_job(
             await _emit_build_event(
                 claim,
                 worker_id,
-                schemas.BuildStepCompleteEvent(
-                    build_id=build.build_id,
-                    analysis_id=build.analysis_id,
-                    emitted_at=datetime.now(UTC),
-                    current_kind=ComputeWorkerRunKind.parse(build.current_kind),
-                    current_datasource_id=build.current_datasource_id,
-                    tab_id=build.current_tab_id,
-                    tab_name=build.current_tab_name,
-                    current_output_id=build.current_output_id,
-                    current_output_name=refreshed_name,
-                    compute_worker_run_id=None,
-                    build_step_index=0,
-                    step_index=0,
-                    step_id=step_id,
-                    step_name=step_name,
-                    step_type="read",
-                    duration_ms=elapsed_ms,
-                    total_steps=1,
+                build_event(
+                    build,
+                    build.analysis_id,
+                    {
+                        "type": schemas.BuildEventType.STEP_COMPLETE,
+                        "tab_id": build.current_tab_id,
+                        "tab_name": build.current_tab_name,
+                        "current_output_name": refreshed_name,
+                        "build_step_index": 0,
+                        "step_index": 0,
+                        "step_id": step_id,
+                        "step_name": step_name,
+                        "step_type": "read",
+                        "duration_ms": elapsed_ms,
+                        "total_steps": 1,
+                    },
                 ),
-                resource_config_json=build.resource_config_json,
+                build=build,
             )
             await _emit_build_event(
                 claim,
                 worker_id,
-                schemas.BuildCompleteEvent(
-                    build_id=build.build_id,
-                    analysis_id=build.analysis_id,
-                    emitted_at=datetime.now(UTC),
-                    current_kind=ComputeWorkerRunKind.parse(build.current_kind),
-                    current_datasource_id=build.current_datasource_id,
-                    tab_id=build.current_tab_id,
-                    tab_name=build.current_tab_name,
-                    current_output_id=build.current_output_id,
-                    current_output_name=refreshed_name,
-                    compute_worker_run_id=None,
-                    elapsed_ms=elapsed_ms,
-                    total_steps=1,
-                    tabs_built=1,
-                    results=[
-                        schemas.BuildTabResult(
-                            tab_id=build.current_tab_id or build.build_id,
-                            tab_name=build.current_tab_name or refreshed_name,
-                            status=schemas.BuildTabStatus.SUCCESS,
-                            output_id=build.current_output_id,
-                            output_name=refreshed_name,
-                        )
-                    ],
-                    duration_ms=elapsed_ms,
+                build_event(
+                    build,
+                    build.analysis_id,
+                    {
+                        "type": schemas.BuildEventType.COMPLETE,
+                        "tab_id": build.current_tab_id,
+                        "tab_name": build.current_tab_name,
+                        "current_output_name": refreshed_name,
+                        "elapsed_ms": elapsed_ms,
+                        "total_steps": 1,
+                        "tabs_built": 1,
+                        "results": [
+                            schemas.BuildTabResult(
+                                tab_id=build.current_tab_id or build.build_id,
+                                tab_name=build.current_tab_name or refreshed_name,
+                                status=schemas.BuildTabStatus.SUCCESS,
+                                output_id=build.current_output_id,
+                                output_name=refreshed_name,
+                            )
+                        ],
+                        "duration_ms": elapsed_ms,
+                    },
                 ),
-                resource_config_json=build.resource_config_json,
+                build=build,
             )
             return
+        except BuildJobLeaseLost:
+            raise
         except Exception as exc:
             await _emit_build_event(
                 claim,
                 worker_id,
-                schemas.BuildFailedEvent(
-                    build_id=build.build_id,
-                    analysis_id=build.analysis_id,
-                    emitted_at=datetime.now(UTC),
-                    current_kind=ComputeWorkerRunKind.parse(build.current_kind),
-                    current_datasource_id=build.current_datasource_id,
-                    tab_id=build.current_tab_id,
-                    tab_name=build.current_tab_name,
-                    current_output_id=build.current_output_id,
-                    current_output_name=build.current_output_name,
-                    compute_worker_run_id=None,
-                    progress=0.0,
-                    elapsed_ms=0,
-                    total_steps=1,
-                    tabs_built=0,
-                    results=[],
-                    duration_ms=0,
-                    error=str(exc),
+                build_event(
+                    build,
+                    build.analysis_id,
+                    {
+                        "type": schemas.BuildEventType.FAILED,
+                        "tab_id": build.current_tab_id,
+                        "tab_name": build.current_tab_name,
+                        "progress": 0.0,
+                        "elapsed_ms": 0,
+                        "total_steps": 1,
+                        "tabs_built": 0,
+                        "results": [],
+                        "duration_ms": 0,
+                        "error": str(exc),
+                    },
                 ),
-                resource_config_json=build.resource_config_json,
+                build=build,
             )
             return
     build_identity = compute_pb2.ComputeWorkerIdentity(

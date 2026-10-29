@@ -1,6 +1,6 @@
 import { afterEach, describe, expect, test, vi } from 'vitest';
 import { fireEvent, render, screen } from '@testing-library/svelte';
-import StepConfig from './StepConfig.svelte';
+import StepConfigBody from './StepConfigBody.svelte';
 import { analysisStore } from '#lib/stores/analysis.svelte.js';
 import type { Analysis } from '#lib/types/analysis.js';
 
@@ -27,9 +27,10 @@ vi.mock('#lib/stores/namespace.svelte.js', async (importOriginal) => {
 	};
 });
 
-describe('StepConfig', () => {
+// Form behavior lives in the body; the editor E2E covers lazy loading and retry.
+describe('StepConfigBody', () => {
 	test('renders read-only config when the editor is locked', async () => {
-		render(StepConfig, {
+		render(StepConfigBody, {
 			props: {
 				step: {
 					id: 'step-1',
@@ -57,7 +58,7 @@ describe('StepConfig', () => {
 		const updateStepConfig = vi
 			.spyOn(analysisStore, 'updateStepConfig')
 			.mockImplementation(() => {});
-		render(StepConfig, {
+		render(StepConfigBody, {
 			props: {
 				step: {
 					id: 'step-download',
@@ -84,7 +85,7 @@ describe('StepConfig', () => {
 	});
 
 	test('apply stays disabled until a download step has a filename', async () => {
-		render(StepConfig, {
+		render(StepConfigBody, {
 			props: {
 				step: {
 					id: 'step-download',
@@ -149,7 +150,7 @@ describe('StepConfig', () => {
 			.spyOn(analysisStore, 'updateStepConfig')
 			.mockImplementation(() => {});
 
-		render(StepConfig, {
+		render(StepConfigBody, {
 			props: {
 				step: analysisStore.pipeline[0],
 				schema: {
@@ -197,7 +198,7 @@ describe('StepConfig', () => {
 			.mockImplementation(() => {});
 		mockInvalidateQueries.mockClear();
 
-		render(StepConfig, {
+		render(StepConfigBody, {
 			props: {
 				step: {
 					id: 'view-1',
@@ -245,7 +246,7 @@ describe('StepConfig', () => {
 			.mockImplementation(() => {});
 		mockInvalidateQueries.mockClear();
 
-		render(StepConfig, {
+		render(StepConfigBody, {
 			props: {
 				step: {
 					id: 'view-1',
@@ -258,7 +259,7 @@ describe('StepConfig', () => {
 			}
 		});
 
-		await fireEvent.input(screen.getByLabelText('Preview Rows'), {
+		await fireEvent.input(await screen.findByLabelText('Preview Rows'), {
 			target: { value: '200' }
 		});
 		await fireEvent.click(screen.getByRole('button', { name: 'Apply' }));

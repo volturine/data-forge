@@ -1,22 +1,8 @@
 from __future__ import annotations
 
-from hashlib import sha256
-
-from sqlalchemy import text
 from sqlmodel import Session
 
-
-def _datasource_lock_key(namespace: str, datasource_id: str) -> int:
-    digest = sha256(f'dataforge:datasource-lifecycle:{namespace}:{datasource_id}'.encode()).digest()
-    return int.from_bytes(digest[:8], byteorder='big', signed=True)
-
-
-def uses_postgres_advisory_locks(session: Session) -> bool:
-    get_bind = getattr(session, 'get_bind', None)
-    if not callable(get_bind):
-        return False
-    bind = get_bind()
-    return getattr(getattr(bind, 'dialect', None), 'name', None) == 'postgresql'
+from backend_core.claiming import advisory_xact_lock
 
 
 def lock_datasource_lifecycle(
@@ -33,10 +19,4 @@ def lock_datasource_lifecycle(
     take the exclusive form and therefore wait for in-flight enqueues before
     changing datasource state.
     """
-    if not uses_postgres_advisory_locks(session):
-        return
-    lock_function = 'pg_advisory_xact_lock_shared' if shared else 'pg_advisory_xact_lock'
-    session.execute(
-        text(f'SELECT {lock_function}(:key)'),
-        {'key': _datasource_lock_key(namespace, datasource_id)},
-    )
+    advisory_xact_lock(session, f'dataforge:datasource-lifecycle:{namespace}:{datasource_id}', shared=shared)

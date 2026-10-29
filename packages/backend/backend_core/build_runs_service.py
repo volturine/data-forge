@@ -1,7 +1,7 @@
 import logging
 import time
 import uuid
-from datetime import UTC, datetime
+from datetime import datetime
 from typing import Any, cast
 
 from google.protobuf import json_format, timestamp_pb2
@@ -14,13 +14,13 @@ from backend_core.domain.build_runs.models import BuildRunStatus
 from backend_core.domain.compute import schemas as compute_schemas
 from backend_core.domain.compute_worker_runs.schemas import ComputeWorkerRunExecutionCategory, ComputeWorkerRunKind
 from backend_core.domain.runtime.events import RuntimePayloadKind
-from backend_core.json_utils import copy_json_dict
+from backend_core.json_utils import copy_json_dict, copy_json_object
 from backend_core.namespace import get_namespace
 from backend_core.persistence.build_runs.models import BuildEvent, BuildRun, BuildRunDatasource
 from backend_core.persistence.datasource.models import DataSource
 from backend_core.persistence.runtime_events.models import RuntimeOutboxEvent
 from backend_core.sqlmodel_typing import col, sa
-from backend_core.time import utc_now as _utcnow
+from backend_core.time import aware_utc, utc_now as _utcnow
 from backend_core.transactions import committed, transaction
 from dataforge_protocol import compute_pb2
 
@@ -35,9 +35,8 @@ class _RejectedBuildEvent(Exception):
 
 
 def _timestamp(value: datetime) -> timestamp_pb2.Timestamp:
-    normalized = value if value.tzinfo is not None else value.replace(tzinfo=UTC)
     timestamp = timestamp_pb2.Timestamp()
-    timestamp.FromDatetime(normalized)
+    timestamp.FromDatetime(aware_utc(value))
     return timestamp
 
 
@@ -207,7 +206,6 @@ def stage_build_run(
     resource_config_json: dict[str, Any] | None = None,
     result_json: dict[str, Any] | None = None,
     status: BuildRunStatus | str = BuildRunStatus.RUNNING,
-    current_compute_worker_run_id: str | None = None,
     current_kind: str | None = None,
     current_datasource_id: str | None = None,
     current_tab_id: str | None = None,
@@ -231,9 +229,8 @@ def stage_build_run(
         status=BuildRunStatus.require(status),
         request_json=copy_json_dict(request_json),
         starter_json=copy_json_dict(starter_json),
-        resource_config_json=copy_json_dict(resource_config_json) if isinstance(resource_config_json, dict) else None,
-        result_json=copy_json_dict(result_json) if isinstance(result_json, dict) else None,
-        current_compute_worker_run_id=current_compute_worker_run_id,
+        resource_config_json=copy_json_object(resource_config_json),
+        result_json=copy_json_object(result_json),
         current_kind=current_kind,
         current_datasource_id=current_datasource_id,
         current_tab_id=current_tab_id,
@@ -321,18 +318,17 @@ def list_build_runs(
             )
         )
     stmt = stmt.order_by(desc(sa(BuildRun.created_at)), sa(BuildRun.id)).limit(limit).offset(offset)
-    runs = list(session.execute(stmt).scalars().all())
-    for run in runs:
-        session.refresh(run)
-    return runs
+    return list(session.execute(stmt.execution_options(populate_existing=True)).scalars().all())
 
 
 def has_inflight_build_for_schedule(session: Session, schedule_id: str) -> bool:
-    stmt = select(BuildRun).where(sa(BuildRun.schedule_id == schedule_id)).where(sa(BuildRun.status == BuildRunStatus.QUEUED)).limit(1)
-    if session.execute(stmt).first() is not None:
-        return True
-    running_stmt = select(BuildRun).where(sa(BuildRun.schedule_id == schedule_id)).where(sa(BuildRun.status == BuildRunStatus.RUNNING)).limit(1)
-    return session.execute(running_stmt).first() is not None
+    stmt = (
+        select(BuildRun)
+        .where(sa(BuildRun.schedule_id == schedule_id))
+        .where(col(BuildRun.status).in_((BuildRunStatus.QUEUED, BuildRunStatus.RUNNING)))
+        .limit(1)
+    )
+    return session.execute(stmt).first() is not None
 
 
 def _cas_update_build_run(
@@ -400,7 +396,7 @@ def stage_build_result_json(session: Session, build_id: str, result_json: dict[s
     run = session.get(BuildRun, build_id)
     if run is None:
         raise ValueError(f'Build run {build_id} not found')
-    run.result_json = copy_json_dict(result_json) if isinstance(result_json, dict) else None
+    run.result_json = copy_json_object(result_json)
     run.updated_at = _utcnow()
     run.version += 1
     session.add(run)
@@ -469,17 +465,18 @@ def stage_build_event(
     payload_json = event.model_dump(mode='json')
     record_phase('event_serialization_ms', phase_started)
     created_at = _utcnow()
-    event_row = BuildEvent(
-        id=event_id,
-        build_id=build_id,
-        namespace=run.namespace,
-        sequence=sequence,
-        type=event.type,
-        payload_json=payload_json,
-        compute_worker_run_id=event.compute_worker_run_id,
-        emitted_at=event.emitted_at,
-        created_at=created_at,
-    )
+    event_fields = {
+        'id': event_id,
+        'build_id': build_id,
+        'namespace': run_namespace,
+        'sequence': sequence,
+        'type': event.type,
+        'payload_json': payload_json,
+        'compute_worker_run_id': event.compute_worker_run_id,
+        'emitted_at': event.emitted_at,
+        'created_at': created_at,
+    }
+    event_row = BuildEvent(**event_fields)
     session.add(event_row)
     session.add(run)
     phase_started = time.perf_counter()
@@ -507,17 +504,7 @@ def stage_build_event(
             },
         )
         record_phase('notify_ms', phase_started)
-    return BuildEvent(
-        id=event_id,
-        build_id=build_id,
-        namespace=run_namespace,
-        sequence=sequence,
-        type=event.type,
-        payload_json=payload_json,
-        compute_worker_run_id=event.compute_worker_run_id,
-        emitted_at=event.emitted_at,
-        created_at=created_at,
-    )
+    return BuildEvent(**event_fields)
 
 
 def append_build_event(
@@ -588,7 +575,7 @@ def list_build_events_after(session: Session, build_id: str, sequence: int = 0) 
 def get_latest_sequence(session: Session, build_id: str) -> int:
     stmt = select(sa(BuildRun.next_event_sequence)).where(sa(BuildRun.id == build_id))
     next_sequence = session.execute(stmt).scalar_one_or_none()
-    return max(next_sequence - 1, 0) if isinstance(next_sequence, int) else 0
+    return max(next_sequence - 1, 0) if next_sequence is not None else 0
 
 
 def serialize_event_row(row: BuildEvent) -> dict[str, object]:
@@ -741,5 +728,5 @@ def build_summary(build_run: BuildRun) -> compute_schemas.BuildRunSummary:
         total_tabs=build_run.total_tabs,
         cancelled_at=build_run.cancelled_at,
         cancelled_by=build_run.cancelled_by,
-        result_json=copy_json_dict(build_run.result_json) if isinstance(build_run.result_json, dict) else None,
+        result_json=copy_json_object(build_run.result_json),
     )

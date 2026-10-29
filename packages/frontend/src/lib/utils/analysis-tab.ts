@@ -28,7 +28,7 @@ function requireString(value: unknown, field: string): string {
 	return trimmed;
 }
 
-function toSlug(value: string, field: string): string {
+export function slugify(value: string, field: string): string {
 	const trimmed = requireString(value, field);
 	return trimmed.replace(/\s+/g, '_').toLowerCase();
 }
@@ -40,7 +40,7 @@ export function buildOutputConfig(args: {
 	namespace?: string;
 }): AnalysisTabOutput {
 	const outputId = requireString(args.outputId, 'outputId');
-	const tableName = toSlug(args.name, 'name');
+	const tableName = slugify(args.name, 'name');
 	const branch = requireString(args.branch, 'branch');
 	const namespace = requireString(args.namespace ?? 'outputs', 'namespace');
 	return {

@@ -1,3 +1,4 @@
+import type { ChatModel } from '#lib/api/chat.js';
 import type { MCPTool } from '#lib/api/mcp.js';
 import type { TimelineEntry } from '#lib/stores/chat.svelte.js';
 import { formatEpoch, isSameLocalDay, isYesterday, nowEpochMs } from '#lib/utils/temporal.js';
@@ -73,4 +74,12 @@ export function formatTokens(count: number): string {
 	if (count >= 1_000_000) return `${(count / 1_000_000).toFixed(1)}M`;
 	if (count >= 1_000) return `${(count / 1_000).toFixed(1)}k`;
 	return String(count);
+}
+
+export function filterChatModels(models: ChatModel[], search: string): ChatModel[] {
+	if (!search) return models;
+	const query = search.toLowerCase();
+	return models.filter(
+		(m) => m.id.toLowerCase().includes(query) || m.name.toLowerCase().includes(query)
+	);
 }

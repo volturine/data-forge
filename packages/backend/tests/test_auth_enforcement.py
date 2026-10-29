@@ -230,7 +230,7 @@ class TestEngineWebsocketAuth:
 
 class TestNamespaceMiddleware:
     def test_headerless_health_does_not_register_implicit_namespace_when_auth_is_disabled(self, client: TestClient, monkeypatch: pytest.MonkeyPatch) -> None:
-        import backend_core.application as application
+        from backend_core import application
 
         monkeypatch.setattr('backend_core.auth_config.settings.auth_required', False)
 
@@ -258,8 +258,11 @@ class TestNamespaceMiddleware:
         namespace = f'fresh-{uuid.uuid4().hex[:8]}'
 
         def _seed(session):
-            from modules.auth.service import create_session, create_user
+            from backend_core.transactions import committed
+            from modules.auth.service import stage_create_session, stage_create_user
 
+            create_user = committed(stage_create_user, refresh=True)
+            create_session = committed(stage_create_session, refresh=True)
             user = create_user(session, f'{namespace}@example.com', 'Password123', 'NS Owner')
             return create_session(session, user.id, 'pytest-agent', '127.0.0.1')
 

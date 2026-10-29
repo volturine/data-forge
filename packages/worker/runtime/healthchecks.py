@@ -1,4 +1,4 @@
-from collections.abc import Callable, Sequence
+from collections.abc import Sequence
 from dataclasses import dataclass
 from datetime import UTC, datetime
 from typing import cast
@@ -54,23 +54,8 @@ def resolve_build_status(
     return BuildStatus.WARNING, f"{len(failed)}/{len(results)} failed", details
 
 
-_SCANNERS: dict[str, Callable[[str], pl.LazyFrame]] = {
-    "parquet": pl.scan_parquet,
-    "csv": pl.scan_csv,
-    "ndjson": pl.scan_ndjson,
-}
-
-
-def load_lazy_frame(output_path: str, export_format: str) -> pl.LazyFrame | None:
-    if scanner := _SCANNERS.get(export_format):
-        return scanner(output_path)
-    if export_format == "json":
-        return pl.read_json(output_path).lazy()
-    return None
-
-
 def _alias(check: HealthCheckSpec, suffix: str) -> str:
-    if HealthCheckType.require(check.check_type) == HealthCheckType.ROW_COUNT and suffix == "count":
+    if check.check_type == HealthCheckType.ROW_COUNT and suffix == "count":
         return "row_count__count"
     return f"{check.id}__{suffix}"
 
@@ -125,7 +110,7 @@ def _missing_column(check: HealthCheckSpec, *, now: datetime) -> HealthCheckResu
 
 
 def _evaluate(check: HealthCheckSpec, *, values: dict[str, object], schema_names: set[str]) -> tuple[bool, str, dict[str, object]]:
-    match HealthCheckType.require(check.check_type):
+    match check.check_type:
         case HealthCheckType.ROW_COUNT:
             count = _value_int(check, values, "count")
             minimum = _config_int(check, "min_rows")
@@ -186,9 +171,8 @@ def _expressions(checks: list[HealthCheckSpec], schema_names: set[str]) -> tuple
     sorted_names = sorted(schema_names)
     row_count_added = False
     for check in checks:
-        check_type = HealthCheckType.require(check.check_type)
         column = _column(check)
-        match check_type:
+        match check.check_type:
             case HealthCheckType.ROW_COUNT:
                 valid.append(check)
                 if not row_count_added:

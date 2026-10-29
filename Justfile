@@ -453,7 +453,7 @@ test-e2e-capacity-raw: _test-container-guard
     fi
     scripts/test_e2e.sh capacity
 
-test-e2e-concurrency browsers='50':
+test-e2e-concurrency browsers='50' repeats='1':
     #!/usr/bin/env bash
     set -euo pipefail
     browsers={{quote(browsers)}}
@@ -462,8 +462,15 @@ test-e2e-concurrency browsers='50':
         echo "Expected a positive browser count, got: $browsers" >&2
         exit 2
     fi
+    repeats={{quote(repeats)}}
+    repeats="${repeats#repeats=}"
+    if [[ ! "$repeats" =~ ^[1-9][0-9]*$ ]]; then
+        echo "Expected a positive repeat count, got: $repeats" >&2
+        exit 2
+    fi
     DATAFORGE_SKIP_PROTOCOL_GENERATE=1 E2E_SHARDS=1 PW_E2E_WORKERS=1 \
-        E2E_CONCURRENCY_BROWSERS="$browsers" PLAYWRIGHT_TEST_FILES=tests/concurrency.test.ts \
+        E2E_CONCURRENCY_BROWSERS="$browsers" E2E_CONCURRENCY_REPEATS="$repeats" \
+        PLAYWRIGHT_TEST_FILES=tests/concurrency.test.ts \
         TEST_TARGET=test-e2e scripts/test_container.sh
 
 # Containerized dev stack (source mounts + Vite). Uses the same host ports as
@@ -477,6 +484,19 @@ docker-dev-down:
 
 docker-dev-logs:
     docker compose --env-file docker/env/dev.env -p dataforge-dev -f docker/compose.yaml -f docker/compose.dev.yaml logs -f
+
+# Write a git-ignored production env file from docker/env/prod.env with
+# generated passwords, tokens and keys. Refuses to overwrite an existing file.
+docker-init env_file='docker/env/prod.local.env':
+    python3 scripts/deploy.py --init --env-file {{quote(env_file)}}
+
+# Resolve and validate the self-hosted production Compose configuration without
+# changing the Docker daemon. `docker-up` performs the checked deployment.
+docker-check env_file='docker/env/prod.env' project='dataforge-prod':
+    python3 scripts/deploy.py --env-file {{quote(env_file)}} --project {{quote(project)}} --check
+
+docker-up env_file='docker/env/prod.env' project='dataforge-prod' wait_timeout='180':
+    python3 scripts/deploy.py --env-file {{quote(env_file)}} --project {{quote(project)}} --wait-timeout {{quote(wait_timeout)}}
 
 # Build local fixed-role images and smoke-test the production compose topology.
 # Overrides only DF_*_IMAGE tags and the host port; still uses
@@ -504,8 +524,10 @@ docker-prod:
         -f docker/compose.yaml \
         up -d "$@"
 
+# Stops the stack but keeps its volumes: this project is also the default
+# `docker-up` deployment, so `-v` would delete production data.
 docker-prod-down:
-    docker compose --env-file docker/env/prod.env -p dataforge-prod -f docker/compose.yaml down -v --remove-orphans
+    docker compose --env-file docker/env/prod.env -p dataforge-prod -f docker/compose.yaml down --remove-orphans
 
 docker-prod-logs:
     docker compose --env-file docker/env/prod.env -p dataforge-prod -f docker/compose.yaml logs -f

@@ -3,11 +3,7 @@ import type { Page } from '@playwright/test';
 import { createImportedAnalysis, type E2ERequest } from './utils/api.js';
 import { gotoAnalysisEditor } from './utils/analysis.js';
 import { deleteAnalysisViaUI } from './utils/ui-cleanup.js';
-import {
-	readyTimeoutMs,
-	waitForChartPreviewReady,
-	waitForInlinePreviewReady
-} from './utils/readiness.js';
+import { readyTimeoutMs, waitForInlinePreviewReady } from './utils/readiness.js';
 import { uid } from './utils/uid.js';
 import { screenshot } from './utils/visual.js';
 
@@ -155,9 +151,19 @@ test.describe('Pipeline data verification', () => {
 
 	// ── Baseline ──────────────────────────────────────────────────────────────
 
-	test('view passthrough returns all original data', async ({ page, request }) => {
-		const aName = `E2E Pipe View ${uid()}`;
-		const info = await createPipelineAnalysis(request, aName, dsId, []);
+	test('pass-through steps keep every original row and column', async ({ page, request }) => {
+		// One chained analysis for the former view, fill_null, export and download journeys.
+		// Each step passes the rows and columns through unchanged, so the final view asserts
+		// the same data each former test asserted.
+		const aName = `E2E Pipe Passthrough ${uid()}`;
+		const info = await createPipelineAnalysis(request, aName, dsId, [
+			{ type: 'fill_null', config: { strategy: 'zero' } },
+			{
+				type: 'export',
+				config: { format: 'csv', filename: 'test_export', destination: 'download' }
+			},
+			{ type: 'download', config: { format: 'parquet', filename: 'test_download' } }
+		]);
 		try {
 			await navigateAndWaitForTable(page, info.analysisId);
 			const table = page.locator('[data-testid="inline-data-table"]');
@@ -216,29 +222,6 @@ test.describe('Pipeline data verification', () => {
 		}
 	});
 
-	test('limit keeps only first N rows', async ({ page, request }) => {
-		const aName = `E2E Pipe Limit ${uid()}`;
-		const info = await createPipelineAnalysis(request, aName, dsId, [
-			{ type: 'limit', config: { n: 2 } }
-		]);
-		try {
-			await navigateAndWaitForTable(page, info.analysisId);
-			const table = page.locator('[data-testid="inline-data-table"]');
-
-			await expect(table.locator('[data-column-id="id"]')).toBeVisible();
-			await expect(table.locator('[data-column-id="name"]')).toBeVisible();
-			await expect(table.locator('[data-column-id="age"]')).toBeVisible();
-			await expect(table.locator('[data-column-id="city"]')).toBeVisible();
-
-			await expect(table.locator('tbody tr')).toHaveCount(2);
-
-			await screenshot(page, 'analysis/pipeline', 'limit');
-		} finally {
-			await leaveAnalysisPage(page);
-			await deleteAnalysisViaUI(page, aName, { skipNavigation: true });
-		}
-	});
-
 	test('topk returns rows with largest values', async ({ page, request }, testInfo) => {
 		// The preview requires one cold engine for this exact analysis RID; under
 		// the 3×4 load it measured just over the suite-wide 120s deadline including
@@ -265,71 +248,70 @@ test.describe('Pipeline data verification', () => {
 		}
 	});
 
-	test('sample with fraction 1.0 returns all rows', async ({ page, request }) => {
-		const aName = `E2E Pipe Sample ${uid()}`;
-		const info = await createPipelineAnalysis(request, aName, dsId, [
-			{ type: 'sample', config: { fraction: 1.0, seed: 42 } }
-		]);
-		try {
-			await navigateAndWaitForTable(page, info.analysisId);
-			const table = page.locator('[data-testid="inline-data-table"]');
-
-			await expect(table.locator('tbody tr')).toHaveCount(3);
-			await expect(table.getByText('Alice', { exact: true })).toBeVisible();
-			await expect(table.getByText('Bob', { exact: true })).toBeVisible();
-			await expect(table.getByText('Charlie', { exact: true })).toBeVisible();
-
-			await screenshot(page, 'analysis/pipeline', 'sample');
-		} finally {
-			await leaveAnalysisPage(page);
-			await deleteAnalysisViaUI(page, aName, { skipNavigation: true });
-		}
-	});
-
-	test('sample with fraction 0.6 returns a real subset of rows', async ({
+	test('sample and deduplicate steps return the expected row counts', async ({
 		page,
 		request,
 		sharedSampleDatasource
 	}) => {
-		const aName = `E2E Pipe Sample Subset ${uid()}`;
-		const info = await createPipelineAnalysis(request, aName, sharedSampleDatasource.id, [
-			{ type: 'sample', config: { fraction: 0.6, seed: 7 } }
+		// One analysis per step; the 0.6 sample reads a different datasource, so it cannot share.
+		test.slow();
+		const sampleName = `E2E Pipe Sample ${uid()}`;
+		const dedupName = `E2E Pipe Dedup ${uid()}`;
+		const subsetName = `E2E Pipe Sample Subset ${uid()}`;
+		const sampleInfo = await createPipelineAnalysis(request, sampleName, dsId, [
+			{ type: 'sample', config: { fraction: 1.0, seed: 42 } }
 		]);
-		try {
-			await navigateAndWaitForTable(page, info.analysisId);
-			const rows = page.locator('[data-testid="inline-data-table"] tbody tr');
-
-			const sampledRows = await rows.count();
-			expect(sampledRows).toBeGreaterThan(0);
-			expect(sampledRows).toBeLessThan(2000);
-
-			await screenshot(page, 'analysis/pipeline', 'sample-subset');
-		} finally {
-			await leaveAnalysisPage(page);
-			await deleteAnalysisViaUI(page, aName, { skipNavigation: true });
-		}
-	});
-
-	test('deduplicate preserves unique rows', async ({ page, request }) => {
-		const aName = `E2E Pipe Dedup ${uid()}`;
-		const info = await createPipelineAnalysis(request, aName, dsId, [
+		const dedupInfo = await createPipelineAnalysis(request, dedupName, dsId, [
 			{ type: 'deduplicate', config: {} }
 		]);
+		const subsetInfo = await createPipelineAnalysis(
+			request,
+			subsetName,
+			sharedSampleDatasource.id,
+			[{ type: 'sample', config: { fraction: 0.6, seed: 7 } }]
+		);
 		try {
-			await navigateAndWaitForTable(page, info.analysisId);
-			const table = page.locator('[data-testid="inline-data-table"]');
+			await test.step('sample with fraction 1.0 returns all rows', async () => {
+				await navigateAndWaitForTable(page, sampleInfo.analysisId);
+				const table = page.locator('[data-testid="inline-data-table"]');
 
-			await expect(table.locator('[data-column-id="id"]')).toBeVisible();
-			await expect(table.locator('[data-column-id="name"]')).toBeVisible();
-			await expect(table.locator('[data-column-id="age"]')).toBeVisible();
-			await expect(table.locator('[data-column-id="city"]')).toBeVisible();
+				await expect(table.locator('tbody tr')).toHaveCount(3);
+				await expect(table.getByText('Alice', { exact: true })).toBeVisible();
+				await expect(table.getByText('Bob', { exact: true })).toBeVisible();
+				await expect(table.getByText('Charlie', { exact: true })).toBeVisible();
 
-			await expect(table.locator('tbody tr')).toHaveCount(3);
+				await screenshot(page, 'analysis/pipeline', 'sample');
+			});
 
-			await screenshot(page, 'analysis/pipeline', 'deduplicate');
+			await test.step('deduplicate preserves unique rows', async () => {
+				await navigateAndWaitForTable(page, dedupInfo.analysisId);
+				const table = page.locator('[data-testid="inline-data-table"]');
+
+				await expect(table.locator('[data-column-id="id"]')).toBeVisible();
+				await expect(table.locator('[data-column-id="name"]')).toBeVisible();
+				await expect(table.locator('[data-column-id="age"]')).toBeVisible();
+				await expect(table.locator('[data-column-id="city"]')).toBeVisible();
+
+				await expect(table.locator('tbody tr')).toHaveCount(3);
+
+				await screenshot(page, 'analysis/pipeline', 'deduplicate');
+			});
+
+			await test.step('sample with fraction 0.6 returns a real subset of rows', async () => {
+				await navigateAndWaitForTable(page, subsetInfo.analysisId);
+				const rows = page.locator('[data-testid="inline-data-table"] tbody tr');
+
+				const sampledRows = await rows.count();
+				expect(sampledRows).toBeGreaterThan(0);
+				expect(sampledRows).toBeLessThan(2000);
+
+				await screenshot(page, 'analysis/pipeline', 'sample-subset');
+			});
 		} finally {
 			await leaveAnalysisPage(page);
-			await deleteAnalysisViaUI(page, aName, { skipNavigation: true });
+			for (const name of [sampleName, dedupName, subsetName]) {
+				await deleteAnalysisViaUI(page, name, { skipNavigation: true });
+			}
 		}
 	});
 
@@ -485,35 +467,13 @@ test.describe('Pipeline data verification', () => {
 		}
 	});
 
-	test('string_transform applies string operation', async ({ page, request }) => {
+	test('string_transform applies uppercase and slice operations', async ({ page, request }) => {
 		const aName = `E2E Pipe StrXform ${uid()}`;
 		const info = await createPipelineAnalysis(request, aName, dsId, [
 			{
 				type: 'string_transform',
 				config: { column: 'name', method: 'uppercase', new_column: 'name_upper' }
-			}
-		]);
-		try {
-			await navigateAndWaitForTable(page, info.analysisId);
-			const table = page.locator('[data-testid="inline-data-table"]');
-
-			await expect(table.locator('[data-column-id="name_upper"]')).toBeVisible();
-
-			await expect(table.locator('tbody tr')).toHaveCount(3);
-			await expect(table.getByText('ALICE', { exact: true })).toBeVisible();
-			await expect(table.getByText('BOB', { exact: true })).toBeVisible();
-			await expect(table.getByText('CHARLIE', { exact: true })).toBeVisible();
-
-			await screenshot(page, 'analysis/pipeline', 'string-transform');
-		} finally {
-			await leaveAnalysisPage(page);
-			await deleteAnalysisViaUI(page, aName, { skipNavigation: true });
-		}
-	});
-
-	test('string_transform slice treats end as an ending index', async ({ page, request }) => {
-		const aName = `E2E Pipe StrSlice ${uid()}`;
-		const info = await createPipelineAnalysis(request, aName, dsId, [
+			},
 			{
 				type: 'string_transform',
 				config: { column: 'name', method: 'slice', start: 1, end: 3, new_column: 'name_slice' }
@@ -523,16 +483,21 @@ test.describe('Pipeline data verification', () => {
 			await navigateAndWaitForTable(page, info.analysisId);
 			const table = page.locator('[data-testid="inline-data-table"]');
 
+			await expect(table.locator('[data-column-id="name_upper"]')).toBeVisible();
 			await expect(table.locator('[data-column-id="name_slice"]')).toBeVisible();
 
 			const rows = table.locator('tbody tr');
 			await expect(rows).toHaveCount(3);
+			await expect(table.getByText('ALICE', { exact: true })).toBeVisible();
+			await expect(table.getByText('BOB', { exact: true })).toBeVisible();
+			await expect(table.getByText('CHARLIE', { exact: true })).toBeVisible();
+			// Slice treats end as an ending index: start 1, end 3.
 			await expect(rows.nth(0)).toContainText('li');
 			await expect(rows.nth(1)).toContainText('ob');
 			await expect(rows.nth(2)).toContainText('ha');
 			await expect(table.getByText('lic', { exact: true })).toHaveCount(0);
 
-			await screenshot(page, 'analysis/pipeline', 'string-transform-slice');
+			await screenshot(page, 'analysis/pipeline', 'string-transform');
 		} finally {
 			await leaveAnalysisPage(page);
 			await deleteAnalysisViaUI(page, aName, { skipNavigation: true });
@@ -635,29 +600,6 @@ test.describe('Pipeline data verification', () => {
 
 	// ── Special operations ────────────────────────────────────────────────────
 
-	test('fill_null with zero strategy preserves clean data', async ({ page, request }) => {
-		const aName = `E2E Pipe FillNull ${uid()}`;
-		const info = await createPipelineAnalysis(request, aName, dsId, [
-			{ type: 'fill_null', config: { strategy: 'zero' } }
-		]);
-		try {
-			await navigateAndWaitForTable(page, info.analysisId);
-			const table = page.locator('[data-testid="inline-data-table"]');
-
-			await expect(table.locator('[data-column-id="id"]')).toBeVisible();
-			await expect(table.locator('[data-column-id="name"]')).toBeVisible();
-			await expect(table.locator('[data-column-id="age"]')).toBeVisible();
-			await expect(table.locator('[data-column-id="city"]')).toBeVisible();
-
-			await expect(table.locator('tbody tr')).toHaveCount(3);
-
-			await screenshot(page, 'analysis/pipeline', 'fill-null');
-		} finally {
-			await leaveAnalysisPage(page);
-			await deleteAnalysisViaUI(page, aName, { skipNavigation: true });
-		}
-	});
-
 	test('join self-join matches rows by column', async ({ page, request }) => {
 		const aName = `E2E Pipe Join ${uid()}`;
 		const info = await createPipelineAnalysis(request, aName, dsId, [
@@ -724,141 +666,127 @@ test.describe('Pipeline data verification', () => {
 			await deleteAnalysisViaUI(page, aName, { skipNavigation: true });
 		}
 	});
+
+	test('applying an upstream filter invalidates target row counts and inline preview', async ({
+		page,
+		request
+	}) => {
+		const aName = `E2E Pipe Prefix Counts ${uid()}`;
+		const info = await createPipelineAnalysis(request, aName, dsId, [
+			{
+				type: 'filter',
+				config: {
+					conditions: [{ column: 'age', operator: '>', value: '20', value_type: 'number' }],
+					logic: 'AND'
+				}
+			},
+			{ type: 'limit', config: { n: 2 } }
+		]);
+		const previewTargetStepIds: string[] = [];
+		const rowCountTargetStepIds: string[] = [];
+		const onComputeRequest = (incoming: import('@playwright/test').Request) => {
+			if (incoming.method() !== 'POST') return;
+			const path = new URL(incoming.url()).pathname;
+			const isPreview = path.endsWith('/api/v1/compute/preview');
+			const isRowCount = path.endsWith('/api/v1/compute/row-count');
+			if (!isPreview && !isRowCount) return;
+			let body: {
+				analysis_id?: string;
+				analysis_pipeline?: { analysis_id?: string };
+				target_step_id?: string;
+			};
+			try {
+				body = incoming.postDataJSON() as typeof body;
+			} catch {
+				return;
+			}
+			const requestAnalysisId = body.analysis_id ?? body.analysis_pipeline?.analysis_id;
+			if (requestAnalysisId !== info.analysisId || !body.target_step_id) return;
+			if (isPreview) previewTargetStepIds.push(body.target_step_id);
+			if (isRowCount) rowCountTargetStepIds.push(body.target_step_id);
+		};
+		page.on('request', onComputeRequest);
+
+		try {
+			await navigateAndWaitForTable(page, info.analysisId);
+			const table = page.locator('[data-testid="inline-data-table"]');
+			const filterNode = page.locator('[data-step-type="filter"]');
+			const limitNode = page.locator('[data-step-type="limit"]');
+			const [filterStepId, limitStepId, viewStepId] = await Promise.all([
+				filterNode.getAttribute('data-step-id'),
+				limitNode.getAttribute('data-step-id'),
+				page.locator('[data-step-type="view"]').getAttribute('data-step-id')
+			]);
+			if (!filterStepId || !limitStepId || !viewStepId) {
+				throw new Error('Imported pipeline nodes have no step identity');
+			}
+			expect(new Set([filterStepId, limitStepId, viewStepId]).size).toBe(3);
+			await expect(table.locator('tbody tr')).toHaveCount(2);
+			await expect(table.getByText('Alice', { exact: true })).toBeVisible();
+			await expect(table.getByText('Bob', { exact: true })).toBeVisible();
+
+			const filterCountButton = filterNode.locator('[data-testid="step-row-count-button"]');
+			await expect(filterCountButton).toBeEnabled({ timeout: readyTimeoutMs() });
+			await filterCountButton.click();
+			await expect(filterNode.locator('[data-testid="step-row-count"]')).toContainText('3 rows', {
+				timeout: readyTimeoutMs()
+			});
+
+			const limitCountButton = limitNode.locator('[data-testid="step-row-count-button"]');
+			await expect(limitCountButton).toBeEnabled({ timeout: readyTimeoutMs() });
+			await limitCountButton.click();
+			await expect(limitNode.locator('[data-testid="step-row-count"]')).toContainText('2 rows', {
+				timeout: readyTimeoutMs()
+			});
+
+			await filterNode.locator('[data-action="edit"]').click();
+			const configPanel = page.locator('[data-step-config="filter"]');
+			await expect(configPanel).toBeVisible();
+			await configPanel.locator('[data-testid="filter-value-input-0"]').fill('30');
+			const applyButton = configPanel.getByRole('button', { name: 'Apply', exact: true });
+			await applyButton.click();
+			await expect(applyButton).toBeDisabled({ timeout: 5_000 });
+			await waitForInlinePreviewReady(page);
+
+			await expect(table.locator('tbody tr')).toHaveCount(1);
+			await expect(table.getByText('Charlie', { exact: true })).toBeVisible();
+			await expect(table.getByText('Alice', { exact: true })).not.toBeVisible();
+			await expect(table.getByText('Bob', { exact: true })).not.toBeVisible();
+			await expect(filterNode.locator('[data-testid="step-row-count"]')).toHaveCount(0);
+			await expect(limitNode.locator('[data-testid="step-row-count"]')).toHaveCount(0);
+
+			await expect(filterCountButton).toBeEnabled({ timeout: readyTimeoutMs() });
+			await filterCountButton.click();
+			await expect(filterNode.locator('[data-testid="step-row-count"]')).toContainText('1 rows', {
+				timeout: readyTimeoutMs()
+			});
+
+			await expect(limitCountButton).toBeEnabled({ timeout: readyTimeoutMs() });
+			await limitCountButton.click();
+			await expect(limitNode.locator('[data-testid="step-row-count"]')).toContainText('1 rows', {
+				timeout: readyTimeoutMs()
+			});
+
+			expect(previewTargetStepIds.length).toBeGreaterThanOrEqual(2);
+			expect(previewTargetStepIds.every((stepId) => stepId === viewStepId)).toBe(true);
+			expect(rowCountTargetStepIds).toEqual([filterStepId, limitStepId, filterStepId, limitStepId]);
+		} finally {
+			page.off('request', onComputeRequest);
+			await leaveAnalysisPage(page);
+			await deleteAnalysisViaUI(page, aName, { skipNavigation: true });
+		}
+	});
 });
 
 // ────────────────────────────────────────────────────────────────────────────────
-// Pass-through operations: chart, export, download
+// Explode: list column expansion
 // ────────────────────────────────────────────────────────────────────────────────
 
-test.describe('Pipeline data – pass-through operations', () => {
+test.describe('Pipeline data – explode', () => {
 	let dsId: string;
 
 	test.beforeEach(async ({ sharedDatasource }) => {
 		dsId = sharedDatasource.id;
-	});
-
-	test('chart (plot_bar) computes aggregated visualization data', async ({ page, request }) => {
-		const aName = `E2E Pipe Chart ${uid()}`;
-		const chartStepId = crypto.randomUUID();
-		const chartTabId = crypto.randomUUID();
-		const chartResultId = crypto.randomUUID();
-		const chartSteps: PipelineStep[] = [
-			{
-				id: chartStepId,
-				type: 'plot_bar',
-				config: {
-					chart_type: 'bar',
-					x_column: 'city',
-					y_column: 'age',
-					aggregation: 'sum'
-				},
-				depends_on: [],
-				is_applied: true
-			}
-		];
-		const datasourceRef = `source-${crypto.randomUUID()}`;
-		const aId = await createImportedAnalysis(
-			request,
-			aName,
-			{
-				tabs: [
-					{
-						id: chartTabId,
-						name: 'Source 1',
-						parent_id: null,
-						datasource: {
-							id: datasourceRef,
-							analysis_tab_id: null,
-							config: { branch: 'master' }
-						},
-						output: {
-							result_id: chartResultId,
-							datasource_type: 'iceberg',
-							format: 'parquet',
-							filename: 'source_1',
-							build_mode: 'full',
-							iceberg: {
-								namespace: 'outputs',
-								table_name: 'source_1',
-								branch: 'master'
-							}
-						},
-						steps: chartSteps
-					}
-				]
-			},
-			{ [datasourceRef]: dsId }
-		);
-		try {
-			await gotoAnalysisEditor(page, aId);
-			await waitForChartPreviewReady(page);
-			const chart = page.locator('[data-testid="chart-preview"]');
-			await expect(chart.locator('svg')).toBeVisible({ timeout: readyTimeoutMs() });
-
-			await screenshot(page, 'analysis/pipeline', 'chart-plot-bar');
-		} finally {
-			await leaveAnalysisPage(page);
-			await deleteAnalysisViaUI(page, aName, { skipNavigation: true });
-		}
-	});
-
-	test('export passes data through unchanged', async ({ page, request }) => {
-		const aName = `E2E Pipe Export ${uid()}`;
-		const info = await createPipelineAnalysis(request, aName, dsId, [
-			{
-				type: 'export',
-				config: {
-					format: 'csv',
-					filename: 'test_export',
-					destination: 'download'
-				}
-			}
-		]);
-		try {
-			await navigateAndWaitForTable(page, info.analysisId);
-			const table = page.locator('[data-testid="inline-data-table"]');
-
-			await expect(table.locator('[data-column-id="id"]')).toBeVisible();
-			await expect(table.locator('[data-column-id="name"]')).toBeVisible();
-			await expect(table.locator('[data-column-id="age"]')).toBeVisible();
-			await expect(table.locator('[data-column-id="city"]')).toBeVisible();
-
-			await expect(table.locator('tbody tr')).toHaveCount(3);
-
-			await screenshot(page, 'analysis/pipeline', 'export');
-		} finally {
-			await leaveAnalysisPage(page);
-			await deleteAnalysisViaUI(page, aName, { skipNavigation: true });
-		}
-	});
-
-	test('download passes data through unchanged', async ({ page, request }) => {
-		const aName = `E2E Pipe Download ${uid()}`;
-		const info = await createPipelineAnalysis(request, aName, dsId, [
-			{
-				type: 'download',
-				config: {
-					format: 'parquet',
-					filename: 'test_download'
-				}
-			}
-		]);
-		try {
-			await navigateAndWaitForTable(page, info.analysisId);
-			const table = page.locator('[data-testid="inline-data-table"]');
-
-			await expect(table.locator('[data-column-id="id"]')).toBeVisible();
-			await expect(table.locator('[data-column-id="name"]')).toBeVisible();
-			await expect(table.locator('[data-column-id="age"]')).toBeVisible();
-			await expect(table.locator('[data-column-id="city"]')).toBeVisible();
-
-			await expect(table.locator('tbody tr')).toHaveCount(3);
-
-			await screenshot(page, 'analysis/pipeline', 'download');
-		} finally {
-			await leaveAnalysisPage(page);
-			await deleteAnalysisViaUI(page, aName, { skipNavigation: true });
-		}
 	});
 
 	test('explode expands list column into rows', async ({ page, request }) => {

@@ -6,6 +6,7 @@ import pytest
 
 from backend_core import notification_delivery
 from backend_core.notification_delivery import DeliveryProgress
+from backend_core.settings_projection import SmtpSettings
 
 
 def test_email_delivery_uses_stable_message_id(monkeypatch) -> None:
@@ -13,13 +14,13 @@ def test_email_delivery_uses_stable_message_id(monkeypatch) -> None:
     monkeypatch.setattr(
         notification_delivery,
         'get_resolved_smtp',
-        lambda: {'host': 'smtp.example.com', 'port': 587, 'user': 'sender@example.com', 'password': 'secret'},
+        lambda: SmtpSettings(host='smtp.example.com', port=587, user='sender@example.com', password='secret'),
     )
     monkeypatch.setattr(notification_delivery, 'send_smtp_message', lambda _host, _port, _user, _password, message: sent.append(message))
 
     notification_delivery.deliver(
         {
-            'kind': notification_delivery.EMAIL_DELIVERY_KIND,
+            'kind': notification_delivery.DeliveryKind.EMAIL,
             'to': 'owner@example.com',
             'subject': 'Ready',
             'body': 'Output published',
@@ -45,7 +46,7 @@ def test_telegram_delivery_uses_persisted_target(monkeypatch) -> None:
 
     notification_delivery.deliver(
         {
-            'kind': notification_delivery.TELEGRAM_DELIVERY_KIND,
+            'kind': notification_delivery.DeliveryKind.TELEGRAM,
             'chat_id': '123',
             'message': 'Ready',
             'bot_token': 'subscriber-token',
@@ -68,7 +69,7 @@ def test_telegram_failure_redacts_bot_token_from_error(monkeypatch) -> None:
     try:
         notification_delivery.deliver(
             {
-                'kind': notification_delivery.TELEGRAM_DELIVERY_KIND,
+                'kind': notification_delivery.DeliveryKind.TELEGRAM,
                 'chat_id': '123',
                 'message': 'Ready',
                 'bot_token': '12345:SECRET-TOKEN',
@@ -99,7 +100,7 @@ def test_telegram_status_error_redacts_bot_token_from_url(monkeypatch) -> None:
     with pytest.raises(RuntimeError) as exc_info:
         notification_delivery.deliver(
             {
-                'kind': notification_delivery.TELEGRAM_DELIVERY_KIND,
+                'kind': notification_delivery.DeliveryKind.TELEGRAM,
                 'chat_id': '123',
                 'message': 'Ready',
                 'bot_token': '12345:SECRET-TOKEN',
@@ -140,7 +141,7 @@ def test_telegram_retry_skips_parts_with_durable_progress(monkeypatch) -> None:
 
     monkeypatch.setattr(notification_delivery.http_client, 'post', post)
     payload: dict[str, object] = {
-        'kind': notification_delivery.TELEGRAM_DELIVERY_KIND,
+        'kind': notification_delivery.DeliveryKind.TELEGRAM,
         'chat_id': '123',
         'message': 'Ready',
         'bot_token': 'subscriber-token',

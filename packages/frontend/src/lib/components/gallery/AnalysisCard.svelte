@@ -38,25 +38,21 @@
 		});
 	}
 
+	function isControlTarget(target: EventTarget | null): boolean {
+		return (target as HTMLElement).closest('button, input[type=checkbox]') !== null;
+	}
+
 	function handleClick(e: MouseEvent) {
-		const target = e.target as HTMLElement;
-		if (target.closest('button') || target.closest('input[type=checkbox]')) {
-			e.preventDefault();
-			return;
-		}
 		e.preventDefault();
+		if (isControlTarget(e.target)) return;
 		goto(resolve(`analysis/${analysis.id}`), { refreshAll: true });
 	}
 
 	function handleKeyPress(e: KeyboardEvent) {
-		if (
-			(e.key === 'Enter' || e.key === ' ') &&
-			!(e.target as HTMLElement).closest('button') &&
-			!(e.target as HTMLElement).closest('input[type=checkbox]')
-		) {
-			e.preventDefault();
-			goto(resolve(`analysis/${analysis.id}`), { refreshAll: true });
-		}
+		if (e.key !== 'Enter' && e.key !== ' ') return;
+		if (isControlTarget(e.target)) return;
+		e.preventDefault();
+		goto(resolve(`analysis/${analysis.id}`), { refreshAll: true });
 	}
 
 	function formatDate(date: string): string {

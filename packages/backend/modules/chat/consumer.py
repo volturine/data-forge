@@ -12,13 +12,16 @@ from typing import Any
 from fastapi import FastAPI
 
 from backend_core.namespace import normalize_namespace
+from modules.chat.models import ChatTurnStatus
 from modules.chat.sessions import MAX_MESSAGES, session_store
 from modules.chat.store import ChatClaimRevoked, ConfirmationPending, TurnClaim, chat_turn_store
 from modules.mcp.registry import build_tool_registry
 
 _MAX_ACTIVE_TURNS = 4
 _CLAIM_BATCH_SIZE = 4
-_RECOVERY_SECONDS = 1.0
+# Enqueue, confirmation and stop commits NOTIFY the coordinator, which wakes this
+# loop (and again after every LISTEN reconnect). The timed claim is only a backstop.
+_RECOVERY_SECONDS = 5.0
 _CONTROL_POLL_SECONDS = 0.5
 _DATABASE_EXECUTOR = ThreadPoolExecutor(max_workers=2, thread_name_prefix='chat-database')
 _PROVIDER_EXECUTOR = ThreadPoolExecutor(max_workers=4, thread_name_prefix='chat-provider')
@@ -75,7 +78,7 @@ class TurnRuntime:
         self,
         checkpoint: dict[str, Any],
         *,
-        status: str | None = None,
+        status: ChatTurnStatus | None = None,
         clear_confirmation: bool = False,
     ) -> None:
         checkpoint = {**checkpoint, 'provider_turn': self.provider_turn, 'usage': dict(self.turn_usage), 'use_text_format': self.use_text_format}
@@ -107,7 +110,7 @@ class TurnRuntime:
             if decision is not None:
                 await self.set_checkpoint(
                     {**self.checkpoint, 'phase': 'tool_ready' if decision else 'provider_request'},
-                    status='running',
+                    status=ChatTurnStatus.RUNNING,
                     clear_confirmation=True,
                 )
                 return decision
@@ -131,7 +134,7 @@ class TurnRuntime:
                     await self.push_event(
                         {'type': 'error', 'content': 'Generation interrupted by coordinator restart' if interrupted else 'Generation stopped'}
                     )
-                    await self.finish('interrupted' if interrupted else 'failed')
+                    await self.finish(ChatTurnStatus.INTERRUPTED if interrupted else ChatTurnStatus.FAILED)
             finally:
                 # A failed terminal write must not free admission while the
                 # uncancellable provider thread is still doing network I/O.
@@ -148,7 +151,7 @@ class TurnRuntime:
     def finished(self) -> bool:
         return self._finished
 
-    async def finish(self, status: str) -> None:
+    async def finish(self, status: ChatTurnStatus) -> None:
         if self._finished:
             return
         await _database(
@@ -239,7 +242,7 @@ class ChatTurnConsumer:
             if stop_requested:
                 runtime.stop_requested = True
                 await runtime.push_event({'type': 'error', 'content': 'Generation stopped'})
-                await runtime.finish('failed')
+                await runtime.finish(ChatTurnStatus.FAILED)
                 return
             from modules.chat.routes import _run_agent_turn
 

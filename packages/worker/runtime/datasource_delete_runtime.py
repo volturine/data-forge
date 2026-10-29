@@ -5,9 +5,9 @@ import logging
 from collections import deque
 from collections.abc import Callable
 
-from dataforge_protocol import compute_pb2, enums_pb2
 from runtime.compute_manager import ProcessManager
 from runtime.config import settings
+from runtime.domain.compute.identity import datasource_compute_worker_identity
 from runtime.executors import run_shutdown_in_thread
 from runtime.live_hubs import VersionHub
 from runtime.worker_runtime import RuntimeNamespaceDirectory
@@ -121,10 +121,4 @@ def _stop_idle_datasource_engine(
     namespace: str,
     manager: ProcessManager,
 ) -> bool:
-    identity = compute_pb2.ComputeWorkerIdentity(
-        scope=enums_pb2.COMPUTE_WORKER_SCOPE_DATASOURCE_PREVIEW,
-        reuse_policy=enums_pb2.COMPUTE_WORKER_REUSE_POLICY_SHARED,
-        datasource_id=datasource_id,
-        resource_id=datasource_id,
-    )
-    return manager.shutdown_compute_worker_if_idle(identity, namespace=namespace)
+    return manager.shutdown_compute_worker_if_idle(datasource_compute_worker_identity(datasource_id), namespace=namespace)

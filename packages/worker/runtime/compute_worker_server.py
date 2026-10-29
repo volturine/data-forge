@@ -15,8 +15,6 @@ from importlib import import_module
 from pathlib import Path
 
 import grpc
-import requests
-from google.protobuf.timestamp_pb2 import Timestamp
 
 from dataforge_protocol import compute_worker_runtime_pb2, compute_worker_runtime_pb2_grpc
 from runtime.config import settings
@@ -24,12 +22,12 @@ from runtime.domain.compute.result import ComputeWorkerResult
 from runtime.environment import read_env, read_int
 from runtime.json_values import dict_to_struct, encode_json_bytes
 from runtime.object_store import reset_object_store_client
+from runtime.protocol_mapping import datetime_to_timestamp
 
 logger = logging.getLogger(__name__)
 
 COMPUTE_WORKER_PROTOCOL_VERSION = 2
 _COMPUTE_WORKER_TOKEN_METADATA_KEY = "x-compute-worker-token"
-_LEGACY_ENGINE_TOKEN_METADATA_KEY = "x-engine-token"
 _MAX_RETAINED_COMPLETED_JOBS = 8
 _MAX_TOTAL_JOBS = 100
 _MAX_PROGRESS_EVENTS = 256
@@ -318,7 +316,7 @@ def _execute_job(
     payload: dict[str, object],
     progress_callback: Callable[[dict[str, object]], None],
 ) -> ComputeWorkerResult:
-    if kind.startswith("datasource_") or kind.startswith("excel_"):
+    if kind.startswith(("datasource_", "excel_")):
         return ComputeWorkerResult(
             job_id=job_id,
             data=_execute_datasource_job(kind, payload, progress_callback),
@@ -340,6 +338,8 @@ def _execute_job(
             raise ValueError("row_limit and offset must be integers")
         result_data = polars_compute.execute_preview(datasource_config, steps, row_limit, offset, job_id, additional_datasources, progress_callback)
     elif kind == "export":
+        import requests
+
         artifact_url = payload.get("artifact_url")
         artifact_upload_url = payload.get("artifact_upload_url")
         export_format = payload.get("export_format", "csv")
@@ -412,12 +412,6 @@ def _result_message(result: ComputeWorkerResult) -> compute_worker_runtime_pb2.C
     return message
 
 
-def _timestamp(value: datetime) -> Timestamp:
-    message = Timestamp()
-    message.FromDatetime(value)
-    return message
-
-
 class PolarsComputeWorkerServicer(compute_worker_runtime_pb2_grpc.PolarsComputeWorkerServiceServicer):
     def __init__(
         self,
@@ -474,13 +468,6 @@ class PolarsComputeWorkerServicer(compute_worker_runtime_pb2_grpc.PolarsComputeW
             return True
         metadata = dict(context.invocation_metadata())
         if metadata.get(_COMPUTE_WORKER_TOKEN_METADATA_KEY) == self._token:
-            return True
-        if metadata.get(_LEGACY_ENGINE_TOKEN_METADATA_KEY) == self._token:
-            logger.warning(
-                "Deprecated gRPC metadata key %s is in use; use %s instead. The compatibility alias will be removed after this release.",
-                _LEGACY_ENGINE_TOKEN_METADATA_KEY,
-                _COMPUTE_WORKER_TOKEN_METADATA_KEY,
-            )
             return True
         context.abort(grpc.StatusCode.UNAUTHENTICATED, "Invalid compute-worker token")
         return False
@@ -605,7 +592,7 @@ class PolarsComputeWorkerServicer(compute_worker_runtime_pb2_grpc.PolarsComputeW
                             compute_worker_runtime_pb2.ComputeWorkerJobEvent(
                                 job_id=request.job_id,
                                 sequence=max(sequence + 1, state.next_sequence),
-                                emitted_at=_timestamp(datetime.now(UTC)),
+                                emitted_at=datetime_to_timestamp(datetime.now(UTC)),
                                 result=_result_message(state.result),
                             )
                         )
@@ -618,12 +605,12 @@ class PolarsComputeWorkerServicer(compute_worker_runtime_pb2_grpc.PolarsComputeW
                             continue
                         event = dict(raw_event)
                         sequence = event_sequence
-                        emitted_at = datetime.fromisoformat(str(event.pop("emitted_at")).replace("Z", "+00:00"))
+                        emitted_at = datetime.fromisoformat(str(event.pop("emitted_at")))
                         batch.append(
                             compute_worker_runtime_pb2.ComputeWorkerJobEvent(
                                 job_id=request.job_id,
                                 sequence=event_sequence,
-                                emitted_at=_timestamp(emitted_at),
+                                emitted_at=datetime_to_timestamp(emitted_at),
                                 progress_json=encode_json_bytes(event),
                             )
                         )
@@ -633,7 +620,7 @@ class PolarsComputeWorkerServicer(compute_worker_runtime_pb2_grpc.PolarsComputeW
                                 compute_worker_runtime_pb2.ComputeWorkerJobEvent(
                                     job_id=request.job_id,
                                     sequence=sequence + 1,
-                                    emitted_at=_timestamp(datetime.now(UTC)),
+                                    emitted_at=datetime_to_timestamp(datetime.now(UTC)),
                                     result=_result_message(state.result),
                                 )
                             )
@@ -726,13 +713,13 @@ def main() -> None:
     # mistaken for a dead one while its first job imports the compute stack.
     _load_polars_compute()
     run_compute_worker_server(
-        host=read_env("COMPUTE_WORKER_RPC_HOST", "0.0.0.0", legacy_names=("ENGINE_RPC_HOST",)),
-        port=read_int("COMPUTE_WORKER_RPC_PORT", 50053, min_value=1, max_value=65535, legacy_names=("ENGINE_RPC_PORT",)),
-        compute_worker_identity=read_env("COMPUTE_WORKER_IDENTITY", "unknown", legacy_names=("ENGINE_IDENTITY",)),
+        host=read_env("COMPUTE_WORKER_RPC_HOST", "0.0.0.0"),
+        port=read_int("COMPUTE_WORKER_RPC_PORT", 50053, min_value=1, max_value=65535),
+        compute_worker_identity=read_env("COMPUTE_WORKER_IDENTITY", "unknown"),
         application_version=os.environ.get("APP_VERSION", "unknown"),
-        token=read_env("COMPUTE_WORKER_RPC_TOKEN", legacy_names=("ENGINE_RPC_TOKEN",)),
-        heartbeat_timeout_seconds=read_int("COMPUTE_WORKER_HEARTBEAT_TIMEOUT_SECONDS", 15, min_value=1, legacy_names=("ENGINE_HEARTBEAT_TIMEOUT_SECONDS",)),
-        init_timeout_seconds=read_int("COMPUTE_WORKER_INIT_TIMEOUT_SECONDS", 0, min_value=0, legacy_names=("ENGINE_INIT_TIMEOUT_SECONDS",)),
+        token=read_env("COMPUTE_WORKER_RPC_TOKEN"),
+        heartbeat_timeout_seconds=read_int("COMPUTE_WORKER_HEARTBEAT_TIMEOUT_SECONDS", 15, min_value=1),
+        init_timeout_seconds=read_int("COMPUTE_WORKER_INIT_TIMEOUT_SECONDS", 0, min_value=0),
     )
 
 

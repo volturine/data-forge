@@ -2,7 +2,7 @@
 
 import polars as pl
 
-from runtime.domain.compute.base import OperationHandler, OperationParams
+from runtime.domain.compute.base import OperationParams
 
 
 class TopKParams(OperationParams):
@@ -11,7 +11,5 @@ class TopKParams(OperationParams):
     descending: bool = False
 
 
-class TopKHandler(OperationHandler):
-    def __call__(self, lf: pl.LazyFrame, params: dict, **_) -> pl.LazyFrame:
-        validated = TopKParams.model_validate(params)
-        return lf.sort(validated.column, descending=validated.descending, maintain_order=True).head(validated.k)
+def topk(lf: pl.LazyFrame, params: TopKParams, **_) -> pl.LazyFrame:
+    return lf.sort(params.column, descending=params.descending, maintain_order=True).head(params.k)

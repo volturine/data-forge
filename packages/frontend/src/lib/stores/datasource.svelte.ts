@@ -1,54 +1,11 @@
 import type { DataSource, SchemaInfo } from '#lib/types/datasource.js';
-import {
-	listDatasources,
-	uploadFile as uploadFileApi,
-	getDatasourceSchema,
-	deleteDatasource as deleteDatasourceApi
-} from '#lib/api/datasource.js';
+import { getDatasourceSchema } from '#lib/api/datasource.js';
 import { SvelteMap } from 'svelte/reactivity';
 
 export class DatasourceStore {
 	datasources = $state.raw<DataSource[]>([]);
 	schemas = $state(new SvelteMap<string, SchemaInfo>());
-	loading = $state(false);
 	loaded = $state(false);
-	error = $state<string | null>(null);
-
-	async loadDatasources(includeHidden: boolean = false): Promise<void> {
-		this.loading = true;
-		this.error = null;
-
-		await listDatasources(includeHidden).match(
-			(datasources) => {
-				this.datasources = datasources;
-				this.loading = false;
-				this.loaded = true;
-			},
-			(err) => {
-				this.error = err.message;
-				this.loading = false;
-				this.loaded = true;
-			}
-		);
-	}
-
-	async uploadFile(file: File, name: string): Promise<DataSource> {
-		this.loading = true;
-		this.error = null;
-
-		return uploadFileApi(file, name).match(
-			(datasource) => {
-				this.datasources = [...this.datasources, datasource];
-				this.loading = false;
-				return datasource;
-			},
-			(err) => {
-				this.error = err.message;
-				this.loading = false;
-				throw new Error(err.message);
-			}
-		);
-	}
 
 	/**
 	 * Fetch column schema for a datasource.
@@ -88,23 +45,6 @@ export class DatasourceStore {
 		);
 	}
 
-	async deleteDatasource(id: string): Promise<void> {
-		this.loading = true;
-		this.error = null;
-
-		await deleteDatasourceApi(id).match(
-			() => {
-				this.datasources = this.datasources.filter((ds) => ds.id !== id);
-				this.schemas.delete(id);
-				this.loading = false;
-			},
-			(err) => {
-				this.error = err.message;
-				this.loading = false;
-			}
-		);
-	}
-
 	getDatasource(id: string): DataSource | undefined {
 		return this.datasources.find((ds) => ds.id === id);
 	}
@@ -117,8 +57,6 @@ export class DatasourceStore {
 	reset(): void {
 		this.datasources = [];
 		this.schemas.clear();
-		this.error = null;
-		this.loading = false;
 		this.loaded = false;
 	}
 }

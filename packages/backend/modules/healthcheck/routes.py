@@ -94,7 +94,7 @@ async def update_healthcheck(
     )
 
 
-@router.delete('/{healthcheck_id}', status_code=204, mcp=True)
+@router.delete('/{healthcheck_id}', status_code=204, mcp=True, mcp_confirm_required=True)
 @handle_errors(operation='delete healthcheck')
 async def delete_healthcheck(healthcheck_id: HealthcheckId):
     """Delete a healthcheck by ID. Use GET /healthchecks?datasource_id=... to find healthcheck IDs."""

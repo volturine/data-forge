@@ -1,4 +1,5 @@
-import ElkConstructor from 'elkjs/lib/elk.bundled.js';
+import ElkConstructor from 'elkjs/lib/elk-api.js';
+import elkWorkerUrl from 'elkjs/lib/elk-worker.min.js?url';
 import { MarkerType } from '@xyflow/svelte';
 import type { EdgeType, LineageResponse, NodeKind } from '#lib/api/lineage.js';
 
@@ -33,15 +34,6 @@ export interface LineageFlowEdge {
 	style: string;
 }
 
-// ELK is constructed lazily: instantiating at module scope runs during SSR
-// prerender, where no Worker implementation exists.
-let elk: InstanceType<typeof ElkConstructor> | null = null;
-
-function getElk(): InstanceType<typeof ElkConstructor> {
-	elk ??= new ElkConstructor();
-	return elk;
-}
-
 const EDGE_STYLES: Record<EdgeType, { color: string; dash: string }> = {
 	uses: { color: 'var(--colors-canvas-lineage-edge)', dash: '' },
 	produces: { color: 'var(--colors-fg-success)', dash: '' },
@@ -49,47 +41,168 @@ const EDGE_STYLES: Record<EdgeType, { color: string; dash: string }> = {
 	consumes_internal: { color: 'var(--colors-fg-faint)', dash: '6 4' }
 };
 
+export const LINEAGE_KIND_LABELS: Record<NodeKind, string> = {
+	source: 'Source',
+	output: 'Output',
+	internal: 'Internal',
+	analysis: 'Analysis'
+};
+
+type ElkInstance = InstanceType<typeof ElkConstructor>;
+
+interface ElkWorkerSession {
+	elk: ElkInstance | null;
+	worker: Worker | null;
+	abortController: AbortController;
+	error: Error | null;
+	terminated: boolean;
+	onWorkerFailure: (event: Event) => void;
+}
+
+function getAbortError(signal: AbortSignal): Error {
+	return signal.reason instanceof Error ? signal.reason : new Error('ELK layout was interrupted.');
+}
+
+function raceWithAbort<T>(operation: Promise<T>, signal: AbortSignal): Promise<T> {
+	if (signal.aborted) return Promise.reject(getAbortError(signal));
+
+	let onAbort: (() => void) | undefined;
+	const aborted = new Promise<T>((_resolve, reject) => {
+		onAbort = () => reject(getAbortError(signal));
+		signal.addEventListener('abort', onAbort, { once: true });
+	});
+
+	return Promise.race([operation, aborted]).finally(() => {
+		if (onAbort) signal.removeEventListener('abort', onAbort);
+	});
+}
+
+function makeWorkerError(event: Event): Error {
+	const detail =
+		'message' in event && typeof event.message === 'string' ? event.message.trim() : '';
+	const cause = 'error' in event ? event.error : undefined;
+	const message = detail ? `ELK worker ${event.type}: ${detail}` : `ELK worker ${event.type}.`;
+	return new Error(message, { cause });
+}
+
+function terminateWorkerSession(session: ElkWorkerSession) {
+	if (session.terminated) return;
+	session.terminated = true;
+	const worker = session.worker;
+	session.worker = null;
+	if (!worker) return;
+	worker.removeEventListener('error', session.onWorkerFailure);
+	worker.removeEventListener('messageerror', session.onWorkerFailure);
+	worker.onmessage = null;
+	worker.terminate();
+}
+
 /**
- * Lays out the lineage graph. Horizontal/vertical use ELK's layered
- * algorithm; grid keeps the deterministic column-major placement.
+ * Creates a per-graph layout engine. ELK starts only for layered layouts and
+ * runs in its own worker so graph layout does not block the UI thread.
  */
-export async function computeLineageLayout(
-	response: LineageResponse,
-	mode: LineageLayoutMode
-): Promise<Map<string, { x: number; y: number }>> {
-	if (response.nodes.length === 0) return new Map();
-	if (mode === 'grid') return gridLayout(response.nodes);
+export function createLineageLayoutEngine() {
+	let workerSession: ElkWorkerSession | null = null;
+	let disposed = false;
 
-	const layout = await getElk().layout(
-		{
-			id: 'root',
-			children: response.nodes.map((node) => ({
-				id: node.id,
-				width: LINEAGE_NODE_WIDTH,
-				height: LINEAGE_NODE_HEIGHT
-			})),
-			edges: response.edges.map((edge) => ({
-				id: `${edge.from}->${edge.to}:${edge.type}`,
-				sources: [edge.from],
-				targets: [edge.to]
-			}))
-		},
-		{
-			layoutOptions: {
-				'elk.algorithm': 'layered',
-				'elk.direction': mode === 'vertical' ? 'DOWN' : 'RIGHT',
-				'elk.layered.spacing.nodeNode': '48',
-				'elk.layered.spacing.nodeNodeBetweenLayers': '40'
-			}
+	function getWorkerSession(): ElkWorkerSession {
+		if (disposed) throw new Error('Cannot use a disposed lineage layout engine.');
+		if (workerSession) return workerSession;
+
+		const session: ElkWorkerSession = {
+			elk: null,
+			worker: null,
+			abortController: new AbortController(),
+			error: null,
+			terminated: false,
+			onWorkerFailure: () => {}
+		};
+		session.onWorkerFailure = (event) => {
+			event.preventDefault();
+			if (session.error || session.terminated) return;
+			session.error = makeWorkerError(event);
+			if (workerSession === session) workerSession = null;
+			session.abortController.abort(session.error);
+			terminateWorkerSession(session);
+		};
+
+		try {
+			session.elk = new ElkConstructor({
+				workerFactory: () => {
+					const worker = new Worker(elkWorkerUrl);
+					session.worker = worker;
+					worker.addEventListener('error', session.onWorkerFailure);
+					worker.addEventListener('messageerror', session.onWorkerFailure);
+					return worker;
+				}
+			});
+			if (!session.worker) throw new Error('ELK did not create its layout worker.');
+			if (session.abortController.signal.aborted)
+				throw getAbortError(session.abortController.signal);
+			workerSession = session;
+			return session;
+		} catch (error) {
+			terminateWorkerSession(session);
+			throw error;
 		}
-	);
-
-	const positions = new Map<string, { x: number; y: number }>();
-	for (const child of layout.children ?? []) {
-		if (child.x === undefined || child.y === undefined) continue;
-		positions.set(child.id, { x: child.x, y: child.y });
 	}
-	return positions;
+
+	async function compute(
+		response: LineageResponse,
+		mode: LineageLayoutMode
+	): Promise<Map<string, { x: number; y: number }>> {
+		if (response.nodes.length === 0) return new Map();
+		if (mode === 'grid') return gridLayout(response.nodes);
+
+		const session = getWorkerSession();
+		const workerEngine = session.elk;
+		if (!workerEngine) throw new Error('ELK layout worker is unavailable.');
+		const layout = await raceWithAbort(
+			workerEngine.layout(
+				{
+					id: 'root',
+					children: response.nodes.map((node) => ({
+						id: node.id,
+						width: LINEAGE_NODE_WIDTH,
+						height: LINEAGE_NODE_HEIGHT
+					})),
+					edges: response.edges.map((edge) => ({
+						id: `${edge.from}->${edge.to}:${edge.type}`,
+						sources: [edge.from],
+						targets: [edge.to]
+					}))
+				},
+				{
+					layoutOptions: {
+						'elk.algorithm': 'layered',
+						'elk.direction': mode === 'vertical' ? 'DOWN' : 'RIGHT',
+						'elk.layered.spacing.nodeNode': '48',
+						'elk.layered.spacing.nodeNodeBetweenLayers': '40'
+					}
+				}
+			),
+			session.abortController.signal
+		);
+
+		const positions = new Map<string, { x: number; y: number }>();
+		for (const child of layout.children ?? []) {
+			if (child.x === undefined || child.y === undefined) continue;
+			positions.set(child.id, { x: child.x, y: child.y });
+		}
+		return positions;
+	}
+
+	function dispose() {
+		disposed = true;
+		const session = workerSession;
+		workerSession = null;
+		if (!session || session.terminated) return;
+		session.error ??= new Error('Lineage layout engine was disposed.');
+		session.abortController.abort(session.error);
+		terminateWorkerSession(session);
+	}
+
+	return { compute, dispose };
 }
 
 function gridLayout(nodes: LineageResponse['nodes']): Map<string, { x: number; y: number }> {
@@ -148,7 +261,7 @@ export function buildFlowGraph(
 		if (seen.has(id)) continue;
 		if (!positions.has(edge.from) || !positions.has(edge.to)) continue;
 		seen.add(id);
-		const stroke = EDGE_STYLES[edge.type] ?? EDGE_STYLES.uses;
+		const stroke = EDGE_STYLES[edge.type];
 		edges.push({
 			id,
 			source: edge.from,

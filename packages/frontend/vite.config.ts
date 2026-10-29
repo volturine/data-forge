@@ -89,7 +89,24 @@ export default defineConfig({
 		rolldownOptions: {
 			output: {
 				codeSplitting: {
-					groups: [{ name: 'svelte-runtime', test: /\/node_modules\/svelte\// }]
+					groups: [
+						{ name: 'svelte-runtime', test: /\/node_modules\/svelte\// },
+						{
+							name: 'code-editor',
+							test: /\/node_modules\/(?:codemirror|@codemirror|@lezer)\//
+						},
+						{
+							name: 'charts',
+							test: /\/node_modules\/@tanstack\/charts\//
+						},
+						{
+							name: 'shared',
+							minShareCount: 2,
+							entriesAware: true,
+							entriesAwareMergeThreshold: 5 * 1024,
+							priority: -1
+						}
+					]
 				}
 			}
 		}

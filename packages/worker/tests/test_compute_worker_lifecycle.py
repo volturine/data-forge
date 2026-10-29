@@ -4,11 +4,13 @@ import asyncio
 import logging
 import threading
 import time
+from collections.abc import Callable
 from concurrent.futures import ThreadPoolExecutor
 from types import SimpleNamespace
 from typing import Any, cast
 
 import pytest
+from worker_test_support import BlockingEngine, FakeEngine, fake_engine_factory
 
 from dataforge_protocol import compute_pb2, enums_pb2
 from runtime.compute_manager import (
@@ -25,70 +27,28 @@ from runtime.datasource_delete_runtime import _stop_idle_datasource_engine
 from runtime.domain.compute.base import ComputeWorker
 
 
-class _FakeEngine:
-    def __init__(self, resource_id: str, resource_config: dict | None = None) -> None:
-        self.analysis_id = resource_id
-        self.resource_config = resource_config or {}
-        self.effective_resources: dict[str, object] = {}
-        self.current_job_id: str | None = None
-        self._alive = False
-        self._capacity_notifier = None
-        self.cancelled_jobs: list[str | None] = []
+def _hold(entered: threading.Event, release: threading.Event) -> Callable[[], None]:
+    """Build a start/shutdown hook that signals entry and blocks until the test releases it."""
 
-    def bind_capacity_notifier(self, notifier) -> None:
-        self._capacity_notifier = notifier
+    def hold() -> None:
+        entered.set()
+        assert release.wait(timeout=2)
 
-    @property
-    def process_id(self) -> int | None:
-        return 1234
+    return hold
 
-    def start(self) -> None:
-        self._alive = True
 
-    def is_process_alive(self) -> bool:
-        return self._alive
+def _blocking_factory(**hooks: Callable[[], object]) -> Callable[..., Any]:
+    """Build an engine factory whose engines run the given start/shutdown hooks."""
 
-    @property
-    def last_known_alive(self) -> bool:
-        return self._alive
+    def factory(identity: compute_pb2.ComputeWorkerIdentity, resource_config: dict | None = None) -> Any:
+        return BlockingEngine(identity.resource_id, resource_config, **hooks)
 
-    def check_health(self) -> bool:
-        return self._alive
-
-    def preview(self, *args: Any, **kwargs: Any) -> str:
-        raise NotImplementedError
-
-    def export(self, *args: Any, **kwargs: Any) -> str:
-        raise NotImplementedError
-
-    def get_schema(self, *args: Any, **kwargs: Any) -> str:
-        raise NotImplementedError
-
-    def get_row_count(self, *args: Any, **kwargs: Any) -> str:
-        raise NotImplementedError
-
-    def get_result(self, timeout: float = 1.0, job_id: str | None = None):
-        raise NotImplementedError
-
-    def get_progress_event(self, timeout: float = 1.0, job_id: str | None = None):
-        raise NotImplementedError
-
-    def cancel_job(self, job_id: str | None = None) -> bool:
-        self.cancelled_jobs.append(job_id)
-        return True
-
-    def shutdown(self) -> None:
-        self._alive = False
-        if self._capacity_notifier is not None:
-            self._capacity_notifier()
+    return factory
 
 
 def test_process_manager_reaps_idle_shared_engines(monkeypatch) -> None:
     monkeypatch.setattr(settings, "compute_worker_idle_ttl_seconds", 1)
     monkeypatch.setattr(settings, "compute_worker_idle_reap_interval_seconds", 1)
-
-    def fake_engine_factory(identity: compute_pb2.ComputeWorkerIdentity, resource_config: dict | None = None):
-        return cast(Any, _FakeEngine(identity.resource_id, resource_config))
 
     manager = ProcessManager(engine_factory=fake_engine_factory)
     identity = compute_pb2.ComputeWorkerIdentity(
@@ -114,7 +74,7 @@ def test_datasource_delete_cannot_stop_engine_with_admitted_request(monkeypatch)
     monkeypatch.setattr(settings, "compute_workers", 1)
     monkeypatch.setattr(settings, "compute_warm_workers", 0)
     manager = ProcessManager(
-        engine_factory=lambda identity, resource_config: cast(Any, _FakeEngine(identity.resource_id, resource_config)),
+        engine_factory=fake_engine_factory,
         warm_worker_target=0,
     )
     identity = compute_pb2.ComputeWorkerIdentity(
@@ -176,7 +136,7 @@ def test_datasource_delete_waits_for_admitted_request_before_engine_exists(monke
 def test_reusing_engine_does_not_republish_unchanged_snapshot() -> None:
     snapshots: list[list[object]] = []
     manager = ProcessManager(
-        engine_factory=lambda identity, resource_config: cast(Any, _FakeEngine(identity.resource_id, resource_config)),
+        engine_factory=fake_engine_factory,
         on_snapshot=snapshots.append,
         warm_worker_target=0,
     )
@@ -202,7 +162,7 @@ def test_reusing_engine_does_not_republish_unchanged_snapshot() -> None:
 async def test_existing_engine_request_admission_is_released_exactly_once(monkeypatch) -> None:
     monkeypatch.setattr(settings, "compute_workers", 1)
     manager = ProcessManager(
-        engine_factory=lambda identity, resource_config: cast(Any, _FakeEngine(identity.resource_id, resource_config)),
+        engine_factory=fake_engine_factory,
         warm_worker_target=0,
     )
     identity = _analysis_identity("analysis-request-reservation")
@@ -220,14 +180,16 @@ async def test_existing_engine_request_admission_is_released_exactly_once(monkey
 
         with manager._capacity_changed:
             assert key not in manager._request_reservations
-            assert manager._find_idle_engine_locked()[0] == key
+            idle = manager._find_idle_engine_locked()
+            assert idle is not None
+            assert idle[0] == key
     finally:
         manager.shutdown_all()
 
 
 def test_docker_reconciliation_is_not_run_on_every_idle_reap(monkeypatch) -> None:
     monkeypatch.setattr(settings, "compute_worker_idle_ttl_seconds", 0)
-    manager = ProcessManager(engine_factory=lambda identity, resource_config: cast(Any, _FakeEngine(identity.resource_id, resource_config)))
+    manager = ProcessManager(engine_factory=fake_engine_factory)
     calls = 0
     elapsed = 0.0
 
@@ -266,7 +228,7 @@ def test_docker_reconciliation_is_not_run_on_every_idle_reap(monkeypatch) -> Non
 
 
 def test_process_manager_cancels_exact_shared_engine_job_without_stopping_worker() -> None:
-    engine = _FakeEngine("analysis-preview-disconnect")
+    engine = FakeEngine("analysis-preview-disconnect")
     manager = ProcessManager(engine_factory=lambda _identity, _resource_config: cast(Any, engine))
     identity = _analysis_identity("analysis-preview-disconnect")
     try:
@@ -284,7 +246,7 @@ def test_process_manager_does_not_reap_engine_with_request_reservation(monkeypat
     """An admitted request protects a reused engine until its runner releases it."""
     monkeypatch.setattr(settings, "compute_worker_idle_ttl_seconds", 0)
     monkeypatch.setattr(settings, "compute_worker_idle_reap_interval_seconds", 3600)
-    manager = ProcessManager(engine_factory=lambda identity, resource_config: cast(Any, _FakeEngine(identity.resource_id, resource_config)))
+    manager = ProcessManager(engine_factory=fake_engine_factory)
     identity = _analysis_identity("analysis-reaper-request-reservation")
     try:
         engine = manager.spawn_compute_worker(identity).engine
@@ -312,7 +274,7 @@ def test_process_manager_shutdown_stops_its_owned_engine() -> None:
         resource_id="analysis-shutdown",
     )
 
-    class ShutdownTrackingEngine(_FakeEngine):
+    class ShutdownTrackingEngine(FakeEngine):
         shutdown_calls = 0
 
         def shutdown(self) -> None:
@@ -343,16 +305,20 @@ def _analysis_identity(resource_id: str) -> compute_pb2.ComputeWorkerIdentity:
     )
 
 
+def _build_identity(build_id: str) -> compute_pb2.ComputeWorkerIdentity:
+    return compute_pb2.ComputeWorkerIdentity(
+        scope=enums_pb2.COMPUTE_WORKER_SCOPE_BUILD,
+        reuse_policy=enums_pb2.COMPUTE_WORKER_REUSE_POLICY_EXCLUSIVE,
+        build_id=build_id,
+        resource_id=build_id,
+    )
+
+
 def test_process_manager_starts_distinct_engines_concurrently(monkeypatch) -> None:
     monkeypatch.setattr(settings, "compute_workers", 2)
     start_barrier = threading.Barrier(3)
 
-    class ConcurrentStartEngine(_FakeEngine):
-        def start(self) -> None:
-            start_barrier.wait(timeout=2)
-            super().start()
-
-    manager = ProcessManager(engine_factory=lambda identity, resource_config: cast(Any, ConcurrentStartEngine(identity.resource_id, resource_config)))
+    manager = ProcessManager(engine_factory=_blocking_factory(before_start=lambda: start_barrier.wait(timeout=2)))
     try:
         with ThreadPoolExecutor(max_workers=2) as executor:
             first = executor.submit(manager.spawn_compute_worker, _analysis_identity("analysis-concurrent-1"))
@@ -368,7 +334,7 @@ def test_process_manager_keeps_shutdown_container_owned_until_cleanup_finishes()
     shutdown_started = threading.Event()
     release_shutdown = threading.Event()
 
-    class ContainerEngine(_FakeEngine):
+    class ContainerEngine(FakeEngine):
         @property
         def container_id(self) -> str:
             return "container-being-shutdown"
@@ -399,23 +365,14 @@ def test_process_manager_keeps_shutdown_container_owned_until_cleanup_finishes()
 def test_process_manager_serializes_same_identity_spawn_after_shutdown() -> None:
     shutdown_started = threading.Event()
     allow_shutdown = threading.Event()
-    created: list[_FakeEngine] = []
+    created: list[FakeEngine] = []
 
-    class BlockingShutdownEngine(_FakeEngine):
-        def __init__(self, resource_id: str, *, block_shutdown: bool) -> None:
-            super().__init__(resource_id)
-            self.block_shutdown = block_shutdown
-
-        def shutdown(self) -> None:
-            if self.block_shutdown:
-                shutdown_started.set()
-                assert allow_shutdown.wait(timeout=2)
-            super().shutdown()
-
-    def factory(identity: compute_pb2.ComputeWorkerIdentity, resource_config: dict | None = None):
-        engine = BlockingShutdownEngine(identity.resource_id, block_shutdown=not created)
+    def factory(identity: compute_pb2.ComputeWorkerIdentity, resource_config: dict | None = None) -> Any:
+        # Only the first engine holds its shutdown; its replacement starts freely.
+        hook = _hold(shutdown_started, allow_shutdown) if not created else None
+        engine = BlockingEngine(identity.resource_id, resource_config, before_shutdown=hook)
         created.append(engine)
-        return cast(Any, engine)
+        return engine
 
     identity = _analysis_identity("analysis-shutdown-restart")
     manager = ProcessManager(engine_factory=factory)
@@ -446,13 +403,7 @@ def test_process_manager_defers_when_start_holds_capacity(monkeypatch) -> None:
     start_entered = threading.Event()
     release_start = threading.Event()
 
-    class BlockingStartEngine(_FakeEngine):
-        def start(self) -> None:
-            start_entered.set()
-            assert release_start.wait(timeout=2)
-            super().start()
-
-    manager = ProcessManager(engine_factory=lambda identity, resource_config: cast(Any, BlockingStartEngine(identity.resource_id, resource_config)))
+    manager = ProcessManager(engine_factory=_blocking_factory(before_start=_hold(start_entered, release_start)))
     try:
         with ThreadPoolExecutor(max_workers=2) as executor:
             first = executor.submit(manager.spawn_compute_worker, _analysis_identity("analysis-capacity-1"))
@@ -475,13 +426,7 @@ def test_stopping_engine_keeps_its_compute_capacity_until_shutdown_finishes(monk
     shutdown_entered = threading.Event()
     finish_shutdown = threading.Event()
 
-    class BlockingShutdownEngine(_FakeEngine):
-        def shutdown(self) -> None:
-            shutdown_entered.set()
-            assert finish_shutdown.wait(timeout=2)
-            super().shutdown()
-
-    manager = ProcessManager(engine_factory=lambda identity, resource_config: cast(Any, BlockingShutdownEngine(identity.resource_id, resource_config)))
+    manager = ProcessManager(engine_factory=_blocking_factory(before_shutdown=_hold(shutdown_entered, finish_shutdown)))
     first_identity = _analysis_identity("analysis-stopping-capacity")
     second_identity = _analysis_identity("analysis-after-stop")
     manager.spawn_compute_worker(first_identity)
@@ -505,7 +450,7 @@ def test_stopping_engine_keeps_its_compute_capacity_until_shutdown_finishes(monk
 
 def test_releasing_eviction_admission_restores_live_engine(monkeypatch) -> None:
     monkeypatch.setattr(settings, "compute_workers", 1)
-    manager = ProcessManager(engine_factory=lambda identity, resource_config: cast(Any, _FakeEngine(identity.resource_id, resource_config)))
+    manager = ProcessManager(engine_factory=fake_engine_factory)
     first_identity = _analysis_identity("analysis-live-eviction")
     second_identity = _analysis_identity("analysis-cancelled-eviction")
 
@@ -522,7 +467,7 @@ def test_releasing_eviction_admission_restores_live_engine(monkeypatch) -> None:
 
 def test_cancelled_eviction_holds_capacity_until_live_engine_is_restored(monkeypatch) -> None:
     monkeypatch.setattr(settings, "compute_workers", 1)
-    manager = ProcessManager(engine_factory=lambda identity, resource_config: cast(Any, _FakeEngine(identity.resource_id, resource_config)))
+    manager = ProcessManager(engine_factory=fake_engine_factory)
 
     current_identity = _analysis_identity("analysis-cancelled-eviction-current")
     cancelled_identity = _analysis_identity("analysis-cancelled-eviction-next")
@@ -558,27 +503,8 @@ def test_cancelled_eviction_holds_capacity_until_live_engine_is_restored(monkeyp
         manager.shutdown_all()
 
 
-def test_process_manager_defers_while_engine_is_reserved(monkeypatch) -> None:
-    """Reservations block eviction; spawn raises so the runner can leave the pool."""
-    monkeypatch.setattr(settings, "compute_workers", 1)
-    manager = ProcessManager(engine_factory=lambda identity, resource_config: cast(Any, _FakeEngine(identity.resource_id, resource_config)))
-    first_identity = _analysis_identity("analysis-reserved-1")
-    second_identity = _analysis_identity("analysis-reserved-2")
-    try:
-        with manager.acquire_engine(first_identity) as first_engine:
-            assert first_engine.is_process_alive()
-            with pytest.raises(ComputeWorkerCapacityFull):
-                manager.spawn_compute_worker(second_identity)
-
-        second_info = manager.spawn_compute_worker(second_identity)
-        assert second_info.engine.is_process_alive()
-        assert manager.get_engine_info(first_identity) is None
-    finally:
-        manager.shutdown_all()
-
-
 def test_lease_loss_keeps_shared_engine_for_reuse() -> None:
-    manager = ProcessManager(engine_factory=lambda identity, resource_config: cast(Any, _FakeEngine(identity.resource_id, resource_config)))
+    manager = ProcessManager(engine_factory=fake_engine_factory)
     identity = _analysis_identity("analysis-shared-lease-loss")
     try:
         engine = manager.spawn_compute_worker(identity).engine
@@ -598,13 +524,8 @@ def test_lease_loss_keeps_shared_engine_for_reuse() -> None:
 
 
 def test_lease_loss_releases_exclusive_engine_after_last_request() -> None:
-    manager = ProcessManager(engine_factory=lambda identity, resource_config: cast(Any, _FakeEngine(identity.resource_id, resource_config)))
-    identity = compute_pb2.ComputeWorkerIdentity(
-        scope=enums_pb2.COMPUTE_WORKER_SCOPE_BUILD,
-        reuse_policy=enums_pb2.COMPUTE_WORKER_REUSE_POLICY_EXCLUSIVE,
-        build_id="build-exclusive-lease-loss",
-        resource_id="build-exclusive-lease-loss",
-    )
+    manager = ProcessManager(engine_factory=fake_engine_factory)
+    identity = _build_identity("build-exclusive-lease-loss")
     try:
         engine = manager.spawn_compute_worker(identity).engine
         manager.reserve_engine_request(identity)
@@ -616,27 +537,20 @@ def test_lease_loss_releases_exclusive_engine_after_last_request() -> None:
         manager.shutdown_all()
 
 
-def test_lease_loss_does_not_shutdown_compute_worker_with_active_job() -> None:
-    manager = ProcessManager(engine_factory=lambda identity, resource_config: cast(Any, _FakeEngine(identity.resource_id, resource_config)))
-    identity = _analysis_identity("analysis-active-job-lease-loss")
+def test_lease_loss_keeps_exclusive_engine_while_idle_or_running_a_job(monkeypatch) -> None:
+    # Shared engines return early, so this uses an exclusive identity to reach the request and active-job checks.
+    monkeypatch.setattr(settings, "compute_worker_idle_ttl_seconds", 60)
+    manager = ProcessManager(engine_factory=fake_engine_factory)
+    identity = _build_identity("build-active-job-lease-loss")
     try:
         engine = manager.spawn_compute_worker(identity).engine
+
+        # With no request holding it, lease loss leaves the idle engine to the reaper.
+        assert manager.shutdown_compute_worker_after_request_lease_loss(identity) is False
+        assert manager.get_engine_info(identity).engine is engine
+
         manager.reserve_engine_request(identity)
         engine.current_job_id = "job-1"
-
-        assert manager.shutdown_compute_worker_after_request_lease_loss(identity) is False
-        assert manager.get_engine_info(identity) is not None
-        assert engine.is_process_alive()
-    finally:
-        manager.shutdown_all()
-
-
-def test_lease_loss_does_not_shutdown_idle_engine_before_reaper(monkeypatch) -> None:
-    monkeypatch.setattr(settings, "compute_worker_idle_ttl_seconds", 60)
-    manager = ProcessManager(engine_factory=lambda identity, resource_config: cast(Any, _FakeEngine(identity.resource_id, resource_config)))
-    identity = _analysis_identity("analysis-idle-lease-loss")
-    try:
-        engine = manager.spawn_compute_worker(identity).engine
 
         assert manager.shutdown_compute_worker_after_request_lease_loss(identity) is False
         assert manager.get_engine_info(identity).engine is engine
@@ -649,7 +563,7 @@ def test_lease_loss_does_not_shutdown_idle_engine_before_reaper(monkeypatch) -> 
 async def test_admitted_reused_engine_is_not_evicted_before_execution(monkeypatch) -> None:
     """An admitted request keeps its existing engine alive until its runner starts."""
     monkeypatch.setattr(settings, "compute_workers", 1)
-    manager = ProcessManager(engine_factory=lambda identity, resource_config: cast(Any, _FakeEngine(identity.resource_id, resource_config)))
+    manager = ProcessManager(engine_factory=fake_engine_factory)
     first_identity = _analysis_identity("analysis-admitted-existing")
     second_identity = _analysis_identity("analysis-admitted-other")
     try:
@@ -674,7 +588,7 @@ async def test_admitted_reused_engine_is_not_evicted_before_execution(monkeypatc
 async def test_process_manager_wait_for_capacity_then_spawn(monkeypatch) -> None:
     """Proper queue: park async without a runner, then claim when capacity frees."""
     monkeypatch.setattr(settings, "compute_workers", 1)
-    manager = ProcessManager(engine_factory=lambda identity, resource_config: cast(Any, _FakeEngine(identity.resource_id, resource_config)))
+    manager = ProcessManager(engine_factory=fake_engine_factory)
     first_identity = _analysis_identity("analysis-async-1")
     second_identity = _analysis_identity("analysis-async-2")
     try:
@@ -697,7 +611,7 @@ async def test_process_manager_wait_for_capacity_then_spawn(monkeypatch) -> None
 @pytest.mark.asyncio
 async def test_process_manager_wait_for_capacity_times_out_without_leaking_waiter(monkeypatch) -> None:
     monkeypatch.setattr(settings, "compute_workers", 1)
-    manager = ProcessManager(engine_factory=lambda identity, resource_config: cast(Any, _FakeEngine(identity.resource_id, resource_config)))
+    manager = ProcessManager(engine_factory=fake_engine_factory)
     first_identity = _analysis_identity("analysis-capacity-timeout")
     try:
         manager.spawn_compute_worker(first_identity)
@@ -713,7 +627,7 @@ async def test_process_manager_wait_for_capacity_times_out_without_leaking_waite
 @pytest.mark.asyncio
 async def test_process_manager_capacity_wait_rechecks_after_spurious_wakeup(monkeypatch) -> None:
     monkeypatch.setattr(settings, "compute_workers", 1)
-    manager = ProcessManager(engine_factory=lambda identity, resource_config: cast(Any, _FakeEngine(identity.resource_id, resource_config)))
+    manager = ProcessManager(engine_factory=fake_engine_factory)
     identity = _analysis_identity("analysis-capacity-spurious-wakeup")
     try:
         with manager.acquire_engine(identity):
@@ -731,7 +645,7 @@ async def test_process_manager_capacity_wait_rechecks_after_spurious_wakeup(monk
 @pytest.mark.asyncio
 async def test_process_manager_capacity_admission_is_fifo(monkeypatch) -> None:
     monkeypatch.setattr(settings, "compute_workers", 1)
-    manager = ProcessManager(engine_factory=lambda identity, resource_config: cast(Any, _FakeEngine(identity.resource_id, resource_config)))
+    manager = ProcessManager(engine_factory=fake_engine_factory)
     first = _analysis_identity("analysis-fifo-1")
     second = _analysis_identity("analysis-fifo-2")
     third = _analysis_identity("analysis-fifo-3")
@@ -780,7 +694,7 @@ async def test_process_manager_capacity_admission_is_fifo(monkeypatch) -> None:
 @pytest.mark.asyncio
 async def test_process_manager_capacity_admission_prioritizes_interactive_work(monkeypatch) -> None:
     monkeypatch.setattr(settings, "compute_workers", 1)
-    manager = ProcessManager(engine_factory=lambda identity, resource_config: cast(Any, _FakeEngine(identity.resource_id, resource_config)))
+    manager = ProcessManager(engine_factory=fake_engine_factory)
     running = _analysis_identity("analysis-priority-running")
     lifecycle = _analysis_identity("analysis-priority-lifecycle")
     interactive = _analysis_identity("analysis-priority-interactive")
@@ -823,14 +737,9 @@ async def test_process_manager_capacity_admission_prioritizes_interactive_work(m
 @pytest.mark.asyncio
 async def test_process_manager_admission_round_robins_builds_under_interactive_load(monkeypatch) -> None:
     monkeypatch.setattr(settings, "compute_workers", 1)
-    manager = ProcessManager(engine_factory=lambda identity, resource_config: cast(Any, _FakeEngine(identity.resource_id, resource_config)))
+    manager = ProcessManager(engine_factory=fake_engine_factory)
     running = _analysis_identity("analysis-fair-running")
-    lifecycle = compute_pb2.ComputeWorkerIdentity(
-        scope=enums_pb2.COMPUTE_WORKER_SCOPE_BUILD,
-        reuse_policy=enums_pb2.COMPUTE_WORKER_REUSE_POLICY_EXCLUSIVE,
-        build_id="build-fair",
-        resource_id="build-fair",
-    )
+    lifecycle = _build_identity("build-fair")
     interactive_one = _analysis_identity("analysis-fair-one")
     interactive_two = _analysis_identity("analysis-fair-two")
     order: list[str] = []
@@ -886,7 +795,7 @@ async def test_process_manager_admission_round_robins_builds_under_interactive_l
 @pytest.mark.asyncio
 async def test_process_manager_reuse_admission_reserves_identity_atomically(monkeypatch) -> None:
     monkeypatch.setattr(settings, "compute_workers", 1)
-    manager = ProcessManager(engine_factory=lambda identity, resource_config: cast(Any, _FakeEngine(identity.resource_id, resource_config)))
+    manager = ProcessManager(engine_factory=fake_engine_factory)
     identity = _analysis_identity("analysis-reserved-reuse")
     competing = _analysis_identity("analysis-reserved-competitor")
 
@@ -911,11 +820,11 @@ async def test_process_manager_reuse_admission_reserves_identity_atomically(monk
 async def test_queued_reuse_admission_owns_its_request_reservation(monkeypatch, cancel_after_resolution: bool) -> None:
     monkeypatch.setattr(settings, "compute_workers", 1)
     manager = ProcessManager(
-        engine_factory=lambda identity, resource_config: cast(Any, _FakeEngine(identity.resource_id, resource_config)),
+        engine_factory=fake_engine_factory,
         warm_worker_target=0,
     )
     identity = _analysis_identity("analysis-queued-reuse-reservation")
-    engine = _FakeEngine(identity.resource_id)
+    engine = FakeEngine(identity.resource_id)
     engine.start()
     key = manager._key(identity)
     with manager._capacity_changed:
@@ -954,7 +863,7 @@ async def test_queued_reuse_admission_owns_its_request_reservation(monkeypatch, 
 @pytest.mark.asyncio
 async def test_process_manager_serializes_commands_per_exact_compute_worker_identity(monkeypatch) -> None:
     monkeypatch.setattr(settings, "compute_workers", 2)
-    manager = ProcessManager(engine_factory=lambda identity, resource_config: cast(Any, _FakeEngine(identity.resource_id, resource_config)))
+    manager = ProcessManager(engine_factory=fake_engine_factory)
     first_identity = _analysis_identity("analysis-single-job")
     second_identity = _analysis_identity("analysis-single-job")
     other_identity = _analysis_identity("analysis-independent-job")
@@ -977,7 +886,7 @@ async def test_process_manager_serializes_commands_per_exact_compute_worker_iden
 @pytest.mark.asyncio
 async def test_cancelling_waiting_engine_job_does_not_strand_its_lane(monkeypatch) -> None:
     monkeypatch.setattr(settings, "compute_workers", 1)
-    manager = ProcessManager(engine_factory=lambda identity, resource_config: cast(Any, _FakeEngine(identity.resource_id, resource_config)))
+    manager = ProcessManager(engine_factory=fake_engine_factory)
     identity = _analysis_identity("analysis-job-slot-cancellation")
     await manager.await_engine_job_slot(identity)
     cancelled = asyncio.create_task(manager.await_engine_job_slot(identity))
@@ -1008,7 +917,7 @@ async def test_cancelling_waiting_engine_job_does_not_strand_its_lane(monkeypatc
 @pytest.mark.asyncio
 async def test_process_manager_shutdown_rejects_capacity_waiter(monkeypatch) -> None:
     monkeypatch.setattr(settings, "compute_workers", 1)
-    manager = ProcessManager(engine_factory=lambda identity, resource_config: cast(Any, _FakeEngine(identity.resource_id, resource_config)))
+    manager = ProcessManager(engine_factory=fake_engine_factory)
     running = manager.spawn_compute_worker(_analysis_identity("analysis-running"))
     running.engine.current_job_id = "job-running"
     waiter = asyncio.create_task(manager.await_spawn_admission(_analysis_identity("analysis-waiting")))
@@ -1027,20 +936,14 @@ def test_shutdown_waits_for_engine_start_and_stops_its_registration(monkeypatch)
     spawn_finished = threading.Event()
     shutdown_finished = threading.Event()
     spawn_errors: list[BaseException] = []
-    created: list[_FakeEngine] = []
+    created: list[FakeEngine] = []
 
-    class BlockingStartEngine(_FakeEngine):
-        def start(self) -> None:
-            start_entered.set()
-            assert finish_start.wait(timeout=2)
-            super().start()
-
-    def factory(identity: compute_pb2.ComputeWorkerIdentity, resource_config: dict | None = None) -> _FakeEngine:
-        engine = BlockingStartEngine(identity.resource_id, resource_config)
+    def factory(identity: compute_pb2.ComputeWorkerIdentity, resource_config: dict | None = None) -> FakeEngine:
+        engine = BlockingEngine(identity.resource_id, resource_config, before_start=_hold(start_entered, finish_start))
         created.append(engine)
         return engine
 
-    manager = ProcessManager(engine_factory=lambda identity, resource_config: cast(Any, factory(identity, resource_config)), warm_worker_target=0)
+    manager = ProcessManager(engine_factory=factory, warm_worker_target=0)
     identity = _analysis_identity("analysis-shutdown-during-start")
 
     def spawn() -> None:
@@ -1093,18 +996,12 @@ async def test_same_identity_waiters_park_until_one_engine_start_finishes(monkey
     monkeypatch.setattr(settings, "compute_workers", 1)
     start_entered = threading.Event()
     release_start = threading.Event()
-    created: list[_FakeEngine] = []
+    created: list[FakeEngine] = []
 
-    class BlockingStartEngine(_FakeEngine):
-        def start(self) -> None:
-            start_entered.set()
-            assert release_start.wait(timeout=2)
-            super().start()
-
-    def factory(identity: compute_pb2.ComputeWorkerIdentity, resource_config: dict | None = None):
-        engine = BlockingStartEngine(identity.resource_id, resource_config)
+    def factory(identity: compute_pb2.ComputeWorkerIdentity, resource_config: dict | None = None) -> Any:
+        engine = BlockingEngine(identity.resource_id, resource_config, before_start=_hold(start_entered, release_start))
         created.append(engine)
-        return cast(Any, engine)
+        return engine
 
     manager = ProcessManager(engine_factory=factory)
     identity = _analysis_identity("analysis-shared-admission")
@@ -1145,13 +1042,7 @@ async def test_cancelled_request_does_not_release_runner_owned_admission(monkeyp
     start_entered = threading.Event()
     release_start = threading.Event()
 
-    class BlockingStartEngine(_FakeEngine):
-        def start(self) -> None:
-            start_entered.set()
-            assert release_start.wait(timeout=2)
-            super().start()
-
-    manager = ProcessManager(engine_factory=lambda identity, resource_config: cast(Any, BlockingStartEngine(identity.resource_id, resource_config)))
+    manager = ProcessManager(engine_factory=_blocking_factory(before_start=_hold(start_entered, release_start)))
     identity = _analysis_identity("analysis-cancelled-request")
     owns_admission = await manager.await_spawn_admission(identity)
     assert owns_admission is True
@@ -1199,23 +1090,21 @@ async def test_cold_engine_start_fanout_is_bounded_by_compute_workers(monkeypatc
     start_count = 0
     start_limit = settings.compute_workers
 
-    class BlockingStartEngine(_FakeEngine):
-        def start(self) -> None:
-            nonlocal active_starts, peak_starts, start_count
-            with lock:
-                active_starts += 1
-                start_count += 1
-                peak_starts = max(peak_starts, active_starts)
-                if active_starts == start_limit:
-                    loop.call_soon_threadsafe(starts_entered.set)
+    def block_start() -> None:
+        nonlocal active_starts, peak_starts, start_count
+        with lock:
+            active_starts += 1
+            start_count += 1
+            peak_starts = max(peak_starts, active_starts)
+            if active_starts == start_limit:
+                loop.call_soon_threadsafe(starts_entered.set)
+        try:
             release_starts.wait()
-            try:
-                super().start()
-            finally:
-                with lock:
-                    active_starts -= 1
+        finally:
+            with lock:
+                active_starts -= 1
 
-    manager = ProcessManager(engine_factory=lambda identity, resource_config: cast(Any, BlockingStartEngine(identity.resource_id, resource_config)))
+    manager = ProcessManager(engine_factory=_blocking_factory(before_start=block_start))
     identities = [_analysis_identity(f"analysis-cold-limit-{index}") for index in range(10)]
     start_executor = ThreadPoolExecutor(max_workers=start_limit)
 
@@ -1280,19 +1169,9 @@ async def test_warm_and_assigned_starts_use_independent_budgets(monkeypatch) -> 
             with lock:
                 active_starts -= 1
 
-    class BlockingEngine(_FakeEngine):
-        def start(self) -> None:
-            block_start()
-            super().start()
-
-    class BlockingWarmWorker(_FakeWarmWorker):
-        def start(self) -> None:
-            block_start()
-            super().start()
-
     manager = ProcessManager(
-        engine_factory=lambda identity, resource_config: cast(Any, BlockingEngine(identity.resource_id, resource_config)),
-        warm_worker_factory=lambda: cast(ComputeWorker, BlockingWarmWorker()),
+        engine_factory=_blocking_factory(before_start=block_start),
+        warm_worker_factory=lambda: cast(ComputeWorker, _FakeWarmWorker(before_start=block_start)),
     )
     identities = [_analysis_identity(f"analysis-warm-start-budget-{index}") for index in range(3)]
     start_executor = ThreadPoolExecutor(max_workers=len(identities))
@@ -1337,7 +1216,7 @@ async def test_failed_cold_start_releases_its_shared_capacity(monkeypatch) -> No
     failed_identity = _analysis_identity("analysis-cold-failure")
     next_identity = _analysis_identity("analysis-after-cold-failure")
 
-    class FailingStartEngine(_FakeEngine):
+    class FailingStartEngine(FakeEngine):
         def start(self) -> None:
             if self.analysis_id == failed_identity.resource_id:
                 raise RuntimeError("simulated start failure")
@@ -1366,9 +1245,9 @@ async def test_failed_cold_start_releases_its_shared_capacity(monkeypatch) -> No
         manager.shutdown_all()
 
 
-class _FakeWarmWorker(_FakeEngine):
-    def __init__(self, resource_id: str = "", resource_config: dict | None = None) -> None:
-        super().__init__(resource_id, resource_config)
+class _FakeWarmWorker(BlockingEngine):
+    def __init__(self, resource_id: str = "", resource_config: dict | None = None, *, before_start: Callable[[], object] | None = None) -> None:
+        super().__init__(resource_id, resource_config, before_start=before_start)
         self.bound_identities: list[compute_pb2.ComputeWorkerIdentity] = []
         self._is_warm_worker = not bool(resource_id)
 
@@ -1396,7 +1275,7 @@ def test_process_manager_warm_workers_replenishes_and_claims(monkeypatch, caplog
         return cast(ComputeWorker, engine)
 
     manager = ProcessManager(
-        engine_factory=lambda identity, resource_config: cast(Any, _FakeEngine(identity.resource_id, resource_config)),
+        engine_factory=fake_engine_factory,
         warm_worker_factory=warm_factory,
     )
 
@@ -1493,7 +1372,7 @@ def test_process_manager_logs_cold_engine_acquisition(monkeypatch, caplog) -> No
     caplog.set_level(logging.INFO, logger="runtime.compute_manager")
     identity = _analysis_identity("analysis-cold-acquisition-log")
     manager = ProcessManager(
-        engine_factory=lambda compute_worker_identity, config: cast(Any, _FakeEngine(compute_worker_identity.resource_id, config)),
+        engine_factory=fake_engine_factory,
         warm_worker_target=0,
     )
     try:
@@ -1513,24 +1392,6 @@ def test_process_manager_logs_cold_engine_acquisition(monkeypatch, caplog) -> No
         manager.shutdown_all()
 
 
-def test_warm_reserve_is_independent_of_active_compute_budget(monkeypatch) -> None:
-    monkeypatch.setattr(settings, "compute_workers", 1)
-    monkeypatch.setattr(settings, "compute_warm_workers", 2)
-    manager = ProcessManager(
-        engine_factory=lambda identity, resource_config: cast(Any, _FakeEngine(identity.resource_id, resource_config)),
-        warm_worker_factory=lambda: cast(ComputeWorker, _FakeWarmWorker()),
-    )
-
-    try:
-        assert manager.wait_for_warm_workers_ready(timeout_seconds=2)
-        assert manager.warm_worker_count == 2
-        with manager._capacity_changed:
-            assert manager._capacity_used_locked() == 0
-            assert manager._capacity_starts == 0
-    finally:
-        manager.shutdown_all()
-
-
 def test_warm_workers_start_is_reserved_while_docker_boots(monkeypatch) -> None:
     monkeypatch.setattr(settings, "compute_warm_workers", 1)
     monkeypatch.setattr(settings, "compute_workers", 2)
@@ -1543,7 +1404,7 @@ def test_warm_workers_start_is_reserved_while_docker_boots(monkeypatch) -> None:
         return cast(ComputeWorker, _FakeWarmWorker())
 
     manager = ProcessManager(
-        engine_factory=lambda identity, resource_config: cast(Any, _FakeEngine(identity.resource_id, resource_config)),
+        engine_factory=fake_engine_factory,
         warm_worker_factory=warm_factory,
     )
 
@@ -1567,15 +1428,9 @@ def test_shutdown_waits_for_inflight_warm_worker_start(monkeypatch) -> None:
     shutdown_finished = threading.Event()
     shutdown_errors: list[BaseException] = []
 
-    class BlockingWarmWorker(_FakeWarmWorker):
-        def start(self) -> None:
-            start_entered.set()
-            assert finish_start.wait(timeout=2)
-            super().start()
-
-    warm_worker = BlockingWarmWorker()
+    warm_worker = _FakeWarmWorker(before_start=_hold(start_entered, finish_start))
     manager = ProcessManager(
-        engine_factory=lambda identity, resource_config: cast(Any, _FakeEngine(identity.resource_id, resource_config)),
+        engine_factory=fake_engine_factory,
         warm_worker_factory=lambda: cast(ComputeWorker, warm_worker),
     )
 
@@ -1625,7 +1480,7 @@ def test_process_manager_replenishes_after_unhealthy_warm_claim(monkeypatch) -> 
         return cast(ComputeWorker, engine)
 
     manager = ProcessManager(
-        engine_factory=lambda identity, resource_config: cast(Any, _FakeEngine(identity.resource_id, resource_config)),
+        engine_factory=fake_engine_factory,
         warm_worker_factory=warm_factory,
     )
 
@@ -1680,7 +1535,7 @@ def test_rejected_warm_shutdown_does_not_block_acquisition(monkeypatch) -> None:
         return cast(ComputeWorker, worker)
 
     manager = ProcessManager(
-        engine_factory=lambda identity, config: cast(Any, _FakeEngine(identity.resource_id, config)),
+        engine_factory=fake_engine_factory,
         warm_worker_factory=warm_factory,
         warm_worker_target=2,
     )
@@ -1743,7 +1598,7 @@ def test_shutdown_all_terminates_after_rejected_warm_cleanup_errors(monkeypatch)
         return cast(ComputeWorker, worker)
 
     manager = ProcessManager(
-        engine_factory=lambda identity, config: cast(Any, _FakeEngine(identity.resource_id, config)),
+        engine_factory=fake_engine_factory,
         warm_worker_factory=warm_factory,
         warm_worker_target=1,
     )
@@ -1775,28 +1630,13 @@ def test_shutdown_all_terminates_after_rejected_warm_cleanup_errors(monkeypatch)
     assert "failed-rejected-warm-container" not in manager._managed_container_ids()
 
 
-def test_process_manager_waits_for_initial_warm_workers(monkeypatch) -> None:
-    monkeypatch.setattr(settings, "compute_warm_workers", 2)
-    monkeypatch.setattr(settings, "compute_workers", 2)
-
-    manager = ProcessManager(
-        engine_factory=lambda identity, resource_config: cast(Any, _FakeEngine(identity.resource_id, resource_config)),
-        warm_worker_factory=lambda: cast(ComputeWorker, _FakeWarmWorker()),
-    )
-    try:
-        assert manager.wait_for_warm_workers_ready(timeout_seconds=1.0)
-        assert len(manager._warm_workers) == 2
-    finally:
-        manager.shutdown_all()
-
-
 @pytest.mark.asyncio
 async def test_warm_workers_admission_reserves_each_engine_once(monkeypatch) -> None:
     monkeypatch.setattr(settings, "compute_warm_workers", 2)
     monkeypatch.setattr(settings, "compute_workers", 2)
 
     manager = ProcessManager(
-        engine_factory=lambda identity, resource_config: cast(Any, _FakeEngine(identity.resource_id, resource_config)),
+        engine_factory=fake_engine_factory,
         warm_worker_factory=lambda: cast(ComputeWorker, _FakeWarmWorker()),
     )
     identities = [_analysis_identity(f"analysis-warm-admission-{index}") for index in range(3)]
@@ -1847,7 +1687,7 @@ async def test_warm_workers_replenishes_while_spawn_waiter_is_parked(monkeypatch
         return cast(ComputeWorker, engine)
 
     manager = ProcessManager(
-        engine_factory=lambda identity, resource_config: cast(Any, _FakeEngine(identity.resource_id, resource_config)),
+        engine_factory=fake_engine_factory,
         warm_worker_factory=warm_factory,
     )
     parked_admission: asyncio.Task[bool] | None = None
@@ -1901,7 +1741,7 @@ def test_process_manager_warm_workers_readiness_has_a_bounded_timeout(monkeypatc
     monkeypatch.setattr(settings, "compute_workers", 1)
 
     manager = ProcessManager(
-        engine_factory=lambda identity, resource_config: cast(Any, _FakeEngine(identity.resource_id, resource_config)),
+        engine_factory=fake_engine_factory,
         warm_worker_factory=lambda: (_ for _ in ()).throw(RuntimeError("engine unavailable")),
     )
     try:
@@ -1922,7 +1762,7 @@ def test_process_manager_can_disable_warm_workers(monkeypatch) -> None:
         return cast(ComputeWorker, engine)
 
     manager = ProcessManager(
-        engine_factory=lambda identity, resource_config: cast(Any, _FakeEngine(identity.resource_id, resource_config)),
+        engine_factory=fake_engine_factory,
         warm_worker_factory=warm_factory,
         warm_worker_target=0,
     )
@@ -1949,7 +1789,7 @@ async def test_capacity_admission_never_probes_the_compute_worker_runtime(monkey
     probe_started = threading.Event()
     release_probe = threading.Event()
 
-    class HangingProbeEngine(_FakeEngine):
+    class HangingProbeEngine(FakeEngine):
         def is_process_alive(self) -> bool:
             if hang_probes.is_set():
                 probe_started.set()
@@ -1992,7 +1832,7 @@ async def test_capacity_admission_never_probes_the_compute_worker_runtime(monkey
 
 def test_busy_engine_is_not_evicted_or_reaped_after_liveness_failure(monkeypatch) -> None:
     monkeypatch.setattr(settings, "compute_workers", 1)
-    manager = ProcessManager(engine_factory=lambda identity, resource_config: cast(Any, _FakeEngine(identity.resource_id, resource_config)))
+    manager = ProcessManager(engine_factory=fake_engine_factory)
     identity = _analysis_identity("analysis-busy-after-heartbeat-failure")
     try:
         info = manager.spawn_compute_worker(identity)
@@ -2008,18 +1848,18 @@ def test_busy_engine_is_not_evicted_or_reaped_after_liveness_failure(monkeypatch
 
 
 @pytest.mark.parametrize("capacity", [1, 2])
-@pytest.mark.parametrize("restart_mode", ["dead", "reconfigured", "configure"])
+@pytest.mark.parametrize("restart_mode", ["dead", "reconfigured"])
 def test_engine_restart_transfers_its_capacity_once(monkeypatch, capacity: int, restart_mode: str) -> None:
     monkeypatch.setattr(settings, "compute_workers", capacity)
     monkeypatch.setattr(settings, "compute_warm_workers", 0)
-    created: list[_FakeEngine] = []
+    created: list[FakeEngine] = []
 
-    def factory(identity: compute_pb2.ComputeWorkerIdentity, resource_config: dict | None) -> _FakeEngine:
-        engine = _FakeEngine(identity.resource_id, resource_config)
+    def factory(identity: compute_pb2.ComputeWorkerIdentity, resource_config: dict | None) -> FakeEngine:
+        engine = FakeEngine(identity.resource_id, resource_config)
         created.append(engine)
         return engine
 
-    manager = ProcessManager(engine_factory=lambda identity, resource_config: cast(Any, factory(identity, resource_config)))
+    manager = ProcessManager(engine_factory=factory)
     identity = _analysis_identity("analysis-restart-after-failure")
     try:
         first = manager.spawn_compute_worker(identity, resource_config={"max_memory_mb": 1234})
@@ -2029,10 +1869,7 @@ def test_engine_restart_transfers_its_capacity_once(monkeypatch, capacity: int, 
         else:
             replacement_config = {"max_memory_mb": 5678}
 
-        if restart_mode == "configure":
-            second = manager.restart_engine_with_config(identity, replacement_config)
-        else:
-            second = manager.spawn_compute_worker(identity, resource_config=replacement_config)
+        second = manager.spawn_compute_worker(identity, resource_config=replacement_config)
 
         assert second.engine is not first.engine
         assert len(created) == 2
@@ -2057,7 +1894,7 @@ def test_failed_engine_restart_releases_warm_worker_claim(monkeypatch) -> None:
             super().shutdown()
 
     manager = ProcessManager(
-        engine_factory=lambda identity, resource_config: cast(Any, _FakeEngine(identity.resource_id, resource_config)),
+        engine_factory=fake_engine_factory,
         warm_worker_factory=lambda: cast(ComputeWorker, FailingShutdownWarmWorker()),
     )
     identity = _analysis_identity("analysis-restart-warm-claim")
@@ -2084,7 +1921,7 @@ def test_failed_engine_restart_releases_warm_worker_claim(monkeypatch) -> None:
 
 
 def test_compute_worker_status_reads_tracked_liveness_without_probing() -> None:
-    class CountingEngine(_FakeEngine):
+    class CountingEngine(FakeEngine):
         def __init__(self, resource_id: str, resource_config: dict | None = None) -> None:
             super().__init__(resource_id, resource_config)
             self.probes = 0
@@ -2124,19 +1961,18 @@ def test_warm_workers_reach_configured_reserve_independent_of_compute_capacity(m
         return cast(ComputeWorker, engine)
 
     manager = ProcessManager(
-        engine_factory=lambda identity, resource_config: cast(Any, _FakeEngine(identity.resource_id, resource_config)),
+        engine_factory=fake_engine_factory,
         warm_worker_factory=warm_factory,
     )
     try:
-        deadline = time.monotonic() + 3.0
-        while time.monotonic() < deadline and len(manager._warm_workers) < 4:
-            time.sleep(0.02)
-
-        assert len(manager._warm_workers) == 4
+        assert manager.wait_for_warm_workers_ready(timeout_seconds=3)
+        assert manager.warm_worker_count == 4
         # Warm workers are an additional, ready-but-unassigned reserve. They do
         # not consume active compute slots until bound to an identity.
         time.sleep(0.2)
         assert len(created) == 4
-        assert manager._capacity_starts == 0
+        with manager._capacity_changed:
+            assert manager._capacity_used_locked() == 0
+            assert manager._capacity_starts == 0
     finally:
         manager.shutdown_all()

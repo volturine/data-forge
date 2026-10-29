@@ -70,9 +70,7 @@ def login_user(
     password_provider = service.get_password_provider(session, user.id)
     if password_provider is None:
         raise InvalidCredentialsError()
-    metadata = password_provider.provider_metadata or {}
-    hashed = metadata.get('password_hash')
-    if not isinstance(hashed, str) or not service.verify_password(password, hashed):
+    if not service.provider_password_matches(password_provider, password):
         raise InvalidCredentialsError()
     user_session = service.stage_create_session(
         session,

@@ -2,25 +2,15 @@
 	import type { Schema } from '#lib/types/schema.js';
 	import type { TimeSeriesConfigData } from '#lib/types/operation-config.js';
 	import ColumnDropdown from '#lib/components/common/ColumnDropdown.svelte';
+	import { getColumnTypeConfig } from '#lib/utils/column-types.js';
 	import { css, label, stepConfig, input } from '#lib/styles/panda.js';
 
 	interface Props {
 		schema: Schema;
-		config?: TimeSeriesConfigData;
+		config: TimeSeriesConfigData;
 	}
 
-	let {
-		schema,
-		config = $bindable({
-			column: '',
-			operation_type: 'extract',
-			new_column: '',
-			component: 'year',
-			value: 1,
-			unit: 'days',
-			column2: ''
-		})
-	}: Props = $props();
+	let { schema, config = $bindable() }: Props = $props();
 
 	const operations = [
 		{ value: 'extract', label: 'Extract Component' },
@@ -48,15 +38,11 @@
 
 	const timestampUnits = ['ns', 'us', 'ms'];
 
-	const dateColumns = $derived(
-		schema.columns.filter(
-			(col) =>
-				col.dtype.toLowerCase().includes('date') ||
-				col.dtype.toLowerCase().includes('time') ||
-				col.dtype.toLowerCase() === 'date' ||
-				col.dtype.toLowerCase() === 'datetime'
-		)
-	);
+	const isDateTimeColumn = (col: { dtype: string }) => {
+		const typeConfig = getColumnTypeConfig(col.dtype);
+		return typeConfig.category === 'temporal' && typeConfig.type !== 'Duration';
+	};
+	const dateColumns = $derived(schema.columns.filter(isDateTimeColumn));
 </script>
 
 <div class={stepConfig()} role="region" aria-label="Time series configuration">
@@ -90,11 +76,7 @@
 			value={config.column ?? ''}
 			onChange={(val) => (config.column = val)}
 			placeholder="Select date/time column..."
-			filter={(col) =>
-				col.dtype.toLowerCase().includes('date') ||
-				col.dtype.toLowerCase().includes('time') ||
-				col.dtype.toLowerCase() === 'date' ||
-				col.dtype.toLowerCase() === 'datetime'}
+			filter={isDateTimeColumn}
 		/>
 		{#if dateColumns.length === 0}
 			<p
@@ -380,11 +362,7 @@
 				value={config.column2 ?? ''}
 				onChange={(val) => (config.column2 = val)}
 				placeholder="Select column..."
-				filter={(col) =>
-					col.dtype.toLowerCase().includes('date') ||
-					col.dtype.toLowerCase().includes('time') ||
-					col.dtype.toLowerCase() === 'date' ||
-					col.dtype.toLowerCase() === 'datetime'}
+				filter={isDateTimeColumn}
 			/>
 		</div>
 	{:else if config.operation_type === 'truncate' || config.operation_type === 'round'}

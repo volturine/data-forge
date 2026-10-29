@@ -54,56 +54,6 @@ function makeTab(overrides: Partial<AnalysisTab> = {}): AnalysisTab {
 	};
 }
 
-describe('AnalysisStore.buildTabs', () => {
-	let store: InstanceType<typeof AnalysisStore>;
-
-	beforeEach(() => {
-		store = new AnalysisStore();
-	});
-
-	test('returns empty array for empty input', () => {
-		expect(store.buildTabs([])).toEqual([]);
-	});
-
-	test('creates one tab per datasource ID', () => {
-		const tabs = store.buildTabs(['ds-a', 'ds-b']);
-		expect(tabs).toHaveLength(2);
-		expect(tabs[0].id).toBe('tab-ds-a');
-		expect(tabs[1].id).toBe('tab-ds-b');
-	});
-
-	test('sets correct datasource references', () => {
-		const tabs = store.buildTabs(['ds-x']);
-		expect(tabs[0].datasource.id).toBe('ds-x');
-		expect(tabs[0].datasource.analysis_tab_id).toBeNull();
-		expect(tabs[0].datasource.config.branch).toBe('master');
-	});
-
-	test('names tabs sequentially', () => {
-		const tabs = store.buildTabs(['a', 'b', 'c']);
-		expect(tabs[0].name).toBe('Source 1');
-		expect(tabs[1].name).toBe('Source 2');
-		expect(tabs[2].name).toBe('Source 3');
-	});
-
-	test('initializes steps as empty array', () => {
-		const tabs = store.buildTabs(['ds-1']);
-		expect(tabs[0].steps).toEqual([]);
-	});
-
-	test('output has valid result_id (UUID format)', () => {
-		const tabs = store.buildTabs(['ds-1']);
-		const uuidPattern = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i;
-		expect(tabs[0].output.result_id).toMatch(uuidPattern);
-	});
-
-	test('output has parquet format and full build_mode', () => {
-		const tabs = store.buildTabs(['ds-1']);
-		expect(tabs[0].output.format).toBe('parquet');
-		expect(tabs[0].output.build_mode).toBe('full');
-	});
-});
-
 describe('AnalysisStore.setTabs', () => {
 	let store: InstanceType<typeof AnalysisStore>;
 
@@ -226,6 +176,9 @@ describe('AnalysisStore.duplicateTab', () => {
 		expect(duplicated?.datasource.analysis_tab_id).toBe('tab-upstream');
 		expect(duplicated?.output.filename).toBe('source_copy');
 		expect(duplicated?.output.iceberg?.table_name).toBe('source_copy');
+		expect(duplicated?.output.result_id).toMatch(
+			/^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i
+		);
 	});
 
 	test('assigns incrementing copy names for repeated duplicates', () => {
@@ -678,30 +631,6 @@ describe('AnalysisStore.updateStepConfig', () => {
 	});
 });
 
-describe('AnalysisStore.reorderSteps', () => {
-	let store: InstanceType<typeof AnalysisStore>;
-
-	beforeEach(() => {
-		store = new AnalysisStore();
-		store.setTabs([
-			makeTab({
-				id: 'tab-1',
-				steps: [
-					makeStep({ id: 'A', depends_on: [] }),
-					makeStep({ id: 'B', depends_on: ['A'] }),
-					makeStep({ id: 'C', depends_on: ['B'] })
-				]
-			})
-		]);
-	});
-
-	test('reorders steps by index', () => {
-		store.reorderSteps(0, 2);
-		const ids = store.tabs[0].steps.map((s) => s.id);
-		expect(ids).toEqual(['B', 'C', 'A']);
-	});
-});
-
 describe('AnalysisStore.updateTab', () => {
 	let store: InstanceType<typeof AnalysisStore>;
 
@@ -923,6 +852,23 @@ describe('AnalysisStore.applyAnalysis', () => {
 
 	beforeEach(() => {
 		store = new AnalysisStore();
+	});
+
+	test('an analysis without pipeline tabs loads with no tabs', () => {
+		store.applyAnalysis({
+			id: 'a-empty',
+			name: 'Empty',
+			description: null,
+			pipeline_definition: {},
+			created_at: '',
+			updated_at: '',
+			revision: 1,
+			result_path: null,
+			thumbnail: null
+		});
+
+		expect(store.tabs).toEqual([]);
+		expect(store.activeTabId).toBeNull();
 	});
 
 	test('clears activeTabId when switching to different analysis', () => {

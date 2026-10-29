@@ -47,9 +47,13 @@ import {
 	formatTimeTick,
 	groupSort,
 	needsRotatedTicks,
+	overlayRowsOf,
+	overlaySeriesLabel,
 	readNumber,
 	readString,
+	referenceAxisOf,
 	referenceLinesOf,
+	referencePositionOf,
 	seriesColors,
 	stackMode,
 	truncateLabel,
@@ -59,6 +63,8 @@ import {
 	type ChartType
 } from './format';
 import { groupOrder, numberValue, stringValue, type ChartRow } from './preparation';
+import { isRecord } from '#lib/utils/json.js';
+import type { OverlayChartType } from '#lib/types/protocol-enum-tokens.js';
 
 export type { ChartType };
 
@@ -72,6 +78,10 @@ type AnyMark = ChartMark<
 	string
 >;
 type MarkStates = readonly ChartMarkState<ChartRow, ChartMarkStateStyle<ChartRow>>[];
+
+function asMark(mark: unknown): AnyMark {
+	return mark as AnyMark;
+}
 
 function defineChartDom(spec: object, options: object): DomChartDefinition {
 	return { ...spec, ...options } as DomChartDefinition;
@@ -152,8 +162,19 @@ const builders: Record<
 
 /* ── shared helpers ── */
 
-const str = stringValue;
-const num = numberValue;
+function seriesSetup(ctx: Ctx) {
+	const { data, config, interaction } = ctx;
+	const groupCol = readString(config, 'group_column');
+	const hasGroup = Boolean(groupCol) && hasColumn(data, groupCol);
+	return {
+		groupCol,
+		hasGroup,
+		labels: [...new Set(data.map((r) => stringValue(r.x)))],
+		groups: hasGroup ? groupOrder(data, groupCol, groupSort(config)) : [],
+		colors: seriesColors(config),
+		rows: hasGroup ? data.filter((r) => seriesVisible(interaction, stringValue(r[groupCol]))) : data
+	};
+}
 
 function hasColumn(data: ChartRow[], column: string): boolean {
 	return data.length > 0 && column in data[0];
@@ -228,8 +249,8 @@ function brushOption(values: number[], ctx: Ctx): Pick<ChartDefinitionOptions, '
 
 function overlayYValues(ctx: Ctx): number[] {
 	const values: number[] = [];
-	for (const overlay of overlayMarksOf(ctx.metadata)) {
-		for (const row of overlayData(overlay)) values.push(num(row.y));
+	for (const overlay of overlayRowsOf(ctx.metadata)) {
+		for (const row of overlayData(overlay)) values.push(numberValue(row.y));
 	}
 	return values;
 }
@@ -278,20 +299,10 @@ function categoryAxis(config: ChartConfig, labels: string[], timeFormat: boolean
 function overlayData(overlay: ChartRow): ChartRow[] {
 	const raw = overlay.data;
 	if (!Array.isArray(raw)) return [];
-	return raw
-		.filter((item) => item && typeof item === 'object')
-		.map((row) => ({ ...(row as ChartRow), series: overlaySeriesLabel(overlay) }));
+	return raw.filter(isRecord).map((row) => ({ ...row, series: overlaySeriesLabel(overlay) }));
 }
 
-function overlaySeriesLabel(overlay: ChartRow): string {
-	const yCol = readString(overlay, 'y_column');
-	const agg = readString(overlay, 'aggregation');
-	if (!yCol) return 'Overlay';
-	if (!agg) return yCol;
-	return `${agg.charAt(0).toUpperCase()}${agg.slice(1)} of ${yCol}`;
-}
-
-function overlayChartType(overlay: ChartRow): 'line' | 'area' | 'bar' | 'scatter' {
+function overlayChartType(overlay: ChartRow): OverlayChartType {
 	const raw = readString(overlay, 'chart_type');
 	if (raw === 'area' || raw === 'bar' || raw === 'scatter') return raw;
 	return 'line';
@@ -301,14 +312,8 @@ function overlayOnRight(overlay: ChartRow): boolean {
 	return readString(overlay, 'y_axis_position') === 'right';
 }
 
-function overlayMarksOf(metadata: Record<string, unknown> | null): ChartRow[] {
-	const raw = metadata?.overlays;
-	if (!Array.isArray(raw)) return [];
-	return raw.filter((item) => item && typeof item === 'object') as ChartRow[];
-}
-
 function rightScaleOption(ctx: Ctx, channel: 'x' | 'y'): Record<string, unknown> {
-	if (!overlayMarksOf(ctx.metadata).some(overlayOnRight)) return {};
+	if (!overlayRowsOf(ctx.metadata).some(overlayOnRight)) return {};
 	return {
 		right: {
 			channel,
@@ -330,45 +335,51 @@ function referenceMarks(
 		const value = readNumber(line, 'value');
 		if (value == null) continue;
 		const color = readString(line, 'color') || 'var(--colors-border-primary)';
-		const axis = readString(line, 'axis') || readString(line, 'target_axis') || 'y';
-		const position = readString(line, 'y_axis_position') || readString(line, 'target_axis');
+		const axis = referenceAxisOf(line);
+		const position = referencePositionOf(line);
 		if (axis === 'x') {
 			const labels = options.xCategoryLabels;
 			const xValue: ChartKey | number = labels
 				? (labels[Math.round(value)] ?? String(value))
 				: value;
 			marks.push(
-				ruleX([xValue], {
-					x: (v) => v,
-					stroke: color,
-					strokeDasharray: '4 4'
-				}) as unknown as AnyMark
+				asMark(
+					ruleX([xValue], {
+						x: (v) => v,
+						stroke: color,
+						strokeDasharray: '4 4'
+					})
+				)
 			);
 			continue;
 		}
 		const labels = options.yCategoryLabels;
 		const yValue: ChartKey | number = labels ? (labels[Math.round(value)] ?? String(value)) : value;
-		const useRight = position === 'right' && overlayMarksOf(ctx.metadata).some(overlayOnRight);
+		const useRight = position === 'right' && overlayRowsOf(ctx.metadata).some(overlayOnRight);
 		marks.push(
-			ruleY([yValue], {
-				y: (v) => v,
-				stroke: color,
-				strokeDasharray: '4 4',
-				...(useRight ? { yScale: 'right' } : {})
-			}) as unknown as AnyMark
+			asMark(
+				ruleY([yValue], {
+					y: (v) => v,
+					stroke: color,
+					strokeDasharray: '4 4',
+					...(useRight ? { yScale: 'right' } : {})
+				})
+			)
 		);
 		const label = readString(line, 'label');
 		if (label && !labels) {
 			marks.push(
-				text([{ x: options.xMax ?? value, y: yValue }], {
-					x: (d) => d.x,
-					y: (d) => num(d.y),
-					text: () => label,
-					fill: color,
-					fontSize: 10,
-					anchor: 'end',
-					dy: -6
-				}) as unknown as AnyMark
+				asMark(
+					text([{ x: options.xMax ?? value, y: yValue }], {
+						x: (d) => d.x,
+						y: (d) => numberValue(d.y),
+						text: () => label,
+						fill: color,
+						fontSize: 10,
+						anchor: 'end',
+						dy: -6
+					})
+				)
 			);
 		}
 	}
@@ -380,7 +391,7 @@ function verticalOverlays(
 	xKind: 'band' | 'index',
 	indexOf: (label: string) => number
 ): AnyMark[] {
-	const overlays = overlayMarksOf(ctx.metadata);
+	const overlays = overlayRowsOf(ctx.metadata);
 	const colors = seriesColors(ctx.config);
 	const marks: AnyMark[] = [];
 	overlays.forEach((overlay, index) => {
@@ -392,63 +403,73 @@ function verticalOverlays(
 		const right = scaleId ? { yScale: scaleId } : {};
 		if (type === 'scatter') {
 			marks.push(
-				dot(rows, {
-					x: (d) => str(d.x),
-					y: (d) => num(d.y),
-					fill: color,
-					r: 3.5,
-					fillOpacity: 0.85,
-					...right
-				}) as unknown as AnyMark
+				asMark(
+					dot(rows, {
+						x: (d) => stringValue(d.x),
+						y: (d) => numberValue(d.y),
+						fill: color,
+						r: 3.5,
+						fillOpacity: 0.85,
+						...right
+					})
+				)
 			);
 			return;
 		}
 		if (type === 'bar') {
 			if (xKind === 'band') {
 				marks.push(
-					barY(rows, {
-						x: (d) => str(d.x),
-						y: (d) => num(d.y),
-						fill: color,
-						fillOpacity: 0.25,
-						...right
-					}) as unknown as AnyMark
+					asMark(
+						barY(rows, {
+							x: (d) => stringValue(d.x),
+							y: (d) => numberValue(d.y),
+							fill: color,
+							fillOpacity: 0.25,
+							...right
+						})
+					)
 				);
 			} else {
 				marks.push(
-					rect(rows, {
-						x1: (d) => indexOf(str(d.x)) - 0.2,
-						x2: (d) => indexOf(str(d.x)) + 0.2,
-						y1: () => 0,
-						y2: (d) => num(d.y),
-						fill: color,
-						fillOpacity: 0.25,
-						...right
-					}) as unknown as AnyMark
+					asMark(
+						rect(rows, {
+							x1: (d) => indexOf(stringValue(d.x)) - 0.2,
+							x2: (d) => indexOf(stringValue(d.x)) + 0.2,
+							y1: () => 0,
+							y2: (d) => numberValue(d.y),
+							fill: color,
+							fillOpacity: 0.25,
+							...right
+						})
+					)
 				);
 			}
 			return;
 		}
 		marks.push(
-			lineY(rows, {
-				x: (d) => str(d.x),
-				y: (d) => num(d.y),
-				stroke: color,
-				strokeWidth: 2,
-				curve: d3Curve(curveMonotoneX),
-				...right
-			}) as unknown as AnyMark
+			asMark(
+				lineY(rows, {
+					x: (d) => stringValue(d.x),
+					y: (d) => numberValue(d.y),
+					stroke: color,
+					strokeWidth: 2,
+					curve: d3Curve(curveMonotoneX),
+					...right
+				})
+			)
 		);
 		if (type === 'area') {
 			marks.push(
-				areaY(rows, {
-					x: (d) => str(d.x),
-					y: (d) => num(d.y),
-					fill: color,
-					fillOpacity: areaOpacity(ctx.config),
-					curve: d3Curve(curveMonotoneX),
-					...right
-				}) as unknown as AnyMark
+				asMark(
+					areaY(rows, {
+						x: (d) => stringValue(d.x),
+						y: (d) => numberValue(d.y),
+						fill: color,
+						fillOpacity: areaOpacity(ctx.config),
+						curve: d3Curve(curveMonotoneX),
+						...right
+					})
+				)
 			);
 		}
 	});
@@ -456,7 +477,7 @@ function verticalOverlays(
 }
 
 function horizontalOverlays(ctx: Ctx): AnyMark[] {
-	const overlays = overlayMarksOf(ctx.metadata);
+	const overlays = overlayRowsOf(ctx.metadata);
 	const colors = seriesColors(ctx.config);
 	const marks: AnyMark[] = [];
 	overlays.forEach((overlay, index) => {
@@ -468,48 +489,56 @@ function horizontalOverlays(ctx: Ctx): AnyMark[] {
 		const right = scaleId ? { xScale: scaleId } : {};
 		if (type === 'scatter') {
 			marks.push(
-				dot(rows, {
-					x: (d) => num(d.y),
-					y: (d) => str(d.x),
-					fill: color,
-					r: 3.5,
-					fillOpacity: 0.85,
-					...right
-				}) as unknown as AnyMark
+				asMark(
+					dot(rows, {
+						x: (d) => numberValue(d.y),
+						y: (d) => stringValue(d.x),
+						fill: color,
+						r: 3.5,
+						fillOpacity: 0.85,
+						...right
+					})
+				)
 			);
 			return;
 		}
 		if (type === 'bar') {
 			marks.push(
-				barX(rows, {
-					x: (d) => num(d.y),
-					y: (d) => str(d.x),
-					fill: color,
-					fillOpacity: 0.25,
-					...right
-				}) as unknown as AnyMark
+				asMark(
+					barX(rows, {
+						x: (d) => numberValue(d.y),
+						y: (d) => stringValue(d.x),
+						fill: color,
+						fillOpacity: 0.25,
+						...right
+					})
+				)
 			);
 			return;
 		}
 		marks.push(
-			lineX(rows, {
-				x: (d) => num(d.y),
-				y: (d) => str(d.x),
-				stroke: color,
-				strokeWidth: 2,
-				curve: d3Curve(curveMonotoneY),
-				...right
-			}) as unknown as AnyMark
+			asMark(
+				lineX(rows, {
+					x: (d) => numberValue(d.y),
+					y: (d) => stringValue(d.x),
+					stroke: color,
+					strokeWidth: 2,
+					curve: d3Curve(curveMonotoneY),
+					...right
+				})
+			)
 		);
 		if (type === 'area') {
 			marks.push(
-				areaX(rows, {
-					x: (d) => num(d.y),
-					y: (d) => str(d.x),
-					fill: color,
-					fillOpacity: areaOpacity(ctx.config),
-					...right
-				}) as unknown as AnyMark
+				asMark(
+					areaX(rows, {
+						x: (d) => numberValue(d.y),
+						y: (d) => stringValue(d.x),
+						fill: color,
+						fillOpacity: areaOpacity(ctx.config),
+						...right
+					})
+				)
 			);
 		}
 	});
@@ -525,13 +554,13 @@ function rowContent(
 		const point = points[0];
 		if (!point) return { rows: [] };
 		const d = point.datum as ChartRow;
-		const label = str(d.series) || fallbackLabel;
-		const value = num(d.y);
+		const label = stringValue(d.series) || fallbackLabel;
+		const value = numberValue(d.y);
 		let text = formatNumber(value, config);
-		const total = totals?.get(str(d.x));
+		const total = totals?.get(stringValue(d.x));
 		if (total != null && total > 0) text += ` (${((value / total) * 100).toFixed(1)}%)`;
 		return {
-			title: str(d.x),
+			title: stringValue(d.x),
 			rows: [{ label, value: text, color: point.color }]
 		};
 	};
@@ -540,8 +569,8 @@ function rowContent(
 function totalsByLabel(data: ChartRow[]): Map<string, number> {
 	const totals = new Map<string, number>();
 	for (const row of data) {
-		const key = str(row.x);
-		totals.set(key, (totals.get(key) ?? 0) + num(row.y));
+		const key = stringValue(row.x);
+		totals.set(key, (totals.get(key) ?? 0) + numberValue(row.y));
 	}
 	return totals;
 }
@@ -557,83 +586,88 @@ function colorRamp(min: number, max: number): ChartScaleInput<ChartKey> {
 
 function barDefinition(ctx: Ctx) {
 	const { data, config, interaction } = ctx;
-	const groupCol = readString(config, 'group_column');
-	const hasGroup = Boolean(groupCol) && hasColumn(data, groupCol);
-	const labels = [...new Set(data.map((r) => str(r.x)))];
-	const groups = hasGroup ? groupOrder(data, groupCol, groupSort(config)) : [];
-	const colors = seriesColors(config);
-	const rows = hasGroup ? data.filter((r) => seriesVisible(interaction, str(r[groupCol]))) : data;
+	const { groupCol, hasGroup, labels, groups, colors, rows } = seriesSetup(ctx);
 	const mode = stackMode(config);
 	const normalized = hasGroup && mode === '100%';
 	const stacked = hasGroup && mode !== 'grouped';
-	const keyOf = (d: ChartRow) => `${hasGroup ? str(d[groupCol]) : ''}::${str(d.x)}`;
+	const keyOf = (d: ChartRow) => `${hasGroup ? stringValue(d[groupCol]) : ''}::${stringValue(d.x)}`;
 	const states = dimStates(keyOf, interaction.selectedKey);
-	const color = hasGroup ? (d: ChartRow) => str(d[groupCol]) : undefined;
+	const color = hasGroup ? (d: ChartRow) => stringValue(d[groupCol]) : undefined;
 
 	const marks: AnyMark[] = [];
 	let yScale: ChartScaleInput<number>;
 	if (stacked) {
 		yScale = stackedScaleInput(Math.max(0, ...totalsByLabel(data).values()), normalized);
 		marks.push(
-			barY(rows, {
-				x: (d) => str(d.x),
-				y: (d) => num(d.y),
-				color,
-				layout: normalized ? stackLayout({ offset: 'normalize' }) : stackLayout(),
-				radius: 1,
-				states
-			}) as unknown as AnyMark
+			asMark(
+				barY(rows, {
+					x: (d) => stringValue(d.x),
+					y: (d) => numberValue(d.y),
+					color,
+					layout: normalized ? stackLayout({ offset: 'normalize' }) : stackLayout(),
+					radius: 1,
+					states
+				})
+			)
 		);
 	} else if (hasGroup) {
-		yScale = yScaleInput([...data.map((r) => num(r.y)), ...overlayYValues(ctx)], config);
+		yScale = yScaleInput([...data.map((r) => numberValue(r.y)), ...overlayYValues(ctx)], config);
 		marks.push(
-			barY(rows, {
-				x: (d) => str(d.x),
-				y: (d) => num(d.y),
-				color,
-				layout: groupLayout({ padding: 0.05 }),
-				radius: 2,
-				states
-			}) as unknown as AnyMark
+			asMark(
+				barY(rows, {
+					x: (d) => stringValue(d.x),
+					y: (d) => numberValue(d.y),
+					color,
+					layout: groupLayout({ padding: 0.05 }),
+					radius: 2,
+					states
+				})
+			)
 		);
 		if (groups.length <= 3) {
 			for (const group of groups) {
 				if (!seriesVisible(interaction, group)) continue;
 				marks.push(
-					text(
-						rows.filter((r) => str(r[groupCol]) === group),
-						{
-							x: (d) => str(d.x),
-							y: (d) => num(d.y),
-							text: (d) => formatNumber(num(d.y), config),
-							dy: -6,
-							fill: FG_SECONDARY,
-							fontSize: 9
-						}
-					) as unknown as AnyMark
+					asMark(
+						text(
+							rows.filter((r) => stringValue(r[groupCol]) === group),
+							{
+								x: (d) => stringValue(d.x),
+								y: (d) => numberValue(d.y),
+								text: (d) => formatNumber(numberValue(d.y), config),
+								dy: -6,
+								fill: FG_SECONDARY,
+								fontSize: 9
+							}
+						)
+					)
 				);
 			}
 		}
 	} else {
-		yScale = yScaleInput([...data.map((r) => num(r.y)), ...overlayYValues(ctx)], config);
+		yScale = yScaleInput([...data.map((r) => numberValue(r.y)), ...overlayYValues(ctx)], config);
 		marks.push(
-			barY(rows, {
-				x: (d) => str(d.x),
-				y: (d) => num(d.y),
-				fill: colors[0],
-				radius: 2,
-				states
-			}) as unknown as AnyMark
+			asMark(
+				barY(rows, {
+					x: (d) => stringValue(d.x),
+					y: (d) => numberValue(d.y),
+					fill: colors[0],
+					radius: 2,
+					states
+				})
+			)
 		);
 		marks.push(
-			text(rows, {
-				x: (d) => str(d.x),
-				y: (d) => num(d.y),
-				text: (d) => formatNumber(num(d.y), config),
-				dy: -6,
-				fill: FG_SECONDARY,
-				fontSize: 10
-			}) as unknown as AnyMark
+			asMark(
+				text(rows, {
+					x: (d) => stringValue(d.x),
+					y: (d) => numberValue(d.y),
+					text: (d) => formatNumber(numberValue(d.y), config),
+					dy: -6,
+					fill: FG_SECONDARY,
+					fontSize: 10
+				})
+			)
 		);
 	}
 
@@ -680,66 +714,69 @@ function barDefinition(ctx: Ctx) {
 
 function horizontalBarDefinition(ctx: Ctx) {
 	const { data, config, interaction } = ctx;
-	const groupCol = readString(config, 'group_column');
-	const hasGroup = Boolean(groupCol) && hasColumn(data, groupCol);
-	const labels = [...new Set(data.map((r) => str(r.x)))];
-	const groups = hasGroup ? groupOrder(data, groupCol, groupSort(config)) : [];
-	const colors = seriesColors(config);
-	const rows = hasGroup ? data.filter((r) => seriesVisible(interaction, str(r[groupCol]))) : data;
+	const { groupCol, hasGroup, labels, groups, colors, rows } = seriesSetup(ctx);
 	const mode = stackMode(config);
 	const normalized = hasGroup && mode === '100%';
 	const stacked = hasGroup && mode !== 'grouped';
-	const keyOf = (d: ChartRow) => `${hasGroup ? str(d[groupCol]) : ''}::${str(d.x)}`;
+	const keyOf = (d: ChartRow) => `${hasGroup ? stringValue(d[groupCol]) : ''}::${stringValue(d.x)}`;
 	const states = dimStates(keyOf, interaction.selectedKey);
-	const color = hasGroup ? (d: ChartRow) => str(d[groupCol]) : undefined;
+	const color = hasGroup ? (d: ChartRow) => stringValue(d[groupCol]) : undefined;
 
 	const marks: AnyMark[] = [];
 	let xScale: ChartScaleInput<number>;
 	if (stacked) {
 		xScale = stackedScaleInput(Math.max(0, ...totalsByLabel(data).values()), normalized);
 		marks.push(
-			barX(rows, {
-				x: (d) => num(d.y),
-				y: (d) => str(d.x),
-				color,
-				layout: normalized ? stackLayout({ offset: 'normalize' }) : stackLayout(),
-				radius: 1,
-				states
-			}) as unknown as AnyMark
+			asMark(
+				barX(rows, {
+					x: (d) => numberValue(d.y),
+					y: (d) => stringValue(d.x),
+					color,
+					layout: normalized ? stackLayout({ offset: 'normalize' }) : stackLayout(),
+					radius: 1,
+					states
+				})
+			)
 		);
 	} else if (hasGroup) {
-		xScale = yScaleInput([...data.map((r) => num(r.y)), ...overlayYValues(ctx)], config);
+		xScale = yScaleInput([...data.map((r) => numberValue(r.y)), ...overlayYValues(ctx)], config);
 		marks.push(
-			barX(rows, {
-				x: (d) => num(d.y),
-				y: (d) => str(d.x),
-				color,
-				layout: groupLayout({ padding: 0.05 }),
-				radius: 2,
-				states
-			}) as unknown as AnyMark
+			asMark(
+				barX(rows, {
+					x: (d) => numberValue(d.y),
+					y: (d) => stringValue(d.x),
+					color,
+					layout: groupLayout({ padding: 0.05 }),
+					radius: 2,
+					states
+				})
+			)
 		);
 	} else {
-		xScale = yScaleInput([...data.map((r) => num(r.y)), ...overlayYValues(ctx)], config);
+		xScale = yScaleInput([...data.map((r) => numberValue(r.y)), ...overlayYValues(ctx)], config);
 		marks.push(
-			barX(rows, {
-				x: (d) => num(d.y),
-				y: (d) => str(d.x),
-				fill: colors[0],
-				radius: 2,
-				states
-			}) as unknown as AnyMark
+			asMark(
+				barX(rows, {
+					x: (d) => numberValue(d.y),
+					y: (d) => stringValue(d.x),
+					fill: colors[0],
+					radius: 2,
+					states
+				})
+			)
 		);
 		marks.push(
-			text(rows, {
-				x: (d) => num(d.y),
-				y: (d) => str(d.x),
-				text: (d) => formatNumber(num(d.y), config),
-				dx: 6,
-				anchor: 'start',
-				fill: FG_SECONDARY,
-				fontSize: 10
-			}) as unknown as AnyMark
+			asMark(
+				text(rows, {
+					x: (d) => numberValue(d.y),
+					y: (d) => stringValue(d.x),
+					text: (d) => formatNumber(numberValue(d.y), config),
+					dx: 6,
+					anchor: 'start',
+					fill: FG_SECONDARY,
+					fontSize: 10
+				})
+			)
 		);
 	}
 
@@ -786,58 +823,59 @@ function horizontalBarDefinition(ctx: Ctx) {
 /* ── area ── */
 
 function areaDefinition(ctx: Ctx) {
-	const { data, config, interaction } = ctx;
-	const groupCol = readString(config, 'group_column');
-	const hasGroup = Boolean(groupCol) && hasColumn(data, groupCol);
-	const labels = [...new Set(data.map((r) => str(r.x)))];
-	const groups = hasGroup ? groupOrder(data, groupCol, groupSort(config)) : [];
-	const colors = seriesColors(config);
-	const rows = hasGroup ? data.filter((r) => seriesVisible(interaction, str(r[groupCol]))) : data;
+	const { data, config } = ctx;
+	const { groupCol, hasGroup, labels, groups, colors, rows } = seriesSetup(ctx);
 	const mode = stackMode(config);
 	const normalized = hasGroup && mode === '100%';
 	const stacked = hasGroup && mode !== 'grouped';
 	const n = Math.max(1, labels.length);
 	const xDomain: [number, number] = [-0.5, n - 0.5];
-	const x = (d: ChartRow) => labels.indexOf(str(d.x));
-	const color = hasGroup ? (d: ChartRow) => str(d[groupCol]) : undefined;
+	const x = (d: ChartRow) => labels.indexOf(stringValue(d.x));
+	const color = hasGroup ? (d: ChartRow) => stringValue(d[groupCol]) : undefined;
 
 	const marks: AnyMark[] = [];
 	let yScale: ChartScaleInput<number>;
 	if (stacked) {
 		yScale = stackedScaleInput(Math.max(0, ...totalsByLabel(data).values()), normalized);
 		marks.push(
-			areaY(rows, {
-				x,
-				y: (d) => num(d.y),
-				color,
-				layout: normalized ? stackLayout({ offset: 'normalize' }) : stackLayout(),
-				fillOpacity: areaOpacity(config),
-				curve: d3Curve(curveMonotoneX)
-			}) as unknown as AnyMark
+			asMark(
+				areaY(rows, {
+					x,
+					y: (d) => numberValue(d.y),
+					color,
+					layout: normalized ? stackLayout({ offset: 'normalize' }) : stackLayout(),
+					fillOpacity: areaOpacity(config),
+					curve: d3Curve(curveMonotoneX)
+				})
+			)
 		);
 	} else if (hasGroup) {
-		yScale = yScaleInput([...data.map((r) => num(r.y)), ...overlayYValues(ctx)], config);
+		yScale = yScaleInput([...data.map((r) => numberValue(r.y)), ...overlayYValues(ctx)], config);
 		marks.push(
-			areaY(rows, {
-				x,
-				y1: () => 0,
-				y2: (d) => num(d.y),
-				color,
-				fillOpacity: areaOpacity(config),
-				curve: d3Curve(curveMonotoneX)
-			}) as unknown as AnyMark
+			asMark(
+				areaY(rows, {
+					x,
+					y1: () => 0,
+					y2: (d) => numberValue(d.y),
+					color,
+					fillOpacity: areaOpacity(config),
+					curve: d3Curve(curveMonotoneX)
+				})
+			)
 		);
 	} else {
-		yScale = yScaleInput([...data.map((r) => num(r.y)), ...overlayYValues(ctx)], config);
+		yScale = yScaleInput([...data.map((r) => numberValue(r.y)), ...overlayYValues(ctx)], config);
 		marks.push(
-			areaY(rows, {
-				x,
-				y1: () => 0,
-				y2: (d) => num(d.y),
-				fill: colors[0],
-				fillOpacity: areaOpacity(config),
-				curve: d3Curve(curveMonotoneX)
-			}) as unknown as AnyMark
+			asMark(
+				areaY(rows, {
+					x,
+					y1: () => 0,
+					y2: (d) => numberValue(d.y),
+					fill: colors[0],
+					fillOpacity: areaOpacity(config),
+					curve: d3Curve(curveMonotoneX)
+				})
+			)
 		);
 	}
 
@@ -890,74 +928,79 @@ function areaDefinition(ctx: Ctx) {
 
 function lineDefinition(ctx: Ctx) {
 	const { data, config, interaction } = ctx;
-	const groupCol = readString(config, 'group_column');
-	const hasGroup = Boolean(groupCol) && hasColumn(data, groupCol);
-	const labels = [...new Set(data.map((r) => str(r.x)))];
-	const groups = hasGroup ? groupOrder(data, groupCol, groupSort(config)) : [];
-	const colors = seriesColors(config);
-	const rows = hasGroup ? data.filter((r) => seriesVisible(interaction, str(r[groupCol]))) : data;
-	const keyOf = (d: ChartRow) => `${hasGroup ? str(d[groupCol]) : ''}::${str(d.x)}`;
+	const { groupCol, hasGroup, labels, groups, colors, rows } = seriesSetup(ctx);
+	const keyOf = (d: ChartRow) => `${hasGroup ? stringValue(d[groupCol]) : ''}::${stringValue(d.x)}`;
 	const states = dimStates(keyOf, interaction.selectedKey);
 	const n = Math.max(1, labels.length);
 	const zoomExtent: [number, number] = [0, n - 1];
 	const zoomActive = configZoomEnabled(config) && isZoomActive(interaction, zoomExtent);
 	const xDomain: [number, number] = zoomActive ? interaction.zoomWindow! : zoomExtent;
-	const x = (d: ChartRow) => labels.indexOf(str(d.x));
-	const color = hasGroup ? (d: ChartRow) => str(d[groupCol]) : undefined;
+	const x = (d: ChartRow) => labels.indexOf(stringValue(d.x));
+	const color = hasGroup ? (d: ChartRow) => stringValue(d[groupCol]) : undefined;
 
 	const marks: AnyMark[] = [];
 	if (hasGroup) {
 		marks.push(
-			areaY(rows, {
-				x,
-				y1: () => 0,
-				y2: (d) => num(d.y),
-				color,
-				fillOpacity: 0.08,
-				curve: d3Curve(curveMonotoneX)
-			}) as unknown as AnyMark
+			asMark(
+				areaY(rows, {
+					x,
+					y1: () => 0,
+					y2: (d) => numberValue(d.y),
+					color,
+					fillOpacity: 0.08,
+					curve: d3Curve(curveMonotoneX)
+				})
+			)
 		);
 		marks.push(
-			lineY(rows, {
-				x,
-				y: (d) => num(d.y),
-				color,
-				strokeWidth: 2,
-				curve: d3Curve(curveMonotoneX)
-			}) as unknown as AnyMark
+			asMark(
+				lineY(rows, {
+					x,
+					y: (d) => numberValue(d.y),
+					color,
+					strokeWidth: 2,
+					curve: d3Curve(curveMonotoneX)
+				})
+			)
 		);
 	} else {
 		marks.push(
-			areaY(rows, {
-				x,
-				y1: () => 0,
-				y2: (d) => num(d.y),
-				fill: colors[0],
-				fillOpacity: 0.08,
-				curve: d3Curve(curveMonotoneX)
-			}) as unknown as AnyMark
+			asMark(
+				areaY(rows, {
+					x,
+					y1: () => 0,
+					y2: (d) => numberValue(d.y),
+					fill: colors[0],
+					fillOpacity: 0.08,
+					curve: d3Curve(curveMonotoneX)
+				})
+			)
 		);
 		marks.push(
-			lineY(rows, {
-				x,
-				y: (d) => num(d.y),
-				stroke: colors[0],
-				strokeWidth: 2,
-				curve: d3Curve(curveMonotoneX)
-			}) as unknown as AnyMark
+			asMark(
+				lineY(rows, {
+					x,
+					y: (d) => numberValue(d.y),
+					stroke: colors[0],
+					strokeWidth: 2,
+					curve: d3Curve(curveMonotoneX)
+				})
+			)
 		);
 	}
 	marks.push(
-		dot(rows, {
-			x,
-			y: (d) => num(d.y),
-			...(hasGroup ? { color } : { fill: colors[0] }),
-			r: 3.5,
-			stroke: 'var(--colors-bg-primary)',
-			strokeWidth: 1.5,
-			key: keyOf,
-			states
-		}) as unknown as AnyMark
+		asMark(
+			dot(rows, {
+				x,
+				y: (d) => numberValue(d.y),
+				...(hasGroup ? { color } : { fill: colors[0] }),
+				r: 3.5,
+				stroke: 'var(--colors-bg-primary)',
+				strokeWidth: 1.5,
+				key: keyOf,
+				states
+			})
+		)
 	);
 
 	marks.push(...verticalOverlays(ctx, 'index', indexOf(labels)));
@@ -978,7 +1021,10 @@ function lineDefinition(ctx: Ctx) {
 					}
 				},
 				y: {
-					scale: yScaleInput([...data.map((r) => num(r.y)), ...overlayYValues(ctx)], config),
+					scale: yScaleInput(
+						[...data.map((r) => numberValue(r.y)), ...overlayYValues(ctx)],
+						config
+					),
 					nice: true,
 					grid: true,
 					axis: { label: yAxisTitle(config, 'line'), ...numberAxis(config, 5) }
@@ -1003,22 +1049,24 @@ function lineDefinition(ctx: Ctx) {
 
 function heatgridDefinition(ctx: Ctx) {
 	const { data, config } = ctx;
-	const xLabels = [...new Set(data.map((r) => str(r.x)))];
-	const yLabels = [...new Set(data.map((r) => str(r.y)))];
-	const values = data.map((r) => num(r.value));
+	const xLabels = [...new Set(data.map((r) => stringValue(r.x)))];
+	const yLabels = [...new Set(data.map((r) => stringValue(r.y)))];
+	const values = data.map((r) => numberValue(r.value));
 	const min = values.length ? Math.min(...values) : 0;
 	const max = values.length ? Math.max(...values) : 1;
 
 	const definition = defineChartDom(
 		{
 			marks: [
-				cell(data, {
-					x: (d) => str(d.x),
-					y: (d) => str(d.y),
-					color: (d) => num(d.value),
-					key: (d) => `${str(d.x)}|${str(d.y)}`,
-					stroke: 'var(--colors-border-primary)'
-				}) as unknown as AnyMark
+				asMark(
+					cell(data, {
+						x: (d) => stringValue(d.x),
+						y: (d) => stringValue(d.y),
+						color: (d) => numberValue(d.value),
+						key: (d) => `${stringValue(d.x)}|${stringValue(d.y)}`,
+						stroke: 'var(--colors-border-primary)'
+					})
+				)
 			],
 			scales: {
 				x: {
@@ -1046,9 +1094,13 @@ function heatgridDefinition(ctx: Ctx) {
 					if (!point) return { rows: [] };
 					const d = point.datum as ChartRow;
 					return {
-						title: str(d.x),
+						title: stringValue(d.x),
 						rows: [
-							{ label: str(d.y), value: formatNumber(num(d.value), config), color: point.color }
+							{
+								label: stringValue(d.y),
+								value: formatNumber(numberValue(d.value), config),
+								color: point.color
+							}
 						]
 					};
 				}
@@ -1064,22 +1116,24 @@ function heatgridDefinition(ctx: Ctx) {
 function histogramDefinition(ctx: Ctx) {
 	const { data, config } = ctx;
 	const colors = seriesColors(config);
-	const starts = data.map((r) => num(r.bin_start));
-	const ends = data.map((r) => num(r.bin_end));
+	const starts = data.map((r) => numberValue(r.bin_start));
+	const ends = data.map((r) => numberValue(r.bin_end));
 	const xMin = starts.length ? Math.min(...starts) : 0;
 	const xMax = ends.length ? Math.max(...ends) : 1;
 
 	const definition = defineChartDom(
 		{
 			marks: [
-				rect(data, {
-					x1: (d) => num(d.bin_start),
-					x2: (d) => num(d.bin_end),
-					y1: () => 0,
-					y2: (d) => num(d.count),
-					fill: colors[0],
-					radius: 1
-				}) as unknown as AnyMark
+				asMark(
+					rect(data, {
+						x1: (d) => numberValue(d.bin_start),
+						x2: (d) => numberValue(d.bin_end),
+						y1: () => 0,
+						y2: (d) => numberValue(d.count),
+						fill: colors[0],
+						radius: 1
+					})
+				)
 			],
 			scales: {
 				x: {
@@ -1104,9 +1158,13 @@ function histogramDefinition(ctx: Ctx) {
 					if (!point) return { rows: [] };
 					const d = point.datum as ChartRow;
 					return {
-						title: `${formatNumber(num(d.bin_start), config)} – ${formatNumber(num(d.bin_end), config)}`,
+						title: `${formatNumber(numberValue(d.bin_start), config)} – ${formatNumber(numberValue(d.bin_end), config)}`,
 						rows: [
-							{ label: 'Count', value: formatNumber(num(d.count), config), color: point.color }
+							{
+								label: 'Count',
+								value: formatNumber(numberValue(d.count), config),
+								color: point.color
+							}
 						]
 					};
 				}
@@ -1124,11 +1182,14 @@ function scatterDefinition(ctx: Ctx) {
 	const hasGroup = hasColumn(data, 'group');
 	const groups = hasGroup ? groupOrder(data, 'group', groupSort(config)) : [];
 	const colors = seriesColors(config);
-	const rows = hasGroup ? data.filter((r) => seriesVisible(interaction, str(r.group))) : data;
-	const keyOf = (d: ChartRow) => `${str(d.group ?? '')}::${num(d.x)}::${num(d.y)}`;
+	const rows = hasGroup
+		? data.filter((r) => seriesVisible(interaction, stringValue(r.group)))
+		: data;
+	const keyOf = (d: ChartRow) =>
+		`${stringValue(d.group ?? '')}::${numberValue(d.x)}::${numberValue(d.y)}`;
 	const states = dimStates(keyOf, interaction.selectedKey);
-	const color = hasGroup ? (d: ChartRow) => str(d.group) : undefined;
-	const xValues = data.map((r) => num(r.x));
+	const color = hasGroup ? (d: ChartRow) => stringValue(d.group) : undefined;
+	const xValues = data.map((r) => numberValue(r.x));
 	const xExtent: [number, number] = [
 		xValues.length ? Math.min(...xValues) : 0,
 		xValues.length ? Math.max(...xValues) : 1
@@ -1141,18 +1202,20 @@ function scatterDefinition(ctx: Ctx) {
 	const half = (xDomain[1] - xDomain[0] || 1) * 0.01;
 
 	const marks: AnyMark[] = [
-		dot(rows, {
-			x: (d) => num(d.x),
-			y: (d) => num(d.y),
-			...(hasGroup ? { color } : { fill: colors[0] }),
-			r: 3,
-			fillOpacity: 0.7,
-			key: keyOf,
-			states
-		}) as unknown as AnyMark
+		asMark(
+			dot(rows, {
+				x: (d) => numberValue(d.x),
+				y: (d) => numberValue(d.y),
+				...(hasGroup ? { color } : { fill: colors[0] }),
+				r: 3,
+				fillOpacity: 0.7,
+				key: keyOf,
+				states
+			})
+		)
 	];
 
-	const overlays = overlayMarksOf(ctx.metadata);
+	const overlays = overlayRowsOf(ctx.metadata);
 	overlays.forEach((overlay, index) => {
 		const overlayRows = overlayData(overlay);
 		if (overlayRows.length === 0) return;
@@ -1162,52 +1225,60 @@ function scatterDefinition(ctx: Ctx) {
 		const right = scaleId ? { yScale: scaleId } : {};
 		if (type === 'scatter') {
 			marks.push(
-				dot(overlayRows, {
-					x: (d) => num(d.x),
-					y: (d) => num(d.y),
-					fill: overlayColor,
-					r: 3.5,
-					fillOpacity: 0.85,
-					...right
-				}) as unknown as AnyMark
+				asMark(
+					dot(overlayRows, {
+						x: (d) => numberValue(d.x),
+						y: (d) => numberValue(d.y),
+						fill: overlayColor,
+						r: 3.5,
+						fillOpacity: 0.85,
+						...right
+					})
+				)
 			);
 			return;
 		}
 		if (type === 'bar') {
 			marks.push(
-				rect(overlayRows, {
-					x1: (d) => num(d.x) - half,
-					x2: (d) => num(d.x) + half,
-					y1: () => 0,
-					y2: (d) => num(d.y),
-					fill: overlayColor,
-					fillOpacity: 0.25,
-					...right
-				}) as unknown as AnyMark
+				asMark(
+					rect(overlayRows, {
+						x1: (d) => numberValue(d.x) - half,
+						x2: (d) => numberValue(d.x) + half,
+						y1: () => 0,
+						y2: (d) => numberValue(d.y),
+						fill: overlayColor,
+						fillOpacity: 0.25,
+						...right
+					})
+				)
 			);
 			return;
 		}
-		const sorted = [...overlayRows].sort((a, b) => num(a.x) - num(b.x));
+		const sorted = [...overlayRows].sort((a, b) => numberValue(a.x) - numberValue(b.x));
 		marks.push(
-			lineY(sorted, {
-				x: (d) => num(d.x),
-				y: (d) => num(d.y),
-				stroke: overlayColor,
-				strokeWidth: 2,
-				curve: d3Curve(curveMonotoneX),
-				...right
-			}) as unknown as AnyMark
+			asMark(
+				lineY(sorted, {
+					x: (d) => numberValue(d.x),
+					y: (d) => numberValue(d.y),
+					stroke: overlayColor,
+					strokeWidth: 2,
+					curve: d3Curve(curveMonotoneX),
+					...right
+				})
+			)
 		);
 		if (type === 'area') {
 			marks.push(
-				areaY(sorted, {
-					x: (d) => num(d.x),
-					y: (d) => num(d.y),
-					fill: overlayColor,
-					fillOpacity: areaOpacity(config),
-					curve: d3Curve(curveMonotoneX),
-					...right
-				}) as unknown as AnyMark
+				asMark(
+					areaY(sorted, {
+						x: (d) => numberValue(d.x),
+						y: (d) => numberValue(d.y),
+						fill: overlayColor,
+						fillOpacity: areaOpacity(config),
+						curve: d3Curve(curveMonotoneX),
+						...right
+					})
+				)
 			);
 		}
 	});
@@ -1224,7 +1295,10 @@ function scatterDefinition(ctx: Ctx) {
 					axis: { label: xAxisTitle(config), ...numberAxis(config, 6) }
 				},
 				y: {
-					scale: yScaleInput([...data.map((r) => num(r.y)), ...overlayYValues(ctx)], config),
+					scale: yScaleInput(
+						[...data.map((r) => numberValue(r.y)), ...overlayYValues(ctx)],
+						config
+					),
 					nice: true,
 					grid: true,
 					axis: { label: yAxisTitle(config, 'scatter'), ...numberAxis(config, 5) }
@@ -1242,30 +1316,30 @@ function scatterDefinition(ctx: Ctx) {
 					const point = points[0];
 					if (!point) return { rows: [] };
 					const d = point.datum as ChartRow;
-					const series = str(d.series);
+					const series = stringValue(d.series);
 					if (series) {
 						return {
 							title: series,
 							rows: [
 								{
 									label: yAxisTitle(config, 'scatter'),
-									value: formatNumber(num(d.y), config),
+									value: formatNumber(numberValue(d.y), config),
 									color: point.color
 								}
 							]
 						};
 					}
 					return {
-						title: str(d.group),
+						title: stringValue(d.group),
 						rows: [
 							{
 								label: xAxisTitle(config),
-								value: formatNumber(num(d.x), config),
+								value: formatNumber(numberValue(d.x), config),
 								color: point.color
 							},
 							{
 								label: yAxisTitle(config, 'scatter'),
-								value: formatNumber(num(d.y), config),
+								value: formatNumber(numberValue(d.y), config),
 								color: point.color
 							}
 						]
@@ -1292,25 +1366,27 @@ function scatterDefinition(ctx: Ctx) {
 function boxplotDefinition(ctx: Ctx) {
 	const { data, config } = ctx;
 	const colors = seriesColors(config);
-	const categories = [...new Set(data.map((r) => str(r.group)))];
+	const categories = [...new Set(data.map((r) => stringValue(r.group)))];
 	const expanded: ChartRow[] = [];
 	for (const row of data) {
 		for (const stat of ['min', 'q1', 'median', 'q3', 'max']) {
-			expanded.push({ group: str(row.group), value: num(row[stat]) });
+			expanded.push({ group: stringValue(row.group), value: numberValue(row[stat]) });
 		}
 	}
 
 	const definition = defineChartDom(
 		{
 			marks: [
-				boxX(expanded, {
-					y: (d) => str(d.group),
-					x: (d) => num(d.value),
-					fill: colors[0],
-					fillOpacity: 0.2,
-					stroke: colors[0],
-					strokeWidth: 1.5
-				}) as unknown as AnyMark
+				asMark(
+					boxX(expanded, {
+						y: (d) => stringValue(d.group),
+						x: (d) => numberValue(d.value),
+						fill: colors[0],
+						fillOpacity: 0.2,
+						stroke: colors[0],
+						strokeWidth: 1.5
+					})
+				)
 			],
 			scales: {
 				x: {
@@ -1382,12 +1458,12 @@ function piePanes(ctx: Ctx): ChartPane[] {
 	const hasGroup = hasColumn(data, 'group');
 	const groups = hasGroup ? groupOrder(data, 'group', groupSort(config)) : [''];
 	const labelDomain = [
-		...new Set(data.map((r) => str(r.label)).filter((label) => label.length > 0))
+		...new Set(data.map((r) => stringValue(r.label)).filter((label) => label.length > 0))
 	];
 
 	return groups.map((group) => {
-		const rows = hasGroup ? data.filter((r) => str(r.group) === group) : data;
-		const slices = pieSlices(rows, { value: (d) => num(d.y) });
+		const rows = hasGroup ? data.filter((r) => stringValue(r.group) === group) : data;
+		const slices = pieSlices(rows, { value: (d) => numberValue(d.y) });
 		const definition = defineChartDom(
 			{
 				marks: [
@@ -1403,8 +1479,8 @@ function piePanes(ctx: Ctx): ChartPane[] {
 							radialArc(slices, {
 								startAngle: (d) => d.startAngle,
 								endAngle: (d) => d.endAngle,
-								color: (d) => str(d.label),
-								key: (d) => str(d.label),
+								color: (d) => stringValue(d.label),
+								key: (d) => stringValue(d.label),
 								innerRadius: (layout) => layout.radius * 0.4,
 								stroke: 'var(--colors-bg-primary)',
 								strokeWidth: 2
@@ -1414,7 +1490,8 @@ function piePanes(ctx: Ctx): ChartPane[] {
 								{
 									angle: (d) => d.angle,
 									radius: () => 0.65,
-									text: (d) => `${truncateLabel(str(d.label), 8)} ${Math.round(d.fraction * 100)}%`,
+									text: (d) =>
+										`${truncateLabel(stringValue(d.label), 8)} ${Math.round(d.fraction * 100)}%`,
 									fill: 'var(--colors-fg-primary)',
 									fontSize: 10,
 									anchor: 'middle'
@@ -1435,7 +1512,7 @@ function piePanes(ctx: Ctx): ChartPane[] {
 						if (!point) return { rows: [] };
 						const d = point.datum as ChartRow & { value: number; fraction: number };
 						return {
-							title: str(d.label),
+							title: stringValue(d.label),
 							rows: [
 								{
 									value: `${formatNumber(d.value, config)} (${(d.fraction * 100).toFixed(1)}%)`,

@@ -102,7 +102,3 @@ async def safe_send_serialized_json(websocket: WebSocket, serialized: str) -> bo
         return serialized
 
     return await _send_locked(websocket, encode)
-
-
-def resolve_websocket_session_token(websocket: WebSocket) -> str | None:
-    return websocket.cookies.get('session_token') or websocket.headers.get('X-Session-Token') or None

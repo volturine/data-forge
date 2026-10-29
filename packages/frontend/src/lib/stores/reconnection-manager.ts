@@ -1,7 +1,14 @@
 export class ReconnectionManager {
 	private timer: ReturnType<typeof setTimeout> | null = null;
 
-	constructor(private readonly delayMs: number) {}
+	private nextDelayMs: number;
+
+	constructor(
+		private readonly delayMs: number,
+		private readonly maxDelayMs = delayMs
+	) {
+		this.nextDelayMs = delayMs;
+	}
 
 	get scheduled(): boolean {
 		return this.timer !== null;
@@ -9,11 +16,21 @@ export class ReconnectionManager {
 
 	schedule(callback: () => void): boolean {
 		if (this.timer !== null) return false;
+		const delay =
+			this.maxDelayMs > this.delayMs
+				? this.nextDelayMs * (0.5 + Math.random() * 0.5)
+				: this.delayMs;
+		this.nextDelayMs = Math.min(this.nextDelayMs * 2, this.maxDelayMs);
 		this.timer = setTimeout(() => {
 			this.timer = null;
 			callback();
-		}, this.delayMs);
+		}, delay);
 		return true;
+	}
+
+	reset(): void {
+		this.clear();
+		this.nextDelayMs = this.delayMs;
 	}
 
 	clear(): void {

@@ -2,6 +2,7 @@ import type { CSVOptions, DataSource, SchemaInfo } from '#lib/types/datasource.j
 import { apiRequest } from './client';
 import type { ResultAsync } from 'neverthrow';
 import type { ApiError } from './client';
+import { withQuery } from './query';
 
 function appendCsvOptions(formData: FormData, csvOptions: CSVOptions): void {
 	formData.append('delimiter', csvOptions.delimiter);
@@ -137,17 +138,21 @@ export function listIcebergSnapshots(
 	datasourceId: string,
 	options?: ListIcebergSnapshotsOptions
 ): ResultAsync<IcebergSnapshotsResponse, ApiError> {
-	const params = new URLSearchParams();
-	if (options?.branch) {
-		params.set('branch', options.branch);
-	}
-	if (options?.buildResultsOnly) {
-		params.set('build_results_only', 'true');
-	}
-	const suffix = params.toString() ? `?${params.toString()}` : '';
 	return apiRequest<IcebergSnapshotsResponse>(
-		`/v1/compute/iceberg/${datasourceId}/snapshots${suffix}`
+		withQuery(`/v1/compute/iceberg/${datasourceId}/snapshots`, {
+			branch: options?.branch,
+			build_results_only: options?.buildResultsOnly
+		})
 	);
+}
+
+export function deleteIcebergSnapshot(
+	datasourceId: string,
+	snapshotId: string
+): ResultAsync<void, ApiError> {
+	return apiRequest<void>(`/v1/compute/iceberg/${datasourceId}/snapshots/${snapshotId}`, {
+		method: 'DELETE'
+	});
 }
 
 export interface SnapshotPreview {
@@ -207,37 +212,25 @@ export function listDatasources(
 	includeHidden?: boolean,
 	options?: RequestInit
 ): ResultAsync<DataSource[], ApiError> {
-	const params = new URLSearchParams();
-	if (includeHidden) {
-		params.set('include_hidden', 'true');
-	}
-	const suffix = params.toString() ? `?${params.toString()}` : '';
-	return apiRequest<DataSource[]>(`/v1/datasource${suffix}`, options);
+	return apiRequest<DataSource[]>(
+		withQuery('/v1/datasource', { include_hidden: includeHidden }),
+		options
+	);
 }
 
 export function getDatasource(id: string): ResultAsync<DataSource, ApiError> {
 	return apiRequest<DataSource>(`/v1/datasource/${id}`);
 }
 
-export function getDatasourceSchema(id: string): ResultAsync<SchemaInfo, ApiError>;
-export function getDatasourceSchema(
-	id: string,
-	options: { sheetName?: string; refresh?: boolean; signal?: AbortSignal }
-): ResultAsync<SchemaInfo, ApiError>;
 export function getDatasourceSchema(
 	id: string,
 	options?: { sheetName?: string; refresh?: boolean; signal?: AbortSignal }
 ): ResultAsync<SchemaInfo, ApiError> {
-	const params = new URLSearchParams();
-	if (options?.sheetName) {
-		params.set('sheet_name', options.sheetName);
-	}
-	if (options?.refresh) {
-		params.set('refresh', 'true');
-	}
-	const suffix = params.toString() ? `?${params.toString()}` : '';
 	return apiRequest<SchemaInfo>(
-		`/v1/datasource/${id}/schema${suffix}`,
+		withQuery(`/v1/datasource/${id}/schema`, {
+			sheet_name: options?.sheetName,
+			refresh: options?.refresh
+		}),
 		options?.signal ? { signal: options.signal } : undefined
 	);
 }
@@ -276,24 +269,18 @@ export function getColumnStats(
 	columnName: string,
 	options?: { sample?: boolean; datasource?: { config: Record<string, unknown> } }
 ): ResultAsync<ColumnStatsResponse, ApiError> {
-	const params = new URLSearchParams();
-	if (options?.sample === false) {
-		params.set('sample', 'false');
-	}
-	const payload = options?.datasource?.config ?? null;
-	const suffix = params.toString() ? `?${params.toString()}` : '';
-	if (!payload) {
-		return apiRequest<ColumnStatsResponse>(
-			`/v1/datasource/${datasourceId}/column/${encodeURIComponent(columnName)}/stats${suffix}`
-		);
-	}
-	return apiRequest<ColumnStatsResponse>(
-		`/v1/datasource/${datasourceId}/column/${encodeURIComponent(columnName)}/stats${suffix}`,
-		{
-			method: 'POST',
-			body: JSON.stringify({ datasource: payload ? { config: payload } : null })
-		}
+	const endpoint = withQuery(
+		`/v1/datasource/${datasourceId}/column/${encodeURIComponent(columnName)}/stats`,
+		{ sample: options?.sample === false ? 'false' : undefined }
 	);
+	const payload = options?.datasource?.config;
+	if (!payload) {
+		return apiRequest<ColumnStatsResponse>(endpoint);
+	}
+	return apiRequest<ColumnStatsResponse>(endpoint, {
+		method: 'POST',
+		body: JSON.stringify({ datasource: { config: payload } })
+	});
 }
 
 export function deleteDatasource(id: string): ResultAsync<void, ApiError> {

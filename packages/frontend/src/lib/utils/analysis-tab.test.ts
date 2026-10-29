@@ -9,32 +9,24 @@ import {
 import type { AnalysisTab } from '#lib/types/analysis.js';
 
 describe('isUuid', () => {
-	test('accepts valid v4 UUID', () => {
-		expect(isUuid('550e8400-e29b-41d4-a716-446655440000')).toBe(true);
-	});
-
-	test('accepts uppercase UUID', () => {
-		expect(isUuid('550E8400-E29B-41D4-A716-446655440000')).toBe(true);
-	});
-
-	test('rejects short string', () => {
-		expect(isUuid('not-a-uuid')).toBe(false);
-	});
-
-	test('rejects empty string', () => {
-		expect(isUuid('')).toBe(false);
-	});
-
-	test('rejects null', () => {
-		expect(isUuid(null)).toBe(false);
-	});
-
-	test('rejects undefined', () => {
-		expect(isUuid(undefined)).toBe(false);
-	});
-
-	test('rejects string with invalid characters', () => {
-		expect(isUuid('550e8400-e29b-41d4-a716-44665544000g')).toBe(false);
+	test('accepts canonical UUID strings and rejects everything else', () => {
+		const cases: Array<[string | null | undefined, boolean]> = [
+			// valid v4 UUID
+			['550e8400-e29b-41d4-a716-446655440000', true],
+			// uppercase UUID
+			['550E8400-E29B-41D4-A716-446655440000', true],
+			// short string
+			['not-a-uuid', false],
+			// empty string
+			['', false],
+			[null, false],
+			[undefined, false],
+			// string with invalid characters
+			['550e8400-e29b-41d4-a716-44665544000g', false]
+		];
+		for (const [value, expected] of cases) {
+			expect(isUuid(value)).toBe(expected);
+		}
 	});
 });
 
@@ -203,49 +195,8 @@ describe('validatePipelineTabs', () => {
 		expect(errors[0].field).toBe('output.result_id');
 	});
 
-	test('detects mismatched upstream tab reference', () => {
-		const upstream = makeTab({ id: 'tab-1' });
-		const downstream = makeTab({
-			id: 'tab-2',
-			datasource: {
-				id: 'wrong-id',
-				analysis_tab_id: 'tab-1',
-				config: { branch: 'master' }
-			}
-		});
-		const errors = validatePipelineTabs([upstream, downstream]);
-		expect(errors).toHaveLength(1);
-		expect(errors[0].field).toBe('datasource.id');
-	});
-
-	test('detects reference to missing upstream tab', () => {
-		const tab = makeTab({
-			datasource: {
-				id: 'some-id',
-				analysis_tab_id: 'nonexistent',
-				config: { branch: 'master' }
-			}
-		});
-		const errors = validatePipelineTabs([tab]);
-		expect(errors).toHaveLength(1);
-		expect(errors[0].field).toBe('datasource.analysis_tab_id');
-	});
-
 	test('returns empty for empty tabs array', () => {
 		expect(validatePipelineTabs([])).toEqual([]);
-	});
-
-	test('valid derived tab with correct upstream reference passes', () => {
-		const upstream = makeTab({ id: 'tab-1' });
-		const derived = makeTab({
-			id: 'tab-2',
-			datasource: {
-				id: upstream.output.result_id,
-				analysis_tab_id: 'tab-1',
-				config: { branch: 'master' }
-			}
-		});
-		expect(validatePipelineTabs([upstream, derived])).toEqual([]);
 	});
 
 	test('derived tab referencing non-existent upstream produces error', () => {

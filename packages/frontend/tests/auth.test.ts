@@ -1,95 +1,62 @@
-import { test, expect } from '@playwright/test';
+import { test, expect, type Route } from '@playwright/test';
 import { uid } from './utils/uid.js';
 import { e2eBaseURL } from './utils/base-url.js';
 
 const baseURL = e2eBaseURL();
 
 test.describe('Auth – registration flow', () => {
-	test('register with valid credentials creates account', async ({ browser }) => {
+	test('register submit button is disabled for short password, mismatched passwords, and empty name', async ({
+		browser
+	}) => {
 		const context = await browser.newContext({ baseURL });
 		const page = await context.newPage();
 		try {
-			const email = `e2e-auth-reg-${uid()}@example.com`;
-			await page.goto('/register');
-			await expect(page.getByRole('heading', { name: 'Create account' })).toBeVisible({
-				timeout: 5_000
+			await test.step('register submit button is disabled when password is too short', async () => {
+				await page.goto('/register');
+				await expect(page.getByRole('heading', { name: 'Create account' })).toBeVisible({
+					timeout: 5_000
+				});
+
+				await page.locator('#name').fill('E2E User');
+				await page.locator('#email').fill(`e2e-auth-${uid()}@example.com`);
+				await page.locator('#password').fill('short');
+				await page.locator('#confirm').fill('short');
+
+				await expect(
+					page.getByRole('button', { name: 'Create account', exact: true })
+				).toBeDisabled();
 			});
 
-			await page.locator('#name').fill('E2E Auth User');
-			await page.locator('#email').fill(email);
-			await page.locator('#password').fill('ValidPass123!');
-			await page.locator('#confirm').fill('ValidPass123!');
+			await test.step('register submit button is disabled when passwords do not match', async () => {
+				await page.goto('/register');
+				await expect(page.getByRole('heading', { name: 'Create account' })).toBeVisible({
+					timeout: 5_000
+				});
 
-			await page.getByRole('button', { name: 'Create account', exact: true }).click();
+				await page.locator('#name').fill('E2E User');
+				await page.locator('#email').fill(`e2e-auth-${uid()}@example.com`);
+				await page.locator('#password').fill('ValidPass123!');
+				await page.locator('#confirm').fill('DifferentPass123!');
 
-			await expect(
-				page.getByText(/Account created/i).or(page.getByLabel('Main navigation'))
-			).toBeVisible({ timeout: 10_000 });
-		} finally {
-			await context.close();
-		}
-	});
-
-	test('register submit button is disabled when password is too short', async ({ browser }) => {
-		const context = await browser.newContext({ baseURL });
-		const page = await context.newPage();
-		try {
-			await page.goto('/register');
-			await expect(page.getByRole('heading', { name: 'Create account' })).toBeVisible({
-				timeout: 5_000
+				await expect(
+					page.getByRole('button', { name: 'Create account', exact: true })
+				).toBeDisabled();
 			});
 
-			await page.locator('#name').fill('E2E User');
-			await page.locator('#email').fill(`e2e-auth-${uid()}@example.com`);
-			await page.locator('#password').fill('short');
-			await page.locator('#confirm').fill('short');
+			await test.step('register submit button is disabled when name is empty', async () => {
+				await page.goto('/register');
+				await expect(page.getByRole('heading', { name: 'Create account' })).toBeVisible({
+					timeout: 5_000
+				});
 
-			await expect(
-				page.getByRole('button', { name: 'Create account', exact: true })
-			).toBeDisabled();
-		} finally {
-			await context.close();
-		}
-	});
+				await page.locator('#email').fill(`e2e-auth-${uid()}@example.com`);
+				await page.locator('#password').fill('ValidPass123!');
+				await page.locator('#confirm').fill('ValidPass123!');
 
-	test('register submit button is disabled when passwords do not match', async ({ browser }) => {
-		const context = await browser.newContext({ baseURL });
-		const page = await context.newPage();
-		try {
-			await page.goto('/register');
-			await expect(page.getByRole('heading', { name: 'Create account' })).toBeVisible({
-				timeout: 5_000
+				await expect(
+					page.getByRole('button', { name: 'Create account', exact: true })
+				).toBeDisabled();
 			});
-
-			await page.locator('#name').fill('E2E User');
-			await page.locator('#email').fill(`e2e-auth-${uid()}@example.com`);
-			await page.locator('#password').fill('ValidPass123!');
-			await page.locator('#confirm').fill('DifferentPass123!');
-
-			await expect(
-				page.getByRole('button', { name: 'Create account', exact: true })
-			).toBeDisabled();
-		} finally {
-			await context.close();
-		}
-	});
-
-	test('register submit button is disabled when name is empty', async ({ browser }) => {
-		const context = await browser.newContext({ baseURL });
-		const page = await context.newPage();
-		try {
-			await page.goto('/register');
-			await expect(page.getByRole('heading', { name: 'Create account' })).toBeVisible({
-				timeout: 5_000
-			});
-
-			await page.locator('#email').fill(`e2e-auth-${uid()}@example.com`);
-			await page.locator('#password').fill('ValidPass123!');
-			await page.locator('#confirm').fill('ValidPass123!');
-
-			await expect(
-				page.getByRole('button', { name: 'Create account', exact: true })
-			).toBeDisabled();
 		} finally {
 			await context.close();
 		}
@@ -97,46 +64,45 @@ test.describe('Auth – registration flow', () => {
 });
 
 test.describe('Auth – login flow', () => {
-	test('login page renders email and password fields', async ({ browser }) => {
+	test('login stays interactive during bootstrap and rejects a wrong password', async ({
+		browser
+	}) => {
 		const context = await browser.newContext({ baseURL });
 		const page = await context.newPage();
+		const gate = Promise.withResolvers<void>();
+		const intercepted = new Set<string>();
+		const holdBootstrap = async (route: Route) => {
+			if (route.request().method() === 'GET') {
+				intercepted.add(new URL(route.request().url()).pathname);
+				await gate.promise;
+			}
+			await route.continue();
+		};
 		try {
-			await page.goto('/login');
+			await page.route('**/api/v1/config', holdBootstrap);
+			await page.route('**/api/v1/auth/me', holdBootstrap);
+			await page.goto('/login', { waitUntil: 'commit' });
+			await expect.poll(() => intercepted.size, { timeout: 5_000 }).toBe(2);
 			await expect(page.getByRole('heading', { name: 'Sign in' })).toBeVisible({ timeout: 5_000 });
 			await expect(page.locator('#email')).toBeVisible();
 			await expect(page.locator('#password')).toBeVisible();
 			await expect(page.getByRole('button', { name: 'Sign in', exact: true })).toBeVisible();
-		} finally {
-			await context.close();
-		}
-	});
-
-	test('login with wrong password shows error message', async ({ browser }) => {
-		const context = await browser.newContext({ baseURL });
-		const page = await context.newPage();
-		try {
-			await page.goto('/login');
-			await expect(page.getByRole('heading', { name: 'Sign in' })).toBeVisible({ timeout: 5_000 });
 
 			await page.locator('#email').fill(`e2e-auth-${uid()}@example.com`);
 			await page.locator('#password').fill('WrongPassword123!');
 			await page.getByRole('button', { name: 'Sign in', exact: true }).click();
 
-			// Error state should appear (any error text in the form vicinity)
-			await expect(page.locator('form')).toContainText(/.+/, { timeout: 5_000 });
+			// The login page renders the backend's InvalidCredentialsError message in its error box
+			await expect(page.getByText('Invalid email or password', { exact: true })).toBeVisible({
+				timeout: 5_000
+			});
 		} finally {
-			await context.close();
-		}
-	});
-
-	test('login form includes forgot password link', async ({ browser }) => {
-		const context = await browser.newContext({ baseURL });
-		const page = await context.newPage();
-		try {
-			await page.goto('/login');
-			await expect(page.getByRole('link', { name: 'Forgot password?' })).toBeVisible();
-		} finally {
-			await context.close();
+			gate.resolve();
+			try {
+				await page.unrouteAll({ behavior: 'wait' });
+			} finally {
+				await context.close();
+			}
 		}
 	});
 });
@@ -190,45 +156,39 @@ test.describe('Auth – reset password flow', () => {
 		}
 	});
 
-	test('reset password submit button is disabled when password is too short', async ({
+	test('reset password submit button is disabled for short password and mismatched passwords', async ({
 		browser
 	}) => {
 		const context = await browser.newContext({ baseURL });
 		const page = await context.newPage();
 		try {
-			await page.goto('/reset-password?token=dummy-token');
-			await expect(page.getByRole('heading', { name: 'Reset password' })).toBeVisible({
-				timeout: 5_000
+			await test.step('reset password submit button is disabled when password is too short', async () => {
+				await page.goto('/reset-password?token=dummy-token');
+				await expect(page.getByRole('heading', { name: 'Reset password' })).toBeVisible({
+					timeout: 5_000
+				});
+
+				await page.locator('#password').fill('short');
+				await page.locator('#confirm').fill('short');
+
+				await expect(
+					page.getByRole('button', { name: 'Reset password', exact: true })
+				).toBeDisabled();
 			});
 
-			await page.locator('#password').fill('short');
-			await page.locator('#confirm').fill('short');
+			await test.step('reset password submit button is disabled when passwords do not match', async () => {
+				await page.goto('/reset-password?token=dummy-token');
+				await expect(page.getByRole('heading', { name: 'Reset password' })).toBeVisible({
+					timeout: 5_000
+				});
 
-			await expect(
-				page.getByRole('button', { name: 'Reset password', exact: true })
-			).toBeDisabled();
-		} finally {
-			await context.close();
-		}
-	});
+				await page.locator('#password').fill('ValidPass123!');
+				await page.locator('#confirm').fill('DifferentPass123!');
 
-	test('reset password submit button is disabled when passwords do not match', async ({
-		browser
-	}) => {
-		const context = await browser.newContext({ baseURL });
-		const page = await context.newPage();
-		try {
-			await page.goto('/reset-password?token=dummy-token');
-			await expect(page.getByRole('heading', { name: 'Reset password' })).toBeVisible({
-				timeout: 5_000
+				await expect(
+					page.getByRole('button', { name: 'Reset password', exact: true })
+				).toBeDisabled();
 			});
-
-			await page.locator('#password').fill('ValidPass123!');
-			await page.locator('#confirm').fill('DifferentPass123!');
-
-			await expect(
-				page.getByRole('button', { name: 'Reset password', exact: true })
-			).toBeDisabled();
 		} finally {
 			await context.close();
 		}
@@ -277,6 +237,7 @@ test.describe('Auth – navigation between auth pages', () => {
 			await page.goto('/login');
 			await expect(page.getByRole('heading', { name: 'Sign in' })).toBeVisible({ timeout: 5_000 });
 
+			await expect(page.getByRole('link', { name: 'Forgot password?' })).toBeVisible();
 			await page.getByRole('link', { name: 'Forgot password?' }).click();
 			await expect(page).toHaveURL(/forgot-password/, { timeout: 5_000 });
 

@@ -1,20 +1,12 @@
-<script lang="ts" module>
-	export type CsvConfig = {
-		delimiter: string;
-		quote_char: string;
-		has_header: boolean;
-		skip_rows: number;
-		encoding: string;
-	};
-</script>
-
 <script lang="ts">
 	import { Loader, Save } from '@lucide/svelte';
+	import { DEFAULT_CSV_OPTIONS } from '#lib/types/datasource.js';
+	import type { CSVOptions } from '#lib/types/datasource.js';
 	import { css, input } from '#lib/styles/panda.js';
 
 	interface Props {
 		datasourceId: string;
-		config?: CsvConfig;
+		config?: CSVOptions;
 		pending: boolean;
 		hasChanges: boolean;
 		onDirty: () => void;
@@ -23,20 +15,14 @@
 
 	let {
 		datasourceId,
-		config = $bindable({
-			delimiter: ',',
-			quote_char: '"',
-			has_header: true,
-			skip_rows: 0,
-			encoding: 'utf8'
-		}),
+		config = $bindable({ ...DEFAULT_CSV_OPTIONS }),
 		pending,
 		hasChanges,
 		onDirty,
 		onSave
 	}: Props = $props();
 
-	function handleCsvConfigChange<K extends keyof CsvConfig>(key: K, value: CsvConfig[K]) {
+	function handleCsvConfigChange<K extends keyof CSVOptions>(key: K, value: CSVOptions[K]) {
 		config = { ...config, [key]: value };
 		onDirty();
 	}

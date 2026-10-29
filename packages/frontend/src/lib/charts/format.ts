@@ -1,17 +1,10 @@
 import { formatEpoch, parsePlainDateTime } from '#lib/utils/temporal.js';
+import { isRecord } from '#lib/utils/json.js';
+import type { ChartType } from '#lib/types/protocol-enum-tokens.js';
 import { stringValue, type ChartRow } from './preparation';
 
+export type { ChartType };
 export type ChartConfig = Record<string, unknown>;
-export type ChartType =
-	| 'bar'
-	| 'horizontal_bar'
-	| 'area'
-	| 'heatgrid'
-	| 'line'
-	| 'pie'
-	| 'histogram'
-	| 'scatter'
-	| 'boxplot';
 
 export const CHART_PALETTE = [
 	'var(--colors-indigo-500)',
@@ -31,7 +24,6 @@ export const CHART_THEME = {
 	background: 'transparent'
 } as const;
 
-export const FG_MUTED = 'var(--colors-fg-muted)';
 export const FG_SECONDARY = 'var(--colors-fg-secondary)';
 
 export function readString(config: ChartConfig, key: string): string {
@@ -161,11 +153,27 @@ export function truncateLabel(text: string, maxChars: number): string {
 export function overlayRowsOf(metadata: Record<string, unknown> | null | undefined): ChartRow[] {
 	const raw = metadata?.overlays;
 	if (!Array.isArray(raw)) return [];
-	return raw.filter((item) => item && typeof item === 'object') as ChartRow[];
+	return raw.filter(isRecord);
+}
+
+export function overlaySeriesLabel(overlay: ChartRow): string {
+	const yCol = readString(overlay, 'y_column');
+	const agg = readString(overlay, 'aggregation');
+	if (!yCol) return 'Overlay';
+	if (!agg) return yCol;
+	return `${agg.charAt(0).toUpperCase()}${agg.slice(1)} of ${yCol}`;
 }
 
 export function referenceLinesOf(metadata: Record<string, unknown> | null | undefined): ChartRow[] {
 	const raw = metadata?.reference_lines;
 	if (!Array.isArray(raw)) return [];
-	return raw.filter((item) => item && typeof item === 'object') as ChartRow[];
+	return raw.filter(isRecord);
+}
+
+export function referenceAxisOf(line: ChartRow): string {
+	return readString(line, 'axis') || readString(line, 'target_axis') || 'y';
+}
+
+export function referencePositionOf(line: ChartRow): string {
+	return readString(line, 'y_axis_position') || readString(line, 'target_axis');
 }

@@ -30,6 +30,7 @@ import docker
 logger = logging.getLogger(__name__)
 
 _HOST_NAME_RE = re.compile(r"^[a-z0-9][a-z0-9_.-]{0,62}$")
+_HOST_FIELDS = frozenset({"name", "docker_host", "connect_host", "compute_worker_network", "object_store_endpoint", "max_workers", "tls_cert_path"})
 _LOCAL_SCHEMES = ("unix://", "npipe://", "http+unix://")
 _SUPPORTED_SCHEMES = (*_LOCAL_SCHEMES, "tcp://", "ssh://", "http://", "https://")
 DEFAULT_HOST_NAME = "local"
@@ -99,7 +100,6 @@ class DockerHostStatus:
 @dataclass(slots=True)
 class _HostState:
     spec: DockerHostSpec
-    order: int
     healthy: bool = False
     unavailable_until: float = 0.0
     last_error: str | None = None
@@ -130,8 +130,8 @@ def parse_docker_hosts(
     """Parse ``COMPUTE_WORKER_DOCKER_HOSTS``; empty input yields the local host.
 
     The single-host variables remain the defaults for every entry that omits a
-    field. The old ``engine_network`` JSON key is accepted for one release and
-    logs a deprecation warning.
+    field. Unknown fields are rejected so a misspelled or renamed key cannot
+    silently fall back to a default.
     """
     text = raw.strip()
     if not text:
@@ -155,6 +155,9 @@ def parse_docker_hosts(
     for index, entry in enumerate(payload):
         if not isinstance(entry, dict):
             raise DockerHostConfigError(f"COMPUTE_WORKER_DOCKER_HOSTS[{index}] must be an object")
+        unknown = sorted(set(entry) - _HOST_FIELDS)
+        if unknown:
+            raise DockerHostConfigError(f"COMPUTE_WORKER_DOCKER_HOSTS[{index}] has unknown fields: {', '.join(unknown)}")
         name = _read_str(entry, "name", default=DEFAULT_HOST_NAME if len(payload) == 1 else "")
         if not _HOST_NAME_RE.fullmatch(name):
             raise DockerHostConfigError(f"COMPUTE_WORKER_DOCKER_HOSTS[{index}] needs a name matching {_HOST_NAME_RE.pattern}")
@@ -167,21 +170,11 @@ def parse_docker_hosts(
         max_workers_raw = entry.get("max_workers", 0)
         if isinstance(max_workers_raw, bool) or not isinstance(max_workers_raw, int) or max_workers_raw < 0:
             raise DockerHostConfigError(f"COMPUTE_WORKER_DOCKER_HOSTS[{name}] max_workers must be a non-negative integer")
-        if "compute_worker_network" in entry:
-            compute_worker_network = _read_str(entry, "compute_worker_network") or default_compute_worker_network
-        elif "engine_network" in entry:
-            logger.warning(
-                "Deprecated compute-worker host field engine_network is in use; use compute_worker_network instead. "
-                "The compatibility alias will be removed after this release."
-            )
-            compute_worker_network = _read_str(entry, "engine_network") or default_compute_worker_network
-        else:
-            compute_worker_network = default_compute_worker_network
         spec = DockerHostSpec(
             name=name,
             docker_host=docker_host,
             connect_host=_read_str(entry, "connect_host", default=default_connect_host),
-            compute_worker_network=compute_worker_network,
+            compute_worker_network=_read_str(entry, "compute_worker_network") or default_compute_worker_network,
             object_store_endpoint=_read_str(entry, "object_store_endpoint") or default_object_store_endpoint,
             max_workers=max_workers_raw,
             tls_cert_path=_read_str(entry, "tls_cert_path"),
@@ -230,7 +223,7 @@ class DockerHostRegistry:
         specs = tuple(hosts)
         if not specs:
             raise DockerHostConfigError("At least one Docker host is required")
-        self._states: dict[str, _HostState] = {spec.name: _HostState(spec=spec, order=index) for index, spec in enumerate(specs)}
+        self._states: dict[str, _HostState] = {spec.name: _HostState(spec=spec) for spec in specs}
         self._compute_worker_image = compute_worker_image
         self._failure_cooldown_seconds = failure_cooldown_seconds
         self._clock = clock
@@ -240,7 +233,7 @@ class DockerHostRegistry:
 
     @property
     def hosts(self) -> tuple[DockerHostSpec, ...]:
-        return tuple(state.spec for state in sorted(self._states.values(), key=lambda state: state.order))
+        return tuple(state.spec for state in self._states.values())
 
     def get(self, name: str) -> DockerHostSpec:
         return self._states[name].spec
@@ -285,15 +278,11 @@ class DockerHostRegistry:
             finally:
                 client.close()
         except Exception as exc:
-            with self._lock:
-                state.healthy = False
-                state.last_error = f"{type(exc).__name__}: {exc}"
-                state.checked_at = self._clock()
-                state.unavailable_until = self._clock() + self._failure_cooldown_seconds
+            error = self._record_failure(state, exc)
             if was_healthy:
-                logger.error("Docker host unavailable name=%s docker_host=%s error=%s", spec.name, spec.docker_host, state.last_error)
+                logger.error("Docker host unavailable name=%s docker_host=%s error=%s", spec.name, spec.docker_host, error)
             else:
-                logger.warning("Docker host probe failed name=%s docker_host=%s error=%s", spec.name, spec.docker_host, state.last_error)
+                logger.warning("Docker host probe failed name=%s docker_host=%s error=%s", spec.name, spec.docker_host, error)
             return False
         with self._lock:
             state.healthy = True
@@ -308,15 +297,20 @@ class DockerHostRegistry:
     def probe_all(self) -> dict[str, bool]:
         return {spec.name: self.probe(spec) for spec in self.hosts}
 
-    def report_failure(self, name: str, error: BaseException) -> None:
-        """Take a host out of placement after a launch or API failure on it."""
-        state = self._states[name]
+    def _record_failure(self, state: _HostState, error: BaseException) -> str:
+        """Exclude a host from placement for the cooldown; return the recorded error text."""
+        message = f"{type(error).__name__}: {error}"
         with self._lock:
             state.healthy = False
-            state.last_error = f"{type(error).__name__}: {error}"
+            state.last_error = message
             state.checked_at = self._clock()
             state.unavailable_until = self._clock() + self._failure_cooldown_seconds
-        logger.error("Docker host failed, excluding it from placement name=%s error=%s", name, state.last_error)
+        return message
+
+    def report_failure(self, name: str, error: BaseException) -> None:
+        """Take a host out of placement after a launch or API failure on it."""
+        message = self._record_failure(self._states[name], error)
+        logger.error("Docker host failed, excluding it from placement name=%s error=%s", name, message)
 
     def start_health_monitor(self, interval_seconds: float) -> None:
         if self._monitor_thread is not None:
@@ -366,15 +360,16 @@ class DockerHostRegistry:
             if not candidates:
                 raise NoEligibleDockerHost(f"No Docker host can accept a compute container ({self._describe_ineligible_locked(now, excluded)})")
 
-            def score(state: _HostState) -> tuple[float, int, int]:
+            def score(state: _HostState) -> tuple[float, int]:
                 placements = len(state.placements)
-                return (placements / max(state.cpu_count or 1, 1), placements, state.order)
+                return (placements / max(state.cpu_count or 1, 1), placements)
 
+            # ``min`` keeps the first candidate on a tie, and candidates follow configuration order.
             return min(candidates, key=score).spec
 
     def _describe_ineligible_locked(self, now: float, excluded: set[str]) -> str:
         parts: list[str] = []
-        for state in sorted(self._states.values(), key=lambda state: state.order):
+        for state in self._states.values():
             if state.spec.name in excluded:
                 reason = "excluded"
             elif not state.healthy or now < state.unavailable_until:
@@ -397,14 +392,11 @@ class DockerHostRegistry:
                     last_error=state.last_error,
                     checked_at=state.checked_at,
                 )
-                for state in sorted(self._states.values(), key=lambda state: state.order)
+                for state in self._states.values()
             ]
 
     def placement_capacity(self) -> int | None:
         """Sum of per-host caps, or ``None`` when any host is uncapped."""
-        total = 0
-        for spec in self.hosts:
-            if spec.max_workers == 0:
-                return None
-            total += spec.max_workers
-        return total
+        if any(spec.max_workers == 0 for spec in self.hosts):
+            return None
+        return sum(spec.max_workers for spec in self.hosts)

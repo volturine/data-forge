@@ -7,7 +7,6 @@ import {
 import {
 	createHealthCheckViaUi,
 	createScheduleViaUi,
-	createUdfViaUi,
 	uploadDatasourceViaUi,
 	uploadDatasourceWithDatesViaUi,
 	E2E_PASSWORD
@@ -62,7 +61,6 @@ export interface E2ERequest extends APIRequestContext {
 
 const datasourceRegistry = new Map<string, { name: string; namespace?: string }>();
 const analysisRegistry = new Map<string, { name: string }>();
-const udfRegistry = new Map<string, { name: string }>();
 
 /**
  * Default app namespace used by helpers unless a test passes another.
@@ -75,10 +73,6 @@ const helperDefaultNamespace = process.env.DEFAULT_NAMESPACE?.trim() || 'default
 // authenticated page avoids hard-loading the SPA before every API-created
 // analysis/datasource while keeping the actual test page fresh per test.
 const helperPages = new WeakMap<BrowserContext, Page>();
-
-async function resolveHelperDefaultNamespace(_page: Page): Promise<string> {
-	return helperDefaultNamespace;
-}
 
 /**
  * Run setup work on the worker's long-lived helper context.
@@ -103,7 +97,7 @@ async function withAuthedPage<T>(request: E2ERequest, fn: (page: Page) => Promis
  * does not require a specific one.
  */
 async function prepareHelperNamespace(page: Page, namespace?: string): Promise<void> {
-	const target = namespace ?? (await resolveHelperDefaultNamespace(page));
+	const target = namespace ?? helperDefaultNamespace;
 	// The worker-scoped helper page remains on the last setup route. Only the
 	// first call needs a document navigation; later setup calls can use the
 	// already-hydrated shell and avoid a second bootstrap/API burst.
@@ -145,7 +139,7 @@ export async function createDatasource(
 	description?: string
 ): Promise<string> {
 	return withAuthedPage(request, async (page) => {
-		const target = namespace ?? (await resolveHelperDefaultNamespace(page));
+		const target = namespace ?? helperDefaultNamespace;
 		await prepareHelperNamespace(page, target);
 		const { id } = await uploadDatasourceViaUi(page, name, { description });
 		datasourceRegistry.set(id, { name, namespace: target });
@@ -160,7 +154,7 @@ export async function createCsvDatasource(
 	namespace?: string
 ): Promise<string> {
 	return withAuthedPage(request, async (page) => {
-		const target = namespace ?? (await resolveHelperDefaultNamespace(page));
+		const target = namespace ?? helperDefaultNamespace;
 		await prepareHelperNamespace(page, target);
 		const { id } = await uploadDatasourceViaUi(page, name, { csv });
 		datasourceRegistry.set(id, { name, namespace: target });
@@ -174,7 +168,7 @@ export async function createLargeDatasource(
 	rows: number
 ): Promise<string> {
 	return withAuthedPage(request, async (page) => {
-		const target = await resolveHelperDefaultNamespace(page);
+		const target = helperDefaultNamespace;
 		await prepareHelperNamespace(page, target);
 		const { id } = await uploadDatasourceViaUi(page, name, { rows });
 		datasourceRegistry.set(id, { name, namespace: target });
@@ -187,7 +181,7 @@ export async function createDatasourceWithDates(
 	name: string
 ): Promise<string> {
 	return withAuthedPage(request, async (page) => {
-		const target = await resolveHelperDefaultNamespace(page);
+		const target = helperDefaultNamespace;
 		await prepareHelperNamespace(page, target);
 		const { id } = await uploadDatasourceWithDatesViaUi(page, name);
 		datasourceRegistry.set(id, { name, namespace: target });
@@ -246,17 +240,17 @@ export async function createAnalysisWithTabs(
 	name: string,
 	tabs: Record<string, unknown>[]
 ): Promise<string> {
-	return withAuthedPage(request, async (page) => {
-		await prepareHelperNamespace(page);
-		const response = await page.request.post(new URL('/api/v1/analysis', page.url()).toString(), {
+	const response = await request.helperContext.request.post(
+		new URL('/api/v1/analysis', request.baseURL).toString(),
+		{
 			headers: { 'X-Namespace': helperDefaultNamespace },
 			data: { name, tabs }
-		});
-		if (!response.ok()) throw new Error(`Analysis creation failed: HTTP ${response.status()}`);
-		const created = (await response.json()) as { id: string };
-		registerAnalysis(created.id, name);
-		return created.id;
-	});
+		}
+	);
+	if (!response.ok()) throw new Error(`Analysis creation failed: HTTP ${response.status()}`);
+	const created = (await response.json()) as { id: string };
+	registerAnalysis(created.id, name);
+	return created.id;
 }
 
 export async function createImportedAnalysis(
@@ -267,28 +261,25 @@ export async function createImportedAnalysis(
 	description?: string,
 	namespace?: string
 ): Promise<string> {
-	return withAuthedPage(request, async (page) => {
-		await prepareHelperNamespace(page, namespace);
-		const response = await page.request.post(
-			new URL('/api/v1/analysis/import', page.url()).toString(),
-			{
-				headers: { 'X-Namespace': namespace ?? helperDefaultNamespace },
-				data: {
-					name,
-					description,
-					pipeline,
-					datasource_remap: datasourceRemap ?? {}
-				}
+	const response = await request.helperContext.request.post(
+		new URL('/api/v1/analysis/import', request.baseURL).toString(),
+		{
+			headers: { 'X-Namespace': namespace ?? helperDefaultNamespace },
+			data: {
+				name,
+				description,
+				pipeline,
+				datasource_remap: datasourceRemap ?? {}
 			}
-		);
-		if (!response.ok()) {
-			const body = await response.text().catch(() => '');
-			throw new Error(`Analysis import failed: HTTP ${response.status()} ${body.slice(0, 300)}`);
 		}
-		const created = (await response.json()) as { id: string };
-		registerAnalysis(created.id, name);
-		return created.id;
-	});
+	);
+	if (!response.ok()) {
+		const body = await response.text().catch(() => '');
+		throw new Error(`Analysis import failed: HTTP ${response.status()} ${body.slice(0, 300)}`);
+	}
+	const created = (await response.json()) as { id: string };
+	registerAnalysis(created.id, name);
+	return created.id;
 }
 
 export async function createMultiStepAnalysis(
@@ -414,15 +405,6 @@ export async function createLongRunningAnalysis(
 	);
 }
 
-export async function createUdf(request: E2ERequest, name: string): Promise<string> {
-	return withAuthedPage(request, async (page) => {
-		await prepareHelperNamespace(page);
-		const id = await createUdfViaUi(page, name);
-		udfRegistry.set(id, { name });
-		return id;
-	});
-}
-
 export async function createSchedule(
 	request: E2ERequest,
 	datasourceId: string,
@@ -443,18 +425,6 @@ export async function createHealthCheck(
 		await prepareHelperNamespace(page);
 		return createHealthCheckViaUi(page, datasourceId, name);
 	});
-}
-
-export async function spawnComputeWorker(_request: E2ERequest, _analysisId: string): Promise<void> {
-	// Compute workers are started through visible user actions and compute requests.
-}
-
-export async function waitForNoComputeWorkerJob(
-	_request: E2ERequest,
-	_analysisId: string,
-	_timeoutMs = 5_000
-): Promise<void> {
-	// Observe compute worker lifecycle via the Compute workers popup / visible build status.
 }
 
 export function registerAnalysis(id: string, name: string): void {
@@ -482,10 +452,6 @@ export function unregisterDatasource(datasourceId: string): void {
 	datasourceRegistry.delete(datasourceId);
 }
 
-export function registeredAnalysisIds(): string[] {
-	return [...analysisRegistry.keys()];
-}
-
 export function registeredDatasourceIds(): string[] {
 	return [...datasourceRegistry.keys()];
 }
@@ -496,8 +462,4 @@ export function nameForDatasourceId(datasourceId: string): string | undefined {
 
 export function nameForAnalysisId(analysisId: string): string | undefined {
 	return analysisRegistry.get(analysisId)?.name;
-}
-
-export function nameForUdfId(udfId: string): string | undefined {
-	return udfRegistry.get(udfId)?.name;
 }

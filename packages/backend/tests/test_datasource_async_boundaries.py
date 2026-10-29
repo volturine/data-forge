@@ -102,7 +102,7 @@ async def test_update_runs_complete_db_operation_off_loop_with_fresh_session_and
             raise TimeoutError('test did not release blocked datasource update')
         return {'updated': True}
 
-    monkeypatch.setattr(database, '_get_tenant_engine', lambda: object())
+    monkeypatch.setattr(database, '_get_tenant_engine', object)
     monkeypatch.setattr(database, 'Session', OwnedSession)
     monkeypatch.setattr(datasource_routes.service, 'update_datasource', blocking_update)
     namespace_token = set_namespace_context('datasource-update-test')

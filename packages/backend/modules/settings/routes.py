@@ -91,16 +91,12 @@ async def write_settings(
 async def test_smtp(body: TestSmtpRequest, user: User = Depends(get_current_user)) -> TestResult:
     """Send a test email via SMTP to verify email notification settings. Requires 'to' address in body."""
     smtp = await run_api_blocking(get_resolved_smtp)
-    host = str(smtp.get('host', ''))
-    port = int(str(smtp.get('port', 587)))
-    smtp_user = str(smtp.get('user', ''))
-    password = str(smtp.get('password', ''))
 
-    if not host or not smtp_user:
+    if not smtp.host or not smtp.user:
         return TestResult(success=False, message='SMTP not configured — set host and user first')
 
     msg = EmailMessage()
-    msg['From'] = smtp_user
+    msg['From'] = smtp.user
     msg['To'] = body.to
     msg['Subject'] = 'Test notification'
     msg.set_content('This is a test email from your application.')
@@ -109,7 +105,7 @@ async def test_smtp(body: TestSmtpRequest, user: User = Depends(get_current_user
         raise HTTPException(status_code=429, detail='SMTP testing is busy; try again shortly')
     try:
         future = _SMTP_TEST_EXECUTOR.submit(
-            partial(send_smtp_message, host, port, smtp_user, password, msg, timeout=10),
+            partial(send_smtp_message, smtp.host, smtp.port, smtp.user, smtp.password, msg, timeout=10),
         )
     except BaseException:
         _SMTP_TEST_CAPACITY.release()
@@ -127,7 +123,7 @@ async def test_smtp(body: TestSmtpRequest, user: User = Depends(get_current_user
         future.cancel()
         raise
     except Exception as exc:
-        raise HTTPException(status_code=502, detail=_redact_token(str(exc), password)) from exc
+        raise HTTPException(status_code=502, detail=_redact_token(str(exc), smtp.password)) from exc
 
     if future.cancel():
         detail = 'SMTP test deadline expired before sending; the email was not sent'

@@ -3,7 +3,7 @@
 import polars as pl
 
 from operations.enums import DeduplicateKeep
-from runtime.domain.compute.base import OperationHandler, OperationParams
+from runtime.domain.compute.base import OperationParams
 
 
 class DeduplicateParams(OperationParams):
@@ -11,7 +11,5 @@ class DeduplicateParams(OperationParams):
     keep: DeduplicateKeep = DeduplicateKeep.FIRST
 
 
-class DeduplicateHandler(OperationHandler):
-    def __call__(self, lf: pl.LazyFrame, params: dict, **_) -> pl.LazyFrame:
-        validated = DeduplicateParams.model_validate(params)
-        return lf.unique(subset=validated.subset, keep=validated.keep.polars_keep, maintain_order=True)
+def deduplicate(lf: pl.LazyFrame, params: DeduplicateParams, **_) -> pl.LazyFrame:
+    return lf.unique(subset=params.subset, keep=params.keep.polars_keep, maintain_order=True)

@@ -1,5 +1,8 @@
 import type {
+	BuildCancelledEvent,
+	BuildCompleteEvent,
 	BuildEvent,
+	BuildFailedEvent,
 	BuildStatus,
 	StepInfo,
 	BuildTabResult,
@@ -10,11 +13,7 @@ import type {
 	BuildDetailSnapshot,
 	QueryPlan
 } from '#lib/types/build-stream.js';
-import {
-	buildResultStatusFromLifecycle,
-	coerceBuildStepState,
-	isTerminalBuildStatus
-} from '#lib/types/build-stream.js';
+import { isTerminalBuildStatus } from '#lib/types/build-stream.js';
 import {
 	connectBuildDetailStream,
 	getRuntimeBuild,
@@ -28,9 +27,8 @@ const MAX_LOGS = 500;
 const MAX_RESOURCE_HISTORY = 120;
 const RECONNECT_DELAY_MS = 1_000;
 const MAX_RECONNECT_ATTEMPTS = 5;
-// WebSocket events are the immediate update path. This REST poll is only a
-// durable-state reconciliation fallback and must not turn every open build
-// preview into four full-detail requests per second.
+// The stream supplies both the initial snapshot and live updates. Read full
+// durable detail only after this much silence, or immediately on disconnect.
 const BUILD_REFRESH_MS = 5_000;
 
 export class BuildStreamStore {
@@ -91,13 +89,12 @@ export class BuildStreamStore {
 		this.pendingError = null;
 		this.retainActivity();
 		this.status = 'connecting';
-		this.scheduleRefresh(generation);
 		void startRuntimeBuild(request).match(
 			(build) => {
 				if (generation !== this.generation) return;
 				this.applySnapshot(build);
 				this.targetBuildId = build.build_id;
-				void this.refreshBuildDetail(build.build_id, generation);
+				if (this.done) return;
 				this.scheduleRefresh(generation);
 				this.openConnection(build.build_id, generation);
 			},
@@ -122,20 +119,12 @@ export class BuildStreamStore {
 		this.targetBuildId = buildId;
 		this.buildId = buildId;
 		this.status = 'connecting';
-		void this.refreshBuildDetail(buildId, generation);
 		this.scheduleRefresh(generation);
 		this.openConnection(buildId, generation);
 	}
 
 	close(): void {
-		this.shouldReconnect = false;
-		this.generation += 1;
-		this.clearReconnectTimer();
-		this.clearRefreshTimer();
-		this.connection?.close();
-		this.connection = null;
-		this.pendingError = null;
-		this.releaseActivityLease();
+		this.stopTracking();
 		this.status = 'disconnected';
 	}
 
@@ -167,14 +156,7 @@ export class BuildStreamStore {
 	}
 
 	markCancelled(cancelled: CancelBuildResponse): void {
-		this.generation += 1;
-		this.shouldReconnect = false;
-		this.clearReconnectTimer();
-		this.clearRefreshTimer();
-		this.connection?.close();
-		this.connection = null;
-		this.pendingError = null;
-		this.releaseActivityLease();
+		this.stopTracking();
 		this.status = 'cancelled';
 		this.duration = cancelled.duration_ms;
 		if (cancelled.duration_ms !== null) {
@@ -191,12 +173,14 @@ export class BuildStreamStore {
 				this.reconnectAttempts = 0;
 				this.pendingError = null;
 				this.applySnapshot(snapshot.build, snapshot.last_sequence);
+				this.scheduleRefresh(generation);
 			},
 			onEvent: (event: BuildEvent) => {
 				if (generation !== this.generation) return;
 				this.reconnectAttempts = 0;
 				this.pendingError = null;
 				this.applyEvent(event);
+				this.scheduleRefresh(generation);
 				if (!this.done) this.error = null;
 			},
 			onError: (msg: string) => {
@@ -239,7 +223,8 @@ export class BuildStreamStore {
 	}
 
 	private scheduleRefresh(generation: number): void {
-		if (this.refreshTimer !== null) return;
+		this.clearRefreshTimer();
+		if (generation !== this.generation || this.done || !this.shouldReconnect) return;
 		this.refreshTimer = setTimeout(() => {
 			this.refreshTimer = null;
 			void this.runRefresh(generation);
@@ -265,10 +250,14 @@ export class BuildStreamStore {
 	}
 
 	private async refreshBuildDetail(buildId: string, generation: number): Promise<boolean> {
+		const sequence = this.lastSequence;
 		return getRuntimeBuild(buildId).match(
 			(build) => {
 				if (generation !== this.generation) return false;
 				if (this.buildId !== buildId) return false;
+				// A live event supersedes the REST snapshot captured before it. Its
+				// sequence is not carried by REST, so it cannot safely overwrite the stream.
+				if (this.lastSequence !== sequence) return false;
 				this.pendingError = null;
 				this.applySnapshot(build);
 				return true;
@@ -303,7 +292,7 @@ export class BuildStreamStore {
 	}
 
 	applySnapshot(build: BuildRunDetail, lastSequence = 0): void {
-		const incomingStatus = buildResultStatusFromLifecycle(build.status);
+		const incomingStatus = build.status;
 		// A REST refresh can race the websocket terminal event and return an
 		// older running snapshot. Do not let that snapshot rewrite a terminal
 		// build back into an active-looking state or replace its terminal data.
@@ -322,7 +311,7 @@ export class BuildStreamStore {
 		this.currentStepIndex = build.current_step_index;
 		this.totalSteps = build.total_steps;
 		this.totalTabs = build.total_tabs;
-		this.steps = (build.steps ?? []).map((s) => ({
+		this.steps = build.steps.map((s) => ({
 			buildStepIndex: s.build_step_index,
 			stepIndex: s.step_index,
 			stepId: s.step_id,
@@ -330,31 +319,26 @@ export class BuildStreamStore {
 			stepType: s.step_type,
 			tabId: s.tab_id ?? null,
 			tabName: s.tab_name ?? null,
-			state: coerceBuildStepState(s.state),
+			state: s.state,
 			duration: s.duration_ms ?? null,
 			rowCount: s.row_count ?? null,
 			error: s.error ?? null
 		}));
-		this.queryPlans = (build.query_plans ?? []).map((p) => ({
+		this.queryPlans = build.query_plans.map((p) => ({
 			tabId: p.tab_id ?? null,
 			tabName: p.tab_name ?? null,
 			optimized: p.optimized_plan,
 			unoptimized: p.unoptimized_plan
 		}));
 		this.latestResources = build.latest_resources ?? null;
-		this.resourceHistory = build.resources ?? [];
+		this.resourceHistory = build.resources;
 		this.resourceConfig = build.resource_config ?? null;
-		this.logs = build.logs ?? [];
-		this.results = build.results ?? [];
+		this.logs = build.logs;
+		this.results = build.results;
 		this.duration = build.duration_ms ?? null;
 		this.error = build.error ?? null;
 		this.status = incomingStatus;
-		if (this.done) {
-			this.shouldReconnect = false;
-			this.clearReconnectTimer();
-			this.clearRefreshTimer();
-			this.releaseActivityLease();
-		}
+		if (this.done) this.finishTracking();
 		this.emitSettled();
 	}
 
@@ -470,47 +454,55 @@ export class BuildStreamStore {
 				break;
 
 			case 'complete':
-				this.status = 'completed';
-				this.progress = event.progress;
-				this.elapsed = event.elapsed_ms;
-				this.duration = event.duration_ms;
-				this.totalSteps = event.total_steps;
-				this.results = event.results;
-				this.shouldReconnect = false;
-				this.clearReconnectTimer();
-				this.clearRefreshTimer();
-				this.releaseActivityLease();
-				break;
-
 			case 'failed':
-				this.status = 'failed';
-				this.progress = event.progress;
-				this.elapsed = event.elapsed_ms;
-				this.duration = event.duration_ms;
-				this.totalSteps = event.total_steps;
-				this.results = event.results;
-				this.error = event.error;
-				this.shouldReconnect = false;
-				this.clearReconnectTimer();
-				this.clearRefreshTimer();
-				this.releaseActivityLease();
-				break;
-
 			case 'cancelled':
-				this.status = 'cancelled';
-				this.progress = event.progress;
-				this.elapsed = event.elapsed_ms;
-				this.duration = event.duration_ms;
-				this.totalSteps = event.total_steps;
-				this.results = event.results;
-				this.error = `Cancelled${event.cancelled_by ? ` by ${event.cancelled_by}` : ''}`;
-				this.shouldReconnect = false;
-				this.clearReconnectTimer();
-				this.clearRefreshTimer();
-				this.releaseActivityLease();
+				this.applyTerminalEvent(event);
 				break;
 		}
 		this.emitSettled();
+	}
+
+	// Unlike stopTracking, keep the socket open so its close event still settles the build.
+	private finishTracking(): void {
+		this.shouldReconnect = false;
+		this.clearReconnectTimer();
+		this.clearRefreshTimer();
+		this.releaseActivityLease();
+	}
+
+	private stopTracking(): void {
+		this.generation += 1;
+		this.shouldReconnect = false;
+		this.clearReconnectTimer();
+		this.clearRefreshTimer();
+		this.connection?.close();
+		this.connection = null;
+		this.pendingError = null;
+		this.releaseActivityLease();
+	}
+
+	private applyTerminalEvent(
+		event: BuildCompleteEvent | BuildFailedEvent | BuildCancelledEvent
+	): void {
+		this.progress = event.progress;
+		this.elapsed = event.elapsed_ms;
+		this.duration = event.duration_ms;
+		this.totalSteps = event.total_steps;
+		this.results = event.results;
+		switch (event.type) {
+			case 'complete':
+				this.status = 'completed';
+				break;
+			case 'failed':
+				this.status = 'failed';
+				this.error = event.error;
+				break;
+			case 'cancelled':
+				this.status = 'cancelled';
+				this.error = `Cancelled${event.cancelled_by ? ` by ${event.cancelled_by}` : ''}`;
+				break;
+		}
+		this.finishTracking();
 	}
 
 	private retainActivity(): void {
@@ -544,20 +536,10 @@ export class BuildStreamStore {
 	}
 
 	private addLog(entry: BuildLogEntry): void {
-		const next = [...this.logs, entry];
-		if (next.length > MAX_LOGS) {
-			this.logs = next.slice(next.length - MAX_LOGS);
-			return;
-		}
-		this.logs = next;
+		this.logs = [...this.logs, entry].slice(-MAX_LOGS);
 	}
 
 	private pushResourceHistory(snapshot: BuildResourceSnapshot): void {
-		const next = [...this.resourceHistory, snapshot];
-		if (next.length > MAX_RESOURCE_HISTORY) {
-			this.resourceHistory = next.slice(next.length - MAX_RESOURCE_HISTORY);
-			return;
-		}
-		this.resourceHistory = next;
+		this.resourceHistory = [...this.resourceHistory, snapshot].slice(-MAX_RESOURCE_HISTORY);
 	}
 }

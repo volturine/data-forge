@@ -15,6 +15,7 @@ from sqlalchemy import text
 from sqlmodel import Session, create_engine
 
 from backend_core.secrets import MASKED_SECRET, decrypt_secret, encrypt_secret
+from backend_core.settings_projection import SmtpSettings
 from tests.http_client import TestClient
 
 
@@ -39,8 +40,11 @@ async def smtp_loop_errors() -> AsyncIterator[list[dict[str, object]]]:
         loop.set_exception_handler(previous_handler)
 
 
-async def _smtp_settings_lookup(_operation: object) -> dict[str, object]:
-    return {'host': 'smtp.test.com', 'port': 587, 'user': 'user@test.com', 'password': 'pw'}
+_TEST_SMTP = SmtpSettings(host='smtp.test.com', port=587, user='user@test.com', password='pw')
+
+
+async def _smtp_settings_lookup(_operation: object) -> SmtpSettings:
+    return _TEST_SMTP
 
 
 def _use_smtp_test_executor(monkeypatch, executor: object, deadline: float = 12.0) -> None:
@@ -85,7 +89,7 @@ class TestGetSettings:
     def test_returns_saved_values(self, client: TestClient, monkeypatch) -> None:
         monkeypatch.setenv('SETTINGS_ENCRYPTION_KEY', 'test-key')
         # First save some values
-        client.put(
+        saved = client.put(
             '/api/v1/settings',
             json={
                 'smtp_host': 'mail.example.com',
@@ -97,6 +101,12 @@ class TestGetSettings:
                 'public_idb_debug': True,
             },
         )
+        assert saved.status_code == 200
+        assert saved.json()['smtp_host'] == 'mail.example.com'
+        assert saved.json()['smtp_user'] == 'user@example.com'
+        assert saved.json()['smtp_password'] == MASKED_SECRET
+        assert saved.json()['telegram_bot_token'] == MASKED_SECRET
+        assert saved.json()['public_idb_debug'] is True
         resp = client.get('/api/v1/settings')
         assert resp.status_code == 200
         data = resp.json()
@@ -144,7 +154,7 @@ class TestNamespaceDatabaseConcurrency:
     def test_pool_snapshot_identifies_checked_out_connection_owner(self, monkeypatch, tmp_path) -> None:
         from backend_core import database
 
-        engine = database._create_engine(f'sqlite:///{tmp_path / "pool.db"}', pool_name='tenant')
+        engine = database._create_engine(f'sqlite:///{tmp_path / "pool.db"}')
         monkeypatch.setattr(database, 'tenant_engine', engine)
         monkeypatch.setattr(database, 'settings_engine', None)
         monkeypatch.setattr(database, '_engine_override', None)
@@ -201,61 +211,9 @@ class TestUpdateSettings:
         assert response.status_code == 200
         assert response.json()['openrouter_default_model'] == 'e2e-model'
 
-    def test_update_smtp(self, client: TestClient, monkeypatch) -> None:
-        monkeypatch.setenv('SETTINGS_ENCRYPTION_KEY', 'test-key')
-        resp = client.put(
-            '/api/v1/settings',
-            json={
-                'smtp_host': 'smtp.test.com',
-                'smtp_port': 587,
-                'smtp_user': 'test@test.com',
-                'smtp_password': 'pw',
-                'telegram_bot_token': '',
-                'telegram_bot_enabled': True,
-                'public_idb_debug': False,
-            },
-        )
-        assert resp.status_code == 200
-        data = resp.json()
-        assert data['smtp_host'] == 'smtp.test.com'
-        assert data['smtp_user'] == 'test@test.com'
-        assert data['smtp_password'] == MASKED_SECRET
-
-    def test_update_telegram(self, client: TestClient, monkeypatch) -> None:
-        monkeypatch.setenv('SETTINGS_ENCRYPTION_KEY', 'test-key')
-        resp = client.put(
-            '/api/v1/settings',
-            json={
-                'smtp_host': '',
-                'smtp_port': 587,
-                'smtp_user': '',
-                'smtp_password': '',
-                'telegram_bot_token': 'bot999:xyz',
-                'telegram_bot_enabled': False,
-                'public_idb_debug': False,
-            },
-        )
-        assert resp.status_code == 200
-        assert resp.json()['telegram_bot_token'] == MASKED_SECRET
-
-    def test_update_idb_debug(self, client: TestClient, monkeypatch) -> None:
-        monkeypatch.setenv('SETTINGS_ENCRYPTION_KEY', 'test-key')
-        resp = client.put(
-            '/api/v1/settings',
-            json={
-                'smtp_host': '',
-                'smtp_port': 587,
-                'smtp_user': '',
-                'smtp_password': '',
-                'telegram_bot_token': '',
-                'telegram_bot_enabled': False,
-                'public_idb_debug': True,
-            },
-        )
-        assert resp.status_code == 200
-        assert resp.json()['public_idb_debug'] is True
-
     def test_preserves_masked_secrets_on_partial_update(self, client: TestClient, monkeypatch) -> None:
+        from backend_core.database import run_settings_db
+        from backend_core.persistence.settings.models import AppSettings
         from backend_core.settings_projection import (
             get_resolved_openrouter_key,
             get_resolved_smtp,
@@ -277,6 +235,18 @@ class TestUpdateSettings:
             },
         )
 
+        def _read(session: Session) -> AppSettings | None:
+            return session.get(AppSettings, 1)
+
+        row = run_settings_db(_read)
+        assert row is not None
+        assert row.smtp_password != 'pw'
+        assert row.telegram_bot_token != 'bot999:xyz'
+        assert row.openrouter_api_key != 'sk-live'
+        assert row.smtp_password.startswith('enc:v1:')
+        assert row.telegram_bot_token.startswith('enc:v1:')
+        assert row.openrouter_api_key.startswith('enc:v1:')
+
         resp = client.put(
             '/api/v1/settings',
             json={
@@ -287,7 +257,7 @@ class TestUpdateSettings:
             },
         )
         assert resp.status_code == 200
-        assert get_resolved_smtp()['password'] == 'pw'
+        assert get_resolved_smtp().password == 'pw'
         assert get_resolved_telegram_settings()['token'] == 'bot999:xyz'
         assert get_resolved_openrouter_key() == 'sk-live'
 
@@ -324,37 +294,6 @@ class TestUpdateSettings:
         assert reread.json()['openrouter_api_key'] == MASKED_SECRET
         assert get_resolved_openrouter_key() == 'sk-or-user'
         assert run_settings_db(_stored_key) == 'sk-or-user'
-
-    def test_encrypts_settings_secrets_at_rest(self, client: TestClient, monkeypatch) -> None:
-        from backend_core.database import run_settings_db
-        from backend_core.persistence.settings.models import AppSettings
-
-        monkeypatch.setenv('SETTINGS_ENCRYPTION_KEY', 'test-key')
-        client.put(
-            '/api/v1/settings',
-            json={
-                'smtp_host': 'smtp.test.com',
-                'smtp_port': 587,
-                'smtp_user': 'test@test.com',
-                'smtp_password': 'pw',
-                'telegram_bot_token': 'bot999:xyz',
-                'telegram_bot_enabled': True,
-                'openrouter_api_key': 'sk-live',
-                'public_idb_debug': False,
-            },
-        )
-
-        def _read(session: Session) -> AppSettings | None:
-            return session.get(AppSettings, 1)
-
-        row = run_settings_db(_read)
-        assert row is not None
-        assert row.smtp_password != 'pw'
-        assert row.telegram_bot_token != 'bot999:xyz'
-        assert row.openrouter_api_key != 'sk-live'
-        assert row.smtp_password.startswith('enc:v1:')
-        assert row.telegram_bot_token.startswith('enc:v1:')
-        assert row.openrouter_api_key.startswith('enc:v1:')
 
     def test_get_rejects_unsupported_secret_storage_format(self, client: TestClient, monkeypatch) -> None:
         from backend_core.database import run_settings_db
@@ -512,7 +451,7 @@ class TestTestSmtp:
         async def _blocked_lookup(_operation):
             waiting.set()
             await continue_lookup.wait()
-            return {'host': 'smtp.test.com', 'port': 587, 'user': 'user@test.com', 'password': 'pw'}
+            return _TEST_SMTP
 
         with ThreadPoolExecutor(max_workers=1) as executor:
             _use_smtp_test_executor(monkeypatch, executor)
@@ -765,57 +704,59 @@ class TestTestTelegram:
 class TestConfigEndpointWithDbSettings:
     """GET /v1/config — should reflect DB settings for smtp/telegram enabled."""
 
-    def test_config_reflects_db_settings(self, client: TestClient, monkeypatch) -> None:
+    @pytest.mark.parametrize(
+        ('saved', 'auth_required', 'verify_email_address', 'expected'),
+        [
+            pytest.param(
+                {
+                    'smtp_host': 'mail.example.com',
+                    'smtp_port': 587,
+                    'smtp_user': 'user@example.com',
+                    'smtp_password': 'pw',
+                    'telegram_bot_token': 'botXYZ',
+                    'telegram_bot_enabled': False,
+                    'public_idb_debug': True,
+                },
+                True,
+                True,
+                {'auth_required': True, 'verify_email_address': True, 'smtp_enabled': True, 'telegram_enabled': False, 'public_idb_debug': True},
+                id='configured-smtp',
+            ),
+            pytest.param(
+                {
+                    'smtp_host': '',
+                    'smtp_port': 587,
+                    'smtp_user': '',
+                    'smtp_password': '',
+                    'telegram_bot_token': '',
+                    'telegram_bot_enabled': False,
+                    'public_idb_debug': False,
+                },
+                False,
+                False,
+                {'auth_required': False, 'verify_email_address': False, 'smtp_enabled': False, 'telegram_enabled': False, 'public_idb_debug': False},
+                id='empty',
+            ),
+        ],
+    )
+    def test_config_reflects_saved_settings(
+        self,
+        client: TestClient,
+        monkeypatch,
+        saved: dict[str, object],
+        auth_required: bool,
+        verify_email_address: bool,
+        expected: dict[str, bool],
+    ) -> None:
         monkeypatch.setenv('SETTINGS_ENCRYPTION_KEY', 'test-key')
-        monkeypatch.setattr('backend_core.auth_config.settings.auth_required', True)
-        # Save SMTP settings
-        client.put(
-            '/api/v1/settings',
-            json={
-                'smtp_host': 'mail.example.com',
-                'smtp_port': 587,
-                'smtp_user': 'user@example.com',
-                'smtp_password': 'pw',
-                'telegram_bot_token': 'botXYZ',
-                'telegram_bot_enabled': False,
-                'public_idb_debug': True,
-            },
-        )
+        monkeypatch.setattr('backend_core.auth_config.settings.auth_required', auth_required)
+        monkeypatch.setattr('backend_core.auth_config.settings.verify_email_address', verify_email_address)
+        client.put('/api/v1/settings', json=saved)
 
         resp = client.get('/api/v1/config')
         assert resp.status_code == 200
         data = resp.json()
-        assert data['auth_required'] is True
-        assert data['verify_email_address'] is True
-        assert data['smtp_enabled'] is True
-        assert data['telegram_enabled'] is False
-        assert data['public_idb_debug'] is True
-
-    def test_config_reflects_empty_settings(self, client: TestClient, monkeypatch) -> None:
-        monkeypatch.setenv('SETTINGS_ENCRYPTION_KEY', 'test-key')
-        monkeypatch.setattr('backend_core.auth_config.settings.auth_required', False)
-        monkeypatch.setattr('backend_core.auth_config.settings.verify_email_address', False)
-        client.put(
-            '/api/v1/settings',
-            json={
-                'smtp_host': '',
-                'smtp_port': 587,
-                'smtp_user': '',
-                'smtp_password': '',
-                'telegram_bot_token': '',
-                'telegram_bot_enabled': False,
-                'public_idb_debug': False,
-            },
-        )
-
-        resp = client.get('/api/v1/config')
-        assert resp.status_code == 200
-        data = resp.json()
-        assert data['auth_required'] is False
-        assert data['verify_email_address'] is False
-        assert data['smtp_enabled'] is False
-        assert data['telegram_enabled'] is False
-        assert data['public_idb_debug'] is False
+        assert {key: data[key] for key in expected} == expected
 
 
 class TestGenerateUuid:
@@ -1053,27 +994,56 @@ class TestSeedSettingsFromEnv:
             assert row.smtp_port == 587
             assert row.telegram_bot_enabled is False
 
-    def test_password_seed_logs_warning_until_encryption_key_exists(self, monkeypatch, caplog) -> None:
+    @pytest.mark.parametrize(
+        ('field', 'bootstrap_complete'),
+        [
+            ('smtp_password', False),
+            ('telegram_bot_token', False),
+            ('openrouter_api_key', False),
+            ('openrouter_api_key', True),
+        ],
+    )
+    def test_secret_seed_warns_without_logging_values_until_encryption_key_exists(self, monkeypatch, caplog, field, bootstrap_complete) -> None:
         from backend_core.config import settings as app_settings
         from backend_core.persistence.settings.models import AppSettings
         from backend_core.settings_store import seed_settings_from_env
 
+        secret_value = 'unit-test-bootstrap-credential'
         monkeypatch.setattr(app_settings, 'smtp_host', 'mail.example.com', raising=False)
-        monkeypatch.setattr(app_settings, 'smtp_password', 'secret', raising=False)
+        for secret_field in ('smtp_password', 'telegram_bot_token', 'openrouter_api_key'):
+            monkeypatch.setattr(app_settings, secret_field, '', raising=False)
+        monkeypatch.setattr(app_settings, field, secret_value, raising=False)
         monkeypatch.delenv('SETTINGS_ENCRYPTION_KEY', raising=False)
         monkeypatch.setattr(app_settings, 'settings_encryption_key', '', raising=False)
 
         engine = self._make_engine()
         with Session(engine) as session:
+            if bootstrap_complete:
+                session.add(AppSettings(id=1, smtp_host='mail.example.com', env_bootstrap_complete=True))
+                session.commit()
             with caplog.at_level('WARNING'):
                 seed_settings_from_env(session)
 
             row = session.get(AppSettings, 1)
             assert row is not None
             assert row.smtp_host == 'mail.example.com'
-            assert row.smtp_password == ''
-            assert row.env_bootstrap_complete is False
-            assert 'SETTINGS_ENCRYPTION_KEY' in caplog.text
+            assert getattr(row, field) == ''
+            assert row.env_bootstrap_complete is bootstrap_complete
+            assert [record.getMessage() for record in caplog.records if record.name == 'backend_core.settings_store'] == [
+                'Skipping secret bootstrap because SETTINGS_ENCRYPTION_KEY is not set'
+            ]
+            assert secret_value not in caplog.text
+
+            caplog.clear()
+            monkeypatch.setenv('SETTINGS_ENCRYPTION_KEY', 'test-key')
+            monkeypatch.setattr(app_settings, 'settings_encryption_key', 'test-key', raising=False)
+            seed_settings_from_env(session)
+            session.refresh(row)
+
+            assert decrypt_secret(getattr(row, field)) == secret_value
+            assert row.env_bootstrap_complete is True
+            assert not [record for record in caplog.records if record.name == 'backend_core.settings_store']
+            assert secret_value not in caplog.text
 
     def test_lifespan_bot_check_uses_decrypted_settings_db(self, monkeypatch):
         from backend_core import database
@@ -1197,12 +1167,7 @@ class TestSettingsRuntimeReads:
 
             assert notifications == [{'kind': 'settings_changed'}]
 
-            assert get_resolved_smtp() == {
-                'host': 'smtp.one.test',
-                'port': 587,
-                'user': 'first',
-                'password': 'pw-one',
-            }
+            assert get_resolved_smtp() == SmtpSettings(host='smtp.one.test', port=587, user='first', password='pw-one')
 
             # Simulate another API child committing a settings change.
             with engine.begin() as connection:
@@ -1210,12 +1175,7 @@ class TestSettingsRuntimeReads:
                     cast(Any, AppSettings).__table__.update().where(AppSettings.id == 1).values(smtp_host='smtp.two.test', smtp_port=465, smtp_user='second')
                 )
 
-            assert get_resolved_smtp() == {
-                'host': 'smtp.two.test',
-                'port': 465,
-                'user': 'second',
-                'password': 'pw-one',
-            }
+            assert get_resolved_smtp() == SmtpSettings(host='smtp.two.test', port=465, user='second', password='pw-one')
         finally:
             clear_settings_engine_override()
 

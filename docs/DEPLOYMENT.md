@@ -81,8 +81,8 @@ CI publishes every role image to GHCR on two channels:
 
 Dev-channel images feed PR-preview deployments; release images are pinned in
 production. Keep all five `DF_*_IMAGE` values on the same channel and commit.
-The old `data-forge-polars-engine` image name is published as a compatibility
-alias for one release; new manifests use `data-forge-compute-worker`.
+The compute-worker image is `data-forge-compute-worker`; the old
+`data-forge-polars-engine` name is no longer published.
 
 ### Naming, ports, and collision rules
 
@@ -106,32 +106,62 @@ compose files mirror this directory's topology and follow the same registry.
 
 ### Configure and start
 
-1. Review `docker/env/prod.env` and replace every `replace-with-...` value.
-2. Set the five image variables to tags published from the same release. `DF_COMPUTE_WORKER_IMAGE` must be available to the local Docker daemon before the worker manager starts. Pin it to a `repository@sha256:<digest>` reference when compute workers must stay byte-identical across launches; tags remain accepted for custom compute-worker images with extra libraries.
+1. Run `just docker-init` to write `docker/env/prod.local.env` (git-ignored,
+   mode 600) from `docker/env/prod.env`. It generates the PostgreSQL password
+   (also placed in `DF_DATABASE_URL`), internal token, object-store keys, admin
+   password and settings encryption key, pins the compute-worker image to the
+   release tag, and on Linux sets `DF_DOCKER_GID` from the Docker socket. It
+   never overwrites an existing file. To configure by hand instead, copy the
+   template and replace every `replace-with-...` value.
+2. Set the five image variables to tags published from the same release. The checked deploy path pulls the worker's resolved `COMPUTE_WORKER_IMAGE` before the worker manager starts. Pin it to a `repository@sha256:<digest>` reference when compute workers must stay byte-identical across launches; tags remain accepted for custom compute-worker images with extra libraries.
 3. Set `DF_AUTH_FRONTEND_URL` and `DF_CORS_ORIGINS` to the public HTTPS origin.
    GitHub OAuth derives its callback from the incoming request host, so register
    `https://<your-host>/api/v1/auth/github/callback` in the GitHub OAuth app.
    Set `DF_TRUSTED_PROXY_HOPS` to the number of proxies that provide the
    forwarded public scheme.
 4. Set `DF_DOCKER_SOCKET_PATH` and `DF_DOCKER_GID` for the deployment host. The worker manager is the only service with Docker access; this permission is equivalent to administrative host access. To run compute workers on more than one machine, list the daemons in `DF_COMPUTE_WORKER_DOCKER_HOSTS` as described in [Compute hosts](COMPUTE_HOSTS.md).
-5. Start the stack:
+5. Resolve and validate the configuration, then start the stack:
 
 ```bash
-docker compose --env-file docker/env/prod.env \
-  -p dataforge-prod \
-  -f docker/compose.yaml \
-  pull
-docker compose --env-file docker/env/prod.env \
-  -p dataforge-prod \
-  -f docker/compose.yaml \
-  up -d
+just docker-check docker/env/prod.local.env dataforge-prod
+just docker-up docker/env/prod.local.env dataforge-prod
 ```
 
-The old `DF_ENGINE_*` and `ENGINE_*` environment names are accepted for one
-release. The worker manager logs a deprecation warning when it reads one; new
-names take precedence. Remove old keys from deployment files during this
-release. `data-forge-polars-engine` is also published as a compatibility image
-alias for this release only.
+`docker-check` renders and validates the Compose configuration without changing
+the Docker daemon. It reports affected services and environment keys without
+printing resolved values, including any `DF_*` variable missing from the env
+file (Compose would otherwise start that service with an empty value). `docker-up` repeats the check, pulls the compute
+image, runs Compose `pull`, then starts the services with `up -d --wait` and a
+180-second health-check timeout. Arguments are positional: for a different
+positive timeout, use `just docker-up docker/env/prod.env dataforge-prod 240`.
+The compute-image pull targets the Docker CLI's selected daemon. Prepare any
+remote compute hosts separately as described in [Compute hosts](COMPUTE_HOSTS.md);
+this command does not provision their images or networks.
+
+The stack needs Docker Engine 25 or later: health checks probe every 2 seconds
+while a container starts and every 30 seconds afterwards. PostgreSQL, RustFS
+and the application roles restart with the Docker daemon, and each Compose
+service keeps at most 3 × 10 MB of JSON logs. Compute-worker containers use the
+daemon's default logging driver and are removed when they stop.
+
+For a raw Compose deployment, keep the same order: capture the resolved worker
+compute image without displaying the full configuration, pull it, pull Compose
+images, then start and wait. This shell sequence assumes Bash and Python 3:
+
+```bash
+set -euo pipefail
+compose=(docker compose --env-file docker/env/prod.env -p dataforge-prod -f docker/compose.yaml)
+compute_image="$("${compose[@]}" config --format json | python3 -c 'import json,sys; print(json.load(sys.stdin)["services"]["worker"]["environment"]["COMPUTE_WORKER_IMAGE"])')"
+docker pull "$compute_image"
+"${compose[@]}" pull
+"${compose[@]}" up -d --wait --wait-timeout 180
+```
+
+The helper also checks for sample passwords, unresolved placeholders, and
+missing required values. Raw Compose commands do not perform those checks.
+
+The old `DF_ENGINE_*` and `ENGINE_*` environment names are no longer read.
+`just docker-check` names any that remain and their replacements.
 
 Inspect status and logs:
 
@@ -161,8 +191,12 @@ variables in `docker/env/prod.env`. Pull the release images without starting the
 services:
 
 ```bash
-docker compose --env-file docker/env/prod.env \
-  -p dataforge-prod -f docker/compose.yaml pull
+set -euo pipefail
+just docker-check docker/env/prod.env dataforge-prod
+compose=(docker compose --env-file docker/env/prod.env -p dataforge-prod -f docker/compose.yaml)
+compute_image="$("${compose[@]}" config --format json | python3 -c 'import json,sys; print(json.load(sys.stdin)["services"]["worker"]["environment"]["COMPUTE_WORKER_IMAGE"])')"
+docker pull "$compute_image"
+"${compose[@]}" pull
 ```
 
 Run the new API image once to apply its migrations to the public schema and all
@@ -182,7 +216,7 @@ coordinated release:
 
 ```bash
 docker compose --env-file docker/env/prod.env \
-  -p dataforge-prod -f docker/compose.yaml up -d
+  -p dataforge-prod -f docker/compose.yaml up -d --wait --wait-timeout 180
 ```
 
 Watch the API and worker-manager logs, confirm `/health/ready`, and restore
@@ -226,6 +260,26 @@ machines with `docker/compose.multi-host.yaml`: API replicas on every machine,
 coordinator and manager active on one and standby on the others, schedulers
 everywhere, compute workers on every daemon, and PostgreSQL and the object
 store shared outside the stacks. See [High availability](HIGH_AVAILABILITY.md).
+
+### Resource-conscious single-host sizing
+
+Start with the default single API process (`DF_WORKERS=1`). More API processes
+multiply database pools and the in-memory frontend cache; increase this only
+when measurements identify the API as the bottleneck.
+
+For an intermittently used personal instance, consider `COMPUTE_WARM_WORKERS=0`
+in the Compose environment file. This removes the extra idle compute reserve;
+it does **not** reduce the active `COMPUTE_WORKERS` budget. The trade-off is
+container cold-start latency on the next preview or build. Assigned workers
+still expire according to `COMPUTE_WORKER_IDLE_TTL_SECONDS`.
+
+Budget for the application services, PostgreSQL, object storage, and both active
+and warm compute workers together. Service `DF_*_MEM_LIMIT` values are limits,
+not reserved memory, and do not cap dynamically launched compute containers.
+Set compute-worker resource limits for your workload rather than assuming the
+manager's memory limit applies to its containers. Check peak host memory,
+preview latency, and queue time before increasing concurrency; there is no
+universal minimum-memory preset that safely fits every dataset.
 
 ## From source
 

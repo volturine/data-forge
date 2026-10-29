@@ -50,15 +50,44 @@ class TestSettings:
         assert settings.sql_echo is False
         assert settings.prod_mode_enabled is False
         assert settings.compute_workers == 14
+        assert settings.distributed_runtime_enabled is False
+        assert settings.log_level == 'info'
+        assert settings.log_flush_interval_seconds == 5
+        assert settings.cors_origins is not None
+        assert len(settings.cors_origins_list) > 0
+        assert settings.app_name == 'Data-Forge Analysis Platform'
+        assert settings.app_version == '1.0.0'
 
-    def test_compute_workers_from_env(self, monkeypatch, tmp_path):
+    @pytest.mark.parametrize(
+        ('env', 'expected'),
+        [
+            pytest.param({'COMPUTE_WORKERS': '32'}, {'compute_workers': 32}, id='compute-workers'),
+            pytest.param({'SQL_ECHO': 'true'}, {'sql_echo': True}, id='sql-echo'),
+            # App config names must not collide with Polars' native env.
+            pytest.param(
+                {'POLARS_CORES_AVAILABLE': '8', 'POLARS_STREAMING_CHUNK_SIZE': '100000'},
+                {'polars_cores_available': 8, 'polars_streaming_chunk_size': 100000},
+                id='polars',
+            ),
+            pytest.param({'POLARS_CORES_AVAILABLE': '0'}, {'polars_cores_available': 0}, id='polars-cores-all-host-cores'),
+            pytest.param({'PERSIST_PREVIEW_RUNS': 'false'}, {'persist_preview_runs': False}, id='preview-run-persistence'),
+            pytest.param({'LOG_LEVEL': 'DEBUG'}, {'log_level': 'debug'}, id='logging-level'),
+            pytest.param({'WORKERS': '4'}, {'workers': 4}, id='workers'),
+            pytest.param(
+                {'DISTRIBUTED_RUNTIME_ENABLED': 'true', 'DATABASE_POOL_SIZE': '100', 'DATABASE_MAX_OVERFLOW': '7', 'DATABASE_POOL_TIMEOUT': '12'},
+                {'distributed_runtime_enabled': True, 'database_pool_size': 100, 'database_max_overflow': 7, 'database_pool_timeout': 12},
+                id='distributed-runtime-and-pool',
+            ),
+        ],
+    )
+    def test_env_var_sets_field(self, monkeypatch, tmp_path, env, expected):
         _set_isolated_settings_env(monkeypatch, tmp_path)
-        monkeypatch.setenv('COMPUTE_WORKERS', '32')
+        for name, value in env.items():
+            monkeypatch.setenv(name, value)
 
         settings = Settings()
 
-        assert settings.compute_workers == 32
-        assert Settings.model_fields['compute_workers'].alias == 'COMPUTE_WORKERS'
+        assert {field: getattr(settings, field) for field in expected} == expected
 
     @pytest.mark.parametrize(
         ('value', 'message'),
@@ -90,41 +119,13 @@ class TestSettings:
         assert settings.default_namespace == 'acme'
         assert settings.public_idb_debug is True
 
-    def test_sql_echo_from_env(self, monkeypatch, tmp_path):
+    def test_default_namespace_env_value_is_stored_stripped(self, monkeypatch, tmp_path):
         _set_isolated_settings_env(monkeypatch, tmp_path)
-        monkeypatch.setenv('SQL_ECHO', 'true')
+        monkeypatch.setenv('DEFAULT_NAMESPACE', '  acme  ')
 
         settings = Settings()
 
-        assert settings.sql_echo is True
-
-    def test_polars_settings(self, monkeypatch, tmp_path):
-        _set_isolated_settings_env(monkeypatch, tmp_path)
-        monkeypatch.setenv('POLARS_CORES_AVAILABLE', '8')
-        monkeypatch.setenv('POLARS_STREAMING_CHUNK_SIZE', '100000')
-
-        settings = Settings()
-
-        assert settings.polars_cores_available == 8
-        assert settings.polars_streaming_chunk_size == 100000
-
-    def test_polars_cores_available_zero_means_all_host_cores(self, monkeypatch, tmp_path):
-        _set_isolated_settings_env(monkeypatch, tmp_path)
-        monkeypatch.setenv('POLARS_CORES_AVAILABLE', '0')
-
-        settings = Settings()
-
-        assert settings.polars_cores_available == 0
-        # App config name must not collide with Polars' native env.
-        assert Settings.model_fields['polars_cores_available'].alias == 'POLARS_CORES_AVAILABLE'
-
-    def test_preview_run_persistence_setting(self, monkeypatch, tmp_path):
-        _set_isolated_settings_env(monkeypatch, tmp_path)
-        monkeypatch.setenv('PERSIST_PREVIEW_RUNS', 'false')
-
-        settings = Settings()
-
-        assert settings.persist_preview_runs is False
+        assert settings.default_namespace == 'acme'
 
     def test_cors_settings(self, monkeypatch, tmp_path):
         _set_isolated_settings_env(monkeypatch, tmp_path)
@@ -136,13 +137,6 @@ class TestSettings:
         assert 'http://localhost:3000' in settings.cors_origins_list
         assert 'http://localhost:5173' in settings.cors_origins_list
 
-    def test_cors_default(self, monkeypatch, tmp_path):
-        _set_isolated_settings_env(monkeypatch, tmp_path)
-        settings = Settings()
-
-        assert settings.cors_origins is not None
-        assert len(settings.cors_origins_list) > 0
-
     def test_database_url_must_be_explicit_postgres(self, monkeypatch, tmp_path):
         data_dir = tmp_path / 'data'
         _set_isolated_settings_env(monkeypatch, tmp_path, data_dir)
@@ -151,36 +145,6 @@ class TestSettings:
 
         with pytest.raises(ValidationError, match='DATABASE_URL must be set to a PostgreSQL connection string'):
             Settings()
-
-    def test_database_url_uses_explicit_env_value(self, monkeypatch, tmp_path):
-        _set_isolated_settings_env(monkeypatch, tmp_path)
-        monkeypatch.setenv('DATABASE_URL', 'postgresql+psycopg://user:pass@host:5432/db')
-
-        settings = Settings()
-
-        assert settings.database_url == 'postgresql+psycopg://user:pass@host:5432/db'
-
-    def test_distributed_runtime_defaults_disabled(self, monkeypatch, tmp_path):
-        _set_isolated_settings_env(monkeypatch, tmp_path)
-
-        settings = Settings()
-
-        assert settings.distributed_runtime_enabled is False
-
-    def test_distributed_runtime_and_pool_settings_from_env(self, monkeypatch, tmp_path):
-        _set_isolated_settings_env(monkeypatch, tmp_path)
-        monkeypatch.setenv('DATABASE_URL', 'postgresql+psycopg://user:pass@host:5432/db')
-        monkeypatch.setenv('DISTRIBUTED_RUNTIME_ENABLED', 'true')
-        monkeypatch.setenv('DATABASE_POOL_SIZE', '100')
-        monkeypatch.setenv('DATABASE_MAX_OVERFLOW', '7')
-        monkeypatch.setenv('DATABASE_POOL_TIMEOUT', '12')
-
-        settings = Settings()
-
-        assert settings.distributed_runtime_enabled is True
-        assert settings.database_pool_size == 100
-        assert settings.database_max_overflow == 7
-        assert settings.database_pool_timeout == 12
 
     def test_database_url_rejects_non_postgres_values(self, monkeypatch, tmp_path):
         _set_isolated_settings_env(monkeypatch, tmp_path)
@@ -223,12 +187,6 @@ class TestSettings:
         settings = Settings()
         assert settings.upload_max_file_size_bytes == 0
 
-    def test_directory_paths_are_path_objects(self, monkeypatch, tmp_path):
-        _set_isolated_settings_env(monkeypatch, tmp_path)
-        settings = Settings()
-
-        assert isinstance(settings.data_dir, Path)
-
     def test_empty_env_file_uses_stable_default_data_dir(self, monkeypatch, tmp_path):
         monkeypatch.delenv('DATA_DIR', raising=False)
         monkeypatch.setenv('DATABASE_URL', 'postgresql+psycopg://dataforge:dataforge@127.0.0.1:5432/dataforge')
@@ -244,41 +202,6 @@ class TestSettings:
         assert first.data_dir == second.data_dir
         assert first.data_dir.exists()
         assert second.database_url == 'postgresql+psycopg://dataforge:dataforge@127.0.0.1:5432/dataforge'
-
-    def test_logging_level(self, monkeypatch, tmp_path):
-        _set_isolated_settings_env(monkeypatch, tmp_path)
-        monkeypatch.setenv('LOG_LEVEL', 'DEBUG')
-
-        settings = Settings()
-
-        assert settings.log_level == 'debug'
-
-    def test_default_logging_level(self, monkeypatch, tmp_path):
-        _set_isolated_settings_env(monkeypatch, tmp_path)
-        settings = Settings()
-
-        assert settings.log_level == 'info'
-
-    def test_default_log_flush_interval(self, monkeypatch, tmp_path):
-        _set_isolated_settings_env(monkeypatch, tmp_path)
-        settings = Settings()
-
-        assert settings.log_flush_interval_seconds == 5
-
-    def test_worker_settings(self, monkeypatch, tmp_path):
-        _set_isolated_settings_env(monkeypatch, tmp_path)
-        monkeypatch.setenv('WORKERS', '4')
-
-        settings = Settings()
-
-        assert settings.workers == 4
-
-    def test_settings_validation(self, monkeypatch, tmp_path):
-        _set_isolated_settings_env(monkeypatch, tmp_path)
-        settings = Settings()
-
-        assert settings.app_name == 'Data-Forge Analysis Platform'
-        assert settings.app_version == '1.0.0'
 
     def test_trusted_proxy_hops_must_be_non_negative(self, monkeypatch, tmp_path):
         _set_isolated_settings_env(monkeypatch, tmp_path)

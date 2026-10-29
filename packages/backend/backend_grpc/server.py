@@ -10,7 +10,8 @@ import time
 import uuid
 from collections import deque
 from collections.abc import Awaitable, Callable, Iterator, Mapping
-from concurrent.futures import Executor, Future as ConcurrentFuture, ThreadPoolExecutor
+from concurrent.futures import Executor, Future as ConcurrentFuture, ThreadPoolExecutor, wait as wait_for_futures
+from dataclasses import dataclass
 from datetime import UTC, datetime
 from types import MappingProxyType
 from typing import Any, Protocol, cast
@@ -30,7 +31,6 @@ from backend_core import (
     compute_worker_instances_service as compute_worker_instance_service,
     compute_worker_runs_service as compute_worker_run_service,
     datasource_delete_service,
-    runtime_outbox_service,
     runtime_work_service,
     runtime_workers_service as runtime_worker_service,
     storage_cleanup_service,
@@ -60,13 +60,12 @@ from backend_core.domain.compute_requests.models import (
 from backend_core.domain.runtime_workers.models import RuntimeWorkerKind
 from backend_core.exceptions import AppError
 from backend_core.namespace import namespace_scope, reset_namespace, set_namespace_context
-from backend_core.notification_delivery import EMAIL_DELIVERY_KIND, TELEGRAM_DELIVERY_KIND
+from backend_core.notification_delivery import DeliveryKind
 from backend_core.persistence.analysis.models import Analysis
 from backend_core.persistence.datasource.models import DataSource
 from backend_core.persistence.healthchecks.models import HealthCheck, HealthCheckResult
 from backend_core.persistence.telegram.models import TelegramListener, TelegramSubscriber
 from backend_core.persistence.udfs.models import Udf
-from backend_core.settings_projection import get_resolved_telegram_settings
 from backend_core.sqlmodel_typing import col, sa
 from dataforge_protocol import (
     common_pb2,
@@ -137,7 +136,7 @@ def _proto_enum_value(prefix: str, value: object) -> Any:
 def proto_value_to_enum_name(enum_type: Any, prefix: str, value: int) -> str:
     enum_name = enum_type.Name(value)
     suffix = enum_name.removeprefix(f'{prefix}_')
-    if suffix == 'UNSPECIFIED' or suffix == enum_name:
+    if suffix in {'UNSPECIFIED', enum_name}:
         raise ValueError(f'Unsupported {prefix} enum value: {enum_name}')
     return suffix.lower()
 
@@ -312,7 +311,7 @@ _LEASE_VALIDATION_METHODS = frozenset(
 
 def _validation_executor(method: str) -> Executor:
     method_name = method.rsplit('/', 1)[-1]
-    if method_name in _SCHEDULER_HEARTBEAT_METHODS and _INTERNAL_SCHEDULER_VALIDATION_EXECUTOR is not None:
+    if method_name in _SCHEDULER_HEARTBEAT_METHODS:
         return _INTERNAL_SCHEDULER_VALIDATION_EXECUTOR
     if method_name in _SCHEDULER_HEARTBEAT_METHODS | _LEASE_VALIDATION_METHODS:
         return _INTERNAL_LEASE_VALIDATION_EXECUTOR
@@ -372,13 +371,9 @@ _INTERNAL_LEASE_VALIDATION_EXECUTOR = ThreadPoolExecutor(
     thread_name_prefix='internal-lease-validation',
 )
 _INTERNAL_SCHEDULER_VALIDATION_WORKERS = min(1, _INTERNAL_SCHEDULER_RPC_WORKERS)
-_INTERNAL_SCHEDULER_VALIDATION_EXECUTOR = (
-    ThreadPoolExecutor(
-        max_workers=_INTERNAL_SCHEDULER_VALIDATION_WORKERS,
-        thread_name_prefix='internal-scheduler-validation',
-    )
-    if _INTERNAL_SCHEDULER_VALIDATION_WORKERS
-    else None
+_INTERNAL_SCHEDULER_VALIDATION_EXECUTOR = ThreadPoolExecutor(
+    max_workers=_INTERNAL_SCHEDULER_VALIDATION_WORKERS,
+    thread_name_prefix='internal-scheduler-validation',
 )
 _INTERNAL_EXTERNAL_IO_WORKERS = 2
 _INTERNAL_EXTERNAL_IO_EXECUTOR = ThreadPoolExecutor(max_workers=_INTERNAL_EXTERNAL_IO_WORKERS, thread_name_prefix='internal-runtime-external-io')
@@ -390,13 +385,9 @@ _INTERNAL_LEASE_RPC_EXECUTOR = ThreadPoolExecutor(
     max_workers=_INTERNAL_LEASE_RPC_WORKERS,
     thread_name_prefix='internal-runtime-lease',
 )
-_INTERNAL_SCHEDULER_RPC_EXECUTOR = (
-    ThreadPoolExecutor(
-        max_workers=_INTERNAL_SCHEDULER_RPC_WORKERS,
-        thread_name_prefix='internal-scheduler-heartbeat',
-    )
-    if _INTERNAL_SCHEDULER_RPC_WORKERS
-    else None
+_INTERNAL_SCHEDULER_RPC_EXECUTOR = ThreadPoolExecutor(
+    max_workers=_INTERNAL_SCHEDULER_RPC_WORKERS,
+    thread_name_prefix='internal-scheduler-heartbeat',
 )
 
 
@@ -481,10 +472,7 @@ class _RpcAdmissionLane:
 _RPC_ADMISSION_LANES = {
     'critical': _RpcAdmissionLane('critical', _INTERNAL_LEASE_RPC_WORKERS),
     'general': _RpcAdmissionLane('general', _INTERNAL_GENERAL_RPC_WORKERS),
-    'scheduler': _RpcAdmissionLane(
-        'scheduler',
-        _INTERNAL_SCHEDULER_RPC_WORKERS or _INTERNAL_LEASE_RPC_WORKERS,
-    ),
+    'scheduler': _RpcAdmissionLane('scheduler', _INTERNAL_SCHEDULER_RPC_WORKERS),
     'external-io': _RpcAdmissionLane('external-io', _INTERNAL_EXTERNAL_IO_WORKERS),
 }
 
@@ -542,8 +530,7 @@ def _cached_pending_runtime_work_namespaces(kinds: tuple[runtime_work_service.Ru
 
 def close_rpc_session(session_gen) -> None:
     """Exhaust and close a get_db() generator so post-yield cleanup runs."""
-    with contextlib.suppress(StopIteration):
-        next(session_gen, None)
+    next(session_gen, None)
     session_gen.close()
 
 
@@ -557,6 +544,19 @@ def _tenant_session(namespace: str) -> Iterator[Session]:
             yield session
         finally:
             close_rpc_session(session_gen)
+
+
+@dataclass(frozen=True, slots=True)
+class _DatasourceMetadata:
+    datasource_id: str
+    name: str
+    source_type: str
+    config: dict[str, object]
+    is_hidden: bool
+    revision: int
+    created_by: str
+    description: str | None
+    schema_cache: dict | None
 
 
 def _threaded_rpc(executor: Executor):
@@ -659,7 +659,7 @@ _general_rpc = _threaded_rpc(_INTERNAL_RPC_EXECUTOR)
 # Keep liveness and lease progress RPCs on their protected lane.
 _lease_rpc = _threaded_rpc(_INTERNAL_LEASE_RPC_EXECUTOR)
 # Protect the singleton scheduler heartbeat from worker lease bursts.
-_scheduler_heartbeat_rpc = _threaded_rpc(_INTERNAL_SCHEDULER_RPC_EXECUTOR or _INTERNAL_LEASE_RPC_EXECUTOR)
+_scheduler_heartbeat_rpc = _threaded_rpc(_INTERNAL_SCHEDULER_RPC_EXECUTOR)
 # Isolate potentially slow provider calls from durable coordinator RPCs.
 _external_io_rpc = _threaded_rpc(_INTERNAL_EXTERNAL_IO_EXECUTOR)
 
@@ -835,7 +835,9 @@ def _compute_worker_status_info_payload(message: compute_pb2.ComputeWorkerStatus
     )
 
 
-def _compute_worker_run_update_fields(update: worker_runtime_pb2.WorkerComputeWorkerRunUpdateFields) -> dict[str, Any]:
+def _compute_worker_run_update_fields(
+    update: worker_runtime_pb2.WorkerComputeWorkerRunUpdateFields,
+) -> compute_requests_service.ComputeWorkerRunFinalizationFields:
     fields: dict[str, Any] = _present_fields(
         update,
         ('analysis_id', 'datasource_id', 'error_message', 'duration_ms', 'query_plan', 'progress', 'triggered_by'),
@@ -858,7 +860,7 @@ def _compute_worker_run_update_fields(update: worker_runtime_pb2.WorkerComputeWo
         fields['current_step'] = None
     if update.HasField('current_step'):
         fields['current_step'] = update.current_step
-    return fields
+    return cast(compute_requests_service.ComputeWorkerRunFinalizationFields, fields)
 
 
 def _compute_worker_run_finalization(
@@ -921,10 +923,6 @@ def _settle_build_job(
             except Exception:
                 logger.warning('Schedule reconciliation deferred after durable build %s build_id=%s', outcome, request.build_id, exc_info=True)
     return worker_runtime_pb2.BoolResponse(value=result is not None)
-
-
-def _notification_attachments(request: worker_runtime_pb2.WorkerSendEmailRequest | worker_runtime_pb2.WorkerSendTelegramRequest) -> list[dict[str, object]]:
-    return [{'filename': item.filename, 'content_base64': item.content_base64, 'content_type': item.content_type} for item in request.attachments]
 
 
 class WorkerRuntimeServicer(worker_runtime_pb2_grpc.WorkerRuntimeServiceServicer):
@@ -1109,7 +1107,7 @@ class WorkerRuntimeServicer(worker_runtime_pb2_grpc.WorkerRuntimeServiceServicer
                 run_db(
                     storage_cleanup_service.register_stage,
                     datasource_id=request.datasource_id,
-                    owner_kind='compute' if is_compute_owner else 'build',
+                    owner_kind=storage_cleanup_service.StorageCleanupOwner.COMPUTE if is_compute_owner else storage_cleanup_service.StorageCleanupOwner.BUILD,
                     owner_id=request.compute_request_id if is_compute_owner else request.job_id,
                     worker_id=request.worker_id,
                     claim_token=request.claim_token,
@@ -1330,30 +1328,30 @@ class WorkerRuntimeServicer(worker_runtime_pb2_grpc.WorkerRuntimeServiceServicer
     def GetDatasourceMetadata(
         self, request: worker_runtime_pb2.WorkerDatasourceMetadataRequest, metadata: RpcMetadata
     ) -> worker_runtime_pb2.WorkerDatasourceMetadataResponse:
-        def _load_metadata() -> tuple[str, str, str, dict[str, object], bool, int, str, str | None, dict | None, dict[str, str]] | None:
+        def _load_metadata() -> tuple[_DatasourceMetadata, dict[str, str]] | None:
             with _tenant_session(request.namespace) as session:
                 datasource = _record_rpc_phase('datasource_row_lookup_ms', lambda: session.get(DataSource, request.datasource_id))
                 if datasource is None:
                     return None
-                metadata_values = _record_rpc_phase(
+                metadata = _record_rpc_phase(
                     'datasource_payload_conversion_ms',
-                    lambda: (
-                        datasource.id,
-                        datasource.name,
-                        datasource.source_type,
-                        dict(datasource.config),
-                        datasource.is_hidden,
-                        int(datasource.revision),
-                        str(datasource.created_by),
-                        datasource.description,
-                        dict(datasource.schema_cache) if isinstance(datasource.schema_cache, dict) else None,
+                    lambda: _DatasourceMetadata(
+                        datasource_id=datasource.id,
+                        name=datasource.name,
+                        source_type=datasource.source_type,
+                        config=dict(datasource.config),
+                        is_hidden=datasource.is_hidden,
+                        revision=datasource.revision,
+                        created_by=datasource.created_by,
+                        description=datasource.description,
+                        schema_cache=dict(datasource.schema_cache) if datasource.schema_cache is not None else None,
                     ),
                 )
                 descriptions = _record_rpc_phase(
                     'column_descriptions_service_ms',
                     lambda: datasource_publication_service.column_description_map(session, datasource.id),
                 )
-                return (*metadata_values, descriptions)
+                return metadata, descriptions
 
         datasource_metadata = _record_rpc_phase('db_unit_ms', _load_metadata)
         if datasource_metadata is None:
@@ -1363,21 +1361,21 @@ class WorkerRuntimeServicer(worker_runtime_pb2_grpc.WorkerRuntimeServiceServicer
             )
 
         def _build_response() -> worker_runtime_pb2.WorkerDatasourceMetadataResponse:
-            datasource_id, name, source_type, config, is_hidden, revision, created_by, description, schema_cache, descriptions = datasource_metadata
+            metadata, descriptions = datasource_metadata
             response = worker_runtime_pb2.WorkerDatasourceMetadataResponse(
                 found=True,
-                id=datasource_id,
-                name=name,
-                source_type=_proto_enum_value('DATA_SOURCE_TYPE', source_type),
-                config=dict_to_struct(config),
-                is_hidden=is_hidden,
-                revision=revision,
-                created_by=created_by,
-                description=description,
+                id=metadata.datasource_id,
+                name=metadata.name,
+                source_type=_proto_enum_value('DATA_SOURCE_TYPE', metadata.source_type),
+                config=dict_to_struct(metadata.config),
+                is_hidden=metadata.is_hidden,
+                revision=metadata.revision,
+                created_by=metadata.created_by,
+                description=metadata.description,
                 column_descriptions=descriptions,
             )
-            if schema_cache is not None:
-                response.schema_info.CopyFrom(schema_info_proto(schema_cache))
+            if metadata.schema_cache is not None:
+                response.schema_info.CopyFrom(schema_info_proto(metadata.schema_cache))
             return response
 
         return _record_rpc_phase('response_transformation_ms', _build_response)
@@ -1421,9 +1419,8 @@ class WorkerRuntimeServicer(worker_runtime_pb2_grpc.WorkerRuntimeServiceServicer
             run = run_db(build_run_service.get_build_run, request.build_id)
         if run is None or run.status != BuildRunStatus.CANCELLED:
             return worker_runtime_pb2.WorkerBuildCancelStatusResponse(cancelled=False)
-        cancelled_by = run.cancelled_by if isinstance(run.cancelled_by, str) else None
-        response = worker_runtime_pb2.WorkerBuildCancelStatusResponse(cancelled=True, cancelled_by=cancelled_by)
-        if isinstance(run.cancelled_at, datetime):
+        response = worker_runtime_pb2.WorkerBuildCancelStatusResponse(cancelled=True, cancelled_by=run.cancelled_by)
+        if run.cancelled_at is not None:
             response.cancelled_at.CopyFrom(datetime_to_timestamp(run.cancelled_at))
         return response
 
@@ -1468,7 +1465,7 @@ class WorkerRuntimeServicer(worker_runtime_pb2_grpc.WorkerRuntimeServiceServicer
                 case 'email':
                     notification_deliveries.append(
                         {
-                            'kind': EMAIL_DELIVERY_KIND,
+                            'kind': DeliveryKind.EMAIL,
                             'to': delivery.email.to,
                             'subject': delivery.email.subject,
                             'body': delivery.email.body,
@@ -1478,7 +1475,7 @@ class WorkerRuntimeServicer(worker_runtime_pb2_grpc.WorkerRuntimeServiceServicer
                 case 'telegram':
                     notification_deliveries.append(
                         {
-                            'kind': TELEGRAM_DELIVERY_KIND,
+                            'kind': DeliveryKind.TELEGRAM,
                             'chat_id': delivery.telegram.chat_id,
                             'message': delivery.telegram.message,
                             'attachments': [],
@@ -1556,25 +1553,25 @@ class WorkerRuntimeServicer(worker_runtime_pb2_grpc.WorkerRuntimeServiceServicer
         with namespace_scope(request.namespace):
             payload_fields: dict[str, Any] = _record_rpc_phase(
                 'payload_conversion_ms',
-                lambda: dict(
-                    analysis_id=_optional(request, 'analysis_id'),
-                    datasource_id=request.datasource_id,
-                    kind=proto_value_to_enum_name(enums_pb2.ComputeWorkerRunKind, 'COMPUTE_WORKER_RUN_KIND', request.kind),
-                    status=proto_value_to_enum_name(enums_pb2.ComputeWorkerRunStatus, 'COMPUTE_WORKER_RUN_STATUS', request.status),
-                    request_json=struct_to_dict(request.request),
-                    result_json=struct_to_dict(request.result) if request.HasField('result') else None,
-                    error_message=_optional(request, 'error_message'),
-                    created_at=request.created_at.ToDatetime(tzinfo=UTC) if request.HasField('created_at') else None,
-                    completed_at=request.completed_at.ToDatetime(tzinfo=UTC) if request.HasField('completed_at') else None,
-                    duration_ms=_optional(request, 'duration_ms'),
-                    step_timings=dict(request.timing_by_key) if request.timing_by_key else None,
-                    query_plan=_optional(request, 'query_plan'),
-                    execution_entries=[_compute_worker_run_execution_entry_payload(entry) for entry in request.execution_entry] or None,
-                    progress=request.progress,
-                    current_step=_optional(request, 'current_step'),
-                    triggered_by=_optional(request, 'triggered_by'),
-                    idempotency_key=_optional(request, 'idempotency_key'),
-                ),
+                lambda: {
+                    'analysis_id': _optional(request, 'analysis_id'),
+                    'datasource_id': request.datasource_id,
+                    'kind': proto_value_to_enum_name(enums_pb2.ComputeWorkerRunKind, 'COMPUTE_WORKER_RUN_KIND', request.kind),
+                    'status': proto_value_to_enum_name(enums_pb2.ComputeWorkerRunStatus, 'COMPUTE_WORKER_RUN_STATUS', request.status),
+                    'request_json': struct_to_dict(request.request),
+                    'result_json': struct_to_dict(request.result) if request.HasField('result') else None,
+                    'error_message': _optional(request, 'error_message'),
+                    'created_at': request.created_at.ToDatetime(tzinfo=UTC) if request.HasField('created_at') else None,
+                    'completed_at': request.completed_at.ToDatetime(tzinfo=UTC) if request.HasField('completed_at') else None,
+                    'duration_ms': _optional(request, 'duration_ms'),
+                    'step_timings': dict(request.timing_by_key) if request.timing_by_key else None,
+                    'query_plan': _optional(request, 'query_plan'),
+                    'execution_entries': [_compute_worker_run_execution_entry_payload(entry) for entry in request.execution_entry] or None,
+                    'progress': request.progress,
+                    'current_step': _optional(request, 'current_step'),
+                    'triggered_by': _optional(request, 'triggered_by'),
+                    'idempotency_key': _optional(request, 'idempotency_key'),
+                },
             )
             payload = _record_rpc_phase(
                 'compute_worker_run_payload_service_ms',
@@ -1627,21 +1624,6 @@ class WorkerRuntimeServicer(worker_runtime_pb2_grpc.WorkerRuntimeServiceServicer
         return _settle_build_job(request, build_commands.finalize_build_job, 'completion')
 
     @_general_rpc
-    def ReleaseBuildWorkerJobs(self, request: common_pb2.RuntimeWorkerRequest, metadata: RpcMetadata) -> worker_runtime_pb2.CountResponse:
-        if not request.target_namespace:
-            raise _ThreadedRpcAbort(grpc.StatusCode.INVALID_ARGUMENT, 'Build worker release must target a namespace')
-        with namespace_scope(request.target_namespace):
-            released = run_db(build_job_service.release_worker_jobs, worker_id=request.worker_id)
-        return worker_runtime_pb2.CountResponse(count=len(released))
-
-    @_general_rpc
-    def GetQueuedBuildJobCount(self, request: common_pb2.EmptyRequest, metadata: RpcMetadata) -> worker_runtime_pb2.CountResponse:
-        if not request.namespace:
-            raise _ThreadedRpcAbort(grpc.StatusCode.INVALID_ARGUMENT, 'Queued build count must target a namespace')
-        with namespace_scope(request.namespace):
-            return worker_runtime_pb2.CountResponse(count=run_db(build_job_service.queued_job_count))
-
-    @_general_rpc
     def ReconcileExpiredBuildJobs(self, request: common_pb2.EmptyRequest, metadata: RpcMetadata) -> worker_runtime_pb2.CountResponse:
         if not request.namespace:
             raise _ThreadedRpcAbort(grpc.StatusCode.INVALID_ARGUMENT, 'Build job reconciliation must target a namespace')
@@ -1654,11 +1636,6 @@ class WorkerRuntimeServicer(worker_runtime_pb2_grpc.WorkerRuntimeServiceServicer
             raise _ThreadedRpcAbort(grpc.StatusCode.INVALID_ARGUMENT, 'Compute request reconciliation must target a namespace')
         with namespace_scope(request.namespace):
             return worker_runtime_pb2.CountResponse(count=run_db(compute_requests_service.reconcile_expired_requests, namespace=request.namespace))
-
-    @_general_rpc
-    def GetIdleBuildWorkerPids(self, request: common_pb2.EmptyRequest, metadata: RpcMetadata) -> worker_runtime_pb2.WorkerIdlePidsResponse:
-        workers = run_settings_db(runtime_worker_service.list_workers, kind=RuntimeWorkerKind.BUILD_WORKER)
-        return worker_runtime_pb2.WorkerIdlePidsResponse(pids=[worker.pid for worker in workers if worker.stopped_at is None and worker.active_jobs == 0])
 
     @_general_rpc
     def ListPendingRuntimeWorkNamespaces(
@@ -1755,9 +1732,7 @@ class WorkerRuntimeServicer(worker_runtime_pb2_grpc.WorkerRuntimeServiceServicer
             # parsing never holds a database connection or job-row lock.
             analysis_pipeline = analysis_pipeline_from_payload(dict(snapshot.request_json))
             build_starter = _build_starter_proto(dict(snapshot.starter_json))
-            build_resource_config = (
-                _build_resource_config_proto(dict(snapshot.resource_config_json)) if isinstance(snapshot.resource_config_json, dict) else None
-            )
+            build_resource_config = _build_resource_config_proto(dict(snapshot.resource_config_json)) if snapshot.resource_config_json is not None else None
 
             def mark_running(session: Session):
                 claim = build_job_service.lock_active_job_claim(
@@ -1793,7 +1768,7 @@ class WorkerRuntimeServicer(worker_runtime_pb2_grpc.WorkerRuntimeServiceServicer
             tab_id = run.request_json.get('tab_id')
             if isinstance(tab_id, str) and tab_id:
                 payload.tab_id = tab_id
-            if isinstance(run.current_kind, str):
+            if run.current_kind is not None:
                 payload.current_kind = _proto_enum_value('COMPUTE_WORKER_RUN_KIND', run.current_kind)
             payload.started_at.CopyFrom(datetime_to_timestamp(run.started_at))
             if build_resource_config is not None:
@@ -1865,39 +1840,6 @@ class WorkerRuntimeServicer(worker_runtime_pb2_grpc.WorkerRuntimeServiceServicer
         with _tenant_session(request.namespace) as session:
             deleted = datasource_delete_service.finalize_delete(session, request.datasource_id)
         return worker_runtime_pb2.WorkerFinalizeDatasourceDeleteResponse(deleted=deleted)
-
-    @_general_rpc
-    def GetTelegramSettings(self, request: common_pb2.EmptyRequest, metadata: RpcMetadata) -> worker_runtime_pb2.WorkerTelegramSettingsResponse:
-        resolved = get_resolved_telegram_settings()
-        return worker_runtime_pb2.WorkerTelegramSettingsResponse(enabled=bool(resolved.get('enabled')))
-
-    @_general_rpc
-    def SendEmail(self, request: worker_runtime_pb2.WorkerSendEmailRequest, metadata: RpcMetadata) -> worker_runtime_pb2.BoolResponse:
-        if not request.to:
-            return worker_runtime_pb2.BoolResponse(value=False)
-        payload: dict[str, object] = {
-            'kind': EMAIL_DELIVERY_KIND,
-            'to': request.to,
-            'subject': request.subject,
-            'body': request.body,
-            'attachments': _notification_attachments(request),
-        }
-        with namespace_scope(request.namespace):
-            run_db(runtime_outbox_service.enqueue_notification_delivery_command, payload)
-        return worker_runtime_pb2.BoolResponse(value=True)
-
-    @_general_rpc
-    def SendTelegram(self, request: worker_runtime_pb2.WorkerSendTelegramRequest, metadata: RpcMetadata) -> worker_runtime_pb2.BoolResponse:
-        payload: dict[str, object] = {
-            'kind': TELEGRAM_DELIVERY_KIND,
-            'chat_id': request.chat_id,
-            'message': request.message,
-            'attachments': _notification_attachments(request),
-            **_present_fields(request, ('bot_token',)),
-        }
-        with namespace_scope(request.namespace):
-            run_db(runtime_outbox_service.enqueue_notification_delivery_command, payload)
-        return worker_runtime_pb2.BoolResponse(value=True)
 
     @_external_io_rpc
     def GenerateAI(self, request: worker_runtime_pb2.WorkerGenerateAIRequest, metadata: RpcMetadata) -> worker_runtime_pb2.WorkerGenerateAIResponse:
@@ -2061,7 +2003,7 @@ async def _prewarm_executor(executor: Executor, size: int) -> None:
     futures = []
     try:
         for _ in range(size):
-            futures.append(executor.submit(barrier.wait))
+            futures.append(executor.submit(barrier.wait))  # noqa: PERF401 - the except path must see every future submitted so far
         await asyncio.to_thread(barrier.wait)
         await asyncio.gather(*(asyncio.wrap_future(future) for future in futures))
     except BaseException:
@@ -2083,7 +2025,7 @@ async def _prewarm_internal_rpc_executors() -> None:
         _INTERNAL_GENERAL_RPC_WORKERS,
         settings.database_pool_size + settings.database_max_overflow,
     )
-    executors: list[tuple[Executor | None, int]] = [
+    executors: list[tuple[Executor, int]] = [
         (_INTERNAL_VALIDATION_EXECUTOR, _INTERNAL_GENERAL_RPC_WORKERS),
         (_INTERNAL_LEASE_VALIDATION_EXECUTOR, _INTERNAL_LEASE_VALIDATION_WORKERS),
         (_INTERNAL_SCHEDULER_VALIDATION_EXECUTOR, _INTERNAL_SCHEDULER_VALIDATION_WORKERS),
@@ -2092,7 +2034,7 @@ async def _prewarm_internal_rpc_executors() -> None:
         (_INTERNAL_RPC_EXECUTOR, _INTERNAL_GENERAL_RPC_WORKERS),
         (_INTERNAL_SCHEDULER_RPC_EXECUTOR, _INTERNAL_SCHEDULER_RPC_WORKERS),
     ]
-    await asyncio.gather(*(_prewarm_executor(executor, size) for executor, size in executors if executor is not None))
+    await asyncio.gather(*(_prewarm_executor(executor, size) for executor, size in executors))
 
 
 async def _start_runtime_grpc_server_on_loop(coordinator_guard: Callable[[], None]) -> grpc.aio.Server:
@@ -2139,8 +2081,7 @@ class ThreadedRuntimeGrpcServer:
 
 
 def start_runtime_grpc_server_in_thread(*, coordinator_guard: Callable[[], None]) -> ThreadedRuntimeGrpcServer:
-    ready: threading.Event = threading.Event()
-    holder: dict[str, object] = {}
+    started: ConcurrentFuture[tuple[asyncio.AbstractEventLoop, grpc.aio.Server]] = ConcurrentFuture()
 
     def _run() -> None:
         loop = asyncio.new_event_loop()
@@ -2148,13 +2089,10 @@ def start_runtime_grpc_server_in_thread(*, coordinator_guard: Callable[[], None]
         try:
             server = loop.run_until_complete(_start_runtime_grpc_server_on_loop(coordinator_guard))
         except Exception as exc:
-            holder['error'] = exc
-            ready.set()
+            started.set_exception(exc)
             loop.close()
             return
-        holder['loop'] = loop
-        holder['server'] = server
-        ready.set()
+        started.set_result((loop, server))
         try:
             loop.run_forever()
         finally:
@@ -2162,16 +2100,11 @@ def start_runtime_grpc_server_in_thread(*, coordinator_guard: Callable[[], None]
 
     thread = threading.Thread(target=_run, name='runtime-coordinator-grpc', daemon=True)
     thread.start()
-    if not ready.wait(timeout=30):
+    wait_for_futures([started], timeout=30)
+    if not started.done():
         raise RuntimeError('Timed out starting runtime coordinator gRPC server')
-    error = holder.get('error')
-    if isinstance(error, Exception):
-        raise error
-    return ThreadedRuntimeGrpcServer(
-        loop=cast(asyncio.AbstractEventLoop, holder['loop']),
-        server=cast(grpc.aio.Server, holder['server']),
-        thread=thread,
-    )
+    loop, server = started.result()
+    return ThreadedRuntimeGrpcServer(loop=loop, server=server, thread=thread)
 
 
 async def start_runtime_grpc_server(*, coordinator_guard: Callable[[], None]) -> ThreadedRuntimeGrpcServer:

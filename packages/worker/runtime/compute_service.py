@@ -22,13 +22,13 @@ from pyiceberg.table import Table as IcebergTable
 
 from builds.build_live import RuntimeBuild
 from dataforge_protocol import compute_pb2, enums_pb2
-from operations.datasource import step_source_payload
+from operations.datasource import pipeline_datasource_payload
 from runtime.build_events import (
     BuildCancelledError,
     BuildEmitter,
-    BuildEventContext as _BuildEventBase,
-    build_event as _build_event,
-    emit_build_event as _emit_build_event,
+    BuildEventContext,
+    build_event,
+    emit_build_event,
     emit_progress as _emit_progress,
 )
 from runtime.compute_manager import ProcessManager
@@ -41,6 +41,7 @@ from runtime.compute_utils import (
 from runtime.config import settings
 from runtime.domain.analysis.step_types import STEP_TYPES
 from runtime.domain.compute import schemas as compute_schemas
+from runtime.domain.compute.base import ComputeWorker
 from runtime.domain.compute.schemas import BuildStatus, BuildTabStatus, ComputeRunStatus
 from runtime.domain.compute_worker_runs.schemas import ComputeWorkerRunExecutionCategory, ComputeWorkerRunKind, ComputeWorkerRunStatus
 from runtime.domain.datasource.source_types import DataSourceType
@@ -54,11 +55,10 @@ from runtime.exceptions import (
 )
 from runtime.executors import run_compute_in_thread, run_engine_io_in_thread, run_shutdown_in_thread
 from runtime.healthchecks import (
-    HealthCheckResult as _HealthCheckEvalResult,
-    load_lazy_frame as _load_healthcheck_lazy,
-    persist_results as _persist_healthcheck_results,
-    resolve_build_status as _resolve_build_status,
-    run_healthchecks as _run_worker_healthchecks,
+    HealthCheckResult,
+    persist_results,
+    resolve_build_status,
+    run_healthchecks,
 )
 from runtime.iceberg_catalog import ensure_catalog_namespace, load_runtime_catalog
 from runtime.iceberg_metadata import resolve_iceberg_branch_metadata_path, resolve_iceberg_metadata_path, sync_iceberg_schema
@@ -79,12 +79,12 @@ from runtime.object_store import (
     prefix_last_modified,
 )
 from runtime.resource_observation import (
-    observe_stream_task as _observe_stream_task,
-    resource_summary as _resource_summary,
-    stop_stream_task as _stop_stream_task,
-    stream_resource_events as _stream_resource_events,
+    observe_stream_task,
+    resource_summary,
+    stop_stream_task,
+    stream_resource_events,
 )
-from runtime.worker_runtime_client import ClaimedBuildJob, ComputeWorkerRunFinalization, HealthCheckSpec, client_from_env
+from runtime.worker_runtime_client import ClaimedBuildJob, ComputeWorkerRunFinalization, ExecutionEntry, client_from_env
 
 logger = logging.getLogger(__name__)
 
@@ -311,18 +311,14 @@ def _preflight_datasource_for_compute(
 
 def _tab_output_config(analysis_pipeline: dict, tab_id: str | None) -> dict:
     """Output config of the requested tab, falling back to the first tab."""
-    tabs = analysis_pipeline.get("tabs")
-    dict_tabs = [tab for tab in tabs if isinstance(tab, dict)] if isinstance(tabs, list) else []
-    selected = next((tab for tab in dict_tabs if tab_id and tab.get("id") == tab_id), dict_tabs[0] if dict_tabs else {})
-    output = selected.get("output")
-    return output if isinstance(output, dict) else {}
+    tabs = analysis_pipeline.get("tabs", [])
+    selected = next((tab for tab in tabs if tab_id and tab.get("id") == tab_id), tabs[0] if tabs else {})
+    return selected.get("output", {})
 
 
 def _output_timeout_warning_ms(analysis_pipeline: dict, tab_id: str | None) -> int | None:
-    raw = _tab_output_config(analysis_pipeline, tab_id).get("build_timeout_warning_ms")
-    if isinstance(raw, bool) or not isinstance(raw, (int, float)) or int(raw) <= 0:
-        return None
-    return int(raw)
+    # The protocol requires a positive value and the pipeline decoder keeps it an int.
+    return _tab_output_config(analysis_pipeline, tab_id).get("build_timeout_warning_ms")
 
 
 def _build_subscriber_message(context: BuildContext) -> str:
@@ -354,26 +350,21 @@ def _build_subscriber_message(context: BuildContext) -> str:
 
     hc_tail = ""
     if isinstance(hc_details, list):
-        lines = []
-        for detail in hc_details:
-            icon = "\u2713" if detail.passed else "\u2717"
-            lines.append(f"  {icon} {detail.name}: {detail.message} ")
-        hc_tail = "\n".join(lines)
+        hc_tail = "\n".join(f"  {'\u2713' if detail.passed else '\u2717'} {detail.name}: {detail.message} " for detail in hc_details)
 
     if not hc_tail:
         return msg[:max_len] + "\n…(truncated)"
 
-    header = msg
     footer = f"\nHealth check details:\n{hc_tail}"
-    combined = header + footer
+    combined = msg + footer
     if len(combined) <= max_len:
         return combined
 
-    available = max_len - len(header) - len("\nHealth check details:\n") - len("\n…(truncated)")
+    available = max_len - len(msg) - len("\nHealth check details:\n") - len("\n…(truncated)")
     if available <= 0:
-        return header[:max_len] + "\n…(truncated)"
+        return msg[:max_len] + "\n…(truncated)"
     trimmed = hc_tail[:available]
-    return f"{header}\nHealth check details:\n{trimmed}\n…(truncated)"
+    return f"{msg}\nHealth check details:\n{trimmed}\n…(truncated)"
 
 
 def _prepare_pipeline_notifications(
@@ -442,15 +433,13 @@ def _build_compute_worker_run_execution_entries(
     *,
     duration_ms: int,
     write_duration_ms: float | None = None,
-) -> list[dict[str, object]]:
-    payload = result_data if isinstance(result_data, dict) else {}
-    raw_data = payload.get("data")
-    data = raw_data if isinstance(raw_data, dict) else {}
-    step_timings = payload.get("step_timings")
+) -> list[ExecutionEntry]:
+    payload = result_data or {}
+    data = payload.get("data") or {}
     return _build_execution_entries(
-        step_timings=step_timings if isinstance(step_timings, dict) else None,
-        query_plans=next((value for value in (payload.get("query_plans"), data.get("query_plans")) if isinstance(value, dict)), None),
-        query_plan=next((value for value in (payload.get("query_plan"), data.get("query_plan")) if isinstance(value, str)), None),
+        step_timings=payload.get("step_timings"),
+        query_plans=data.get("query_plans"),
+        query_plan=payload.get("query_plan"),
         read_duration_ms=payload.get("read_duration_ms"),
         collect_duration_ms=payload.get("collect_duration_ms"),
         write_duration_ms=write_duration_ms,
@@ -474,7 +463,7 @@ def _build_execution_entries(
     collect_duration_ms: object = None,
     write_duration_ms: float | None = None,
     total_duration_ms: int | None = None,
-) -> list[dict[str, object]]:
+) -> list[ExecutionEntry]:
     normalized_timings: dict[str, float] = {}
     for key, value in (step_timings or {}).items():
         try:
@@ -490,7 +479,7 @@ def _build_execution_entries(
     timed_total = sum(normalized_timings.values())
     timed_total += sum(duration for duration in (read_duration, collect_duration, write_duration) if duration is not None)
     denominator = total_duration if total_duration and total_duration > 0 else timed_total
-    entries: list[dict[str, object]] = []
+    entries: list[ExecutionEntry] = []
 
     def append_entry(
         *,
@@ -500,29 +489,30 @@ def _build_execution_entries(
         duration_ms: float | None = None,
         optimized_plan: str | None = None,
         unoptimized_plan: str | None = None,
-        metadata: dict[str, object] | None = None,
+        step_type: str | None = None,
     ) -> None:
         share_pct = None
         if duration_ms is not None and denominator > 0:
             share_pct = round(min(max((duration_ms / denominator) * 100, 0.0), 100.0), 1)
         entries.append(
-            {
-                "key": key,
-                "label": label,
-                "category": category,
-                "order": len(entries),
-                "duration_ms": round(duration_ms, 2) if duration_ms is not None else None,
-                "share_pct": share_pct,
-                "optimized_plan": optimized_plan,
-                "unoptimized_plan": unoptimized_plan,
-                "metadata": metadata,
-            }
+            ExecutionEntry(
+                key=key,
+                label=label,
+                category=category,
+                order=len(entries),
+                duration_ms=round(duration_ms, 2) if duration_ms is not None else None,
+                share_pct=share_pct,
+                optimized_plan=optimized_plan,
+                unoptimized_plan=unoptimized_plan,
+                step_type=step_type,
+            )
         )
 
     if read_duration is not None:
         append_entry(key="initial_read", label="Initial Read", category=ComputeWorkerRunExecutionCategory.READ, duration_ms=read_duration)
-    raw_optimized_plan = query_plans.get("optimized") if isinstance(query_plans, dict) else None
-    raw_unoptimized_plan = query_plans.get("unoptimized") if isinstance(query_plans, dict) else None
+    raw_plans = query_plans or {}
+    raw_optimized_plan = raw_plans.get("optimized")
+    raw_unoptimized_plan = raw_plans.get("unoptimized")
     optimized_plan = raw_optimized_plan if isinstance(raw_optimized_plan, str) else None
     unoptimized_plan = raw_unoptimized_plan if isinstance(raw_unoptimized_plan, str) else None
     if optimized_plan or unoptimized_plan or query_plan:
@@ -540,7 +530,7 @@ def _build_execution_entries(
             label=label,
             category=ComputeWorkerRunExecutionCategory.STEP,
             duration_ms=timing_duration_ms,
-            metadata={"step_type": base_key},
+            step_type=base_key,
         )
     if collect_duration is not None:
         append_entry(key="compute", label="Compute", category=ComputeWorkerRunExecutionCategory.COMPUTE, duration_ms=collect_duration)
@@ -550,20 +540,14 @@ def _build_execution_entries(
 
 
 def _tab_name_from_pipeline(analysis_pipeline: dict, tab_id: str | None) -> str | None:
-    tabs = analysis_pipeline.get("tabs")
-    if not isinstance(tabs, list):
-        return None
+    tabs = analysis_pipeline.get("tabs", [])
     if isinstance(tab_id, str):
         for tab in tabs:
-            if not isinstance(tab, dict):
+            if tab.get("id", "") != tab_id:
                 continue
-            if str(tab.get("id") or "") != tab_id:
-                continue
-            name = tab.get("name")
-            return str(name) if isinstance(name, str) and name else None
-    if len(tabs) == 1 and isinstance(tabs[0], dict):
-        name = tabs[0].get("name")
-        return str(name) if isinstance(name, str) and name else None
+            return tab.get("name") or None
+    if len(tabs) == 1:
+        return tabs[0].get("name") or None
     return None
 
 
@@ -591,12 +575,8 @@ def _normalize_query_plan_snapshots(
         ]
 
     if isinstance(query_plans, dict):
-        optimized_plan = query_plans.get("optimized_plan")
-        if not isinstance(optimized_plan, str):
-            optimized_plan = query_plans.get("optimized")
-        unoptimized_plan = query_plans.get("unoptimized_plan")
-        if not isinstance(unoptimized_plan, str):
-            unoptimized_plan = query_plans.get("unoptimized")
+        optimized_plan = query_plans.get("optimized")
+        unoptimized_plan = query_plans.get("unoptimized")
         if isinstance(optimized_plan, str) or isinstance(unoptimized_plan, str):
             return [
                 {
@@ -610,48 +590,31 @@ def _normalize_query_plan_snapshots(
     return []
 
 
-def _step_type_from_execution_entry(entry: dict[str, object]) -> str:
-    metadata = entry.get("metadata")
-    if isinstance(metadata, dict):
-        step_type = metadata.get("step_type")
-        if isinstance(step_type, str) and step_type:
-            return step_type
-    category = ComputeWorkerRunExecutionCategory.read(entry.get("category"), default=None)
-    return category.default_step_type if category is not None else "unknown"
+def _step_type_from_execution_entry(entry: ExecutionEntry) -> str:
+    return entry.step_type or entry.category.default_step_type
 
 
 def _build_step_snapshots_from_execution_entries(
-    execution_entries: list[dict[str, object]],
+    execution_entries: list[ExecutionEntry],
     *,
     tab_id: str | None,
     tab_name: str | None,
 ) -> list[dict[str, object]]:
-    steps = [
-        entry
-        for entry in execution_entries
-        if ComputeWorkerRunExecutionCategory.read(entry.get("category"), default=None) != ComputeWorkerRunExecutionCategory.PLAN
-    ]
-
-    def sort_order(entry: dict[str, object]) -> int:
-        order = entry.get("order")
-        return order if isinstance(order, int) else 0
-
-    steps.sort(key=sort_order)
+    steps = [entry for entry in execution_entries if entry.category != ComputeWorkerRunExecutionCategory.PLAN]
+    steps.sort(key=lambda entry: entry.order)
     snapshots: list[dict[str, object]] = []
     for index, entry in enumerate(steps):
-        step_id = entry.get("key")
-        step_name = entry.get("label")
         snapshots.append(
             {
                 "build_step_index": index,
                 "step_index": index,
-                "step_id": step_id if isinstance(step_id, str) and step_id else f"step_{index}",
-                "step_name": step_name if isinstance(step_name, str) and step_name else "Unnamed step",
+                "step_id": entry.key or f"step_{index}",
+                "step_name": entry.label or "Unnamed step",
                 "step_type": _step_type_from_execution_entry(entry),
                 "tab_id": tab_id,
                 "tab_name": tab_name,
                 "state": compute_schemas.BuildStepState.COMPLETED.value,
-                "duration_ms": entry.get("duration_ms") if isinstance(entry.get("duration_ms"), (int, float)) else None,
+                "duration_ms": entry.duration_ms,
                 "row_count": None,
                 "error": None,
             }
@@ -663,20 +626,17 @@ def _load_compute_worker_run_result_json(run_id: str) -> dict[str, object]:
     state = client_from_env().compute_worker_run_state(namespace=get_namespace(), run_id=run_id)
     if state is None:
         return {}
-    result_json = state.get("result_json")
-    return dict(result_json) if isinstance(result_json, dict) else {}
+    return dict(state.result_json)
 
 
 def _raise_if_compute_worker_run_cancelled(run_id: str) -> None:
     state = client_from_env().compute_worker_run_state(namespace=get_namespace(), run_id=run_id)
-    if state is None or state.get("status") != ComputeWorkerRunStatus.CANCELLED.value:
+    if state is None or state.status != ComputeWorkerRunStatus.CANCELLED.value:
         return
-    cancelled_at = state.get("cancelled_at")
-    cancelled_by = state.get("cancelled_by")
     raise BuildCancelledError(
         run_id,
-        cancelled_at=cancelled_at if isinstance(cancelled_at, str) else None,
-        cancelled_by=cancelled_by if isinstance(cancelled_by, str) else None,
+        cancelled_at=state.cancelled_at,
+        cancelled_by=state.cancelled_by,
     )
 
 
@@ -764,7 +724,7 @@ def _build_canonical_compute_worker_run_result(
     *,
     existing_result: dict[str, object] | None,
     summary_meta: dict[str, object] | None,
-    execution_entries: list[dict[str, object]],
+    execution_entries: list[ExecutionEntry],
     current_tab_id: str | None,
     current_tab_name: str | None,
     total_steps: int,
@@ -777,7 +737,7 @@ def _build_canonical_compute_worker_run_result(
     result["current_output_name"] = None
     result["current_tab_id"] = current_tab_id
     result["current_tab_name"] = current_tab_name
-    result["total_steps"] = max(total_steps, sum(1 for entry in execution_entries if entry.get("category") != "plan"))
+    result["total_steps"] = max(total_steps, sum(1 for entry in execution_entries if entry.category != ComputeWorkerRunExecutionCategory.PLAN))
     result["total_tabs"] = 1
     if resource_config is not None:
         result["resource_config"] = resource_config
@@ -908,20 +868,14 @@ def _get_additional_datasources(
 
     for step in steps:
         config = step.get("config", {})
-        right_source_id = config.get("right_source") or config.get("rightDataSource")
-
-        union_sources = config.get("sources", [])
-        if isinstance(union_sources, str):
-            union_sources = [union_sources]
-
-        source_ids = ([str(right_source_id)] if right_source_id else []) + [str(s) for s in union_sources if s is not None]
+        right_source_id = config.get("right_source")
+        source_ids = ([right_source_id] if right_source_id else []) + config.get("sources", [])
 
         for source_id in source_ids:
             if source_id in additional:
                 continue
             config_override = _resolve_step_source_config(
                 source_id=source_id,
-                step_config=config if isinstance(config, dict) else {},
                 analysis_pipeline=analysis_pipeline,
                 output_to_tab=output_to_tab,
             )
@@ -948,13 +902,8 @@ def _library_udf_expression(expr: object) -> bool:
 def _hydrate_udfs(steps: list[dict]) -> list[dict]:
     udf_ids: list[str] = []
     for step in steps:
-        config = step.get("config", {})
-        expressions = config.get("expressions", []) if isinstance(config, dict) else []
-        if not isinstance(expressions, list):
-            continue
-        for expr in expressions:
-            if _library_udf_expression(expr):
-                udf_ids.append(str(expr["udf_id"]))
+        expressions = step.get("config", {}).get("expressions", [])
+        udf_ids.extend(str(expr["udf_id"]) for expr in expressions if _library_udf_expression(expr))
     codes = client_from_env().udf_codes(namespace=get_namespace(), udf_ids=sorted(set(udf_ids))) if udf_ids else {}
     next_steps: list[dict] = []
     for step in steps:
@@ -962,10 +911,7 @@ def _hydrate_udfs(steps: list[dict]) -> list[dict]:
             next_steps.append(step)
             continue
         config = step.get("config", {})
-        expressions = config.get("expressions", []) if isinstance(config, dict) else []
-        if not isinstance(config, dict) or not isinstance(expressions, list):
-            next_steps.append(step)
-            continue
+        expressions = config.get("expressions", [])
         updated = []
         for expr in expressions:
             if not _library_udf_expression(expr):
@@ -981,35 +927,17 @@ def _hydrate_udfs(steps: list[dict]) -> list[dict]:
 
 
 def _pipeline_output_to_tab_id(pipeline: dict) -> dict[str, str]:
-    tabs = pipeline.get("tabs", [])
-    if not isinstance(tabs, list):
-        return {}
     output_to_tab: dict[str, str] = {}
-    for tab in tabs:
-        if not isinstance(tab, dict):
-            continue
+    for tab in pipeline.get("tabs", []):
         tab_id = tab.get("id")
-        output = tab.get("output")
-        output_id = output.get("result_id") if isinstance(output, dict) else None
-        if isinstance(tab_id, str) and isinstance(output_id, str) and output_id:
+        output_id = tab.get("output", {}).get("result_id")
+        if tab_id and output_id:
             output_to_tab[output_id] = tab_id
     return output_to_tab
 
 
-def _pipeline_datasource_payload(pipeline: dict, datasource_id: str) -> dict | None:
-    tabs = pipeline.get("tabs", [])
-    if not isinstance(tabs, list):
-        return None
-    for tab in tabs:
-        if not isinstance(tab, dict):
-            continue
-        datasource = tab.get("datasource")
-        if not isinstance(datasource, dict):
-            continue
-        if datasource.get("id") != datasource_id:
-            continue
-        return datasource
-    return None
+def _analysis_source_config(analysis_id: str, analysis_tab_id: str, overrides: dict | None = None) -> dict:
+    return {"source_type": "analysis", "analysis_id": analysis_id, "analysis_tab_id": analysis_tab_id, **(overrides or {})}
 
 
 def _resolve_pipeline_datasource_config(
@@ -1017,7 +945,7 @@ def _resolve_pipeline_datasource_config(
     datasource: dict,
 ) -> dict:
     datasource_id = datasource.get("id")
-    if not isinstance(datasource_id, str) or not datasource_id:
+    if not datasource_id:
         raise ValueError("analysis_pipeline tab missing datasource.id")
     overrides = datasource.get("config")
     if not isinstance(overrides, dict):
@@ -1027,26 +955,16 @@ def _resolve_pipeline_datasource_config(
         raise ValueError("analysis_pipeline tab datasource.config.branch is required")
     analysis_tab_id = datasource.get("analysis_tab_id")
     output_to_tab = _pipeline_output_to_tab_id(pipeline)
-    if isinstance(analysis_tab_id, str) and analysis_tab_id:
+    if analysis_tab_id:
         analysis_id = pipeline.get("analysis_id")
-        if not isinstance(analysis_id, str) or not analysis_id:
+        if not analysis_id:
             raise ValueError("analysis_pipeline analysis_id is required for analysis sources")
-        return {
-            "source_type": "analysis",
-            "analysis_id": analysis_id,
-            "analysis_tab_id": analysis_tab_id,
-            **overrides,
-        }
+        return _analysis_source_config(analysis_id, analysis_tab_id, overrides)
     if datasource_id in output_to_tab:
         analysis_id = pipeline.get("analysis_id")
-        if not isinstance(analysis_id, str) or not analysis_id:
+        if not analysis_id:
             raise ValueError("analysis_pipeline analysis_id is required for analysis outputs")
-        return {
-            "source_type": "analysis",
-            "analysis_id": analysis_id,
-            "analysis_tab_id": output_to_tab[datasource_id],
-            **overrides,
-        }
+        return _analysis_source_config(analysis_id, output_to_tab[datasource_id], overrides)
     from runtime.worker_runtime_client import frozen_datasource_metadata
 
     frozen = frozen_datasource_metadata(get_namespace(), datasource_id)
@@ -1070,24 +988,16 @@ def _resolve_pipeline_datasource_config(
 def _resolve_step_source_config(
     *,
     source_id: str,
-    step_config: dict,
     analysis_pipeline: dict,
     output_to_tab: dict[str, str],
 ) -> dict | None:
     if source_id in output_to_tab:
         analysis_id = analysis_pipeline.get("analysis_id")
-        if not isinstance(analysis_id, str) or not analysis_id:
+        if not analysis_id:
             raise ValueError("analysis_pipeline analysis_id is required for analysis sources")
-        return {
-            "source_type": "analysis",
-            "analysis_id": analysis_id,
-            "analysis_tab_id": output_to_tab[source_id],
-        }
-    embedded = step_source_payload(step_config, source_id)
-    if isinstance(embedded, dict):
-        return _resolve_pipeline_datasource_config(analysis_pipeline, embedded)
-    payload = _pipeline_datasource_payload(analysis_pipeline, source_id)
-    if isinstance(payload, dict):
+        return _analysis_source_config(analysis_id, output_to_tab[source_id])
+    payload = pipeline_datasource_payload(analysis_pipeline, source_id)
+    if payload is not None:
         return _resolve_pipeline_datasource_config(analysis_pipeline, payload)
     from runtime.worker_runtime_client import frozen_datasource_metadata
 
@@ -1101,40 +1011,34 @@ def _resolve_step_source_config(
 
 def _select_pipeline_tab(pipeline: dict, tab_id: str | None, target_step_id: str) -> dict:
     tabs = pipeline.get("tabs", [])
-    if not isinstance(tabs, list) or not tabs:
+    if not tabs:
         raise ValueError("analysis_pipeline missing tabs")
 
     selected = None
     if tab_id:
         selected = next((tab for tab in tabs if tab.get("id") == tab_id), None)
     if selected and target_step_id != "source":
-        steps = selected.get("steps", []) if isinstance(selected, dict) else []
+        steps = selected.get("steps", [])
         if not any(step.get("id") == target_step_id for step in steps):
             selected = None
     if not selected and target_step_id != "source":
-        selected = next(
-            (tab for tab in tabs if isinstance(tab, dict) and any(step.get("id") == target_step_id for step in tab.get("steps", []))),
-            None,
-        )
+        selected = next((tab for tab in tabs if any(step.get("id") == target_step_id for step in tab.get("steps", []))), None)
     if not selected:
         selected = next((tab for tab in tabs if tab.get("steps")), None)
     if not selected:
         selected = tabs[0]
-    if not isinstance(selected, dict):
-        raise ValueError("analysis_pipeline tab must be a dict")
     return selected
 
 
-def default_stateless_compute_worker_identity(analysis_pipeline: dict) -> compute_pb2.ComputeWorkerIdentity:
-    """Return the shared engine identity owned by the pipeline's analysis RID.
+def default_stateless_compute_worker_identity(analysis_id: str) -> compute_pb2.ComputeWorkerIdentity:
+    """Return the shared engine identity owned by an analysis RID.
 
     Datasource previews carry an explicit datasource identity from the API, so
     every other pipeline operation must name its analysis RID. Keep this
     selection identical to the backend identity normalization so admission and
     execution refer to the same engine key.
     """
-    analysis_id = analysis_pipeline.get("analysis_id")
-    if not isinstance(analysis_id, str) or not analysis_id:
+    if not analysis_id:
         raise ValueError("Malformed compute request: analysis_pipeline.analysis_id is required")
     return compute_pb2.ComputeWorkerIdentity(
         scope=enums_pb2.COMPUTE_WORKER_SCOPE_ANALYSIS_INTERACTIVE,
@@ -1142,6 +1046,12 @@ def default_stateless_compute_worker_identity(analysis_pipeline: dict) -> comput
         analysis_id=analysis_id,
         resource_id=analysis_id,
     )
+
+
+def _pipeline_analysis_id(analysis_pipeline: dict) -> str:
+    """Analysis RID named by a pipeline payload; a missing or non-string value is empty."""
+    analysis_id = analysis_pipeline.get("analysis_id")
+    return analysis_id if isinstance(analysis_id, str) else ""
 
 
 @dataclass(frozen=True, slots=True)
@@ -1172,8 +1082,6 @@ def _resolve_pipeline_request(
         raise ValueError("analysis_pipeline tab missing datasource.id")
 
     steps = selected.get("steps", [])
-    if not isinstance(steps, list):
-        raise ValueError("analysis_pipeline tab steps must be a list")
 
     merged = _resolve_pipeline_datasource_config(pipeline, datasource)
     pipeline_analysis_id = pipeline.get("analysis_id")
@@ -1243,7 +1151,7 @@ def preview_step(
     request_payload = _ensure_request_branch(request_json, request.datasource_config)
     preview_steps = _steps_through_target(request.steps, request.target_step_id)
 
-    resolved_compute_worker_identity = compute_worker_identity or default_stateless_compute_worker_identity(analysis_pipeline)
+    resolved_compute_worker_identity = compute_worker_identity or default_stateless_compute_worker_identity(_pipeline_analysis_id(analysis_pipeline))
     request_namespace = get_namespace()
     run_id = None
     initial_run_result: dict[str, object] | None = None
@@ -1281,7 +1189,7 @@ def preview_step(
         phase_started = time.perf_counter()
         with manager.acquire_engine(resolved_compute_worker_identity, resource_config=resource_config) as engine:
             execution_phases["engine_acquire_ms"] = (time.perf_counter() - phase_started) * 1000
-            preview_resource_summary = _resource_summary(engine)
+            preview_resource_summary = resource_summary(engine)
             phase_started = time.perf_counter()
             job_id = engine.preview(
                 datasource_config=request.datasource_config,
@@ -1402,7 +1310,7 @@ def get_step_schema(
         analysis_pipeline, tab_id, target_step_id, analysis_id=analysis_id, operation="schema", analysis_required_by="Schema fetch"
     )
     schema_steps = _steps_through_target(request.steps, request.target_step_id)
-    with manager.acquire_engine(default_stateless_compute_worker_identity(analysis_pipeline)) as engine:
+    with manager.acquire_engine(default_stateless_compute_worker_identity(_pipeline_analysis_id(analysis_pipeline))) as engine:
         job_id = engine.get_schema(
             datasource_config=request.datasource_config,
             steps=schema_steps,
@@ -1464,7 +1372,7 @@ def get_step_row_count(
     )
     result_data: dict | None = None
     try:
-        with manager.acquire_engine(default_stateless_compute_worker_identity(analysis_pipeline)) as engine:
+        with manager.acquire_engine(default_stateless_compute_worker_identity(_pipeline_analysis_id(analysis_pipeline))) as engine:
             job_id = engine.get_row_count(
                 datasource_config=request.datasource_config,
                 steps=count_steps,
@@ -1524,8 +1432,9 @@ def export_data(
     tab_id: str | None = None,
     result_id: str | None = None,
     build_mode: str = "full",
-    job_started: Callable[[dict[str, object]], None] | None = None,
-    build_stage_event: Callable[[dict[str, object]], None] | None = None,
+    job_started: Callable[[str, ComputeWorker], None] | None = None,
+    on_write_start: Callable[[float | None], None] | None = None,
+    on_write_complete: Callable[[float], None] | None = None,
     compute_worker_identity: compute_pb2.ComputeWorkerIdentity | None = None,
     build_id: str | None = None,
     publication_claim: ClaimedBuildJob | None = None,
@@ -1551,7 +1460,9 @@ def export_data(
 
     if compute_worker_identity is None:
         compute_worker_identity = (
-            _build_compute_worker_identity(build_id) if build_id is not None else default_stateless_compute_worker_identity(analysis_pipeline)
+            _build_compute_worker_identity(build_id)
+            if build_id is not None
+            else default_stateless_compute_worker_identity(_pipeline_analysis_id(analysis_pipeline))
         )
     additional_datasources = _get_additional_datasources(export_steps, analysis_pipeline)
     source_metadata = client_from_env().datasource_metadata(namespace=get_namespace(), datasource_id=datasource_id)
@@ -1570,7 +1481,7 @@ def export_data(
                 additional_datasources=additional_datasources,
             )
             if job_started is not None:
-                job_started({"job_id": job_id, "engine": engine, "steps": export_steps, "tab_id": tab_id})
+                job_started(job_id, engine)
             result_data = await_compute_worker_result(engine, job_id=job_id)
         _raise_engine_failure(result_data, operation="export", datasource_id=datasource_id, failure_prefix="Export")
         if build_id is not None:
@@ -1601,14 +1512,12 @@ def export_data(
 
         hc_datasource_id = str(result_id)
         hc_checks = client_from_env().list_healthchecks(namespace=get_namespace(), datasource_id=hc_datasource_id)
-        hc_results: list[_HealthCheckEvalResult] = []
+        hc_results: list[HealthCheckResult] = []
         logger.info(f"Health checks: found {len(hc_checks)} enabled for datasource {hc_datasource_id}")
         if hc_checks:
-            hc_lf = _load_healthcheck_lazy(tmp_output, "parquet")
-            if hc_lf is None:
-                raise ValueError("Unsupported healthcheck export format: parquet")
+            hc_lf = pl.scan_parquet(tmp_output)
             try:
-                hc_results = _run_worker_healthchecks(cast(list[HealthCheckSpec], hc_checks), hc_lf)
+                hc_results = run_healthchecks(hc_checks, hc_lf)
             except Exception as exc:
                 if any(check.critical for check in hc_checks):
                     raise PipelineExecutionError(
@@ -1618,7 +1527,7 @@ def export_data(
                 logger.exception("Health check evaluation failed")
             else:
                 if publication_claim is None:
-                    _persist_healthcheck_results(hc_results)
+                    persist_results(hc_results)
                 critical_ids = {check.id for check in hc_checks if check.critical}
                 critical_failed = [result for result in hc_results if not result.passed and result.healthcheck_id in critical_ids]
                 if critical_failed:
@@ -1632,7 +1541,7 @@ def export_data(
                 failed_count = sum(1 for r in hc_results if not r.passed)
                 logger.info(f"Health checks: {len(hc_results)} evaluated, {failed_count} failed")
 
-        status, hc_summary, hc_details = _resolve_build_status(hc_results, hc_checks)
+        status, hc_summary, hc_details = resolve_build_status(hc_results, hc_checks)
 
         analysis_name = client_from_env().analysis_name(namespace=get_namespace(), analysis_id=request.analysis_id) if request.analysis_id else None
 
@@ -1668,8 +1577,8 @@ def export_data(
         identifier = f"{namespace}.{table_name}"
 
         read_duration_ms = result_data.get("read_duration_ms")
-        if build_stage_event is not None:
-            build_stage_event({"stage": "write_start", "read_duration_ms": float(read_duration_ms) if isinstance(read_duration_ms, (int, float)) else None})
+        if on_write_start is not None:
+            on_write_start(read_duration_ms)
 
         write_started = time.perf_counter()
         arrow_table = pq.read_table(tmp_output)
@@ -1763,8 +1672,8 @@ def export_data(
         iceberg_ds_config = _set_snapshot_metadata(iceberg_ds_config, snapshot_id, snapshot_timestamp_ms, metadata_file=iceberg_table.metadata_location)
         schema_cache = _schema_cache_payload_from_arrow(arrow_table.schema, data)
         write_duration_ms = (time.perf_counter() - write_started) * 1000
-        if build_stage_event is not None:
-            build_stage_event({"stage": "write_complete", "write_duration_ms": write_duration_ms})
+        if on_write_complete is not None:
+            on_write_complete(write_duration_ms)
         result_meta["datasource_id"] = result_id
         result_meta["datasource_name"] = datasource_name
         if snapshot_id:
@@ -1802,11 +1711,8 @@ def export_data(
             analysis_id=request.analysis_id,
             is_hidden=output_hidden,
             keep_schema_cache=build_mode == "incremental" and publication_claim is None,
-            job_id=publication_claim.job_id if publication_claim is not None else None,
-            build_id=publication_claim.build_id if publication_claim is not None else None,
+            publication=publication_claim,
             worker_id=worker_id,
-            claim_token=publication_claim.claim_token if publication_claim is not None else None,
-            lease_generation=publication_claim.lease_generation if publication_claim is not None else None,
             build_result_json=(
                 {
                     **result_meta,
@@ -1827,7 +1733,7 @@ def export_data(
             notification_deliveries=notification_deliveries,
         )
         if publication_claim is not None:
-            _persist_healthcheck_results(hc_results)
+            persist_results(hc_results)
         return ExportDatasourceResult(datasource_id=str(target_ds.id), datasource_name=datasource_name, result_meta=result_meta)
     except BuildCancelledError:
         raise
@@ -1918,7 +1824,7 @@ def download_step(
     run_id = None
     result_data: dict | None = None
     try:
-        with manager.acquire_engine(default_stateless_compute_worker_identity(analysis_pipeline)) as engine:
+        with manager.acquire_engine(default_stateless_compute_worker_identity(_pipeline_analysis_id(analysis_pipeline))) as engine:
             run_id = client_from_env().create_compute_worker_run(
                 namespace=get_namespace(),
                 analysis_id=request.analysis_id,
@@ -1930,7 +1836,7 @@ def download_step(
                     current_tab_id=tab_id,
                     current_tab_name=tab_name,
                     total_steps=len(download_steps),
-                    resource_config=_resource_summary(engine),
+                    resource_config=resource_summary(engine),
                 ),
                 created_at=started_at,
                 progress=0.0,
@@ -1972,7 +1878,7 @@ def download_step(
                 total_steps=len(download_steps),
                 summary_meta={"filename": download_name, "format": export_format},
                 log_message=f"Prepared download {download_name}",
-                resource_config=_resource_summary(engine),
+                resource_config=resource_summary(engine),
                 write_duration_ms=write_duration_ms,
                 query_plan=result_data.get("query_plan"),
             )
@@ -1991,7 +1897,7 @@ def download_step(
                 tab_name=tab_name,
                 total_steps=len(download_steps),
                 error=exc,
-                resource_config=_resource_summary(engine),
+                resource_config=resource_summary(engine),
                 query_plan=result_data.get("query_plan") if isinstance(result_data, dict) else None,
             )
         )
@@ -2009,13 +1915,13 @@ def _build_execution_tab(pipeline: dict) -> dict:
     recomputed lazily as part of it and are not built separately.
     """
     tabs = pipeline.get("tabs", [])
-    if not isinstance(tabs, list) or not tabs:
+    if not tabs:
         raise ValueError("analysis_pipeline missing tabs")
 
     tab_id = pipeline.get("tab_id")
     if not isinstance(tab_id, str) or not tab_id:
         raise ValueError("analysis_pipeline missing tab_id")
-    selected = next((tab for tab in tabs if isinstance(tab, dict) and str(tab.get("id")) == tab_id), None)
+    selected = next((tab for tab in tabs if tab.get("id") == tab_id), None)
     if selected is None:
         raise ValueError(f"analysis_pipeline missing tab {tab_id}")
     return selected
@@ -2039,10 +1945,7 @@ def _resolve_live_output_metadata(output_config: dict, tab_name: str) -> tuple[s
 
 def _count_total_build_steps(tab: dict) -> int:
     steps = tab.get("steps", [])
-    if not isinstance(steps, list):
-        return 0
-    output_config = tab.get("output")
-    if not isinstance(output_config, dict) or "filename" not in output_config:
+    if "filename" not in tab.get("output", {}):
         return max(len(steps), 1)
     # Synthetic read stage + pipeline steps + synthetic write stage.
     return len(steps) + 2
@@ -2120,9 +2023,9 @@ async def _stream_engine_events(
         payload["current_kind"] = build.current_kind
         if emitted_type in {"step_start", "step_complete", "step_failed"} and not read_stage.completed:
             read_stage.completed = True
-            await _emit_build_event(
+            await emit_build_event(
                 emitter,
-                event=_build_event(
+                event=build_event(
                     build,
                     analysis_id,
                     _stage_event(
@@ -2154,7 +2057,7 @@ async def _stream_engine_events(
         payload["compute_worker_run_id"] = payload.get("compute_worker_run_id") or compute_worker_run_id
 
         if emitted_type not in {"compute_start", "compute_complete"}:
-            await _emit_build_event(emitter, event=_build_event(build, analysis_id, payload))
+            await emit_build_event(emitter, event=build_event(build, analysis_id, payload))
 
         if emitted_type == "step_complete":
             completed_steps += 1
@@ -2169,7 +2072,7 @@ async def _stream_engine_events(
 def _start_stream_tasks(
     loop: asyncio.AbstractEventLoop, *, build: RuntimeBuild, engine, job_id: str, **stream_kwargs
 ) -> tuple[asyncio.Task | None, asyncio.Task | None]:
-    build.resource_config = compute_schemas.BuildResourceConfigSummary.model_validate(_resource_summary(engine))
+    build.resource_config = compute_schemas.BuildResourceConfigSummary.model_validate(resource_summary(engine))
     if loop.is_closed() or not loop.is_running():
         logger.warning("Skipping build stream tasks for job %s because the event loop is unavailable", job_id)
         return None, None
@@ -2180,7 +2083,7 @@ def _start_stream_tasks(
         try:
             progress_task = loop.create_task(_stream_engine_events(build=build, engine=engine, job_id=job_id, **stream_kwargs))
             resource_task = loop.create_task(
-                _stream_resource_events(
+                stream_resource_events(
                     build=build,
                     analysis_id=stream_kwargs["analysis_id"],
                     engine=engine,
@@ -2189,8 +2092,8 @@ def _start_stream_tasks(
                     tab_name=stream_kwargs["tab_name"],
                 )
             )
-            progress_task.add_done_callback(_observe_stream_task)
-            resource_task.add_done_callback(_observe_stream_task)
+            progress_task.add_done_callback(observe_stream_task)
+            resource_task.add_done_callback(observe_stream_task)
             future.set_result((progress_task, resource_task))
         except Exception as exc:
             future.set_exception(exc)
@@ -2228,7 +2131,7 @@ async def run_analysis_build_stream(
     started_perf = time.perf_counter()
 
     async def emit(payload: dict[str, object]) -> None:
-        await _emit_build_event(emitter, event=_build_event(build, analysis_id_value, payload))
+        await emit_build_event(emitter, event=build_event(build, analysis_id_value, payload))
 
     await emit({"type": "log", "level": compute_schemas.BuildLogLevel.INFO.value, "message": f"Starting build for {build.analysis_name}"})
     await _emit_progress(
@@ -2253,21 +2156,18 @@ async def run_analysis_build_stream(
     async def build_tab() -> BuildCancelledError | None:
         tab_id = str(tab.get("id", "unknown"))
         tab_name = str(tab.get("name", "unnamed"))
-        datasource = tab.get("datasource")
-        tab_datasource_id = datasource.get("id") if isinstance(datasource, dict) else None
+        tab_datasource_id = tab.get("datasource", {}).get("id")
         steps = tab.get("steps", [])
-        output_config = tab.get("output")
+        output_config = tab.get("output", {})
         if not tab_datasource_id:
             return None
-        if not isinstance(steps, list):
-            steps = []
 
         build.current_kind = ComputeWorkerRunKind.BUILD.value
         build.current_datasource_id = str(tab_datasource_id)
         build.current_tab_id = tab_id
         build.current_tab_name = tab_name
 
-        if not isinstance(output_config, dict) or "filename" not in output_config:
+        if "filename" not in output_config:
             error = f"Tab {tab_id} missing output configuration"
             results.append({"tab_id": tab_id, "tab_name": tab_name, "status": BuildTabStatus.FAILED, "error": error})
             await emit({"type": "log", "level": compute_schemas.BuildLogLevel.ERROR.value, "message": error, "tab_id": tab_id, "tab_name": tab_name})
@@ -2276,7 +2176,7 @@ async def run_analysis_build_stream(
         raw_filename = output_config.get("filename")
         if not isinstance(raw_filename, str) or not raw_filename.strip():
             raise ValueError(f"Build output filename is required for tab {tab_id}")
-        result_id = output_config.get("result_id") if isinstance(output_config.get("result_id"), str) else None
+        result_id = output_config.get("result_id")
         current_output_id, current_output_name = _resolve_live_output_metadata(output_config, tab_name)
         iceberg_cfg = output_config.get("iceberg")
         if not isinstance(iceberg_cfg, dict):
@@ -2333,15 +2233,11 @@ async def run_analysis_build_stream(
                 compute_worker_run_id=build.current_compute_worker_run_id,
             )
 
-        def handle_job_started(info: dict[str, object]) -> None:
+        def handle_job_started(job_id: str, engine: ComputeWorker) -> None:
             nonlocal progress_task, resource_task
-            job_id = info["job_id"]
-            engine = info.get("engine")
-            if not isinstance(job_id, str) or not job_id:
+            if not job_id:
                 raise ValueError("Build engine job ID is required")
             cancellation.job_started(job_id)
-            if engine is None:
-                return
             run_started: dict[str, object] = {
                 "type": "progress",
                 "progress": 0.0,
@@ -2367,33 +2263,38 @@ async def run_analysis_build_stream(
                 **tab_fields,
             )
 
-        def handle_stage_event(info: dict[str, object]) -> None:
-            stage = info.get("stage")
-            if not isinstance(stage, str) or loop.is_closed() or not loop.is_running():
+        def stage_duration_ms(duration_ms: float | None, synthetic_stage: _SyntheticBuildStage) -> int:
+            if duration_ms is not None:
+                return int(duration_ms)
+            return int((time.perf_counter() - synthetic_stage.started_at) * 1000)
+
+        def handle_write_start(read_duration_ms: float | None) -> None:
+            if loop.is_closed() or not loop.is_running():
                 return
 
-            def stage_duration_ms(key: str, synthetic_stage: _SyntheticBuildStage) -> int:
-                value = info.get(key)
-                return int(float(value)) if isinstance(value, (int, float)) else int((time.perf_counter() - synthetic_stage.started_at) * 1000)
+            async def emit_write_start() -> None:
+                if not read_stage.completed:
+                    read_stage_duration_ms = stage_duration_ms(read_duration_ms, read_stage)
+                    read_stage.completed = True
+                    await emit(stage_event(read_stage, "step_complete", duration_ms=read_stage_duration_ms, row_count=None))
+                    await emit_stage_progress(1, read_stage)
+                write_stage.started = True
+                write_stage.started_at = time.perf_counter()
+                await emit(stage_event(write_stage, "step_start"))
 
-            async def emit_stage_updates() -> None:
-                if stage == "write_start":
-                    if not read_stage.completed:
-                        read_duration_ms = stage_duration_ms("read_duration_ms", read_stage)
-                        read_stage.completed = True
-                        await emit(stage_event(read_stage, "step_complete", duration_ms=read_duration_ms, row_count=None))
-                        await emit_stage_progress(1, read_stage)
-                    write_stage.started = True
-                    write_stage.started_at = time.perf_counter()
-                    await emit(stage_event(write_stage, "step_start"))
-                    return
-                if stage == "write_complete":
-                    write_duration_ms = stage_duration_ms("write_duration_ms", write_stage)
-                    write_stage.completed = True
-                    await emit(stage_event(write_stage, "step_complete", duration_ms=write_duration_ms, row_count=None))
-                    await emit_stage_progress(len(steps) + 2, write_stage)
+            asyncio.run_coroutine_threadsafe(emit_write_start(), loop).result()
 
-            asyncio.run_coroutine_threadsafe(emit_stage_updates(), loop).result()
+        def handle_write_complete(write_duration_ms: float) -> None:
+            if loop.is_closed() or not loop.is_running():
+                return
+
+            async def emit_write_complete() -> None:
+                write_stage_duration_ms = stage_duration_ms(write_duration_ms, write_stage)
+                write_stage.completed = True
+                await emit(stage_event(write_stage, "step_complete", duration_ms=write_stage_duration_ms, row_count=None))
+                await emit_stage_progress(len(steps) + 2, write_stage)
+
+            asyncio.run_coroutine_threadsafe(emit_write_complete(), loop).result()
 
         def run_export_job() -> ExportDatasourceResult:
             cancellation.raise_if_cancelled()
@@ -2408,7 +2309,8 @@ async def run_analysis_build_stream(
                 result_id=result_id,
                 build_mode=build_mode,
                 job_started=handle_job_started,
-                build_stage_event=handle_stage_event,
+                on_write_start=handle_write_start,
+                on_write_complete=handle_write_complete,
                 compute_worker_identity=build_identity,
                 build_id=build.build_id,
                 publication_claim=publication_claim,
@@ -2422,7 +2324,7 @@ async def run_analysis_build_stream(
             export_result = await run_compute_in_thread(run_export_job, cancel_work=cancellation.cancel, expected_cancel_errors=(BuildCancelledError,))
             if progress_task is not None:
                 _ = await progress_task
-            await _stop_stream_task(resource_task)
+            await stop_stream_task(resource_task)
             build.current_output_id = export_result.datasource_id
             build.current_output_name = export_result.datasource_name
             results.append(
@@ -2439,14 +2341,14 @@ async def run_analysis_build_stream(
             if progress_task is not None:
                 with contextlib.suppress(Exception):
                     _ = await progress_task
-            await _stop_stream_task(resource_task)
+            await stop_stream_task(resource_task)
             await emit({"type": "log", "level": compute_schemas.BuildLogLevel.WARNING.value, "message": "Build cancellation requested", **tab_fields})
             return exc
         except Exception as exc:
             if progress_task is not None:
                 with contextlib.suppress(Exception):
                     _ = await progress_task
-            await _stop_stream_task(resource_task)
+            await stop_stream_task(resource_task)
             failed_stage = write_stage if write_stage.started and not write_stage.completed else read_stage if not read_stage.completed else None
             if failed_stage is not None:
                 await emit(stage_event(failed_stage, "step_failed", error=str(exc)))
@@ -2466,7 +2368,7 @@ async def run_analysis_build_stream(
     cancellation_error = await build_tab()
     tabs_built = sum(1 for result in results if result["status"] == BuildTabStatus.SUCCESS)
     elapsed_ms = int((time.perf_counter() - started_perf) * 1000)
-    base = _BuildEventBase.from_build(
+    base = BuildEventContext.from_build(
         build,
         analysis_id_value,
         current_output_id=build.current_output_id,
@@ -2505,7 +2407,7 @@ async def run_analysis_build_stream(
         terminal_event = compute_schemas.BuildFailedEvent.model_validate({**terminal_fields, "progress": 0.0, "error": "One or more tabs failed"})
     else:
         terminal_event = compute_schemas.BuildCompleteEvent.model_validate(terminal_fields)
-    await _emit_build_event(emitter, event=terminal_event)
+    await emit_build_event(emitter, event=terminal_event)
     with contextlib.suppress(Exception):
         await run_shutdown_in_thread(manager.shutdown_compute_worker, _build_compute_worker_identity(build.build_id))
     return {

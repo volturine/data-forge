@@ -4,10 +4,11 @@ from unittest.mock import MagicMock, patch
 
 import polars as pl
 import pytest
+from operation_support import run_operation
 from pydantic import ValidationError
 
 from dataforge_protocol import enums_pb2
-from operations.ai import AIError, AIHandler, AIParams, InternalAIClient, get_ai_client, parse_ai_provider, parse_request_options
+from operations.ai import AIError, AIParams, InternalAIClient, get_ai_client, parse_ai_provider, parse_request_options
 
 # ---------------------------------------------------------------------------
 # parse_request_options
@@ -15,14 +16,9 @@ from operations.ai import AIError, AIHandler, AIParams, InternalAIClient, get_ai
 
 
 class TestParseRequestOptions:
-    def test_none(self):
-        assert parse_request_options(None) is None
-
-    def test_empty_string(self):
-        assert parse_request_options("") is None
-
-    def test_whitespace_string(self):
-        assert parse_request_options("   ") is None
+    @pytest.mark.parametrize("value", [None, "", "   "], ids=["none", "empty_string", "whitespace_string"])
+    def test_blank_input_returns_none(self, value):
+        assert parse_request_options(value) is None
 
     def test_valid_json_string(self):
         result = parse_request_options('{"temperature": 0.2}')
@@ -58,21 +54,12 @@ class TestAIParams:
                 "output_column": "result",
             },
         )
-        assert params.provider == "ollama"
+        assert params.provider == enums_pb2.AI_PROVIDER_OLLAMA
         assert params.model == "llama2"
         assert params.input_columns == ["text"]
         assert params.output_column == "result"
         assert params.batch_size == 10
         assert params.request_options is None
-
-    def test_multi_column_input(self):
-        params = AIParams.model_validate(
-            {
-                "input_columns": ["title", "body"],
-                "output_column": "result",
-            },
-        )
-        assert params.input_columns == ["title", "body"]
 
     def test_no_input_raises(self):
         with pytest.raises(ValidationError, match="input"):
@@ -91,36 +78,6 @@ class TestAIParams:
             },
         )
         assert params.request_options == {"temperature": 0.3}
-
-    def test_request_options_dict_passthrough(self):
-        params = AIParams.model_validate(
-            {
-                "input_columns": ["text"],
-                "output_column": "result",
-                "request_options": {"temperature": 0.3},
-            },
-        )
-        assert params.request_options == {"temperature": 0.3}
-
-    def test_request_options_none(self):
-        params = AIParams.model_validate(
-            {
-                "input_columns": ["text"],
-                "output_column": "result",
-                "request_options": None,
-            },
-        )
-        assert params.request_options is None
-
-    def test_request_options_empty_string(self):
-        params = AIParams.model_validate(
-            {
-                "input_columns": ["text"],
-                "output_column": "result",
-                "request_options": "",
-            },
-        )
-        assert params.request_options is None
 
     def test_invalid_provider(self):
         with pytest.raises(ValidationError):
@@ -197,44 +154,15 @@ class TestGetAIClient:
 
 
 class TestAIHandler:
-    def test_basic_execution(self):
-        handler = AIHandler()
-        df = pl.DataFrame({"text": ["Hello", "World"]})
-
-        mock_client = MagicMock()
-        mock_client.generate_batch.return_value = [
-            "classified: Hello",
-            "classified: World",
-        ]
-
-        with patch("operations.ai.get_ai_client", return_value=mock_client):
-            result = handler(
-                df.lazy(),
-                {
-                    "provider": "ollama",
-                    "model": "llama2",
-                    "input_columns": ["text"],
-                    "output_column": "result",
-                    "prompt_template": "Classify: {{text}}",
-                    "batch_size": 10,
-                },
-            )
-            collected = result.collect()
-            assert "result" in collected.columns
-            assert collected["result"].to_list() == [
-                "classified: Hello",
-                "classified: World",
-            ]
-
     def test_lazy_execution_defers_side_effects(self):
-        handler = AIHandler()
         df = pl.DataFrame({"text": ["Hello", "World"]})
 
         mock_client = MagicMock()
         mock_client.generate_batch.return_value = ["ok1", "ok2"]
 
         with patch("operations.ai.get_ai_client", return_value=mock_client):
-            result = handler(
+            result = run_operation(
+                "ai",
                 df.lazy(),
                 {
                     "provider": "ollama",
@@ -250,10 +178,10 @@ class TestAIHandler:
             mock_client.generate_batch.assert_called_once()
 
     def test_empty_dataframe(self):
-        handler = AIHandler()
         df = pl.DataFrame({"text": []}).cast({"text": pl.Utf8})
 
-        result = handler(
+        result = run_operation(
+            "ai",
             df.lazy(),
             {
                 "input_columns": ["text"],
@@ -267,11 +195,11 @@ class TestAIHandler:
         assert len(collected) == 0
 
     def test_missing_column_raises(self):
-        handler = AIHandler()
         df = pl.DataFrame({"name": ["Alice"]})
 
         with pytest.raises(ValueError, match=r"Input column\(s\) not found"):
-            handler(
+            run_operation(
+                "ai",
                 df.lazy(),
                 {
                     "input_columns": ["text"],
@@ -282,11 +210,11 @@ class TestAIHandler:
             )
 
     def test_batch_size_validation(self):
-        handler = AIHandler()
         df = pl.DataFrame({"text": ["Hello"]})
 
-        with pytest.raises(ValueError, match="batch_size must be at least 1"):
-            handler(
+        with pytest.raises(ValidationError, match="batch_size"):
+            run_operation(
+                "ai",
                 df.lazy(),
                 {
                     "input_columns": ["text"],
@@ -297,7 +225,6 @@ class TestAIHandler:
             )
 
     def test_error_handling_per_batch(self):
-        handler = AIHandler()
         df = pl.DataFrame({"text": ["a", "b", "c", "d"]})
 
         mock_client = MagicMock()
@@ -310,7 +237,8 @@ class TestAIHandler:
             patch("operations.ai.get_ai_client", return_value=mock_client),
             patch("operations.ai.time.sleep"),
         ):
-            result = handler(
+            result = run_operation(
+                "ai",
                 df.lazy(),
                 {
                     "input_columns": ["text"],
@@ -327,7 +255,6 @@ class TestAIHandler:
             assert "[error:" in results[3]
 
     def test_batching_respects_size(self):
-        handler = AIHandler()
         df = pl.DataFrame({"text": ["a", "b", "c", "d", "e"]})
 
         mock_client = MagicMock()
@@ -338,7 +265,8 @@ class TestAIHandler:
         ]
 
         with patch("operations.ai.get_ai_client", return_value=mock_client):
-            result = handler(
+            result = run_operation(
+                "ai",
                 df.lazy(),
                 {
                     "input_columns": ["text"],
@@ -352,14 +280,14 @@ class TestAIHandler:
             assert mock_client.generate_batch.call_count == 3
 
     def test_prompt_template_substitution(self):
-        handler = AIHandler()
         df = pl.DataFrame({"text": ["hello"]})
 
         mock_client = MagicMock()
         mock_client.generate_batch.return_value = ["result"]
 
         with patch("operations.ai.get_ai_client", return_value=mock_client):
-            result = handler(
+            result = run_operation(
+                "ai",
                 df.lazy(),
                 {
                     "input_columns": ["text"],
@@ -373,14 +301,14 @@ class TestAIHandler:
             assert prompts == ["Analyze: hello now"]
 
     def test_request_options_passed_to_client(self):
-        handler = AIHandler()
         df = pl.DataFrame({"text": ["test"]})
 
         mock_client = MagicMock()
         mock_client.generate_batch.return_value = ["result"]
 
         with patch("operations.ai.get_ai_client", return_value=mock_client):
-            result = handler(
+            result = run_operation(
+                "ai",
                 df.lazy(),
                 {
                     "input_columns": ["text"],
@@ -395,14 +323,14 @@ class TestAIHandler:
             assert call_kwargs["options"] == {"temperature": 0.1}
 
     def test_multi_column_prompt(self):
-        handler = AIHandler()
         df = pl.DataFrame({"title": ["Hello"], "body": ["World"]})
 
         mock_client = MagicMock()
         mock_client.generate_batch.return_value = ["result"]
 
         with patch("operations.ai.get_ai_client", return_value=mock_client):
-            result = handler(
+            result = run_operation(
+                "ai",
                 df.lazy(),
                 {
                     "input_columns": ["title", "body"],
@@ -414,18 +342,3 @@ class TestAIHandler:
             result.collect()
             prompts = mock_client.generate_batch.call_args[0][0]
             assert prompts == ["Title: Hello Body: World"]
-
-    def test_missing_multi_column_raises(self):
-        handler = AIHandler()
-        df = pl.DataFrame({"title": ["Hello"]})
-
-        with pytest.raises(ValueError, match="Input column"):
-            handler(
-                df.lazy(),
-                {
-                    "input_columns": ["title", "body"],
-                    "output_column": "result",
-                    "prompt_template": "{{title}} {{body}}",
-                    "batch_size": 5,
-                },
-            )

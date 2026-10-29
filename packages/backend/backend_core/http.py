@@ -36,7 +36,10 @@ def post(url: str, **kwargs: Any) -> httpx.Response:
 
 
 def get_async_client() -> httpx.AsyncClient:
-    loop = asyncio.get_running_loop()
+    return _get_async_client(asyncio.get_running_loop())
+
+
+def _get_async_client(loop: asyncio.AbstractEventLoop) -> httpx.AsyncClient:
     loop_id = id(loop)
     with _ASYNC_CLIENTS_LOCK:
         existing = _ASYNC_CLIENTS.get(loop_id)
@@ -47,6 +50,11 @@ def get_async_client() -> httpx.AsyncClient:
         client = httpx.AsyncClient(timeout=DEFAULT_TIMEOUT)
         _ASYNC_CLIENTS[loop_id] = (loop, client)
         return client
+
+
+def prewarm_async_client(loop: asyncio.AbstractEventLoop) -> None:
+    """Construct the client for ``loop``; callers should offload this work."""
+    _get_async_client(loop)
 
 
 async def close_clients() -> None:

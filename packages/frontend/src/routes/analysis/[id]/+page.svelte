@@ -180,8 +180,8 @@
 	let tabContextMenu = $state<{ tabId: string; x: number; y: number } | null>(null);
 
 	function bindPaneMedia(): () => void {
-		const narrow = window.matchMedia('max-width: 900px');
-		const mobile = window.matchMedia('max-width: 600px');
+		const narrow = window.matchMedia('(max-width: 900px)');
+		const mobile = window.matchMedia('(max-width: 600px)');
 		const onNarrow = () => {
 			if (narrow.matches) leftPaneCollapsed = true;
 		};
@@ -221,7 +221,7 @@
 		};
 	});
 
-	function applyAnalysisDetail(detail: AnalysisDetail): void {
+	function applyAnalysisDetail(detail: Pick<AnalysisDetail, 'analysis' | 'version'>): void {
 		analysisStore.applyAnalysis(detail.analysis);
 		analysisStore.currentRevision = detail.version;
 		lastLoadedVersion = detail.version;
@@ -252,10 +252,9 @@
 		lock.setRemoteSyncPending(true);
 		lock.setRemoteSyncFailed(false);
 
-		actions.showDatasourceModal = false;
+		actions.closeDatasourceModal();
 		showVersionModal = false;
 		saveError = '';
-		actions.dismissTabError();
 		analysisStore.setResourceConfig(null);
 
 		if (storageKey) {
@@ -581,10 +580,7 @@
 
 	function handleVersionRestored(restored: { analysis: Analysis; version: string }) {
 		schemaStore.reset();
-		analysisStore.previews.runs.clear();
-		analysisStore.applyAnalysis(restored.analysis);
-		analysisStore.currentRevision = restored.version;
-		lastLoadedVersion = restored.version;
+		applyAnalysisDetail(restored);
 		selectedStepId = null;
 	}
 

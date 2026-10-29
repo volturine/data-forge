@@ -4,15 +4,15 @@ from sqlalchemy import Column, DateTime, Integer, String
 from sqlmodel import Field, SQLModel
 
 from backend_core.domain.runtime_workers.models import RuntimeWorkerKind
-from backend_core.time import naive_utc
+from backend_core.time import aware_utc, naive_utc
 
 
 class RuntimeWorker(SQLModel, table=True):  # type: ignore[call-arg, assignment]
     __tablename__ = 'runtime_workers'  # type: ignore[assignment]
 
     def heartbeat_age_seconds(self, *, now: dt.datetime) -> float:
-        heartbeat = self.last_heartbeat_at.astimezone(dt.UTC) if self.last_heartbeat_at.tzinfo is not None else self.last_heartbeat_at.replace(tzinfo=dt.UTC)
-        current = now.astimezone(dt.UTC) if now.tzinfo is not None else now.replace(tzinfo=dt.UTC)
+        heartbeat = aware_utc(self.last_heartbeat_at)
+        current = aware_utc(now)
         return max((current - heartbeat).total_seconds(), 0.0)
 
     id: str = Field(sa_column=Column(String, primary_key=True))

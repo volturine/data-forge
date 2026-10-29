@@ -1,5 +1,4 @@
 <script lang="ts">
-	import { onDestroy } from 'svelte';
 	import { EllipsisVertical, Workflow } from '@lucide/svelte';
 	import { overlayStack } from '#lib/stores/overlay.svelte.js';
 	import { css } from '#lib/styles/panda.js';
@@ -33,11 +32,7 @@
 	}
 
 	function toggle() {
-		if (open) {
-			open = false;
-			return;
-		}
-		open = true;
+		open = !open;
 	}
 
 	function handleResize() {
@@ -67,10 +62,6 @@
 				}
 			: null
 	);
-
-	onDestroy(() => {
-		open = false;
-	});
 </script>
 
 <button

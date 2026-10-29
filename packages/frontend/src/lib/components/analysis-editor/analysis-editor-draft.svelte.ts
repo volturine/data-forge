@@ -55,8 +55,6 @@ export function createDraftController(deps: DraftControllerDeps) {
 		if (!storageKey || draftLoaded || deps.blockedFromHydration()) return;
 		if (!deps.hasTabs()) return;
 		const analysisId = deps.getAnalysisId();
-		const currentStorageKey = storageKey;
-		const currentAnalysisId = analysisId;
 		const serverVersion = deps.getServerVersion();
 		if (!serverVersion) {
 			draftLoaded = true;
@@ -70,14 +68,10 @@ export function createDraftController(deps: DraftControllerDeps) {
 		}
 
 		const token = draftLoadGate.issue();
-		void idbGet<string>(currentStorageKey)
+		void idbGet<string>(storageKey)
 			.then((raw) => {
 				if (!draftLoadGate.isCurrent(token)) return;
-				if (
-					deps.getStorageKey() !== currentStorageKey ||
-					deps.getAnalysisId() !== currentAnalysisId
-				)
-					return;
+				if (deps.getStorageKey() !== storageKey || deps.getAnalysisId() !== analysisId) return;
 				if (!raw) {
 					draftLoaded = true;
 					return;
@@ -86,16 +80,16 @@ export function createDraftController(deps: DraftControllerDeps) {
 				try {
 					parsed = JSON.parse(raw) as typeof parsed;
 				} catch {
-					void idbDelete(currentStorageKey);
+					void idbDelete(storageKey);
 					draftLoaded = true;
 					return;
 				}
-				if (parsed.analysisId !== currentAnalysisId) {
+				if (parsed.analysisId !== analysisId) {
 					draftLoaded = true;
 					return;
 				}
 				if ((parsed.version ?? null) !== serverVersion) {
-					void idbDelete(currentStorageKey);
+					void idbDelete(storageKey);
 					draftLoaded = true;
 					return;
 				}
@@ -105,7 +99,7 @@ export function createDraftController(deps: DraftControllerDeps) {
 				}
 				parsed.tabs = parsed.tabs.map((tab, index) => ensureTabDefaults(tab, index));
 				const restoreTabs = !(stepCount(parsed.tabs) === 0 && deps.serverStepCount() > 0);
-				if (!restoreTabs) void idbDelete(currentStorageKey);
+				if (!restoreTabs) void idbDelete(storageKey);
 				const requestedTabId = typeof parsed.activeTabId === 'string' ? parsed.activeTabId : null;
 				const visibleTabIds = restoreTabs
 					? parsed.tabs.map((tab) => tab.id)
@@ -153,7 +147,6 @@ export function createDraftController(deps: DraftControllerDeps) {
 		reset() {
 			draftLoaded = false;
 			flush();
-		},
-		invalidate: () => draftLoadGate.invalidate()
+		}
 	};
 }

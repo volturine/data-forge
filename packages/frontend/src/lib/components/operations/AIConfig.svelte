@@ -5,32 +5,11 @@
 	import { css, label, stepConfig, input } from '#lib/styles/panda.js';
 
 	interface Props {
-		config?: AIConfigData;
+		config: AIConfigData;
 		schema: Schema;
 	}
 
-	const defaultConfig: AIConfigData = {
-		provider: 'ollama',
-		model: 'llama3.2',
-		input_columns: [],
-		output_column: 'ai_result',
-		error_column: 'ai_error',
-		prompt_template: 'Classify this text: {{text}}',
-		batch_size: 10,
-		max_retries: 3,
-		rate_limit_rpm: null,
-		endpoint_url: '',
-		api_key: '',
-		temperature: 0.7,
-		max_tokens: null,
-		request_options: null
-	};
-
-	let { config = $bindable(defaultConfig), schema }: Props = $props();
-
-	function handleColumnsChange(columns: string[]) {
-		config.input_columns = columns;
-	}
+	let { config = $bindable(), schema }: Props = $props();
 
 	const inputColumns = $derived(Array.isArray(config?.input_columns) ? config.input_columns : []);
 
@@ -94,7 +73,7 @@
 		<MultiSelectColumnDropdown
 			{schema}
 			value={inputColumns}
-			onChange={handleColumnsChange}
+			onChange={(columns) => (config.input_columns = columns)}
 			placeholder="Select column(s)..."
 			showSelectAll={false}
 		/>

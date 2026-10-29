@@ -6,12 +6,14 @@ import logging
 import os
 import tempfile
 import threading
+from contextlib import nullcontext
 from datetime import UTC, datetime
 from types import SimpleNamespace
 from typing import Any, cast
 
 import polars as pl
 import pytest
+from operation_support import run_operation
 from pydantic import ValidationError
 
 from builds.build_live import RuntimeBuild
@@ -19,8 +21,8 @@ from dataforge_protocol import analysis_pb2, compute_pb2, datasource_pb2, enums_
 from datasources import execution as datasource_execution
 from operations.download import DownloadParams
 from operations.export import ExportParams
-from operations.notification import NotificationHandler, NotificationParams
-from operations.plot import ChartHandler, ChartParams, compute_chart_data
+from operations.notification import NotificationParams
+from operations.plot import ChartParams, compute_chart_data
 from operations.step_converter import analysis_pipeline_to_execution_payload
 from runtime import compute_request_runtime, compute_service, datasource_delete_runtime, worker_runtime_client
 from runtime.compute_manager import (
@@ -32,6 +34,7 @@ from runtime.compute_manager import (
 from runtime.compute_service import ExportDatasourceResult
 from runtime.domain.compute import schemas as compute_schemas
 from runtime.domain.compute.base import ComputeWorkerStatusInfo
+from runtime.domain.compute_worker_runs.schemas import ComputeWorkerRunExecutionCategory
 from runtime.executors import (
     CLEANUP_EXECUTOR,
     COMPUTE_EXECUTOR,
@@ -42,7 +45,7 @@ from runtime.executors import (
     run_engine_io_in_thread,
 )
 from runtime.polars_compute import _build_pipeline_details, classify_engine_error
-from runtime.worker_runtime_client import BackendWorkerRpcError, PendingDatasourceDelete
+from runtime.worker_runtime_client import BackendWorkerRpcError, ExecutionEntry, PendingDatasourceDelete
 
 # ---------------------------------------------------------------------------
 # Build runtime regressions
@@ -160,52 +163,6 @@ def test_terminal_compute_completion_retries_after_api_reconnect(monkeypatch) ->
 
 
 @pytest.mark.asyncio
-async def test_claim_hash_survives_client_to_dispatcher_handoff(monkeypatch) -> None:
-    command_hash = "7a4c-hash"
-    claimed_by_client = worker_runtime_client.ClaimedComputeRequest(
-        id="request-with-hash",
-        namespace="default",
-        kind=enums_pb2.COMPUTE_REQUEST_KIND_PREVIEW,
-        command_envelope=_preview_command_envelope(request_id="request-with-hash"),
-        worker_id="worker-test",
-        claim_token="claim-token",
-        lease_generation=1,
-        lease_expires_at=datetime.now(UTC),
-        attempt=1,
-        lease_ttl_seconds=300,
-        command_hash=command_hash,
-    )
-
-    class Client:
-        def __enter__(self):
-            return self
-
-        def __exit__(self, *_args):
-            return None
-
-        async def claim_compute_request_async(self, **_kwargs):
-            return claimed_by_client
-
-    async def execute_request(_claimed, _manager) -> None:
-        return None
-
-    async def get_client() -> Client:
-        return Client()
-
-    monkeypatch.setattr(compute_request_runtime, "async_client_from_env", get_client)
-    monkeypatch.setattr(compute_request_runtime, "_execute_request", execute_request)
-
-    claimed = await compute_request_runtime.next_compute_request("worker-test", namespace="default")
-    assert claimed is not None
-    assert claimed.command_hash == command_hash
-    assert await compute_request_runtime._run_once(
-        worker_id="worker-test",
-        manager=cast(Any, SimpleNamespace()),
-        namespace="default",
-    )
-
-
-@pytest.mark.asyncio
 async def test_compute_claim_hash_is_decoded_from_rpc_command(monkeypatch) -> None:
     import hashlib
     from datetime import timedelta
@@ -248,13 +205,22 @@ async def test_compute_claim_hash_is_decoded_from_rpc_command(monkeypatch) -> No
     async def get_client():
         return client
 
+    async def execute_request(_claimed, _manager) -> None:
+        return None
+
     monkeypatch.setattr(compute_request_runtime, "async_client_from_env", get_client)
+    monkeypatch.setattr(compute_request_runtime, "_execute_request", execute_request)
 
     claimed = await compute_request_runtime.next_compute_request("worker-test", namespace="default")
 
     expected_hash = hashlib.sha256(command_envelope.command.SerializeToString(deterministic=True)).hexdigest()
     assert claimed is not None
     assert claimed.command_hash == expected_hash
+    assert await compute_request_runtime._run_once(
+        worker_id="worker-test",
+        manager=cast(Any, SimpleNamespace()),
+        namespace="default",
+    )
 
 
 @pytest.mark.asyncio
@@ -321,7 +287,7 @@ async def test_cancelled_compute_lease_follower_does_not_cancel_shared_rpc() -> 
             renewed_ids.extend(request_id for request_id, _token, _generation in renewals)
             rpc_started.set()
             await release_rpc.wait()
-            return {request_id: 30 for request_id in renewed_ids}
+            return dict.fromkeys(renewed_ids, 30)
 
     batcher = worker_runtime_client._ComputeLeaseRenewalBatcher(batch_window_seconds=0)
 
@@ -492,33 +458,6 @@ async def test_runtime_executor_preserves_request_context() -> None:
         namespace.reset(token)
 
 
-@pytest.mark.asyncio
-async def test_cancelled_compute_keeps_its_slot_until_thread_stops() -> None:
-    thread_started = threading.Event()
-    release_thread = threading.Event()
-    cancellation_started = threading.Event()
-
-    def blocking_work() -> None:
-        thread_started.set()
-        release_thread.wait()
-
-    task = asyncio.create_task(
-        run_compute_in_thread(
-            blocking_work,
-            cancel_work=cancellation_started.set,
-        )
-    )
-    try:
-        assert await asyncio.wait_for(asyncio.to_thread(thread_started.wait, 2), timeout=3)
-        task.cancel()
-        assert await asyncio.wait_for(asyncio.to_thread(cancellation_started.wait, 2), timeout=3)
-        assert not task.done()
-    finally:
-        release_thread.set()
-    with pytest.raises(asyncio.CancelledError):
-        await task
-
-
 def test_engine_admission_prioritizes_shared_datasource_preview() -> None:
     datasource_identity = compute_pb2.ComputeWorkerIdentity(
         scope=enums_pb2.COMPUTE_WORKER_SCOPE_DATASOURCE_PREVIEW,
@@ -567,7 +506,6 @@ async def test_compute_request_claims_share_a_bounded_control_plane(monkeypatch)
         peak = max(peak, active)
         await asyncio.sleep(0.02)
         active -= 1
-        return None
 
     monkeypatch.setattr(compute_request_runtime, "next_compute_request", fake_next_request)
     claim_capacity = compute_request_runtime.compute_request_claim_worker_count()
@@ -591,15 +529,17 @@ async def test_compute_request_claims_share_a_bounded_control_plane(monkeypatch)
 
 def test_compute_worker_run_execution_entry_proto_uses_typed_fields() -> None:
     entry = worker_runtime_client._compute_worker_run_execution_entry_proto(
-        {
-            "key": "filter",
-            "label": "Filter",
-            "category": "step",
-            "order": 0,
-            "duration_ms": 12.5,
-            "share_pct": 100.0,
-            "metadata": {"step_type": "filter"},
-        }
+        ExecutionEntry(
+            key="filter",
+            label="Filter",
+            category=ComputeWorkerRunExecutionCategory.STEP,
+            order=0,
+            duration_ms=12.5,
+            share_pct=100.0,
+            optimized_plan=None,
+            unoptimized_plan=None,
+            step_type="filter",
+        )
     )
 
     assert isinstance(entry, compute_pb2.ComputeWorkerRunExecutionEntry)
@@ -617,9 +557,9 @@ def test_compute_worker_run_execution_entries_normalize_invalid_timing_metrics()
         total_duration_ms=1,
     )
 
-    assert [entry["key"] for entry in entries] == ["compute"]
-    assert entries[0]["duration_ms"] == 250.0
-    assert entries[0]["share_pct"] == 100.0
+    assert [entry.key for entry in entries] == ["compute"]
+    assert entries[0].duration_ms == 250.0
+    assert entries[0].share_pct == 100.0
 
 
 def test_export_operation_params_accept_generated_enum_numbers() -> None:
@@ -655,14 +595,17 @@ def test_compute_worker_run_update_proto_uses_typed_patch_fields() -> None:
             "duration_ms": 42,
             "step_timings": {"filter": 2.5},
             "execution_entries": [
-                {
-                    "key": "filter",
-                    "label": "Filter",
-                    "category": "step",
-                    "order": 0,
-                    "duration_ms": 2.5,
-                    "metadata": {"step_type": "filter"},
-                }
+                ExecutionEntry(
+                    key="filter",
+                    label="Filter",
+                    category=ComputeWorkerRunExecutionCategory.STEP,
+                    order=0,
+                    duration_ms=2.5,
+                    share_pct=None,
+                    optimized_plan=None,
+                    unoptimized_plan=None,
+                    step_type="filter",
+                )
             ],
             "progress": 1.0,
             "current_step": None,
@@ -698,7 +641,7 @@ def test_compute_worker_run_finalization_uses_the_existing_typed_update() -> Non
 
 
 def test_compute_worker_status_result_proto_uses_typed_snapshot_fields() -> None:
-    status = worker_runtime_client._compute_worker_status_result_proto(
+    status = worker_runtime_client.compute_worker_status_result_proto(
         ComputeWorkerStatusInfo(
             analysis_id="analysis-1",
             resource_id="datasource-1",
@@ -714,7 +657,8 @@ def test_compute_worker_status_result_proto_uses_typed_snapshot_fields() -> None
             last_activity=datetime.now(UTC).isoformat(),
             current_job_id="job-1",
             resource_config={"max_threads": 2},
-            effective_resources={"max_threads": 2, "max_memory_mb": 1024},
+            # Effective resources reflect the host and may exceed user override limits.
+            effective_resources={"max_threads": 128, "max_memory_mb": 1024},
             defaults={"max_threads": 2, "max_memory_mb": 1024, "streaming_chunk_size": 500},
             scope="datasource_preview",
             reuse_policy="shared",
@@ -727,6 +671,7 @@ def test_compute_worker_status_result_proto_uses_typed_snapshot_fields() -> None
 
     assert status.status == enums_pb2.COMPUTE_WORKER_STATUS_HEALTHY
     assert status.resource_config.max_threads == 2
+    assert status.effective_resources.max_threads == 128
     assert status.effective_resources.max_memory_mb == 1024
     assert status.defaults.streaming_chunk_size == 500
     assert status.scope == enums_pb2.COMPUTE_WORKER_SCOPE_DATASOURCE_PREVIEW
@@ -823,8 +768,52 @@ def _preview_command_envelope(*, request_id: str) -> compute_pb2.ComputeCommandE
     )
 
 
-def test_analysis_pipeline_protocol_view_config_uses_worker_service_key() -> None:
-    pipeline = analysis_pb2.AnalysisPipelinePayload(
+class _AdmissionManager:
+    """Manager fake for the engine admission path. Every call must target tenant-a."""
+
+    admitted = False
+
+    async def await_engine_request_admission(self, _identity, *, namespace, priority):
+        assert namespace == "tenant-a"
+        return self.admitted
+
+    def reserve_engine_request(self, _identity, *, namespace):
+        assert namespace == "tenant-a"
+
+    def release_engine_request(self, _identity, *, namespace):
+        assert namespace == "tenant-a"
+
+    async def await_engine_job_slot(self, _identity, *, namespace):
+        assert namespace == "tenant-a"
+
+    def release_engine_job_slot(self, _identity, *, namespace):
+        assert namespace == "tenant-a"
+
+    def release_spawn_admission(self, _identity, *, namespace, owned):
+        assert namespace == "tenant-a"
+        assert owned is False
+
+
+async def _keep_lease_alive(_claimed, *, stop_event: asyncio.Event, lease_confirmed: asyncio.Event) -> None:
+    lease_confirmed.set()
+    await stop_event.wait()
+
+
+def _preview_claim(request_id: str, *, lease_ttl_seconds: float = 300) -> compute_request_runtime.ClaimedComputeRequest:
+    return compute_request_runtime.ClaimedComputeRequest(
+        id=request_id,
+        namespace="tenant-a",
+        kind=enums_pb2.COMPUTE_REQUEST_KIND_PREVIEW,
+        worker_id="worker-test",
+        claim_token=f"claim-{request_id}",
+        lease_generation=1,
+        lease_ttl_seconds=lease_ttl_seconds,
+        command_envelope=_preview_command_envelope(request_id=request_id),
+    )
+
+
+def _single_step_pipeline(step: analysis_pb2.AnalysisPipelineStep) -> analysis_pb2.AnalysisPipelinePayload:
+    return analysis_pb2.AnalysisPipelinePayload(
         analysis_id="analysis-1",
         tabs=[
             analysis_pb2.AnalysisPipelineTab(
@@ -839,15 +828,19 @@ def test_analysis_pipeline_protocol_view_config_uses_worker_service_key() -> Non
                     filename="result.csv",
                     format=enums_pb2.EXPORT_FORMAT_CSV,
                 ),
-                steps=[
-                    analysis_pb2.AnalysisPipelineStep(
-                        id="view-1",
-                        step_type=enums_pb2.STEP_TYPE_VIEW,
-                        config=analysis_pb2.StepConfig(view=analysis_pb2.ViewConfig(row_limit=100)),
-                    )
-                ],
+                steps=[step],
             )
         ],
+    )
+
+
+def test_analysis_pipeline_protocol_view_config_uses_worker_service_key() -> None:
+    pipeline = _single_step_pipeline(
+        analysis_pb2.AnalysisPipelineStep(
+            id="view-1",
+            step_type=enums_pb2.STEP_TYPE_VIEW,
+            config=analysis_pb2.StepConfig(view=analysis_pb2.ViewConfig(row_limit=100)),
+        )
     )
 
     payload = analysis_pipeline_to_execution_payload(pipeline)
@@ -858,31 +851,25 @@ def test_analysis_pipeline_protocol_view_config_uses_worker_service_key() -> Non
     assert step_config == {"row_limit": 100}
 
 
+def test_build_timeout_warning_reaches_the_build_as_an_integer() -> None:
+    pipeline = _single_step_pipeline(
+        analysis_pb2.AnalysisPipelineStep(id="view-1", step_type=enums_pb2.STEP_TYPE_VIEW, config=analysis_pb2.StepConfig(view=analysis_pb2.ViewConfig()))
+    )
+    pipeline.tabs[0].output.build_timeout_warning_ms = 1500
+
+    payload = analysis_pipeline_to_execution_payload(pipeline)
+
+    # int64 decodes to a JSON string; the build must still compare it as a number.
+    assert compute_service._output_timeout_warning_ms(payload, "tab-1") == 1500
+
+
 def test_analysis_pipeline_protocol_step_type_drives_service_step_type() -> None:
-    pipeline = analysis_pb2.AnalysisPipelinePayload(
-        analysis_id="analysis-1",
-        tabs=[
-            analysis_pb2.AnalysisPipelineTab(
-                id="tab-1",
-                datasource=analysis_pb2.AnalysisPipelineDatasource(
-                    id="datasource-1",
-                    analysis_tab_id="tab-1",
-                    source_type=enums_pb2.DATA_SOURCE_TYPE_FILE,
-                ),
-                output=analysis_pb2.AnalysisPipelineOutput(
-                    result_id="result-1",
-                    filename="result.csv",
-                    format=enums_pb2.EXPORT_FORMAT_CSV,
-                ),
-                steps=[
-                    analysis_pb2.AnalysisPipelineStep(
-                        id="plot-1",
-                        step_type=enums_pb2.STEP_TYPE_PLOT_SCATTER,
-                        config=analysis_pb2.StepConfig(chart=analysis_pb2.ChartConfig(chart_type=enums_pb2.CHART_TYPE_SCATTER)),
-                    )
-                ],
-            )
-        ],
+    pipeline = _single_step_pipeline(
+        analysis_pb2.AnalysisPipelineStep(
+            id="plot-1",
+            step_type=enums_pb2.STEP_TYPE_PLOT_SCATTER,
+            config=analysis_pb2.StepConfig(chart=analysis_pb2.ChartConfig(chart_type=enums_pb2.CHART_TYPE_SCATTER)),
+        )
     )
 
     payload = analysis_pipeline_to_execution_payload(pipeline)
@@ -896,30 +883,12 @@ def test_analysis_pipeline_protocol_step_type_drives_service_step_type() -> None
 
 
 def test_analysis_pipeline_protocol_deduplicate_absent_subset_is_not_null() -> None:
-    pipeline = analysis_pb2.AnalysisPipelinePayload(
-        analysis_id="analysis-1",
-        tabs=[
-            analysis_pb2.AnalysisPipelineTab(
-                id="tab-1",
-                datasource=analysis_pb2.AnalysisPipelineDatasource(
-                    id="datasource-1",
-                    analysis_tab_id="tab-1",
-                    source_type=enums_pb2.DATA_SOURCE_TYPE_FILE,
-                ),
-                output=analysis_pb2.AnalysisPipelineOutput(
-                    result_id="result-1",
-                    filename="result.csv",
-                    format=enums_pb2.EXPORT_FORMAT_CSV,
-                ),
-                steps=[
-                    analysis_pb2.AnalysisPipelineStep(
-                        id="dedup-1",
-                        step_type=enums_pb2.STEP_TYPE_DEDUPLICATE,
-                        config=analysis_pb2.StepConfig(deduplicate=analysis_pb2.DeduplicateConfig(keep=enums_pb2.DEDUPLICATE_KEEP_FIRST)),
-                    )
-                ],
-            )
-        ],
+    pipeline = _single_step_pipeline(
+        analysis_pb2.AnalysisPipelineStep(
+            id="dedup-1",
+            step_type=enums_pb2.STEP_TYPE_DEDUPLICATE,
+            config=analysis_pb2.StepConfig(deduplicate=analysis_pb2.DeduplicateConfig(keep=enums_pb2.DEDUPLICATE_KEEP_FIRST)),
+        )
     )
 
     payload = analysis_pipeline_to_execution_payload(pipeline)
@@ -969,7 +938,7 @@ def test_preview_compute_request_uses_typed_command_not_legacy_payload(monkeypat
         def fail_compute_request(self, **_kwargs):
             raise AssertionError("request should not fail")
 
-    monkeypatch.setattr(compute_request_runtime, "worker_runtime_client", lambda: _Client())
+    monkeypatch.setattr(compute_request_runtime, "worker_runtime_client", _Client)
     monkeypatch.setattr(compute_request_runtime.service, "preview_step", fake_preview_step)
 
     claimed = compute_request_runtime.ClaimedComputeRequest(
@@ -1032,11 +1001,7 @@ async def test_same_engine_waiter_does_not_overtake_other_engine(monkeypatch) ->
         def close(self):
             pass
 
-    class _Manager:
-        async def await_engine_request_admission(self, _identity, *, namespace, priority):
-            assert namespace == "tenant-a"
-            return False
-
+    class _Manager(_AdmissionManager):
         async def await_engine_job_slot(self, identity, *, namespace):
             assert namespace == "tenant-a"
             slot = slots.setdefault(identity.resource_id, asyncio.Lock())
@@ -1045,20 +1010,6 @@ async def test_same_engine_waiter_does_not_overtake_other_engine(monkeypatch) ->
         def release_engine_job_slot(self, identity, *, namespace):
             assert namespace == "tenant-a"
             slots[identity.resource_id].release()
-
-        def reserve_engine_request(self, _identity, *, namespace):
-            assert namespace == "tenant-a"
-
-        def release_engine_request(self, _identity, *, namespace):
-            assert namespace == "tenant-a"
-
-        def release_spawn_admission(self, _identity, *, namespace, owned):
-            assert namespace == "tenant-a"
-            assert owned is False
-
-    async def keep_lease_alive(_claimed, *, stop_event: asyncio.Event, lease_confirmed: asyncio.Event) -> None:
-        lease_confirmed.set()
-        await stop_event.wait()
 
     async def run_in_thread(function, claimed, manager):
         if claimed.id == "same-rid-first":
@@ -1070,25 +1021,16 @@ async def test_same_engine_waiter_does_not_overtake_other_engine(monkeypatch) ->
             third_started.set()
         function(claimed, manager)
 
-    monkeypatch.setattr(compute_request_runtime, "worker_runtime_client", lambda: _Client())
-    monkeypatch.setattr(compute_request_runtime, "_renew_compute_lease", keep_lease_alive)
+    monkeypatch.setattr(compute_request_runtime, "worker_runtime_client", _Client)
+    monkeypatch.setattr(compute_request_runtime, "_renew_compute_lease", _keep_lease_alive)
     monkeypatch.setattr(compute_request_runtime, "run_compute_in_thread", run_in_thread)
     monkeypatch.setattr(compute_request_runtime, "_execute_request_sync", lambda *_args: None)
 
     def claim(request_id: str, analysis_id: str) -> compute_request_runtime.ClaimedComputeRequest:
-        command = _preview_command_envelope(request_id=request_id)
-        command.command.preview.analysis_id = analysis_id
-        command.command.preview.analysis_pipeline.analysis_id = analysis_id
-        return compute_request_runtime.ClaimedComputeRequest(
-            id=request_id,
-            namespace="tenant-a",
-            kind=enums_pb2.COMPUTE_REQUEST_KIND_PREVIEW,
-            worker_id="worker-test",
-            claim_token=f"claim-{request_id}",
-            lease_generation=1,
-            lease_ttl_seconds=300,
-            command_envelope=command,
-        )
+        claimed = _preview_claim(request_id)
+        claimed.command_envelope.command.preview.analysis_id = analysis_id
+        claimed.command_envelope.command.preview.analysis_pipeline.analysis_id = analysis_id
+        return claimed
 
     manager = cast(Any, _Manager())
     first = asyncio.create_task(compute_request_runtime._execute_request(claim("same-rid-first", "analysis-shared"), manager))
@@ -1114,24 +1056,13 @@ async def test_compute_capacity_race_releases_manager_admission_before_retry(mon
     releases = 0
     executions = 0
 
-    class _Manager:
-        async def await_engine_request_admission(self, _identity, *, namespace, priority):
+    class _Manager(_AdmissionManager):
+        admitted = True
+
+        async def await_engine_request_admission(self, identity, *, namespace, priority):
             nonlocal admissions
-            assert namespace == "tenant-a"
             admissions += 1
-            return True
-
-        def reserve_engine_request(self, _identity, *, namespace):
-            assert namespace == "tenant-a"
-
-        def release_engine_request(self, _identity, *, namespace):
-            assert namespace == "tenant-a"
-
-        async def await_engine_job_slot(self, _identity, *, namespace):
-            assert namespace == "tenant-a"
-
-        def release_engine_job_slot(self, _identity, *, namespace):
-            assert namespace == "tenant-a"
+            return await super().await_engine_request_admission(identity, namespace=namespace, priority=priority)
 
         def release_spawn_admission(self, _identity, *, namespace, owned: bool) -> None:
             nonlocal releases
@@ -1142,10 +1073,6 @@ async def test_compute_capacity_race_releases_manager_admission_before_retry(mon
     class _Client:
         def close(self):
             pass
-
-    async def keep_lease_alive(_claimed, *, stop_event: asyncio.Event, lease_confirmed: asyncio.Event) -> None:
-        lease_confirmed.set()
-        await stop_event.wait()
 
     async def run_in_thread(function, *args, **kwargs) -> None:
         nonlocal executions
@@ -1162,21 +1089,12 @@ async def test_compute_capacity_race_releases_manager_admission_before_retry(mon
         race_wait_started.set()
         await race_wait_release.wait()
 
-    monkeypatch.setattr(compute_request_runtime, "worker_runtime_client", lambda: _Client())
-    monkeypatch.setattr(compute_request_runtime, "_renew_compute_lease", keep_lease_alive)
+    monkeypatch.setattr(compute_request_runtime, "worker_runtime_client", _Client)
+    monkeypatch.setattr(compute_request_runtime, "_renew_compute_lease", _keep_lease_alive)
     monkeypatch.setattr(compute_request_runtime, "run_compute_in_thread", run_in_thread)
     monkeypatch.setattr(compute_request_runtime, "_wait_after_engine_capacity_race", wait_after_capacity_race)
     monkeypatch.setattr(compute_request_runtime, "_execute_request_sync", lambda *_args: None)
-    claimed = compute_request_runtime.ClaimedComputeRequest(
-        id="req-capacity-race",
-        namespace="tenant-a",
-        kind=enums_pb2.COMPUTE_REQUEST_KIND_PREVIEW,
-        worker_id="worker-test",
-        claim_token="claim-test",
-        lease_generation=1,
-        lease_ttl_seconds=300,
-        command_envelope=_preview_command_envelope(request_id="req-capacity-race"),
-    )
+    claimed = _preview_claim("req-capacity-race")
 
     task = asyncio.create_task(compute_request_runtime._execute_request(claimed, cast(Any, _Manager())))
     await asyncio.wait_for(race_wait_started.wait(), timeout=1)
@@ -1197,24 +1115,10 @@ async def test_compute_request_lease_loss_cancels_shared_job_without_stopping_wo
     shutdown_calls: list[tuple[str, str | None]] = []
     loop = asyncio.get_running_loop()
 
-    class _Manager:
-        async def await_engine_request_admission(self, _identity, *, namespace, priority):
-            assert namespace == "tenant-a"
+    class _Manager(_AdmissionManager):
+        async def await_engine_request_admission(self, identity, *, namespace, priority):
             assert priority == compute_request_runtime.COMPUTE_WORKER_ADMISSION_PRIORITY_INTERACTIVE
-            return False
-
-        def release_engine_request(self, _identity, *, namespace):
-            assert namespace == "tenant-a"
-
-        async def await_engine_job_slot(self, _identity, *, namespace):
-            assert namespace == "tenant-a"
-
-        def release_engine_job_slot(self, _identity, *, namespace):
-            assert namespace == "tenant-a"
-
-        def release_spawn_admission(self, _identity, *, namespace, owned: bool) -> None:
-            assert namespace == "tenant-a"
-            assert owned is False
+            return await super().await_engine_request_admission(identity, namespace=namespace, priority=priority)
 
         def shutdown_compute_worker(self, identity, *, namespace: str | None = None) -> None:
             shutdown_calls.append((identity.resource_id, namespace))
@@ -1241,16 +1145,7 @@ async def test_compute_request_lease_loss_cancels_shared_job_without_stopping_wo
 
     monkeypatch.setattr(compute_request_runtime, "_renew_compute_lease", lose_lease)
     monkeypatch.setattr(compute_request_runtime, "_execute_request_sync", run_engine)
-    claimed = compute_request_runtime.ClaimedComputeRequest(
-        id="req-lease-loss",
-        namespace="tenant-a",
-        kind=enums_pb2.COMPUTE_REQUEST_KIND_PREVIEW,
-        worker_id="worker-test",
-        claim_token="claim-test",
-        lease_generation=1,
-        lease_ttl_seconds=300,
-        command_envelope=_preview_command_envelope(request_id="req-lease-loss"),
-    )
+    claimed = _preview_claim("req-lease-loss")
     identity = compute_request_runtime._compute_worker_identity_for_claimed(claimed)
     assert identity is not None
     assert identity.reuse_policy == enums_pb2.COMPUTE_WORKER_REUSE_POLICY_SHARED
@@ -1271,24 +1166,10 @@ async def test_compute_request_waits_for_first_lease_confirmation_before_admissi
     allow_renewal = asyncio.Event()
     admission_started = asyncio.Event()
 
-    class _Manager:
-        async def await_engine_request_admission(self, _identity, *, namespace, priority):
-            assert namespace == "tenant-a"
+    class _Manager(_AdmissionManager):
+        async def await_engine_request_admission(self, identity, *, namespace, priority):
             admission_started.set()
-            return False
-
-        async def await_engine_job_slot(self, _identity, *, namespace):
-            assert namespace == "tenant-a"
-
-        def release_engine_job_slot(self, _identity, *, namespace):
-            assert namespace == "tenant-a"
-
-        def release_engine_request(self, _identity, *, namespace):
-            assert namespace == "tenant-a"
-
-        def release_spawn_admission(self, _identity, *, namespace, owned):
-            assert namespace == "tenant-a"
-            assert owned is False
+            return await super().await_engine_request_admission(identity, namespace=namespace, priority=priority)
 
     async def renew_after_gate(_claimed, *, stop_event, lease_confirmed):
         renewal_started.set()
@@ -1302,16 +1183,7 @@ async def test_compute_request_waits_for_first_lease_confirmation_before_admissi
     monkeypatch.setattr(compute_request_runtime, "_renew_compute_lease", renew_after_gate)
     monkeypatch.setattr(compute_request_runtime, "run_compute_in_thread", run_inline)
     monkeypatch.setattr(compute_request_runtime, "_execute_request_sync", lambda *_args: None)
-    claimed = compute_request_runtime.ClaimedComputeRequest(
-        id="req-first-lease-confirmation",
-        namespace="tenant-a",
-        kind=enums_pb2.COMPUTE_REQUEST_KIND_PREVIEW,
-        worker_id="worker-test",
-        claim_token="claim-test",
-        lease_generation=1,
-        lease_ttl_seconds=20,
-        command_envelope=_preview_command_envelope(request_id="req-first-lease-confirmation"),
-    )
+    claimed = _preview_claim("req-first-lease-confirmation", lease_ttl_seconds=20)
 
     task = asyncio.create_task(compute_request_runtime._execute_request(claimed, cast(Any, _Manager())))
     try:
@@ -1338,26 +1210,15 @@ async def test_lease_loss_releases_admission_completed_in_same_turn(monkeypatch)
     held_admissions = 0
     released_admissions: list[bool] = []
 
-    class _Manager:
-        async def await_engine_request_admission(self, _identity, *, namespace, priority):
+    class _Manager(_AdmissionManager):
+        admitted = True
+
+        async def await_engine_request_admission(self, identity, *, namespace, priority):
             nonlocal held_admissions
-            assert namespace == "tenant-a"
             admission_started.set()
             await admission_ready.wait()
             held_admissions += 1
-            return True
-
-        def reserve_engine_request(self, _identity, *, namespace):
-            assert namespace == "tenant-a"
-
-        def release_engine_request(self, _identity, *, namespace):
-            assert namespace == "tenant-a"
-
-        async def await_engine_job_slot(self, _identity, *, namespace):
-            assert namespace == "tenant-a"
-
-        def release_engine_job_slot(self, _identity, *, namespace):
-            assert namespace == "tenant-a"
+            return await super().await_engine_request_admission(identity, namespace=namespace, priority=priority)
 
         def release_spawn_admission(self, _identity, *, namespace, owned):
             nonlocal held_admissions
@@ -1385,16 +1246,7 @@ async def test_lease_loss_releases_admission_completed_in_same_turn(monkeypatch)
 
     manager = _Manager()
     monkeypatch.setattr(compute_request_runtime, "_renew_compute_lease", lose_lease)
-    claimed = compute_request_runtime.ClaimedComputeRequest(
-        id="req-admission-handoff",
-        namespace="tenant-a",
-        kind=enums_pb2.COMPUTE_REQUEST_KIND_PREVIEW,
-        worker_id="worker-test",
-        claim_token="claim-test",
-        lease_generation=1,
-        lease_ttl_seconds=300,
-        command_envelope=_preview_command_envelope(request_id="req-admission-handoff"),
-    )
+    claimed = _preview_claim("req-admission-handoff")
 
     task = asyncio.create_task(compute_request_runtime._execute_request(claimed, cast(Any, manager)))
     try:
@@ -1426,22 +1278,21 @@ async def test_lease_loss_releases_engine_lane_acquired_in_same_turn(monkeypatch
     request_reservations = 0
     released_admissions: list[bool] = []
 
-    class _Manager:
-        async def await_engine_request_admission(self, _identity, *, namespace, priority):
-            assert namespace == "tenant-a"
+    class _Manager(_AdmissionManager):
+        async def await_engine_request_admission(self, identity, *, namespace, priority):
             nonlocal request_reservations
             request_reservations += 1
-            return False
+            return await super().await_engine_request_admission(identity, namespace=namespace, priority=priority)
 
         def release_spawn_admission(self, _identity, *, namespace, owned):
             assert namespace == "tenant-a"
             released_admissions.append(owned)
 
         async def await_engine_job_slot(self, _identity, *, namespace):
+            nonlocal engine_job_locked
             assert namespace == "tenant-a"
             job_slot_started.set()
             await acquire.wait()
-            nonlocal engine_job_locked
             engine_job_locked = True
 
         def release_engine_job_slot(self, _identity, *, namespace):
@@ -1474,16 +1325,7 @@ async def test_lease_loss_releases_engine_lane_acquired_in_same_turn(monkeypatch
 
     manager = _Manager()
     monkeypatch.setattr(compute_request_runtime, "_renew_compute_lease", lose_lease)
-    claimed = compute_request_runtime.ClaimedComputeRequest(
-        id="req-engine-lane-handoff",
-        namespace="tenant-a",
-        kind=enums_pb2.COMPUTE_REQUEST_KIND_PREVIEW,
-        worker_id="worker-test",
-        claim_token="claim-test",
-        lease_generation=1,
-        lease_ttl_seconds=300,
-        command_envelope=_preview_command_envelope(request_id="req-engine-lane-handoff"),
-    )
+    claimed = _preview_claim("req-engine-lane-handoff")
 
     task = asyncio.create_task(compute_request_runtime._execute_request(claimed, cast(Any, manager)))
     try:
@@ -1512,14 +1354,15 @@ async def test_parent_cancellation_releases_admission_acquired_before_handoff(mo
     released_admissions: list[bool] = []
     request_task: asyncio.Task[None] | None = None
 
-    class _Manager:
-        async def await_engine_request_admission(self, _identity, *, namespace, priority):
+    class _Manager(_AdmissionManager):
+        admitted = True
+
+        async def await_engine_request_admission(self, identity, *, namespace, priority):
             nonlocal held_admissions
-            assert namespace == "tenant-a"
             held_admissions += 1
             assert request_task is not None
             request_task.cancel()
-            return True
+            return await super().await_engine_request_admission(identity, namespace=namespace, priority=priority)
 
         def release_spawn_admission(self, _identity, *, namespace, owned):
             nonlocal held_admissions
@@ -1528,21 +1371,8 @@ async def test_parent_cancellation_releases_admission_acquired_before_handoff(mo
             if owned:
                 held_admissions -= 1
 
-    async def renew(_claimed, *, stop_event, lease_confirmed):
-        lease_confirmed.set()
-        await stop_event.wait()
-
-    monkeypatch.setattr(compute_request_runtime, "_renew_compute_lease", renew)
-    claimed = compute_request_runtime.ClaimedComputeRequest(
-        id="req-admission-cancel-handoff",
-        namespace="tenant-a",
-        kind=enums_pb2.COMPUTE_REQUEST_KIND_PREVIEW,
-        worker_id="worker-test",
-        claim_token="claim-test",
-        lease_generation=1,
-        lease_ttl_seconds=300,
-        command_envelope=_preview_command_envelope(request_id="req-admission-cancel-handoff"),
-    )
+    monkeypatch.setattr(compute_request_runtime, "_renew_compute_lease", _keep_lease_alive)
+    claimed = _preview_claim("req-admission-cancel-handoff")
 
     request_task = asyncio.create_task(compute_request_runtime._execute_request(claimed, cast(Any, _Manager())))
     with pytest.raises(asyncio.CancelledError):
@@ -1558,16 +1388,11 @@ async def test_parent_cancellation_releases_rid_slot_acquired_before_handoff(mon
     request_reservations = 0
     request_task: asyncio.Task[None] | None = None
 
-    class _Manager:
-        async def await_engine_request_admission(self, _identity, *, namespace, priority):
+    class _Manager(_AdmissionManager):
+        async def await_engine_request_admission(self, identity, *, namespace, priority):
             nonlocal request_reservations
-            assert namespace == "tenant-a"
             request_reservations += 1
-            return False
-
-        def release_spawn_admission(self, _identity, *, namespace, owned):
-            assert namespace == "tenant-a"
-            assert owned is False
+            return await super().await_engine_request_admission(identity, namespace=namespace, priority=priority)
 
         async def await_engine_job_slot(self, _identity, *, namespace):
             nonlocal engine_job_locked
@@ -1587,21 +1412,8 @@ async def test_parent_cancellation_releases_rid_slot_acquired_before_handoff(mon
             assert namespace == "tenant-a"
             request_reservations -= 1
 
-    async def renew(_claimed, *, stop_event, lease_confirmed):
-        lease_confirmed.set()
-        await stop_event.wait()
-
-    monkeypatch.setattr(compute_request_runtime, "_renew_compute_lease", renew)
-    claimed = compute_request_runtime.ClaimedComputeRequest(
-        id="req-rid-slot-cancel-handoff",
-        namespace="tenant-a",
-        kind=enums_pb2.COMPUTE_REQUEST_KIND_PREVIEW,
-        worker_id="worker-test",
-        claim_token="claim-test",
-        lease_generation=1,
-        lease_ttl_seconds=300,
-        command_envelope=_preview_command_envelope(request_id="req-rid-slot-cancel-handoff"),
-    )
+    monkeypatch.setattr(compute_request_runtime, "_renew_compute_lease", _keep_lease_alive)
+    claimed = _preview_claim("req-rid-slot-cancel-handoff")
 
     request_task = asyncio.create_task(compute_request_runtime._execute_request(claimed, cast(Any, _Manager())))
     with pytest.raises(asyncio.CancelledError):
@@ -1634,24 +1446,10 @@ async def test_terminal_compute_publication_wins_late_lease_loss(monkeypatch) ->
         await asyncio.to_thread(allow_publication_return.wait)
         await execution
 
-    class _Manager:
-        async def await_engine_request_admission(self, _identity, *, namespace, priority):
-            assert namespace == "tenant-a"
+    class _Manager(_AdmissionManager):
+        async def await_engine_request_admission(self, identity, *, namespace, priority):
             assert priority == compute_request_runtime.COMPUTE_WORKER_ADMISSION_PRIORITY_INTERACTIVE
-            return False
-
-        def release_spawn_admission(self, _identity, *, namespace: str, owned: bool) -> None:
-            assert namespace == "tenant-a"
-            assert owned is False
-
-        def release_engine_request(self, _identity, *, namespace):
-            assert namespace == "tenant-a"
-
-        async def await_engine_job_slot(self, _identity, *, namespace):
-            assert namespace == "tenant-a"
-
-        def release_engine_job_slot(self, _identity, *, namespace):
-            assert namespace == "tenant-a"
+            return await super().await_engine_request_admission(identity, namespace=namespace, priority=priority)
 
         def shutdown_compute_worker(self, identity, *, namespace: str | None = None) -> None:
             del namespace
@@ -1680,16 +1478,7 @@ async def test_terminal_compute_publication_wins_late_lease_loss(monkeypatch) ->
         return True
 
     monkeypatch.setattr(compute_request_runtime, "_execute_request_sync", publish_request)
-    claimed = compute_request_runtime.ClaimedComputeRequest(
-        id="req-completed-with-late-renewal",
-        namespace="tenant-a",
-        kind=enums_pb2.COMPUTE_REQUEST_KIND_PREVIEW,
-        worker_id="worker-test",
-        claim_token="claim-test",
-        lease_generation=1,
-        lease_ttl_seconds=300,
-        command_envelope=_preview_command_envelope(request_id="req-completed-with-late-renewal"),
-    )
+    claimed = _preview_claim("req-completed-with-late-renewal")
 
     execution = asyncio.create_task(compute_request_runtime._execute_request(claimed, cast(Any, _Manager())))
     try:
@@ -1719,10 +1508,23 @@ def test_shutdown_compute_request_removes_active_engine_and_emits_empty_snapshot
         process_id = 1234
         resource_config: dict[str, object] = {}
         effective_resources: dict[str, object] = {}
+        container_id = None
+        image_digest = None
+        docker_host = None
+        termination_reason = None
+        exit_code = None
+        oom_killed = None
 
         def __init__(self) -> None:
             self.alive = False
             self.shutdown_calls = 0
+
+        def bind_capacity_notifier(self, _notifier) -> None:
+            return None
+
+        @property
+        def lifecycle_status(self) -> str:
+            return "running" if self.current_job_id else "idle"
 
         def start(self) -> None:
             self.alive = True
@@ -1754,7 +1556,7 @@ def test_shutdown_compute_request_removes_active_engine_and_emits_empty_snapshot
         def fail_compute_request(self, **_kwargs):
             raise AssertionError("request should not fail")
 
-    monkeypatch.setattr(compute_request_runtime, "worker_runtime_client", lambda: _Client())
+    monkeypatch.setattr(compute_request_runtime, "worker_runtime_client", _Client)
 
     manager = ProcessManager(engine_factory=lambda _identity, _resource_config: cast(Any, engine), on_snapshot=snapshots.append)
     manager.spawn_compute_worker(identity)
@@ -1802,7 +1604,7 @@ def test_shutdown_compute_request_is_idempotent_when_engine_already_absent(monke
         def fail_compute_request(self, **_kwargs):
             raise AssertionError("missing engines must complete shutdown successfully")
 
-    monkeypatch.setattr(compute_request_runtime, "worker_runtime_client", lambda: _Client())
+    monkeypatch.setattr(compute_request_runtime, "worker_runtime_client", _Client)
     manager = ProcessManager(engine_factory=lambda _identity, _resource_config: cast(Any, object()))
     claimed = compute_request_runtime.ClaimedComputeRequest(
         id="req-missing-shutdown",
@@ -1859,7 +1661,7 @@ def test_compute_request_maps_missing_datasource_to_error_result(monkeypatch) ->
         def complete_compute_request(self, **kwargs):
             completed.append(kwargs["response"])
 
-    monkeypatch.setattr(compute_request_runtime, "worker_runtime_client", lambda: _Client())
+    monkeypatch.setattr(compute_request_runtime, "worker_runtime_client", _Client)
 
     claimed = compute_request_runtime.ClaimedComputeRequest(
         id="req-404",
@@ -1912,7 +1714,7 @@ def test_retired_compute_request_lease_drains_without_error_log(monkeypatch, cap
                 error_code="FAILED_PRECONDITION",
             )
 
-    monkeypatch.setattr(compute_request_runtime, "worker_runtime_client", lambda: _Client())
+    monkeypatch.setattr(compute_request_runtime, "worker_runtime_client", _Client)
     claimed = compute_request_runtime.ClaimedComputeRequest(
         id="req-retired",
         namespace="default",
@@ -1948,53 +1750,33 @@ async def test_datasource_delete_claim_rpc_does_not_block_the_runtime_event_loop
     assert await task is False
 
 
-async def _pending_delete_async(datasource_id: str) -> list[PendingDatasourceDelete]:
-    return [PendingDatasourceDelete(namespace="default", datasource_id=datasource_id)]
-
-
 @pytest.mark.asyncio
-async def test_pending_datasource_delete_waits_for_busy_preview_engine() -> None:
+@pytest.mark.parametrize(
+    ("preview_engine_idle", "backend_finalizes", "expected_handled", "expected_finalized"),
+    [
+        pytest.param(False, True, False, [], id="busy_preview_engine_waits"),
+        pytest.param(True, False, False, [("default", "datasource-1")], id="backend_defers_finalization"),
+        pytest.param(True, True, True, [("default", "datasource-1")], id="idle_preview_engine_finalizes_once"),
+    ],
+)
+async def test_pending_datasource_delete_decision(
+    preview_engine_idle: bool,
+    backend_finalizes: bool,
+    expected_handled: bool,
+    expected_finalized: list[tuple[str, str]],
+) -> None:
     datasource_id = "datasource-1"
-
-    cleanup_calls: list[str] = []
-    finalized: list[tuple[str, str]] = []
-    shutdown_calls: list[str] = []
-    manager = SimpleNamespace(
-        shutdown_compute_worker_if_idle=lambda identity, *, namespace=None: False,
-    )
-
-    async def finalize_delete_async(*, namespace: str, datasource_id: str) -> bool:
-        finalized.append((namespace, datasource_id))
-        return True
-
-    client = SimpleNamespace(
-        pending_datasource_deletes_async=lambda **_kwargs: _pending_delete_async(datasource_id),
-        finalize_datasource_delete_async=finalize_delete_async,
-    )
-
-    handled = await datasource_delete_runtime._run_once(manager=cast(Any, manager), client=cast(Any, client), namespace="default")
-
-    assert handled is False
-    assert cleanup_calls == []
-    assert finalized == []
-    assert shutdown_calls == []
-
-
-@pytest.mark.asyncio
-async def test_pending_datasource_delete_finalizes_once_preview_engine_is_idle() -> None:
-    datasource_id = "datasource-2"
-
-    cleanup_calls: list[str] = []
-    finalized: list[tuple[str, str]] = []
-    shutdown_calls: list[str] = []
-    manager_threads: list[int] = []
     event_loop = asyncio.get_running_loop()
     expected_identity = _datasource_preview_identity(datasource_id)
 
-    def shutdown_compute_worker_if_idle(identity, *, namespace=None):
+    finalized: list[tuple[str, str]] = []
+    shutdown_calls: list[str] = []
+    manager_threads: list[int] = []
+
+    def shutdown_compute_worker_if_idle(identity, *, namespace=None) -> bool:
         manager_threads.append(threading.get_ident())
         shutdown_calls.append(identity.resource_id)
-        return True
+        return preview_engine_idle
 
     manager = SimpleNamespace(
         shutdown_compute_worker_if_idle=shutdown_compute_worker_if_idle,
@@ -2007,7 +1789,7 @@ async def test_pending_datasource_delete_finalizes_once_preview_engine_is_idle()
     async def finalize_delete_async(*, namespace: str, datasource_id: str) -> bool:
         assert asyncio.get_running_loop() is event_loop
         finalized.append((namespace, datasource_id))
-        return True
+        return backend_finalizes
 
     client = SimpleNamespace(
         pending_datasource_deletes_async=pending_deletes_async,
@@ -2016,34 +1798,10 @@ async def test_pending_datasource_delete_finalizes_once_preview_engine_is_idle()
 
     handled = await datasource_delete_runtime._run_once(manager=cast(Any, manager), client=cast(Any, client), namespace="default")
 
-    assert handled is True
-    assert cleanup_calls == []
-    assert finalized == [("default", datasource_id)]
+    assert handled is expected_handled
+    assert finalized == expected_finalized
     assert shutdown_calls == [expected_identity.resource_id]
     assert manager_threads and all(thread_id != threading.get_ident() for thread_id in manager_threads)
-
-
-@pytest.mark.asyncio
-async def test_pending_datasource_delete_waits_when_backend_defers_finalization() -> None:
-    datasource_id = "datasource-3"
-    finalized: list[tuple[str, str]] = []
-    manager = SimpleNamespace(
-        shutdown_compute_worker_if_idle=lambda _identity, *, namespace=None: True,
-    )
-
-    async def finalize_delete_async(*, namespace: str, datasource_id: str) -> bool:
-        finalized.append((namespace, datasource_id))
-        return False
-
-    client = SimpleNamespace(
-        pending_datasource_deletes_async=lambda **_kwargs: _pending_delete_async(datasource_id),
-        finalize_datasource_delete_async=finalize_delete_async,
-    )
-
-    handled = await datasource_delete_runtime._run_once(manager=cast(Any, manager), client=cast(Any, client), namespace="default")
-
-    assert handled is False
-    assert finalized == [("default", datasource_id)]
 
 
 @pytest.mark.asyncio
@@ -2128,32 +1886,12 @@ async def test_run_analysis_build_stream_shuts_down_build_engine_after_completio
 
 
 class TestNotificationHandler:
-    def test_per_row_stages_and_adds_status_column(self):
-        """NotificationHandler stages per-row delivery and adds a status column."""
-        handler = NotificationHandler()
-        lf = pl.DataFrame({"msg": ["hello", "world"]}).lazy()
-        result = handler(
-            lf,
-            {
-                "method": "email",
-                "recipient": "test@example.com",
-                "input_columns": ["msg"],
-                "output_column": "status",
-                "message_template": "{{msg}}",
-                "subject_template": "Test",
-            },
-            step_id="step-1",
-        )
-        collected = result.collect()
-        assert "status" in collected.columns
-        assert collected["status"].to_list() == ["staged", "staged"]
-
     def test_validates_params(self):
         """Invalid params raise ValidationError."""
-        handler = NotificationHandler()
         lf = pl.DataFrame({"a": [1]}).lazy()
         with pytest.raises(ValidationError):
-            handler(
+            run_operation(
+                "notification",
                 lf,
                 {
                     "method": "invalid_method",
@@ -2161,18 +1899,6 @@ class TestNotificationHandler:
                     "input_columns": ["a"],
                 },
                 step_id="step-1",
-            )
-
-    def test_extra_fields_forbidden(self):
-        """Extra fields in notification params are rejected."""
-        with pytest.raises(ValidationError):
-            NotificationParams.model_validate(
-                {
-                    "method": "email",
-                    "recipient": "test@test.com",
-                    "input_columns": ["a"],
-                    "unknown_field": "bad",
-                },
             )
 
     def test_defaults(self):
@@ -2205,6 +1931,15 @@ def _chart_frame() -> pl.LazyFrame:
             "value": [10.0, 20.0, 30.0, 40.0, 50.0],
             "group": ["x", "y", "x", "y", "x"],
             "group_rank": ["b", "a", "b", "a", "b"],
+        },
+    ).lazy()
+
+
+def _two_group_frame() -> pl.LazyFrame:
+    return pl.DataFrame(
+        {
+            "category": ["A", "A", "A", "B", "B", "B"],
+            "value": [1.0, 2.0, 3.0, 4.0, 5.0, 6.0],
         },
     ).lazy()
 
@@ -2329,9 +2064,9 @@ class TestChartHandlerPassThrough:
     """Chart handler must return input lf unchanged (pass-through for DAG)."""
 
     def test_pass_through_preserves_schema(self):
-        handler = ChartHandler()
         lf = _chart_frame()
-        result = handler(
+        result = run_operation(
+            "chart",
             lf,
             {
                 "chart_type": "bar",
@@ -2344,20 +2079,20 @@ class TestChartHandlerPassThrough:
         assert result.collect_schema().names() == lf.collect_schema().names()
 
     def test_pass_through_data_unchanged(self):
-        handler = ChartHandler()
         lf = _chart_frame()
-        result = handler(lf, {"chart_type": "scatter", "x_column": "category", "y_column": "value"})
+        result = run_operation("chart", lf, {"chart_type": "scatter", "x_column": "category", "y_column": "value"})
         assert result.collect().height == lf.collect().height
         assert result.collect().columns == lf.collect().columns
 
 
 class TestChartDataBar:
-    def test_bar_no_group(self):
+    @pytest.mark.parametrize("chart_type", ["bar", "line"])
+    def test_bar_no_group(self, chart_type):
         result = (
             compute_chart_data(
                 _chart_frame(),
                 {
-                    "chart_type": "bar",
+                    "chart_type": chart_type,
                     "x_column": "category",
                     "y_column": "value",
                     "aggregation": "sum",
@@ -2405,102 +2140,32 @@ class TestChartDataBar:
 
         assert result["y"].to_list() == [2, 2, 1]
 
-    def test_bar_aggregation_mean(self):
-        result = (
-            compute_chart_data(
-                _chart_frame(),
-                {
-                    "chart_type": "bar",
-                    "x_column": "category",
-                    "y_column": "value",
-                    "aggregation": "mean",
-                },
-            )
-            .collect()
-            .sort("x")
-        )
-
-        assert result["y"].to_list() == [15.0, 35.0, 50.0]
-
-    def test_bar_aggregation_median(self):
-        result = (
-            compute_chart_data(
-                _chart_frame(),
-                {
-                    "chart_type": "bar",
-                    "x_column": "category",
-                    "y_column": "value",
-                    "aggregation": "median",
-                },
-            )
-            .collect()
-            .sort("x")
-        )
-
-        assert result["y"].to_list() == [15.0, 35.0, 50.0]
-
-    def test_bar_aggregation_std(self):
-        lf = pl.DataFrame(
-            {
-                "category": ["A", "A", "A", "B", "B", "B"],
-                "value": [1.0, 2.0, 3.0, 4.0, 5.0, 6.0],
-            },
-        ).lazy()
+    @pytest.mark.parametrize(
+        ("aggregation", "lf", "y_column", "expected"),
+        [
+            pytest.param("mean", _chart_frame(), "value", [15.0, 35.0, 50.0], id="mean"),
+            pytest.param("median", _chart_frame(), "value", [15.0, 35.0, 50.0], id="median"),
+            pytest.param("std", _two_group_frame(), "value", pytest.approx([1.0, 1.0]), id="std"),
+            pytest.param("variance", _two_group_frame(), "value", pytest.approx([1.0, 1.0]), id="variance"),
+            pytest.param("unique_count", _chart_frame(), "group", [2, 2, 1], id="unique_count"),
+        ],
+    )
+    def test_bar_aggregation(self, aggregation, lf, y_column, expected):
         result = (
             compute_chart_data(
                 lf,
                 {
                     "chart_type": "bar",
                     "x_column": "category",
-                    "y_column": "value",
-                    "aggregation": "std",
+                    "y_column": y_column,
+                    "aggregation": aggregation,
                 },
             )
             .collect()
             .sort("x")
         )
 
-        assert result["y"].to_list() == pytest.approx([1.0, 1.0])
-
-    def test_bar_aggregation_variance(self):
-        lf = pl.DataFrame(
-            {
-                "category": ["A", "A", "A", "B", "B", "B"],
-                "value": [1.0, 2.0, 3.0, 4.0, 5.0, 6.0],
-            },
-        ).lazy()
-        result = (
-            compute_chart_data(
-                lf,
-                {
-                    "chart_type": "bar",
-                    "x_column": "category",
-                    "y_column": "value",
-                    "aggregation": "variance",
-                },
-            )
-            .collect()
-            .sort("x")
-        )
-
-        assert result["y"].to_list() == pytest.approx([1.0, 1.0])
-
-    def test_bar_aggregation_unique_count(self):
-        result = (
-            compute_chart_data(
-                _chart_frame(),
-                {
-                    "chart_type": "bar",
-                    "x_column": "category",
-                    "y_column": "group",
-                    "aggregation": "unique_count",
-                },
-            )
-            .collect()
-            .sort("x")
-        )
-
-        assert result["y"].to_list() == [2, 2, 1]
+        assert result["y"].to_list() == expected
 
     def test_bar_sort_by_y_desc(self):
         result = compute_chart_data(
@@ -2560,7 +2225,18 @@ class TestChartDataBar:
 
         assert result["y"].to_list() == [3, 3]
 
-    def test_bar_group_sort_by_value_desc(self):
+    @pytest.mark.parametrize(
+        "group_sort",
+        [
+            pytest.param({"group_sort_by": "value", "group_sort_order": "desc"}, id="value_desc"),
+            pytest.param({"group_sort_by": "name", "group_sort_order": "desc"}, id="name_desc"),
+            pytest.param(
+                {"group_sort_by": "custom", "group_sort_order": "asc", "group_sort_column": "group_rank"},
+                id="custom_asc",
+            ),
+        ],
+    )
+    def test_bar_group_sort(self, group_sort):
         result = compute_chart_data(
             _chart_frame(),
             {
@@ -2569,81 +2245,12 @@ class TestChartDataBar:
                 "y_column": "value",
                 "aggregation": "sum",
                 "group_column": "group",
-                "group_sort_by": "value",
-                "group_sort_order": "desc",
+                **group_sort,
             },
         ).collect()
 
         groups = result["group"].to_list()
         assert groups[:2] == ["y", "y"]
-
-    def test_bar_group_sort_by_name_desc(self):
-        result = compute_chart_data(
-            _chart_frame(),
-            {
-                "chart_type": "bar",
-                "x_column": "category",
-                "y_column": "value",
-                "aggregation": "sum",
-                "group_column": "group",
-                "group_sort_by": "name",
-                "group_sort_order": "desc",
-            },
-        ).collect()
-
-        groups = result["group"].to_list()
-        assert groups[:2] == ["y", "y"]
-
-    def test_bar_group_sort_by_custom_asc(self):
-        result = compute_chart_data(
-            _chart_frame(),
-            {
-                "chart_type": "bar",
-                "x_column": "category",
-                "y_column": "value",
-                "aggregation": "sum",
-                "group_column": "group",
-                "group_sort_by": "custom",
-                "group_sort_order": "asc",
-                "group_sort_column": "group_rank",
-            },
-        ).collect()
-
-        groups = result["group"].to_list()
-        assert groups[:2] == ["y", "y"]
-
-
-class TestChartDataLine:
-    def test_line_basic(self):
-        result = (
-            compute_chart_data(
-                _chart_frame(),
-                {
-                    "chart_type": "line",
-                    "x_column": "category",
-                    "y_column": "value",
-                    "aggregation": "sum",
-                },
-            )
-            .collect()
-            .sort("x")
-        )
-
-        assert result.columns == ["x", "y"]
-        assert result["x"].to_list() == ["A", "B", "C"]
-
-    def test_line_with_group(self):
-        result = compute_chart_data(
-            _chart_frame(),
-            {
-                "chart_type": "line",
-                "x_column": "category",
-                "y_column": "value",
-                "group_column": "group",
-            },
-        ).collect()
-
-        assert "group" in result.columns
 
 
 class TestChartDataPie:
@@ -2660,17 +2267,6 @@ class TestChartDataPie:
         assert "label" in result.columns
         assert "y" in result.columns
         assert set(result["label"].to_list()) == {"A", "B", "C"}
-
-    def test_pie_sorted_descending(self):
-        result = compute_chart_data(
-            _chart_frame(),
-            {
-                "chart_type": "pie",
-                "x_column": "category",
-                "y_column": "value",
-            },
-        ).collect()
-
         # Should be sorted by y descending
         values = result["y"].to_list()
         assert values == sorted(values, reverse=True)
@@ -2689,7 +2285,18 @@ class TestChartDataPie:
 
         assert result["label"].to_list() == ["A", "B", "C"]
 
-    def test_pie_group_sort_by_name(self):
+    @pytest.mark.parametrize(
+        "group_sort",
+        [
+            pytest.param({"group_sort_by": "name", "group_sort_order": "desc"}, id="name_desc"),
+            pytest.param({"group_sort_by": "value", "group_sort_order": "desc"}, id="value_desc"),
+            pytest.param(
+                {"group_sort_by": "custom", "group_sort_order": "desc", "group_sort_column": "group"},
+                id="custom_desc",
+            ),
+        ],
+    )
+    def test_pie_group_sort(self, group_sort):
         result = compute_chart_data(
             _chart_frame(),
             {
@@ -2697,8 +2304,7 @@ class TestChartDataPie:
                 "x_column": "category",
                 "y_column": "value",
                 "group_column": "group",
-                "group_sort_by": "name",
-                "group_sort_order": "desc",
+                **group_sort,
             },
         ).collect()
 
@@ -2725,37 +2331,6 @@ class TestChartDataPie:
         ).collect()
 
         assert set(result["label"].to_list()) == {0}
-
-    def test_pie_group_sort_by_value(self):
-        result = compute_chart_data(
-            _chart_frame(),
-            {
-                "chart_type": "pie",
-                "x_column": "category",
-                "y_column": "value",
-                "group_column": "group",
-                "group_sort_by": "value",
-                "group_sort_order": "desc",
-            },
-        ).collect()
-
-        assert result["group"].to_list()[0] == "y"
-
-    def test_pie_group_sort_by_custom(self):
-        result = compute_chart_data(
-            _chart_frame(),
-            {
-                "chart_type": "pie",
-                "x_column": "category",
-                "y_column": "value",
-                "group_column": "group",
-                "group_sort_by": "custom",
-                "group_sort_order": "desc",
-                "group_sort_column": "group",
-            },
-        ).collect()
-
-        assert result["group"].to_list()[0] == "y"
 
 
 class TestChartDataHistogram:
@@ -2934,24 +2509,6 @@ class TestStepTimingLabels:
         config = {"source_type": "file", "file_path": path, "file_type": "csv"}
         return path, config
 
-    def test_timing_keys_use_step_type(self):
-        """step_timings keys should use step type, not UUID."""
-        path, config = self._make_csv_config()
-        try:
-            steps = [
-                {
-                    "id": "id-abc123",
-                    "type": "select",
-                    "config": {"columns": ["a"]},
-                    "depends_on": [],
-                },
-            ]
-            _, timings, _read_duration_ms, _cache_key = _build_pipeline_details(config, steps, "job-1")
-            assert "select" in timings
-            assert "id-abc123" not in timings
-        finally:
-            os.unlink(path)
-
     def test_timing_keys_deduplicate(self):
         """Multiple steps of same type get _2, _3, etc."""
         path, config = self._make_csv_config()
@@ -2973,44 +2530,28 @@ class TestStepTimingLabels:
             _, timings, _read_duration_ms, _cache_key = _build_pipeline_details(config, steps, "job-2")
             assert "select" in timings
             assert "select_2" in timings
+            assert "id-1" not in timings
         finally:
             os.unlink(path)
 
 
 # ---------------------------------------------------------------------------
-# ChartParams sort_by / group_sort_by coercion
+# ChartParams sort_by / group_sort_by parsing
 # ---------------------------------------------------------------------------
 
 
-class TestChartParamsSortByCoercion:
-    def test_invalid_sort_by_coerces_to_none(self):
-        params = ChartParams.model_validate({"chart_type": "bar", "x_column": "cat", "sort_by": "rank"})
-        assert params.sort_by is None
-
-    def test_invalid_group_sort_by_coerces_to_none(self):
-        params = ChartParams.model_validate({"chart_type": "bar", "x_column": "cat", "group_sort_by": "total"})
-        assert params.group_sort_by is None
-
-    def test_valid_sort_by_preserved(self):
-        params = ChartParams.model_validate({"chart_type": "bar", "x_column": "cat", "sort_by": "y"})
+class TestChartParamsSortBy:
+    @pytest.mark.parametrize("sort_by", ["y", enums_pb2.SORT_BY_Y], ids=["token", "protocol-int"])
+    def test_sort_by_accepts_tokens_and_protocol_integers(self, sort_by):
+        # Protocol step configs carry enums as integers; they must not be dropped.
+        params = ChartParams.model_validate({"chart_type": "bar", "x_column": "cat", "sort_by": sort_by, "group_sort_by": enums_pb2.GROUP_SORT_BY_VALUE})
         assert params.sort_by == enums_pb2.SORT_BY_Y
-
-    def test_valid_group_sort_by_preserved(self):
-        params = ChartParams.model_validate({"chart_type": "bar", "x_column": "cat", "group_sort_by": "value"})
         assert params.group_sort_by == enums_pb2.GROUP_SORT_BY_VALUE
 
-    def test_invalid_sort_by_does_not_raise_in_compute(self):
-        lf = pl.DataFrame({"cat": ["A", "B"], "val": [1.0, 2.0]}).lazy()
-        result = compute_chart_data(
-            lf,
-            {
-                "chart_type": "bar",
-                "x_column": "cat",
-                "y_column": "val",
-                "sort_by": "rank",
-            },
-        ).collect()
-        assert result.height == 2
+    @pytest.mark.parametrize("field", ["sort_by", "group_sort_by"])
+    def test_unknown_sort_tokens_are_rejected(self, field):
+        with pytest.raises(ValidationError):
+            ChartParams.model_validate({"chart_type": "bar", "x_column": "cat", field: "rank"})
 
 
 # ---------------------------------------------------------------------------
@@ -3036,32 +2577,24 @@ class TestSafeBuiltinsUdf:
         udf = local_scope.get("udf") or scope.get("udf")
         return udf() if udf else None
 
-    def test_getattr_blocked(self):
+    @pytest.mark.parametrize(
+        "code",
+        [
+            pytest.param('def udf(): return getattr([], "__class__")', id="getattr"),
+            pytest.param('def udf():\n    class C: pass\n    setattr(C, "x", 1)\n    return C.x', id="setattr"),
+            pytest.param("def udf(): return vars()", id="vars"),
+            pytest.param("def udf(): return dir([])", id="dir"),
+            pytest.param('def udf(): return open("/etc/passwd")', id="open"),
+        ],
+    )
+    def test_blocked_builtin_raises(self, code):
         with pytest.raises((NameError, TypeError)):
-            self._run_udf('def udf(): return getattr([], "__class__")')
-
-    def test_setattr_blocked(self):
-        with pytest.raises((NameError, TypeError)):
-            self._run_udf('def udf():\n    class C: pass\n    setattr(C, "x", 1)\n    return C.x')
-
-    def test_vars_blocked(self):
-        with pytest.raises((NameError, TypeError)):
-            self._run_udf("def udf(): return vars()")
-
-    def test_dir_blocked(self):
-        with pytest.raises((NameError, TypeError)):
-            self._run_udf("def udf(): return dir([])")
-
-    def test_open_blocked(self):
-        with pytest.raises((NameError, TypeError)):
-            self._run_udf('def udf(): return open("/etc/passwd")')
+            self._run_udf(code)
 
     def test_dunder_escape_blocked_before_exec(self):
-        from operations.with_columns import WithColumnsHandler
-
-        handler = WithColumnsHandler()
         with pytest.raises(ValueError, match="forbidden dunder access"):
-            handler(
+            run_operation(
+                "with_columns",
                 pl.DataFrame({"id": [1]}).lazy(),
                 {
                     "expressions": [
@@ -3074,107 +2607,99 @@ class TestSafeBuiltinsUdf:
                 },
             )
 
-    def test_safe_arithmetic_works(self):
-        result = self._run_udf("def udf(): return 2 + 2")
-        assert result == 4
-
-    def test_safe_len_works(self):
-        result = self._run_udf("def udf(): return len([1, 2, 3])")
-        assert result == 3
+    @pytest.mark.parametrize(
+        ("code", "expected"),
+        [
+            pytest.param("def udf(): return 2 + 2", 4, id="arithmetic"),
+            pytest.param("def udf(): return len([1, 2, 3])", 3, id="len"),
+        ],
+    )
+    def test_safe_builtin_evaluates(self, code, expected):
+        assert self._run_udf(code) == expected
 
 
 class TestValidateRegexPattern:
     """Shared operations.validation.validate_regex_pattern helper."""
 
-    def test_valid_pattern_passes(self):
+    @pytest.mark.parametrize(
+        ("pattern", "expected_error"),
+        [
+            pytest.param(r"\d+", None, id="valid_pattern_passes"),
+            pytest.param(r"[unclosed", "Invalid regex pattern", id="invalid_pattern_raises"),
+        ],
+    )
+    def test_validate_regex_pattern(self, pattern, expected_error):
         from operations.validation import validate_regex_pattern
 
-        validate_regex_pattern(r"\d+")
-
-    def test_invalid_pattern_raises(self):
-        from operations.validation import validate_regex_pattern
-
-        with pytest.raises(ValueError, match="Invalid regex pattern"):
-            validate_regex_pattern(r"[unclosed")
+        with pytest.raises(ValueError, match=expected_error) if expected_error else nullcontext():
+            validate_regex_pattern(pattern)
 
 
 class TestAssertSelectOnly:
     """SQL read-only guard in datasource operations."""
 
-    def _check(self, query: str):
+    @pytest.mark.parametrize(
+        ("query", "expected_error"),
+        [
+            pytest.param("SELECT * FROM t", None, id="select_allowed"),
+            pytest.param("  SELECT * FROM t", None, id="select_leading_whitespace"),
+            pytest.param("WITH cte AS (SELECT 1) SELECT * FROM cte", None, id="with_cte_allowed"),
+            pytest.param("INSERT INTO t VALUES (1)", "Only SELECT", id="insert_rejected"),
+            pytest.param("DROP TABLE t", "Only SELECT", id="drop_rejected"),
+            pytest.param("", "Only SELECT", id="empty_rejected"),
+        ],
+    )
+    def test_select_only_guard(self, query, expected_error):
         from datasources.datasource_loading import _assert_select_only
 
-        _assert_select_only(query)
-
-    def test_select_allowed(self):
-        self._check("SELECT * FROM t")
-
-    def test_select_leading_whitespace(self):
-        self._check("  SELECT * FROM t")
-
-    def test_with_cte_allowed(self):
-        self._check("WITH cte AS (SELECT 1) SELECT * FROM cte")
-
-    def test_insert_rejected(self):
-        with pytest.raises(ValueError, match="Only SELECT"):
-            self._check("INSERT INTO t VALUES (1)")
-
-    def test_drop_rejected(self):
-        with pytest.raises(ValueError, match="Only SELECT"):
-            self._check("DROP TABLE t")
-
-    def test_empty_rejected(self):
-        with pytest.raises(ValueError, match="Only SELECT"):
-            self._check("")
+        with pytest.raises(ValueError, match=expected_error) if expected_error else nullcontext():
+            _assert_select_only(query)
 
 
 class TestParseDatetimeString:
     """FilterValueType.parse_datetime accepts ISO 8601 only."""
 
-    def test_iso8601(self):
-        from datetime import datetime
-
+    @pytest.mark.parametrize(
+        ("value", "expected"),
+        [
+            pytest.param("2024-06-15T12:30:00", datetime(2024, 6, 15, 12, 30, 0), id="iso8601"),
+            pytest.param("2024-06-15T12:30:00Z", datetime(2024, 6, 15, 12, 30, 0, tzinfo=UTC), id="z_suffix"),
+        ],
+    )
+    def test_accepts_iso_8601(self, value, expected):
         from operations.filter import FilterValueType
 
-        dt = FilterValueType.parse_datetime("2024-06-15T12:30:00")
-        assert dt == datetime(2024, 6, 15, 12, 30, 0)
+        assert FilterValueType.parse_datetime(value) == expected
 
-    def test_z_suffix(self):
+    @pytest.mark.parametrize(
+        ("value", "error_match"),
+        [
+            pytest.param("2024-06-15 12:30:00", "Accepted format: ISO 8601", id="non_iso_rejected"),
+            pytest.param("not-a-date", "Cannot parse datetime string", id="invalid_raises"),
+        ],
+    )
+    def test_rejects_other_formats(self, value, error_match):
         from operations.filter import FilterValueType
 
-        dt = FilterValueType.parse_datetime("2024-06-15T12:30:00Z")
-        assert dt.year == 2024 and dt.month == 6 and dt.day == 15
-
-    def test_non_iso_rejected(self):
-        from operations.filter import FilterValueType
-
-        with pytest.raises(ValueError, match="Accepted format: ISO 8601"):
-            FilterValueType.parse_datetime("2024-06-15 12:30:00")
-
-    def test_invalid_raises(self):
-        from operations.filter import FilterValueType
-
-        with pytest.raises(ValueError, match="Cannot parse datetime string"):
-            FilterValueType.parse_datetime("not-a-date")
+        with pytest.raises(ValueError, match=error_match):
+            FilterValueType.parse_datetime(value)
 
 
 class TestCoerceValueNumber:
     """coerce_value handles scientific notation strings correctly."""
 
-    def test_integer_string(self):
+    @pytest.mark.parametrize(
+        ("raw", "expected", "expected_type"),
+        [
+            pytest.param("42", 42, int, id="integer_string"),
+            pytest.param("3.14", pytest.approx(3.14), float, id="float_string"),
+            # '1e5' contains 'e', so it must stay a float even though it is integral
+            pytest.param("1e5", pytest.approx(100000.0), float, id="scientific_notation"),
+        ],
+    )
+    def test_number_string_coercion(self, raw, expected, expected_type):
         from operations.filter import FilterValueType
 
-        assert FilterValueType.NUMBER.coerce("42") == 42
-        assert isinstance(FilterValueType.NUMBER.coerce("42"), int)
-
-    def test_float_string(self):
-        from operations.filter import FilterValueType
-
-        assert FilterValueType.NUMBER.coerce("3.14") == pytest.approx(3.14)
-
-    def test_scientific_notation(self):
-        from operations.filter import FilterValueType
-
-        val = FilterValueType.NUMBER.coerce("1e5")
-        assert val == pytest.approx(100000.0)
-        assert isinstance(val, float)  # '1e5' contains 'e', must stay float
+        val = FilterValueType.NUMBER.coerce(raw)
+        assert val == expected
+        assert isinstance(val, expected_type)

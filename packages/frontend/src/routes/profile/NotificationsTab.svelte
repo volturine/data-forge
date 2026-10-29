@@ -1,17 +1,7 @@
 <script lang="ts">
 	import { onMount } from 'svelte';
 	import { createQuery, createMutation, useQueryClient } from '@tanstack/svelte-query';
-	import {
-		Mail,
-		MessageCircle,
-		ChevronDown,
-		CheckCircle,
-		XCircle,
-		Send,
-		Save,
-		Loader2,
-		Trash2
-	} from '@lucide/svelte';
+	import { Mail, MessageCircle, ChevronDown, Send, Save, Loader2, Trash2 } from '@lucide/svelte';
 	import {
 		getSettings,
 		updateSettings,
@@ -24,6 +14,7 @@
 	} from '#lib/api/settings.js';
 	import type { AppSettings } from '#lib/api/settings.js';
 	import { configStore } from '#lib/stores/config.svelte.js';
+	import FeedbackBanner from '#lib/components/ui/FeedbackBanner.svelte';
 	import SectionHeader from '#lib/components/ui/SectionHeader.svelte';
 	import { button, css, input, label } from '#lib/styles/panda.js';
 
@@ -152,23 +143,6 @@
 		);
 		testingSmtp = false;
 	}
-
-	const feedbackStyle = (type: 'success' | 'error') =>
-		css({
-			display: 'flex',
-			alignItems: 'center',
-			gap: '2',
-			borderWidth: '1',
-			padding: '2',
-			fontSize: 'sm',
-			...(type === 'success'
-				? {
-						borderColor: 'border.success',
-						backgroundColor: 'bg.success',
-						color: 'fg.success'
-					}
-				: { borderColor: 'border.error', backgroundColor: 'bg.error', color: 'fg.error' })
-		});
 </script>
 
 {#if loading}
@@ -189,14 +163,7 @@
 {:else}
 	<div class={css({ display: 'flex', flexDirection: 'column', gap: '6' })}>
 		{#if feedback}
-			<div class={feedbackStyle(feedback.type)}>
-				{#if feedback.type === 'success'}
-					<CheckCircle size={14} />
-				{:else}
-					<XCircle size={14} />
-				{/if}
-				{feedback.message}
-			</div>
+			<FeedbackBanner kind={feedback.type} message={feedback.message} />
 		{/if}
 
 		<div

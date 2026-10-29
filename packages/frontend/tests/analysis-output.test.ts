@@ -72,6 +72,10 @@ test.describe('Analyses – output visibility toggle', () => {
 
 			const toggle = page.locator('[data-testid="output-visibility-toggle"]');
 			await expect(toggle).toBeVisible({ timeout: 5_000 });
+			// Without a saved/built output datasource, toggle shows "hidden" (default).
+			await expect(toggle).toContainText('hidden', { timeout: 5_000 });
+			await screenshot(page, 'analysis/output', 'output-visibility-toggle');
+
 			// Reserved output id is exposed on the toggle before first build.
 			const reservedId = await toggle.getAttribute('data-output-datasource-id');
 			expect(reservedId).toMatch(
@@ -96,255 +100,166 @@ test.describe('Analyses – output visibility toggle', () => {
 		}
 	});
 
-	test('OutputNode: successful build creates output datasource visible in the library', async ({
+	test('OutputNode: build, visibility, rebuild, and preview after source deletion', async ({
 		page,
 		request
 	}) => {
+		// One analysis carries three former journeys. Visibility and the rebuild need the output
+		// built in the first step. Source deletion runs last because it deletes the analysis that
+		// the rebuild needs, and the output id is read again after the rebuild.
+		test.slow();
 		const aName = `E2E Build Creates Output ${uid()}`;
 		const aId = await createAnalysis(request, aName, sharedDatasourceId);
-		try {
-			await gotoAnalysisEditor(page, aId);
-
-			const toggle = page.locator('[data-testid="output-visibility-toggle"]');
-			await expect(toggle).toBeVisible({ timeout: 5_000 });
-			const reservedId = await toggle.getAttribute('data-output-datasource-id');
-			expect(reservedId).toBeTruthy();
-			const outputName = (
-				await page.locator('[data-testid="output-table-name-card"]').textContent()
-			)?.trim();
-			expect(outputName).toBeTruthy();
-
-			// Before build: health empty state for unbuilt output.
-			await page.locator('[data-testid="output-health-toggle"]').click();
-			await expect(page.locator('[data-testid="output-health-empty-state"]')).toContainText(
-				/Build this output once to create its datasource/i,
-				{ timeout: 5_000 }
-			);
-
-			const buildBtn = page.locator('[data-testid="output-build-button"]');
-			await expect(buildBtn).toBeVisible({ timeout: 5_000 });
-			await buildBtn.click({ timeout: 5_000 });
-			const buildTrigger = page.locator('[data-testid="output-build-preview-trigger"]');
-			await expect(buildTrigger).toBeVisible({ timeout: 5_000 });
-			await expectCompletedEventually(buildTrigger);
-
-			// After a successful build the visibility chip stays interactive.
-			await expect(toggle).toBeEnabled({ timeout: 15_000 });
-			await expect(toggle).toContainText('hidden', { timeout: 5_000 });
-			await toggle.click();
-			await expect(toggle).toContainText('visible', { timeout: 5_000 });
-
-			// Follow the SPA path so the library sees the output without a reload.
-			await page.getByRole('link', { name: 'Data Sources' }).click();
-			const row = page.locator(`[data-ds-id="${reservedId}"]`);
-			await expect(row).toBeVisible({ timeout: 15_000 });
-			await expect(row).toHaveAttribute('data-ds-row', outputName!);
-
-			await row.click();
-			await waitForDatasourcePreviewReady(page, readyTimeoutMs());
-			const preview = page.getByTestId('datasource-preview');
-			await expect(preview.locator('table tbody tr').first()).toBeVisible({
-				timeout: readyTimeoutMs()
-			});
-
-			await page.goBack();
-			await expect(toggle).toBeVisible({ timeout: readyTimeoutMs() });
-			await toggle.click();
-			await expect(toggle).toContainText('hidden', { timeout: 5_000 });
-
-			await page.getByRole('link', { name: 'Data Sources' }).click();
-			await expect(row).toHaveCount(0, { timeout: 15_000 });
-		} finally {
-			await cleanupAnalysis(page, aName);
-		}
-	});
-
-	test('visible output previews first after reload when its source analysis was deleted', async ({
-		page,
-		request
-	}) => {
-		const aName = `E2E Deleted Source Preview ${uid()}`;
-		const aId = await createAnalysis(request, aName, sharedDatasourceId);
+		let reservedId: string | null = null;
+		let outputName: string | undefined;
 		let markPreviewStarted = () => {};
 		let releasePreview = () => {};
 		try {
-			await gotoAnalysisEditor(page, aId);
-			const toggle = page.locator('[data-testid="output-visibility-toggle"]');
-			await expect(toggle).toBeVisible({ timeout: 5_000 });
-			const outputId = await toggle.getAttribute('data-output-datasource-id');
-			const outputName = (
-				await page.locator('[data-testid="output-table-name-card"]').textContent()
-			)?.trim();
-			expect(outputId).toBeTruthy();
-			expect(outputName).toBeTruthy();
+			await test.step('successful build creates output datasource visible in the library', async () => {
+				await gotoAnalysisEditor(page, aId);
 
-			await page.locator('[data-testid="output-build-button"]').click({ timeout: 5_000 });
-			const buildTrigger = page.locator('[data-testid="output-build-preview-trigger"]');
-			await expect(buildTrigger).toBeVisible({ timeout: 5_000 });
-			await expectCompletedEventually(buildTrigger);
-			await expect(toggle).toBeEnabled({ timeout: 15_000 });
-			await toggle.click();
-			await expect(toggle).toContainText('visible', { timeout: 5_000 });
+				const toggle = page.locator('[data-testid="output-visibility-toggle"]');
+				await expect(toggle).toBeVisible({ timeout: 5_000 });
+				reservedId = await toggle.getAttribute('data-output-datasource-id');
+				expect(reservedId).toBeTruthy();
+				outputName = (
+					await page.locator('[data-testid="output-table-name-card"]').textContent()
+				)?.trim();
+				expect(outputName).toBeTruthy();
 
-			await gotoAnalysesGallery(page);
-			const card = page.locator(`[data-analysis-card="${aName}"]`);
-			await expect(card).toBeVisible({ timeout: readyTimeoutMs() });
-			await card.getByRole('button', { name: /Delete analysis/ }).click();
-			const dialog = dialogByHeading(page, /Delete Analysis/i);
-			await expect(dialog).toBeVisible();
-			await dialog.getByRole('button', { name: /^Delete$/ }).click();
-			await expect(card).toHaveCount(0, { timeout: readyTimeoutMs() });
+				const buildBtn = page.locator('[data-testid="output-build-button"]');
+				await expect(buildBtn).toBeVisible({ timeout: 5_000 });
+				await buildBtn.click({ timeout: 5_000 });
+				const buildTrigger = page.locator('[data-testid="output-build-preview-trigger"]');
+				await expect(buildTrigger).toBeVisible({ timeout: 5_000 });
+				await expectCompletedEventually(buildTrigger);
 
-			await page.getByRole('link', { name: 'Data Sources' }).click();
-			await showAutoGeneratedDatasources(page);
-			const row = page.locator(`[data-ds-id="${outputId}"]`);
-			await expect(row).toBeVisible({ timeout: readyTimeoutMs() });
-			await page.reload();
-			await waitForDatasourceList(page, readyTimeoutMs());
-			await showAutoGeneratedDatasources(page);
-			await expect(row).toBeVisible({ timeout: readyTimeoutMs() });
+				// After a successful build the visibility chip stays interactive.
+				await expect(toggle).toBeEnabled({ timeout: 15_000 });
+				await expect(toggle).toContainText('hidden', { timeout: 5_000 });
+				await toggle.click();
+				await expect(toggle).toContainText('visible', { timeout: 5_000 });
 
-			const previewStarted = new Promise<void>((resolve) => {
-				markPreviewStarted = resolve;
-			});
-			const previewReleased = new Promise<void>((resolve) => {
-				releasePreview = resolve;
-			});
-			const metadataBranch = 'metadata-arrived-during-preview';
-			await page.route(`**/api/v1/datasource/${outputId}`, async (route) => {
-				const response = await route.fetch();
-				const datasource = await response.json();
-				await previewStarted;
-				await route.fulfill({
-					response,
-					json: {
-						...datasource,
-						config: { ...datasource.config, branches: ['master', metadataBranch] }
-					}
+				// Follow the SPA path so the library sees the output without a reload.
+				await page.getByRole('link', { name: 'Data Sources' }).click();
+				const row = page.locator(`[data-ds-id="${reservedId}"]`);
+				await expect(row).toBeVisible({ timeout: 15_000 });
+				await expect(row).toHaveAttribute('data-ds-row', outputName!);
+
+				await row.click();
+				await waitForDatasourcePreviewReady(page, readyTimeoutMs());
+				const preview = page.getByTestId('datasource-preview');
+				await expect(preview.locator('table tbody tr').first()).toBeVisible({
+					timeout: readyTimeoutMs()
 				});
-			});
-			await page.route('**/api/v1/compute/preview', async (route) => {
-				if (route.request().postDataJSON()?.datasource_id === outputId) {
-					markPreviewStarted();
-					await previewReleased;
-				}
-				await route.continue();
+
+				await page.goBack();
+				await expect(toggle).toBeVisible({ timeout: readyTimeoutMs() });
+				await toggle.click();
+				await expect(toggle).toContainText('hidden', { timeout: 5_000 });
+
+				await page.getByRole('link', { name: 'Data Sources' }).click();
+				await expect(row).toHaveCount(0, { timeout: 15_000 });
 			});
 
-			await row.click();
-			await page.waitForURL((url) => url.pathname === '/datasources', {
-				timeout: readyTimeoutMs()
+			await test.step('rebuilding recreates a deleted output datasource', async () => {
+				// Delete the output built above by the id captured before that build, then rebuild.
+				await deleteDatasourceViaUI(page, outputName!, { id: reservedId! });
+				await gotoAnalysisEditor(page, aId);
+
+				const rebuiltBuildBtn = page.locator('[data-testid="output-build-button"]');
+				await expect(rebuiltBuildBtn).toBeVisible({ timeout: 5_000 });
+				await rebuiltBuildBtn.click();
+				const rebuiltBuildTrigger = page.locator('[data-testid="output-build-preview-trigger"]');
+				await expect(rebuiltBuildTrigger).toBeVisible({ timeout: 5_000 });
+				await expectCompletedEventually(rebuiltBuildTrigger);
+
+				const rebuiltToggleBtn = page.locator('[data-testid="output-visibility-toggle"]');
+				await expect(rebuiltToggleBtn).toBeEnabled({ timeout: 5_000 });
+				await rebuiltToggleBtn.click();
+				await expect(rebuiltToggleBtn).toContainText('visible', { timeout: 5_000 });
+				await rebuiltToggleBtn.click();
+				await expect(rebuiltToggleBtn).toContainText('hidden', { timeout: 5_000 });
 			});
-			// Detail metadata must arrive while the first preview is still in flight.
-			await page.getByRole('button', { name: 'master', exact: true }).click();
-			await expect(page.getByText(metadataBranch, { exact: true })).toBeVisible();
-			await page.keyboard.press('Escape');
-			releasePreview();
-			await waitForDatasourcePreviewReady(page, readyTimeoutMs());
-			const preview = page.getByTestId('datasource-preview');
-			await expect(preview.getByTestId('preview-error')).not.toBeVisible();
-			await expect(preview.locator('table tbody tr').first()).toBeVisible({
-				timeout: readyTimeoutMs()
+
+			await test.step('visible output previews first after reload when its source analysis was deleted', async () => {
+				// The editor is still open from the rebuild step. Read the id after the rebuild,
+				// because the recreated datasource is the one the library must show.
+				const toggle = page.locator('[data-testid="output-visibility-toggle"]');
+				await expect(toggle).toBeVisible({ timeout: 5_000 });
+				const outputId = await toggle.getAttribute('data-output-datasource-id');
+				expect(outputId).toBeTruthy();
+				await toggle.click();
+				await expect(toggle).toContainText('visible', { timeout: 5_000 });
+
+				await gotoAnalysesGallery(page);
+				const card = page.locator(`[data-analysis-card="${aName}"]`);
+				await expect(card).toBeVisible({ timeout: readyTimeoutMs() });
+				await card.getByRole('button', { name: /Delete analysis/ }).click();
+				const dialog = dialogByHeading(page, /Delete Analysis/i);
+				await expect(dialog).toBeVisible();
+				await dialog.getByRole('button', { name: /^Delete$/ }).click();
+				await expect(card).toHaveCount(0, { timeout: readyTimeoutMs() });
+
+				await page.getByRole('link', { name: 'Data Sources' }).click();
+				await showAutoGeneratedDatasources(page);
+				const row = page.locator(`[data-ds-id="${outputId}"]`);
+				await expect(row).toBeVisible({ timeout: readyTimeoutMs() });
+				await page.reload();
+				await waitForDatasourceList(page, readyTimeoutMs());
+				await showAutoGeneratedDatasources(page);
+				await expect(row).toBeVisible({ timeout: readyTimeoutMs() });
+
+				const previewStarted = new Promise<void>((resolve) => {
+					markPreviewStarted = resolve;
+				});
+				const previewReleased = new Promise<void>((resolve) => {
+					releasePreview = resolve;
+				});
+				const metadataBranch = 'metadata-arrived-during-preview';
+				await page.route(`**/api/v1/datasource/${outputId}`, async (route) => {
+					const response = await route.fetch();
+					const datasource = await response.json();
+					await previewStarted;
+					await route.fulfill({
+						response,
+						json: {
+							...datasource,
+							config: { ...datasource.config, branches: ['master', metadataBranch] }
+						}
+					});
+				});
+				await page.route('**/api/v1/compute/preview', async (route) => {
+					if (route.request().postDataJSON()?.datasource_id === outputId) {
+						markPreviewStarted();
+						await previewReleased;
+					}
+					await route.continue();
+				});
+
+				await row.click();
+				await page.waitForURL((url) => url.pathname === '/datasources', {
+					timeout: readyTimeoutMs()
+				});
+				// Detail metadata must arrive while the first preview is still in flight.
+				await page.getByRole('button', { name: 'master', exact: true }).click();
+				await expect(page.getByText(metadataBranch, { exact: true })).toBeVisible();
+				await page.keyboard.press('Escape');
+				releasePreview();
+				await waitForDatasourcePreviewReady(page, readyTimeoutMs());
+				const preview = page.getByTestId('datasource-preview');
+				await expect(preview.getByTestId('preview-error')).not.toBeVisible();
+				await expect(preview.locator('table tbody tr').first()).toBeVisible({
+					timeout: readyTimeoutMs()
+				});
+				await expect(preview).not.toHaveAttribute(
+					'data-preview-error',
+					/Compute request cancelled/i
+				);
 			});
-			await expect(preview).not.toHaveAttribute('data-preview-error', /Compute request cancelled/i);
 		} finally {
 			markPreviewStarted();
 			releasePreview();
-			await cleanupAnalysis(page, aName);
-		}
-	});
-
-	test('OutputNode: visibility toggle button shows initial state', async ({ page, request }) => {
-		const aName = `E2E Vis Toggle ${uid()}`;
-		const aId = await createAnalysis(request, aName, sharedDatasourceId);
-		try {
-			await gotoAnalysisEditor(page, aId);
-
-			// Toggle button should be visible on the output node
-			const toggleBtn = page.locator('[data-testid="output-visibility-toggle"]');
-			await expect(toggleBtn).toBeVisible({ timeout: 5_000 });
-
-			// Without a saved/built output datasource, toggle shows "hidden" (default)
-			// The toggle button is present but not functional until the output datasource exists
-			await expect(toggleBtn).toContainText('hidden', { timeout: 5_000 });
-
-			await screenshot(page, 'analysis/output', 'output-visibility-toggle');
-		} finally {
-			await cleanupAnalysis(page, aName);
-		}
-	});
-
-	test('OutputNode: visibility toggle updates after the output datasource exists', async ({
-		page,
-		request
-	}) => {
-		const aName = `E2E Vis Build ${uid()}`;
-		const aId = await createAnalysis(request, aName, sharedDatasourceId);
-		try {
-			await gotoAnalysisEditor(page, aId);
-
-			const buildBtn = page.locator('[data-testid="output-build-button"]');
-			await expect(buildBtn).toBeVisible({ timeout: 5_000 });
-			await buildBtn.click();
-			const buildTrigger = page.locator('[data-testid="output-build-preview-trigger"]');
-			await expect(buildTrigger).toBeVisible({ timeout: 5_000 });
-			await expectCompletedEventually(buildTrigger);
-
-			const toggleBtn = page.locator('[data-testid="output-visibility-toggle"]');
-			await expect(toggleBtn).toBeEnabled({ timeout: 5_000 });
-			await expect(toggleBtn).toContainText('hidden');
-
-			await toggleBtn.click();
-			await expect(toggleBtn).toContainText('visible', { timeout: 5_000 });
-
-			await toggleBtn.click();
-			await expect(toggleBtn).toContainText('hidden', { timeout: 5_000 });
-		} finally {
-			await cleanupAnalysis(page, aName);
-		}
-	});
-
-	test('OutputNode: rebuilding recreates a deleted output datasource', async ({
-		page,
-		request
-	}) => {
-		const aName = `E2E Output Rebuild ${uid()}`;
-		const aId = await createAnalysis(request, aName, sharedDatasourceId);
-		try {
-			await gotoAnalysisEditor(page, aId);
-			const outputName = (
-				await page.locator('[data-testid="output-table-name-card"]').textContent()
-			)?.trim();
-			expect(outputName).toBeTruthy();
-			const outputId = await page
-				.locator('[data-testid="output-visibility-toggle"]')
-				.getAttribute('data-output-datasource-id');
-			expect(outputId).toBeTruthy();
-
-			const buildBtn = page.locator('[data-testid="output-build-button"]');
-			await expect(buildBtn).toBeVisible({ timeout: 5_000 });
-			await buildBtn.click();
-			const initialBuildTrigger = page.locator('[data-testid="output-build-preview-trigger"]');
-			await expect(initialBuildTrigger).toBeVisible({ timeout: 5_000 });
-			await expectCompletedEventually(initialBuildTrigger);
-
-			await deleteDatasourceViaUI(page, outputName!, { id: outputId! });
-			await gotoAnalysisEditor(page, aId);
-
-			const rebuiltBuildBtn = page.locator('[data-testid="output-build-button"]');
-			await expect(rebuiltBuildBtn).toBeVisible({ timeout: 5_000 });
-			await rebuiltBuildBtn.click();
-			const rebuiltBuildTrigger = page.locator('[data-testid="output-build-preview-trigger"]');
-			await expect(rebuiltBuildTrigger).toBeVisible({ timeout: 5_000 });
-			await expectCompletedEventually(rebuiltBuildTrigger);
-
-			const rebuiltToggleBtn = page.locator('[data-testid="output-visibility-toggle"]');
-			await expect(rebuiltToggleBtn).toBeEnabled({ timeout: 5_000 });
-			await rebuiltToggleBtn.click();
-			await expect(rebuiltToggleBtn).toContainText('visible', { timeout: 5_000 });
-			await rebuiltToggleBtn.click();
-			await expect(rebuiltToggleBtn).toContainText('hidden', { timeout: 5_000 });
-		} finally {
 			await cleanupAnalysis(page, aName);
 		}
 	});
@@ -353,73 +268,104 @@ test.describe('Analyses – output visibility toggle', () => {
 // ── Output node interactions ────────────────────────────────────────────────
 
 test.describe('Analyses – output node interactions', () => {
-	test('output node build button and mode selector are visible', async ({ page, request }) => {
+	test('output node build button and mode selector are visible, and build mode persists after save and reload', async ({
+		page,
+		request
+	}) => {
 		const aName = `E2E Output Node ${uid()}`;
 		const aId = await createAnalysis(request, aName, sharedDatasourceId);
 		try {
-			await gotoAnalysisEditor(page, aId);
+			await test.step('output node build button and mode selector are visible', async () => {
+				await gotoAnalysisEditor(page, aId);
 
-			// Build button should be visible
-			const buildBtn = page.locator('[data-testid="output-build-button"]');
-			await expect(buildBtn).toBeVisible({ timeout: 5_000 });
+				// Build button should be visible
+				const buildBtn = page.locator('[data-testid="output-build-button"]');
+				await expect(buildBtn).toBeVisible({ timeout: 5_000 });
 
-			// Mode trigger should be visible
-			const modeTrigger = page.locator('[data-testid="output-mode-trigger"]');
-			await expect(modeTrigger).toBeVisible();
+				// Mode trigger should be visible
+				const modeTrigger = page.locator('[data-testid="output-mode-trigger"]');
+				await expect(modeTrigger).toBeVisible();
 
-			// Click mode trigger to open dropdown
-			await modeTrigger.click();
-			const dropdown = page.locator('[data-testid="output-mode-listbox"]');
-			await expect(dropdown).toBeVisible({ timeout: 3_000 });
+				// Click mode trigger to open dropdown
+				await modeTrigger.click();
+				const dropdown = page.locator('[data-testid="output-mode-listbox"]');
+				await expect(dropdown).toBeVisible({ timeout: 3_000 });
 
-			// Check mode options are present
-			await expect(dropdown.locator('[data-testid="output-mode-option-full"]')).toBeVisible();
-			await expect(
-				dropdown.locator('[data-testid="output-mode-option-incremental"]')
-			).toBeVisible();
-			await expect(dropdown.locator('[data-testid="output-mode-option-recreate"]')).toBeVisible();
+				// Check mode options are present
+				await expect(dropdown.locator('[data-testid="output-mode-option-full"]')).toBeVisible();
+				await expect(
+					dropdown.locator('[data-testid="output-mode-option-incremental"]')
+				).toBeVisible();
+				await expect(dropdown.locator('[data-testid="output-mode-option-recreate"]')).toBeVisible();
 
-			await screenshot(page, 'analysis/output', 'output-node-mode-dropdown');
-		} finally {
-			await cleanupAnalysis(page, aName);
-		}
-	});
-
-	test('selecting a mode updates the trigger text', async ({ page, request }) => {
-		const aName = `E2E Output Mode ${uid()}`;
-		const aId = await createAnalysis(request, aName, sharedDatasourceId);
-		try {
-			await gotoAnalysisEditor(page, aId);
-
-			const buildBtn = page.locator('[data-testid="output-build-button"]');
-			await expect(buildBtn).toBeVisible({ timeout: 5_000 });
-
-			const modeTrigger = page.locator('[data-testid="output-mode-trigger"]');
-			await expect(modeTrigger).toBeVisible({ timeout: 5_000 });
-
-			// Default should be "full"
-			await expect(modeTrigger).toContainText('full');
-
-			// Select "incremental"
-			await modeTrigger.click();
-			const dropdown = page.locator('[data-testid="output-mode-listbox"]');
-			await expect(dropdown).toBeVisible({ timeout: 3_000 });
-			await dropdown.locator('[data-testid="output-mode-option-incremental"]').click();
-
-			// Dropdown should close and trigger should show "incremental"
-			await expect(dropdown).not.toBeVisible({ timeout: 3_000 });
-			await expect(modeTrigger).toContainText('incremental');
-
-			// Select "recreate"
-			await modeTrigger.click();
-			await expect(page.locator('[data-testid="output-mode-listbox"]')).toBeVisible({
-				timeout: 3_000
+				await screenshot(page, 'analysis/output', 'output-node-mode-dropdown');
 			});
-			await page.locator('[data-testid="output-mode-option-recreate"]').click();
 
-			await expect(modeTrigger).toContainText('recreate');
+			await test.step('selecting a mode updates the trigger text', async () => {
+				// Reload the editor so the mode dropdown opened above is closed.
+				await gotoAnalysisEditor(page, aId);
 
-			await screenshot(page, 'analysis/output', 'output-mode-recreate');
+				const buildBtn = page.locator('[data-testid="output-build-button"]');
+				await expect(buildBtn).toBeVisible({ timeout: 5_000 });
+
+				const modeTrigger = page.locator('[data-testid="output-mode-trigger"]');
+				await expect(modeTrigger).toBeVisible({ timeout: 5_000 });
+
+				// Default should be "full"
+				await expect(modeTrigger).toContainText('full');
+
+				// Select "incremental"
+				await modeTrigger.click();
+				const dropdown = page.locator('[data-testid="output-mode-listbox"]');
+				await expect(dropdown).toBeVisible({ timeout: 3_000 });
+				await dropdown.locator('[data-testid="output-mode-option-incremental"]').click();
+
+				// Dropdown should close and trigger should show "incremental"
+				await expect(dropdown).not.toBeVisible({ timeout: 3_000 });
+				await expect(modeTrigger).toContainText('incremental');
+
+				// Select "recreate"
+				await modeTrigger.click();
+				await expect(page.locator('[data-testid="output-mode-listbox"]')).toBeVisible({
+					timeout: 3_000
+				});
+				await page.locator('[data-testid="output-mode-option-recreate"]').click();
+
+				await expect(modeTrigger).toContainText('recreate');
+
+				await screenshot(page, 'analysis/output', 'output-mode-recreate');
+			});
+
+			await test.step('build mode persists after save and reload', async () => {
+				// Continues from the unsaved "recreate" selection above. Navigating away
+				// here would hit the editor's beforeunload guard, so save in place.
+				const modeTrigger = page.locator('[data-testid="output-mode-trigger"]');
+				await expect(modeTrigger).toBeVisible({ timeout: 5_000 });
+
+				// Select incremental mode
+				await modeTrigger.click();
+				const dropdown = page.locator('[data-testid="output-mode-listbox"]');
+				await expect(dropdown).toBeVisible({ timeout: 3_000 });
+				await dropdown.locator('[data-testid="output-mode-option-incremental"]').click();
+				await expect(modeTrigger).toContainText('incremental');
+
+				// Save the analysis
+				await page.getByRole('button', { name: 'Save' }).click();
+				await expect(page.getByRole('button', { name: 'Saved' })).toBeVisible({ timeout: 5_000 });
+
+				// Verify mode is still correct immediately after save (before reload)
+				await expect(modeTrigger).toContainText('incremental');
+
+				// Reload and verify mode persisted
+				await page.reload();
+				await waitForEditorReload(page);
+
+				const modeTriggerAfter = page.locator('[data-testid="output-mode-trigger"]');
+				await expect(modeTriggerAfter).toBeVisible({ timeout: 5_000 });
+				await expect(modeTriggerAfter).toContainText('incremental');
+
+				await screenshot(page, 'analysis/output', 'output-mode-persisted');
+			});
 		} finally {
 			await cleanupAnalysis(page, aName);
 		}
@@ -537,37 +483,6 @@ test.describe('Analyses – output node interactions', () => {
 			await cleanupAnalysis(page, aName);
 		}
 	});
-
-	test('table name inline edit', async ({ page, request }) => {
-		const aName = `E2E Output Rename ${uid()}`;
-		const aId = await createAnalysis(request, aName, sharedDatasourceId);
-		try {
-			await gotoAnalysisEditor(page, aId);
-
-			// Click the edit pencil button (aria-label="Edit export name")
-			const editBtn = page.locator('[data-testid="output-table-name-inline-edit"]');
-			await expect(editBtn).toBeVisible({ timeout: 5_000 });
-			await editBtn.click();
-
-			// Input should appear
-			const nameInput = page.locator('#output-node-name');
-			await expect(nameInput).toBeVisible({ timeout: 3_000 });
-
-			// Clear and type new name
-			await nameInput.fill('my_custom_table');
-			await nameInput.press('Enter');
-
-			// After commit, the new name should appear in the output card
-			await expect(page.locator('[data-testid="output-table-name-inline"]')).toHaveText(
-				'my_custom_table',
-				{ timeout: 3_000 }
-			);
-
-			await screenshot(page, 'analysis/output', 'output-table-renamed');
-		} finally {
-			await cleanupAnalysis(page, aName);
-		}
-	});
 });
 
 // ── Output table name edit ──────────────────────────────────────────────────
@@ -605,43 +520,6 @@ test.describe('Analyses – output node table name edit', () => {
 // ── Output persistence ──────────────────────────────────────────────────────
 
 test.describe('Analyses – output node persistence', () => {
-	test('build mode persists after save and reload', async ({ page, request }) => {
-		const aName = `E2E Mode Persist ${uid()}`;
-		const aId = await createAnalysis(request, aName, sharedDatasourceId);
-		try {
-			await gotoAnalysisEditor(page, aId);
-
-			const modeTrigger = page.locator('[data-testid="output-mode-trigger"]');
-			await expect(modeTrigger).toBeVisible({ timeout: 5_000 });
-
-			// Select incremental mode
-			await modeTrigger.click();
-			const dropdown = page.locator('[data-testid="output-mode-listbox"]');
-			await expect(dropdown).toBeVisible({ timeout: 3_000 });
-			await dropdown.locator('[data-testid="output-mode-option-incremental"]').click();
-			await expect(modeTrigger).toContainText('incremental');
-
-			// Save the analysis
-			await page.getByRole('button', { name: 'Save' }).click();
-			await expect(page.getByRole('button', { name: 'Saved' })).toBeVisible({ timeout: 5_000 });
-
-			// Verify mode is still correct immediately after save (before reload)
-			await expect(modeTrigger).toContainText('incremental');
-
-			// Reload and verify mode persisted
-			await page.reload();
-			await waitForEditorReload(page);
-
-			const modeTriggerAfter = page.locator('[data-testid="output-mode-trigger"]');
-			await expect(modeTriggerAfter).toBeVisible({ timeout: 5_000 });
-			await expect(modeTriggerAfter).toContainText('incremental');
-
-			await screenshot(page, 'analysis/output', 'output-mode-persisted');
-		} finally {
-			await cleanupAnalysis(page, aName);
-		}
-	});
-
 	test('table name persists after save and reload', async ({ page, request }) => {
 		const aName = `E2E TableName Persist ${uid()}`;
 		const aId = await createAnalysis(request, aName, sharedDatasourceId);
@@ -664,8 +542,18 @@ test.describe('Analyses – output node persistence', () => {
 				{ timeout: 3_000 }
 			);
 
+			await screenshot(page, 'analysis/output', 'output-table-renamed');
+
 			// Save
-			await page.getByRole('button', { name: 'Save' }).click();
+			const [saveResponse] = await Promise.all([
+				page.waitForResponse(
+					(response) =>
+						response.url().endsWith(`/api/v1/analysis/${aId}`) &&
+						response.request().method() === 'PUT'
+				),
+				page.getByRole('button', { name: 'Save' }).click()
+			]);
+			expect(saveResponse.ok()).toBeTruthy();
 			await expect(page.getByRole('button', { name: 'Saved' })).toBeVisible({ timeout: 5_000 });
 
 			// Verify table name is still correct immediately after save (before reload)

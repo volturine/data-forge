@@ -2,7 +2,7 @@ from __future__ import annotations
 
 import uuid
 from collections.abc import Mapping
-from datetime import UTC, datetime, timedelta
+from datetime import datetime, timedelta
 from enum import StrEnum
 from urllib.parse import urlparse
 
@@ -21,6 +21,7 @@ from backend_core.persistence.runtime_events.models import RuntimeOutboxEvent, R
 from backend_core.runtime_outbox_service import STORAGE_CLEANUP_KIND, OutboxClaim
 from backend_core.runtime_work_service import RuntimeWorkKind
 from backend_core.sqlmodel_typing import col, sa
+from backend_core.time import aware_utc
 from dataforge_protocol import enums_pb2
 
 STORAGE_CLEANUP_WAKE_KIND = 'storage_cleanup_wakeup'
@@ -35,8 +36,21 @@ class StorageCleanupPhase(StrEnum):
     DELETED = 'deleted'
 
 
+class StorageCleanupOwner(StrEnum):
+    UPLOAD = 'upload'
+    PREFLIGHT = 'preflight'
+    SOURCE = 'source'
+    DATASOURCE = 'datasource'
+    COMPUTE = 'compute'
+    BUILD = 'build'
+
+
 class StorageCleanupConflict(RuntimeError):
     """An object already authorized for deletion cannot acquire a new reference."""
+
+
+def _phase(payload: Mapping[str, object]) -> StorageCleanupPhase:
+    return StorageCleanupPhase(str(payload['phase']))
 
 
 def _is_managed_url(url: str, roots: frozenset[str] = frozenset({'uploads', 'clean', 'exports', 'runtime-staging'})) -> bool:
@@ -44,10 +58,6 @@ def _is_managed_url(url: str, roots: frozenset[str] = frozenset({'uploads', 'cle
     parsed = urlparse(url)
     segments = parsed.path.strip('/').split('/')
     return parsed.scheme == 's3' and parsed.netloc == get_namespace() and segments[0] in roots and not any(segment in {'.', '..'} for segment in segments)
-
-
-def _aware(value: datetime) -> datetime:
-    return value if value.tzinfo is not None else value.replace(tzinfo=UTC)
 
 
 def _rearm(session: Session, event: RuntimeOutboxEvent, *, available_at: datetime | None = None) -> None:
@@ -66,13 +76,18 @@ def _rearm(session: Session, event: RuntimeOutboxEvent, *, available_at: datetim
 def _lock_owner(session: Session, payload: Mapping[str, object]) -> ComputeRequest | BuildJob | DataSource | None:
     owner_kind = payload['owner_kind']
     owner_id = str(payload['owner_id'])
-    if owner_kind == 'upload':
-        return None
-    if owner_kind == 'build':
-        return session.get(BuildJob, owner_id, with_for_update=True, populate_existing=True)
-    if owner_kind == 'datasource':
-        return session.get(DataSource, owner_id, with_for_update=True, populate_existing=True)
-    return session.get(ComputeRequest, owner_id, with_for_update=True, populate_existing=True)
+    match owner_kind:
+        case StorageCleanupOwner.UPLOAD:
+            return None
+        case StorageCleanupOwner.BUILD:
+            return session.get(BuildJob, owner_id, with_for_update=True, populate_existing=True)
+        case StorageCleanupOwner.DATASOURCE:
+            return session.get(DataSource, owner_id, with_for_update=True, populate_existing=True)
+        # Preflight and source owner IDs are compute request IDs.
+        case StorageCleanupOwner.PREFLIGHT | StorageCleanupOwner.SOURCE | StorageCleanupOwner.COMPUTE:
+            return session.get(ComputeRequest, owner_id, with_for_update=True, populate_existing=True)
+        case _:
+            raise ValueError(f'Unsupported storage cleanup owner kind {owner_kind!r}')
 
 
 def _event_id(url: str) -> str:
@@ -194,7 +209,7 @@ def enqueue_datasource_cleanup(session: Session, datasource: DataSource) -> None
 
         payload: dict[str, object] = {
             'resource_id': datasource_id,
-            'owner_kind': 'datasource',
+            'owner_kind': StorageCleanupOwner.DATASOURCE.value,
             'owner_id': datasource_id,
             'is_prefix': is_prefix,
         }
@@ -219,7 +234,7 @@ def _enqueue_datasource_target(session: Session, *, url: str, payload: dict[str,
     if event.kind != STORAGE_CLEANUP_KIND or event.payload_json.get('url') != url:
         raise ValueError('Storage cleanup identity is already in use')
 
-    phase = StorageCleanupPhase(str(event.payload_json['phase']))
+    phase = _phase(event.payload_json)
     if phase in {StorageCleanupPhase.AUTHORIZED, StorageCleanupPhase.DELETED}:
         return
 
@@ -230,13 +245,13 @@ def _enqueue_datasource_target(session: Session, *, url: str, payload: dict[str,
 
 def register_preflight_source(session: Session, *, preflight_id: str, resource_id: str, source_path: str, available_at: datetime | None = None) -> None:
     event = session.get(RuntimeOutboxEvent, _event_id(source_path), with_for_update=True, populate_existing=True)
-    if event is not None and event.payload_json.get('owner_kind') == 'upload':
-        if StorageCleanupPhase(str(event.payload_json.get('phase'))) != StorageCleanupPhase.TRACKED:
+    if event is not None and event.payload_json.get('owner_kind') == StorageCleanupOwner.UPLOAD:
+        if _phase(event.payload_json) != StorageCleanupPhase.TRACKED:
             raise StorageCleanupConflict('Uploaded preflight source is no longer available')
         event.payload_json = {
             **event.payload_json,
             'resource_id': resource_id,
-            'owner_kind': 'preflight',
+            'owner_kind': StorageCleanupOwner.PREFLIGHT.value,
             'owner_id': preflight_id,
         }
         _rearm(session, event, available_at=available_at)
@@ -244,7 +259,7 @@ def register_preflight_source(session: Session, *, preflight_id: str, resource_i
     _enqueue(
         session,
         url=source_path,
-        payload={'resource_id': resource_id, 'owner_kind': 'preflight', 'owner_id': preflight_id, 'is_prefix': False},
+        payload={'resource_id': resource_id, 'owner_kind': StorageCleanupOwner.PREFLIGHT.value, 'owner_id': preflight_id, 'is_prefix': False},
         available_at=available_at,
     )
 
@@ -254,24 +269,29 @@ def register_upload_source(session: Session, *, upload_id: str, source_path: str
     event = _enqueue(
         session,
         url=source_path,
-        payload={'resource_id': upload_id, 'owner_kind': 'upload', 'owner_id': upload_id, 'is_prefix': False},
+        payload={'resource_id': upload_id, 'owner_kind': StorageCleanupOwner.UPLOAD.value, 'owner_id': upload_id, 'is_prefix': False},
         available_at=database_now(session) + PREFLIGHT_TTL,
     )
-    if event.payload_json.get('owner_kind') != 'upload' or event.payload_json.get('owner_id') != upload_id:
+    if event.payload_json.get('owner_kind') != StorageCleanupOwner.UPLOAD or event.payload_json.get('owner_id') != upload_id:
         raise StorageCleanupConflict('Upload target already has a different durable owner')
     session.commit()
 
 
-def renew_upload_source(session: Session, *, upload_id: str, source_path: str) -> None:
+def _lock_tracked_upload(session: Session, *, upload_id: str, source_path: str, conflict: str) -> RuntimeOutboxEvent:
     event = session.get(RuntimeOutboxEvent, _event_id(source_path), with_for_update=True, populate_existing=True)
     if (
         event is None
         or event.kind != STORAGE_CLEANUP_KIND
-        or event.payload_json.get('owner_kind') != 'upload'
+        or event.payload_json.get('owner_kind') != StorageCleanupOwner.UPLOAD
         or event.payload_json.get('owner_id') != upload_id
-        or StorageCleanupPhase(str(event.payload_json.get('phase'))) != StorageCleanupPhase.TRACKED
+        or _phase(event.payload_json) != StorageCleanupPhase.TRACKED
     ):
-        raise StorageCleanupConflict('Upload source ownership was lost')
+        raise StorageCleanupConflict(conflict)
+    return event
+
+
+def renew_upload_source(session: Session, *, upload_id: str, source_path: str) -> None:
+    event = _lock_tracked_upload(session, upload_id=upload_id, source_path=source_path, conflict='Upload source ownership was lost')
     _rearm(session, event, available_at=database_now(session) + PREFLIGHT_TTL)
     session.commit()
 
@@ -283,15 +303,12 @@ def complete_upload_source(session: Session, *, upload_id: str, source_path: str
 
 def release_upload_source_for_cleanup(session: Session, *, upload_id: str, source_path: str) -> None:
     """Make an abandoned or failed, fully-settled transfer immediately retryable."""
-    event = session.get(RuntimeOutboxEvent, _event_id(source_path), with_for_update=True, populate_existing=True)
-    if (
-        event is None
-        or event.kind != STORAGE_CLEANUP_KIND
-        or event.payload_json.get('owner_kind') != 'upload'
-        or event.payload_json.get('owner_id') != upload_id
-        or StorageCleanupPhase(str(event.payload_json.get('phase'))) != StorageCleanupPhase.TRACKED
-    ):
-        raise StorageCleanupConflict('Upload source ownership was lost before cleanup handoff')
+    event = _lock_tracked_upload(
+        session,
+        upload_id=upload_id,
+        source_path=source_path,
+        conflict='Upload source ownership was lost before cleanup handoff',
+    )
     _rearm(session, event)
     session.commit()
 
@@ -313,11 +330,11 @@ def register_stage(
     from backend_core import build_jobs_service, compute_requests_service
 
     owner: ComputeRequest | BuildJob | None
-    if owner_kind == 'compute':
+    if owner_kind == StorageCleanupOwner.COMPUTE:
         owner = compute_requests_service.lock_active_request_claim(
             session, owner_id, worker_id=worker_id, claim_token=claim_token, lease_generation=lease_generation
         )
-    elif owner_kind == 'build' and build_id is not None:
+    elif owner_kind == StorageCleanupOwner.BUILD and build_id is not None:
         owner = build_jobs_service.lock_active_job_claim(
             session, owner_id, build_id=build_id, worker_id=worker_id, claim_token=claim_token, lease_generation=lease_generation
         )
@@ -331,7 +348,7 @@ def register_stage(
     expected_prefix = f's3://{get_namespace()}/clean/{staging_id}/'
     expected_manifest = (
         f's3://{get_namespace()}/runtime-staging/datasource-stage/{owner_id}/{lease_generation}/manifest.json'
-        if owner_kind == 'compute'
+        if owner_kind == StorageCleanupOwner.COMPUTE
         else f's3://{get_namespace()}/runtime-staging/schedule-ingest/{owner_id}/{lease_generation}/manifest.json'
     )
     expected_catalog_identifier = f'clean.{prefix_url.rstrip("/").split("/")[-2]}'
@@ -365,7 +382,7 @@ def register_stage(
 
 
 def _settle_referenced(session: Session, event: RuntimeOutboxEvent) -> None:
-    if StorageCleanupPhase(str(event.payload_json['phase'])) not in {StorageCleanupPhase.TRACKED, StorageCleanupPhase.PUBLISHED}:
+    if _phase(event.payload_json) not in {StorageCleanupPhase.TRACKED, StorageCleanupPhase.PUBLISHED}:
         raise StorageCleanupConflict('Storage cleanup was already authorized for this path')
     now = database_now(session)
     event.payload_json = {**event.payload_json, 'phase': StorageCleanupPhase.PUBLISHED.value}
@@ -424,7 +441,7 @@ def _rearm_published_catalog_intents(
 ) -> None:
     for snapshot in _catalog_intents(session, namespace, table, family_prefix=family_prefix):
         payload = dict(snapshot.payload_json)
-        if StorageCleanupPhase(str(payload.get('phase'))) != StorageCleanupPhase.PUBLISHED:
+        if _phase(payload) != StorageCleanupPhase.PUBLISHED:
             continue
         if snapshot.status != RuntimeOutboxStatus.DISPATCHED:
             continue
@@ -480,10 +497,10 @@ def _lock_source_intent(session: Session, source_path: str) -> tuple[RuntimeOutb
     assert event is not None
     if event.payload_json != payload:
         raise StorageCleanupConflict('Source ownership changed while enqueueing')
-    phase = StorageCleanupPhase(str(event.payload_json['phase']))
+    phase = _phase(event.payload_json)
     if phase not in {StorageCleanupPhase.TRACKED, StorageCleanupPhase.PUBLISHED}:
         raise StorageCleanupConflict('Source cleanup was already authorized')
-    if phase == StorageCleanupPhase.TRACKED and owner is None and payload['owner_kind'] not in {'datasource', 'upload'}:
+    if phase == StorageCleanupPhase.TRACKED and owner is None and payload['owner_kind'] not in {StorageCleanupOwner.DATASOURCE, StorageCleanupOwner.UPLOAD}:
         raise StorageCleanupConflict('Source ownership has been retired')
     return event, owner
 
@@ -505,21 +522,26 @@ def transfer_preflight_source(session: Session, *, source_path: str, request_id:
                 url=source_path,
                 payload={
                     'resource_id': request_id,
-                    'owner_kind': 'source',
+                    'owner_kind': StorageCleanupOwner.SOURCE.value,
                     'owner_id': request_id,
                     'is_prefix': False,
                 },
             )
         return
-    if StorageCleanupPhase(str(event.payload_json['phase'])) == StorageCleanupPhase.PUBLISHED:
+    if _phase(event.payload_json) == StorageCleanupPhase.PUBLISHED:
         return
-    if event.payload_json['owner_kind'] == 'source' and event.payload_json['owner_id'] == request_id:
+    if event.payload_json['owner_kind'] == StorageCleanupOwner.SOURCE and event.payload_json['owner_id'] == request_id:
         return
-    if event.payload_json['owner_kind'] == 'upload':
-        event.payload_json = {**event.payload_json, 'owner_kind': 'source', 'owner_id': request_id, 'resource_id': request_id}
+    if event.payload_json['owner_kind'] == StorageCleanupOwner.UPLOAD:
+        event.payload_json = {
+            **event.payload_json,
+            'owner_kind': StorageCleanupOwner.SOURCE.value,
+            'owner_id': request_id,
+            'resource_id': request_id,
+        }
         _rearm(session, event)
         return
-    if event.payload_json['owner_kind'] != 'preflight':
+    if event.payload_json['owner_kind'] != StorageCleanupOwner.PREFLIGHT:
         raise StorageCleanupConflict('Source ownership has already transferred to another consumer')
     if not isinstance(owner, ComputeRequest) or owner.status != enums_pb2.COMPUTE_REQUEST_STATUS_COMPLETED:
         raise StorageCleanupConflict('Preflight source has not completed')
@@ -527,7 +549,12 @@ def transfer_preflight_source(session: Session, *, source_path: str, request_id:
     owner.artifact_name = None
     owner.artifact_content_type = None
     session.add(owner)
-    event.payload_json = {**event.payload_json, 'owner_kind': 'source', 'owner_id': request_id, 'resource_id': request_id}
+    event.payload_json = {
+        **event.payload_json,
+        'owner_kind': StorageCleanupOwner.SOURCE.value,
+        'owner_id': request_id,
+        'resource_id': request_id,
+    }
     _rearm(session, event)
 
 
@@ -617,16 +644,16 @@ def authorize_cleanup(session: Session, *, event_id: str, claim_token: str, leas
         or event.claim_token != claim_token
         or event.lease_generation != lease_generation
         or event.payload_json != payload
-        or StorageCleanupPhase(str(event.payload_json['phase'])) not in {StorageCleanupPhase.TRACKED, StorageCleanupPhase.AUTHORIZED}
+        or _phase(event.payload_json) not in {StorageCleanupPhase.TRACKED, StorageCleanupPhase.AUTHORIZED}
         or event.lease_expires_at is None
-        or _aware(event.lease_expires_at) <= now
+        or aware_utc(event.lease_expires_at) <= now
     ):
         return False
     if owner is not None:
-        if owner_kind == 'datasource' and isinstance(owner, DataSource):
+        if owner_kind == StorageCleanupOwner.DATASOURCE and isinstance(owner, DataSource):
             return False
-        if owner_kind in {'preflight', 'source'} and isinstance(owner, ComputeRequest):
-            if owner_kind == 'preflight' and owner.artifact_path != payload['url']:
+        if owner_kind in {StorageCleanupOwner.PREFLIGHT, StorageCleanupOwner.SOURCE} and isinstance(owner, ComputeRequest):
+            if owner_kind == StorageCleanupOwner.PREFLIGHT and owner.artifact_path != payload['url']:
                 _settle_referenced(session, event)
                 session.commit()
                 return False
@@ -637,7 +664,7 @@ def authorize_cleanup(session: Session, *, event_id: str, claim_token: str, leas
             and owner.claim_token == payload['owner_token']
             and owner.lease_generation == payload['owner_generation']
         ):
-            if owner.lease_expires_at is not None and _aware(owner.lease_expires_at) > now:
+            if owner.lease_expires_at is not None and aware_utc(owner.lease_expires_at) > now:
                 return False
     url = str(payload['url'])
     is_prefix = payload['is_prefix'] is True
@@ -659,9 +686,9 @@ def authorize_cleanup(session: Session, *, event_id: str, claim_token: str, leas
         session.commit()
         return False
     assert event.lease_expires_at is not None
-    if _aware(event.lease_expires_at) <= database_now(session, wall_clock=True):
+    if aware_utc(event.lease_expires_at) <= database_now(session, wall_clock=True):
         return False
-    if owner_kind == 'preflight' and owner is not None:
+    if owner_kind == StorageCleanupOwner.PREFLIGHT and owner is not None:
         session.delete(owner)
     event.payload_json = {**event.payload_json, 'phase': StorageCleanupPhase.AUTHORIZED.value}
     session.add(event)
@@ -675,7 +702,7 @@ def complete_cleanup(session: Session, *, event_id: str, claim_token: str, lease
         return False
     if event.status != RuntimeOutboxStatus.DISPATCHING or event.claim_token != claim_token or event.lease_generation != lease_generation:
         return False
-    if error is None and StorageCleanupPhase(str(event.payload_json['phase'])) != StorageCleanupPhase.AUTHORIZED:
+    if error is None and _phase(event.payload_json) != StorageCleanupPhase.AUTHORIZED:
         raise ValueError('Storage cleanup must be authorized before completion')
     claim = OutboxClaim(event_id, claim_token, lease_generation, STORAGE_CLEANUP_KIND, dict(event.payload_json))
     if error is None:

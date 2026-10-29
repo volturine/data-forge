@@ -12,7 +12,6 @@ from runtime.worker_runtime_client import client_from_env
 class ObjectStoreCredentials:
     access_key: str
     secret_key: str
-    session_token: str | None = None
 
 
 # Engine launches are latency-critical and every launch needs the namespace's

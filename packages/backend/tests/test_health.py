@@ -2,7 +2,9 @@
 
 import asyncio
 import threading
-from concurrent.futures import ThreadPoolExecutor
+import time
+from collections.abc import Callable
+from concurrent.futures import Future, ThreadPoolExecutor
 
 import pytest
 
@@ -11,13 +13,22 @@ from backend_core.config import settings
 
 class TestHealthEndpoints:
     def test_health_liveness(self, client):
+        started = time.perf_counter()
         response = client.get('/health')
-
+        # Preserve the liveness latency guard without a second identical request.
+        assert time.perf_counter() - started < 1.0
         assert response.status_code == 200
         data = response.json()
         assert data['status'] == 'healthy'
         assert data['version'] == settings.app_version
         assert data['service'] == settings.app_name
+        assert 'application/json' in response.headers['content-type']
+        assert response.headers['x-content-type-options'] == 'nosniff'
+        assert response.headers['x-frame-options'] == 'DENY'
+        assert response.headers['x-xss-protection'] == '0'
+        assert response.headers['referrer-policy'] == 'strict-origin-when-cross-origin'
+        assert response.headers['permissions-policy'] == 'camera=(), microphone=(), geolocation=()'
+        assert response.headers['strict-transport-security'] == 'max-age=63072000; includeSubDomains'
 
     def test_health_readiness(self, client):
         response = client.get('/health/ready')
@@ -41,34 +52,6 @@ class TestHealthEndpoints:
         assert data['message'] == settings.app_name
         assert data['version'] == settings.app_version
 
-    def test_health_check_response_time(self, client):
-        import time
-
-        start = time.time()
-        response = client.get('/health')
-        duration = time.time() - start
-
-        assert response.status_code == 200
-        assert duration < 1.0
-
-    def test_multiple_health_checks(self, client):
-        for _ in range(5):
-            response = client.get('/health')
-            assert response.status_code == 200
-
-    def test_health_check_headers(self, client):
-        response = client.get('/health')
-
-        assert response.status_code == 200
-        assert 'content-type' in response.headers
-        assert 'application/json' in response.headers['content-type']
-        assert response.headers['x-content-type-options'] == 'nosniff'
-        assert response.headers['x-frame-options'] == 'DENY'
-        assert response.headers['x-xss-protection'] == '0'
-        assert response.headers['referrer-policy'] == 'strict-origin-when-cross-origin'
-        assert response.headers['permissions-policy'] == 'camera=(), microphone=(), geolocation=()'
-        assert response.headers['strict-transport-security'] == 'max-age=63072000; includeSubDomains'
-
     def test_security_headers_skip_hsts_in_debug(self, client, monkeypatch):
         monkeypatch.setattr(settings, 'debug', True, raising=False)
 
@@ -79,7 +62,7 @@ class TestHealthEndpoints:
 
 
 def test_readiness_object_store_failure_does_not_expose_exception_detail(monkeypatch) -> None:
-    import backend_core.object_store_probe as object_store_probe
+    from backend_core import object_store_probe
     from backend_core.application import _readiness_checks
 
     def fail(*, namespace: str | None = None) -> str:
@@ -125,4 +108,48 @@ async def test_readiness_probe_coalesces_callers_and_survives_one_cancellation()
         assert calls == 1
     finally:
         release.set()
+        executor.shutdown(wait=True, cancel_futures=True)
+
+
+def test_readiness_probe_completed_future_does_not_deadlock(monkeypatch: pytest.MonkeyPatch) -> None:
+    from backend_core.application import ReadinessProbe
+
+    executor = ThreadPoolExecutor(max_workers=1, thread_name_prefix='readiness-completed-test')
+    results = [({'database': 'first'}, True), ({'database': 'second'}, False)]
+    calls = 0
+
+    def check() -> tuple[dict[str, str], bool]:
+        nonlocal calls
+        result = results[calls]
+        calls += 1
+        return result
+
+    def submit_immediately(
+        function: Callable[[], tuple[dict[str, str], bool]],
+    ) -> Future[tuple[dict[str, str], bool]]:
+        future: Future[tuple[dict[str, str], bool]] = Future()
+        future.set_result(function())
+        return future
+
+    monkeypatch.setattr(executor, 'submit', submit_immediately)
+    probe = ReadinessProbe(executor, check)
+
+    async def run_twice() -> tuple[tuple[dict[str, str], bool], tuple[dict[str, str], bool]]:
+        return await probe.run(), await probe.run()
+
+    outcome: Future[tuple[tuple[dict[str, str], bool], tuple[dict[str, str], bool]]] = Future()
+
+    def run_in_daemon_thread() -> None:
+        try:
+            outcome.set_result(asyncio.run(run_twice()))
+        except BaseException as error:
+            outcome.set_exception(error)
+
+    thread = threading.Thread(target=run_in_daemon_thread, name='readiness-completed-test', daemon=True)
+    thread.start()
+
+    try:
+        assert outcome.result(timeout=2) == (results[0], results[1])
+        assert calls == 2
+    finally:
         executor.shutdown(wait=True, cancel_futures=True)

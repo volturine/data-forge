@@ -17,6 +17,7 @@ from backend_core import (
     runtime_work_service,
 )
 from backend_core.claiming import claim_by_lease_owner, with_for_update_skip_locked
+from backend_core.domain.analysis.pipeline_types import PipelineTab
 from backend_core.domain.build_jobs.live import hub as build_job_hub
 from backend_core.domain.build_jobs.models import BuildJobStatus
 from backend_core.domain.build_runs.models import BuildRunStatus
@@ -48,7 +49,7 @@ _SCHEDULE_LEASE_DURATION = timedelta(minutes=5)
 _SCHEDULE_CANDIDATE_BATCH_SIZE = 100
 
 
-def _build_request_json(request: compute_schemas.BuildRequest) -> dict[str, object]:
+def build_request_json(request: compute_schemas.BuildRequest) -> dict[str, object]:
     pipeline = normalize_pipeline_step_configs_for_protocol(request.pipeline_payload())
     return {
         'analysis_pipeline': {
@@ -95,8 +96,7 @@ def mark_schedule_enqueue_failed(
 
 
 def build_analysis_pipeline_payload(session: Session, analysis: Analysis) -> dict[str, Any]:
-    pipeline = analysis.pipeline_definition
-    tabs = pipeline.get('tabs', []) if isinstance(pipeline, dict) else []
+    tabs = analysis.pipeline_definition.get('tabs', [])
     if not isinstance(tabs, list) or not tabs:
         return {'analysis_id': str(analysis.id), 'tabs': []}
 
@@ -115,42 +115,6 @@ def build_analysis_pipeline_payload(session: Session, analysis: Analysis) -> dic
             output_map[str(tab_id)] = str(output_id)
 
     output_to_tab = {output_id: tab_id for tab_id, output_id in output_map.items()}
-
-    def enrich_step(step: dict[str, object]) -> dict[str, Any]:
-        config = step.get('config')
-        if not isinstance(config, dict):
-            return step
-        next_config = dict(config)
-        right_source = next_config.get('right_source') or next_config.get('rightDataSource')
-        if isinstance(right_source, str) and right_source and right_source not in output_to_tab:
-            datasource_model = session.get(DataSource, right_source)
-            if datasource_model is not None:
-                next_config['right_source_datasource'] = {
-                    'id': right_source,
-                    'analysis_tab_id': None,
-                    'source_type': datasource_model.source_type,
-                    'config': dict(datasource_model.config),
-                }
-        raw_sources = next_config.get('sources')
-        source_ids = [raw_sources] if isinstance(raw_sources, str) else raw_sources if isinstance(raw_sources, list) else []
-        refs: list[dict[str, Any]] = []
-        for source in source_ids:
-            if not isinstance(source, str) or not source or source in output_to_tab:
-                continue
-            datasource_model = session.get(DataSource, source)
-            if datasource_model is None:
-                continue
-            refs.append(
-                {
-                    'id': source,
-                    'analysis_tab_id': None,
-                    'source_type': datasource_model.source_type,
-                    'config': dict(datasource_model.config),
-                }
-            )
-        if refs:
-            next_config['source_datasources'] = refs
-        return {**step, 'config': next_config}
 
     next_tabs: list[dict[str, Any]] = []
     for tab in tabs:
@@ -192,7 +156,7 @@ def build_analysis_pipeline_payload(session: Session, analysis: Analysis) -> dic
                     'source_type': source_type,
                     'config': merged_config,
                 },
-                'steps': [enrich_step(step) for step in tab.get('steps', []) if isinstance(step, dict)],
+                'steps': tab.get('steps', []),
             }
         )
 
@@ -290,7 +254,7 @@ def _enqueue_schedule_build(
         schedule_id=schedule.id,
         analysis_id=analysis_id,
         analysis_name=analysis_name,
-        request_json=_build_request_json(request),
+        request_json=build_request_json(request),
         starter_json=compute_schemas.BuildStarter.for_schedule(schedule.id).model_dump(mode='json'),
         status=BuildRunStatus.QUEUED,
         current_kind=ComputeWorkerRunKind.BUILD.value,
@@ -300,7 +264,7 @@ def _enqueue_schedule_build(
         current_output_id=output_id or schedule.datasource_id,
         current_output_name=output_name or tab_name,
         total_tabs=len(request.analysis_pipeline.tabs),
-        datasource_ids=datasource_ids,
+        datasource_ids=build_datasource_dependencies.build_datasource_ids(request.analysis_pipeline),
         created_at=now,
         started_at=now,
     )
@@ -309,7 +273,7 @@ def _enqueue_schedule_build(
     return run
 
 
-def _resolve_schedule_target(session: Session, datasource_id: str) -> tuple[DataSourceTargetKind, str | None, str | None]:
+def _resolve_schedule_target(session: Session, datasource_id: str) -> tuple[DataSourceTargetKind, str | None]:
     """Resolve schedule execution path and optional analysis provenance."""
     datasource = session.get(DataSource, datasource_id)
     if not datasource:
@@ -317,13 +281,12 @@ def _resolve_schedule_target(session: Session, datasource_id: str) -> tuple[Data
 
     analysis_id = datasource.created_by_analysis_id
     if datasource.target_kind() == DataSourceTargetKind.ANALYSIS and analysis_id:
-        tab_id = datasource.config.get('analysis_tab_id') if isinstance(datasource.config, dict) else None
-        return DataSourceTargetKind.ANALYSIS, analysis_id, tab_id
+        return DataSourceTargetKind.ANALYSIS, analysis_id
 
     if datasource.target_kind() == DataSourceTargetKind.RAW:
-        return DataSourceTargetKind.RAW, None, None
+        return DataSourceTargetKind.RAW, None
 
-    return DataSourceTargetKind.DATASOURCE, None, None
+    return DataSourceTargetKind.DATASOURCE, None
 
 
 def _build_schedule_response(
@@ -348,7 +311,7 @@ def _build_schedule_response(
     if datasource:
         data['analysis_id'] = datasource.created_by_analysis_id
 
-        tab_id = datasource.config.get('analysis_tab_id') if isinstance(datasource.config, dict) else None
+        tab_id = datasource.config.get('analysis_tab_id')
         data['tab_id'] = tab_id
 
         if analysis:
@@ -751,32 +714,26 @@ def claim_due_schedules(
     return [rows_by_id[schedule_id] for schedule_id in claimed_ids]
 
 
-def _tab_reading_datasource(tabs: list[Any], datasource_id: str) -> dict[str, Any] | None:
+def _tab_reading_datasource(tabs: list[PipelineTab], datasource_id: str) -> PipelineTab | None:
     """Return the first tab that reads datasource_id as an external source."""
-    for tab in tabs:
-        if not isinstance(tab, dict):
-            continue
-        datasource = tab.get('datasource')
-        if not isinstance(datasource, dict) or datasource.get('analysis_tab_id'):
-            continue
-        if str(datasource.get('id') or '') == datasource_id:
-            return tab
-    return None
+    return next(
+        (tab for tab in tabs if not tab.datasource.analysis_tab_id and tab.datasource.id == datasource_id),
+        None,
+    )
 
 
-def _analyses_reading_datasource(session: Session, datasource_id: str) -> list[Analysis]:
-    """Analyses in this namespace whose pipeline reads the scheduled source.
+def _analyses_reading_datasource(session: Session, datasource_id: str) -> list[tuple[Analysis, PipelineTab]]:
+    """Analyses in this namespace whose pipeline reads the scheduled source, each with its reading tab.
 
-    pipeline_definition is JSON, so the match is done in Python. The schedule
+    The match is done in Python over the parsed pipeline. The schedule
     fire already selected one namespace; this does not scan the namespace registry.
     """
     analyses = session.execute(select(Analysis).order_by(col(Analysis.id))).scalars().all()
-    readers: list[Analysis] = []
+    readers: list[tuple[Analysis, PipelineTab]] = []
     for analysis in analyses:
-        pipeline = analysis.pipeline_definition
-        tabs = pipeline.get('tabs') if isinstance(pipeline, dict) else None
-        if isinstance(tabs, list) and _tab_reading_datasource(tabs, datasource_id) is not None:
-            readers.append(analysis)
+        tab = _tab_reading_datasource(analysis.pipeline.tabs, datasource_id)
+        if tab is not None:
+            readers.append((analysis, tab))
     return readers
 
 
@@ -784,24 +741,13 @@ def _build_reader_analysis_request(
     session: Session,
     schedule: Schedule,
     analysis: Analysis,
+    target: PipelineTab,
 ) -> tuple[compute_schemas.BuildRequest, str, str, str, str | None, str | None]:
-    pipeline = analysis.pipeline_definition
-    tabs = pipeline.get('tabs') if isinstance(pipeline, dict) else None
-    target = _tab_reading_datasource(tabs, schedule.datasource_id) if isinstance(tabs, list) else None
-    if target is None:
-        raise ValueError(f'Analysis {analysis.id} does not read datasource {schedule.datasource_id}')
-    tab_id = target.get('id')
-    if not isinstance(tab_id, str) or not tab_id:
+    if not target.id:
         raise ValueError(f'Analysis {analysis.id} tab reading {schedule.datasource_id} has no id')
     payload = build_analysis_pipeline_payload(session, analysis)
-    request = compute_schemas.BuildRequest.model_validate({'analysis_pipeline': payload, 'tab_id': tab_id})
-    raw_output = target.get('output')
-    output = raw_output if isinstance(raw_output, dict) else {}
-    result_id = output.get('result_id')
-    output_id = result_id if isinstance(result_id, str) else None
-    raw_name = target.get('name')
-    tab_name = raw_name if isinstance(raw_name, str) else None
-    return request, str(analysis.id), analysis.name, tab_id, tab_name, output_id
+    request = compute_schemas.BuildRequest.model_validate({'analysis_pipeline': payload, 'tab_id': target.id})
+    return request, str(analysis.id), analysis.name, target.id, target.name, target.output.result_id
 
 
 def enqueue_schedule_run(
@@ -829,7 +775,7 @@ def enqueue_schedule_run(
     ):
         raise ValueError(f'Schedule {schedule_id} claim is stale')
 
-    target_kind, analysis_id, _ = _resolve_schedule_target(session, schedule.datasource_id)
+    target_kind, analysis_id = _resolve_schedule_target(session, schedule.datasource_id)
     namespace = get_namespace()
     schedule.last_triggered_at = naive_stamp
     schedule.last_failure_at = None
@@ -838,9 +784,9 @@ def enqueue_schedule_run(
         readers = _analyses_reading_datasource(session, schedule.datasource_id)
         if readers:
             run_ids: list[str] = []
-            for analysis in readers:
+            for analysis, target in readers:
                 request, reader_analysis_id, reader_name, reader_tab_id, reader_tab_name, output_id = _build_reader_analysis_request(
-                    session, schedule, analysis
+                    session, schedule, analysis, target
                 )
                 run = _enqueue_schedule_build(
                     session,

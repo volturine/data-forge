@@ -1,5 +1,5 @@
 <script lang="ts">
-	import { createQuery, useQueryClient } from '@tanstack/svelte-query';
+	import { createQuery, useQueryClient, type QueryKey } from '@tanstack/svelte-query';
 	import { goto } from '$app/navigation';
 	import { idbGet, idbSet } from '#lib/utils/indexeddb.js';
 	import { SvelteMap, SvelteSet } from 'svelte/reactivity';
@@ -30,10 +30,12 @@
 
 	const queryClient = useQueryClient();
 	const ns = useNamespace();
+	const analysesKey = $derived(['analyses', ns.value] as const);
+	const favoritesKey = $derived(['favorite-analyses', ns.value] as const);
 	let deletedAnalysisIds = $state<string[]>([]);
 
 	const query = createQuery(() => ({
-		queryKey: ['analyses', ns.value],
+		queryKey: analysesKey,
 		queryFn: async ({ signal }) => {
 			const result = await listAnalyses({ signal });
 			if (result.isErr()) {
@@ -140,10 +142,10 @@
 
 	function removeAnalysesFromCaches(ids: Iterable<string>) {
 		const idSet = new Set(ids);
-		queryClient.setQueryData<AnalysisGalleryItem[]>(['analyses', ns.value], (current) =>
+		queryClient.setQueryData<AnalysisGalleryItem[]>(analysesKey, (current) =>
 			current?.filter((analysis) => !idSet.has(analysis.id))
 		);
-		queryClient.setQueryData<AnalysisGalleryItem[]>(['favorite-analyses', ns.value], (current) =>
+		queryClient.setQueryData<AnalysisGalleryItem[]>(favoritesKey, (current) =>
 			current?.filter((analysis) => !idSet.has(analysis.id))
 		);
 	}
@@ -157,18 +159,34 @@
 	function restoreAnalyses(ids: Iterable<string>) {
 		const restored = new Set(ids);
 		deletedAnalysisIds = deletedAnalysisIds.filter((id) => !restored.has(id));
-		void queryClient.invalidateQueries({ queryKey: ['analyses', ns.value], exact: true });
+		void queryClient.invalidateQueries({ queryKey: analysesKey, exact: true });
+	}
+
+	function writeFavoriteCache(
+		favoritesCacheKey: QueryKey,
+		id: string,
+		isFavorite: boolean,
+		analysis: AnalysisGalleryItem | undefined
+	) {
+		queryClient.setQueryData<AnalysisGalleryItem[]>(favoritesCacheKey, (current) => {
+			if (!current && !analysis) return current;
+			const existing = current ?? [];
+			const withoutCurrent = existing.filter((item) => item.id !== id);
+			if (!isFavorite) return withoutCurrent;
+			return analysis ? [...withoutCurrent, { ...analysis, is_favorite: true }] : existing;
+		});
 	}
 
 	async function toggleFavorite(id: string) {
-		const analysesKey = ['analyses', ns.value] as const;
-		const favoritesKey = ['favorite-analyses', ns.value] as const;
+		// Captured before awaiting so a late response cannot write into another namespace.
+		const analysesCacheKey = analysesKey;
+		const favoritesCacheKey = favoritesKey;
 		const version = (favoriteMutationVersions.get(id) ?? 0) + 1;
 		favoriteMutationVersions.set(id, version);
 		const next = !favoriteStore.isFavorite(id);
 		const previousFavorite = !next;
-		const previousAnalyses = queryClient.getQueryData<AnalysisGalleryItem[]>(analysesKey);
-		const previousFavorites = queryClient.getQueryData<AnalysisGalleryItem[]>(favoritesKey);
+		const previousAnalyses = queryClient.getQueryData<AnalysisGalleryItem[]>(analysesCacheKey);
+		const previousFavorites = queryClient.getQueryData<AnalysisGalleryItem[]>(favoritesCacheKey);
 		const analysis =
 			previousAnalyses?.find((item) => item.id === id) ??
 			query.data?.find((item) => item.id === id);
@@ -178,28 +196,24 @@
 		// round-trip before reflecting a click.
 		favoriteStore.apply(id, next);
 
-		queryClient.setQueryData<AnalysisGalleryItem[]>(analysesKey, (current) =>
+		queryClient.setQueryData<AnalysisGalleryItem[]>(analysesCacheKey, (current) =>
 			current?.map((item) => (item.id === id ? { ...item, is_favorite: next } : item))
 		);
-
-		queryClient.setQueryData<AnalysisGalleryItem[]>(favoritesKey, (current) => {
-			if (!current && !analysis) return current;
-			const existing = current ?? [];
-			const withoutCurrent = existing.filter((item) => item.id !== id);
-			if (!next) return withoutCurrent;
-			return analysis ? [...withoutCurrent, { ...analysis, is_favorite: true }] : existing;
-		});
+		writeFavoriteCache(favoritesCacheKey, id, next, analysis);
 
 		// Stop an older in-flight response from restoring the pre-mutation
 		// favorite list after the optimistic state has been published.
 		const mutation = next ? favoriteAnalysis(id) : unfavoriteAnalysis(id);
-		await queryClient.cancelQueries({ queryKey: favoritesKey, exact: true }, { revert: false });
+		await queryClient.cancelQueries(
+			{ queryKey: favoritesCacheKey, exact: true },
+			{ revert: false }
+		);
 		const result = await mutation;
 		if (result.isErr()) {
 			if (favoriteMutationVersions.get(id) === version) {
 				favoriteStore.apply(id, previousFavorite);
-				queryClient.setQueryData(analysesKey, previousAnalyses);
-				queryClient.setQueryData(favoritesKey, previousFavorites);
+				queryClient.setQueryData(analysesCacheKey, previousAnalyses);
+				queryClient.setQueryData(favoritesCacheKey, previousFavorites);
 				deleteError = result.error.message;
 			}
 			return;
@@ -209,23 +223,15 @@
 		favoriteStore.apply(id, isFavorite);
 		// The mutation response is authoritative. Update both visible caches
 		// synchronously so a refetch cannot briefly remove the sidebar link.
-		queryClient.setQueryData<AnalysisGalleryItem[]>(analysesKey, (current) =>
+		queryClient.setQueryData<AnalysisGalleryItem[]>(analysesCacheKey, (current) =>
 			current?.map((analysis) =>
 				analysis.id === id ? { ...analysis, is_favorite: isFavorite } : analysis
 			)
 		);
 		const currentAnalysis = queryClient
-			.getQueryData<AnalysisGalleryItem[]>(analysesKey)
+			.getQueryData<AnalysisGalleryItem[]>(analysesCacheKey)
 			?.find((item) => item.id === id);
-		queryClient.setQueryData<AnalysisGalleryItem[]>(favoritesKey, (current) => {
-			if (!current && !currentAnalysis) return current;
-			const existing = current ?? [];
-			const withoutCurrent = existing.filter((item) => item.id !== id);
-			if (!isFavorite) return withoutCurrent;
-			return currentAnalysis
-				? [...withoutCurrent, { ...currentAnalysis, is_favorite: true }]
-				: existing;
-		});
+		writeFavoriteCache(favoritesCacheKey, id, isFavorite, currentAnalysis);
 	}
 
 	function requestDuplicate(analysis: AnalysisGalleryItem) {
@@ -258,10 +264,7 @@
 		// The list must not stay on the old card while the network mutation is
 		// being scheduled. `revert: false` prevents that fetch from restoring the
 		// pre-delete snapshot after the optimistic update.
-		await queryClient.cancelQueries(
-			{ queryKey: ['analyses', ns.value], exact: true },
-			{ revert: false }
-		);
+		await queryClient.cancelQueries({ queryKey: analysesKey, exact: true }, { revert: false });
 
 		const result = await deleteAnalysis(id, analysis.revision);
 		if (result.isErr()) {
@@ -289,10 +292,7 @@
 		// Do not make the gallery wait for an in-flight list request before
 		// reflecting the deletion. The deleted-id guard also keeps an older
 		// response from reintroducing these cards while the DELETEs complete.
-		await queryClient.cancelQueries(
-			{ queryKey: ['analyses', ns.value], exact: true },
-			{ revert: false }
-		);
+		await queryClient.cancelQueries({ queryKey: analysesKey, exact: true }, { revert: false });
 
 		const outcomes = await Promise.all(
 			idsToDelete.map(async (id) => {

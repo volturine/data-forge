@@ -12,7 +12,7 @@ from backend_core import (
     build_jobs_service as build_job_service,
     build_runs_service as build_run_service,
 )
-from backend_core.build_datasource_dependencies import external_datasource_ids
+from backend_core.build_datasource_dependencies import external_datasource_ids, output_datasource_ids
 from backend_core.domain.analysis.models import AnalysisStatus
 from backend_core.domain.build_runs.models import BuildRunStatus
 from backend_core.domain.compute import schemas as compute_schemas
@@ -918,8 +918,11 @@ class TestEnqueueScheduleRun:
             test_db_session.execute(select(col(BuildRunDatasource.datasource_id)).where(col(BuildRunDatasource.build_id) == run.id)).scalars().all()
         )
         assert source_ids == (sample_datasource.id,)
-        assert persisted_ids == set(source_ids)
+        # The run records the outputs it publishes as well as what it reads.
+        assert output.id in output_datasource_ids(pipeline)
+        assert persisted_ids == {*source_ids, *output_datasource_ids(pipeline)}
         assert build_run_service.has_active_build_for_datasource(test_db_session, namespace='default', datasource_id=sample_datasource.id)
+        assert build_run_service.has_active_build_for_datasource(test_db_session, namespace='default', datasource_id=output.id)
         job = build_job_service.get_job_by_build_id(test_db_session, run_id)
         assert job is not None
 
@@ -1026,6 +1029,58 @@ class TestEnqueueScheduleRun:
             tabs = run.request_json['analysis_pipeline']['tabs']
             assert any(step['type'] == 'sort' for tab in tabs for step in tab['steps'])
             assert all(tab['datasource']['source_type'] != 'schedule' for tab in tabs)
+
+    def test_enqueue_schedule_for_reader_joining_another_datasource(
+        self,
+        test_db_session: Session,
+        analysis_with_output: Analysis,
+        sample_datasource: DataSource,
+    ):
+        lookup = DataSource(
+            id=str(uuid.uuid4()),
+            name='Lookup',
+            source_type=sample_datasource.source_type,
+            config=dict(sample_datasource.config),
+            created_by='import',
+            created_at=datetime.now(UTC),
+        )
+        join_config = {
+            'how': 'left',
+            'right_source': lookup.id,
+            'join_columns': [{'id': 'join-1', 'left_column': 'value', 'right_column': 'value'}],
+            'right_columns': [],
+            'suffix': '_lookup',
+        }
+        tab = analysis_with_output.pipeline_definition['tabs'][0]
+        analysis_with_output.pipeline_definition = {
+            'tabs': [{**tab, 'steps': [{'id': 'join-1', 'type': 'join', 'config': join_config, 'depends_on': [], 'is_applied': True}]}]
+        }
+        test_db_session.add(lookup)
+        test_db_session.add(analysis_with_output)
+        test_db_session.commit()
+        schedule = create_schedule(
+            test_db_session,
+            ScheduleCreate(datasource_id=sample_datasource.id, cron_expression='0 * * * *'),
+        )
+        row = test_db_session.get(Schedule, schedule.id)
+        assert row is not None
+        claim_token, lease_generation = _assign_schedule_claim(row)
+        test_db_session.add(row)
+        test_db_session.commit()
+
+        run_id = enqueue_schedule_run(
+            test_db_session,
+            schedule.id,
+            worker_id='scheduler:test',
+            claim_token=claim_token,
+            lease_generation=lease_generation,
+        )
+
+        run = build_run_service.get_build_run(test_db_session, run_id)
+        assert run is not None
+        pipeline = compute_schemas.AnalysisPipelinePayload.model_validate(run.request_json['analysis_pipeline'])
+        [step] = pipeline.tabs[0].steps
+        assert step['config']['right_source'] == lookup.id
 
     def test_enqueue_schedule_for_raw_datasource_uses_build_kind(self, test_db_session: Session, sample_csv_file):
         raw = DataSource(

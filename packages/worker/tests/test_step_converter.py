@@ -1,8 +1,12 @@
 import dataclasses
+from typing import Self
 
 import pytest
+from pydantic import model_validator
 
 from dataforge_protocol import enums_pb2
+from operations import PARAM_MODELS
+from operations.limit import LimitParams
 from operations.step_converter import (
     BackendStep,
     FrontendStep,
@@ -10,9 +14,9 @@ from operations.step_converter import (
 )
 
 
-def test_direct_frontend_step_with_unknown_type_is_rejected() -> None:
-    with pytest.raises(ValueError, match="Unknown operation 'typo'"):
-        convert_step_format(FrontendStep(id="step-1", type="typo"))
+def test_unknown_step_type_is_rejected() -> None:
+    with pytest.raises(ValueError, match="Unknown step type 'typo'"):
+        convert_step_format({"id": "step-1", "type": "typo"})
 
 
 def test_convert_step_format_returns_frozen_backend_step_dataclass() -> None:
@@ -34,6 +38,24 @@ def test_convert_step_format_returns_frozen_backend_step_dataclass() -> None:
 
     with pytest.raises(dataclasses.FrozenInstanceError):
         step.operation = "filter"
+
+
+def test_convert_step_format_validates_operation_config_once(monkeypatch: pytest.MonkeyPatch) -> None:
+    validated: list[LimitParams] = []
+
+    class CountingLimitParams(LimitParams):
+        @model_validator(mode="after")
+        def record_validation(self) -> Self:
+            validated.append(self)
+            return self
+
+    monkeypatch.setitem(PARAM_MODELS, "limit", CountingLimitParams)
+
+    step = convert_step_format({"id": "step-1", "type": "limit", "config": {"n": 5}})
+
+    assert len(validated) == 1
+    assert step.config is validated[0]
+    assert step.params == {"n": 5}
 
 
 def test_convert_step_format_parses_config_through_protocol_step_config() -> None:
@@ -69,17 +91,6 @@ def test_convert_step_format_parses_config_through_protocol_step_config() -> Non
     }
 
 
-def test_frontend_step_from_mapping_rejects_unknown_protocol_config_field() -> None:
-    with pytest.raises(ValueError, match="no_such_field"):
-        FrontendStep.from_mapping(
-            {
-                "id": "step-1",
-                "type": "filter",
-                "config": {"conditions": [], "logic": "AND", "no_such_field": True},
-            }
-        )
-
-
 def test_convert_step_format_accepts_protocol_step_type_field() -> None:
     step = convert_step_format(
         {
@@ -106,31 +117,42 @@ def test_convert_step_format_preserves_explicit_protocol_default_values() -> Non
     assert step.params == {"sources": ["step-0"], "allow_missing": False}
 
 
-def test_frontend_step_from_mapping_rejects_mismatched_step_config_oneof() -> None:
-    with pytest.raises(ValueError, match="does not match step type"):
-        FrontendStep.from_mapping({"id": "step-1", "type": "filter", "config": {"limit": {"n": 5}}})
-
-
-def test_frontend_step_from_mapping_rejects_missing_type() -> None:
-    with pytest.raises(ValueError, match="Step must have a type field"):
-        FrontendStep.from_mapping({"id": "step-1"})
-
-
-def test_frontend_step_from_mapping_rejects_unknown_step_type() -> None:
-    with pytest.raises(ValueError, match="Unknown step type 'typo'"):
-        FrontendStep.from_mapping({"id": "step-1", "type": "typo", "config": {}})
-
-
-def test_frontend_step_from_mapping_rejects_unknown_fields() -> None:
-    with pytest.raises(ValueError, match="unknown field"):
-        FrontendStep.from_mapping({"id": "step-1", "type": "filter", "config": {}, "surprise": True})
-
-
-def test_frontend_step_from_mapping_rejects_invalid_config_shape() -> None:
-    with pytest.raises(ValueError, match="Step config must be an object"):
-        FrontendStep.from_mapping({"id": "step-1", "type": "filter", "config": []})
-
-
-def test_frontend_step_from_mapping_rejects_invalid_depends_on_shape() -> None:
-    with pytest.raises(ValueError, match="depends_on must be a list"):
-        FrontendStep.from_mapping({"id": "step-1", "type": "filter", "config": {}, "depends_on": [None]})
+@pytest.mark.parametrize(
+    ("mapping", "match"),
+    [
+        pytest.param(
+            {"id": "step-1", "type": "filter", "config": {"conditions": [], "logic": "AND", "no_such_field": True}},
+            "no_such_field",
+            id="test_frontend_step_from_mapping_rejects_unknown_protocol_config_field",
+        ),
+        pytest.param(
+            {"id": "step-1", "type": "filter", "config": {"limit": {"n": 5}}},
+            "does not match step type",
+            id="test_frontend_step_from_mapping_rejects_mismatched_step_config_oneof",
+        ),
+        pytest.param({"id": "step-1"}, "Step must have a type field", id="test_frontend_step_from_mapping_rejects_missing_type"),
+        pytest.param(
+            {"id": "step-1", "type": "typo", "config": {}},
+            "Unknown step type 'typo'",
+            id="test_frontend_step_from_mapping_rejects_unknown_step_type",
+        ),
+        pytest.param(
+            {"id": "step-1", "type": "filter", "config": {}, "surprise": True},
+            "unknown field",
+            id="test_frontend_step_from_mapping_rejects_unknown_fields",
+        ),
+        pytest.param(
+            {"id": "step-1", "type": "filter", "config": []},
+            "Step config must be an object",
+            id="test_frontend_step_from_mapping_rejects_invalid_config_shape",
+        ),
+        pytest.param(
+            {"id": "step-1", "type": "filter", "config": {}, "depends_on": [None]},
+            "depends_on must be a list",
+            id="test_frontend_step_from_mapping_rejects_invalid_depends_on_shape",
+        ),
+    ],
+)
+def test_frontend_step_from_mapping_rejects_invalid_mappings(mapping: dict, match: str) -> None:
+    with pytest.raises(ValueError, match=match):
+        FrontendStep.from_mapping(mapping)

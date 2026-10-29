@@ -1,34 +1,20 @@
 <script lang="ts">
 	import { CircleAlert, Copy, ClipboardCheck, Play, Eye } from '@lucide/svelte';
-	import { onDestroy } from 'svelte';
 	import { css } from '#lib/styles/panda.js';
 	import { chatStore } from '#lib/stores/chat.svelte.js';
 	import type { ChatMessage } from '#lib/stores/chat.svelte.js';
 	import { renderMarkdown, timeAgo } from '#lib/utils/markdown.js';
+	import { createCopyFeedback } from '#lib/chat/copy-feedback.svelte.js';
 
 	interface Props {
 		msg: ChatMessage;
 		grouped: boolean;
+		now: number;
 	}
 
-	let { msg, grouped }: Props = $props();
+	let { msg, grouped, now }: Props = $props();
 
-	let copiedId = $state<string | null>(null);
-	let copiedTimer: ReturnType<typeof setTimeout> | null = null;
-
-	async function copyToClipboard(text: string, id: string) {
-		await navigator.clipboard.writeText(text).catch(() => {});
-		copiedId = id;
-		if (copiedTimer) clearTimeout(copiedTimer);
-		copiedTimer = setTimeout(() => {
-			copiedTimer = null;
-			if (copiedId === id) copiedId = null;
-		}, 2000);
-	}
-
-	onDestroy(() => {
-		if (copiedTimer) clearTimeout(copiedTimer);
-	});
+	const copyFeedback = createCopyFeedback(2000);
 </script>
 
 {#if msg.role === 'tool'}
@@ -143,11 +129,11 @@
 							_hover: { color: 'fg.primary' }
 						})
 					]}
-					onclick={() => copyToClipboard(msg.content, msg.id)}
+					onclick={() => copyFeedback.copy(msg.content, msg.id)}
 					title="Copy message"
 					type="button"
 				>
-					{#if copiedId === msg.id}
+					{#if copyFeedback.copiedId === msg.id}
 						<ClipboardCheck size={11} />
 					{:else}
 						<Copy size={11} />
@@ -164,7 +150,7 @@
 					})
 				]}
 			>
-				{timeAgo(msg.ts)}
+				{timeAgo(msg.ts, now)}
 			</span>
 		</div>
 	</div>

@@ -14,6 +14,7 @@ from urllib.parse import urlparse
 import aiohttp
 from sqlmodel import Session, select
 
+from backend_core.claiming import is_postgres
 from backend_core.config import settings
 from backend_core.database import namespace_provision_lock
 from backend_core.persistence.namespaces.models import NamespaceEngineCredential
@@ -116,7 +117,7 @@ def provision_namespace_engine_credentials(
     released before object-store RPCs so slow network calls do not occupy a
     pooled connection or hold a transaction open.
     """
-    lock = namespace_provision_lock(namespace) if not namespace_lock_held and session.get_bind().dialect.name == 'postgresql' else nullcontext()
+    lock = namespace_provision_lock(namespace) if not namespace_lock_held and is_postgres(session) else nullcontext()
     with lock:
         existing = session.exec(select(NamespaceEngineCredential).where(NamespaceEngineCredential.namespace == namespace)).all()
         existing_roles = {row.role for row in existing}

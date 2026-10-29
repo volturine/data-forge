@@ -1,5 +1,4 @@
 import type { ChartType, ProtocolPipelineStepType } from '#lib/types/protocol-enum-tokens.js';
-import { STEP_TYPE_TOKENS } from '#lib/types/protocol-enum-tokens.js';
 
 export type { ChartType };
 
@@ -9,7 +8,6 @@ export type CanonicalStepType = Exclude<ProtocolPipelineStepType, PlotAliasStepT
 export type KnownPipelineStepType = CanonicalStepType | PlotAliasStepType;
 export type PipelineStepType = KnownPipelineStepType | (string & {});
 
-export const KNOWN_PIPELINE_STEP_TYPES = Object.values(STEP_TYPE_TOKENS) as KnownPipelineStepType[];
 export const CHART_ALIAS_TO_TYPE = {
 	plot_bar: 'bar',
 	plot_horizontal_bar: 'horizontal_bar',

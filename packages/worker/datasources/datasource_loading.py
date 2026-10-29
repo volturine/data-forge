@@ -2,13 +2,13 @@ from __future__ import annotations
 
 import os
 import tempfile
-from collections.abc import Generator
+from collections.abc import Generator, Iterator
+from contextlib import contextmanager
 from pathlib import Path
 from typing import Any, Literal
 
 import polars as pl
 import psycopg
-from openpyxl import load_workbook
 
 from runtime.config import settings
 from runtime.domain.datasource.source_types import DataSourceFileType, DataSourceLoadType, IcebergReader
@@ -41,7 +41,7 @@ def _csv_opts(opts: dict[str, Any] | None) -> dict[str, Any]:
         "separator": opts.get("delimiter", ","),
         "quote_char": opts.get("quote_char", '"'),
         "has_header": bool(opts.get("has_header", True)),
-        "skip_rows": _as_int(opts.get("skip_rows", 0), default=0) or 0,
+        "skip_rows": _as_int(opts.get("skip_rows", 0), default=0),
         "encoding": opts.get("encoding", "utf8"),
         "try_parse_dates": True,
     }
@@ -83,6 +83,8 @@ def has_excel_bounds(config: dict[str, Any]) -> bool:
 
 
 def _read_excel_bounds(config: dict[str, Any]) -> pl.LazyFrame:
+    from openpyxl import load_workbook
+
     file_path = config.get("file_path")
     sheet_name = config.get("sheet_name")
     start_row = _as_int(config.get("start_row"))
@@ -98,10 +100,10 @@ def _read_excel_bounds(config: dict[str, Any]) -> pl.LazyFrame:
     sheet = workbook[target_sheet]
     rows = list(
         sheet.iter_rows(
-            min_row=int(start_row) + 1,
-            max_row=int(end_row) + 1,
-            min_col=int(start_col) + 1,
-            max_col=int(end_col) + 1,
+            min_row=start_row + 1,
+            max_row=end_row + 1,
+            min_col=start_col + 1,
+            max_col=end_col + 1,
             values_only=True,
         ),
     )
@@ -126,13 +128,28 @@ def _assert_select_only(query: str) -> None:
         raise ValueError("Only SELECT queries (including CTEs starting with WITH) are permitted for database datasources")
 
 
-def _download_object_store_file(path: str) -> Path:
+def _database_query(config: dict[str, Any]) -> tuple[str, str]:
+    connection_string = config.get("connection_string")
+    query = config.get("query")
+    if not isinstance(connection_string, str) or not isinstance(query, str):
+        raise ValueError("Datasource database loading requires connection_string and query")
+    _assert_select_only(query)
+    if not connection_string.lower().startswith("postgresql://"):
+        raise ValueError("Database datasource connection string must be PostgreSQL")
+    return connection_string, query
+
+
+@contextmanager
+def _downloaded_object_store_file(path: str) -> Iterator[Path]:
     suffix = Path(path).suffix or ".dat"
     fd, temp_name = tempfile.mkstemp(suffix=suffix)
     os.close(fd)
     temp_path = Path(temp_name)
     download_file(path, temp_path)
-    return temp_path
+    try:
+        yield temp_path
+    finally:
+        temp_path.unlink(missing_ok=True)
 
 
 def _polars_storage_options() -> dict[str, str]:
@@ -168,10 +185,9 @@ def load_datasource_frame(config: dict[str, Any]) -> pl.LazyFrame:
                 return pl.scan_parquet(file_path, storage_options=storage)
             if file_type == DataSourceFileType.NDJSON:
                 return pl.scan_ndjson(file_path, storage_options=storage)
-            temp_path = _download_object_store_file(str(file_path))
-            local_path = str(temp_path)
-            local_config = {**config, "file_path": local_path}
-            try:
+            with _downloaded_object_store_file(str(file_path)) as temp_path:
+                local_path = str(temp_path)
+                local_config = {**config, "file_path": local_path}
                 if file_type == DataSourceFileType.EXCEL and has_excel_bounds(local_config):
                     return _read_excel_bounds(local_config)
                 match file_type:
@@ -185,8 +201,6 @@ def load_datasource_frame(config: dict[str, Any]) -> pl.LazyFrame:
                         return pl.read_ndjson(local_path).lazy()
                     case DataSourceFileType.EXCEL:
                         return _read_excel(local_path, opts)
-            finally:
-                temp_path.unlink(missing_ok=True)
         if file_type == DataSourceFileType.EXCEL and has_excel_bounds(config):
             return _read_excel_bounds(config)
         match file_type:
@@ -203,15 +217,9 @@ def load_datasource_frame(config: dict[str, Any]) -> pl.LazyFrame:
         raise ValueError(f"Unsupported file type: {file_type.value}")
 
     if source_type == DataSourceLoadType.DATABASE.value:
-        connection_string = config.get("connection_string")
-        query = config.get("query")
-        if not isinstance(connection_string, str) or not isinstance(query, str):
-            raise ValueError("Datasource database loading requires connection_string and query")
-        _assert_select_only(query)
-        if not connection_string.lower().startswith("postgresql://"):
-            raise ValueError("Database datasource connection string must be PostgreSQL")
+        connection_string, database_query = _database_query(config)
         with psycopg.connect(connection_string, autocommit=True) as connection:
-            return pl.read_database(query, connection).lazy()
+            return pl.read_database(database_query, connection).lazy()
 
     if source_type == DataSourceLoadType.DUCKDB.value:
         import duckdb
@@ -282,13 +290,7 @@ def iter_datasource_batches(config: dict[str, Any], *, batch_size: int) -> Gener
 
     source_type = str(config.get("source_type") or "")
     if source_type == DataSourceLoadType.DATABASE.value:
-        connection_string = config.get("connection_string")
-        query = config.get("query")
-        if not isinstance(connection_string, str) or not isinstance(query, str):
-            raise ValueError("Database source requires connection details and query")
-        _assert_select_only(query)
-        if not connection_string.lower().startswith("postgresql://"):
-            raise ValueError("Database datasource connection string must be PostgreSQL")
+        connection_string, query = _database_query(config)
         with psycopg.connect(connection_string) as connection:
             connection.execute("SET TRANSACTION ISOLATION LEVEL REPEATABLE READ READ ONLY")
             with connection.cursor(name="dataforge_ingest") as cursor:
@@ -304,16 +306,13 @@ def iter_datasource_batches(config: dict[str, Any], *, batch_size: int) -> Gener
         }:
             yield from load_datasource_frame(config).collect_batches(chunk_size=batch_size, engine="streaming")
             return
-        path = _download_object_store_file(file_path)
-        try:
+        with _downloaded_object_store_file(file_path) as path:
             local_config = {**config, "file_path": str(path)}
             if DataSourceFileType.read(config.get("file_type"), default=None) == DataSourceFileType.EXCEL:
                 yield from iter_excel_batches(local_config, batch_size=batch_size)
                 return
             lazy = load_datasource_frame(local_config)
             yield from lazy.collect_batches(chunk_size=batch_size, engine="streaming")
-        finally:
-            path.unlink(missing_ok=True)
         return
     if source_type == DataSourceLoadType.FILE.value and DataSourceFileType.read(config.get("file_type"), default=None) == DataSourceFileType.EXCEL:
         yield from iter_excel_batches(config, batch_size=batch_size)

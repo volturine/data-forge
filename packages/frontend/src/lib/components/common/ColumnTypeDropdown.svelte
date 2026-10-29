@@ -21,7 +21,7 @@
 	}
 
 	let {
-		value = $bindable(),
+		value,
 		onChange,
 		placeholder = 'Select type...',
 		disabled = false,

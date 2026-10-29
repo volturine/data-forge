@@ -31,7 +31,6 @@ const {
 	switchNamespace,
 	useNamespace,
 	isNamespaceReady,
-	isNamespaceSwitching,
 	getNamespaceError,
 	getNamespaceStatus
 } = await import('./namespace.svelte');
@@ -355,22 +354,6 @@ describe('namespace store', () => {
 			expect(requireNamespace()).toBe('no-callback');
 		});
 
-		test('sets switching flag during switch', async () => {
-			let switchingDuringBeforeCommit = false;
-			let switchingDuringAfterCommit = false;
-			await switchNamespace('flag-ns', {
-				beforeCommit() {
-					switchingDuringBeforeCommit = isNamespaceSwitching();
-				},
-				afterCommit() {
-					switchingDuringAfterCommit = isNamespaceSwitching();
-				}
-			});
-			expect(switchingDuringBeforeCommit).toBe(true);
-			expect(switchingDuringAfterCommit).toBe(true);
-			expect(isNamespaceSwitching()).toBe(false);
-		});
-
 		test('throws when namespace registration fails', async () => {
 			mockRegisterNamespace.mockResolvedValueOnce({
 				isErr: () => true,
@@ -378,7 +361,7 @@ describe('namespace store', () => {
 				error: { message: 'registration failed' }
 			});
 			await expect(switchNamespace('err-ns')).rejects.toThrow('registration failed');
-			expect(isNamespaceSwitching()).toBe(false);
+			expect(useNamespace().switching).toBe(false);
 		});
 
 		test('clears switching flag even on hook error', async () => {
@@ -389,7 +372,7 @@ describe('namespace store', () => {
 					}
 				})
 			).rejects.toThrow('hook error');
-			expect(isNamespaceSwitching()).toBe(false);
+			expect(useNamespace().switching).toBe(false);
 		});
 	});
 });

@@ -28,29 +28,64 @@ export type ShellPhase = 'loading' | 'error' | 'auth' | 'app';
  */
 export class AppBootstrap {
 	private run: Promise<void> | null = null;
-	/** True after start() has finished its orchestration attempt. */
+	private succeeded = false;
+	private lastFailure = $state<string | null>(null);
+	retrying = $state(false);
+	/** True after the current orchestration attempt has finished. */
 	private settled = $state(false);
 
 	/**
-	 * Kick bootstrap exactly once. Safe to call from layout `onMount`.
+	 * Start once from client init; layout `onMount` callers join the same attempt.
 	 */
 	start(): Promise<void> {
 		if (this.run) return this.run;
 
-		this.run = (async () => {
-			// Config and session are independent; fail independently.
-			await Promise.all([configStore.fetch(), authStore.resolve()]);
+		this.settled = false;
+		this.retrying = true;
+		let unexpectedError: string | null = null;
+
+		const attempt = async (): Promise<void> => {
+			// Config and session are independent; wait for both even if one throws,
+			// so a retry never overlaps a still-running cold-start probe.
+			const probes = await Promise.allSettled([
+				Promise.resolve().then(() => configStore.fetch()),
+				Promise.resolve().then(() => authStore.resolve())
+			]);
+			const failedProbe = probes.find((probe) => probe.status === 'rejected');
+			if (failedProbe?.status === 'rejected') {
+				unexpectedError = getErrorMessage(failedProbe.reason);
+			}
 
 			// Namespace depends on config (or a prior IDB value). Skip when config
 			// is unusable so we don't invent a second error for the same outage.
-			if (configStore.config !== null) {
-				await initNamespace();
+			if (configStore.config === null) return;
+
+			const [namespaceResult] = await Promise.allSettled([
+				Promise.resolve().then(() => initNamespace())
+			]);
+			if (namespaceResult.status === 'rejected') {
+				unexpectedError ??= getErrorMessage(namespaceResult.reason);
 			}
-		})().finally(() => {
+		};
+
+		this.run = attempt().finally(() => {
 			this.settled = true;
+			this.succeeded = this.appReady;
+			this.lastFailure = this.succeeded
+				? null
+				: (this.currentError() ?? unexpectedError ?? 'Failed to start application');
+			this.retrying = false;
 		});
 
 		return this.run;
+	}
+
+	/** Retry the last attempt only after it failed; concurrent callers join it. */
+	retry(): Promise<void> {
+		if (this.run && (!this.settled || this.succeeded)) return this.run;
+
+		this.run = null;
+		return this.start();
 	}
 
 	/** Full application shell may mount. */
@@ -67,6 +102,10 @@ export class AppBootstrap {
 	 * still loading / when healthy. Auth routes use {@link phase} instead.
 	 */
 	get error(): string | null {
+		return this.lastFailure ?? this.currentError();
+	}
+
+	private currentError(): string | null {
 		if (configStore.error) return configStore.error;
 		if (this.settled && configStore.config === null) {
 			return 'Failed to load application configuration';
@@ -105,6 +144,10 @@ export class AppBootstrap {
 		}
 		return this.error;
 	}
+}
+
+function getErrorMessage(error: unknown): string {
+	return error instanceof Error ? error.message : String(error);
 }
 
 export const appBootstrap = new AppBootstrap();

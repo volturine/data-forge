@@ -45,9 +45,6 @@ jobs:
             image: data-forge-worker
           - target: compute-worker
             image: data-forge-compute-worker
-          # Keep the old image name available for one release.
-          - target: compute-worker
-            image: data-forge-polars-engine
     steps:
       - uses: actions/checkout@v7
 
@@ -106,9 +103,6 @@ jobs:
             image: data-forge-worker
           - target: compute-worker
             image: data-forge-compute-worker
-          # Keep the old image name available for one release.
-          - target: compute-worker
-            image: data-forge-polars-engine
     steps:
       - uses: actions/checkout@v7
 
@@ -194,7 +188,6 @@ jobs:
             echo "| Compute worker | \`${COMPUTE_WORKER_IMAGE}:${VERSION}\` |"
             echo
             echo "Also tagged as \`${TAG}\`, \`latest\`, and major/minor aliases."
-            echo "The old \`data-forge-polars-engine\` image name is also published as a compatibility alias for this release."
             echo
             echo "### Pull"
             echo

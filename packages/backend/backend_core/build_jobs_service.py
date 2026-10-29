@@ -1,8 +1,8 @@
 import uuid
-from datetime import datetime, timedelta
+from datetime import timedelta
 from typing import Any, cast
 
-from sqlalchemy import and_, desc, func, or_, select, update
+from sqlalchemy import and_, desc, or_, select, update
 from sqlalchemy.engine import CursorResult
 from sqlmodel import Session
 
@@ -36,6 +36,8 @@ _BUILD_WORK_DUE_QUERY = """
     WHERE status IN ('leased', 'running')
       AND lease_expires_at > statement_timestamp()
 """
+_ACTIVE_JOB_STATUSES = [status for status in BuildJobStatus.members() if status.is_active]
+_CANCELLABLE_JOB_STATUSES = [BuildJobStatus.QUEUED, *_ACTIVE_JOB_STATUSES]
 
 
 def stage_job(
@@ -43,10 +45,7 @@ def stage_job(
     *,
     build_id: str,
     namespace: str,
-    status: BuildJobStatus | str = BuildJobStatus.QUEUED,
-    priority: int = 0,
     max_attempts: int = 1,
-    available_at: datetime | None = None,
 ) -> BuildJob:
     # Claims compare availability against PostgreSQL CURRENT_TIMESTAMP. Use the
     # same clock when staging so a host/database clock skew cannot hide a fresh
@@ -56,11 +55,11 @@ def stage_job(
         id=str(uuid.uuid4()),
         build_id=build_id,
         namespace=namespace,
-        status=BuildJobStatus.require(status),
-        priority=priority,
+        status=BuildJobStatus.QUEUED,
+        priority=0,
         attempts=0,
         max_attempts=max_attempts,
-        available_at=available_at or now,
+        available_at=now,
         created_at=now,
         updated_at=now,
     )
@@ -83,10 +82,9 @@ def claim_next_job(session: Session, *, worker_id: str, reclaimable_owner_ids: s
     table = BuildJob.metadata.tables[BuildJob.__tablename__]
     reclaimable = set(reclaimable_owner_ids or ())
     queued_clause = table.c.status == BuildJobStatus.QUEUED
-    reclaimable_statuses = [status for status in BuildJobStatus.members() if status.is_reclaimable]
     lease_expired_clause = table.c.lease_expires_at <= now
     reclaimable_clause = and_(
-        table.c.status.in_(reclaimable_statuses),
+        table.c.status.in_(_ACTIVE_JOB_STATUSES),
         or_(table.c.lease_owner.is_(None), table.c.lease_owner.in_(reclaimable), lease_expired_clause),
         table.c.attempts < table.c.max_attempts,
     )
@@ -157,7 +155,7 @@ def stage_exhausted_jobs(session: Session) -> list[str]:
     table = BuildJob.metadata.tables[BuildJob.__tablename__]
     base = (
         select(BuildJob)
-        .where(table.c.status.in_([status for status in BuildJobStatus.members() if status.is_reclaimable]))
+        .where(table.c.status.in_(_ACTIVE_JOB_STATUSES))
         .where(table.c.lease_expires_at <= now)
         .where(table.c.attempts >= table.c.max_attempts)
         .order_by(sa(BuildJob.lease_expires_at), sa(BuildJob.id))
@@ -346,7 +344,7 @@ def finish_claimed_job(
     status: BuildJobStatus,
     error: str | None = None,
 ) -> BuildJob | None:
-    if status not in {BuildJobStatus.COMPLETED, BuildJobStatus.FAILED, BuildJobStatus.CANCELLED}:
+    if not status.is_terminal:
         raise ValueError(f'Unsupported claimed build job terminal status: {status.value}')
     now = database_now(session)
     table = BuildJob.metadata.tables[BuildJob.__tablename__]
@@ -380,11 +378,10 @@ def finish_claimed_job(
 def stage_job_cancelled(session: Session, job_id: str) -> BuildJob:
     now = database_now(session)
     table = BuildJob.metadata.tables[BuildJob.__tablename__]
-    cancellable_statuses = [BuildJobStatus.QUEUED, *[status for status in BuildJobStatus.members() if status.is_active]]
     statement = (
         update(BuildJob)
         .where(table.c.id == job_id)
-        .where(table.c.status.in_(cancellable_statuses))
+        .where(table.c.status.in_(_CANCELLABLE_JOB_STATUSES))
         .values(
             status=BuildJobStatus.CANCELLED,
             lease_owner=None,
@@ -411,43 +408,3 @@ def stage_job_cancelled(session: Session, job_id: str) -> BuildJob:
 
 
 mark_job_cancelled = committed(stage_job_cancelled, refresh=True)
-
-
-def queued_job_count(session: Session) -> int:
-    now = database_now(session)
-    table = BuildJob.metadata.tables[BuildJob.__tablename__]
-    stmt = (
-        select(func.count())
-        .select_from(table)
-        .where(
-            or_(
-                table.c.status == BuildJobStatus.QUEUED,
-                and_(
-                    table.c.status.in_([status for status in BuildJobStatus.members() if status.is_reclaimable]),
-                    table.c.lease_expires_at <= now,
-                    table.c.attempts < table.c.max_attempts,
-                ),
-            )
-        )
-    )
-    return session.execute(stmt).scalar_one()
-
-
-def release_worker_jobs(session: Session, *, worker_id: str) -> list[BuildJob]:
-    now = database_now(session)
-    table = BuildJob.metadata.tables[BuildJob.__tablename__]
-    stmt = (
-        select(BuildJob)
-        .where(sa(BuildJob.lease_owner == worker_id))
-        .where(table.c.status.in_([status for status in BuildJobStatus.members() if status.is_reclaimable]))
-    )
-    jobs = list(session.execute(with_for_update_skip_locked(session, stmt)).scalars().all())
-    for job in jobs:
-        job.status = BuildJobStatus.QUEUED
-        job.clear_lease()
-        job.updated_at = now
-        session.add(job)
-    session.commit()
-    for job in jobs:
-        session.refresh(job)
-    return jobs

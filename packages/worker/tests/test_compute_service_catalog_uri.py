@@ -1,4 +1,5 @@
 import os
+from collections.abc import Callable
 from pathlib import Path
 from types import SimpleNamespace
 from uuid import uuid4
@@ -56,9 +57,29 @@ def _datasource_with_catalog_uri(config_uri: object) -> SimpleNamespace:
     )
 
 
-def test_list_iceberg_snapshots_uses_worker_database_url(
+@pytest.mark.parametrize(
+    ("operation", "call_kwargs", "namespace_guard_message"),
+    [
+        pytest.param(
+            compute_service.list_iceberg_snapshots,
+            {"datasource_id": "ds-1", "request_namespace": "analytics"},
+            "snapshot lookup must not depend on ContextVar namespace",
+            id="test_list_iceberg_snapshots_uses_worker_database_url",
+        ),
+        pytest.param(
+            compute_service.delete_iceberg_snapshot,
+            {"datasource_id": "ds-1", "snapshot_id": "1", "request_namespace": "analytics"},
+            "snapshot deletion must not depend on ContextVar namespace",
+            id="test_delete_iceberg_snapshot_uses_worker_database_url",
+        ),
+    ],
+)
+def test_iceberg_snapshot_operations_use_worker_database_url(
     monkeypatch: pytest.MonkeyPatch,
     worker_database_url: str,
+    operation: Callable[..., object],
+    call_kwargs: dict,
+    namespace_guard_message: str,
 ) -> None:
     captured: dict = {}
     metadata_namespaces: list[str] = []
@@ -73,36 +94,10 @@ def test_list_iceberg_snapshots_uses_worker_database_url(
 
     monkeypatch.setattr(compute_service, "client_from_env", lambda: SimpleNamespace(datasource_metadata=datasource_metadata))
     monkeypatch.setattr(compute_service, "load_runtime_catalog", fake_load_runtime_catalog)
-    monkeypatch.setattr(compute_service, "get_namespace", lambda: pytest.fail("snapshot lookup must not depend on ContextVar namespace"))
+    monkeypatch.setattr(compute_service, "get_namespace", lambda: pytest.fail(namespace_guard_message))
 
     with pytest.raises(RuntimeError, match="stop before catalog access"):
-        compute_service.list_iceberg_snapshots(datasource_id="ds-1", request_namespace="analytics")
-
-    assert captured["uri"] == worker_database_url
-    assert metadata_namespaces == ["analytics"]
-
-
-def test_delete_iceberg_snapshot_uses_worker_database_url(
-    monkeypatch: pytest.MonkeyPatch,
-    worker_database_url: str,
-) -> None:
-    captured: dict = {}
-    metadata_namespaces: list[str] = []
-
-    def fake_load_runtime_catalog(name: str, **kwargs):
-        captured.update(kwargs)
-        raise RuntimeError("stop before catalog access")
-
-    def datasource_metadata(*, namespace: str, **_kwargs):
-        metadata_namespaces.append(namespace)
-        return _datasource_with_catalog_uri("postgresql://leaked:creds@config-db:5432/platform")
-
-    monkeypatch.setattr(compute_service, "client_from_env", lambda: SimpleNamespace(datasource_metadata=datasource_metadata))
-    monkeypatch.setattr(compute_service, "load_runtime_catalog", fake_load_runtime_catalog)
-    monkeypatch.setattr(compute_service, "get_namespace", lambda: pytest.fail("snapshot deletion must not depend on ContextVar namespace"))
-
-    with pytest.raises(RuntimeError, match="stop before catalog access"):
-        compute_service.delete_iceberg_snapshot(datasource_id="ds-1", snapshot_id="1", request_namespace="analytics")
+        operation(**call_kwargs)
 
     assert captured["uri"] == worker_database_url
     assert metadata_namespaces == ["analytics"]

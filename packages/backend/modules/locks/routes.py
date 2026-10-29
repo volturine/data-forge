@@ -14,10 +14,10 @@ from backend_core.error_handlers import handle_errors
 from backend_core.namespace import get_namespace, reset_namespace, set_namespace_context
 from backend_core.websocket import (
     is_disconnect_runtime_error,
-    resolve_websocket_session_token,
     safe_close_websocket,
     safe_send_json,
 )
+from modules.auth.dependencies import resolve_session_token
 from modules.locks import schemas, service, watchers
 from modules.mcp.router import MCPRouter
 
@@ -31,7 +31,7 @@ async def _require_websocket_user(websocket: WebSocket) -> str:
     owner_id = await run_api_blocking(
         run_settings_db,
         resolve_lock_owner_id,
-        resolve_websocket_session_token(websocket),
+        resolve_session_token(websocket),
         websocket.query_params.get('editor_client_id'),
     )
     if owner_id is None:
@@ -287,15 +287,22 @@ async def lock_websocket(websocket: WebSocket) -> None:
 
                 token_value = message.lock_token or watch_token
                 if token_value is not None:
-                    lock = await _heartbeat_lock(watch_type, watch_id, owner_id, token_value, message.ttl_seconds)
-                    if lock.lock_token != token_value:
-                        # This socket's token was rotated. Tell it the live lock
-                        # without adopting that token, so disconnect cannot release it.
-                        await _send_status(websocket, watch_type, watch_id, lock)
+                    try:
+                        lock = await _heartbeat_lock(watch_type, watch_id, owner_id, token_value, message.ttl_seconds)
+                    except HTTPException as exc:
+                        if exc.status_code != 409:
+                            raise
+                        watch_token = None
+                        # The lease may have expired; report canonical status before the client reacquires.
+                    else:
+                        if lock.lock_token != token_value:
+                            # This socket's token was rotated. Tell it the live lock
+                            # without adopting that token, so disconnect cannot release it.
+                            await _send_status(websocket, watch_type, watch_id, lock)
+                            continue
+                        watch_token = token_value
+                        await _notify_watchers(watch_type, watch_id, lock)
                         continue
-                    watch_token = token_value
-                    await _notify_watchers(watch_type, watch_id, lock)
-                    continue
 
                 status, cleaned = await _lookup_lock_status(watch_type, watch_id)
                 if cleaned:

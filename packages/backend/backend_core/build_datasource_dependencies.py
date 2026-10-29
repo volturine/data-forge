@@ -3,15 +3,30 @@ from __future__ import annotations
 from sqlmodel import Session
 
 from backend_core import datasource_delete_service
-from backend_core.datasource_lifecycle import lock_datasource_lifecycle, uses_postgres_advisory_locks
+from backend_core.claiming import is_postgres
+from backend_core.datasource_lifecycle import lock_datasource_lifecycle
 from backend_core.domain.compute.schemas import AnalysisPipelinePayload
+
+
+def output_datasource_ids(pipeline: AnalysisPipelinePayload) -> tuple[str, ...]:
+    """Return the datasource RIDs a pipeline's tabs publish."""
+    return tuple(sorted({result_id for tab in pipeline.tabs if isinstance((result_id := tab.output.get('result_id')), str)}))
+
+
+def build_datasource_ids(pipeline: AnalysisPipelinePayload) -> tuple[str, ...]:
+    """Return every datasource RID a build reads or publishes.
+
+    Recording published outputs keeps a tombstoned output (for example one the
+    user deleted before rebuilding) from being finalized and cleaned up while
+    the build is still writing it.
+    """
+    return tuple(sorted({*external_datasource_ids(pipeline), *output_datasource_ids(pipeline)}))
 
 
 def external_datasource_ids(pipeline: AnalysisPipelinePayload) -> tuple[str, ...]:
     """Return the exact datasource RIDs a queued pipeline can read."""
     tab_ids = {tab.id for tab in pipeline.tabs}
-    output_ids = {result_id for tab in pipeline.tabs if isinstance((result_id := tab.output.get('result_id')), str)}
-    local_ids = tab_ids | output_ids
+    local_ids = tab_ids | set(output_datasource_ids(pipeline))
     external_ids: set[str] = set()
 
     for tab in pipeline.tabs:
@@ -41,5 +56,5 @@ def lock_active_datasources(session: Session, *, namespace: str, datasource_ids:
         datasource_delete_service.get_active_datasource(
             session,
             datasource_id,
-            for_update=not uses_postgres_advisory_locks(session),
+            for_update=not is_postgres(session),
         )

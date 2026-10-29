@@ -1,4 +1,5 @@
 import { afterEach, beforeEach, describe, expect, test, vi } from 'vitest';
+import { MockWebSocket } from '#lib/test-utils/mock-websocket.js';
 
 vi.mock('#lib/stores/clientIdentity.svelte.js', () => ({
 	getClientIdentity: () => ({ clientId: 'client-1', clientSignature: 'signature-1' }),
@@ -11,39 +12,6 @@ vi.mock('#lib/stores/namespace.svelte.js', () => ({
 }));
 
 type Listener = (event?: { data?: string; code?: number; reason?: string }) => void;
-
-class MockWebSocket {
-	static instances: MockWebSocket[] = [];
-
-	url: string;
-	readyState = 1;
-	closeCalls: Array<{ code?: number; reason?: string }> = [];
-	private listeners = new Map<string, Listener[]>();
-
-	static readonly OPEN = 1;
-	static readonly CONNECTING = 0;
-	static readonly CLOSED = 3;
-
-	constructor(url: string) {
-		this.url = url;
-		MockWebSocket.instances.push(this);
-	}
-
-	addEventListener(type: string, listener: Listener) {
-		this.listeners.set(type, [...(this.listeners.get(type) ?? []), listener]);
-	}
-
-	close(code?: number, reason?: string) {
-		this.closeCalls.push({ code, reason });
-		this.readyState = MockWebSocket.CLOSED;
-	}
-
-	emit(type: string, event?: { data?: string; code?: number; reason?: string }) {
-		for (const listener of this.listeners.get(type) ?? []) {
-			listener(event);
-		}
-	}
-}
 
 class MockEventSource {
 	static instances: MockEventSource[] = [];
@@ -144,13 +112,16 @@ describe('createStream', () => {
 			onError: overrides.onError ?? vi.fn(),
 			onClose: overrides.onClose ?? vi.fn()
 		};
-		const handle = createStream<TestSnapshot, TestEvent, TestMessage>('/v1/test/ws', {
-			parse,
-			isSnapshot,
-			extractSnapshot,
-			extractEvent,
-			callbacks
-		});
+		const handle = createStream<TestSnapshot, TestEvent, TestMessage, TestSnapshotMessage>(
+			'/v1/test/ws',
+			{
+				parse,
+				isSnapshot,
+				extractSnapshot,
+				extractEvent,
+				callbacks
+			}
+		);
 		const socket = MockWebSocket.instances[MockWebSocket.instances.length - 1];
 		return { handle, callbacks, socket };
 	}
@@ -269,7 +240,7 @@ describe('createStream', () => {
 			onError: vi.fn(),
 			onClose: vi.fn()
 		};
-		createStream<TestSnapshot, never, TestMessage>('/v1/test/ws', {
+		createStream<TestSnapshot, never, TestMessage, TestSnapshotMessage>('/v1/test/ws', {
 			parse,
 			isSnapshot,
 			extractSnapshot: extractSnapshot,

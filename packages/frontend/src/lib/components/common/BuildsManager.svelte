@@ -6,6 +6,7 @@
 	import { getDatasource, listDatasources } from '#lib/api/datasource.js';
 	import { listAnalyses } from '#lib/api/analysis.js';
 	import type { BuildRunDetail, BuildRunSummary } from '#lib/types/build-stream.js';
+	import { datasourceBranches } from '#lib/types/datasource.js';
 	import {
 		buildLifecycleStatusLabel,
 		canCancelBuildLifecycleStatus,
@@ -42,6 +43,7 @@
 	import { getDurationStats } from '#lib/api/compute-worker-runs.js';
 	import { formatDateTimeDisplay, toEpochDisplay } from '#lib/utils/datetime.js';
 	import { elapsedSince, formatDuration } from '#lib/utils/format-duration.js';
+	import { subscribeVisibleClock } from '#lib/utils/visible-clock.js';
 	import { endOfDayEpoch, startOfDayEpoch } from '#lib/utils/temporal.js';
 	import { onDestroy, onMount } from 'svelte';
 	import { SvelteMap, SvelteSet } from 'svelte/reactivity';
@@ -57,10 +59,8 @@
 		id: string;
 	};
 
-	type BuildPayloadData = {
-		requestJson: Record<string, unknown> | null;
-		resultJson: Record<string, unknown> | null;
-	};
+	type SortColumn =
+		'created_at' | 'duration_ms' | 'kind' | 'status' | 'datasource' | 'analysis' | 'output';
 
 	let { compact = false, searchQuery, embedded = false }: Props = $props();
 
@@ -78,22 +78,24 @@
 	let expandedId = $state<string | null>(null);
 	let expandedLiveId = $state<string | null>(null);
 	let expandedStore = $state<BuildStreamStore | null>(null);
-	let expandedPayload = $state<BuildPayloadData | null>(null);
-	let sortColumn = $state<string>('created_at');
+	let sortColumn = $state<SortColumn>('created_at');
 	let sortDir = $state<'asc' | 'desc'>('desc');
 	let syncingExpandedId: string | null = null;
 	let nowMs = $state(Date.now());
 	const detailStores = new SvelteMap<string, BuildStreamStore>();
 	const detailSnapshots = new SvelteMap<string, BuildRunDetail>();
-	const detailPayloads = new SvelteMap<string, BuildPayloadData>();
 	const pendingCancelled = new SvelteMap<string, CancelBuildResponse>();
 	const limit = 50;
 	const HISTORY_STREAM_RECONNECT_MS = 1_000;
 	const HISTORY_REFRESH_DEBOUNCE_MS = 150;
 
+	const analysisId = $derived(pageState.url.searchParams.get('analysis_id') || undefined);
+	const datasourceId = $derived(pageState.url.searchParams.get('datasource_id') || undefined);
+	const expandedDetail = $derived(expandedId ? detailSnapshots.get(expandedId) : undefined);
+
 	const queryParams = $derived({
-		analysis_id: (pageState.url.searchParams.get('analysis_id') ?? undefined) || undefined,
-		datasource_id: (pageState.url.searchParams.get('datasource_id') ?? undefined) || undefined,
+		analysis_id: analysisId,
+		datasource_id: datasourceId,
 		kind: kindFilter || undefined,
 		status: statusFilter === 'all' ? undefined : statusFilter,
 		search: effectiveSearch.trim() || undefined,
@@ -218,9 +220,6 @@
 
 	const runs = $derived(buildsStore.builds);
 
-	const datasourceId = $derived(
-		(pageState.url.searchParams.get('datasource_id') ?? undefined) || undefined
-	);
 	const datasourceQuery = createQuery(() => ({
 		queryKey: ['datasource', datasourceId],
 		queryFn: async () => {
@@ -232,8 +231,8 @@
 		enabled: !!datasourceId
 	}));
 	const branchOptions = $derived.by(() => {
-		const config = (datasourceQuery.data?.config ?? {}) as Record<string, unknown>;
-		const branches = (config.branches as string[] | undefined) ?? [];
+		const datasource = datasourceQuery.data;
+		const branches = datasource ? datasourceBranches(datasource) : [];
 		const cleaned = branches.map((branch) => branch.trim()).filter((branch) => branch.length > 0);
 		const set = new SvelteSet<string>();
 		set.add('master');
@@ -247,8 +246,8 @@
 		if (effectiveSearch) {
 			const q = effectiveSearch.toLowerCase();
 			result = result.filter((run) => {
-				const outputName = buildOutputName(run) ?? '';
-				const currentTabName = buildCurrentTabName(run) ?? '';
+				const outputName = run.current_output_name ?? '';
+				const currentTabName = run.current_tab_name ?? '';
 				const datasourceId = buildDatasourceId(run);
 				const datasourceName = buildDatasourceName(run) ?? dsNames.get(datasourceId) ?? '';
 				return (
@@ -283,6 +282,16 @@
 
 	const hasAnyBuildRows = $derived(filteredRuns.length > 0);
 
+	const sortColumns: { key: SortColumn; label: string }[] = [
+		{ key: 'kind', label: 'Type' },
+		{ key: 'status', label: 'Status' },
+		{ key: 'datasource', label: 'Datasource' },
+		{ key: 'analysis', label: 'Analysis' },
+		{ key: 'output', label: 'Output' },
+		{ key: 'duration_ms', label: 'Duration' },
+		{ key: 'created_at', label: 'Created' }
+	];
+
 	function sortRuns(list: BuildRunSummary[]): BuildRunSummary[] {
 		const dir = sortDir === 'asc' ? 1 : -1;
 		return [...list].sort((a, b) => {
@@ -311,25 +320,21 @@
 				return dir * left.localeCompare(right);
 			}
 			if (sortColumn === 'output') {
-				const left = buildOutputName(a) ?? '';
-				const right = buildOutputName(b) ?? '';
+				const left = a.current_output_name ?? '';
+				const right = b.current_output_name ?? '';
 				return dir * left.localeCompare(right);
 			}
 			return 0;
 		});
 	}
 
-	function toggleSort(col: string) {
+	function toggleSort(col: SortColumn) {
 		if (sortColumn === col) {
 			sortDir = sortDir === 'asc' ? 'desc' : 'asc';
 			return;
 		}
 		sortColumn = col;
 		sortDir = col === 'created_at' || col === 'duration_ms' ? 'desc' : 'asc';
-	}
-
-	function formatDate(isoDate: string): string {
-		return formatDateTimeDisplay(isoDate);
 	}
 
 	function prevPage() {
@@ -352,7 +357,6 @@
 	function clearExpanded(): void {
 		expandedLiveId = null;
 		expandedStore = null;
-		expandedPayload = null;
 	}
 
 	function toggleExpand(id: string) {
@@ -393,16 +397,9 @@
 		return dsNames.get(datasourceId) ?? null;
 	}
 
-	function buildCurrentTabName(run: BuildRunSummary): string | null {
-		return run.current_tab_name ?? null;
-	}
-
-	function buildOutputName(run: BuildRunSummary): string | null {
-		return run.current_output_name ?? null;
-	}
-
 	function getRunBranch(run: BuildRunSummary): string | null {
-		const payload = detailPayloads.get(run.build_id)?.requestJson;
+		const detail = detailSnapshots.get(run.build_id);
+		const payload = detail?.request_json;
 		if (!payload) return null;
 		const opts = payload.iceberg_options as Record<string, unknown> | undefined;
 		if (typeof opts?.branch === 'string' && opts.branch.trim()) return opts.branch;
@@ -412,8 +409,7 @@
 			return datasource.branch;
 		}
 
-		const result = detailPayloads.get(run.build_id)?.resultJson;
-		const meta = result?.metadata as Record<string, unknown> | undefined;
+		const meta = detail?.result_json?.metadata as Record<string, unknown> | undefined;
 		if (typeof meta?.branch === 'string' && meta.branch.trim()) return meta.branch;
 		return null;
 	}
@@ -441,26 +437,19 @@
 		return result.duration_exceeded_warning === true;
 	}
 
-	const statsAnalysisId = $derived(
-		(pageState.url.searchParams.get('analysis_id') ?? undefined) || undefined
-	);
-	const statsDatasourceId = $derived(
-		(pageState.url.searchParams.get('datasource_id') ?? undefined) || undefined
-	);
-
 	const durationStatsQuery = createQuery(() => ({
-		queryKey: ['duration-stats', statsAnalysisId, statsDatasourceId],
+		queryKey: ['duration-stats', analysisId, datasourceId],
 		queryFn: async () => {
 			const result = await getDurationStats({
-				analysis_id: statsAnalysisId,
-				datasource_id: statsDatasourceId,
+				analysis_id: analysisId,
+				datasource_id: datasourceId,
 				kind: 'build',
 				limit: 20
 			});
 			if (result.isErr()) throw new Error(result.error.message);
 			return result.value;
 		},
-		enabled: !ns.switching && !!(statsAnalysisId || statsDatasourceId)
+		enabled: !ns.switching && !!(analysisId || datasourceId)
 	}));
 	const durationStats = $derived(durationStatsQuery.data ?? null);
 	const durationStatsLoading = $derived(durationStatsQuery.isLoading);
@@ -484,11 +473,7 @@
 
 	function lastCompletedStep(run: BuildRunSummary): string | null {
 		const detail = detailSnapshots.get(run.build_id);
-		if (!detail) return null;
-		for (let index = detail.steps.length - 1; index >= 0; index -= 1) {
-			if (detail.steps[index].state === 'completed') return detail.steps[index].step_name;
-		}
-		return null;
+		return detail?.steps.findLast((step) => step.state === 'completed')?.step_name ?? null;
 	}
 
 	function canCancelRun(run: BuildRunSummary): boolean {
@@ -548,10 +533,6 @@
 		cancelPending = false;
 	}
 
-	async function refreshHistory(): Promise<void> {
-		buildsStore.refresh();
-	}
-
 	function detailStore(buildId: string): BuildStreamStore {
 		let store = detailStores.get(buildId);
 		if (!store) {
@@ -577,28 +558,12 @@
 		};
 	}
 
-	function replaceRun(next: BuildRunSummary): void {
-		buildsStore.replaceBuild(next);
-	}
-
-	function setDetailPayload(build: BuildRunDetail): void {
-		detailSnapshots.set(build.build_id, build);
-		detailPayloads.set(build.build_id, {
-			requestJson: (build.request_json as Record<string, unknown> | null) ?? null,
-			resultJson: (build.result_json as Record<string, unknown> | null) ?? null
-		});
-		if (expandedId === build.build_id) {
-			expandedPayload = detailPayloads.get(build.build_id) ?? null;
-		}
-	}
-
 	async function syncExpandedRun(buildId: string): Promise<void> {
 		const run = runs.find((item) => item.build_id === buildId);
 		if (!run || syncingExpandedId === buildId) return;
 		const cached = detailSnapshots.get(buildId);
 		if (cached && run.status !== 'queued' && run.status !== 'running') {
 			expandedStore = detailStore(buildId);
-			expandedPayload = detailPayloads.get(buildId) ?? null;
 			return;
 		}
 		const store = detailStore(buildId);
@@ -606,7 +571,6 @@
 			store.close();
 			store.applySnapshot(summaryDetail(run));
 			expandedStore = store;
-			expandedPayload = null;
 		}
 		syncingExpandedId = buildId;
 		const detail = await getBuild(buildId).match(
@@ -615,8 +579,8 @@
 		);
 		if (syncingExpandedId === buildId) syncingExpandedId = null;
 		if (expandedId !== buildId || !detail) return;
-		replaceRun(detail);
-		setDetailPayload(detail);
+		buildsStore.replaceBuild(detail);
+		detailSnapshots.set(detail.build_id, detail);
 		if (canCancelBuildLifecycleStatus(detail.status)) {
 			store.onSettled = () => persistExpanded(store, detail.build_id);
 			store.watch(detail.build_id);
@@ -637,8 +601,8 @@
 			(persisted) => {
 				if (expandedId !== liveId) return;
 				store.close();
-				setDetailPayload(persisted);
-				replaceRun(persisted);
+				detailSnapshots.set(persisted.build_id, persisted);
+				buildsStore.replaceBuild(persisted);
 				store.applySnapshot(persisted);
 				expandedStore = store;
 			},
@@ -657,16 +621,23 @@
 		buildsStore.load(queryParams);
 	});
 
+	const hasActiveRuns = $derived(
+		runs.some((run) => canCancelBuildLifecycleStatus(currentStatus(run)))
+	);
+	// Elapsed labels need a browser clock only while a visible build is active.
+	$effect(() => {
+		if (!hasActiveRuns) return;
+		return subscribeVisibleClock(1000, (tick) => {
+			nowMs = tick;
+		});
+	});
+
 	onMount(() => {
 		historyStreamMounted = true;
 		startHistoryStream();
-		const elapsed = setInterval(() => {
-			nowMs = Date.now();
-		}, 1000);
 		return () => {
 			historyStreamMounted = false;
 			stopHistoryStream();
-			clearInterval(elapsed);
 			buildsStore.close();
 		};
 	});
@@ -909,7 +880,7 @@
 			<button
 				type="button"
 				class={button({ variant: 'ghost', size: 'sm' })}
-				onclick={() => void refreshHistory()}
+				onclick={() => buildsStore.refresh()}
 			>
 				<RefreshCw size={14} />
 				Refresh History
@@ -949,7 +920,7 @@
 			{buildsStore.error ?? 'Failed to load builds'}
 		</div>
 	{:else}
-		{#if statsAnalysisId || statsDatasourceId}
+		{#if analysisId || datasourceId}
 			<div class={css({ marginBottom: '3' })}>
 				<DurationTrendChart stats={durationStats} loading={durationStatsLoading} />
 			</div>
@@ -1007,7 +978,7 @@
 									fontWeight: 'medium'
 								})}
 							></th>
-							{#each [{ key: 'kind', label: 'Type' }, { key: 'status', label: 'Status' }, { key: 'datasource', label: 'Datasource' }, { key: 'analysis', label: 'Analysis' }, { key: 'output', label: 'Output' }, { key: 'duration_ms', label: 'Duration' }, { key: 'created_at', label: 'Created' }] as col (col.key)}
+							{#each sortColumns as col (col.key)}
 								<th
 									class={css({
 										cursor: 'pointer',
@@ -1049,7 +1020,7 @@
 									resolveName(buildDatasourceId(run), dsNames)}
 								data-build-analysis-id={run.analysis_id}
 								data-build-analysis-name={resolveAnalysisName(run)}
-								data-build-output-name={buildOutputName(run) ?? ''}
+								data-build-output-name={run.current_output_name ?? ''}
 								class={css(
 									{
 										cursor: 'pointer',
@@ -1267,7 +1238,7 @@
 										paddingY: '2'
 									})}
 								>
-									{#if buildOutputName(run)}
+									{#if run.current_output_name}
 										<span
 											class={css({
 												display: 'block',
@@ -1277,9 +1248,9 @@
 												fontSize: 'xs',
 												color: 'fg.secondary'
 											})}
-											title={buildOutputName(run) ?? ''}
+											title={run.current_output_name ?? ''}
 										>
-											{buildOutputName(run)}
+											{run.current_output_name}
 										</span>
 									{:else}
 										<span class={css({ color: 'fg.muted' })}>-</span>
@@ -1324,7 +1295,7 @@
 										whiteSpace: 'nowrap'
 									})}
 								>
-									{formatDate(run.started_at)}
+									{formatDateTimeDisplay(run.started_at)}
 								</td>
 							</tr>
 							{#if expandedId === run.build_id}
@@ -1362,7 +1333,7 @@
 												{#if currentStatus(run) === 'cancelled'}
 													<span class={css({ color: 'fg.warning' })}>
 														<strong>Cancelled At:</strong>
-														{cancelledAt(run) ? formatDate(cancelledAt(run) ?? '') : '-'}
+														{cancelledAt(run) ? formatDateTimeDisplay(cancelledAt(run) ?? '') : '-'}
 													</span>
 													<span class={css({ color: 'fg.warning' })}>
 														<strong>Cancelled By:</strong>
@@ -1382,8 +1353,8 @@
 													<BuildPreview
 														store={expandedStore}
 														title={computeWorkerRunKindLabel(effectiveKind(run))}
-														requestJson={expandedPayload?.requestJson ?? null}
-														resultJson={expandedPayload?.resultJson ?? null}
+														requestJson={expandedDetail?.request_json ?? null}
+														resultJson={expandedDetail?.result_json ?? null}
 													/>
 												{/key}
 											</div>

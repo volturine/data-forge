@@ -2,69 +2,49 @@
 	import { createQuery } from '@tanstack/svelte-query';
 	import { onDestroy } from 'svelte';
 	import { previewStepData, throwIfAborted, type StepPreviewResponse } from '#lib/api/compute.js';
-	import { stepPreviewQueryKey } from '#lib/utils/preview-query.js';
-	import { applySteps, stepsThroughTarget } from '#lib/utils/pipeline.js';
+	import {
+		createPreviewRequestCancellation,
+		PREVIEW_QUERY_GC_TIME,
+		stepPreviewQueryKey
+	} from '#lib/utils/preview-query.js';
+	import { stepsThroughTarget } from '#lib/utils/pipeline.js';
 	import { toComputeError } from '#lib/utils/compute-error.js';
 	import { hashPipeline } from '#lib/utils/hash.js';
 	import { analysisStore } from '#lib/stores/analysis.svelte.js';
-	import { datasourceStore } from '#lib/stores/datasource.svelte.js';
 	import { schemaStore } from '#lib/stores/schema.svelte.js';
 	import { isNamespaceReady, requireNamespace } from '#lib/stores/namespace.svelte.js';
-	import {
-		buildAnalysisPipelinePayload,
-		buildTargetPreviewPipelinePayload
-	} from '#lib/utils/analysis-pipeline.js';
+	import type { PipelineStep } from '#lib/types/analysis.js';
+	import type { AnalysisPipelinePayload } from '#lib/utils/analysis-pipeline.js';
 	import DataTable from '#lib/components/common/DataTable.svelte';
 	import { css } from '#lib/styles/panda.js';
 
 	interface Props {
 		analysisId: string;
 		datasourceId: string;
-		pipeline: Array<{
-			id: string;
-			type: string;
-			config: Record<string, unknown>;
-			depends_on?: string[];
-		}>;
+		appliedSteps: PipelineStep[];
 		stepId: string;
+		targetAnalysisPipeline: AnalysisPipelinePayload | null;
 		rowLimit?: number;
 	}
 
-	let { analysisId, datasourceId, pipeline, stepId, rowLimit = 100 }: Props = $props();
+	let {
+		analysisId,
+		datasourceId,
+		appliedSteps,
+		stepId,
+		targetAnalysisPipeline,
+		rowLimit = 100
+	}: Props = $props();
 	let currentPage = $state(1);
 	let columnSearch = $state('');
-	let previewRequestKey: string | null = null;
-	let previewRequestController = new AbortController();
+	const previewRequestCancellation = createPreviewRequestCancellation();
 
-	function previewSignal(request: Parameters<typeof previewStepData>[0]): AbortSignal {
-		const nextKey = JSON.stringify(request);
-		if (previewRequestKey !== nextKey || previewRequestController.signal.aborted) {
-			if (previewRequestKey !== null && !previewRequestController.signal.aborted) {
-				previewRequestController.abort();
-			}
-			previewRequestKey = nextKey;
-			previewRequestController = new AbortController();
-		}
-		return previewRequestController.signal;
-	}
+	onDestroy(() => previewRequestCancellation.dispose());
 
-	onDestroy(() => previewRequestController.abort());
-
-	const activePipeline = $derived(applySteps(pipeline));
-	const isActiveStep = $derived(activePipeline.some((step) => step.id === stepId));
-	const targetSteps = $derived(stepsThroughTarget(activePipeline, stepId));
+	const isActiveStep = $derived(appliedSteps.some((step) => step.id === stepId));
+	const targetSteps = $derived(stepsThroughTarget(appliedSteps, stepId));
 	const pipelineKey = $derived(hashPipeline(targetSteps));
 	const namespace = $derived(isNamespaceReady() ? requireNamespace() : null);
-	const targetAnalysisPipeline = $derived.by(() => {
-		if (!analysisId) return null;
-		const pipeline = buildAnalysisPipelinePayload(
-			analysisId,
-			analysisStore.tabs,
-			datasourceStore.datasources
-		);
-		if (!pipeline) return null;
-		return buildTargetPreviewPipelinePayload(pipeline, analysisStore.activeTab?.id ?? null, stepId);
-	});
 	const previewRequestState = $derived.by(() => {
 		if (!targetAnalysisPipeline) return null;
 		return {
@@ -93,7 +73,7 @@
 			const state = queryKey[5];
 			if (!state) throw new Error('Preview command is not ready');
 			const { request } = state;
-			const signal = previewSignal(request);
+			const signal = previewRequestCancellation.signalFor(request);
 			const result = await previewStepData(request, { signal });
 			throwIfAborted(signal);
 			if (result.isErr()) {
@@ -103,7 +83,7 @@
 			return result.value;
 		},
 		staleTime: Infinity,
-		gcTime: Infinity,
+		gcTime: PREVIEW_QUERY_GC_TIME,
 		// Cache-option Apply invalidates this target's variants; fresh navigation entries stay cached.
 		refetchOnMount: true,
 		retry: false,

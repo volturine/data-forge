@@ -37,7 +37,8 @@ export function setupInferredSchemaHydrationEffect(
 			datasourceStore.datasources
 		);
 		if (!analysisPayload) return;
-		const pipelineHash = hashPipeline(applySteps(pipeline));
+		const appliedPipeline = applySteps(pipeline);
+		const pipelineHash = hashPipeline(appliedPipeline);
 		const gate = `${id}:${tab.id}:${pipelineHash}`;
 		if (hydratedGates.has(gate)) return;
 		hydratedGates.add(gate);
@@ -45,7 +46,6 @@ export function setupInferredSchemaHydrationEffect(
 		const controller = new AbortController();
 		controllers.add(controller);
 
-		const appliedPipeline = applySteps(pipeline);
 		const targets = pipeline
 			.filter(
 				(step) =>
@@ -133,38 +133,45 @@ export function setupSourceSchemaLoadingEffect(deps: SourceSchemaLoaderDeps): {
 	const pendingSourceSchemaKeys = new SvelteSet<string>();
 	const controllers = new SvelteSet<AbortController>();
 
+	function startSourceRequest(schemaId: string): {
+		controller: AbortController;
+		release: () => void;
+	} {
+		const controller = new AbortController();
+		controllers.add(controller);
+		const release = () => {
+			if (!pendingSourceSchemaKeys.has(schemaId)) return;
+			pendingSourceSchemaKeys.delete(schemaId);
+			controllers.delete(controller);
+			isLoadingSchema = pendingSourceSchemaKeys.size > 0;
+		};
+		pendingSourceSchemaKeys.add(schemaId);
+		isLoadingSchema = true;
+		return { controller, release };
+	}
+
 	function load(): void {
 		const datasourceIdValue = deps.datasourceId();
 		const schemaId = deps.schemaKey();
 		if (!schemaId) return;
-		const requestKey = schemaId;
 
 		const existingSchema = analysisStore.sourceSchemas.get(schemaId);
-		if (existingSchema || pendingSourceSchemaKeys.has(requestKey)) return;
+		if (existingSchema || pendingSourceSchemaKeys.has(schemaId)) return;
 
 		const activeTab = analysisStore.activeTab;
 		const analysisTabId = activeTab?.datasource?.analysis_tab_id ?? null;
-		const validAnalysisId = deps.validAnalysisId();
-		const analysisPayload = validAnalysisId
-			? buildAnalysisPipelinePayload(
-					validAnalysisId,
-					analysisStore.tabs,
-					datasourceStore.datasources
-				)
-			: null;
 
 		if (analysisTabId) {
+			const validAnalysisId = deps.validAnalysisId();
+			const analysisPayload = validAnalysisId
+				? buildAnalysisPipelinePayload(
+						validAnalysisId,
+						analysisStore.tabs,
+						datasourceStore.datasources
+					)
+				: null;
 			if (!analysisPayload) return;
-			const controller = new AbortController();
-			controllers.add(controller);
-			const releasePendingSchema = () => {
-				if (!pendingSourceSchemaKeys.has(requestKey)) return;
-				pendingSourceSchemaKeys.delete(requestKey);
-				controllers.delete(controller);
-				isLoadingSchema = pendingSourceSchemaKeys.size > 0;
-			};
-			pendingSourceSchemaKeys.add(requestKey);
-			isLoadingSchema = true;
+			const request = startSourceRequest(schemaId);
 			getStepSchema(
 				{
 					analysis_id: validAnalysisId ?? undefined,
@@ -172,11 +179,11 @@ export function setupSourceSchemaLoadingEffect(deps: SourceSchemaLoaderDeps): {
 					tab_id: analysisTabId,
 					target_step_id: 'source'
 				},
-				{ signal: controller.signal }
+				{ signal: request.controller.signal }
 			).match(
 				(payload) => {
-					releasePendingSchema();
-					if (controller.signal.aborted) return;
+					request.release();
+					if (request.controller.signal.aborted) return;
 					if (deps.schemaKey() !== schemaId) return;
 					const columns = payload.columns.map((name) => ({
 						name,
@@ -189,8 +196,8 @@ export function setupSourceSchemaLoadingEffect(deps: SourceSchemaLoaderDeps): {
 					});
 				},
 				(error) => {
-					releasePendingSchema();
-					if (controller.signal.aborted) return;
+					request.release();
+					if (request.controller.signal.aborted) return;
 					if (deps.schemaKey() !== schemaId) return;
 					track({
 						event: 'schema_error',
@@ -208,26 +215,17 @@ export function setupSourceSchemaLoadingEffect(deps: SourceSchemaLoaderDeps): {
 		if (!isUuid(datasourceIdValue)) return;
 		const ds = data.find((d) => d.id === datasourceIdValue);
 		if (ds?.source_type === 'analysis') return;
-		const controller = new AbortController();
-		controllers.add(controller);
-		const releasePendingSchema = () => {
-			if (!pendingSourceSchemaKeys.has(requestKey)) return;
-			pendingSourceSchemaKeys.delete(requestKey);
-			controllers.delete(controller);
-			isLoadingSchema = pendingSourceSchemaKeys.size > 0;
-		};
-		pendingSourceSchemaKeys.add(requestKey);
-		isLoadingSchema = true;
-		getDatasourceSchema(datasourceIdValue, { signal: controller.signal }).match(
+		const request = startSourceRequest(schemaId);
+		getDatasourceSchema(datasourceIdValue, { signal: request.controller.signal }).match(
 			(schema) => {
-				releasePendingSchema();
-				if (controller.signal.aborted) return;
+				request.release();
+				if (request.controller.signal.aborted) return;
 				if (deps.schemaKey() !== schemaId) return;
 				analysisStore.setSourceSchema(schemaId, schema);
 			},
 			(err) => {
-				releasePendingSchema();
-				if (controller.signal.aborted) return;
+				request.release();
+				if (request.controller.signal.aborted) return;
 				if (deps.schemaKey() !== schemaId) return;
 				track({
 					event: 'schema_error',

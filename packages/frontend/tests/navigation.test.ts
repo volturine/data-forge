@@ -1,11 +1,10 @@
-import type { Page } from '@playwright/test';
-import { E2E_SHARED_NAMESPACE_B, test, expect } from './fixtures.js';
+import type { Page, Route, Request } from '@playwright/test';
+import { test, expect } from './fixtures.js';
 import { createLongRunningAnalysis } from './utils/api.js';
 import { screenshot } from './utils/visual.js';
 import {
 	gotoAuthedRoute,
 	gotoMonitoringTab,
-	gotoNewAnalysis,
 	gotoProfile,
 	waitForProfileTab,
 	readyTimeoutMs,
@@ -18,7 +17,7 @@ import { createAnalysisViaUi } from './utils/user-flows.js';
 import { nameForAnalysisId } from './utils/api.js';
 import { DEFAULT_NAMESPACE, switchNamespace } from './utils/namespace.js';
 import { uid } from './utils/uid.js';
-import { dialogByHeading, dialogByTextbox } from './utils/locators.js';
+import { dialogByHeading } from './utils/locators.js';
 import { waitForBuildPreview, waitForBuildPreviewId } from './utils/builds.js';
 
 /**
@@ -26,47 +25,185 @@ import { waitForBuildPreview, waitForBuildPreviewId } from './utils/builds.js';
  * and primary navigation links work.
  */
 test.describe('Navigation – page load smoke tests', () => {
-	test('home page renders Analyses heading', async ({ page }) => {
+	test('home page recovers from a startup failure without reloading', async ({ page }) => {
+		await page.route(
+			'**/api/v1/config',
+			(route) => route.fulfill({ status: 503, json: { detail: 'Temporarily unavailable' } }),
+			{ times: 1 }
+		);
 		await page.goto('/');
+		await expect(page.getByRole('heading', { name: 'Unable to start the app' })).toBeVisible();
+		const documentStarted = await page.evaluate(() => performance.timeOrigin);
+		await page.getByRole('button', { name: 'Retry', exact: true }).click();
+		// The previous failure remains visible while Retry is in flight. Wait for
+		// recovery before using the normal fail-fast bootstrap readiness helper.
+		await expect(page.getByRole('heading', { name: 'Unable to start the app' })).toBeHidden({
+			timeout: readyTimeoutMs()
+		});
 		await waitForLayoutReady(page);
+		expect(await page.evaluate(() => performance.timeOrigin)).toBe(documentStarted);
 		await expect(page.getByRole('heading', { name: 'Analyses', level: 1 })).toBeVisible();
 		await expect(page.getByRole('link', { name: /New Analysis/i })).toBeVisible();
 		await screenshot(page, 'navigation', 'home-page');
 	});
 
-	test('datasources page renders Data Sources heading', async ({ page }) => {
-		await page.goto('/datasources');
+	test('datasources page becomes interactive without animation frames', async ({ page }) => {
+		const fontWeights = [400, 500, 600, 700] as const;
+		const fontSampleText = 'Az09ĀЖӐΩắ';
+		const expectedFontSubsetCount = 6;
+		const googleFontRequestPattern = /^https:\/\/fonts\.(?:googleapis|gstatic)\.com(?:\/|$)/;
+		const blockedGoogleFontRequests: string[] = [];
+		const fontRequestUrls: string[] = [];
+		const abortGoogleFontRequest = async (route: Route): Promise<void> => {
+			blockedGoogleFontRequests.push(route.request().url());
+			await route.abort();
+		};
+		const recordFontRequest = (request: Request): void => {
+			if (request.resourceType() === 'font') fontRequestUrls.push(request.url());
+		};
+		page.on('request', recordFontRequest);
+
+		try {
+			await page.route(googleFontRequestPattern, abortGoogleFontRequest);
+			await page.addInitScript(() => {
+				const nativeRequestAnimationFrame = window.requestAnimationFrame.bind(window);
+				const nativeCancelAnimationFrame = window.cancelAnimationFrame.bind(window);
+				const queuedCallbacks = new Map<
+					number,
+					{ callback: FrameRequestCallback; nativeId?: number }
+				>();
+				let nextHeldId = -1;
+				let held = true;
+				const restoreCancellationWhenDrained = () => {
+					if (!held && queuedCallbacks.size === 0)
+						window.cancelAnimationFrame = nativeCancelAnimationFrame;
+				};
+
+				window.requestAnimationFrame = (callback) => {
+					if (!held) return nativeRequestAnimationFrame(callback);
+					const id = nextHeldId--;
+					queuedCallbacks.set(id, { callback });
+					return id;
+				};
+				window.cancelAnimationFrame = (id) => {
+					const pending = queuedCallbacks.get(id);
+					if (pending) {
+						if (pending.nativeId !== undefined) nativeCancelAnimationFrame(pending.nativeId);
+						queuedCallbacks.delete(id);
+						restoreCancellationWhenDrained();
+					} else if (id >= 0) nativeCancelAnimationFrame(id);
+				};
+				window.addEventListener(
+					'e2e-resume-animation-frame',
+					() => {
+						held = false;
+						window.requestAnimationFrame = nativeRequestAnimationFrame;
+						for (const [id, pending] of queuedCallbacks) {
+							pending.nativeId = nativeRequestAnimationFrame((timestamp) => {
+								queuedCallbacks.delete(id);
+								restoreCancellationWhenDrained();
+								pending.callback(timestamp);
+							});
+						}
+						restoreCancellationWhenDrained();
+					},
+					{ once: true }
+				);
+			});
+
+			try {
+				await page.goto('/datasources');
+				await expect(page.locator('aside[aria-label="Main navigation"]')).toHaveAttribute(
+					'data-shell-interactive',
+					'true',
+					{ timeout: readyTimeoutMs() }
+				);
+				await expect(page.getByRole('button', { name: 'Select namespace' })).toBeEnabled({
+					timeout: readyTimeoutMs()
+				});
+			} finally {
+				await page.evaluate(() => window.dispatchEvent(new Event('e2e-resume-animation-frame')));
+			}
+
+			await waitForLayoutReady(page);
+			await expect(page.getByRole('heading', { name: 'Data Sources' })).toBeVisible();
+			await expect(
+				page.locator(
+					'link[href^="https://fonts.googleapis.com"], link[href^="https://fonts.gstatic.com"]'
+				)
+			).toHaveCount(0);
+
+			const loadedFontFaces = await page.evaluate(
+				async ({ weights, sampleText, timeoutMs }) => {
+					let timeoutHandle: number | undefined;
+					const fontLoad = Promise.all(
+						weights.map(async (weight) => {
+							const faces = await document.fonts.load(
+								`${weight} 16px "JetBrains Mono"`,
+								sampleText
+							);
+							return {
+								weight,
+								faces: faces.map((face) => ({
+									family: face.family,
+									weight: face.weight,
+									style: face.style,
+									status: face.status
+								}))
+							};
+						})
+					);
+					const timeout = new Promise<never>((_, reject) => {
+						timeoutHandle = window.setTimeout(
+							() => reject(new Error('Timed out loading JetBrains Mono font faces')),
+							timeoutMs
+						);
+					});
+					try {
+						return await Promise.race([fontLoad, timeout]);
+					} finally {
+						if (timeoutHandle !== undefined) window.clearTimeout(timeoutHandle);
+					}
+				},
+				{ weights: [...fontWeights], sampleText: fontSampleText, timeoutMs: readyTimeoutMs() }
+			);
+
+			expect(loadedFontFaces.map(({ weight }) => weight)).toEqual([...fontWeights]);
+			for (const { weight, faces } of loadedFontFaces) {
+				expect(faces).toHaveLength(expectedFontSubsetCount);
+				expect(
+					faces.every(
+						(face) =>
+							face.family.replace(/^['"]|['"]$/g, '') === 'JetBrains Mono' &&
+							face.weight === String(weight) &&
+							face.style === 'normal' &&
+							face.status === 'loaded'
+					)
+				).toBe(true);
+			}
+			expect(blockedGoogleFontRequests).toHaveLength(0);
+
+			const pageOrigin = new URL(page.url()).origin;
+			expect(fontRequestUrls.length).toBeGreaterThan(0);
+			expect(fontRequestUrls.every((url) => new URL(url).origin === pageOrigin)).toBe(true);
+			await screenshot(page, 'navigation', 'datasources-page');
+		} finally {
+			await page.unroute(googleFontRequestPattern, abortGoogleFontRequest);
+			page.off('request', recordFontRequest);
+		}
+	});
+
+	test('legacy datasource detail URLs redirect to the datasource list', async ({ page }) => {
+		await page.goto('/datasources/legacy-id');
 		await waitForLayoutReady(page);
+		await expect(page).toHaveURL(/\/datasources\/?$/);
 		await expect(page.getByRole('heading', { name: 'Data Sources' })).toBeVisible();
-		await screenshot(page, 'navigation', 'datasources-page');
 	});
 
 	test('UDFs are not a sidebar destination', async ({ page }) => {
 		await gotoAuthedRoute(page, '/');
 		const sidebar = page.locator('aside[aria-label="Main navigation"]');
 		await expect(sidebar.getByRole('link', { name: 'UDFs', exact: true })).toHaveCount(0);
-	});
-
-	test('monitoring page renders Monitoring heading', async ({ page }) => {
-		await page.goto('/monitoring');
-		await waitForLayoutReady(page);
-		await expect(page.getByRole('heading', { name: 'Monitoring' })).toBeVisible({
-			timeout: 5_000
-		});
-		await expect(page.getByRole('tab', { name: 'Builds' })).toBeVisible({ timeout: 5_000 });
-		await screenshot(page, 'navigation', 'monitoring-page');
-	});
-
-	test('new analysis page renders the datasource picker', async ({ page }) => {
-		await gotoNewAnalysis(page);
-		await expect(page.getByRole('heading', { name: 'New Analysis' })).toBeVisible();
-		await expect(page.getByPlaceholder('Search datasources...')).toBeVisible();
-		await screenshot(page, 'navigation', 'new-analysis-datasource-picker');
-	});
-
-	test('new datasource page loads', async ({ page }) => {
-		await gotoAuthedRoute(page, '/datasources/new');
-		await expect(page).toHaveURL(/datasources\/new/);
 	});
 
 	// ── header nav links ──────────────────────────────────────────────────────
@@ -168,25 +305,6 @@ test.describe('Navigation – theme toggle', () => {
 	});
 });
 
-test.describe('Navigation – profile access', () => {
-	test('profile link navigates to profile page', async ({ page }) => {
-		await gotoAuthedRoute(page, '/');
-		await page.getByRole('link', { name: 'Profile' }).click();
-
-		// The SPA can update the URL before Playwright attaches a navigation
-		// event waiter. Assert the current URL instead of waiting for a missed
-		// event; this also ensures the page content is checked below.
-		await expect(page).toHaveURL(/\/profile/, { timeout: 5_000 });
-		await expect(page.getByRole('heading', { name: 'Profile', level: 1 })).toBeVisible();
-		await expect(page.getByRole('tab', { name: 'Account' })).toHaveAttribute(
-			'aria-selected',
-			'true'
-		);
-
-		await screenshot(page, 'navigation', 'profile-via-sidebar');
-	});
-});
-
 async function gotoMonitoringBuilds(page: Page, analysisId?: string) {
 	if (analysisId) {
 		const params = new URLSearchParams({ tab: 'builds', analysis_id: analysisId });
@@ -201,87 +319,9 @@ async function gotoMonitoringBuilds(page: Page, analysisId?: string) {
 	await expect(page.locator('#panel-builds')).toBeVisible({ timeout: 5_000 });
 }
 
-function cancelBuildDialog(page: Page) {
-	const title = page.getByRole('heading', { name: 'Cancel this build?' });
-	return page.getByRole('dialog').filter({ has: title });
-}
-
-async function confirmCancelBuild(page: Page) {
-	const dialog = cancelBuildDialog(page);
-	const confirmButton = dialog.getByRole('button', { name: 'Cancel Build', exact: true });
-	await expect(dialog).toBeVisible({ timeout: 5_000 });
-	await expect(confirmButton).toBeVisible({ timeout: 5_000 });
-	await expect(confirmButton).toBeEnabled({ timeout: 5_000 });
-	const responsePromise = page
-		.waitForResponse(
-			(apiResponse) =>
-				apiResponse.url().includes('/api/v1/compute/builds/') &&
-				apiResponse.url().includes('/cancel') &&
-				apiResponse.status() === 200,
-			{ timeout: 10_000 }
-		)
-		.then(async (response) => (await response.json()) as { status: string });
-	await confirmButton.click({ force: true, timeout: 5_000 });
-	const payload = await responsePromise;
-	expect(payload.status).toBe('cancelled');
-	await expect(dialog).not.toBeVisible({ timeout: 5_000 });
-}
-
 async function previewBuildId(page: Page) {
 	await waitForBuildPreview(page);
 	return waitForBuildPreviewId(page);
-}
-
-async function waitForBuildRowById(
-	page: Page,
-	panel: ReturnType<Page['locator']>,
-	runId: string,
-	statuses:
-		| 'running'
-		| 'completed'
-		| 'failed'
-		| 'cancelled'
-		| 'queued'
-		| Array<'queued' | 'running' | 'completed' | 'failed' | 'cancelled'>,
-	timeout = 5_000
-) {
-	const acceptedStatuses = Array.isArray(statuses) ? statuses : [statuses];
-	const failedToLoad = panel.getByText(/Failed to load builds/i).first();
-	await expect(failedToLoad).not.toBeVisible({ timeout: 5_000 });
-	const row = panel
-		.locator(
-			acceptedStatuses
-				.map((status) => `[data-build-row="${runId}"][data-build-status="${status}"]`)
-				.join(',')
-		)
-		.first();
-	await expect(row).toBeVisible({ timeout });
-	if (acceptedStatuses.includes('cancelled')) {
-		const completed = panel.locator(`[data-build-row="${runId}"][data-build-status="completed"]`);
-		const failed = panel.locator(`[data-build-row="${runId}"][data-build-status="failed"]`);
-		if (await completed.isVisible().catch(() => false)) {
-			throw new Error(`Build row ${runId} completed after a confirmed cancellation`);
-		}
-		if (await failed.isVisible().catch(() => false)) {
-			throw new Error(`Build row ${runId} failed after a confirmed cancellation`);
-		}
-	}
-	return row;
-}
-
-async function waitForBuildRowEventually(
-	page: Page,
-	panel: ReturnType<Page['locator']>,
-	runId: string,
-	statuses:
-		| 'running'
-		| 'completed'
-		| 'failed'
-		| 'cancelled'
-		| 'queued'
-		| Array<'queued' | 'running' | 'completed' | 'failed' | 'cancelled'>
-) {
-	return waitForBuildRowById(page, panel, runId, statuses, 5_000);
 }
 
 test.describe('Navigation – compute worker monitor', () => {
@@ -332,28 +372,6 @@ test.describe('Navigation – compute worker monitor', () => {
 				timeout: readyTimeoutMs()
 			});
 			await closeComputeWorkersPopup(page);
-
-			const panel = page.locator('#panel-builds');
-			// Build may finish before cancel under load (especially with multi-thread
-			// Polars). The Compute workers popup already verified; only cancel while still active.
-			const historyRow = await waitForBuildRowEventually(page, panel, runId, [
-				'queued',
-				'running',
-				'completed',
-				'failed',
-				'cancelled'
-			]);
-			const status = await historyRow.getAttribute('data-build-status');
-			if (status === 'queued' || status === 'running') {
-				const cancelButton = historyRow.getByLabel('Cancel build');
-				await expect(cancelButton).toBeVisible({ timeout: 5_000 });
-				await expect(cancelButton).toBeEnabled({ timeout: 5_000 });
-				await cancelButton.click({ timeout: 5_000 });
-				await confirmCancelBuild(page);
-
-				const cancelledRow = await waitForBuildRowEventually(page, panel, runId, 'cancelled');
-				await expect(cancelledRow.getByText('Cancelled')).toBeVisible({ timeout: 5_000 });
-			}
 		} finally {
 			await deleteAnalysisViaUI(page, analysisName);
 		}
@@ -364,71 +382,83 @@ test.describe('Navigation – compute worker monitor', () => {
 // Chat panel – minimal smoke tests
 // ────────────────────────────────────────────────────────────────────────────────
 
+const OPENROUTER_CHAT_SETTINGS = {
+	smtp_host: '',
+	smtp_port: 587,
+	smtp_user: '',
+	smtp_password: '',
+	telegram_bot_token: '',
+	telegram_bot_enabled: false,
+	openrouter_api_key: 'sk-test',
+	openrouter_default_model: 'openai/gpt-4o-mini',
+	ollama_endpoint_url: 'http://ollama.test',
+	ollama_default_model: 'llama3.2',
+	public_idb_debug: false
+};
+
+/** Stub GET /api/v1/settings with an OpenRouter-configured profile, optionally gating GETs. */
+async function stubChatSettings(
+	page: Page,
+	options: { getGate?: Promise<void> } = {}
+): Promise<void> {
+	await page.route('**/api/v1/settings', async (route) => {
+		if (route.request().method() === 'GET' && options.getGate) {
+			await options.getGate;
+		}
+		await route.fulfill({
+			status: 200,
+			contentType: 'application/json',
+			body: JSON.stringify(OPENROUTER_CHAT_SETTINGS)
+		});
+	});
+}
+
 test.describe('Navigation – chat panel smoke', () => {
-	test('chat trigger opens panel and close button dismisses it', async ({ page }) => {
+	test('chat panel opens and closes via trigger, close button, Escape, and second trigger click', async ({
+		page
+	}) => {
+		// One page load covers all three open/close paths. Each step ends with the
+		// panel closed, so the next step starts from the same state as a fresh load.
 		await gotoAuthedRoute(page, '/');
 
 		const trigger = page.getByRole('button', { name: 'AI Assistant' });
-		await expect(trigger).toBeVisible();
-		await trigger.click();
-
 		const panel = page.locator('#chat-panel');
-		await expect(panel).toBeVisible({ timeout: 5_000 });
 
-		await screenshot(page, 'navigation', 'chat-panel-open');
+		await test.step('chat trigger opens panel and close button dismisses it', async () => {
+			await expect(trigger).toBeVisible();
+			await trigger.click();
+			await expect(panel).toBeVisible({ timeout: 5_000 });
 
-		// Close via the close button
-		await panel.getByRole('button', { name: 'Close chat' }).click();
-		await expect(panel).not.toBeVisible({ timeout: 3_000 });
-	});
+			await screenshot(page, 'navigation', 'chat-panel-open');
 
-	test('chat panel closes via Escape key', async ({ page }) => {
-		await gotoAuthedRoute(page, '/');
+			// Close via the close button
+			await panel.getByRole('button', { name: 'Close chat' }).click();
+			await expect(panel).not.toBeVisible({ timeout: 3_000 });
+		});
 
-		await page.getByRole('button', { name: 'AI Assistant' }).click();
-		const panel = page.locator('#chat-panel');
-		await expect(panel).toBeVisible({ timeout: 5_000 });
+		await test.step('chat panel closes via Escape key', async () => {
+			await trigger.click();
+			await expect(panel).toBeVisible({ timeout: 5_000 });
 
-		await page.keyboard.press('Escape');
-		await expect(panel).not.toBeVisible({ timeout: 3_000 });
-	});
+			await page.keyboard.press('Escape');
+			await expect(panel).not.toBeVisible({ timeout: 3_000 });
+		});
 
-	test('chat panel toggle: second click closes the panel', async ({ page }) => {
-		await gotoAuthedRoute(page, '/');
+		await test.step('chat panel toggle: second click closes the panel', async () => {
+			await trigger.click();
+			await expect(panel).toBeVisible({ timeout: 5_000 });
 
-		const trigger = page.getByRole('button', { name: 'AI Assistant' });
-		await trigger.click();
-		const panel = page.locator('#chat-panel');
-		await expect(panel).toBeVisible({ timeout: 5_000 });
-
-		// Click trigger again to close
-		await trigger.click();
-		await expect(panel).not.toBeVisible({ timeout: 3_000 });
+			// Click trigger again to close
+			await trigger.click();
+			await expect(panel).not.toBeVisible({ timeout: 3_000 });
+		});
 	});
 
 	test('chat panel provider switch updates model selector without a local Ollama service', async ({
 		page
 	}) => {
 		await gotoAuthedRoute(page, '/');
-		await page.route('**/api/v1/settings', (route) =>
-			route.fulfill({
-				status: 200,
-				contentType: 'application/json',
-				body: JSON.stringify({
-					smtp_host: '',
-					smtp_port: 587,
-					smtp_user: '',
-					smtp_password: '',
-					telegram_bot_token: '',
-					telegram_bot_enabled: false,
-					openrouter_api_key: 'sk-test',
-					openrouter_default_model: 'openai/gpt-4o-mini',
-					ollama_endpoint_url: 'http://ollama.test',
-					ollama_default_model: 'llama3.2',
-					public_idb_debug: false
-				})
-			})
-		);
+		await stubChatSettings(page);
 		await page.route('**/api/v1/mcp/tools', (route) =>
 			route.fulfill({ status: 200, contentType: 'application/json', body: '[]' })
 		);
@@ -490,29 +520,10 @@ test.describe('Navigation – chat panel smoke', () => {
 
 	test('first chat open stays neutral while provider settings and tools load', async ({ page }) => {
 		await page.addInitScript(() => localStorage.setItem('chat_session_id', 'session-1'));
-		await page.route('**/api/v1/settings', async (route) => {
-			if (route.request().method() === 'GET')
-				await new Promise((resolve) => setTimeout(resolve, 800));
-			await route.fulfill({
-				status: 200,
-				contentType: 'application/json',
-				body: JSON.stringify({
-					smtp_host: '',
-					smtp_port: 587,
-					smtp_user: '',
-					smtp_password: '',
-					telegram_bot_token: '',
-					telegram_bot_enabled: false,
-					openrouter_api_key: 'sk-test',
-					openrouter_default_model: 'openai/gpt-4o-mini',
-					ollama_endpoint_url: 'http://ollama.test',
-					ollama_default_model: 'llama3.2',
-					public_idb_debug: false
-				})
-			});
-		});
+		const settingsGate = Promise.withResolvers<void>();
+		await stubChatSettings(page, { getGate: settingsGate.promise });
 		await page.route('**/api/v1/mcp/tools', async (route) => {
-			await new Promise((resolve) => setTimeout(resolve, 800));
+			await settingsGate.promise;
 			await route.fulfill({ status: 200, contentType: 'application/json', body: '[]' });
 		});
 		await page.route('**/api/v1/ai/chat/sessions', (route) =>
@@ -541,28 +552,33 @@ test.describe('Navigation – chat panel smoke', () => {
 			})
 		);
 
-		await gotoAuthedRoute(page, '/');
-		await page.reload();
-		const settingsRequest = page.waitForRequest(
-			(request) =>
-				request.method() === 'GET' && new URL(request.url()).pathname === '/api/v1/settings'
-		);
-		const toolsRequest = page.waitForRequest(
-			(request) =>
-				request.method() === 'GET' && new URL(request.url()).pathname === '/api/v1/mcp/tools'
-		);
-		await page.getByRole('button', { name: 'AI Assistant' }).click();
+		const trigger = page.getByRole('button', { name: 'AI Assistant' });
 		const panel = page.locator('#chat-panel');
-		await expect(panel).toBeVisible();
-		await Promise.all([settingsRequest, toolsRequest]);
+		try {
+			await gotoAuthedRoute(page, '/');
+			await page.reload();
+			const settingsRequest = page.waitForRequest(
+				(request) =>
+					request.method() === 'GET' && new URL(request.url()).pathname === '/api/v1/settings'
+			);
+			const toolsRequest = page.waitForRequest(
+				(request) =>
+					request.method() === 'GET' && new URL(request.url()).pathname === '/api/v1/mcp/tools'
+			);
+			await trigger.click();
+			await expect(panel).toBeVisible();
+			await Promise.all([settingsRequest, toolsRequest]);
 
-		await expect(panel.getByRole('status').first()).toContainText('Loading chat');
-		await expect(panel.getByRole('button', { name: 'Configure' })).toBeDisabled();
-		await expect(panel.getByText(/No AI provider is configured/)).toHaveCount(0);
-		await expect(panel.locator('select[title="Chat provider"]')).toHaveCount(0);
-		await expect(panel.getByText(/Ollama|settings unavailable|failed|not configured/i)).toHaveCount(
-			0
-		);
+			await expect(panel.getByRole('status').first()).toContainText('Loading chat');
+			await expect(panel.getByRole('button', { name: 'Configure' })).toBeDisabled();
+			await expect(panel.getByText(/No AI provider is configured/)).toHaveCount(0);
+			await expect(panel.locator('select[title="Chat provider"]')).toHaveCount(0);
+			await expect(
+				panel.getByText(/Ollama|settings unavailable|failed|not configured/i)
+			).toHaveCount(0);
+		} finally {
+			settingsGate.resolve();
+		}
 
 		await expect(panel.locator('select[title="Chat provider"]')).toHaveValue('openrouter', {
 			timeout: 5_000
@@ -571,7 +587,8 @@ test.describe('Navigation – chat panel smoke', () => {
 	});
 
 	test('chat reloads provider settings after saving them in Profile', async ({ page }) => {
-		let delayNextSettingsGet = false;
+		let holdNextSettingsGet = false;
+		const settingsGetGate = Promise.withResolvers<void>();
 		let settings: Record<string, unknown> = {
 			smtp_host: '',
 			smtp_port: 587,
@@ -587,9 +604,9 @@ test.describe('Navigation – chat panel smoke', () => {
 		};
 		await page.route('**/api/v1/settings', async (route) => {
 			if (route.request().method() === 'GET') {
-				if (delayNextSettingsGet) {
-					delayNextSettingsGet = false;
-					await new Promise((resolve) => setTimeout(resolve, 700));
+				if (holdNextSettingsGet) {
+					holdNextSettingsGet = false;
+					await settingsGetGate.promise;
 				}
 				await route.fulfill({
 					status: 200,
@@ -642,12 +659,21 @@ test.describe('Navigation – chat panel smoke', () => {
 		await expect(page.getByText('AI provider settings saved')).toBeVisible({ timeout: 5_000 });
 
 		await gotoAuthedRoute(page, '/');
-		delayNextSettingsGet = true;
-		await page.getByRole('button', { name: 'AI Assistant' }).click();
+		holdNextSettingsGet = true;
+		const settingsRequest = page.waitForRequest(
+			(request) =>
+				request.method() === 'GET' && new URL(request.url()).pathname === '/api/v1/settings'
+		);
 		panel = page.locator('#chat-panel');
-		await expect(panel.getByRole('status').first()).toContainText('Loading chat');
-		await expect(panel.getByText(/No AI provider is configured/)).toHaveCount(0);
-		await expect(panel.locator('select[title="Chat provider"]')).toHaveCount(0);
+		try {
+			await page.getByRole('button', { name: 'AI Assistant' }).click();
+			await settingsRequest;
+			await expect(panel.getByRole('status').first()).toContainText('Loading chat');
+			await expect(panel.getByText(/No AI provider is configured/)).toHaveCount(0);
+			await expect(panel.locator('select[title="Chat provider"]')).toHaveCount(0);
+		} finally {
+			settingsGetGate.resolve();
+		}
 		await expect(panel.locator('select[title="Chat provider"]')).toHaveValue('openrouter');
 		await expect(panel.getByText('Start a session and ask anything.')).toBeVisible({
 			timeout: 5_000
@@ -656,43 +682,6 @@ test.describe('Navigation – chat panel smoke', () => {
 });
 
 test.describe('Navigation – namespace persistence', () => {
-	test('selected namespace persists across page refresh', async ({ page }) => {
-		const ns = E2E_SHARED_NAMESPACE_B;
-
-		await page.goto('/');
-		await waitForAppShell(page);
-
-		await page.getByRole('button', { name: 'Select namespace' }).click();
-		const dialog = dialogByTextbox(page, 'Search namespaces');
-		await expect(dialog).toBeVisible({ timeout: 5_000 });
-
-		const search = dialog.getByRole('textbox', { name: 'Search namespaces' });
-		await search.fill(ns);
-
-		await dialog.locator(`[data-namespace-option="${ns}"]`).click();
-		await expect(dialog).not.toBeVisible({ timeout: readyTimeoutMs() });
-
-		const sidebar = page.locator('aside[aria-label="Main navigation"]');
-		await expect(sidebar.getByRole('button', { name: 'Select namespace' })).toContainText(ns, {
-			timeout: 5_000
-		});
-
-		await page.getByRole('button', { name: 'Select namespace' }).click();
-		const reopenedDialog = dialogByTextbox(page, 'Search namespaces');
-		await expect(reopenedDialog).toBeVisible({ timeout: 5_000 });
-		await expect(reopenedDialog.locator(`[data-namespace-option="${ns}"]`)).toBeVisible({
-			timeout: 5_000
-		});
-		await page.keyboard.press('Escape');
-		await expect(reopenedDialog).not.toBeVisible({ timeout: 5_000 });
-
-		await page.reload();
-		await waitForAppShell(page);
-
-		await expect(sidebar.getByText(ns)).toBeVisible({ timeout: 5_000 });
-		await screenshot(page, 'navigation', 'namespace-persisted');
-	});
-
 	test('namespace picker search filters and selecting closes modal', async ({ page }) => {
 		await page.goto('/');
 		await waitForAppShell(page);

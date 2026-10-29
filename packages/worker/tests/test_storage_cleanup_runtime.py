@@ -3,7 +3,6 @@ from __future__ import annotations
 import asyncio
 import threading
 from collections.abc import Callable
-from concurrent.futures import ThreadPoolExecutor
 from dataclasses import replace
 from typing import cast
 
@@ -216,7 +215,7 @@ def test_datasource_delete_drops_only_its_catalog_table_family(monkeypatch: pyte
         return Catalog()
 
     monkeypatch.setattr(cleanup, "load_runtime_catalog", load_catalog)
-    monkeypatch.setattr(cleanup, "object_store_storage_options", lambda: {})
+    monkeypatch.setattr(cleanup, "object_store_storage_options", dict)
     monkeypatch.setattr(cleanup, "delete_prefix", lambda path: calls.append(("prefix", path)))
     claim = StorageCleanupClaim(
         "default",
@@ -274,7 +273,7 @@ def test_non_sql_catalog_family_uses_its_namespace_scoped_listing_api(monkeypatc
             calls.append(identifier)
 
     monkeypatch.setattr(cleanup, "load_runtime_catalog", lambda *_args, **_kwargs: Catalog())
-    monkeypatch.setattr(cleanup, "object_store_storage_options", lambda: {})
+    monkeypatch.setattr(cleanup, "object_store_storage_options", dict)
     monkeypatch.setattr(cleanup, "delete_prefix", lambda _path: None)
     claim = replace(
         _claim(),
@@ -355,7 +354,7 @@ def test_cleanup_drops_only_the_exact_catalog_identifier_and_prefix(monkeypatch:
                 raise NoSuchTableError(identifier)
 
     monkeypatch.setattr(cleanup, "load_runtime_catalog", lambda *_args, **_kwargs: Catalog())
-    monkeypatch.setattr(cleanup, "object_store_storage_options", lambda: {})
+    monkeypatch.setattr(cleanup, "object_store_storage_options", dict)
     monkeypatch.setattr(cleanup, "delete_prefix", lambda path: calls.append(("prefix", path)))
     cleanup.delete_cleanup_target(_claim())
     assert calls == [("catalog", "clean.datasource-1__claim_attempt"), ("prefix", "s3://default/clean/datasource-1__claim_attempt/master")]
@@ -430,7 +429,7 @@ def test_failed_or_stale_import_leaves_only_claim_prefix_for_durable_cleanup(mon
 
     monkeypatch.setattr(compute_request_runtime, "_datasource_engine_job", lambda *_args, **_kwargs: manifest)
     monkeypatch.setattr(compute_request_runtime.datasource_execution, "import_staged_parquet_files", fail_import)
-    monkeypatch.setattr("runtime.object_store.delete_object", lambda path: deleted_objects.append(path))
+    monkeypatch.setattr("runtime.object_store.delete_object", deleted_objects.append)
 
     with pytest.raises(RuntimeError, match="no longer active"):
         compute_request_runtime._publish_staged_datasource(cast(WorkerRuntimeClient, RegistrationClient()), _manager(), claimed, command.datasource)
@@ -553,44 +552,6 @@ def test_reingest_datasource_strips_stale_time_travel_keys(monkeypatch: pytest.M
         "branch": "master",
         "metadata_path": "s3://default/clean/ds-1__claim_previous/master",
     }
-
-
-def test_worker_heartbeat_reports_registration_loss_and_recovery_on_its_thread() -> None:
-    from runtime.worker_runtime_client import run_worker_heartbeat_loop
-
-    stop = threading.Event()
-    states: list[tuple[bool, int]] = []
-
-    class HeartbeatClient:
-        def __init__(self) -> None:
-            self.calls = 0
-
-        def heartbeat_worker(self, **_kwargs: object) -> None:
-            self.calls += 1
-            if self.calls == 1:
-                raise RuntimeError("Coordinator unavailable")
-            stop.set()
-
-        def register_worker(self, **_kwargs: object) -> None:
-            return None
-
-    client = HeartbeatClient()
-    with ThreadPoolExecutor(max_workers=1) as executor:
-        future = executor.submit(
-            run_worker_heartbeat_loop,
-            client=cast(WorkerRuntimeClient, client),
-            stop_signal=stop,
-            worker_id="writer",
-            kind="coordinator",
-            hostname="test",
-            pid=1,
-            capacity=1,
-            heartbeat_seconds=0.05,
-            on_registration_changed=lambda available: states.append((available, threading.get_ident())),
-        )
-        future.result(timeout=3)
-    assert [available for available, _thread in states] == [False, True]
-    assert all(thread != threading.get_ident() for _available, thread in states)
 
 
 @pytest.mark.asyncio

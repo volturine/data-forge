@@ -1,5 +1,7 @@
 import asyncio
 import contextlib
+import gc
+import gzip
 import logging
 import mimetypes
 import os
@@ -27,7 +29,6 @@ from api import include_api_routes
 from backend_core import runtime_ipc
 from backend_core.api_execution_budget import (
     ApiDatabaseBudget,
-    ApiWorkAdmissionFull,
     BoundedThreadPoolExecutor,
     register_api_blocking_executor_lifecycle,
     register_bootstrap_executor_lifecycle,
@@ -51,7 +52,7 @@ from backend_core.error_handlers import (
     validation_error_handler,
 )
 from backend_core.exceptions import AppError
-from backend_core.http import close_clients
+from backend_core.http import close_clients, prewarm_async_client
 from backend_core.logging import (
     _REQUEST_LOG_EXECUTOR,
     _REQUEST_LOG_WORKERS,
@@ -59,12 +60,14 @@ from backend_core.logging import (
     RequestTimingMiddleware,
     configure_logging_off_loop,
     flush_request_logs,
+    scope_header,
     shutdown_logging,
 )
 from backend_core.namespace import namespace_scope, normalize_namespace
 from backend_core.namespaces_service import register_namespace
 from backend_core.runtime_notifications import handle_runtime_payload, recover_runtime_notifications, refresh_build_projections, refresh_lock_projections
 from backend_core.settings_store import seed_settings_from_env
+from modules.auth.dependencies import resolve_session_token
 from modules.udf import service as udf_service
 
 register_settings_bootstrap_hook(seed_settings_from_env)
@@ -203,12 +206,15 @@ class ReadinessProbe:
         self._inflight: Future[tuple[dict[str, str], bool]] | None = None
 
     async def run(self) -> tuple[dict[str, str], bool]:
+        register_clear_callback = False
         with self._lock:
             future = self._inflight
             if future is None or future.done():
                 future = self._executor.submit(self._check)
                 self._inflight = future
-                future.add_done_callback(self._clear)
+                register_clear_callback = True
+        if register_clear_callback:
+            future.add_done_callback(self._clear)
         return await asyncio.shield(asyncio.wrap_future(future))
 
     def _clear(self, completed: Future[tuple[dict[str, str], bool]]) -> None:
@@ -288,22 +294,77 @@ frontend_build_dir = ROOT / 'packages' / 'frontend' / 'build'
 # The API image also serves the prerendered SPA.  Keep the small, immutable
 # build in memory so a burst of browser navigations does not consume the
 # shared threadpool on one FileResponse stat/open/send cycle per asset.
-_FRONTEND_ASSET_CACHE: dict[str, tuple[bytes, str | None]] = {}
+_FRONTEND_ASSET_CACHE: dict[str, tuple[bytes, bytes | None, str | None]] = {}
 _FRONTEND_ASSET_CACHE_ROOT: Path | None = None
 _FRONTEND_ASSET_CACHE_SOURCE: Path | None = None
+_FRONTEND_ASSET_MIN_GZIP_BYTES = 1024
+
+
+def _compressed_frontend_asset(content: bytes, media_type: str | None) -> bytes | None:
+    if len(content) < _FRONTEND_ASSET_MIN_GZIP_BYTES or media_type is None:
+        return None
+
+    normalized_media_type = media_type.lower()
+    if not (
+        normalized_media_type.startswith('text/')
+        or normalized_media_type.endswith(('+json', '+xml'))
+        or normalized_media_type in {'application/javascript', 'application/json', 'application/xml', 'image/svg+xml'}
+    ):
+        return None
+
+    compressed = gzip.compress(content, mtime=0)
+    # Keep a second representation only when it saves at least 10%.
+    if len(compressed) * 10 > len(content) * 9:
+        return None
+    return compressed
+
+
+def _accepted_frontend_encodings(request: Request) -> tuple[bool, bool]:
+    accept_encoding = request.headers.get('accept-encoding')
+    if not accept_encoding:
+        return False, True
+
+    qualities: dict[str, float] = {}
+    for entry in accept_encoding.split(','):
+        parts = entry.split(';')
+        coding = parts[0].strip().lower()
+        if not coding or coding in qualities:
+            continue
+
+        quality_parameters = [part.partition('=')[2].strip() for part in parts[1:] if part.partition('=')[0].strip().lower() == 'q']
+        if not quality_parameters:
+            qualities[coding] = 1.0
+            continue
+        if len(quality_parameters) != 1:
+            qualities[coding] = 0.0
+            continue
+
+        try:
+            quality = float(quality_parameters[0])
+        except ValueError:
+            quality = 0.0
+        qualities[coding] = quality if 0.0 <= quality <= 1.0 else 0.0
+
+    accepts_gzip = qualities.get('gzip', qualities.get('*', 0.0)) > 0
+    # Identity is acceptable by default, unless explicitly excluded (including
+    # a zero-quality wildcard without a more specific identity preference).
+    accepts_identity = qualities.get('identity', 0.0 if qualities.get('*') == 0 else 1.0) > 0
+    return accepts_gzip, accepts_identity
 
 
 def _load_frontend_asset_cache() -> None:
     global _FRONTEND_ASSET_CACHE_ROOT, _FRONTEND_ASSET_CACHE_SOURCE
 
     root = frontend_build_dir.resolve()
-    assets: dict[str, tuple[bytes, str | None]] = {}
+    assets: dict[str, tuple[bytes, bytes | None, str | None]] = {}
     if settings.prod_mode_enabled and root.is_dir():
         for path in root.rglob('*'):
             if not path.is_file():
                 continue
             relative = path.relative_to(root).as_posix()
-            assets[relative] = (path.read_bytes(), mimetypes.guess_type(path.name)[0])
+            content = path.read_bytes()
+            media_type = mimetypes.guess_type(path.name)[0]
+            assets[relative] = (content, _compressed_frontend_asset(content, media_type), media_type)
 
     _FRONTEND_ASSET_CACHE_ROOT = root
     _FRONTEND_ASSET_CACHE_SOURCE = frontend_build_dir
@@ -312,7 +373,7 @@ def _load_frontend_asset_cache() -> None:
     logger.info('Loaded %s frontend assets into memory', len(assets))
 
 
-def _cached_frontend_response(relative_path: str) -> Response | None:
+def _cached_frontend_response(relative_path: str, request: Request) -> Response | None:
     # The asset root is resolved once during lifespan startup. Resolving it on
     # every async request performs a synchronous filesystem call on Uvicorn's
     # event loop during a browser navigation burst.
@@ -321,8 +382,17 @@ def _cached_frontend_response(relative_path: str) -> Response | None:
     cached = _FRONTEND_ASSET_CACHE.get(relative_path)
     if cached is None:
         return None
-    content, media_type = cached
-    headers = {'Cache-Control': 'public, max-age=31536000, immutable'} if relative_path.startswith('_app/') else {'Cache-Control': 'no-cache'}
+    content, compressed_content, media_type = cached
+    headers = {
+        'Cache-Control': 'public, max-age=31536000, immutable' if relative_path.startswith('_app/immutable/') else 'no-cache',
+        'Vary': 'Accept-Encoding',
+    }
+    accepts_gzip, accepts_identity = _accepted_frontend_encodings(request)
+    if compressed_content is not None and accepts_gzip:
+        content = compressed_content
+        headers['Content-Encoding'] = 'gzip'
+    if 'Content-Encoding' not in headers and not accepts_identity:
+        return Response(status_code=406, headers={'Vary': 'Accept-Encoding', 'Cache-Control': 'no-store'})
     return Response(content=content, media_type=media_type, headers=headers)
 
 
@@ -429,6 +499,9 @@ async def event_loop_lag_loop(
 async def lifespan(app: FastAPI) -> AsyncIterator[None]:
     async with AsyncExitStack() as cleanup:
         await _start_api_lifespan(app, cleanup)
+        # Scan startup's object graph before traffic can make a full collection
+        # hold the GIL long enough to starve Uvicorn's worker health reply.
+        await run_api_blocking(gc.collect, 2)
         yield
 
 
@@ -443,6 +516,7 @@ async def _start_api_lifespan(app: FastAPI, cleanup: AsyncExitStack) -> None:
     # Keep the default executor installed for framework and explicitly excluded
     # adapters; application call sites use run_api_blocking directly.
     loop = asyncio.get_running_loop()
+    cleanup.push_async_callback(close_clients)
     api_blocking_workers = api_budget.general_workers
     # The default executor is sized from host CPU count, not application
     # capacity; with many visible CPUs that creates a large GIL/database burst
@@ -498,6 +572,7 @@ async def _start_api_lifespan(app: FastAPI, cleanup: AsyncExitStack) -> None:
         request_log_prewarm,
         _prewarm_executor(bootstrap_executor, api_budget.bootstrap_workers),
     )
+    await run_api_blocking(prewarm_async_client, loop)
     # Fail closed at boot if any /v1 route was added without authentication.
     from api.v1.router import verify_v1_auth_coverage
 
@@ -509,7 +584,6 @@ async def _start_api_lifespan(app: FastAPI, cleanup: AsyncExitStack) -> None:
     await run_api_blocking(_load_frontend_asset_cache)
     await configure_logging_off_loop()
     api_logging_configured = True
-    cleanup.push_async_callback(close_clients)
     logger.info('Starting application...')
     # This is an observability identity only. API children do not register as
     # runtime workers and never own runtime leases, gRPC listeners, or engine
@@ -566,18 +640,9 @@ async def _recover_api_notifications() -> None:
 app = FastAPI(title=settings.app_name, version=settings.app_version, lifespan=lifespan)
 
 
-async def api_work_admission_full_handler(_request: Request, _exc: ApiWorkAdmissionFull) -> JSONResponse:
-    return JSONResponse(
-        status_code=503,
-        content={'detail': 'API execution capacity is full'},
-        headers={'Retry-After': '1'},
-    )
-
-
 app.add_exception_handler(AppError, cast(Any, app_error_handler))
 app.add_exception_handler(RequestValidationError, cast(Any, validation_error_handler))
 app.add_exception_handler(ClientDisconnect, cast(Any, client_disconnect_handler))
-app.add_exception_handler(ApiWorkAdmissionFull, cast(Any, api_work_admission_full_handler))
 app.add_exception_handler(Exception, generic_error_handler)
 
 # Namespaces already known to this process; avoids a DB roundtrip per request.
@@ -595,7 +660,7 @@ def _namespace_registered(session: Session, name: str) -> bool:
 def _has_valid_session(request: Request) -> bool:
     from modules.auth.service import validate_session
 
-    token = request.cookies.get('session_token') or request.headers.get('X-Session-Token')
+    token = resolve_session_token(request)
     if not token:
         return False
 
@@ -603,13 +668,6 @@ def _has_valid_session(request: Request) -> bool:
         return validate_session(session, token) is not None
 
     return run_settings_db(_check)
-
-
-def _scope_header(scope: Scope, name: bytes) -> str | None:
-    for header_name, header_value in scope.get('headers', []):
-        if header_name.lower() == name:
-            return header_value.decode('latin-1')
-    return None
 
 
 class NamespaceMiddleware:
@@ -638,7 +696,7 @@ class NamespaceMiddleware:
             await self.app(scope, receive, send)
             return
 
-        raw = _scope_header(scope, b'x-namespace')
+        raw = scope_header(scope, b'x-namespace')
         with namespace_scope(raw):
             if not auth_settings.auth_required:
                 if not (is_health_request and raw is None):
@@ -748,11 +806,11 @@ include_api_routes(app)
 
 
 @app.get('/', response_model=None)
-async def root() -> Response | dict[str, str]:
+async def root(request: Request) -> Response | dict[str, str]:
     index_path = frontend_build_dir / 'index.html'
 
     if settings.prod_mode_enabled:
-        cached = _cached_frontend_response('index.html')
+        cached = _cached_frontend_response('index.html', request)
         if cached is not None:
             return cached
         if await run_api_blocking(index_path.is_file):
@@ -831,7 +889,7 @@ async def startup() -> dict[str, str]:
 
 
 @app.get('/{full_path:path}', include_in_schema=False, response_model=None)
-async def serve_static_or_index(full_path: str) -> Response:
+async def serve_static_or_index(full_path: str, request: Request) -> Response:
     if not settings.prod_mode_enabled:
         logger.info('Frontend build not served (development mode or build missing)')
         raise HTTPException(status_code=404, detail='Frontend build not found')
@@ -845,7 +903,7 @@ async def serve_static_or_index(full_path: str) -> Response:
     relative_path = full_path.strip('/')
     if any(part in {'', '.', '..'} for part in relative_path.split('/')):
         raise HTTPException(status_code=404, detail='File not found')
-    cached = _cached_frontend_response(relative_path)
+    cached = _cached_frontend_response(relative_path, request)
     if cached is not None:
         return cached
 
@@ -853,7 +911,7 @@ async def serve_static_or_index(full_path: str) -> Response:
     # ``<route>.html`` files. Resolve those before falling back to 200.html;
     # otherwise direct navigation to an auth route renders the empty SPA shell.
     if relative_path and not relative_path.endswith('.html'):
-        cached = _cached_frontend_response(f'{relative_path}.html')
+        cached = _cached_frontend_response(f'{relative_path}.html', request)
         if cached is not None:
             return cached
         prerendered_path = frontend_build_dir / f'{relative_path}.html'
@@ -868,14 +926,14 @@ async def serve_static_or_index(full_path: str) -> Response:
 
     fallback_path = frontend_build_dir / '200.html'
     if await run_api_blocking(fallback_path.is_file):
-        cached = _cached_frontend_response('200.html')
+        cached = _cached_frontend_response('200.html', request)
         if cached is not None:
             return cached
         return FileResponse(str(fallback_path))
 
     index_path = frontend_build_dir / 'index.html'
     if await run_api_blocking(index_path.is_file):
-        cached = _cached_frontend_response('index.html')
+        cached = _cached_frontend_response('index.html', request)
         if cached is not None:
             return cached
         return FileResponse(str(index_path))

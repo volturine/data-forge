@@ -24,9 +24,6 @@
 	/* ── interaction state ── */
 	const hiddenSeries = new SvelteSet<string>();
 	let legendCollapsed = $state(false);
-	let selectedKey = $state<string | null>(null);
-	let zoomWindow = $state<[number, number] | null>(null);
-	let brushRange = $state<[number, number] | null>(null);
 	let exportContainer: HTMLElement | null = $state(null);
 
 	const handlers: ChartHandlers = {
@@ -41,11 +38,25 @@
 		}
 	};
 
-	const legendPosition = $derived((readString(config, 'legend_position') || 'right') as string);
+	const legendPosition = $derived(readString(config, 'legend_position') || 'right');
 	const titleText = $derived(readString(config, 'title').trim());
 	const selectEnabled = $derived(Boolean(config.selection_enabled));
 	const zoomEnabled = $derived(Boolean(config.pan_zoom_enabled));
 	const areaSelectEnabled = $derived(Boolean(config.area_selection_enabled));
+
+	// Cleared when the matching enablement flag changes; chart handlers only fire while enabled.
+	let selectedKey: string | null = $derived.by(() => {
+		void selectEnabled;
+		return null;
+	});
+	let zoomWindow: [number, number] | null = $derived.by(() => {
+		void zoomEnabled;
+		return null;
+	});
+	let brushRange: [number, number] | null = $derived.by(() => {
+		void areaSelectEnabled;
+		return null;
+	});
 
 	function visibleSeries(): ReadonlySet<string> {
 		if (hiddenSeries.size === 0) return new Set<string>();
@@ -100,10 +111,6 @@
 		return !hiddenSeries.has(label);
 	}
 
-	function legendLabels(): string[] {
-		return built.seriesLabels;
-	}
-
 	/* ── export ── */
 	function onChartRender(context: { container: HTMLElement }): void {
 		if (!exportContainer) exportContainer = context.container;
@@ -126,17 +133,9 @@
 	}
 
 	function chartAriaLabel(): string {
-		const title = readString(config, 'title').trim();
-		if (title) return title;
+		if (titleText) return titleText;
 		return `${chartType.replace('_', ' ')} chart`;
 	}
-
-	/* ── reset state that is no longer applicable ── */
-	$effect(() => {
-		if (!selectEnabled && selectedKey !== null) selectedKey = null;
-		if (!zoomEnabled && zoomWindow !== null) zoomWindow = null;
-		if (!areaSelectEnabled && brushRange !== null) brushRange = null;
-	});
 
 	/* ── legend styles ── */
 	const legendTopCss = $derived(
@@ -415,7 +414,7 @@
 					onclick={() => (legendCollapsed = false)}
 					title="Show legend"
 				>
-					{#each legendLabels().slice(0, 12) as label (label)}
+					{#each built.seriesLabels.slice(0, 12) as label (label)}
 						<span
 							class={[legendPillDotCss, !isSeriesVisible(label) && css({ opacity: '0.3' })]}
 							style:background={built.colorOf(label)}
@@ -423,7 +422,7 @@
 					{/each}
 				</button>
 			{:else}
-				{#each legendLabels() as label (label)}
+				{#each built.seriesLabels as label (label)}
 					<button
 						type="button"
 						class={[legendItemCss, !isSeriesVisible(label) && css({ opacity: '0.35' })]}
@@ -553,7 +552,7 @@
 				{/if}
 				{#if !legendCollapsed}
 					<div class={sideItemsCss}>
-						{#each legendLabels() as label (label)}
+						{#each built.seriesLabels as label (label)}
 							<button
 								type="button"
 								class={[legendItemCss, !isSeriesVisible(label) && css({ opacity: '0.35' })]}
@@ -590,7 +589,7 @@
 					onclick={() => (legendCollapsed = false)}
 					title="Show legend"
 				>
-					{#each legendLabels().slice(0, 12) as label (label)}
+					{#each built.seriesLabels.slice(0, 12) as label (label)}
 						<span
 							class={[legendPillDotCss, !isSeriesVisible(label) && css({ opacity: '0.3' })]}
 							style:background={built.colorOf(label)}
@@ -598,7 +597,7 @@
 					{/each}
 				</button>
 			{:else}
-				{#each legendLabels() as label (label)}
+				{#each built.seriesLabels as label (label)}
 					<button
 						type="button"
 						class={[legendItemCss, !isSeriesVisible(label) && css({ opacity: '0.35' })]}

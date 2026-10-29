@@ -1,14 +1,11 @@
 import { expect, type Page } from '@playwright/test';
-import { gotoAnalysisEditor, waitForCurrentAnalysisEditor } from './analysis.js';
+import { waitForCurrentAnalysisEditor } from './analysis.js';
 import {
 	gotoAuthedRoute,
 	gotoMonitoringTab,
 	gotoNewAnalysis,
-	gotoNewUdfPage,
-	gotoUdfLibrary,
 	readyTimeoutMs,
-	waitForDatasourceList,
-	waitForUdfList
+	waitForDatasourceList
 } from './readiness.js';
 
 export const E2E_PASSWORD = 'E2eTestPw12345';
@@ -186,45 +183,6 @@ export async function createAnalysisViaUi(page: Page, datasourceName?: string): 
 	return analysisId;
 }
 
-export async function createUdfViaUi(page: Page, name: string): Promise<string> {
-	const currentAnalysisId = new URL(page.url()).pathname.match(/^\/analysis\/([^/]+)$/)?.[1];
-	const setupAnalysisId = currentAnalysisId ? undefined : await createAnalysisViaUi(page);
-	const analysisId = currentAnalysisId ?? setupAnalysisId;
-	if (!analysisId) throw new Error('Could not open an analysis for the UDF editor');
-
-	try {
-		if (setupAnalysisId) await gotoAnalysisEditor(page, setupAnalysisId);
-		await gotoNewUdfPage(page);
-		await page.locator('#udf-name').fill(name);
-		await page.locator('#udf-description').fill(`Test UDF: ${name}`);
-		await page.locator('#udf-tags').fill('test');
-		const [response] = await Promise.all([
-			page.waitForResponse(
-				(resp) =>
-					resp.url().includes('/api/v1/udf') &&
-					resp.request().method() === 'POST' &&
-					resp.status() !== 0
-			),
-			page.getByTestId('udf-save-button').click()
-		]);
-		if (!response.ok()) throw new Error(`UDF create failed: HTTP ${response.status()}`);
-		const payload = (await response.json()) as { id: string };
-		await expect(page).toHaveURL(`/analysis/${analysisId}`, { timeout: readyTimeoutMs() });
-		return payload.id;
-	} finally {
-		if (setupAnalysisId) {
-			const [{ nameForAnalysisId }, { deleteAnalysisViaUI }] = await Promise.all([
-				import('./api.js'),
-				import('./ui-cleanup.js')
-			]);
-			const analysisName = nameForAnalysisId(setupAnalysisId);
-			if (analysisName) {
-				await deleteAnalysisViaUI(page, analysisName, { id: setupAnalysisId });
-			}
-		}
-	}
-}
-
 export async function createScheduleViaUi(
 	page: Page,
 	datasourceId: string,
@@ -279,14 +237,12 @@ export async function createHealthCheckViaUi(
 		page.getByRole('button', { name: 'Save Check' }).click()
 	]);
 	if (!response.ok()) {
-		throw new Error(`Health check create failed: HTTP ${response.status()}`);
+		throw new Error(
+			`Health check create failed: HTTP ${response.status()}; requested datasource ${datasourceId}; ` +
+				`submitted ${(response.request().postData() ?? '').slice(0, 2_000)}; ` +
+				`response ${(await response.text()).slice(0, 2_000)}`
+		);
 	}
 	const payload = (await response.json()) as { id: string };
 	return payload.id;
-}
-
-export async function waitForUdfVisible(page: Page, name: string): Promise<void> {
-	await gotoUdfLibrary(page);
-	await waitForUdfList(page);
-	await expect(page.locator(`[data-udf-card="${name}"]`)).toBeVisible({ timeout: 5_000 });
 }

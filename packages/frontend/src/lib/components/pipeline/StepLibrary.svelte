@@ -1,11 +1,10 @@
 <script lang="ts">
 	import { drag, type DropTarget } from '#lib/stores/drag.svelte.js';
 	import { css } from '#lib/styles/panda.js';
+	import { getStepTypeConfig } from './utils';
 
 	interface StepType {
 		type: string;
-		label: string;
-		icon: typeof Funnel;
 		description: string;
 	}
 
@@ -115,109 +114,32 @@
 		cancelLongPress();
 	}
 
-	import {
-		ArrowUpDown,
-		ChartColumn,
-		Bomb,
-		Brush,
-		Calculator,
-		Calendar,
-		Dices,
-		Eye,
-		Funnel,
-		LayoutGrid,
-		Link,
-		Pencil,
-		Repeat,
-		Repeat2,
-		Scissors,
-		Trophy,
-		Type,
-		Wrench,
-		ListChecks,
-		Trash2,
-		ChartColumnIncreasing,
-		Bell,
-		Sparkles,
-		Download
-	} from '@lucide/svelte';
-
 	const stepTypes: StepType[] = [
-		{ type: 'filter', label: 'Filter', icon: Funnel, description: 'Filter rows by conditions' },
-		{ type: 'select', label: 'Select', icon: ListChecks, description: 'Select specific columns' },
-		{
-			type: 'groupby',
-			label: 'Group By',
-			icon: ChartColumn,
-			description: 'Group and aggregate data'
-		},
-		{ type: 'sort', label: 'Sort', icon: ArrowUpDown, description: 'Sort rows by columns' },
-		{ type: 'rename', label: 'Rename', icon: Pencil, description: 'Rename columns' },
-		{ type: 'drop', label: 'Drop', icon: Trash2, description: 'Remove columns' },
-		{ type: 'join', label: 'Join', icon: Link, description: 'Join with another dataset' },
-		{
-			type: 'expression',
-			label: 'Expression',
-			icon: Calculator,
-			description: 'Create computed columns'
-		},
-		{
-			type: 'with_columns',
-			label: 'With Columns',
-			icon: Calculator,
-			description: 'Add/Update columns'
-		},
-		{ type: 'pivot', label: 'Pivot', icon: Repeat, description: 'Reshape data wide' },
-		{ type: 'unpivot', label: 'Unpivot', icon: Repeat2, description: 'Reshape data long' },
-		{ type: 'fill_null', label: 'Fill Null', icon: Wrench, description: 'Handle missing values' },
-		{
-			type: 'deduplicate',
-			label: 'Deduplicate',
-			icon: Brush,
-			description: 'Remove duplicate rows'
-		},
-		{ type: 'explode', label: 'Explode', icon: Bomb, description: 'Expand list columns' },
-		{
-			type: 'timeseries',
-			label: 'Time Series',
-			icon: Calendar,
-			description: 'Date/time operations'
-		},
-		{
-			type: 'string_transform',
-			label: 'String Transform',
-			icon: Type,
-			description: 'Text manipulation'
-		},
-		{ type: 'sample', label: 'Sample', icon: Dices, description: 'Random sample rows' },
-		{ type: 'limit', label: 'Limit', icon: Scissors, description: 'Keep first N rows' },
-		{ type: 'topk', label: 'Top K', icon: Trophy, description: 'Get top K rows by column' },
-		{
-			type: 'chart',
-			label: 'Chart',
-			icon: ChartColumnIncreasing,
-			description: 'Visualize data inline'
-		},
-		{
-			type: 'notification',
-			label: 'Notify',
-			icon: Bell,
-			description: 'Send email or Telegram alert'
-		},
-		{ type: 'ai', label: 'AI', icon: Sparkles, description: 'Transform text using AI' },
-		{ type: 'view', label: 'View', icon: Eye, description: 'Preview data at this step' },
-		{
-			type: 'union_by_name',
-			label: 'Union By Name',
-			icon: LayoutGrid,
-			description: 'Union rows from multiple datasources'
-		},
-		{
-			type: 'download',
-			label: 'Download',
-			icon: Download,
-			description: 'Download data in various formats'
-		}
+		{ type: 'filter', description: 'Filter rows by conditions' },
+		{ type: 'select', description: 'Select specific columns' },
+		{ type: 'groupby', description: 'Group and aggregate data' },
+		{ type: 'sort', description: 'Sort rows by columns' },
+		{ type: 'rename', description: 'Rename columns' },
+		{ type: 'drop', description: 'Remove columns' },
+		{ type: 'join', description: 'Join with another dataset' },
+		{ type: 'expression', description: 'Create computed columns' },
+		{ type: 'with_columns', description: 'Add/Update columns' },
+		{ type: 'pivot', description: 'Reshape data wide' },
+		{ type: 'unpivot', description: 'Reshape data long' },
+		{ type: 'fill_null', description: 'Handle missing values' },
+		{ type: 'deduplicate', description: 'Remove duplicate rows' },
+		{ type: 'explode', description: 'Expand list columns' },
+		{ type: 'timeseries', description: 'Date/time operations' },
+		{ type: 'string_transform', description: 'Text manipulation' },
+		{ type: 'sample', description: 'Random sample rows' },
+		{ type: 'limit', description: 'Keep first N rows' },
+		{ type: 'topk', description: 'Get top K rows by column' },
+		{ type: 'chart', description: 'Visualize data inline' },
+		{ type: 'notification', description: 'Send email or Telegram alert' },
+		{ type: 'ai', description: 'Transform text using AI' },
+		{ type: 'view', description: 'Preview data at this step' },
+		{ type: 'union_by_name', description: 'Union rows from multiple datasources' },
+		{ type: 'download', description: 'Download data in various formats' }
 	];
 
 	// Search/filter
@@ -227,7 +149,7 @@
 		if (!q) return stepTypes;
 		return stepTypes.filter(
 			(s) =>
-				s.label.toLowerCase().includes(q) ||
+				getStepTypeConfig(s.type).label.toLowerCase().includes(q) ||
 				s.type.toLowerCase().includes(q) ||
 				s.description.toLowerCase().includes(q)
 		);
@@ -311,6 +233,7 @@
 		role="list"
 	>
 		{#each filtered as stepType (stepType.type)}
+			{@const stepConfig = getStepTypeConfig(stepType.type)}
 			<button
 				class={css({
 					position: 'relative',
@@ -339,7 +262,7 @@
 				data-drag-handle="true"
 				disabled={readOnly}
 			>
-				<stepType.icon
+				<stepConfig.icon
 					size={15}
 					class={css({ flexShrink: '0', color: 'fg.muted' })}
 					data-drag-handle="true"
@@ -353,7 +276,7 @@
 						gap: '0'
 					})}
 				>
-					<span class={css({ fontSize: 'xs', fontWeight: 'medium' })}>{stepType.label}</span>
+					<span class={css({ fontSize: 'xs', fontWeight: 'medium' })}>{stepConfig.label}</span>
 					<span
 						class={css({
 							overflow: 'hidden',

@@ -3,10 +3,10 @@
 	import { page } from '$app/state';
 	import { afterNavigate, goto } from '$app/navigation';
 	import { resolve } from '$app/paths';
-	import { onMount } from 'svelte';
+	import { onMount, tick } from 'svelte';
 	import { idbGet, idbSet } from '#lib/utils/indexeddb.js';
 	import favicon from '#lib/assets/favicon.svg';
-	import { css, spinner } from '#lib/styles/panda.js';
+	import { button, css, spinner } from '#lib/styles/panda.js';
 	import { PanelLeftClose } from '@lucide/svelte';
 	import NamespacePickerModal from '#lib/components/common/NamespacePickerModal.svelte';
 	import IndexedDbButton from '#lib/components/common/IndexedDbButton.svelte';
@@ -26,6 +26,10 @@
 	import { AppLifecycle } from '#lib/services/app-lifecycle.js';
 	import { appBootstrap } from '#lib/services/app-bootstrap.svelte.js';
 	import { installAuditListeners, setAuditPage, track } from '#lib/utils/audit-log.js';
+	import '@fontsource/jetbrains-mono/400.css';
+	import '@fontsource/jetbrains-mono/500.css';
+	import '@fontsource/jetbrains-mono/600.css';
+	import '@fontsource/jetbrains-mono/700.css';
 	import '../../styled-system/styles.css';
 
 	let { children } = $props();
@@ -88,7 +92,6 @@
 	function bindNamespaceServices(): void {
 		if (!isNamespaceReady()) return;
 		favoriteStore.setNamespace(namespaceState.value);
-		void analysisStore.initialize(namespaceState.value);
 	}
 
 	if (typeof window !== 'undefined') {
@@ -123,16 +126,13 @@
 
 	function enableShell(_node: HTMLElement): () => void {
 		shellInteractive = false;
-		let frameA = 0;
-		let frameB = 0;
-		frameA = window.requestAnimationFrame(() => {
-			frameB = window.requestAnimationFrame(() => {
-				shellInteractive = true;
-			});
+		let active = true;
+		// Bindings are ready after the DOM flush, even when browser paints are deferred.
+		void tick().then(() => {
+			if (active) shellInteractive = true;
 		});
 		return () => {
-			window.cancelAnimationFrame(frameA);
-			window.cancelAnimationFrame(frameB);
+			active = false;
 			shellInteractive = false;
 		};
 	}
@@ -169,8 +169,7 @@
 		});
 	}
 
-	function onWindowReject(event: Event): void {
-		const rejection = event as PromiseRejectionEvent;
+	function onWindowReject(rejection: PromiseRejectionEvent): void {
 		track({
 			event: 'client_error',
 			action: 'unhandledrejection',
@@ -312,7 +311,6 @@
 
 	let namespaceOpen = $state(false);
 	let namespaceError = $state<string | null>(null);
-	const namespaceDraft = $derived(namespaceState.value);
 
 	async function handleNamespaceSelect(value: string) {
 		await switchNamespace(value, {
@@ -373,11 +371,16 @@
 		void chatStore.open_panel();
 	}
 
+	// Not $derived: the snapshot effect must keep tracking these same dependencies.
+	function canLoadComputeWorkers(): boolean {
+		if (!appBootstrap.appReady || onAuthPage || !isNamespaceReady()) return false;
+		if (configStore.authRequired && !authStore.authenticated) return false;
+		return !!namespaceState.value;
+	}
+
 	function refreshComputeWorkersSnapshotWhenVisible(): void {
 		if (document.visibilityState !== 'visible') return;
-		if (!appBootstrap.appReady || onAuthPage || !isNamespaceReady()) return;
-		if (configStore.authRequired && !authStore.authenticated) return;
-		if (!namespaceState.value) return;
+		if (!canLoadComputeWorkers()) return;
 		computeWorkersStore.refreshSnapshot();
 	}
 
@@ -401,10 +404,7 @@
 	});
 
 	$effect(() => {
-		if (!appBootstrap.appReady || onAuthPage || !isNamespaceReady()) return;
-		if (configStore.authRequired && !authStore.authenticated) return;
-		const namespace = namespaceState.value;
-		if (!namespace) return;
+		if (!canLoadComputeWorkers()) return;
 		computeWorkersStore.loadSnapshotOnce();
 	});
 
@@ -440,15 +440,6 @@
 
 <svelte:head>
 	<link rel="icon" href={favicon} />
-
-	<link rel="preconnect" href="https://fonts.googleapis.com" />
-
-	<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin="anonymous" />
-
-	<link
-		href="https://fonts.googleapis.com/css2?family=JetBrains+Mono:wght@400;500;600;700&display=swap"
-		rel="stylesheet"
-	/>
 	<title>Data Analysis Platform</title>
 </svelte:head>
 
@@ -488,9 +479,15 @@
 			<p class={css({ fontSize: 'sm', color: 'fg.muted', margin: '0', maxWidth: 'md' })}>
 				{bootstrapError}
 			</p>
-			<p class={css({ fontSize: 'xs', color: 'fg.muted', margin: '0' })}>
-				Reload the page once the API is reachable.
-			</p>
+			<button
+				class={button({ variant: 'primary' })}
+				disabled={appBootstrap.retrying}
+				aria-busy={appBootstrap.retrying}
+				onclick={() => void appBootstrap.retry()}
+				type="button"
+			>
+				{appBootstrap.retrying ? 'Retrying…' : 'Retry'}
+			</button>
 		</div>
 	{:else if shellPhase === 'auth'}
 		{@render children()}
@@ -513,7 +510,7 @@
 					onOpenChat={handleOpenChat}
 					onOpenNamespace={openNamespace}
 					onSignOut={handleSignOut}
-					namespace={namespaceDraft}
+					namespace={namespaceState.value}
 					authenticated={authStore.authenticated}
 					authRequired={configStore.authRequired}
 					avatarUrl={authStore.user?.avatar_url ?? null}
@@ -626,7 +623,7 @@
 
 		<NamespacePickerModal
 			open={namespaceOpen}
-			selected={namespaceDraft}
+			selected={namespaceState.value}
 			onSelect={handleNamespaceSelect}
 			onSelectError={handleNamespaceError}
 			onClose={() => (namespaceOpen = false)}

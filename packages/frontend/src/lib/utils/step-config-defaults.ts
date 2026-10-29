@@ -19,6 +19,7 @@ import type {
 	NotificationConfigData,
 	PlotConfigData,
 	PivotConfigData,
+	RenameConfigData,
 	SampleConfigData,
 	SelectConfigData,
 	StringMethodsConfigData,
@@ -212,8 +213,8 @@ const defaultConfigs: Record<string, StepConfig> = {
 
 	// Operations that don't need config
 	datasource: {},
-	sort: {},
-	rename: {},
+	sort: { columns: [], descending: [] },
+	rename: { column_mapping: {} } satisfies RenameConfigData,
 	expression: { expression: '', column_name: '' } satisfies ExpressionConfigData,
 	with_columns: { expressions: [] } satisfies WithColumnsConfigData,
 	fill_null: {

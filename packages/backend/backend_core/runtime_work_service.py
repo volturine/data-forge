@@ -9,6 +9,7 @@ from enum import StrEnum
 from sqlalchemy import select, text
 from sqlmodel import Session
 
+from backend_core.claiming import is_postgres
 from backend_core.config import settings
 from backend_core.persistence.runtime_events.models import RuntimeNamespaceWorkWake
 from backend_core.sqlmodel_typing import col
@@ -35,14 +36,13 @@ _SLOW_WAKE_OPERATION_SECONDS = 0.25
 _WAKE_BATCH_SIZE = 256
 
 
-def _is_distributed_postgres(session: Session) -> bool:
-    bind = session.get_bind()
-    return settings.distributed_runtime_enabled and getattr(getattr(bind, 'dialect', None), 'name', None) == 'postgresql'
+def is_distributed_postgres(session: Session) -> bool:
+    return is_postgres(session) and settings.distributed_runtime_enabled
 
 
 def append_wake(session: Session, *, namespace: str, kind: RuntimeWorkKind) -> int | None:
     """Append a durable wake pointer in the work transaction without locking the projection."""
-    if not _is_distributed_postgres(session):
+    if not is_distributed_postgres(session):
         return None
     started = time.perf_counter()
     wake_id = session.execute(
@@ -78,7 +78,7 @@ def mark_schedule_pending(session: Session, *, namespace: str) -> None:
 
 def list_due_schedule_namespaces(session: Session, *, limit: int = 100) -> list[tuple[str, int, list[int]]]:
     """Return due namespaces and exact bounded schedule wake IDs captured for each."""
-    if not _is_distributed_postgres(session):
+    if not is_distributed_postgres(session):
         return []
     rows = session.execute(
         text(
@@ -133,7 +133,7 @@ def finish_schedule_scan(
     wake_ids: Collection[int] = (),
 ) -> None:
     """Acknowledge captured IDs and CAS schedule state after the scan."""
-    if not _is_distributed_postgres(session):
+    if not is_distributed_postgres(session):
         return
     session.execute(
         text(
@@ -191,7 +191,7 @@ def list_pending_namespaces(
     kinds: Collection[RuntimeWorkKind] = WORKER_RECOVERY_KINDS,
 ) -> list[str]:
     """Return only namespaces with pending work, not the tenant registry."""
-    if not _is_distributed_postgres(session):
+    if not is_distributed_postgres(session):
         return []
     kind_values = [kind.value for kind in kinds]
     if not kind_values:
@@ -236,7 +236,7 @@ def refresh_pending_work(
     only those captured rows in the same transaction. Later commits remain
     discoverable even if their sequence values are lower.
     """
-    if not _is_distributed_postgres(session):
+    if not is_distributed_postgres(session):
         return
     started = time.perf_counter()
     captured_ids = [

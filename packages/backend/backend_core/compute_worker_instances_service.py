@@ -2,15 +2,16 @@ import time
 from collections.abc import Iterator
 from contextlib import contextmanager
 from datetime import datetime
-from hashlib import sha256
 from typing import Any
 
-from sqlalchemy import text, update
+from sqlalchemy import update
 from sqlalchemy.exc import IntegrityError
 from sqlmodel import Session, select
 
 from backend_core import runtime_ipc, runtime_workers_service
+from backend_core.claiming import advisory_xact_lock
 from backend_core.domain.compute.base import ComputeWorkerStatusInfo
+from backend_core.domain.compute.schemas import ComputeWorkerScope
 from backend_core.domain.compute_worker_instances.models import ComputeWorkerInstanceStatus
 from backend_core.domain.runtime.events import RuntimePayloadKind
 from backend_core.domain.runtime_workers.models import RuntimeWorkerKind
@@ -59,12 +60,7 @@ def _required_identity_value(value: str | None, field_name: str) -> str:
 
 
 def _lock_engine_snapshot(session: Session, *, worker_id: str, namespace: str) -> None:
-    bind = session.get_bind()
-    if getattr(getattr(bind, 'dialect', None), 'name', None) != 'postgresql':
-        return
-    digest = sha256(f'dataforge:engine-snapshot:{worker_id}:{namespace}'.encode()).digest()
-    key = int.from_bytes(digest[:8], byteorder='big', signed=True)
-    session.execute(text('SELECT pg_advisory_xact_lock(:key)'), {'key': key})
+    advisory_xact_lock(session, f'dataforge:engine-snapshot:{worker_id}:{namespace}')
 
 
 def _compute_worker_instance_status(status: ComputeWorkerStatusInfo) -> ComputeWorkerInstanceStatus:
@@ -255,7 +251,7 @@ def list_engine_projection(session: Session, *, namespace: str) -> list[ComputeW
 def serialize_compute_worker_instance(row: ComputeWorkerInstance, *, defaults: dict[str, object]) -> dict[str, object]:
     return {
         'analysis_id': row.analysis_id or None,
-        'resource_id': _row_resource_id(row),
+        'resource_id': row_resource_id(row),
         'status': row.status_kind().overview_status,
         'container_id': row.container_id,
         'image_digest': row.image_digest,
@@ -281,13 +277,13 @@ def serialize_compute_worker_instance(row: ComputeWorkerInstance, *, defaults: d
 
 
 def _row_identity_key(row: ComputeWorkerInstance) -> str:
-    return f'{row.compute_worker_scope}:{_row_resource_id(row)}'
+    return f'{row.compute_worker_scope}:{row_resource_id(row)}'
 
 
-def _row_resource_id(row: ComputeWorkerInstance) -> str:
-    if row.compute_worker_scope == 'datasource_preview' and row.datasource_id:
+def row_resource_id(row: ComputeWorkerInstance) -> str:
+    if row.compute_worker_scope == ComputeWorkerScope.DATASOURCE_PREVIEW and row.datasource_id:
         return row.datasource_id
-    if row.compute_worker_scope == 'build' and row.build_id:
+    if row.compute_worker_scope == ComputeWorkerScope.BUILD and row.build_id:
         return row.build_id
     return row.analysis_id
 
@@ -295,8 +291,7 @@ def _row_resource_id(row: ComputeWorkerInstance) -> str:
 def _read_dt(value: str | None) -> datetime | None:
     if not value:
         return None
-    raw = value[:-1] + '+00:00' if value.endswith('Z') else value
     try:
-        return datetime.fromisoformat(raw)
+        return datetime.fromisoformat(value)
     except ValueError:
         return None

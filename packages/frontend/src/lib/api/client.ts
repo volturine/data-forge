@@ -1,23 +1,17 @@
 import { err, okAsync, ResultAsync } from 'neverthrow';
 import { getClientIdentity, getEditorClientId } from '#lib/stores/clientIdentity.svelte.js';
-import { requireNamespace, isNamespaceReady } from '#lib/stores/namespace.svelte.js';
 import { uuid } from '#lib/utils/uuid.js';
 import { track } from '#lib/utils/audit-log.js';
+import { currentNamespace } from './in-flight';
 
 export const BASE_URL = '/api';
-
-function backendOrigin(): string {
-	const origin = import.meta.env.DEV
-		? `http://${window.location.hostname}:${import.meta.env.VITE_BACKEND_PORT ?? '8000'}`
-		: '';
-	return origin;
-}
 
 export function buildBackendUrl(endpoint: string): string {
 	const path = `${BASE_URL}${endpoint}`;
 	if (typeof window === 'undefined') return path;
 	if (!import.meta.env.DEV) return path;
-	return new URL(path, backendOrigin()).toString();
+	const origin = `http://${window.location.hostname}:${import.meta.env.VITE_BACKEND_PORT ?? '8000'}`;
+	return new URL(path, origin).toString();
 }
 
 export type ApiErrorType = 'network' | 'http' | 'parse';
@@ -78,7 +72,7 @@ function buildHeaders(options?: RequestInit): Headers {
 	const headers = new Headers(options?.headers);
 	const identity = getClientIdentity();
 	const editorClientId = getEditorClientId();
-	const namespace = isNamespaceReady() ? requireNamespace() : undefined;
+	const namespace = currentNamespace();
 	if (identity.clientId && !headers.has('X-Client-Id'))
 		headers.set('X-Client-Id', identity.clientId);
 	if (identity.clientSignature && !headers.has('X-Client-Signature'))
@@ -95,43 +89,49 @@ function buildHeaders(options?: RequestInit): Headers {
 function handleErrorResponse(
 	response: Response,
 	endpoint: string,
-	options?: RequestInit
+	options: RequestInit | undefined,
+	classifyCancellation: (error: unknown) => ApiError | undefined
 ): ResultAsync<never, ApiError> {
-	track({
-		event: 'api_error',
-		action: options?.method ?? 'GET',
-		page: typeof window !== 'undefined' ? window.location.pathname : undefined,
-		target: endpoint,
-		meta: { status: response.status, statusText: response.statusText }
-	});
-	return ResultAsync.fromPromise(response.text(), (error) =>
-		createApiError(
+	return ResultAsync.fromPromise(response.text(), (error) => {
+		const cancellationError = classifyCancellation(error);
+		if (cancellationError) return cancellationError;
+		return createApiError(
 			'http',
 			error instanceof Error ? error.message : response.statusText,
 			response.status,
 			response.statusText
-		)
-	).andThen((raw) => {
-		let message = raw || response.statusText;
-		let code: string | undefined;
-		try {
-			const parsed = JSON.parse(raw);
-			if (typeof parsed.detail === 'string') message = parsed.detail;
-			if (typeof parsed.error_code === 'string') code = parsed.error_code;
-		} catch {
-			// raw text is fine as fallback
-		}
-		return err(createApiError('http', message, response.status, response.statusText, code));
-	});
+		);
+	})
+		.andThen((raw) => {
+			const cancellationError = classifyCancellation(undefined);
+			if (cancellationError) return err(cancellationError);
+
+			let message = raw || response.statusText;
+			let code: string | undefined;
+			try {
+				const parsed = JSON.parse(raw);
+				if (typeof parsed.detail === 'string') message = parsed.detail;
+				if (typeof parsed.error_code === 'string') code = parsed.error_code;
+			} catch {
+				// raw text is fine as fallback
+			}
+			return err(createApiError('http', message, response.status, response.statusText, code));
+		})
+		.orTee((error) => {
+			if (error.type !== 'http') return;
+
+			track({
+				event: 'api_error',
+				action: options?.method ?? 'GET',
+				page: typeof window !== 'undefined' ? window.location.pathname : undefined,
+				target: endpoint,
+				meta: { status: response.status, statusText: response.statusText }
+			});
+		});
 }
 
 /** Bound for app-shell bootstrap probes (config + session). Compute stays unbounded. */
 export const BOOTSTRAP_API_TIMEOUT_MS = 15_000;
-
-function requestCacheMode(options: RequestInit | undefined): RequestCache | undefined {
-	if (options?.cache !== undefined) return options.cache;
-	return 'no-store';
-}
 
 function combineSignals(signals: AbortSignal[]): AbortSignal | undefined {
 	if (signals.length === 0) return undefined;
@@ -146,10 +146,35 @@ function isAbortError(error: unknown): boolean {
 	);
 }
 
+function isTimeoutError(error: unknown): boolean {
+	return (
+		(error instanceof DOMException && error.name === 'TimeoutError') ||
+		(error instanceof Error && error.name === 'TimeoutError')
+	);
+}
+
+function parseJsonBody<T>(
+	response: Response,
+	endpoint: string,
+	options: RequestInit | undefined,
+	classifyCancellation: (error: unknown) => ApiError | undefined
+): ResultAsync<T, ApiError> {
+	return ResultAsync.fromPromise(response.json() as Promise<T>, (error): ApiError => {
+		const cancellationError = classifyCancellation(error);
+		if (cancellationError) return cancellationError;
+
+		trackParseError(endpoint, options?.method);
+		return createApiError('parse', 'Failed to parse response JSON');
+	});
+}
+
 function apiFetch<T>(
 	endpoint: string,
 	options: RequestInit | undefined,
-	parse: (response: Response) => ResultAsync<T, ApiError>
+	parse: (
+		response: Response,
+		classifyCancellation: (error: unknown) => ApiError | undefined
+	) => ResultAsync<T, ApiError>
 ): ResultAsync<T, ApiError> {
 	const headers = buildHeaders(options);
 	// A 304 is a success for conditional requests — let it reach the parse callback.
@@ -166,63 +191,57 @@ function apiFetch<T>(
 		(signal): signal is AbortSignal => signal !== undefined
 	);
 	const signal = combineSignals(signals);
+	const classifyCancellation = (error: unknown): ApiError | undefined => {
+		if (namespaceController.signal.aborted) {
+			return createApiError('network', 'Request cancelled because the namespace changed');
+		}
+
+		if (isTimeoutError(error) || (callerSignal?.aborted && isTimeoutError(callerSignal.reason))) {
+			return createApiError('network', 'Request timed out', undefined, undefined, 'TIMEOUT');
+		}
+
+		if (callerSignal?.aborted || isAbortError(error)) {
+			return createApiError('network', 'Request was cancelled', undefined, undefined, 'ABORTED');
+		}
+
+		return undefined;
+	};
 	const request = {
 		...options,
 		headers,
 		signal,
-		cache: requestCacheMode(options)
+		cache: options?.cache ?? 'no-store'
 	} satisfies RequestInit;
 	const result = ResultAsync.fromPromise(
 		fetch(buildApiUrl(endpoint), request),
 		(error): ApiError => {
-			if (namespaceController.signal.aborted) {
-				return createApiError('network', 'Request cancelled because the namespace changed');
-			}
-			if (callerSignal?.aborted || isAbortError(error)) {
-				return createApiError(
-					'network',
-					callerSignal
-						? `Request timed out or was aborted (bootstrap budget ${BOOTSTRAP_API_TIMEOUT_MS}ms)`
-						: error instanceof Error
-							? error.message
-							: 'Network error'
-				);
-			}
-			return createApiError('network', error instanceof Error ? error.message : 'Network error');
+			return (
+				classifyCancellation(error) ??
+				createApiError('network', error instanceof Error ? error.message : 'Network error')
+			);
 		}
 	).andThen((response) => {
 		if (!response.ok && !(allowsNotModified && response.status === 304)) {
-			return handleErrorResponse(response, endpoint, options);
+			return handleErrorResponse(response, endpoint, options, classifyCancellation);
 		}
-		return parse(response).andThen((value) => {
-			const currentNamespace = isNamespaceReady() ? requireNamespace() : null;
-			if (
-				requestNamespace &&
-				(requestEpoch !== namespaceEpoch || requestNamespace !== currentNamespace)
-			) {
+		return parse(response, classifyCancellation).andThen((value) => {
+			const namespace = currentNamespace();
+			if (requestNamespace && (requestEpoch !== namespaceEpoch || requestNamespace !== namespace)) {
 				return err(createApiError('network', 'Response discarded because the namespace changed'));
 			}
 			return okAsync(value);
 		});
 	});
-	return result
-		.map((value) => {
-			namespaceRequests.delete(namespaceController);
-			return value;
-		})
-		.mapErr((error) => {
-			namespaceRequests.delete(namespaceController);
-			return error;
-		});
+	const release = (): void => {
+		namespaceRequests.delete(namespaceController);
+	};
+	return result.andTee(release).orTee(release);
 }
 
 export function apiRequest<T>(endpoint: string, options?: RequestInit): ResultAsync<T, ApiError> {
-	return apiFetch(endpoint, options, (response) => {
+	return apiFetch(endpoint, options, (response, classifyCancellation) => {
 		if (response.status === 204) return okAsync(undefined as T);
-		return ResultAsync.fromPromise(response.json() as Promise<T>, (): ApiError => {
-			trackParseError(endpoint, options?.method);
-			return createApiError('parse', 'Failed to parse response JSON');
-		});
+		return parseJsonBody<T>(response, endpoint, options, classifyCancellation);
 	});
 }
 
@@ -230,13 +249,13 @@ export function apiRequestWithHeaders<T>(
 	endpoint: string,
 	options?: RequestInit
 ): ResultAsync<ApiResponse<T>, ApiError> {
-	return apiFetch(endpoint, options, (response) => {
+	return apiFetch(endpoint, options, (response, classifyCancellation) => {
 		if (response.status === 204)
 			return okAsync({ data: undefined as T, headers: response.headers });
-		return ResultAsync.fromPromise(response.json() as Promise<T>, (): ApiError => {
-			trackParseError(endpoint, options?.method);
-			return createApiError('parse', 'Failed to parse response JSON');
-		}).map((data) => ({ data, headers: response.headers }));
+		return parseJsonBody<T>(response, endpoint, options, classifyCancellation).map((data) => ({
+			data,
+			headers: response.headers
+		}));
 	});
 }
 export function apiConditionalRequestWithHeaders<T>(
@@ -246,14 +265,15 @@ export function apiConditionalRequestWithHeaders<T>(
 	return apiFetch(
 		endpoint,
 		options,
-		(response): ResultAsync<ApiConditionalResponse<T>, ApiError> => {
+		(response, classifyCancellation): ResultAsync<ApiConditionalResponse<T>, ApiError> => {
 			if (response.status === 304) return okAsync({ notModified: true, headers: response.headers });
 			if (response.status === 204)
 				return okAsync({ notModified: false, headers: response.headers, data: undefined as T });
-			return ResultAsync.fromPromise(response.json() as Promise<T>, (): ApiError => {
-				trackParseError(endpoint, options?.method);
-				return createApiError('parse', 'Failed to parse response JSON');
-			}).map((data) => ({ notModified: false, data, headers: response.headers }));
+			return parseJsonBody<T>(response, endpoint, options, classifyCancellation).map((data) => ({
+				notModified: false,
+				data,
+				headers: response.headers
+			}));
 		}
 	);
 }
@@ -261,8 +281,11 @@ export function apiBlobRequest(
 	endpoint: string,
 	options?: RequestInit
 ): ResultAsync<Blob, ApiError> {
-	return apiFetch(endpoint, options, (response) =>
-		ResultAsync.fromPromise(response.blob(), (): ApiError => {
+	return apiFetch(endpoint, options, (response, classifyCancellation) =>
+		ResultAsync.fromPromise(response.blob(), (error): ApiError => {
+			const cancellationError = classifyCancellation(error);
+			if (cancellationError) return cancellationError;
+
 			trackParseError(endpoint, options?.method);
 			return createApiError('parse', 'Failed to read response');
 		})

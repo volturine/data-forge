@@ -26,7 +26,7 @@ def test_prunes_only_aged_non_kept_revisions() -> None:
     with (
         patch("runtime.compute_service.list_prefixes", side_effect=fake_list_prefixes),
         patch("runtime.compute_service.prefix_last_modified", side_effect=fake_last_modified),
-        patch("runtime.compute_service.delete_prefix", side_effect=lambda url: deleted.append(url)),
+        patch("runtime.compute_service.delete_prefix", side_effect=deleted.append),
     ):
         prune_superseded_revisions(
             "s3://bucket/exports/ds-1/master",

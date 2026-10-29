@@ -25,6 +25,7 @@ from google.protobuf import json_format
 
 from dataforge_protocol import analysis_pb2
 from runtime.domain.analysis.step_types import STEP_TYPES
+from runtime.domain.compute.base import OperationParams
 from runtime.domain.domain_enums import domain_token
 
 
@@ -44,6 +45,9 @@ def analysis_pipeline_to_execution_payload(pipeline: analysis_pb2.AnalysisPipeli
             datasource["source_type"] = domain_token("DataSourceType", datasource["source_type"])
         output = tab.get("output")
         if isinstance(output, dict):
+            # The protobuf JSON mapping renders int64 fields as strings.
+            if "build_timeout_warning_ms" in output:
+                output["build_timeout_warning_ms"] = int(output["build_timeout_warning_ms"])
             for field, enum_name in (
                 ("format", "ExportFormat"),
                 ("datasource_type", "DataSourceType"),
@@ -170,16 +174,9 @@ class FrontendStep:
 
         protocol_payload = _execution_step_payload(payload)
 
-        step_type = protocol_payload.get("type")
-        if not isinstance(step_type, str) or not step_type.strip():
-            raise ValueError("Step must have a type field")
-
         step_id = protocol_payload.get("id")
         if not isinstance(step_id, str) or not step_id.strip():
             raise ValueError("Step must have an id field")
-
-        raw_config = protocol_payload.get("config")
-        config = raw_config if isinstance(raw_config, dict) else {}
 
         raw_deps = protocol_payload.get("depends_on")
         depends_on = tuple(raw_deps) if isinstance(raw_deps, list) else ()
@@ -191,8 +188,8 @@ class FrontendStep:
 
         return cls(
             id=step_id,
-            type=step_type,
-            config=config,
+            type=cast(str, protocol_payload["type"]),
+            config=cast(dict[str, object], protocol_payload["config"]),
             depends_on=depends_on,
             is_applied=is_applied,
         )
@@ -203,34 +200,27 @@ class BackendStep:
     name: str
     operation: str
     params: dict[str, object]
+    config: OperationParams
 
 
 def convert_step_format(
-    frontend_step: Mapping[str, object] | FrontendStep,
+    frontend_step: Mapping[str, object],
 ) -> BackendStep:
     """Convert frontend step format to backend engine format."""
-    parsed = frontend_step if isinstance(frontend_step, FrontendStep) else FrontendStep.from_mapping(frontend_step)
+    parsed = FrontendStep.from_mapping(frontend_step)
     step_type = parsed.type
     config = parsed.config
-    chart_type = STEP_TYPES.chart_type(step_type)
-    if chart_type:
-        config = {**config, "chart_type": chart_type}
-    normalized_type = STEP_TYPES.normalized(step_type)
-    if not STEP_TYPES.has(normalized_type):
-        raise ValueError(f"Unknown operation '{normalized_type}'")
     raw_params = dict(config)
 
     # Import after operation modules initialize: datasource operations depend on
     # this converter while the registry owns executable parameter validation.
     from operations import PARAM_MODELS
 
-    params = (
-        PARAM_MODELS[normalized_type]
-        .model_validate(raw_params)
-        .model_dump(
-            mode="json",
-            exclude_none=True,
-        )
+    params_model = PARAM_MODELS[step_type]
+    validated_config = params_model.model_validate(raw_params)
+    params = validated_config.model_dump(
+        mode="json",
+        exclude_none=True,
     )
 
     name = STEP_TYPES.label(step_type)
@@ -239,6 +229,7 @@ def convert_step_format(
 
     return BackendStep(
         name=name,
-        operation=normalized_type,
+        operation=step_type,
         params=params,
+        config=validated_config,
     )

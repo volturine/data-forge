@@ -106,10 +106,6 @@ class WorkerDataPlaneClient:
             request.namespace = namespace
         return self._call(self._object_store.BuildUrl, request).url
 
-    def join_object_url(self, base_url: str, *parts: str) -> str:
-        request = object_store_pb2.ObjectStoreJoinRequest(base=object_store_pb2.ObjectStoreUrl(url=base_url), parts=parts)
-        return self._call(self._object_store.JoinUrl, request).url
-
     def ensure_object_store_bucket(self, name: str) -> None:
         self._call(self._object_store.EnsureBucket, object_store_pb2.ObjectStoreBucket(name=name))
 

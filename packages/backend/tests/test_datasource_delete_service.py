@@ -198,16 +198,26 @@ def test_finalize_delete_waits_for_active_compute_request(test_db_session) -> No
 def test_datasource_delete_waits_for_build_reader_until_build_is_terminal(test_db_session) -> None:
     datasource_id = str(uuid.uuid4())
     _add_file_datasources(test_db_session, datasource_id, 'right-source', 'third-source')
+    # An output the user deleted before rebuilding is still tombstoned when the build starts.
+    _add_file_datasources(test_db_session, 'output-main', pending_delete=True)
     build_id = str(uuid.uuid4())
     start_build(test_db_session, _start_build_command(build_id, datasource_id))
 
     dependencies = test_db_session.exec(select(BuildRunDatasource).where(BuildRunDatasource.build_id == build_id)).all()
-    assert {dependency.datasource_id for dependency in dependencies} == {'right-source', datasource_id, 'third-source'}
+    assert {dependency.datasource_id for dependency in dependencies} == {
+        'right-source',
+        datasource_id,
+        'third-source',
+        'output-main',
+        'output-derived',
+    }
     assert build_runs_service.has_active_build_for_datasource(test_db_session, namespace='default', datasource_id=datasource_id)
 
     datasource_delete_service.request_delete(test_db_session, datasource_id)
     assert datasource_delete_service.finalize_delete(test_db_session, datasource_id) is False
+    assert datasource_delete_service.finalize_delete(test_db_session, 'output-main') is False
     assert test_db_session.get(DataSource, datasource_id) is not None
+    assert test_db_session.get(DataSource, 'output-main') is not None
     assert test_db_session.exec(select(RuntimeOutboxEvent).where(RuntimeOutboxEvent.kind == 'storage_cleanup')).all() == []
 
     run = build_runs_service.get_build_run(test_db_session, build_id)

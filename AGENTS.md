@@ -7,57 +7,47 @@ Local-first no-code data analysis: visual Polars pipelines, Iceberg storage, sch
 ## Commands
 
 ```bash
-just install              # deps + protocol generation
-just dev                  # API, worker, scheduler, frontend
-just format               # ruff + prettier
-just check                # lint/types/protocol
-just verify               # format + static checks
-just test                 # backend, worker, scheduler pytest + frontend unit
-just test-e2e             # Playwright only via this recipe
-just generate-protocol
+just install      # dependencies + protocol generation
+just dev          # local stack
+just verify       # formatting + static checks
+just test         # all unit/integration suites
+just test-e2e     # browser/runtime tests + mandatory 50-tab gate
 ```
 
-Public `just test*` recipes run in isolated Docker Compose enclaves, one per
-suite invocation; `just test` runs the per-suite recipes sequentially. Never
-run pytest or Playwright directly on the host. Inside an enclave, loopback is
-valid for process-internal tests; use Docker Compose DNS for services in other
-containers. The Mac Tailscale-address rule applies only to services published
-by local dev/prod stacks, not container-internal test services.
+Run tests through public `just test*` recipes in isolated Docker Compose enclaves,
+never pytest or Playwright on the host. `just test` runs suites sequentially.
+Inside enclaves, loopback is valid within one container; use Compose DNS between
+containers. Use the Mac's Tailscale address for published local dev/prod services.
 
 - Frontend: `bun add` / `bun remove` — never hand-edit `package.json`.
 - Python: `uv add` / `uv remove` in the package dir — never hand-edit `pyproject.toml`.
-- Prefer `just` recipes over ad-hoc scripts.
 
 ## Packages
 
 `packages/{backend,worker,scheduler,frontend,protocol}` — no shared Python package.
 
-- Import boundaries: `scripts/check_package_boundaries.py` (e.g. worker ↛ `backend_core`/`modules`).
-- The `worker` service is the Docker-owning manager; a compute worker is one isolated container it starts for an analysis or datasource. Keep those roles distinct in code, docs, and user-facing names.
-- Protocol: edit protos → run `just generate-protocol` locally. Generated output (`packages/*/dataforge_protocol/`, `packages/*/buf/`, `frontend/src/lib/protocol`) is git-ignored and must not be committed or hand-edited.
-- Env: `docker/env/` — see `docs/ENV_VARIABLES.md`.
+- Respect `scripts/check_package_boundaries.py`: worker must not import backend `backend_core`/`modules`.
+- `worker` is the Docker-owning manager; a compute worker is its isolated analysis/datasource container. Keep those names distinct.
+- After editing protos, run `just generate-protocol`. Never hand-edit or commit ignored generated output (`dataforge_protocol/`, `buf/`, frontend `src/lib/protocol`).
+- Environment configuration lives in `docker/env/`.
 
 ## Definition of done
 
-Code/config: `just verify` && `just test` && `just test-e2e` before done or review. Markdown-only: skip unless asked.
+For code/config, run focused checks first, then `just verify`, `just test` and
+`just test-e2e` before declaring done. Markdown-only: skip these unless asked.
 
-- Fix failures and warnings immediately (pre-existing ones when you touch the area). Unfixable third-party stub warnings: inline comment why.
-- Add backend tests for new/changed backend behavior.
+- Preserve required workloads, limits, deadlines and assertions; profiles do not replace the mandatory stress gate.
+- Fix failures/warnings in touched areas. Explain unavoidable third-party stub warnings inline. Cover changed backend behavior with backend tests.
+- Reuse checks only when their inputs are unchanged; label reused or incomplete evidence. Inspect saved exits/artifacts before rerunning work after an agent failure.
+- Before expensive experiments, state the hypothesis and required signal; preflight the exact command and collector on a small case. Reassess inconclusive runs before repeating them.
+- For PR work, inspect all current-head checks, including security findings. After a stacked merge, verify the destination head too; report pending/failing checks explicitly. Merge only the authorized PR/base.
 
 ## Docs
 
-Before designing a change or debugging a failure, read [`docs/agent-guidance.md`](docs/agent-guidance.md). Before changing runtime coordination, durable work, locks, previews, capacity, scheduler behavior, or private storage cleanup, read [`docs/runtime-invariants.md`](docs/runtime-invariants.md) first.
+Read [engineering guidance](docs/agent-guidance.md) before design/debugging and
+[runtime invariants](docs/runtime-invariants.md) before changing runtime/durable
+work, locks, previews, capacity, scheduling or private storage cleanup.
 
-| Doc                                                                                           | Use for                                                               |
-| --------------------------------------------------------------------------------------------- | --------------------------------------------------------------------- |
-| [`STYLE_GUIDE.md`](STYLE_GUIDE.md)                                                            | Code style                                                            |
-| [`README.md`](README.md)                                                                      | Overview, architecture                                                |
-| [`docs/prd/`](docs/prd/)                                                                      | Product/architecture by status: `implemented/`, `active/`, `backlog/` |
-| [`docs/prd/README.md`](docs/prd/README.md)                                                    | PRD index — update on add/move/material change                        |
-| [`CONTRIBUTING.md`](CONTRIBUTING.md)                                                          | PR process                                                            |
-| [`CODING_STANDARDS.md`](CODING_STANDARDS.md)                                                  | Reviewer-only judgment rules                                          |
-| [`docs/agent-guidance.md`](docs/agent-guidance.md)                                            | General engineering and problem-solving guidance                      |
-| [`docs/runtime-invariants.md`](docs/runtime-invariants.md)                                    | Runtime, locking, preview, and capacity constraints                   |
-| [`docs/ENV_VARIABLES.md`](docs/ENV_VARIABLES.md) · [`docs/DEPLOYMENT.md`](docs/DEPLOYMENT.md) | Env, deploy                                                           |
-
-PRDs go by delivery status, not topic.
+- [README](README.md): architecture; [style](STYLE_GUIDE.md), [review standards](CODING_STANDARDS.md), [contributing](CONTRIBUTING.md): conventions and PR process.
+- [PRDs](docs/prd/README.md): grouped by delivery status (`implemented/`, `active/`, `backlog/`); update the index on additions, moves or material changes.
+- [Environment](docs/ENV_VARIABLES.md), [deployment](docs/DEPLOYMENT.md): operations.

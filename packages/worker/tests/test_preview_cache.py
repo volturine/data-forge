@@ -8,6 +8,7 @@ import pytest
 
 from operations.step_converter import BackendStep
 from runtime.config import settings
+from runtime.domain.compute.base import OperationParams
 from runtime.domain.datasource.source_types import DataSourceLoadType
 from runtime.namespace import namespace_paths
 from runtime.preview_cache import PreviewCache
@@ -188,7 +189,9 @@ def test_distinct_sources_and_namespace_config_have_distinct_keys(tmp_path: Path
     first_config = {"source_type": "file", "file_path": str(first_path), "file_type": "csv", "namespace_name": "alpha"}
     second_config = {"source_type": "file", "file_path": str(second_path), "file_type": "csv", "namespace_name": "alpha"}
     other_namespace_config = {**first_config, "namespace_name": "beta"}
-    identical_step = BackendStep(name="Filter", operation="filter", params={"conditions": [{"column": "row", "operator": ">", "value": 0}], "logic": "AND"})
+    identical_step = BackendStep(
+        name="Filter", operation="filter", params={"conditions": [{"column": "row", "operator": ">", "value": 0}], "logic": "AND"}, config=OperationParams()
+    )
 
     _first_copy, first_key = cache.source(first_config)
     _second_copy, second_key = cache.source(second_config)
@@ -215,7 +218,7 @@ def test_source_and_step_key_return_none_on_serialization_or_stat_errors(tmp_pat
     assert copied_config == unserializable_config
     assert key is None
 
-    unserializable_step = BackendStep(name="Filter", operation="filter", params={"bad": object()})
+    unserializable_step = BackendStep(name="Filter", operation="filter", params={"bad": object()}, config=OperationParams())
     assert cache.step_key("parent", unserializable_step, {}) is None
 
     with monkeypatch.context() as context:
@@ -282,12 +285,12 @@ def test_iceberg_source_pins_branch_metadata_and_invalidates_snapshot(tmp_path: 
 
 def test_step_keys_cover_transparent_and_deterministic_operations() -> None:
     cache = PreviewCache()
-    filter_step = BackendStep(name="Filter", operation="filter", params={"conditions": [], "logic": "AND"})
-    other_filter_step = BackendStep(name="Filter", operation="filter", params={"conditions": [{"column": "x"}], "logic": "AND"})
+    filter_step = BackendStep(name="Filter", operation="filter", params={"conditions": [], "logic": "AND"}, config=OperationParams())
+    other_filter_step = BackendStep(name="Filter", operation="filter", params={"conditions": [{"column": "x"}], "logic": "AND"}, config=OperationParams())
 
-    assert cache.step_key("parent", BackendStep(name="View", operation="view", params={"row_limit": 2}), {}) == "parent"
-    assert cache.step_key("parent", BackendStep(name="Chart", operation="chart", params={}), {}) == "parent"
-    assert cache.step_key(None, BackendStep(name="View", operation="view", params={}), {}) is None
+    assert cache.step_key("parent", BackendStep(name="View", operation="view", params={"row_limit": 2}, config=OperationParams()), {}) == "parent"
+    assert cache.step_key("parent", BackendStep(name="Chart", operation="chart", params={}, config=OperationParams()), {}) == "parent"
+    assert cache.step_key(None, BackendStep(name="View", operation="view", params={}, config=OperationParams()), {}) is None
     assert cache.step_key("parent", filter_step, {}) != cache.step_key("different-parent", filter_step, {})
     assert cache.step_key("parent", filter_step, {}) != cache.step_key("parent", other_filter_step, {})
     assert cache.step_key("parent", filter_step, {}) is not None
@@ -295,8 +298,8 @@ def test_step_keys_cover_transparent_and_deterministic_operations() -> None:
 
 def test_step_keys_include_only_referenced_additional_sources() -> None:
     cache = PreviewCache()
-    join = BackendStep(name="Join", operation="join", params={"right_source": "right", "how": "inner"})
-    union = BackendStep(name="Union", operation="union_by_name", params={"sources": ["right"], "allow_missing": True})
+    join = BackendStep(name="Join", operation="join", params={"right_source": "right", "how": "inner"}, config=OperationParams())
+    union = BackendStep(name="Union", operation="union_by_name", params={"sources": ["right"], "allow_missing": True}, config=OperationParams())
 
     join_key = cache.step_key("parent", join, {"right": "right-v1", "unused": "unused-v1"})
     assert join_key is not None
@@ -312,23 +315,26 @@ def test_step_keys_include_only_referenced_additional_sources() -> None:
 def test_step_keys_reject_unsafe_barriers_and_udf_expressions() -> None:
     cache = PreviewCache()
     for operation in ("ai", "notification", "datasource", "expression", "unknown"):
-        step = BackendStep(name=operation, operation=operation, params={})
+        step = BackendStep(name=operation, operation=operation, params={}, config=OperationParams())
         assert cache.step_key("parent", step, {}) is None
 
     literal = BackendStep(
         name="Columns",
         operation="with_columns",
         params={"expressions": [{"name": "constant", "type": "literal", "value": 2}]},
+        config=OperationParams(),
     )
     column = BackendStep(
         name="Columns",
         operation="with_columns",
         params={"expressions": [{"name": "copy", "type": "column", "column": "value"}]},
+        config=OperationParams(),
     )
     udf = BackendStep(
         name="Columns",
         operation="with_columns",
         params={"expressions": [{"name": "computed", "type": "udf", "code": "def udf(): return 1"}]},
+        config=OperationParams(),
     )
 
     assert cache.step_key("parent", literal, {}) is not None

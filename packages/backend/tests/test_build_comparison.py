@@ -1,63 +1,29 @@
 """Tests for the build comparison endpoint and service."""
 
 import uuid
-from datetime import UTC, datetime
 
 import pytest
 from sqlmodel import Session
 
 from backend_core.compute_worker_runs_service import _compute_schema_diff, _compute_timing_diff, _safe_int, compare_compute_worker_runs
 from backend_core.exceptions import AppError, ComputeWorkerRunComparisonError
-from backend_core.persistence.compute_worker_runs.models import ComputeWorkerRun
-
-
-def _create_run(
-    session: Session,
-    *,
-    datasource_id: str | None = None,
-    kind: str = 'download',
-    status: str = 'success',
-    result_json: dict | None = None,
-    step_timings: dict | None = None,
-    duration_ms: int | None = None,
-) -> ComputeWorkerRun:
-    run = ComputeWorkerRun(
-        id=str(uuid.uuid4()),
-        analysis_id=str(uuid.uuid4()),
-        datasource_id=datasource_id or str(uuid.uuid4()),
-        kind=kind,
-        status=status,
-        request_json={},
-        result_json=result_json,
-        created_at=datetime.now(UTC).replace(tzinfo=None),
-        step_timings=step_timings or {},
-        progress=1.0,
-        duration_ms=duration_ms,
-    )
-    session.add(run)
-    session.commit()
-    session.refresh(run)
-    return run
+from tests.harness.compute_run_factories import create_compute_worker_run
 
 
 class TestSafeInt:
-    def test_none(self) -> None:
-        assert _safe_int(None) is None
-
-    def test_int(self) -> None:
-        assert _safe_int(42) == 42
-
-    def test_str_int(self) -> None:
-        assert _safe_int('100') == 100
-
-    def test_float(self) -> None:
-        assert _safe_int(12.9) == 12
-
-    def test_invalid(self) -> None:
-        assert _safe_int('abc') is None
-
-    def test_non_scalar(self) -> None:
-        assert _safe_int({'row_count': 10}) is None
+    @pytest.mark.parametrize(
+        ('value', 'expected'),
+        [
+            pytest.param(None, None, id='none'),
+            pytest.param(42, 42, id='int'),
+            pytest.param('100', 100, id='str-int'),
+            pytest.param(12.9, 12, id='float-truncates'),
+            pytest.param('abc', None, id='invalid-str'),
+            pytest.param({'row_count': 10}, None, id='non-scalar'),
+        ],
+    )
+    def test_parses_scalars_or_returns_none(self, value: object, expected: int | None) -> None:
+        assert _safe_int(value) == expected
 
 
 class TestSchemasDiff:
@@ -66,34 +32,29 @@ class TestSchemasDiff:
         b = {'col_a': 'Int64', 'col_b': 'Utf8'}
         assert _compute_schema_diff(a, b) == []
 
-    def test_added_column(self) -> None:
-        a = {'col_a': 'Int64'}
-        b = {'col_a': 'Int64', 'col_b': 'Utf8'}
-        diffs = _compute_schema_diff(a, b)
+    @pytest.mark.parametrize(
+        ('schema_a', 'schema_b', 'column', 'status', 'type_a', 'type_b'),
+        [
+            pytest.param({'col_a': 'Int64'}, {'col_a': 'Int64', 'col_b': 'Utf8'}, 'col_b', 'added', None, 'Utf8', id='added-column'),
+            pytest.param({'col_a': 'Int64', 'col_b': 'Utf8'}, {'col_a': 'Int64'}, 'col_b', 'removed', 'Utf8', None, id='removed-column'),
+            pytest.param({'col_a': 'Int64'}, {'col_a': 'Float64'}, 'col_a', 'type_changed', 'Int64', 'Float64', id='type-changed'),
+        ],
+    )
+    def test_single_column_diff(
+        self,
+        schema_a: dict[str, str],
+        schema_b: dict[str, str],
+        column: str,
+        status: str,
+        type_a: str | None,
+        type_b: str | None,
+    ) -> None:
+        diffs = _compute_schema_diff(schema_a, schema_b)
         assert len(diffs) == 1
-        assert diffs[0].column == 'col_b'
-        assert diffs[0].status == 'added'
-        assert diffs[0].type_b == 'Utf8'
-        assert diffs[0].type_a is None
-
-    def test_removed_column(self) -> None:
-        a = {'col_a': 'Int64', 'col_b': 'Utf8'}
-        b = {'col_a': 'Int64'}
-        diffs = _compute_schema_diff(a, b)
-        assert len(diffs) == 1
-        assert diffs[0].column == 'col_b'
-        assert diffs[0].status == 'removed'
-        assert diffs[0].type_a == 'Utf8'
-        assert diffs[0].type_b is None
-
-    def test_type_changed(self) -> None:
-        a = {'col_a': 'Int64'}
-        b = {'col_a': 'Float64'}
-        diffs = _compute_schema_diff(a, b)
-        assert len(diffs) == 1
-        assert diffs[0].status == 'type_changed'
-        assert diffs[0].type_a == 'Int64'
-        assert diffs[0].type_b == 'Float64'
+        assert diffs[0].column == column
+        assert diffs[0].status == status
+        assert diffs[0].type_a == type_a
+        assert diffs[0].type_b == type_b
 
     def test_empty_schemas(self) -> None:
         assert _compute_schema_diff({}, {}) == []
@@ -149,14 +110,14 @@ class TestTimingDiff:
 class TestCompareComputeWorkerRuns:
     def test_compare_two_runs(self, test_db_session: Session) -> None:
         datasource_id = str(uuid.uuid4())
-        run_a = _create_run(
+        run_a = create_compute_worker_run(
             test_db_session,
             datasource_id=datasource_id,
             result_json={'schema': {'col_a': 'Int64', 'col_b': 'Utf8'}, 'row_count': 100},
             step_timings={'filter': 50, 'select': 30},
             duration_ms=80,
         )
-        run_b = _create_run(
+        run_b = create_compute_worker_run(
             test_db_session,
             datasource_id=datasource_id,
             result_json={'schema': {'col_a': 'Int64', 'col_c': 'Float64'}, 'row_count': 150},
@@ -190,46 +151,22 @@ class TestCompareComputeWorkerRuns:
         assert by_step['sort'].ms_a is None
 
     def test_compare_run_not_found(self, test_db_session: Session) -> None:
-        run_a = _create_run(test_db_session, result_json={})
+        run_a = create_compute_worker_run(test_db_session, result_json={})
         missing_id = str(uuid.uuid4())
         with pytest.raises(AppError, match='not found') as exc_info:
             compare_compute_worker_runs(test_db_session, run_a.id, missing_id)
         assert exc_info.value.error_code == 'ENGINE_RUN_NOT_FOUND'
 
     def test_compare_requires_same_datasource(self, test_db_session: Session) -> None:
-        run_a = _create_run(test_db_session, result_json={'row_count': 1})
-        run_b = _create_run(test_db_session, result_json={'row_count': 2})
+        run_a = create_compute_worker_run(test_db_session, result_json={'row_count': 1})
+        run_b = create_compute_worker_run(test_db_session, result_json={'row_count': 2})
         with pytest.raises(ComputeWorkerRunComparisonError, match='same datasource'):
             compare_compute_worker_runs(test_db_session, run_a.id, run_b.id)
 
-    def test_compare_identical_runs(self, test_db_session: Session) -> None:
-        datasource_id = str(uuid.uuid4())
-        run_a = _create_run(
-            test_db_session,
-            datasource_id=datasource_id,
-            result_json={'schema': {'col_a': 'Int64'}, 'row_count': 10},
-            step_timings={'step1': 100},
-            duration_ms=100,
-        )
-        run_b = _create_run(
-            test_db_session,
-            datasource_id=datasource_id,
-            result_json={'schema': {'col_a': 'Int64'}, 'row_count': 10},
-            step_timings={'step1': 100},
-            duration_ms=100,
-        )
-
-        result = compare_compute_worker_runs(test_db_session, run_a.id, run_b.id)
-        assert result.row_count_delta == 0
-        assert result.total_duration_delta_ms == 0
-        assert result.schema_diff == []
-        assert len(result.timing_diff) == 1
-        assert result.timing_diff[0].delta_ms == 0.0
-
     def test_compare_runs_without_result_json(self, test_db_session: Session) -> None:
         datasource_id = str(uuid.uuid4())
-        run_a = _create_run(test_db_session, result_json=None, datasource_id=datasource_id)
-        run_b = _create_run(test_db_session, result_json=None, datasource_id=datasource_id)
+        run_a = create_compute_worker_run(test_db_session, result_json=None, datasource_id=datasource_id)
+        run_b = create_compute_worker_run(test_db_session, result_json=None, datasource_id=datasource_id)
 
         result = compare_compute_worker_runs(test_db_session, run_a.id, run_b.id)
         assert result.row_count_a is None
@@ -241,8 +178,8 @@ class TestCompareComputeWorkerRuns:
     def test_compare_row_count_as_string(self, test_db_session: Session) -> None:
         """Row count stored as string (common from engine) should be parsed."""
         datasource_id = str(uuid.uuid4())
-        run_a = _create_run(test_db_session, result_json={'row_count': '200'}, datasource_id=datasource_id)
-        run_b = _create_run(test_db_session, result_json={'row_count': '300'}, datasource_id=datasource_id)
+        run_a = create_compute_worker_run(test_db_session, result_json={'row_count': '200'}, datasource_id=datasource_id)
+        run_b = create_compute_worker_run(test_db_session, result_json={'row_count': '300'}, datasource_id=datasource_id)
 
         result = compare_compute_worker_runs(test_db_session, run_a.id, run_b.id)
         assert result.row_count_a == 200

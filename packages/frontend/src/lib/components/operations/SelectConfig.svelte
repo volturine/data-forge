@@ -13,12 +13,12 @@
 
 	interface Props {
 		schema: Schema;
-		config?: SelectConfigData;
+		config: SelectConfigData;
 	}
 
 	const CAST_TYPES = Object.values(CAST_MAP_TYPE_TOKENS);
 
-	let { schema, config = $bindable({ columns: [], cast_map: {} }) }: Props = $props();
+	let { schema, config = $bindable() }: Props = $props();
 
 	const safeColumns = $derived(Array.isArray(config.columns) ? config.columns : []);
 	const safeCasts = $derived(config.cast_map ?? {});
@@ -30,14 +30,12 @@
 	);
 
 	function onColumnsChange(next: string[]): void {
-		const nextCasts: Record<string, CastMapType> = {};
-		for (const name of next) {
-			if (safeCasts[name]) {
-				nextCasts[name] = safeCasts[name];
-			}
-		}
 		config.columns = next;
-		config.cast_map = nextCasts;
+		config.cast_map = Object.fromEntries(
+			next
+				.filter((name) => safeCasts[name])
+				.map((name): [string, CastMapType] => [name, safeCasts[name]])
+		);
 	}
 
 	function setCast(column: string, dtype: string): void {

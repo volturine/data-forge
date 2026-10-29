@@ -118,10 +118,7 @@
 		selectionError = null;
 		try {
 			await onSelect(value);
-			view = 'namespaces';
-			searchQuery = '';
-			createName = '';
-			onClose();
+			resetAndClose();
 		} catch (error) {
 			const message = errorMessage(error);
 			selectionError = message;

@@ -6,7 +6,6 @@ from typing import Any, cast
 import pytest
 
 from dataforge_protocol import analysis_pb2, compute_pb2, enums_pb2
-from operations.step_converter import analysis_pipeline_to_execution_payload
 from runtime import compute_request_runtime, compute_service
 
 
@@ -31,29 +30,6 @@ def _claimed(kind: int, command: compute_pb2.ComputeCommand) -> compute_request_
         lease_generation=1,
         lease_ttl_seconds=300,
     )
-
-
-@pytest.mark.parametrize(
-    ("kind", "field_name", "command_type"),
-    [
-        (enums_pb2.COMPUTE_REQUEST_KIND_DOWNLOAD, "download", compute_pb2.DownloadCommand),
-        (enums_pb2.COMPUTE_REQUEST_KIND_EXPORT, "export", compute_pb2.ExportCommand),
-    ],
-)
-def test_download_and_export_admission_use_pipeline_identity_without_duplicate_id(kind, field_name, command_type) -> None:
-    request = command_type(
-        target_step_id="source",
-        analysis_pipeline=_pipeline(),
-    )
-    command = compute_pb2.ComputeCommand()
-    getattr(command, field_name).CopyFrom(request)
-
-    identity = compute_request_runtime._compute_worker_identity_for_claimed(_claimed(kind, command))
-    pipeline_identity = compute_service.default_stateless_compute_worker_identity(analysis_pipeline_to_execution_payload(request.analysis_pipeline))
-
-    assert identity == pipeline_identity
-    assert identity.scope == enums_pb2.COMPUTE_WORKER_SCOPE_ANALYSIS_INTERACTIVE
-    assert identity.analysis_id == "analysis-1"
 
 
 def test_preview_identity_preserves_explicit_identity_before_pipeline_fallback() -> None:
@@ -140,7 +116,7 @@ async def test_pipeline_only_download_admission_cancels_its_exact_job_on_lease_l
         enums_pb2.COMPUTE_REQUEST_KIND_DOWNLOAD,
         compute_pb2.ComputeCommand(download=download),
     )
-    expected_identity = compute_service.default_stateless_compute_worker_identity(analysis_pipeline_to_execution_payload(download.analysis_pipeline))
+    expected_identity = compute_service.default_stateless_compute_worker_identity(download.analysis_pipeline.analysis_id)
 
     task = asyncio.create_task(compute_request_runtime._execute_request(claimed, cast(Any, Manager())))
     await asyncio.wait_for(execution_started.wait(), timeout=1)

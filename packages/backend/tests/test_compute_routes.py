@@ -193,7 +193,7 @@ async def test_engine_shutdown_creates_uses_and_closes_session_in_its_db_thread(
         operations.append(('queue', threading.get_ident(), get_namespace()))
 
     monkeypatch.setattr(database, 'Session', OwnedSession)
-    monkeypatch.setattr(database, '_get_tenant_engine', lambda: object())
+    monkeypatch.setattr(database, '_get_tenant_engine', object)
     monkeypatch.setattr(executor_client, 'request_compute_worker_shutdown', request_shutdown)
     namespace_token = set_namespace_context('shutdown-test')
     try:

@@ -41,6 +41,13 @@ def _read_metadata(path: Path) -> tuple[list[str], dict[str, list[str]], list[st
         workbook.close()
 
 
+def _zero_based_bounds(coordinates: str, *, error: str) -> tuple[int, int, int, int]:
+    min_col, min_row, max_col, max_row = range_boundaries(coordinates)
+    if min_col is None or min_row is None or max_col is None or max_row is None:
+        raise ValueError(error)
+    return min_row - 1, min_col - 1, max_col - 1, max_row - 1
+
+
 def resolve_excel_bounds(
     workbook: Any,
     *,
@@ -57,10 +64,7 @@ def resolve_excel_bounds(
         table = workbook[sheet_name].tables.get(table_name)
         if table is None:
             raise ValueError(f"Table not found: {table_name}")
-        min_col, min_row, max_col, max_row = range_boundaries(table.ref)
-        if min_col is None or min_row is None or max_col is None or max_row is None:
-            raise ValueError("Invalid Excel table range")
-        return sheet_name, min_row - 1, min_col - 1, max_col - 1, max_row - 1
+        return (sheet_name, *_zero_based_bounds(table.ref, error="Invalid Excel table range"))
     if named_range:
         named = workbook.defined_names.get(named_range)
         if named is None:
@@ -69,18 +73,12 @@ def resolve_excel_bounds(
         if not destinations:
             raise ValueError(f"Named range has no destinations: {named_range}")
         target_sheet, coordinates = destinations[0]
-        min_col, min_row, max_col, max_row = range_boundaries(coordinates)
-        if min_col is None or min_row is None or max_col is None or max_row is None:
-            raise ValueError("Invalid Excel named range")
-        return target_sheet, min_row - 1, min_col - 1, max_col - 1, max_row - 1
+        return (target_sheet, *_zero_based_bounds(coordinates, error="Invalid Excel named range"))
     if cell_range:
         target_sheet, coordinates = _cell_range_parts(cell_range, sheet_name)
         if target_sheet not in workbook.sheetnames:
             raise ValueError(f"Sheet not found for cell range: {target_sheet}")
-        min_col, min_row, max_col, max_row = range_boundaries(coordinates)
-        if min_col is None or min_row is None or max_col is None or max_row is None:
-            raise ValueError(f"Invalid cell range: {cell_range}")
-        return target_sheet, min_row - 1, min_col - 1, max_col - 1, max_row - 1
+        return (target_sheet, *_zero_based_bounds(coordinates, error=f"Invalid cell range: {cell_range}"))
 
     start_row = max(start_row, 0)
     start_col = max(start_col, 0)
@@ -166,16 +164,17 @@ def _preview(
             raise ValueError("Excel row bounds exceed sheet size")
         if not sheet.max_column or start_col >= sheet.max_column or end_col >= sheet.max_column:
             raise ValueError("Excel column bounds exceed sheet size")
-        rows = []
         preview_end_row = min(start_row + _PREVIEW_ROW_LIMIT - 1, end_row)
-        for row in sheet.iter_rows(
-            min_row=start_row + 1,
-            max_row=preview_end_row + 1,
-            min_col=start_col + 1,
-            max_col=end_col + 1,
-            values_only=True,
-        ):
-            rows.append({"cells": [str(value) if value is not None else None for value in row]})
+        rows = [
+            {"cells": [str(value) if value is not None else None for value in row]}
+            for row in sheet.iter_rows(
+                min_row=start_row + 1,
+                max_row=preview_end_row + 1,
+                min_col=start_col + 1,
+                max_col=end_col + 1,
+                values_only=True,
+            )
+        ]
         return {
             "preflight_id": "",
             "preview_rows": rows,

@@ -153,32 +153,23 @@ def test_normalize_step_config_rejects_removed_counts_steps() -> None:
         normalize_step_config('null_count', {})
 
 
-def test_normalize_step_config_rejects_unknown_config_fields() -> None:
-    with pytest.raises(ValueError, match='Extra inputs are not permitted'):
-        normalize_step_config('filter', {'conditions': [], 'logic': 'AND', 'typo': True})
-
-
-def test_normalize_step_config_rejects_unknown_nested_config_fields() -> None:
-    with pytest.raises(ValueError, match='Extra inputs are not permitted'):
-        normalize_step_config(
+@pytest.mark.parametrize(
+    ('step_type', 'config'),
+    [
+        pytest.param('filter', {'conditions': [], 'logic': 'AND', 'typo': True}, id='unknown-config-field'),
+        pytest.param(
             'with_columns',
             {'expressions': [{'name': 'x', 'type': 'literal', 'value': 1, 'surprise': True}]},
-        )
-
-
-def test_normalize_step_config_rejects_flat_filter_config() -> None:
+            id='unknown-nested-config-field',
+        ),
+        pytest.param('filter', {'column': 'city', 'operator': 'equals', 'value': 'NYC'}, id='flat-filter-config'),
+        pytest.param('groupby', {'column': 'city', 'operation': 'count'}, id='flat-groupby-config'),
+        pytest.param('join', {'right': 'orders', 'on': 'customer_id'}, id='flat-join-config'),
+    ],
+)
+def test_normalize_step_config_rejects_extra_inputs(step_type: str, config: dict) -> None:
     with pytest.raises(ValueError, match='Extra inputs are not permitted'):
-        normalize_step_config('filter', {'column': 'city', 'operator': 'equals', 'value': 'NYC'})
-
-
-def test_normalize_step_config_rejects_flat_groupby_config() -> None:
-    with pytest.raises(ValueError, match='Extra inputs are not permitted'):
-        normalize_step_config('groupby', {'column': 'city', 'operation': 'count'})
-
-
-def test_normalize_step_config_rejects_flat_join_config() -> None:
-    with pytest.raises(ValueError, match='Extra inputs are not permitted'):
-        normalize_step_config('join', {'right': 'orders', 'on': 'customer_id'})
+        normalize_step_config(step_type, config)
 
 
 def test_pipeline_protocol_normalization_removes_http_aliases() -> None:

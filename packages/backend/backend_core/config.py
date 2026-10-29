@@ -1,11 +1,14 @@
 import os
 import tempfile
 from pathlib import Path
+from typing import Literal
 from zoneinfo import available_timezones
 
 from pydantic import Field, field_validator, model_validator
 from pydantic_settings import BaseSettings, SettingsConfigDict
 from pydantic_settings.sources import DotEnvSettingsSource
+
+from backend_core.namespace_storage import validate_namespace_name
 
 _MAX_UPLOAD_FILE_SIZE_BYTES = 2 * 1024 * 1024 * 1024
 
@@ -120,16 +123,13 @@ class Settings(EnvFileSettings):
     # Maximum connections per worker
     worker_connections: int = Field(default=4096, alias='WORKER_CONNECTIONS')
 
-    engine_idle_ttl_seconds: int = Field(default=300, ge=1, alias='ENGINE_IDLE_TTL_SECONDS')
-    engine_idle_reap_interval_seconds: int = Field(default=30, ge=1, alias='ENGINE_IDLE_REAP_INTERVAL_SECONDS')
-
     object_store_endpoint: str = Field(default='http://127.0.0.1:9000', alias='OBJECT_STORE_ENDPOINT')
     object_store_region: str = Field(default='us-east-1', alias='OBJECT_STORE_REGION')
     object_store_access_key: str = Field(default='rustfsadmin', alias='OBJECT_STORE_ACCESS_KEY')
     object_store_secret_key: str = Field(default='rustfsadmin', alias='OBJECT_STORE_SECRET_KEY')
 
     # Logging level (debug, info, warning, error)
-    log_level: str = Field(default='info', alias='LOG_LEVEL')
+    log_level: Literal['debug', 'info', 'warning', 'error', 'critical'] = Field(default='info', alias='LOG_LEVEL')
     sql_echo: bool = Field(default=False, alias='SQL_ECHO')
     uvicorn_access_log: bool = Field(default=True, alias='UVICORN_ACCESS_LOG')
     # Idle keep-alive close. Clients that pool sockets without their own idle
@@ -163,7 +163,7 @@ class Settings(EnvFileSettings):
     log_queue_max_size: int = Field(default=2000, ge=1, alias='LOG_QUEUE_MAX_SIZE')
 
     # Queue overflow behavior: 'block' or 'drop' (default)
-    log_queue_overflow: str = Field(default='drop', alias='LOG_QUEUE_OVERFLOW')
+    log_queue_overflow: Literal['block', 'drop'] = Field(default='drop', alias='LOG_QUEUE_OVERFLOW')
 
     # Max known-size request/response body to log in bytes (0 disables body logging)
     log_max_body_size: int = Field(default=64 * 1024, ge=0, alias='LOG_MAX_BODY_SIZE')
@@ -204,13 +204,15 @@ class Settings(EnvFileSettings):
         path.mkdir(parents=True, exist_ok=True)
         return path
 
-    @field_validator('log_level')
+    @field_validator('default_namespace')
     @classmethod
-    def _validate_log_level(cls, value: str) -> str:
-        valid_levels = ['debug', 'info', 'warning', 'error', 'critical']
-        if value.lower() not in valid_levels:
-            raise ValueError(f'log_level must be one of {valid_levels}, got {value}')
-        return value.lower()
+    def _validate_default_namespace(cls, value: str) -> str:
+        return validate_namespace_name(value)
+
+    @field_validator('log_level', 'log_queue_overflow', mode='before')
+    @classmethod
+    def _lowercase_choice(cls, value: object) -> object:
+        return value.lower() if isinstance(value, str) else value
 
     @field_validator('database_url')
     @classmethod
@@ -219,7 +221,7 @@ class Settings(EnvFileSettings):
         if not normalized:
             raise ValueError('DATABASE_URL must be set to a PostgreSQL connection string')
         lower = normalized.lower()
-        if not (lower.startswith('postgresql://') or lower.startswith('postgresql+')):
+        if not lower.startswith(('postgresql://', 'postgresql+')):
             raise ValueError('DATABASE_URL must be a PostgreSQL connection string')
         return normalized
 
@@ -230,14 +232,6 @@ class Settings(EnvFileSettings):
         if value not in zones:
             raise ValueError(f'timezone must be a valid IANA timezone, got {value}')
         return value
-
-    @field_validator('log_queue_overflow')
-    @classmethod
-    def _validate_log_queue_overflow(cls, value: str) -> str:
-        valid = ['block', 'drop']
-        if value.lower() not in valid:
-            raise ValueError(f'log_queue_overflow must be one of {valid}, got {value}')
-        return value.lower()
 
     @model_validator(mode='after')
     def _validate_directories_writable(self) -> Settings:
@@ -253,19 +247,11 @@ class Settings(EnvFileSettings):
 
     @model_validator(mode='after')
     def _validate_runtime_mode(self) -> Settings:
-        if self.engine_idle_reap_interval_seconds >= self.engine_idle_ttl_seconds:
-            raise ValueError('ENGINE_IDLE_REAP_INTERVAL_SECONDS must be < ENGINE_IDLE_TTL_SECONDS')
         for name in ('endpoint', 'region', 'access_key', 'secret_key'):
             if not getattr(self, f'object_store_{name}').strip():
                 raise ValueError(f'OBJECT_STORE_{name.upper()} must not be empty')
         if self.prod_mode_enabled and 'rustfsadmin' in {self.object_store_access_key, self.object_store_secret_key}:
             raise ValueError('OBJECT_STORE credentials must be changed from the rustfsadmin default in production')
-        # Default namespace is the default S3 bucket name.
-        from backend_core.namespace_storage import is_valid_namespace_name
-
-        default_ns = self.default_namespace.strip()
-        if not is_valid_namespace_name(default_ns):
-            raise ValueError('DEFAULT_NAMESPACE must be a valid bucket name (3–63 lowercase letters, digits, hyphens, underscores; start/end alphanumeric)')
         return self
 
 

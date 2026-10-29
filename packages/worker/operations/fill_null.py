@@ -4,7 +4,7 @@ import polars as pl
 
 from operations.enums import FillNullStrategy
 from operations.type_casting import cast_value, get_polars_type
-from runtime.domain.compute.base import OperationHandler, OperationParams
+from runtime.domain.compute.base import OperationParams
 
 
 class FillNullParams(OperationParams):
@@ -43,27 +43,23 @@ def _resolve_statistical_columns(
     return numeric_columns
 
 
-class FillNullHandler(OperationHandler):
-    def __call__(self, lf: pl.LazyFrame, params: dict, **_) -> pl.LazyFrame:
-        validated = FillNullParams.model_validate(params)
-        strategy = validated.strategy
-        columns = validated.columns
+def fill_null(lf: pl.LazyFrame, params: FillNullParams, **_) -> pl.LazyFrame:
+    strategy = params.strategy
+    columns = params.columns
 
-        if strategy.drops_rows:
-            return lf.drop_nulls(subset=columns) if columns else lf.drop_nulls()
+    if strategy == FillNullStrategy.DROP_ROWS:
+        return lf.drop_nulls(subset=columns) if columns else lf.drop_nulls()
 
-        if strategy in (FillNullStrategy.MEAN, FillNullStrategy.MEDIAN):
-            fill = _FILL_STRATEGIES[strategy]
-            return lf.with_columns([fill(pl.col(col)) for col in _resolve_statistical_columns(lf, strategy, columns)])
+    if strategy in (FillNullStrategy.MEAN, FillNullStrategy.MEDIAN):
+        fill = _FILL_STRATEGIES[strategy]
+        return lf.with_columns([fill(pl.col(col)) for col in _resolve_statistical_columns(lf, strategy, columns)])
 
-        target_columns = columns or lf.collect_schema().names()
-        if strategy.uses_literal_value:
-            value = cast_value(validated.value, validated.value_type)
-            dtype = get_polars_type(validated.value_type)
-            literal = pl.lit(value, dtype=dtype) if dtype is not None else value
-            return lf.with_columns([pl.col(col).fill_null(literal) for col in target_columns])
+    target_columns = columns or lf.collect_schema().names()
+    if strategy == FillNullStrategy.LITERAL:
+        value = cast_value(params.value, params.value_type)
+        dtype = get_polars_type(params.value_type)
+        literal = pl.lit(value, dtype=dtype) if dtype is not None else value
+        return lf.with_columns([pl.col(col).fill_null(literal) for col in target_columns])
 
-        if column_fill := _FILL_STRATEGIES.get(strategy):
-            return lf.with_columns([column_fill(pl.col(col)) for col in target_columns])
-
-        raise ValueError(f"Unsupported fill_null strategy: {strategy}")
+    column_fill = _FILL_STRATEGIES[strategy]
+    return lf.with_columns([column_fill(pl.col(col)) for col in target_columns])

@@ -42,13 +42,20 @@ type LoadAnalysis = {
 	name: string;
 };
 
+type BrowserPerformanceSnapshot = { metrics: Array<{ name: string; value: number }> };
+
+type PageState = {
+	index: number;
+	url: string;
+};
+
 type NavigationFailurePage = {
 	index: number;
 	kind: 'analysis' | 'datasource';
 	page: Page;
 	failedAtEpochMs: number;
 	failedAtMonotonicMs: number;
-	state: Promise<{ pageState: unknown; snapshotReceivedAtEpochMs: number }>;
+	state: Promise<{ pageState: PageState; snapshotReceivedAtEpochMs: number }>;
 };
 
 type PageDiagnostics = {
@@ -182,7 +189,7 @@ async function capturePageState(
 	page: Page,
 	index: number,
 	datasourceName: string
-): Promise<unknown> {
+): Promise<PageState> {
 	const snapshot = page.evaluate((targetDatasourceName) => {
 		const describe = (element: Element | null) => {
 			if (!element) return null;
@@ -196,6 +203,7 @@ async function capturePageState(
 				visibility: style.visibility,
 				opacity: style.opacity,
 				interactive: element.getAttribute('data-shell-interactive'),
+				editorAccessState: element.getAttribute('data-editor-access-state'),
 				state: element.getAttribute('data-preview-state'),
 				ready: element.getAttribute('data-preview-ready'),
 				outerHTML: element.outerHTML.slice(0, 1_000)
@@ -292,10 +300,10 @@ async function capturePageState(
 			resourceCount: performance.getEntriesByType('resource').length
 		};
 	}, datasourceName);
-	const timeout = new Promise<unknown>((resolve) =>
+	const timeout = new Promise<{ snapshotError: string }>((resolve) =>
 		setTimeout(() => resolve({ snapshotError: 'page evaluation exceeded 2 seconds' }), 2_000)
 	);
-	return { index, url: page.url(), ...((await Promise.race([snapshot, timeout])) as object) };
+	return { index, url: page.url(), ...(await Promise.race([snapshot, timeout])) };
 }
 
 async function createLoadAnalysis(
@@ -395,6 +403,27 @@ test.describe('Concurrent authenticated browser sessions', () => {
 		const accountContexts: BrowserContext[] = [];
 		const analyses: LoadAnalysis[] = [];
 		let pages: Page[] = [];
+		const navigationCalls = new Map<
+			Page,
+			{ startedAtEpochMs: number; returnedPromiseAtEpochMs: number | null; timeoutMs: number }
+		>();
+		const observeNavigationCall = (
+			page: Page,
+			navigate: (timeoutMs: number) => Promise<void>
+		): Promise<void> => {
+			const timeoutMs = readyTimeoutMs();
+			if (browserCount === 1) return navigate(timeoutMs);
+			// Bound the synchronous helper call without adding browser commands or waits.
+			const call = {
+				startedAtEpochMs: Date.now(),
+				returnedPromiseAtEpochMs: null as number | null,
+				timeoutMs
+			};
+			navigationCalls.set(page, call);
+			const navigation = navigate(timeoutMs);
+			call.returnedPromiseAtEpochMs = Date.now();
+			return navigation;
+		};
 		const requestTracesByPage = new Map<Page, RequestTrace | null>();
 		const previewBodiesByPage = new Map<Page, string[]>();
 		const diagnosticsByPage = new Map<Page, PageDiagnostics>();
@@ -455,7 +484,7 @@ test.describe('Concurrent authenticated browser sessions', () => {
 				if (index > 0 && authRequired) {
 					const response = await context.request.post('/api/v1/auth/register', {
 						data: {
-							email: `e2e-load-${E2E_RUN_STAMP}-account-${index}@example.com`,
+							email: `e2e-load-${E2E_RUN_STAMP}-account-${index}-repeat-${testInfo.repeatEachIndex}@example.com`,
 							password: E2E_PASSWORD,
 							display_name: `E2E Load Account ${index + 1}`
 						}
@@ -500,7 +529,7 @@ test.describe('Concurrent authenticated browser sessions', () => {
 						page,
 						testInfo.workerIndex,
 						`${testInfo.title} tab ${index}`,
-						`${testInfo.testId}-tab-${index}`
+						`${testInfo.testId}-repeat-${testInfo.repeatEachIndex}-tab-${index}`
 					)
 				);
 			});
@@ -536,10 +565,22 @@ test.describe('Concurrent authenticated browser sessions', () => {
 
 			// Start all 30 distinct analysis transforms and all shared datasource
 			// previews together, so the probe measures the mixed 50-tab burst.
+			const rendererSession =
+				browserCount === 1 ? await pages[0].context().newCDPSession(pages[0]) : null;
+			if (rendererSession) {
+				await rendererSession.send('Performance.enable', { timeDomain: 'threadTicks' });
+			}
+			const rendererBeforeNavigation: BrowserPerformanceSnapshot | null = rendererSession
+				? await rendererSession.send('Performance.getMetrics')
+				: null;
+			const burstStartedAtEpochMs = Date.now();
+			const burstStartedAt = performance.now();
 			const navigationResults = await Promise.allSettled([
 				...analysisPages.map(async (page, index) => {
 					try {
-						await gotoAnalysisEditor(page, analyses[index].id, readyTimeoutMs());
+						await observeNavigationCall(page, (timeoutMs) =>
+							gotoAnalysisEditor(page, analyses[index].id, timeoutMs)
+						);
 					} catch (error) {
 						captureNavigationFailure(page, index, 'analysis');
 						throw new Error(`analysis tab ${index} editor navigation failed: ${String(error)}`, {
@@ -553,7 +594,9 @@ test.describe('Concurrent authenticated browser sessions', () => {
 						// Opening the datasource route by ID selects the same UI preview as
 						// clicking its row, without making a saturated 50-page browser spend
 						// the navigation phase on 20 pointer-action acknowledgements.
-						await gotoAuthedRoute(page, `/datasources/${sharedDatasource.id}`, readyTimeoutMs());
+						await observeNavigationCall(page, (timeoutMs) =>
+							gotoAuthedRoute(page, `/datasources/${sharedDatasource.id}`, timeoutMs)
+						);
 						await waitForDatasourceList(page, readyTimeoutMs());
 					} catch (error) {
 						captureNavigationFailure(page, tabIndex, 'datasource');
@@ -563,6 +606,7 @@ test.describe('Concurrent authenticated browser sessions', () => {
 					}
 				})
 			]);
+			const navigationBatchMs = performance.now() - burstStartedAt;
 			const navigationFailures = navigationResults
 				.filter((result): result is PromiseRejectedResult => result.status === 'rejected')
 				.map((result) => result.reason);
@@ -583,6 +627,8 @@ test.describe('Concurrent authenticated browser sessions', () => {
 					await expect(page.locator('[data-column-id="id"]')).toBeVisible();
 				})
 			]);
+			const previewReadyAtEpochMs = Date.now();
+			const previewReadyBatchMs = performance.now() - burstStartedAt;
 			const previewFailures = previewResults
 				.filter((result): result is PromiseRejectedResult => result.status === 'rejected')
 				.map((result) => result.reason);
@@ -591,6 +637,45 @@ test.describe('Concurrent authenticated browser sessions', () => {
 					previewFailures,
 					`Load probe previews failed in ${previewFailures.length} of ${browserCount} tabs`
 				);
+			}
+			let rendererProfile: {
+				timeDomain: string;
+				beforeNavigation: BrowserPerformanceSnapshot | null;
+				ready: BrowserPerformanceSnapshot;
+				afterGc: BrowserPerformanceSnapshot;
+				scripts: Array<{ path: string; decodedBytes: number; encodedBytes: number }>;
+			} | null = null;
+			if (rendererSession) {
+				const ready: BrowserPerformanceSnapshot =
+					await rendererSession.send('Performance.getMetrics');
+				// Normalize retained heap after the usable-preview timestamp. Startup
+				// CPU is captured before this measurement-only collection.
+				await rendererSession.send('HeapProfiler.collectGarbage');
+				const afterGc: BrowserPerformanceSnapshot =
+					await rendererSession.send('Performance.getMetrics');
+				const scripts = await pages[0].evaluate(() =>
+					performance.getEntriesByType('resource').flatMap((entry) => {
+						const resource = entry as PerformanceResourceTiming;
+						const path = new URL(resource.name).pathname;
+						return path.endsWith('.js')
+							? [
+									{
+										path,
+										decodedBytes: resource.decodedBodySize,
+										encodedBytes: resource.encodedBodySize
+									}
+								]
+							: [];
+					})
+				);
+				rendererProfile = {
+					timeDomain: 'threadTicks',
+					beforeNavigation: rendererBeforeNavigation,
+					ready,
+					afterGc,
+					scripts
+				};
+				await rendererSession.detach();
 			}
 			await Promise.all([...pendingResponseReadsByPage.values()].flat());
 			const tabApiResponsesByPage = new Map(
@@ -677,9 +762,20 @@ test.describe('Concurrent authenticated browser sessions', () => {
 			const analysisPreviewLatencies = previewLatenciesForPages(analysisPages);
 			const datasourcePreviewLatencies = previewLatenciesForPages(datasourcePages);
 			const loadMetrics = {
+				repeatIndex: testInfo.repeatEachIndex,
+				...(browserCount > 1
+					? {
+							navigationCalls: pages.map((page, index) => ({ index, ...navigationCalls.get(page) }))
+						}
+					: {}),
 				browserTabs: browserCount,
 				accounts: accountCount,
 				browserProcesses: probeBrowsers.length,
+				burstStartedAtEpochMs,
+				previewReadyAtEpochMs,
+				navigationBatchMs,
+				previewReadyBatchMs,
+				rendererProfile,
 				previewTimingSource: 'API Server-Timing app;dur',
 				computePreviewResponses: tabComputePreviewResponses.length,
 				previewP50Ms: percentile(allPreviewLatencies, 0.5),
@@ -721,7 +817,8 @@ test.describe('Concurrent authenticated browser sessions', () => {
 									startedMsAgo: Date.now() - pending.startedAt
 								}));
 								const diagnostic = {
-									...(state.pageState as object),
+									...state.pageState,
+									navigationCall: navigationCalls.get(failure.page),
 									navigationFailureKind: failure.kind,
 									failedAtEpochMs: failure.failedAtEpochMs,
 									failedAtMonotonicMs: failure.failedAtMonotonicMs,
@@ -763,7 +860,8 @@ test.describe('Concurrent authenticated browser sessions', () => {
 									startedMsAgo: Date.now() - pending.startedAt
 								}));
 								return {
-									...((await capturePageState(page, index, sharedDatasource.name)) as object),
+									...(await capturePageState(page, index, sharedDatasource.name)),
+									navigationCall: navigationCalls.get(page),
 									...diagnosticsByPage.get(page),
 									pendingPreviewRequests
 								};
@@ -792,10 +890,18 @@ test.describe('Concurrent authenticated browser sessions', () => {
 						if (!response.ok()) return { index, status: response.status() };
 						const lock = (await response.json()) as { owner_id?: unknown } | null;
 						const lockOwnerId = typeof lock?.owner_id === 'string' ? lock.owner_id : null;
+						const expectedUserId = accountUserIds[index] ?? null;
 						return {
 							index,
-							lockOwnerAccountIndex: lockOwnerId ? accountUserIds.indexOf(lockOwnerId) : -1,
-							lockOwnedByExpectedAccount: lockOwnerId === accountUserIds[index]
+							lockOwnerAccountIndex: lockOwnerId
+								? accountUserIds.findIndex(
+										(userId) => userId !== null && lockOwnerId.startsWith(`${userId}:`)
+									)
+								: -1,
+							lockOwnedByExpectedAccount:
+								lockOwnerId !== null &&
+								expectedUserId !== null &&
+								lockOwnerId.startsWith(`${expectedUserId}:`)
 						};
 					} catch (error) {
 						return { index, error: String(error) };
@@ -822,7 +928,7 @@ test.describe('Concurrent authenticated browser sessions', () => {
 				const page = diagnostic as {
 					index: number;
 					url: string;
-					analysisEditor?: { interactive?: string | null } | null;
+					analysisEditor?: { editorAccessState?: string | null } | null;
 					preview?: { state?: string | null; ready?: string | null } | null;
 					documentResponses: string[];
 					apiResponses: string[];
@@ -836,7 +942,7 @@ test.describe('Concurrent authenticated browser sessions', () => {
 				return {
 					index: page.index,
 					path: new URL(page.url).pathname,
-					editor: page.analysisEditor?.interactive ?? null,
+					editor: page.analysisEditor?.editorAccessState ?? null,
 					previewState: page.preview?.state ?? null,
 					previewReady: page.preview?.ready ?? null,
 					previewRequestStarts: page.previewRequestStarts,

@@ -77,7 +77,7 @@ async def test_scheduler_heartbeat_retries_transient_deadline_without_error_trac
             assert worker_id == "scheduler:test"
             timeouts.append(timeout_seconds)
             if len(timeouts) == 1:
-                raise RuntimeError("Backend scheduler gRPC failed with DEADLINE_EXCEEDED: Deadline Exceeded")
+                raise scheduler_main.SchedulerRpcError(grpc.StatusCode.DEADLINE_EXCEEDED, "Deadline Exceeded")
             stop.set()
 
     await scheduler_main._heartbeat_loop(
@@ -92,6 +92,27 @@ async def test_scheduler_heartbeat_retries_transient_deadline_without_error_trac
     assert health.snapshot()["registered"] is True
     assert health.snapshot()["healthy"] is False
     assert [record.levelname for record in caplog.records if "Scheduler heartbeat" in record.message] == ["WARNING"]
+
+
+@pytest.mark.asyncio
+async def test_scheduler_heartbeat_classifies_failures_by_status_code_not_message(caplog: pytest.LogCaptureFixture) -> None:
+    stop = asyncio.Event()
+    health = DispatcherHealth("scheduler:test", lanes=("scheduler",), max_age_seconds=30)
+
+    class _Client(FakeSchedulerClient):
+        async def heartbeat(self, *, worker_id: str, timeout_seconds: float | None = None) -> None:
+            stop.set()
+            raise RuntimeError("UNAVAILABLE mentioned in text only")
+
+    await scheduler_main._heartbeat_loop(
+        client=_Client(),
+        stop_event=stop,
+        worker_id="scheduler:test",
+        heartbeat_seconds=0.001,
+        health=health,
+    )
+
+    assert [record.levelname for record in caplog.records if "Scheduler heartbeat" in record.message] == ["ERROR"]
 
 
 def test_scheduler_settings_require_internal_rpc_contract(monkeypatch: pytest.MonkeyPatch) -> None:

@@ -15,7 +15,7 @@ from backend_core.database import get_settings_engine
 from backend_core.sqlmodel_typing import col
 from modules.auth.models import User
 from modules.chat.consumer import ChatTurnConsumer
-from modules.chat.models import ChatEvent, ChatSession, ChatTurn
+from modules.chat.models import ChatEvent, ChatSession, ChatTurn, ChatTurnStatus
 from modules.chat.sessions import ChatSessionBusy, session_store
 from modules.chat.store import ChatTurnStore
 from modules.mcp.models import MCPToolDefinition
@@ -67,8 +67,8 @@ def test_claim_batch_fails_only_turn_with_undecryptable_credentials(test_user: U
     assert any(payload.get('type') == 'done' for payload in payloads)
 
 
-@pytest.mark.parametrize('status', ['queued', 'running', 'awaiting_confirmation'])
-def test_active_session_delete_returns_conflict_and_preserves_turn(client: TestClient, test_user: User, status: str) -> None:
+@pytest.mark.parametrize('status', [ChatTurnStatus.QUEUED, ChatTurnStatus.RUNNING, ChatTurnStatus.AWAITING_CONFIRMATION])
+def test_active_session_delete_returns_conflict_and_preserves_turn(client: TestClient, test_user: User, status: ChatTurnStatus) -> None:
     session_id = _create_session(client)
     store = ChatTurnStore()
     turn_id = _enqueue(session_id, test_user.id, 'keep the durable owner')

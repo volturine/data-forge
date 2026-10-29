@@ -6,9 +6,8 @@ import threading
 import time
 from collections.abc import Callable, Generator, Iterator
 from contextlib import contextmanager
-from hashlib import sha256
 from threading import Lock
-from typing import Any, Concatenate, ParamSpec
+from typing import Any, Concatenate
 
 from sqlalchemy import event, text
 from sqlalchemy.engine import Connection, Engine
@@ -16,14 +15,13 @@ from sqlalchemy.pool import QueuePool
 from sqlmodel import Session, create_engine
 
 from backend_core.api_execution_budget import run_api_blocking
+from backend_core.claiming import advisory_key, is_postgres
 from backend_core.config import settings
 from backend_core.namespace import (
     get_namespace,
     namespace_database_schema,
     normalize_namespace,
 )
-
-P = ParamSpec('P')
 
 _PUBLIC_SCHEMA = 'public'
 _POSTGRES_INIT_LOCK_KEY = 4815162342
@@ -179,7 +177,7 @@ def active_runtime_coordinator_generation() -> int | None:
 def _fence_runtime_transaction(session: Session, _transaction, connection: Connection) -> None:
     del session
     generation = _ACTIVE_RUNTIME_COORDINATOR_GENERATION
-    if generation is None or connection.dialect.name != 'postgresql':
+    if generation is None or not is_postgres(connection):
         return
     current_generation = connection.execute(
         text('SELECT generation FROM public.runtime_coordinator_state WHERE singleton_id = 1 FOR SHARE')
@@ -191,7 +189,7 @@ def _fence_runtime_transaction(session: Session, _transaction, connection: Conne
 event.listen(Session, 'after_begin', _fence_runtime_transaction)
 
 
-def _track_pool_checkouts(engine: Engine, pool_name: str) -> None:
+def _track_pool_checkouts(engine: Engine) -> None:
     engine_id = id(engine)
 
     def checkout(_dbapi_connection, record, _connection_proxy) -> None:
@@ -276,7 +274,6 @@ def configure_runtime_critical_database_budget() -> int:
 def _create_engine(
     url: str,
     *,
-    pool_name: str,
     search_path: Callable[[], str] | None = None,
     critical: bool = False,
     connect_args: dict[str, object] | None = None,
@@ -296,7 +293,7 @@ def _create_engine(
         pool_timeout=settings.database_pool_timeout,
         connect_args=connect_args or {},
     )
-    _track_pool_checkouts(engine, pool_name)
+    _track_pool_checkouts(engine)
     if search_path is not None:
 
         @event.listens_for(engine, 'checkout')
@@ -358,7 +355,7 @@ def _set_postgres_search_path(raw_connection: object, namespace: str) -> None:
 
 
 def _apply_postgres_search_path(connection: Connection, namespace: str) -> None:
-    if connection.dialect.name != 'postgresql':
+    if not is_postgres(connection):
         return
     schema = namespace_database_schema(namespace)
     connection.execute(text(f'SET search_path TO "{schema}", {_PUBLIC_SCHEMA}'))
@@ -367,7 +364,6 @@ def _apply_postgres_search_path(connection: Connection, namespace: str) -> None:
 def _create_public_engine(*, critical: bool = False) -> Engine:
     return _create_engine(
         settings.database_url,
-        pool_name='settings-critical' if critical else 'settings',
         search_path=lambda: _PUBLIC_SCHEMA,
         critical=critical,
         connect_args={'options': f'-c search_path={_PUBLIC_SCHEMA}'},
@@ -397,7 +393,7 @@ def _get_tenant_engine() -> Engine:
         return tenant_engine
     with _tenant_engine_lock:
         if tenant_engine is None:
-            tenant_engine = _create_engine(settings.database_url, pool_name='tenant', search_path=get_namespace)
+            tenant_engine = _create_engine(settings.database_url, search_path=get_namespace)
         return tenant_engine
 
 
@@ -425,7 +421,7 @@ def _get_critical_tenant_engine() -> Engine:
         return critical_tenant_engine
     with _critical_tenant_engine_lock:
         if critical_tenant_engine is None:
-            critical_tenant_engine = _create_engine(settings.database_url, pool_name='tenant-critical', search_path=get_namespace, critical=True)
+            critical_tenant_engine = _create_engine(settings.database_url, search_path=get_namespace, critical=True)
         return critical_tenant_engine
 
 
@@ -589,7 +585,7 @@ def _seed_shared_state() -> None:
 def run_settings_connection_locked[T](func: Callable[[Connection], T]) -> T:
     engine = get_settings_engine()
     with engine.begin() as connection:
-        if connection.dialect.name != 'postgresql':
+        if not is_postgres(connection):
             return func(connection)
         # Bind the lock to this transaction so a failed DDL transaction rolls
         # back and releases it without a second SQL statement that would be
@@ -606,8 +602,7 @@ def _run_postgres_init_locked(func) -> None:
 
 
 def _namespace_lock_key(prefix: str, namespace: str) -> int:
-    raw = f'{prefix}{normalize_namespace(namespace)}'.encode()
-    return int.from_bytes(sha256(raw).digest()[:8], 'big', signed=True)
+    return advisory_key(f'{prefix}{normalize_namespace(namespace)}')
 
 
 @contextmanager
@@ -627,7 +622,7 @@ def _postgres_advisory_lock(lock_key: int) -> Iterator[None]:
 @contextmanager
 def namespace_provision_lock(namespace: str) -> Generator[None]:
     """Fence namespace provisioning across API processes without using the DB pool."""
-    if get_settings_engine().dialect.name != 'postgresql':
+    if not is_postgres(get_settings_engine()):
         yield
         return
     with _postgres_advisory_lock(_namespace_lock_key(_NAMESPACE_PROVISION_LOCK_PREFIX, namespace)):
@@ -639,7 +634,7 @@ def _run_namespace_init_locked(namespace: str, func: Callable[[], None]) -> None
     from backend_core.migrations import ensure_database_exists
 
     ensure_database_exists(settings.database_url)
-    if get_settings_engine().dialect.name != 'postgresql':
+    if not is_postgres(get_settings_engine()):
         func()
         return
     with _postgres_advisory_lock(_namespace_lock_key(_NAMESPACE_INIT_LOCK_PREFIX, namespace)):

@@ -1,24 +1,31 @@
 import uuid
 from datetime import UTC, datetime
 from pathlib import Path
+from typing import Any
 from unittest.mock import AsyncMock, patch
 
+import pytest
 from sqlmodel import select
 
 from backend_core.exceptions import DataSourceValidationError
 from backend_core.persistence.datasource.models import DataSource, DataSourceColumnMetadata
 
 
+def _mock_upload_files(mock_file_upload: dict[str, Any]) -> dict[str, tuple[str, bytes, str]]:
+    return {'file': (mock_file_upload['filename'], mock_file_upload['content'], mock_file_upload['content_type'])}
+
+
+def _fail_worker(*args, **kwargs):
+    raise AssertionError('worker must not be contacted when schema_cache is present')
+
+
 class TestDataSourceUpload:
-    def test_upload_csv_file_success(self, client, temp_upload_dir: Path, mock_file_upload: dict):
-        files = {
-            'file': (
-                mock_file_upload['filename'],
-                mock_file_upload['content'],
-                mock_file_upload['content_type'],
-            )
+    def test_upload_csv_file_success(self, client, temp_upload_dir: Path, mock_file_upload: dict, test_db_session, test_user):
+        files = _mock_upload_files(mock_file_upload)
+        data = {
+            'name': 'Test CSV Upload',
+            'description': 'Source of truth for customer lifecycle analysis.',
         }
-        data = {'name': 'Test CSV Upload'}
 
         response = client.post('/api/v1/datasource/upload', files=files, data=data)
 
@@ -26,6 +33,7 @@ class TestDataSourceUpload:
         result = response.json()
 
         assert result['name'] == 'Test CSV Upload'
+        assert result['description'] == 'Source of truth for customer lifecycle analysis.'
         assert result['source_type'] == 'iceberg'
         assert 'id' in result
         assert 'created_at' in result
@@ -34,78 +42,30 @@ class TestDataSourceUpload:
 
         assert client_from_settings().classify_object_url(result['config']['metadata_path']).is_object_store
 
-    def test_upload_csv_file_with_description_success(self, client, temp_upload_dir: Path, mock_file_upload: dict):
-        files = {
-            'file': (
-                mock_file_upload['filename'],
-                mock_file_upload['content'],
-                mock_file_upload['content_type'],
-            )
-        }
-        data = {
-            'name': 'Described CSV Upload',
-            'description': 'Source of truth for customer lifecycle analysis.',
-        }
+        created = test_db_session.get(DataSource, result['id'])
+        assert created is not None
+        assert created.owner_id == test_user.id
 
-        response = client.post('/api/v1/datasource/upload', files=files, data=data)
-
-        assert response.status_code == 200
-        result = response.json()
-        assert result['description'] == 'Source of truth for customer lifecycle analysis.'
-
-    def test_upload_parquet_file_success(self, client, temp_upload_dir: Path, sample_parquet_file: Path):
-        with open(sample_parquet_file, 'rb') as f:
-            files = {'file': ('test.parquet', f, 'application/octet-stream')}
-            data = {'name': 'Test Parquet Upload'}
+    @pytest.mark.parametrize(
+        ('file_fixture', 'filename', 'content_type', 'name'),
+        [
+            pytest.param('sample_parquet_file', 'test.parquet', 'application/octet-stream', 'Test Parquet Upload', id='parquet'),
+            pytest.param('sample_json_file', 'test.json', 'application/json', 'Test JSON Upload', id='json'),
+            pytest.param('sample_ndjson_file', 'test.ndjson', 'application/json', 'Test NDJSON Upload', id='ndjson'),
+            pytest.param('sample_ndjson_file', 'test.jsonl', 'application/json', 'Test JSONL Upload', id='jsonl'),
+        ],
+    )
+    def test_upload_file_format_success(self, request, client, file_fixture: str, filename: str, content_type: str, name: str):
+        with open(request.getfixturevalue(file_fixture), 'rb') as f:
+            files = {'file': (filename, f, content_type)}
+            data = {'name': name}
 
             response = client.post('/api/v1/datasource/upload', files=files, data=data)
 
         assert response.status_code == 200
         result = response.json()
 
-        assert result['name'] == 'Test Parquet Upload'
-        assert result['source_type'] == 'iceberg'
-        assert result['config']['branch'] == 'master'
-
-    def test_upload_json_file_success(self, client, temp_upload_dir: Path, sample_json_file: Path):
-        with open(sample_json_file, 'rb') as f:
-            files = {'file': ('test.json', f, 'application/json')}
-            data = {'name': 'Test JSON Upload'}
-
-            response = client.post('/api/v1/datasource/upload', files=files, data=data)
-
-        assert response.status_code == 200
-        result = response.json()
-
-        assert result['name'] == 'Test JSON Upload'
-        assert result['source_type'] == 'iceberg'
-        assert result['config']['branch'] == 'master'
-
-    def test_upload_ndjson_file_success(self, client, temp_upload_dir: Path, sample_ndjson_file: Path):
-        with open(sample_ndjson_file, 'rb') as f:
-            files = {'file': ('test.ndjson', f, 'application/json')}
-            data = {'name': 'Test NDJSON Upload'}
-
-            response = client.post('/api/v1/datasource/upload', files=files, data=data)
-
-        assert response.status_code == 200
-        result = response.json()
-
-        assert result['name'] == 'Test NDJSON Upload'
-        assert result['source_type'] == 'iceberg'
-        assert result['config']['branch'] == 'master'
-
-    def test_upload_jsonl_file_success(self, client, temp_upload_dir: Path, sample_ndjson_file: Path):
-        with open(sample_ndjson_file, 'rb') as f:
-            files = {'file': ('test.jsonl', f, 'application/json')}
-            data = {'name': 'Test JSONL Upload'}
-
-            response = client.post('/api/v1/datasource/upload', files=files, data=data)
-
-        assert response.status_code == 200
-        result = response.json()
-
-        assert result['name'] == 'Test JSONL Upload'
+        assert result['name'] == name
         assert result['source_type'] == 'iceberg'
         assert result['config']['branch'] == 'master'
 
@@ -126,67 +86,41 @@ class TestDataSourceUpload:
         assert response.status_code == 400
         assert 'Unsupported file type' in response.json()['detail']
 
-    def test_upload_sets_owner_id_for_authenticated_user(self, client, mock_file_upload: dict, test_db_session, test_user):
-        files = {
-            'file': (
-                mock_file_upload['filename'],
-                mock_file_upload['content'],
-                mock_file_upload['content_type'],
-            )
-        }
-        data = {'name': 'Owned Upload'}
-
-        response = client.post('/api/v1/datasource/upload', files=files, data=data)
-
-        assert response.status_code == 200
-        datasource_id = response.json()['id']
-        created = test_db_session.get(DataSource, datasource_id)
-        assert created is not None
-        assert created.owner_id == test_user.id
-
+    @pytest.mark.parametrize(
+        ('error_type', 'message'),
+        [
+            pytest.param(DataSourceValidationError, 'CSV schema is invalid', id='datasource_validation_error'),
+            pytest.param(ValueError, 'Bad upload path', id='value_error'),
+        ],
+    )
     @patch(
         'modules.datasource.routes.create_remote_file_datasource',
         new_callable=AsyncMock,
     )
-    def test_upload_preserves_datasource_validation_error(self, mock_create, client, mock_file_upload: dict):
-        mock_create.side_effect = DataSourceValidationError('CSV schema is invalid')
-        files = {
-            'file': (
-                mock_file_upload['filename'],
-                mock_file_upload['content'],
-                mock_file_upload['content_type'],
-            )
-        }
-        data = {'name': 'Validation Failure'}
+    def test_upload_preserves_domain_error_detail(self, mock_create, client, mock_file_upload: dict, error_type: type[Exception], message: str):
+        mock_create.side_effect = error_type(message)
+        files = _mock_upload_files(mock_file_upload)
+        data = {'name': 'Failed Upload'}
 
         response = client.post('/api/v1/datasource/upload', files=files, data=data)
 
         assert response.status_code == 400
-        assert response.json()['detail'] == 'CSV schema is invalid'
-
-    @patch(
-        'modules.datasource.routes.create_remote_file_datasource',
-        new_callable=AsyncMock,
-    )
-    def test_upload_preserves_value_error(self, mock_create, client, mock_file_upload: dict):
-        mock_create.side_effect = ValueError('Bad upload path')
-        files = {
-            'file': (
-                mock_file_upload['filename'],
-                mock_file_upload['content'],
-                mock_file_upload['content_type'],
-            )
-        }
-        data = {'name': 'Value Failure'}
-
-        response = client.post('/api/v1/datasource/upload', files=files, data=data)
-
-        assert response.status_code == 400
-        assert response.json()['detail'] == 'Bad upload path'
+        assert response.json()['detail'] == message
 
 
 class TestDataSourceConnect:
-    def test_connect_database_datasource(self, client):
+    @pytest.mark.parametrize(
+        ('extra_fields', 'expected_description'),
+        [
+            pytest.param({}, None, id='without_description'),
+            pytest.param(
+                {'description': 'Read-only reporting extract for finance reconciliation.'},
+                'Read-only reporting extract for finance reconciliation.',
+                id='with_description',
+            ),
+        ],
+    )
+    def test_connect_database_datasource(self, client, test_db_session, test_user, extra_fields: dict, expected_description: str | None):
         payload = {
             'name': 'Test Database Connection',
             'source_type': 'database',
@@ -194,6 +128,7 @@ class TestDataSourceConnect:
                 'connection_string': 'postgresql://user:pass@localhost/db',
                 'query': 'SELECT * FROM users',
             },
+            **extra_fields,
         }
 
         response = client.post('/api/v1/datasource/connect', json=payload)
@@ -202,43 +137,12 @@ class TestDataSourceConnect:
         result = response.json()
 
         assert result['name'] == 'Test Database Connection'
-        assert result['description'] is None
+        assert result['description'] == expected_description
         assert result['source_type'] == 'database'
         assert result['config']['connection_string'] == 'postgresql://user:pass@localhost/db'
         assert result['config']['query'] == 'SELECT * FROM users'
 
-    def test_connect_database_datasource_with_description(self, client):
-        payload = {
-            'name': 'Described Database Connection',
-            'description': 'Read-only reporting extract for finance reconciliation.',
-            'source_type': 'database',
-            'config': {
-                'connection_string': 'postgresql://user:pass@localhost/db',
-                'query': 'SELECT * FROM users',
-            },
-        }
-
-        response = client.post('/api/v1/datasource/connect', json=payload)
-
-        assert response.status_code == 200
-        result = response.json()
-        assert result['description'] == 'Read-only reporting extract for finance reconciliation.'
-
-    def test_connect_sets_owner_id_for_authenticated_user(self, client, test_db_session, test_user):
-        payload = {
-            'name': 'Owned Database Connection',
-            'source_type': 'database',
-            'config': {
-                'connection_string': 'postgresql://user:pass@localhost/db',
-                'query': 'SELECT * FROM users',
-            },
-        }
-
-        response = client.post('/api/v1/datasource/connect', json=payload)
-
-        assert response.status_code == 200
-        datasource_id = response.json()['id']
-        created = test_db_session.get(DataSource, datasource_id)
+        created = test_db_session.get(DataSource, result['id'])
         assert created is not None
         assert created.owner_id == test_user.id
 
@@ -594,9 +498,6 @@ class TestDataSourceSchema:
         test_db_session.add(sample_datasource)
         test_db_session.commit()
 
-        def _fail_worker(*args, **kwargs):
-            raise AssertionError('worker must not be contacted when schema_cache is present')
-
         monkeypatch.setattr(routes, 'get_remote_datasource_schema', _fail_worker)
 
         response = client.patch(
@@ -620,9 +521,6 @@ class TestDataSourceSchema:
         }
         test_db_session.add(sample_datasource)
         test_db_session.commit()
-
-        def _fail_worker(*args, **kwargs):
-            raise AssertionError('worker must not be contacted when schema_cache is present')
 
         monkeypatch.setattr(routes, 'get_remote_datasource_schema', _fail_worker)
 
@@ -681,9 +579,6 @@ class TestDataSourceSchema:
         }
         test_db_session.add(sample_datasource)
         test_db_session.commit()
-
-        def _fail_worker(*args, **kwargs):
-            raise AssertionError('worker must not be contacted when schema_cache is present')
 
         monkeypatch.setattr(routes, 'get_remote_datasource_schema', _fail_worker)
 
@@ -776,9 +671,6 @@ class TestDataSourceDelete:
         assert 'not found' in response.json()['detail']
 
     def test_delete_datasource_without_file(self, client, test_db_session):
-        import uuid
-        from datetime import UTC, datetime
-
         datasource_id = str(uuid.uuid4())
         config = {
             'connection_string': 'postgresql://localhost/db',

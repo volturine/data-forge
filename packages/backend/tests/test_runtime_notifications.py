@@ -61,11 +61,11 @@ async def test_lock_notification_does_not_echo_to_the_publishing_api_process(mon
 def test_notify_api_lock_includes_process_identity(monkeypatch) -> None:
     from backend_core import runtime_ipc
 
-    sent = []
+    sent: list[dict[str, object]] = []
     monkeypatch.setattr(
         runtime_ipc,
         '_send_postgres_message',
-        lambda payload: sent.append(payload),
+        sent.append,
     )
     status: dict[str, object] = {'type': 'status', 'lock': None}
 
@@ -87,11 +87,11 @@ def test_notify_api_lock_converts_pydantic_payload_to_json_value(monkeypatch) ->
     from backend_core import runtime_ipc
     from modules.locks.schemas import LockWebsocketStatusMessage
 
-    sent = []
+    sent: list[dict[str, object]] = []
     monkeypatch.setattr(
         runtime_ipc,
         '_send_postgres_message',
-        lambda payload: sent.append(payload),
+        sent.append,
     )
     status = LockWebsocketStatusMessage(
         resource_type='analysis',
