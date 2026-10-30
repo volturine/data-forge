@@ -1,7 +1,7 @@
 <script lang="ts">
 	import { page } from '$app/state';
 	import { afterNavigate } from '$app/navigation';
-	import { onDestroy, onMount } from 'svelte';
+	import { onDestroy, onMount, type Component } from 'svelte';
 	import { createQuery, useQueryClient } from '@tanstack/svelte-query';
 	import { analysisStore } from '#lib/stores/analysis.svelte.js';
 	import { datasourceStore } from '#lib/stores/datasource.svelte.js';
@@ -23,9 +23,6 @@
 	import { css } from '#lib/styles/panda.js';
 	import AnalysisEditorLoadGate from '#lib/components/analysis-editor/AnalysisEditorLoadGate.svelte';
 	import AnalysisEditorHeader from '#lib/components/analysis-editor/AnalysisEditorHeader.svelte';
-	import AnalysisEditorDescriptionModal from '#lib/components/analysis-editor/AnalysisEditorDescriptionModal.svelte';
-	import AnalysisEditorExportModal from '#lib/components/analysis-editor/AnalysisEditorExportModal.svelte';
-	import AnalysisEditorVersionModal from '#lib/components/analysis-editor/AnalysisEditorVersionModal.svelte';
 	import {
 		setupInferredSchemaHydrationEffect,
 		setupSourceSchemaLoadingEffect
@@ -48,6 +45,29 @@
 	});
 	let isSaving = $state(false);
 	let saveError = $state('');
+	type ExportModalProps = {
+		open: boolean;
+		validAnalysisId: string | null;
+		scopeTabId: string | null;
+		tabs: { id: string; name: string }[];
+		onClose: () => void;
+	};
+	type DescriptionModalProps = {
+		open: boolean;
+		description: string | null;
+		editorReadOnly: boolean;
+		onSave: (description: string | null) => void;
+		onClose: () => void;
+	};
+	type VersionModalProps = {
+		open: boolean;
+		analysisId: string | null;
+		validAnalysisId: string | null;
+		currentRevision: string | null;
+		editorReadOnly: boolean;
+		onRestored: (restored: { analysis: Analysis; version: string }) => void;
+		onClose: () => void;
+	};
 
 	const isDirty = $derived(analysisStore.isDirty());
 	let lastLoadedVersion = $state<string | null>(null);
@@ -176,6 +196,11 @@
 	let showVersionModal = $state(false);
 	let showDescriptionModal = $state(false);
 	let showExportModal = $state(false);
+	let modalLoading = $state(false);
+	let modalLoadError = $state('');
+	let DescriptionModalComponent = $state<Component<DescriptionModalProps> | null>(null);
+	let VersionModalComponent = $state<Component<VersionModalProps> | null>(null);
+	let ExportModalComponent = $state<Component<ExportModalProps> | null>(null);
 	let exportScopeTabId = $state<string | null>(null);
 	let tabContextMenu = $state<{ tabId: string; x: number; y: number } | null>(null);
 
@@ -558,7 +583,29 @@
 		);
 	}
 
-	function openDescriptionModal() {
+	async function loadModal<T>(
+		loader: () => Promise<{ default: T }>,
+		label: string
+	): Promise<T | null> {
+		modalLoading = true;
+		modalLoadError = '';
+		try {
+			return (await loader()).default;
+		} catch (error) {
+			modalLoadError = `Could not load ${label}. Please try again.`;
+			console.error(`Failed to load ${label}:`, error);
+			return null;
+		} finally {
+			modalLoading = false;
+		}
+	}
+
+	async function openDescriptionModal() {
+		DescriptionModalComponent ??= await loadModal(
+			() => import('#lib/components/analysis-editor/AnalysisEditorDescriptionModal.svelte'),
+			'the description editor'
+		);
+		if (!DescriptionModalComponent) return;
 		showDescriptionModal = true;
 	}
 
@@ -574,7 +621,12 @@
 		}
 	}
 
-	function openVersionModal() {
+	async function openVersionModal() {
+		VersionModalComponent ??= await loadModal(
+			() => import('#lib/components/analysis-editor/AnalysisEditorVersionModal.svelte'),
+			'analysis versions'
+		);
+		if (!VersionModalComponent) return;
 		showVersionModal = true;
 	}
 
@@ -584,10 +636,15 @@
 		selectedStepId = null;
 	}
 
-	function openExportModal(tabId: string | null = null) {
+	async function openExportModal(tabId: string | null = null) {
+		tabContextMenu = null;
+		ExportModalComponent ??= await loadModal(
+			() => import('#lib/components/analysis-editor/AnalysisEditorExportModal.svelte'),
+			'the code export panel'
+		);
+		if (!ExportModalComponent) return;
 		exportScopeTabId = tabId;
 		showExportModal = true;
-		tabContextMenu = null;
 	}
 
 	function handleTabContextMenu(event: MouseEvent, tabId: string) {
@@ -650,6 +707,16 @@
 		{#if saveError}
 			<div class={css({ paddingX: '4', paddingY: '2' })} data-testid="save-error">
 				<Callout tone="error">{saveError}</Callout>
+			</div>
+		{/if}
+		{#if modalLoading}
+			<div class={css({ paddingX: '4', paddingY: '2' })}>
+				<Callout>Loading panel…</Callout>
+			</div>
+		{/if}
+		{#if modalLoadError}
+			<div class={css({ paddingX: '4', paddingY: '2' })}>
+				<Callout tone="error">{modalLoadError}</Callout>
 			</div>
 		{/if}
 		{#if missingDatasource}
@@ -901,39 +968,45 @@
 	</div>
 {/if}
 
-{#key showDescriptionModal}
-	<AnalysisEditorDescriptionModal
-		open={showDescriptionModal}
-		description={currentAnalysis?.description ?? null}
-		{editorReadOnly}
-		onSave={saveDescription}
-		onClose={closeDescriptionModal}
-	/>
-{/key}
+{#if DescriptionModalComponent}
+	{#key showDescriptionModal}
+		<DescriptionModalComponent
+			open={showDescriptionModal}
+			description={currentAnalysis?.description ?? null}
+			{editorReadOnly}
+			onSave={saveDescription}
+			onClose={closeDescriptionModal}
+		/>
+	{/key}
+{/if}
 
-<AnalysisEditorVersionModal
-	open={showVersionModal}
-	{analysisId}
-	{validAnalysisId}
-	currentRevision={analysisStore.currentRevision}
-	{editorReadOnly}
-	onRestored={handleVersionRestored}
-	onClose={() => {
-		showVersionModal = false;
-	}}
-/>
-
-{#key showExportModal}
-	<AnalysisEditorExportModal
-		open={showExportModal}
+{#if VersionModalComponent}
+	<VersionModalComponent
+		open={showVersionModal}
+		{analysisId}
 		{validAnalysisId}
-		scopeTabId={exportScopeTabId}
-		tabs={analysisTabs}
+		currentRevision={analysisStore.currentRevision}
+		{editorReadOnly}
+		onRestored={handleVersionRestored}
 		onClose={() => {
-			showExportModal = false;
-			exportScopeTabId = null;
+			showVersionModal = false;
 		}}
 	/>
-{/key}
+{/if}
+
+{#if ExportModalComponent}
+	{#key showExportModal}
+		<ExportModalComponent
+			open={showExportModal}
+			{validAnalysisId}
+			scopeTabId={exportScopeTabId}
+			tabs={analysisTabs}
+			onClose={() => {
+				showExportModal = false;
+				exportScopeTabId = null;
+			}}
+		/>
+	{/key}
+{/if}
 
 <DragPreview />

@@ -30,7 +30,7 @@ const accountCount = Math.min(30, browserCount);
 // BrowserContexts isolate account cookies and storage. Spread them across a
 // small process pool so the constrained load generator does not starve document
 // navigation by starting one Chromium process per account.
-const browserProcessCount = Math.min(accountCount, 8);
+const browserProcessCount = Math.min(accountCount, 4);
 const authRequired = process.env.AUTH_REQUIRED !== 'false';
 
 if (!Number.isInteger(browserCount) || browserCount < 1) {

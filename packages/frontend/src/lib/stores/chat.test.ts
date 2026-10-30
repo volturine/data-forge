@@ -55,11 +55,8 @@ const mockLocalStorage = {
 	key: (_i: number) => null
 };
 vi.stubGlobal('localStorage', mockLocalStorage);
-vi.stubGlobal('window', {
-	addEventListener: vi.fn(),
-	removeEventListener: vi.fn(),
-	localStorage: mockLocalStorage
-});
+vi.spyOn(window, 'addEventListener').mockImplementation(() => {});
+vi.spyOn(window, 'removeEventListener').mockImplementation(() => {});
 
 const chatApi = await import('#lib/api/chat.js');
 const settingsApi = await import('#lib/api/settings.js');
