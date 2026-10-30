@@ -85,7 +85,7 @@ def _resolve_websocket_user(websocket: WebSocket) -> User | None:
     if override is not None:
         return override()
 
-    from modules.auth.service import ensure_default_user, validate_session
+    from modules.auth.service import get_or_seed_default_user, validate_session
 
     token = resolve_session_token(websocket)
 
@@ -94,7 +94,7 @@ def _resolve_websocket_user(websocket: WebSocket) -> User | None:
             return validate_session(session, token)
 
         if not auth_settings.auth_required:
-            return ensure_default_user(session)
+            return get_or_seed_default_user(session)
         return None
 
     return run_settings_db(_lookup)

@@ -13,7 +13,7 @@ from collections.abc import Callable, Mapping
 from dataclasses import dataclass
 from datetime import UTC, datetime
 from pathlib import Path
-from typing import Any, Final, cast
+from typing import Final, cast
 
 import polars as pl
 import pyarrow as pa  # type: ignore[import-untyped]
@@ -661,6 +661,7 @@ def _single_tab_run_finalization(
     log_message: str = "",
     resource_config: dict[str, int | None] | None = None,
     write_duration_ms: float | None = None,
+    query_plan: object = None,
     **fields: object,
 ) -> ComputeWorkerRunFinalization:
     """Terminal run update for a single-tab preview, row count, or download."""
@@ -706,6 +707,8 @@ def _single_tab_run_finalization(
         "progress": 0.0 if failed else 1.0,
         **fields,
     }
+    if isinstance(query_plan, str) and query_plan:
+        run_fields["query_plan"] = query_plan
     if failed:
         run_fields["error_message"] = str(error)
     return ComputeWorkerRunFinalization(run_id=run_id, fields=run_fields, merge_result_json=False)
@@ -1230,8 +1233,6 @@ def preview_step(
                 result_meta["query_plans"] = query_plans
             if metadata := data.get("metadata"):
                 result_meta["metadata"] = metadata
-            query_plan = result_data.get("query_plan")
-            plan_fields: dict[str, Any] = {"query_plan": query_plan} if isinstance(query_plan, str) else {}
             compute_worker_run_finalization = _single_tab_run_finalization(
                 run_id,
                 existing_result=initial_run_result,
@@ -1244,7 +1245,7 @@ def preview_step(
                 log_message="Preview completed",
                 resource_config=preview_resource_summary,
                 current_step=None,
-                **plan_fields,
+                query_plan=result_data.get("query_plan"),
             )
 
         return PreviewOutcome(
@@ -1898,7 +1899,6 @@ def download_step(
                 total_steps=len(download_steps),
                 error=exc,
                 resource_config=resource_summary(engine),
-                query_plan=result_data.get("query_plan") if isinstance(result_data, dict) else None,
             )
         )
         raise

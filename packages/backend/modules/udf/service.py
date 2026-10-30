@@ -232,7 +232,7 @@ def seed_defaults(session: Session) -> list[UdfResponseSchema]:
             ),
             code=(
                 'def udf(value, min_value, max_value):\n'
-                '    if value is None or min_value is None or max_value in (None, 0):\n'
+                '    if value is None or min_value is None or max_value is None or max_value == min_value:\n'
                 '        return None\n'
                 '    return (value - min_value) / (max_value - min_value)\n'
             ),

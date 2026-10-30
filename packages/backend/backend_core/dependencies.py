@@ -7,7 +7,7 @@ from backend_core.api_execution_budget import run_api_blocking
 from backend_core.auth_config import settings as auth_settings
 from backend_core.database import run_settings_db
 from modules.auth.dependencies import resolve_session_token
-from modules.auth.service import ensure_default_user, validate_session
+from modules.auth.service import get_default_user_id, validate_session
 
 
 def _scope_lock_owner_id(owner_id: str, editor_client_id: str | None) -> str:
@@ -29,7 +29,7 @@ def resolve_lock_owner_id(
         if user is not None:
             return _scope_lock_owner_id(user.id, editor_client_id)
     if not auth_settings.auth_required:
-        return _scope_lock_owner_id(ensure_default_user(session).id, editor_client_id)
+        return _scope_lock_owner_id(get_default_user_id(), editor_client_id)
     return None
 
 

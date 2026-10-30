@@ -170,6 +170,23 @@ describe('SearchableDropdown', () => {
 			await fireEvent.click(screen.getByText('Alpha'));
 			expect(screen.queryByRole('listbox')).not.toBeInTheDocument();
 		});
+
+		test('restores focus to the trigger after selection', async () => {
+			renderDropdown();
+			const trigger = screen.getByRole('button');
+			await fireEvent.click(trigger);
+			await fireEvent.click(screen.getByText('Alpha'));
+			expect(document.activeElement).toBe(trigger);
+		});
+
+		test('restores focus to the trigger after Escape', async () => {
+			renderDropdown();
+			const trigger = screen.getByRole('button');
+			await fireEvent.click(trigger);
+			await fireEvent.keyDown(window, { key: 'Escape' });
+			expect(screen.queryByRole('listbox')).not.toBeInTheDocument();
+			expect(document.activeElement).toBe(trigger);
+		});
 	});
 
 	describe('multi mode', () => {
@@ -205,6 +222,58 @@ describe('SearchableDropdown', () => {
 			await fireEvent.click(screen.getByRole('button'));
 			expect(screen.queryByText(/Select All/)).not.toBeInTheDocument();
 		});
+
+		test('adds filtered options without dropping hidden selections', async () => {
+			const onChange = vi.fn();
+			const searchOptions = [
+				{ id: 'id', label: 'ID' },
+				{ id: 'name', label: 'Name' },
+				{ id: 'created_date', label: 'Created date' },
+				{ id: 'updated_date', label: 'Updated date' }
+			];
+			renderDropdown({
+				mode: 'multi',
+				value: ['id', 'name'],
+				options: searchOptions,
+				showSelectAll: true,
+				searchDelay: 0,
+				onChange
+			});
+			await fireEvent.click(screen.getByRole('button'));
+			await fireEvent.input(screen.getByLabelText('Search'), {
+				target: { value: 'date' }
+			});
+			await vi.waitFor(() => {
+				expect(screen.getByRole('button', { name: 'Select All Filtered' })).toBeInTheDocument();
+			});
+			await fireEvent.click(screen.getByRole('button', { name: 'Select All Filtered' }));
+			expect(onChange).toHaveBeenCalledWith(['id', 'name', 'created_date', 'updated_date']);
+		});
+
+		test('keeps option order when selecting all without a query', async () => {
+			const onChange = vi.fn();
+			renderDropdown({
+				mode: 'multi',
+				value: ['c'],
+				showSelectAll: true,
+				onChange
+			});
+			await fireEvent.click(screen.getByRole('button'));
+			await fireEvent.click(screen.getByRole('button', { name: 'Select All' }));
+			expect(onChange).toHaveBeenCalledWith(['a', 'b', 'c']);
+		});
+
+		test('does not label whitespace-only search as filtered', async () => {
+			renderDropdown({ mode: 'multi', value: [], showSelectAll: true, searchDelay: 0 });
+			await fireEvent.click(screen.getByRole('button'));
+			await fireEvent.input(screen.getByLabelText('Search'), {
+				target: { value: '   ' }
+			});
+			await vi.waitFor(() => {
+				expect(screen.getByRole('button', { name: 'Select All' })).toBeInTheDocument();
+			});
+			expect(screen.queryByRole('button', { name: 'Select All Filtered' })).not.toBeInTheDocument();
+		});
 	});
 
 	describe('clearable', () => {
@@ -223,6 +292,24 @@ describe('SearchableDropdown', () => {
 			renderDropdown({ clearable: true, value: 'a', onChange });
 			await fireEvent.click(screen.getByLabelText('Clear selection'));
 			expect(onChange).toHaveBeenCalledWith('');
+		});
+
+		test('clear button is a sibling and does not open the menu', async () => {
+			renderDropdown({ clearable: true, value: 'a' });
+			const trigger = screen.getByRole('button', { name: 'Alpha' });
+			const clearButton = screen.getByRole('button', { name: 'Clear selection' });
+			expect(clearButton.parentElement).toBe(trigger.parentElement);
+			await fireEvent.click(clearButton);
+			expect(screen.queryByRole('listbox')).not.toBeInTheDocument();
+		});
+
+		test('disables the clear button when the trigger is disabled', () => {
+			const onChange = vi.fn();
+			renderDropdown({ clearable: true, value: 'a', disabled: true, onChange });
+			const clearButton = screen.getByRole('button', { name: 'Clear selection' });
+			expect(clearButton).toBeDisabled();
+			clearButton.click();
+			expect(onChange).not.toHaveBeenCalled();
 		});
 
 		test('calls onChange with empty array on clear in multi mode', async () => {
@@ -252,6 +339,17 @@ describe('SearchableDropdown', () => {
 			renderDropdown({ triggerType: 'input' });
 			await fireEvent.focus(screen.getByLabelText('Search'));
 			expect(screen.getByRole('listbox')).toBeInTheDocument();
+		});
+
+		test('keeps the menu closed after selecting an option', async () => {
+			renderDropdown({ triggerType: 'input' });
+			const trigger = screen.getByLabelText('Search');
+			await fireEvent.focus(trigger);
+			const option = screen.getByRole('option', { name: 'Alpha' });
+			option.setAttribute('tabindex', '0');
+			option.focus();
+			await fireEvent.click(option);
+			expect(screen.queryByRole('listbox')).not.toBeInTheDocument();
 		});
 	});
 

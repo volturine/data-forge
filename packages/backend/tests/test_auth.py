@@ -8,8 +8,8 @@ from unittest.mock import AsyncMock, Mock
 from urllib.parse import parse_qs, urlparse
 
 import pytest
-from fastapi import Depends, FastAPI
-from sqlalchemy import Table, text
+from fastapi import Depends, FastAPI, Response
+from sqlalchemy import Table, delete, text
 from sqlmodel import Session, SQLModel, create_engine, select
 
 from backend_core.application import app
@@ -48,6 +48,7 @@ from modules.auth.service import (
     _DEFAULT_USER_LOCK_ID,
     _acquire_default_user_lock,
     ensure_default_user,
+    get_default_user_id,
     get_user_by_email,
     get_user_by_id,
     hash_password,
@@ -933,16 +934,138 @@ class TestVerificationTokenService:
 
 
 class TestAuthRoutes:
-    def test_dependencies_resolve_default_user_when_auth_disabled(
+    def test_auth_optional_me_skips_default_user_reconciliation(
         self,
+        auth_client: TestClient,
+        auth_engine,
+        monkeypatch: pytest.MonkeyPatch,
+    ) -> None:
+        from sqlalchemy import event
+
+        monkeypatch.setattr('backend_core.auth_config.settings.auth_required', False)
+        hash_password_mock = Mock(side_effect=AssertionError('request must not hash the default password'))
+        verify_password_mock = Mock(side_effect=AssertionError('request must not verify the default password'))
+        monkeypatch.setattr('modules.auth.service.hash_password', hash_password_mock)
+        monkeypatch.setattr('modules.auth.service.verify_password', verify_password_mock)
+
+        statements: list[str] = []
+
+        def record_statement(_connection, _cursor, statement, _parameters, _context, _executemany) -> None:
+            statements.append(statement)
+
+        event.listen(auth_engine, 'before_cursor_execute', record_statement)
+        try:
+            response = auth_client.get('/api/v1/auth/me')
+        finally:
+            event.remove(auth_engine, 'before_cursor_execute', record_statement)
+
+        assert response.status_code == 200
+        assert not any('pg_advisory_xact_lock' in statement for statement in statements)
+        hash_password_mock.assert_not_called()
+        verify_password_mock.assert_not_called()
+
+    def test_auth_optional_me_reseeds_missing_default_user(
+        self,
+        auth_client: TestClient,
         auth_db_session: Session,
         monkeypatch: pytest.MonkeyPatch,
     ) -> None:
+        monkeypatch.setattr('backend_core.auth_config.settings.auth_required', False)
+        monkeypatch.setattr('backend_core.auth_config.settings.default_user_email', 'healing@example.com')
+        monkeypatch.setattr('backend_core.auth_config.settings.default_user_password', 'HealingPass123')
+        monkeypatch.setattr('backend_core.auth_config.settings.default_user_name', 'Healing User')
+        default_user = ensure_default_user(auth_db_session)
+        auth_db_session.exec(delete(AuthProvider).where(sa(AuthProvider.user_id == default_user.id)))
+        auth_db_session.exec(delete(User).where(sa(User.id == default_user.id)))
+        auth_db_session.commit()
+
+        response = auth_client.get('/api/v1/auth/me')
+
+        assert response.status_code == 200
+        assert response.json()['id'] == default_user.id
+        assert response.json()['email'] == 'healing@example.com'
+        auth_db_session.expire_all()
+        assert get_user_by_id(auth_db_session, default_user.id) is not None
+
+    def test_auth_optional_profile_and_password_edits_persist_across_requests(
+        self,
+        auth_client: TestClient,
+        auth_db_session: Session,
+        monkeypatch: pytest.MonkeyPatch,
+    ) -> None:
+        monkeypatch.setattr('backend_core.auth_config.settings.auth_required', False)
+        monkeypatch.setattr('backend_core.auth_config.settings.default_user_email', 'runtime-edits@example.com')
+        monkeypatch.setattr('backend_core.auth_config.settings.default_user_password', 'InitialPass123')
+        monkeypatch.setattr('backend_core.auth_config.settings.default_user_name', 'Initial User')
+        default_user = ensure_default_user(auth_db_session)
+
+        profile = auth_client.put(
+            '/api/v1/auth/profile',
+            json={'display_name': 'Runtime Profile User'},
+        )
+        assert profile.status_code == 200
+
+        password = auth_client.put(
+            '/api/v1/auth/password',
+            json={'current_password': 'InitialPass123', 'new_password': 'RuntimePass123'},
+        )
+        assert password.status_code == 200
+
+        me = auth_client.get('/api/v1/auth/me')
+
+        assert me.status_code == 200
+        assert me.json()['id'] == default_user.id
+        assert me.json()['display_name'] == 'Runtime Profile User'
+        auth_db_session.expire_all()
+        provider = auth_db_session.exec(
+            select(AuthProvider).where(
+                sa(AuthProvider.user_id == default_user.id),
+                sa(AuthProvider.provider == AuthProviderName.PASSWORD),
+            ),
+        ).first()
+        assert provider is not None
+        assert provider.provider_metadata is not None
+        password_hash = cast(str, provider.provider_metadata['password_hash'])
+        assert verify_password('RuntimePass123', password_hash) is True
+        assert verify_password('InitialPass123', password_hash) is False
+
+    def test_optional_lock_owner_uses_constant_user_id_without_database_access(
+        self,
+        monkeypatch: pytest.MonkeyPatch,
+    ) -> None:
+        from backend_core.dependencies import resolve_lock_owner_id
+
+        monkeypatch.setattr('backend_core.auth_config.settings.auth_required', False)
+
+        owner_id = resolve_lock_owner_id(cast(Session, object()), None, 'browser-tab')
+
+        assert owner_id == f'{get_default_user_id()}:browser-tab'
+
+    def test_session_cookie_max_age_matches_configured_lifetime(self, monkeypatch: pytest.MonkeyPatch) -> None:
+        monkeypatch.setattr('backend_core.auth_config.settings.session_max_age_days', 12)
+        response = Response()
+
+        auth_routes._set_session_cookie(response, 'session-token', secure=False)
+
+        assert 'Max-Age=1036800' in response.headers['set-cookie']
+
+    def test_dependencies_resolve_default_user_when_auth_disabled(
+        self,
+        auth_db_session: Session,
+        auth_engine,
+        monkeypatch: pytest.MonkeyPatch,
+    ) -> None:
+        from sqlalchemy import event
+
         monkeypatch.setattr('backend_core.auth_config.settings.auth_required', False)
         monkeypatch.setattr('backend_core.auth_config.settings.default_user_email', 'guest@example.com')
         monkeypatch.setattr('backend_core.auth_config.settings.default_user_password', 'GuestPass123')
         monkeypatch.setattr('backend_core.auth_config.settings.default_user_name', 'Guest User')
         ensure_default_user(auth_db_session)
+        hash_password_mock = Mock(side_effect=AssertionError('request must not hash the default password'))
+        verify_password_mock = Mock(side_effect=AssertionError('request must not verify the default password'))
+        monkeypatch.setattr('modules.auth.service.hash_password', hash_password_mock)
+        monkeypatch.setattr('modules.auth.service.verify_password', verify_password_mock)
 
         close = Mock(wraps=auth_db_session.close)
         monkeypatch.setattr(auth_db_session, 'close', close)
@@ -954,6 +1077,11 @@ class TestAuthRoutes:
                 auth_db_session.close()
 
         monkeypatch.setattr('modules.auth.dependencies.run_settings_db', run_auth_db)
+
+        statements: list[str] = []
+
+        def record_statement(_connection, _cursor, statement, _parameters, _context, _executemany) -> None:
+            statements.append(statement)
 
         app = FastAPI()
 
@@ -967,15 +1095,22 @@ class TestAuthRoutes:
         ) -> dict[str, str | None]:
             return {'email': user.email if user else None}
 
-        with TestClient(app) as client:
-            resp_current = client.get('/current')
-            resp_optional = client.get('/optional')
+        event.listen(auth_engine, 'before_cursor_execute', record_statement)
+        try:
+            with TestClient(app) as client:
+                resp_current = client.get('/current')
+                resp_optional = client.get('/optional')
+        finally:
+            event.remove(auth_engine, 'before_cursor_execute', record_statement)
 
         assert resp_current.status_code == 200
         assert resp_current.json()['email'] == 'guest@example.com'
         assert resp_optional.status_code == 200
         assert resp_optional.json()['email'] == 'guest@example.com'
         assert close.call_count >= 2
+        assert not any('pg_advisory_xact_lock' in statement for statement in statements)
+        hash_password_mock.assert_not_called()
+        verify_password_mock.assert_not_called()
 
     def test_get_current_user_returns_401_when_auth_required(
         self,

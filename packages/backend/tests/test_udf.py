@@ -185,6 +185,17 @@ class TestUdfCRUD:
         assert second == []
         assert sorted(udf.name for udf in list_udfs(test_db_session)) == ['Coalesce', 'Normalize', 'Ratio']
 
+        normalize = next(udf for udf in first if udf.name == 'Normalize')
+        namespace = {}
+        exec(normalize.code, namespace)
+        normalize_value = namespace['udf']
+        assert normalize_value(5, 5, 5) is None
+        assert normalize_value(-5, -10, 0) == 0.5
+        assert normalize_value(5, 0, 10) == 0.5
+        assert normalize_value(None, 0, 10) is None
+        assert normalize_value(5, None, 10) is None
+        assert normalize_value(5, 0, None) is None
+
 
 class TestUdfListing:
     """Test UDF listing and filtering."""

@@ -83,31 +83,11 @@ class TestDeleteSubscriber:
 
 
 class TestListeners:
-    def test_add_and_list(self, test_db_session: Session) -> None:
-        sub = add_subscriber(test_db_session, '10', 'X', 'tok')
-        listener = add_listener(test_db_session, ListenerCreate(subscriber_id=sub.id, datasource_id='ds-A'))
-        assert listener.datasource_id == 'ds-A'
-        found = list_listeners(test_db_session, subscriber_id=sub.id)
-        assert len(found) == 1
-
     def test_idempotent(self, test_db_session: Session) -> None:
         sub = add_subscriber(test_db_session, '11', 'Y', 'tok')
         first = add_listener(test_db_session, ListenerCreate(subscriber_id=sub.id, datasource_id='ds-B'))
         second = add_listener(test_db_session, ListenerCreate(subscriber_id=sub.id, datasource_id='ds-B'))
         assert first.id == second.id
-
-    def test_filter_by_datasource(self, test_db_session: Session) -> None:
-        sub = add_subscriber(test_db_session, '12', 'Z', 'tok')
-        add_listener(test_db_session, ListenerCreate(subscriber_id=sub.id, datasource_id='ds-C'))
-        add_listener(test_db_session, ListenerCreate(subscriber_id=sub.id, datasource_id='ds-D'))
-        found = list_listeners(test_db_session, datasource_id='ds-C')
-        assert len(found) == 1
-
-    def test_remove(self, test_db_session: Session) -> None:
-        sub = add_subscriber(test_db_session, '13', 'W', 'tok')
-        listener = add_listener(test_db_session, ListenerCreate(subscriber_id=sub.id, datasource_id='ds-E'))
-        remove_listener(test_db_session, listener.id)
-        assert list_listeners(test_db_session, subscriber_id=sub.id) == []
 
     def test_remove_missing_no_error(self, test_db_session: Session) -> None:
         remove_listener(test_db_session, 99999)  # should not raise
@@ -173,6 +153,9 @@ class TestListenerEndpoints:
         )
         resp = client.delete(f'/api/v1/telegram/listeners/{listener.id}')
         assert resp.status_code == 204
+        resp = client.get('/api/v1/telegram/listeners', params={'subscriber_id': sub.id})
+        assert resp.status_code == 200
+        assert resp.json() == []
 
     def test_filter_by_datasource(self, client: TestClient, test_db_session: Session) -> None:
         sub = add_subscriber(test_db_session, '202', 'N', 'tok')

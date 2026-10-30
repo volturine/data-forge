@@ -33,7 +33,7 @@ from modules.auth.schemas import (
     UserPublic,
     VerifyEmailRequest,
 )
-from modules.auth.service import ensure_default_user, get_user_providers, send_auth_email, validate_session
+from modules.auth.service import get_or_seed_default_user, get_user_providers, send_auth_email, validate_session
 
 router = APIRouter(prefix='/auth', tags=['auth'])
 
@@ -55,7 +55,7 @@ def _set_session_cookie(response: Response, session_token: str, *, secure: bool)
         httponly=True,
         secure=secure,
         samesite='lax',
-        max_age=30 * 24 * 3600,
+        max_age=auth_settings.session_max_age_days * 24 * 3600,
         path='/',
     )
 
@@ -270,7 +270,7 @@ def _resolve_me(session: Session, token: str | None) -> UserPublic:
         if user:
             return _build_user_public(session, user)
     if not auth_settings.auth_required:
-        return _build_user_public(session, ensure_default_user(session))
+        return _build_user_public(session, get_or_seed_default_user(session))
     raise HTTPException(status_code=401, detail='Not authenticated')
 
 
@@ -281,7 +281,7 @@ def _update_profile(session: Session, token: str | None, body: UpdateProfileRequ
         if current_user is None:
             raise HTTPException(status_code=401, detail='Not authenticated')
     elif not auth_settings.auth_required:
-        current_user = ensure_default_user(session)
+        current_user = get_or_seed_default_user(session)
     else:
         raise HTTPException(status_code=401, detail='Not authenticated')
 

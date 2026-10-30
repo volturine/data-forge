@@ -491,7 +491,7 @@ run_playwright_concurrency_probe() {
     run_playwright "$timeout_seconds" "${E2E_TIMEOUT_GRACE_SECONDS:-30}" \
         "dataforge-e2e-${E2E_STACK_ID}-playwright-load-probe" \
         --cpu-limit "$E2E_LOAD_PROBE_CPUS" \
-        "${runner_env[@]}" -- tests/concurrency.test.ts --repeat-each "${E2E_CONCURRENCY_REPEATS:-1}"
+        "${runner_env[@]}" -- tests/concurrency.test.ts --repeat-each "${E2E_CONCURRENCY_REPEATS:-2}"
 }
 
 run_playwright_architecture_tests() {

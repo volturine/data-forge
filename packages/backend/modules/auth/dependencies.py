@@ -5,7 +5,7 @@ from backend_core.api_execution_budget import run_api_blocking
 from backend_core.auth_config import settings as auth_settings
 from backend_core.database import run_settings_db
 from modules.auth.models import User
-from modules.auth.service import ensure_default_user, get_default_user_id, validate_session
+from modules.auth.service import get_default_user_id, get_or_seed_default_user, validate_session
 
 
 def resolve_session_token(request: HTTPConnection) -> str | None:
@@ -19,7 +19,7 @@ async def _resolve_user(request: HTTPConnection) -> User | None:
         if user:
             return user
     if not auth_settings.auth_required:
-        return await run_api_blocking(run_settings_db, ensure_default_user)
+        return await run_api_blocking(run_settings_db, get_or_seed_default_user)
     return None
 
 

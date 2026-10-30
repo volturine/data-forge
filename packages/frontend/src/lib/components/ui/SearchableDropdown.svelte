@@ -131,27 +131,27 @@
 		() => searchValue,
 		() => searchDelay
 	);
+	const activeQuery = $derived(debouncedSearch.current.trim().toLowerCase());
 
 	const selectedSet = $derived(new SvelteSet(Array.isArray(value) ? value : value ? [value] : []));
 	const selectedCount = $derived(selectedSet.size);
 
 	const filteredOptions = $derived.by(() => {
-		const query = debouncedSearch.current.trim().toLowerCase();
-		if (!query) return options;
+		if (!activeQuery) return options;
 		if (filter) {
-			return options.filter((option) => filter(option, query));
+			return options.filter((option) => filter(option, activeQuery));
 		}
 		return options.filter((option) => {
 			const base = [option.label, option.id];
 			const extra = option.searchText ?? [];
-			return [...base, ...extra].some((text) => text.toLowerCase().includes(query));
+			return [...base, ...extra].some((text) => text.toLowerCase().includes(activeQuery));
 		});
 	});
 
 	function handleSelect(id: string) {
 		if (mode === 'single') {
 			onChange(id);
-			closeMenu();
+			closeAndRestoreFocus();
 			return;
 		}
 		const current = new SvelteSet(selectedSet);
@@ -165,7 +165,13 @@
 
 	function selectAll() {
 		if (mode !== 'multi') return;
-		onChange(filteredOptions.map((option) => option.id));
+		if (!activeQuery) {
+			onChange(filteredOptions.map((option) => option.id));
+			return;
+		}
+		const next = new SvelteSet(selectedSet);
+		for (const option of filteredOptions) next.add(option.id);
+		onChange(Array.from(next));
 	}
 
 	function deselectAll() {
@@ -188,6 +194,13 @@
 		menuOpen = false;
 		searchValue = '';
 		onClose?.();
+	}
+
+	function closeAndRestoreFocus() {
+		const restoreFocus =
+			!alwaysOpen && triggerType !== 'input' && menuContainerRef?.contains(document.activeElement);
+		closeMenu();
+		if (restoreFocus) triggerRef?.focus({ preventScroll: true });
 	}
 
 	function isSelected(id: string) {
@@ -227,7 +240,7 @@
 	const outsideClickOverlayConfig = $derived<OverlayConfig>(
 		closeOnOutside && !alwaysOpen
 			? {
-					onEscape: closeMenu,
+					onEscape: closeAndRestoreFocus,
 					onOutsideClick: (target: Node) => {
 						if (menuRef?.contains(target)) return;
 						if (menuContainerRef?.contains(target)) return;
@@ -267,85 +280,88 @@
 	{:else if renderTrigger}
 		{@render renderTrigger(triggerPayload)}
 	{:else}
-		<button
-			type="button"
-			class={[
-				css({
-					display: 'flex',
-					alignItems: 'center',
-					gap: '2',
-					paddingX: '3',
-					paddingY: '2.5',
-					borderWidth: '1',
-					backgroundColor: 'bg.secondary',
-					cursor: 'pointer',
-					justifyContent: 'space-between',
-					fontSize: 'sm',
-					_focusVisible: {
-						outline: '2px solid {colors.accent.secondary}',
-						outlineOffset: 'px'
-					}
-				}),
-				triggerClass
-			]}
-			onclick={openMenu}
-			aria-expanded={isMenuVisible ? 'true' : 'false'}
-			aria-controls={isMenuVisible ? `${uid}-listbox` : undefined}
-			aria-labelledby={triggerAriaLabelledby}
-			use:setTriggerRef={undefined}
-			{disabled}
-		>
-			<span
-				class={selectedCount > 0
-					? css({
-							flex: '1',
-							textAlign: 'left',
-							minWidth: '0',
-							overflow: 'hidden',
-							textOverflow: 'ellipsis',
-							whiteSpace: 'nowrap'
-						})
-					: css({ color: 'fg.muted' })}>{displayLabel}</span
+		<div class={css({ position: 'relative', width: '100%' })}>
+			<button
+				type="button"
+				class={[
+					css({
+						display: 'flex',
+						alignItems: 'center',
+						gap: '2',
+						paddingX: '3',
+						paddingRight: clearable && selectedCount > 0 ? '10' : '3',
+						paddingY: '2.5',
+						borderWidth: '1',
+						backgroundColor: 'bg.secondary',
+						cursor: 'pointer',
+						justifyContent: 'space-between',
+						fontSize: 'sm',
+						_focusVisible: {
+							outline: '2px solid {colors.accent.secondary}',
+							outlineOffset: 'px'
+						}
+					}),
+					triggerClass
+				]}
+				onclick={openMenu}
+				aria-expanded={isMenuVisible ? 'true' : 'false'}
+				aria-haspopup="listbox"
+				aria-controls={isMenuVisible ? `${uid}-listbox` : undefined}
+				aria-labelledby={triggerAriaLabelledby}
+				use:setTriggerRef={undefined}
+				{disabled}
 			>
-			{#if clearable && selectedCount > 0}
 				<span
-					role="button"
-					tabindex="0"
+					class={selectedCount > 0
+						? css({
+								flex: '1',
+								textAlign: 'left',
+								minWidth: '0',
+								overflow: 'hidden',
+								textOverflow: 'ellipsis',
+								whiteSpace: 'nowrap'
+							})
+						: css({ color: 'fg.muted' })}>{displayLabel}</span
+				>
+				{#if !(clearable && selectedCount > 0)}
+					<ChevronDown size={14} class={css({ color: 'fg.muted' })} />
+				{/if}
+			</button>
+			{#if clearable && selectedCount > 0}
+				<button
+					type="button"
 					class={css({
+						position: 'absolute',
+						right: '3',
+						top: '50%',
+						transform: 'translateY(-50%)',
 						display: 'flex',
 						alignItems: 'center',
 						justifyContent: 'center',
 						width: 'iconSm',
 						height: 'iconSm',
 						flexShrink: '0',
+						padding: '0',
+						border: 'none',
+						backgroundColor: 'transparent',
 						color: 'fg.muted',
 						fontSize: '2xs',
 						lineHeight: 'none',
 						cursor: 'pointer',
 						_hover: { color: 'fg.primary', backgroundColor: 'bg.tertiary' }
 					})}
-					onclick={(e) => {
-						e.stopPropagation();
+					{disabled}
+					onclick={() => {
 						onChange(mode === 'multi' ? [] : '');
 						onClose?.();
 					}}
-					onkeydown={(e) => {
-						if (e.key === 'Enter' || e.key === ' ') {
-							e.stopPropagation();
-							onChange(mode === 'multi' ? [] : '');
-							onClose?.();
-						}
-					}}
-					aria-label="Clear selection">✕</span
+					aria-label="Clear selection">✕</button
 				>
-			{:else}
-				<ChevronDown size={14} class={css({ color: 'fg.muted' })} />
 			{/if}
-		</button>
+		</div>
 	{/if}
 	{#if isMenuVisible}
 		<div
-			id="{uid}-listbox"
 			class={[
 				css({
 					position: alwaysOpen ? 'relative' : 'absolute',
@@ -363,9 +379,6 @@
 				}),
 				menuClass
 			]}
-			role="listbox"
-			aria-multiselectable={mode === 'multi'}
-			aria-label={listAriaLabel}
 			use:resolvedMenuAction={menuActionValue}
 			use:overlayStack.action={outsideClickOverlayConfig}
 			bind:this={menuContainerRef}
@@ -412,7 +425,7 @@
 							selectAll();
 						}}
 					>
-						Select All {searchValue ? 'Filtered' : ''}
+						Select All {activeQuery ? 'Filtered' : ''}
 					</button>
 					<button
 						type="button"
@@ -439,9 +452,6 @@
 			{/if}
 			<div
 				class={css({
-					display: 'flex',
-					flexDirection: 'column',
-					gap: '2',
 					maxHeight: 'dropdown',
 					overflowY: 'auto',
 					overflowX: 'hidden',
@@ -454,7 +464,14 @@
 					<div class={emptyText({ size: 'panel' })}>
 						{emptyLabel}
 					</div>
-				{:else}
+				{/if}
+				<div
+					id="{uid}-listbox"
+					class={css({ display: 'flex', flexDirection: 'column', gap: '2' })}
+					role="listbox"
+					aria-multiselectable={mode === 'multi'}
+					aria-label={listAriaLabel}
+				>
 					{#each filteredOptions as option (option.id)}
 						{@render renderOption({
 							option,
@@ -462,7 +479,7 @@
 							onSelect: () => handleSelect(option.id)
 						})}
 					{/each}
-				{/if}
+				</div>
 			</div>
 			{#if mode === 'multi'}
 				<button
@@ -481,7 +498,7 @@
 					})}
 					onclick={(e) => {
 						e.stopPropagation();
-						closeMenu();
+						closeAndRestoreFocus();
 					}}
 				>
 					Done{selectedCount > 0 ? ` (${selectedCount})` : ''}
