@@ -83,6 +83,7 @@
     exclude = ["(^|/)conftest\\.py$", "buf", "dataforge_protocol"]
 
 [tool.pytest.ini_options]
+    asyncio_default_fixture_loop_scope = "function"
     cache_dir = "tests/.artifacts/pytest-cache"
 
 [dependency-groups]

@@ -25,7 +25,7 @@ Scope = MutableMapping[str, Any]
 Receive = Callable[[], Awaitable[Message]]
 Send = Callable[[Message], Awaitable[None]]
 
-_PortalFactory = Callable[[], AbstractContextManager[anyio.abc.BlockingPortal]]
+_PortalFactory = Callable[[], AbstractContextManager[anyio.from_thread.BlockingPortal]]
 
 ASGIInstance = Callable[[Receive, Send], Awaitable[None]]
 ASGI2App = Callable[[Scope], ASGIInstance]
@@ -310,7 +310,7 @@ class _TestClientTransport(httpx.BaseTransport):
 class TestClient(httpx.Client):
     __test__ = False
     task: Future[None]
-    portal: anyio.abc.BlockingPortal | None = None
+    portal: anyio.from_thread.BlockingPortal | None = None
 
     def __init__(
         self,
@@ -348,7 +348,7 @@ class TestClient(httpx.Client):
         )
 
     @contextlib.contextmanager
-    def _portal_factory(self) -> Generator[anyio.abc.BlockingPortal]:
+    def _portal_factory(self) -> Generator[anyio.from_thread.BlockingPortal]:
         if self.portal is not None:
             yield self.portal
             return
