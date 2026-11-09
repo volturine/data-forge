@@ -27,7 +27,6 @@
 		layoutMode = $bindable<LineageLayoutMode>('horizontal'),
 		// The zoom label lives in the page toolbar; the value is written back
 		// through the binding and never read inside this component.
-		// eslint-disable-next-line no-useless-assignment
 		zoomPercent: _zoomPercent = $bindable(100)
 	}: Props = $props();
 
