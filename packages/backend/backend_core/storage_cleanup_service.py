@@ -663,9 +663,10 @@ def authorize_cleanup(session: Session, *, event_id: str, claim_token: str, leas
             isinstance(owner, (BuildJob, ComputeRequest))
             and owner.claim_token == payload['owner_token']
             and owner.lease_generation == payload['owner_generation']
+            and owner.lease_expires_at is not None
+            and aware_utc(owner.lease_expires_at) > now
         ):
-            if owner.lease_expires_at is not None and aware_utc(owner.lease_expires_at) > now:
-                return False
+            return False
     url = str(payload['url'])
     is_prefix = payload['is_prefix'] is True
     catalog_namespace = payload.get('catalog_namespace')
