@@ -36,7 +36,10 @@ describe('uploadFile', () => {
 
 		const result = await uploadFile(new File(['a,b\n1,2\n'], 'data.csv'), 'data');
 
-		const error = result.match(() => null, (apiError) => apiError);
+		const error = result.match(
+			() => null,
+			(apiError) => apiError
+		);
 		expect(error).toMatchObject({ type: 'http', status: 503, message });
 	});
 });
