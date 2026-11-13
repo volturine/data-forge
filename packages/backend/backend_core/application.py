@@ -64,6 +64,7 @@ from backend_core.logging import (
     shutdown_logging,
 )
 from backend_core.namespace import namespace_scope, normalize_namespace
+from backend_core.namespace_storage import NAMESPACE_NAME_RULES
 from backend_core.namespaces_service import register_namespace
 from backend_core.runtime_notifications import handle_runtime_payload, recover_runtime_notifications, refresh_build_projections, refresh_lock_projections
 from backend_core.settings_store import seed_settings_from_env
@@ -699,8 +700,8 @@ class NamespaceMiddleware:
         raw = scope_header(scope, b'x-namespace')
         try:
             normalize_namespace(raw)
-        except ValueError as exc:
-            await JSONResponse(status_code=400, content={'detail': str(exc)})(scope, receive, send)
+        except ValueError:
+            await JSONResponse(status_code=400, content={'detail': f'Invalid namespace. {NAMESPACE_NAME_RULES}'})(scope, receive, send)
             return
         with namespace_scope(raw):
             if not auth_settings.auth_required:
