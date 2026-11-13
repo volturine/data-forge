@@ -112,7 +112,7 @@ class AnalysisCreateSchema(_RejectPipelineStepsModel):
 
 
 class AnalysisUpdateSchema(_RejectPipelineStepsModel):
-    name: str | None = None
+    name: Annotated[str, StringConstraints(min_length=1, strip_whitespace=True)] | None = None
     description: str | None = None
     tabs: list[TabSchema] | None = None
 

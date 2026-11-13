@@ -161,7 +161,7 @@
 		error = null;
 
 		try {
-			if (file.name.endsWith('.xlsx')) {
+			if (file.name.toLowerCase().endsWith('.xlsx')) {
 				if (!preflightId) {
 					error = 'Run preflight to select table bounds before uploading';
 					return;
@@ -661,7 +661,7 @@
 						{/each}
 					</div>
 				{/if}
-				{#if file?.name.endsWith('.xlsx')}
+				{#if file?.name.toLowerCase().endsWith('.xlsx')}
 					<ExcelTableSelector
 						mode="upload"
 						{file}

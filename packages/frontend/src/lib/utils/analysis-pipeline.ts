@@ -220,12 +220,18 @@ export function buildDatasourcePipelinePayload(args: {
 	const datasource = args.datasource;
 	const normalizedConfig = normalizeSnapshotConfig(args.datasourceConfig);
 	const branch = normalizedConfig.branch;
-	const filename = slugify(datasource.name, 'datasource.name');
+	// Datasources saved before names were validated can have a blank name;
+	// previewing them must not crash the page.
+	const label =
+		typeof datasource.name === 'string' && !datasource.name.trim()
+			? datasource.id
+			: datasource.name;
+	const filename = slugify(label, 'datasource.name');
 	const previewOutputId = `datasource-preview-${datasource.id}`;
 	const tabs: PipelineTab[] = [
 		{
 			id: `datasource-${datasource.id}`,
-			name: datasource.name,
+			name: label,
 			datasource: {
 				id: datasource.id,
 				analysis_tab_id: null,
@@ -235,7 +241,7 @@ export function buildDatasourcePipelinePayload(args: {
 			output: {
 				result_id: previewOutputId,
 				format: 'parquet',
-				filename: datasource.name,
+				filename: label,
 				build_mode: 'full',
 				iceberg: { namespace: 'outputs', table_name: filename, branch }
 			},

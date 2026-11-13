@@ -1,11 +1,12 @@
 import uuid
 from datetime import UTC, datetime
+from typing import Any
 
 from sqlalchemy import or_, select
 from sqlmodel import Session
 
 from backend_core.domain.healthcheck_models import HealthCheckType
-from backend_core.exceptions import HealthcheckValidationError, healthcheck_not_found
+from backend_core.exceptions import HealthcheckValidationError, datasource_not_found, healthcheck_not_found
 from backend_core.persistence.datasource.models import DataSource
 from backend_core.persistence.healthchecks.models import HealthCheck, HealthCheckResult
 from backend_core.sqlmodel_typing import col, sa
@@ -55,6 +56,9 @@ def list_all_healthchecks(
 
 
 def create_healthcheck(session: Session, payload: HealthCheckCreate) -> HealthCheckResponse:
+    if session.get(DataSource, payload.datasource_id) is None:
+        raise datasource_not_found(payload.datasource_id)
+    _validate_config(payload.check_type, payload.config)
     _ensure_unique_row_count(session, payload.datasource_id, payload.check_type)
     record = HealthCheck(
         id=str(uuid.uuid4()),
@@ -81,6 +85,7 @@ def update_healthcheck(
     if not check:
         raise healthcheck_not_found(healthcheck_id)
     _ensure_unique_row_count(session, check.datasource_id, payload.check_type or check.check_type, exclude_id=healthcheck_id)
+    _validate_config(payload.check_type or check.check_type, payload.config if payload.config is not None else check.config)
     for key, value in payload.model_dump(exclude_none=True).items():
         setattr(check, key, value)
     session.add(check)
@@ -110,6 +115,42 @@ def list_all_results(session: Session, limit: int = 10) -> list[HealthCheckResul
     query = select(HealthCheckResult).order_by(col(HealthCheckResult.checked_at).desc(), col(HealthCheckResult.id).asc()).limit(limit)
     results = session.execute(query)
     return [HealthCheckResultResponse.model_validate(r) for r in results.scalars().all()]
+
+
+_COUNT_KEYS = ('min_rows', 'max_rows', 'min_columns', 'max_columns', 'expected_unique')
+_BOUND_PAIRS = (('min_rows', 'max_rows'), ('min_columns', 'max_columns'), ('min', 'max'))
+
+
+def _number(config: dict[str, Any], key: str) -> float | None:
+    value = config.get(key)
+    if value is None or value == '':
+        return None
+    if isinstance(value, bool):
+        raise HealthcheckValidationError(f'{key} must be a number', details={'field': key})
+    try:
+        return float(value)
+    except TypeError, ValueError:
+        raise HealthcheckValidationError(f'{key} must be a number', details={'field': key}) from None
+
+
+def _validate_config(check_type: HealthCheckType | str, config: dict[str, Any]) -> None:
+    """Reject configs the worker would evaluate as nonsense (negative counts, min > max)."""
+    resolved = HealthCheckType.require(check_type)
+    for key in _COUNT_KEYS:
+        value = _number(config, key)
+        if value is not None and (value < 0 or not value.is_integer()):
+            raise HealthcheckValidationError(f'{key} must be a non-negative whole number', details={'field': key})
+    for low_key, high_key in _BOUND_PAIRS:
+        low, high = _number(config, low_key), _number(config, high_key)
+        if low is not None and high is not None and low > high:
+            raise HealthcheckValidationError(f'{low_key} cannot be greater than {high_key}', details={'field': low_key})
+    threshold = _number(config, 'threshold')
+    if threshold is not None and not 0 <= threshold <= 100:
+        raise HealthcheckValidationError('threshold must be a percentage between 0 and 100', details={'field': 'threshold'})
+    if resolved in (HealthCheckType.COLUMN_NULL, HealthCheckType.COLUMN_UNIQUE, HealthCheckType.COLUMN_RANGE):
+        column = config.get('column')
+        if not isinstance(column, str) or not column.strip():
+            raise HealthcheckValidationError('column is required for this check type', details={'field': 'column'})
 
 
 def _ensure_unique_row_count(

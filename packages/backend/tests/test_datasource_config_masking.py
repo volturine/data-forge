@@ -9,6 +9,7 @@ from sqlmodel import Session
 from backend_core.persistence.datasource.models import DataSource
 from backend_core.secrets import MASKED_SECRET
 from modules.datasource import service as datasource_service
+from modules.datasource.schemas import DataSourceUpdate
 
 
 def _insert_datasource(
@@ -108,6 +109,24 @@ class TestConfigMasking:
 
         assert items['11111111-1111-4111-8111-000000000004'].config['connection_string'] == MASKED_SECRET
         assert items['11111111-1111-4111-8111-000000000005'].config['catalog_uri'] == MASKED_SECRET
+
+    def test_update_response_masks_secret_fields(self, test_db_session: Session) -> None:
+        secret = 'postgresql://user:pass@localhost/db'
+        datasource_id = '11111111-1111-4111-8111-000000000007'
+        _insert_datasource(
+            test_db_session,
+            datasource_id=datasource_id,
+            source_type='database',
+            config={'connection_string': secret, 'query': 'SELECT 1'},
+        )
+
+        response = datasource_service.update_datasource(test_db_session, datasource_id, DataSourceUpdate(name='renamed'))
+
+        assert response.name == 'renamed'
+        assert response.config['connection_string'] == MASKED_SECRET
+        row = test_db_session.get(DataSource, datasource_id)
+        assert row is not None
+        assert row.config['connection_string'] == secret
 
     def test_persistence_keeps_real_values(self, test_db_session: Session) -> None:
         secret = 'postgresql://user:pass@localhost/db'

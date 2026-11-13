@@ -1,4 +1,4 @@
-import { apiRequest, buildBackendUrl } from './client';
+import { apiRequest, buildApiUrl } from './client';
 import type { ResultAsync } from 'neverthrow';
 import type { ApiError } from './client';
 import { createOwnedEventSource } from './websocket';
@@ -238,5 +238,7 @@ export function listSessions(): ResultAsync<ChatSessionInfo[], ApiError> {
 
 export function openEventStream(sessionId: string, after = 0): EventSource {
 	const cursor = after > 0 ? `?after=${after}` : '';
-	return createOwnedEventSource(buildBackendUrl(`/v1/ai/chat/stream/${sessionId}${cursor}`));
+	// Same-origin like every other API call: a direct dev-server port is a
+	// cross-origin request that CORS blocks on any host but localhost.
+	return createOwnedEventSource(buildApiUrl(`/v1/ai/chat/stream/${sessionId}${cursor}`));
 }

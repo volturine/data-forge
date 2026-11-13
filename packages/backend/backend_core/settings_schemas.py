@@ -1,6 +1,6 @@
 """Backend-owned settings API schemas."""
 
-from pydantic import BaseModel, ConfigDict
+from pydantic import BaseModel, ConfigDict, Field
 
 
 class SettingsResponse(BaseModel):
@@ -21,7 +21,7 @@ class SettingsResponse(BaseModel):
 
 class SettingsUpdate(BaseModel):
     smtp_host: str | None = None
-    smtp_port: int | None = None
+    smtp_port: int | None = Field(default=None, ge=1, le=65535)
     smtp_user: str | None = None
     smtp_password: str | None = None
     telegram_bot_token: str | None = None

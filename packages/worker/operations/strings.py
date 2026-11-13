@@ -62,6 +62,6 @@ def string_transform(lf: pl.LazyFrame, params: StringTransformParams, **_) -> pl
         return lf.with_columns(base.str.split(params.delimiter or " ").alias(target))
 
     if params.method == StringTransformMethod.SPLIT_TAKE:
-        return lf.with_columns(base.str.split(params.delimiter or " ").list.get(params.index or 0).alias(target))
+        return lf.with_columns(base.str.split(params.delimiter or " ").list.get(params.index or 0, null_on_oob=True).alias(target))
 
     raise ValueError(f"Unsupported string method: {params.method}")

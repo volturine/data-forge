@@ -97,8 +97,10 @@
 			if (mutatingId === deletedId) mutatingId = null;
 			await queryClient.invalidateQueries({ queryKey: ['datasources', ns.value] });
 		},
-		onError: (_error, failedId) => {
+		onError: async (_error, failedId) => {
 			if (mutatingId === failedId) mutatingId = null;
+			// confirmDelete hid the row optimistically; bring it back from the server.
+			await queryClient.invalidateQueries({ queryKey: ['datasources', ns.value] });
 		}
 	}));
 
@@ -337,6 +339,11 @@
 
 		<!-- Datasource List -->
 		<div class={css({ flex: '1', overflowY: 'auto' })}>
+			{#if deleteMutation.isError}
+				<Callout tone="error">
+					Failed to delete datasource: {deleteMutation.error?.message ?? 'Unknown error'}
+				</Callout>
+			{/if}
 			{#if ns.status === 'failed'}
 				<Callout tone="error">Namespace is unavailable: {ns.error ?? 'Unknown error'}</Callout>
 			{:else if !namespaceReady || query.isPending || (query.isFetching && !query.data)}
@@ -560,7 +567,7 @@
 	</aside>
 
 	<!-- Right Pane -->
-	<main class={css({ flex: '1', overflow: 'hidden' })}>
+	<section aria-label="Data source preview" class={css({ flex: '1', overflow: 'hidden' })}>
 		{#key `${ns.value}:${selectedId ?? ''}`}
 			{#if selectedDatasource}
 				<div class={css({ height: '100%', display: 'flex', flexDirection: 'column' })}>
@@ -669,7 +676,7 @@
 				</div>
 			{/if}
 		{/key}
-	</main>
+	</section>
 </div>
 
 <ConfirmDialog

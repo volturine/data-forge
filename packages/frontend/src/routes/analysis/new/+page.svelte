@@ -183,7 +183,7 @@
 	}
 </script>
 
-<main
+<div
 	class={css({
 		boxSizing: 'border-box',
 		width: 'full',
@@ -478,4 +478,4 @@
 			{/if}
 		{/if}
 	</section>
-</main>
+</div>

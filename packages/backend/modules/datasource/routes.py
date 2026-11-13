@@ -261,6 +261,13 @@ def _list_export_branches(metadata_path: str, current_branch: str | None = None)
     return branches
 
 
+def _required_datasource_name(name: str) -> str:
+    normalized = name.strip()
+    if not normalized:
+        raise HTTPException(status_code=400, detail='Datasource name is required')
+    return normalized
+
+
 @router.post('/upload', response_model=schemas.DataSourceResponse)
 @handle_errors(operation='upload datasource', value_error_status=400)
 async def upload_file(
@@ -274,6 +281,7 @@ async def upload_file(
     encoding: str = Form('utf8'),
     user: User = Depends(get_current_user),
 ):
+    name = _required_datasource_name(name)
     if not file.filename:
         raise HTTPException(status_code=400, detail='No filename provided')
 
@@ -591,6 +599,7 @@ async def confirm_excel(
     cell_range: str | None = Form(None),
     user: User = Depends(get_current_user),
 ):
+    name = _required_datasource_name(name)
     preflight_key = parse_preflight_id(preflight_id)
     preflight = await get_preflight(preflight_key)
     if not preflight:

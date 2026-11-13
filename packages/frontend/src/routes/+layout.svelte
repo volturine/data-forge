@@ -215,6 +215,8 @@
 			transitionDuration: '160ms',
 			transitionTimingFunction: 'ease',
 			_hover: { color: 'fg.primary' },
+			// Keyboard users never trigger the hover reveal.
+			_focusVisible: { opacity: 1, pointerEvents: 'auto' },
 			_before: {
 				content: '""',
 				position: 'absolute',

@@ -26,9 +26,26 @@ def _validate_code(code: str) -> None:
     if not code.strip():
         raise UdfValidationError('UDF code cannot be empty')
     try:
-        ast.parse(code)
+        tree = ast.parse(code)
     except SyntaxError as e:
         raise UdfValidationError(f'Invalid Python syntax: {e.msg}', details={'error': e.msg})
+    if not _defines_udf(tree):
+        raise UdfValidationError('UDF code must define a function named udf, e.g. def udf(value): ...')
+
+
+def _defines_udf(tree: ast.Module) -> bool:
+    # Compute workers call the top-level name ``udf``; catch a missing
+    # definition at save time instead of on the first pipeline run.
+    for node in tree.body:
+        if isinstance(node, ast.FunctionDef) and node.name == 'udf':
+            return True
+        if (
+            isinstance(node, ast.Assign)
+            and any(isinstance(target, ast.Name) and target.id == 'udf' for target in node.targets)
+            and isinstance(node.value, ast.Lambda | ast.Name | ast.Attribute | ast.Call)
+        ):
+            return True
+    return False
 
 
 def _signature_key(signature: dict) -> str:
@@ -160,8 +177,13 @@ def import_udfs(session: Session, payload: UdfImportSchema) -> list[UdfResponseS
 
     imported: list[Udf] = []
     for item in payload.udfs:
-        existing_result = session.execute(select(Udf).where(col(Udf.name) == item.name))
-        udf = existing_result.scalar_one_or_none()
+        matches = session.execute(select(Udf).where(col(Udf.name) == item.name)).scalars().all()
+        if len(matches) > 1:
+            raise UdfValidationError(
+                f'Cannot import UDF {item.name!r}: several existing UDFs share that name. Rename them first.',
+                details={'name': item.name},
+            )
+        udf = matches[0] if matches else None
 
         if udf and not payload.overwrite:
             continue

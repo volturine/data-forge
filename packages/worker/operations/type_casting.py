@@ -1,13 +1,30 @@
 from __future__ import annotations
 
+from collections.abc import Callable
 from typing import Any
 
 import polars as pl
 
-_TYPE_CASTERS: dict[str, tuple[type[Any] | None, pl.DataType]] = {
+_TRUE_STRINGS = frozenset({"true", "1", "yes", "y", "t"})
+_FALSE_STRINGS = frozenset({"false", "0", "no", "n", "f"})
+
+
+def _to_bool(value: Any) -> bool:
+    # bool("false") is True, so parse text explicitly.
+    if isinstance(value, str):
+        normalized = value.strip().lower()
+        if normalized in _TRUE_STRINGS:
+            return True
+        if normalized in _FALSE_STRINGS:
+            return False
+        raise ValueError(f"Cannot interpret {value!r} as a Boolean; use true or false")
+    return bool(value)
+
+
+_TYPE_CASTERS: dict[str, tuple[Callable[[Any], Any] | None, pl.DataType]] = {
     "Int64": (int, pl.Int64()),
     "Float64": (float, pl.Float64()),
-    "Boolean": (bool, pl.Boolean()),
+    "Boolean": (_to_bool, pl.Boolean()),
     "String": (str, pl.Utf8()),
     "Utf8": (str, pl.Utf8()),
     "Date": (None, pl.Date()),

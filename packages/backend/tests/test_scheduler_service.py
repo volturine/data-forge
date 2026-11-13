@@ -53,6 +53,20 @@ def schedule_id() -> str:
     return str(uuid.uuid4())
 
 
+def _upstream_datasource(session: Session) -> DataSource:
+    datasource = DataSource(
+        id=str(uuid.uuid4()),
+        name='Upstream DataSource',
+        source_type='iceberg',
+        config={},
+        created_at=datetime.now(UTC),
+    )
+    session.add(datasource)
+    session.commit()
+    session.refresh(datasource)
+    return datasource
+
+
 @pytest.fixture
 def output_datasource(test_db_session: Session, sample_analysis: Analysis) -> DataSource:
     """Datasource with created_by='analysis' — eligible for schedules."""
@@ -341,6 +355,57 @@ class TestScheduleCrud:
             delete_schedule(test_db_session, 'nonexistent')
         assert exc_info.value.error_code == 'SCHEDULE_NOT_FOUND'
 
+    def test_create_schedule_without_cron_or_trigger_is_rejected(self, test_db_session: Session, output_datasource: DataSource):
+        with pytest.raises(AppError, match='needs a cron expression') as exc_info:
+            create_schedule(test_db_session, ScheduleCreate(datasource_id=output_datasource.id, cron_expression=''))
+        assert exc_info.value.error_code == 'SCHEDULE_VALIDATION_ERROR'
+
+    def test_update_rejects_self_and_cyclic_dependencies(self, test_db_session: Session, output_datasource: DataSource):
+        first = create_schedule(test_db_session, ScheduleCreate(datasource_id=output_datasource.id, cron_expression='0 * * * *'))
+        second = create_schedule(
+            test_db_session,
+            ScheduleCreate(datasource_id=output_datasource.id, cron_expression='', depends_on=first.id),
+        )
+
+        with pytest.raises(AppError, match='cannot form a cycle'):
+            update_schedule(test_db_session, first.id, ScheduleUpdate(depends_on=first.id))
+        with pytest.raises(AppError, match='cannot form a cycle'):
+            update_schedule(test_db_session, first.id, ScheduleUpdate(depends_on=second.id))
+
+    def test_update_rejects_second_trigger_on_merged_schedule(self, test_db_session: Session, output_datasource: DataSource):
+        first = create_schedule(test_db_session, ScheduleCreate(datasource_id=output_datasource.id, cron_expression='0 * * * *'))
+        second = create_schedule(
+            test_db_session,
+            ScheduleCreate(datasource_id=output_datasource.id, cron_expression='', depends_on=first.id),
+        )
+
+        upstream = _upstream_datasource(test_db_session)
+        with pytest.raises(AppError, match='either depends_on or trigger_on_datasource_id'):
+            update_schedule(test_db_session, second.id, ScheduleUpdate(trigger_on_datasource_id=upstream.id))
+
+    def test_clearing_cron_clears_next_run(self, test_db_session: Session, output_datasource: DataSource):
+        first = create_schedule(test_db_session, ScheduleCreate(datasource_id=output_datasource.id, cron_expression='0 * * * *'))
+        second = create_schedule(
+            test_db_session,
+            ScheduleCreate(datasource_id=output_datasource.id, cron_expression='0 * * * *', depends_on=first.id),
+        )
+        assert second.next_run is not None
+
+        updated = update_schedule(test_db_session, second.id, ScheduleUpdate(cron_expression=''))
+
+        assert updated.next_run is None
+
+    def test_delete_schedule_with_dependents_is_rejected(self, test_db_session: Session, output_datasource: DataSource):
+        first = create_schedule(test_db_session, ScheduleCreate(datasource_id=output_datasource.id, cron_expression='0 * * * *'))
+        create_schedule(
+            test_db_session,
+            ScheduleCreate(datasource_id=output_datasource.id, cron_expression='', depends_on=first.id),
+        )
+
+        with pytest.raises(AppError, match='run after this one'):
+            delete_schedule(test_db_session, first.id)
+        assert len(list_schedules(test_db_session)) == 2
+
     def test_create_schedule_without_datasource_id(self, test_db_session: Session):
         """ScheduleCreate requires datasource_id - should raise validation error."""
         from pydantic import ValidationError
@@ -521,6 +586,7 @@ class TestClaimDueScheduleEligibility:
         test_db_session: Session,
         output_datasource: DataSource,
     ) -> None:
+        trigger_datasource = _upstream_datasource(test_db_session)
         created_old = datetime(2026, 9, 23, 10, 0, tzinfo=UTC)
         created_new = datetime(2026, 9, 23, 10, 2, tzinfo=UTC)
         last_triggered = datetime(2026, 9, 23, 10, 3, tzinfo=UTC)
@@ -538,7 +604,7 @@ class TestClaimDueScheduleEligibility:
                 request_json={'analysis_pipeline': {'analysis_id': 'source', 'tabs': []}, 'tab_id': None},
                 starter_json={},
                 status=BuildRunStatus.COMPLETED,
-                current_datasource_id=output_datasource.id,
+                current_output_id=trigger_datasource.id,
                 created_at=created_at,
                 started_at=created_at,
             )
@@ -550,7 +616,7 @@ class TestClaimDueScheduleEligibility:
             id=str(uuid.uuid4()),
             datasource_id=output_datasource.id,
             cron_expression='0 * * * *',
-            trigger_on_datasource_id=output_datasource.id,
+            trigger_on_datasource_id=trigger_datasource.id,
             last_triggered_at=last_triggered,
             next_run=datetime(2026, 9, 23, 11, 0, tzinfo=UTC),
             created_at=created_old,
@@ -560,6 +626,42 @@ class TestClaimDueScheduleEligibility:
 
         claimed = claim_due_schedules(test_db_session, worker_id='test-scheduler')
         assert [item.id for item in claimed] == [schedule.id]
+
+    def test_datasource_trigger_ignores_builds_that_only_read_it(self, test_db_session: Session, output_datasource: DataSource) -> None:
+        trigger_datasource = _upstream_datasource(test_db_session)
+        run = build_run_service.create_build_run(
+            test_db_session,
+            build_id=str(uuid.uuid4()),
+            namespace='default',
+            analysis_id=str(uuid.uuid4()),
+            analysis_name='Downstream reader',
+            request_json={'analysis_pipeline': {'analysis_id': 'reader', 'tabs': []}, 'tab_id': None},
+            starter_json={},
+            status=BuildRunStatus.COMPLETED,
+            current_datasource_id=trigger_datasource.id,
+            current_output_id=output_datasource.id,
+        )
+        run.completed_at = datetime.now(UTC)
+        test_db_session.add(run)
+        schedule = Schedule(
+            id=str(uuid.uuid4()),
+            datasource_id=output_datasource.id,
+            cron_expression='',
+            trigger_on_datasource_id=trigger_datasource.id,
+            last_triggered_at=datetime.now(UTC) - timedelta(hours=1),
+            created_at=datetime.now(UTC) - timedelta(hours=1),
+        )
+        test_db_session.add(schedule)
+        test_db_session.commit()
+
+        assert claim_due_schedules(test_db_session, worker_id='test-scheduler') == []
+
+    def test_schedule_cannot_trigger_on_its_own_target(self, test_db_session: Session, output_datasource: DataSource) -> None:
+        with pytest.raises(AppError, match='its own target datasource'):
+            create_schedule(
+                test_db_session,
+                ScheduleCreate(datasource_id=output_datasource.id, cron_expression='', trigger_on_datasource_id=output_datasource.id),
+            )
 
 
 # ---------------------------------------------------------------------------

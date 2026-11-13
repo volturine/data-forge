@@ -1,13 +1,16 @@
 from datetime import datetime
+from typing import Annotated
 
 from protovalidate import ValidationError, Validator
-from pydantic import AwareDatetime, BaseModel, ConfigDict, Field, field_validator
+from pydantic import AwareDatetime, BaseModel, ConfigDict, Field, StringConstraints, field_validator
 
 from backend_core.domain.compute_worker_runs.schemas import SchemaDiffStatus
 from backend_core.domain.datasource.source_types import DataSourceFileType, DataSourceType
 from dataforge_protocol import object_store_pb2
 
 _PROTOCOL_VALIDATOR = Validator()
+
+DataSourceName = Annotated[str, StringConstraints(min_length=1, strip_whitespace=True)]
 
 
 def _validated_object_store_url(value: str) -> str:
@@ -237,7 +240,7 @@ class DataSourceDescriptionModel(BaseModel):
 
 
 class DataSourceCreate(DataSourceDescriptionModel):
-    name: str
+    name: DataSourceName
     description: str | None = Field(default=None, max_length=4000)
     source_type: DataSourceType
     config: dict
@@ -303,7 +306,7 @@ class DataSourceListItem(BaseModel):
 class DataSourceUpdate(DataSourceDescriptionModel):
     model_config = ConfigDict(from_attributes=True)
 
-    name: str | None = None
+    name: DataSourceName | None = None
     description: str | None = Field(default=None, max_length=4000)
     config: dict | None = None
     is_hidden: bool | None = None

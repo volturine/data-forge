@@ -86,6 +86,28 @@ class TestUdfValidation:
         with pytest.raises(UdfValidationError, match='Invalid Python syntax'):
             create_udf(test_db_session, udf_data)
 
+    @pytest.mark.parametrize('code', ['x = 1', 'udf = 1'])
+    def test_create_udf_without_udf_function_is_rejected(self, test_db_session, code):
+        udf_data = UdfCreateSchema(
+            name='no_udf_function',
+            description='Defines no udf callable',
+            signature=UdfSignatureSchema(inputs=[], output_dtype='String'),
+            code=code,
+        )
+
+        with pytest.raises(UdfValidationError, match='must define a function named udf'):
+            create_udf(test_db_session, udf_data)
+
+    def test_create_udf_accepts_lambda_assignment(self, test_db_session):
+        udf_data = UdfCreateSchema(
+            name='lambda_udf',
+            description='Lambda udf',
+            signature=UdfSignatureSchema(inputs=[], output_dtype='String'),
+            code='udf = lambda: "x"',
+        )
+
+        assert create_udf(test_db_session, udf_data).name == 'lambda_udf'
+
     def test_update_udf_with_invalid_code(self, test_db_session):
         """Test updating a UDF with invalid code raises error."""
         # First create a valid UDF
@@ -424,6 +446,32 @@ class TestUdfImport:
         existing = list_udfs(test_db_session)
         assert len(existing) == 1
         assert existing[0].description == 'Original'
+
+    def test_import_with_ambiguous_existing_name_is_rejected(self, test_db_session):
+        for code in ('def udf():\n    return "a"', 'def udf():\n    return "b"'):
+            create_udf(
+                test_db_session,
+                UdfCreateSchema(
+                    name='shared_name',
+                    description=None,
+                    signature=UdfSignatureSchema(inputs=[], output_dtype='String'),
+                    code=code,
+                ),
+            )
+        import_data = UdfImportSchema(
+            udfs=[
+                UdfImportItemSchema(
+                    name='shared_name',
+                    description='Imported',
+                    signature=UdfSignatureSchema(inputs=[], output_dtype='String'),
+                    code='def udf():\n    return "c"',
+                ),
+            ],
+            overwrite=True,
+        )
+
+        with pytest.raises(UdfValidationError, match='several existing UDFs share that name'):
+            import_udfs(test_db_session, import_data)
 
 
 class TestUdfAPI:

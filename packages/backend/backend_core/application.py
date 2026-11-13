@@ -697,6 +697,11 @@ class NamespaceMiddleware:
             return
 
         raw = scope_header(scope, b'x-namespace')
+        try:
+            normalize_namespace(raw)
+        except ValueError as exc:
+            await JSONResponse(status_code=400, content={'detail': str(exc)})(scope, receive, send)
+            return
         with namespace_scope(raw):
             if not auth_settings.auth_required:
                 if not (is_health_request and raw is None):

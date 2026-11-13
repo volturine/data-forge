@@ -391,6 +391,36 @@ def _validate_schedule_references(session: Session, depends_on: str | None, trig
         raise datasource_not_found(trigger_on_datasource_id)
 
 
+def _validate_schedule_trigger(
+    session: Session,
+    *,
+    schedule_id: str | None,
+    datasource_id: str,
+    cron_expression: str,
+    depends_on: str | None,
+    trigger_on_datasource_id: str | None,
+) -> None:
+    """Validate the trigger a schedule ends up with after a create or update."""
+    if trigger_on_datasource_id is not None and trigger_on_datasource_id == datasource_id:
+        # Each build of the target would count as a new update and retrigger it forever.
+        raise ScheduleValidationError('A schedule cannot be triggered by updates to its own target datasource')
+    if depends_on and trigger_on_datasource_id:
+        raise ScheduleValidationError('Schedule trigger must use either depends_on or trigger_on_datasource_id, not both')
+    if not cron_expression.strip() and not depends_on and not trigger_on_datasource_id:
+        raise ScheduleValidationError('Schedule needs a cron expression, a dependency schedule, or a trigger datasource')
+    if schedule_id is None or not depends_on:
+        return
+    # Walk the dependency chain; a schedule that waits on itself never runs.
+    seen = {schedule_id}
+    current: str | None = depends_on
+    while current is not None:
+        if current in seen:
+            raise ScheduleValidationError('Schedule dependencies cannot form a cycle', details={'depends_on': depends_on})
+        seen.add(current)
+        parent = session.get(Schedule, current)
+        current = parent.depends_on if parent is not None else None
+
+
 def stage_create_schedule(session: Session, payload: ScheduleCreate) -> Schedule:
     """Create a new schedule targeting a specific datasource.
 
@@ -405,6 +435,14 @@ def stage_create_schedule(session: Session, payload: ScheduleCreate) -> Schedule
             details={'datasource_id': payload.datasource_id},
         )
     _validate_schedule_references(session, payload.depends_on, payload.trigger_on_datasource_id)
+    _validate_schedule_trigger(
+        session,
+        schedule_id=None,
+        datasource_id=payload.datasource_id,
+        cron_expression=payload.cron_expression,
+        depends_on=payload.depends_on,
+        trigger_on_datasource_id=payload.trigger_on_datasource_id,
+    )
 
     next_run = Schedule.compute_next_run(payload.cron_expression)
     record = Schedule(
@@ -437,9 +475,17 @@ def stage_update_schedule(session: Session, schedule_id: str, payload: ScheduleU
     update_data = payload.model_dump(exclude_unset=True)
     for key, value in update_data.items():
         setattr(schedule, key, value)
+    _validate_schedule_trigger(
+        session,
+        schedule_id=schedule.id,
+        datasource_id=schedule.datasource_id,
+        cron_expression=schedule.cron_expression,
+        depends_on=schedule.depends_on,
+        trigger_on_datasource_id=schedule.trigger_on_datasource_id,
+    )
 
-    if payload.cron_expression:
-        schedule.next_run = Schedule.compute_next_run(payload.cron_expression)
+    if 'cron_expression' in update_data:
+        schedule.next_run = Schedule.compute_next_run(schedule.cron_expression)
 
     session.add(schedule)
     session.flush()
@@ -451,6 +497,12 @@ def stage_delete_schedule(session: Session, schedule_id: str) -> None:
     schedule = session.get(Schedule, schedule_id)
     if not schedule:
         raise schedule_not_found(schedule_id)
+    dependents = session.execute(select(col(Schedule.id)).where(col(Schedule.depends_on) == schedule_id)).scalars().all()
+    if dependents:
+        raise ScheduleValidationError(
+            f'{len(dependents)} other schedule(s) run after this one; change or delete them first',
+            details={'dependent_schedule_ids': list(dependents)},
+        )
     session.delete(schedule)
     session.flush()
     runtime_work_service.mark_schedule_pending(session, namespace=get_namespace())
@@ -517,21 +569,19 @@ def _due_schedule_candidates(session: Session, schedules: Sequence[Schedule], no
     }
     latest_completed_at: dict[str, datetime] = {}
     if trigger_ids:
-        for datasource_column in (BuildRun.current_datasource_id, BuildRun.current_output_id):
-            completed_rows = session.execute(
-                select(col(datasource_column), func.max(col(BuildRun.completed_at)))
-                .where(col(datasource_column).in_(trigger_ids))
-                .where(col(BuildRun.status) == BuildRunStatus.COMPLETED)
-                .where(col(BuildRun.completed_at).is_not(None))
-                .group_by(col(datasource_column))
-            ).all()
-            for datasource_id, completed_at in completed_rows:
-                if datasource_id is None or completed_at is None:
-                    continue
-                key = str(datasource_id)
-                previous = latest_completed_at.get(key)
-                if previous is None or naive_utc(completed_at) > naive_utc(previous):
-                    latest_completed_at[key] = completed_at
+        # Only a build that publishes the trigger datasource updates it. A
+        # build's current_datasource_id is the input it reads, so matching on
+        # it would fire event schedules whenever a downstream analysis runs.
+        completed_rows = session.execute(
+            select(col(BuildRun.current_output_id), func.max(col(BuildRun.completed_at)))
+            .where(col(BuildRun.current_output_id).in_(trigger_ids))
+            .where(col(BuildRun.status) == BuildRunStatus.COMPLETED)
+            .where(col(BuildRun.completed_at).is_not(None))
+            .group_by(col(BuildRun.current_output_id))
+        ).all()
+        for datasource_id, completed_at in completed_rows:
+            if datasource_id is not None and completed_at is not None:
+                latest_completed_at[str(datasource_id)] = completed_at
 
     due: list[Schedule] = []
     for sched in schedules:

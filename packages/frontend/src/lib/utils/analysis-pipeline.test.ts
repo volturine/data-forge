@@ -669,6 +669,15 @@ describe('buildDatasourcePipelinePayload', () => {
 		expect(result.tabs[0].output.iceberg?.table_name).toBe('my_test_file');
 	});
 
+	test('falls back to the datasource id for a blank name', () => {
+		const result = buildDatasourcePipelinePayload({
+			datasource: datasource({ name: '   ' }),
+			datasourceConfig: { branch: 'main' }
+		});
+		expect(result.tabs[0].name).toBe('ds-1');
+		expect(result.tabs[0].output.iceberg?.table_name).toBe('ds-1');
+	});
+
 	test('requires datasource name', () => {
 		const ds = datasource();
 		Object.defineProperty(ds, 'name', { value: undefined, configurable: true });

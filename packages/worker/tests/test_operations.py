@@ -922,3 +922,47 @@ def test_select_handler_cast_map_non_selected_column():
             pl.DataFrame({"age": ["30"], "name": ["Alice"]}).lazy(),
             {"columns": ["age"], "cast_map": {"name": "String"}},
         ).collect()
+
+
+def test_topk_keeps_nulls_out_of_the_top_rows():
+    frame = pl.DataFrame({"name": ["a", "b", "c", "d"], "score": [None, 10, 30, None]}).lazy()
+
+    largest = run_operation("topk", frame, {"column": "score", "k": 2, "descending": True}).collect()
+    smallest = run_operation("topk", frame, {"column": "score", "k": 2, "descending": False}).collect()
+
+    assert largest["score"].to_list() == [30, 10]
+    assert smallest["score"].to_list() == [10, 30]
+
+
+def test_string_split_take_returns_null_when_part_is_missing():
+    frame = pl.DataFrame({"tags": ["a|b|c", "solo", None]}).lazy()
+
+    result = run_operation(
+        "string_transform",
+        frame,
+        {"column": "tags", "method": "split_take", "delimiter": "|", "index": 1, "new_column": "second"},
+    ).collect()
+
+    assert result["second"].to_list() == ["b", None, None]
+
+
+def test_fill_null_literal_boolean_parses_false_text():
+    frame = pl.DataFrame({"flag": [True, None]}).lazy()
+
+    result = run_operation(
+        "fill_null",
+        frame,
+        {"strategy": "literal", "columns": ["flag"], "value": "false", "value_type": "Boolean"},
+    ).collect()
+
+    assert result["flag"].to_list() == [True, False]
+
+
+def test_fill_null_literal_without_columns_keeps_column_types():
+    frame = pl.DataFrame({"qty": [1, None], "label": [None, "x"]}).lazy()
+
+    result = run_operation("fill_null", frame, {"strategy": "literal", "value": "0", "value_type": "Utf8"}).collect()
+
+    assert result.schema == pl.Schema({"qty": pl.Int64, "label": pl.String})
+    assert result["qty"].to_list() == [1, None]
+    assert result["label"].to_list() == ["0", "x"]

@@ -277,6 +277,14 @@ class TestNamespaceMiddleware:
         assert authenticated.status_code == 200
         assert anonymous_after_registration.status_code == 200
 
+    def test_invalid_namespace_header_returns_bad_request(self, client: TestClient, monkeypatch: pytest.MonkeyPatch) -> None:
+        monkeypatch.setattr('backend_core.auth_config.settings.auth_required', False)
+
+        response = client.get('/api/v1/analysis', headers={'X-Namespace': 'BAD NS'})
+
+        assert response.status_code == 400
+        assert 'Invalid namespace' in response.json()['detail']
+
     def test_allows_everything_when_auth_disabled(self, client: TestClient, monkeypatch: pytest.MonkeyPatch) -> None:
         monkeypatch.setattr('backend_core.auth_config.settings.auth_required', False)
         namespace = f'open-{uuid.uuid4().hex[:8]}'
