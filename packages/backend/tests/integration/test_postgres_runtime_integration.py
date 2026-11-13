@@ -824,13 +824,17 @@ def test_runtime_work_listings_skip_invalid_legacy_namespaces(monkeypatch, tmp_p
         asyncio.run(database.init_db())
 
         with Session(database._get_tenant_engine()) as session:
-            # A namespace registered before underscores were rejected still has work rows.
-            runtime_work_service.mark_schedule_pending(session, namespace='team_a')
+            # Namespaces registered before underscores were rejected still have
+            # work rows. They are older than the valid work, so a full batch of
+            # them must not crowd it out of the schedule scan's LIMIT.
+            for legacy in ('team_a', 'team_b', 'xn--legacy'):
+                runtime_work_service.mark_schedule_pending(session, namespace=legacy)
             runtime_work_service.mark_schedule_pending(session, namespace='default')
             runtime_work_service.append_wake(session, namespace='team_a', kind=RuntimeWorkKind.BUILD)
             runtime_work_service.append_wake(session, namespace='default', kind=RuntimeWorkKind.BUILD)
             session.commit()
 
+            assert [row[0] for row in runtime_work_service.list_due_schedule_namespaces(session, limit=2)] == ['default']
             assert [row[0] for row in runtime_work_service.list_due_schedule_namespaces(session)] == ['default']
             assert runtime_work_service.list_pending_namespaces(session) == ['default']
 

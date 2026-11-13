@@ -11,7 +11,7 @@ from sqlmodel import Session
 
 from backend_core.claiming import is_postgres
 from backend_core.config import settings
-from backend_core.namespace_storage import is_valid_namespace_name
+from backend_core.namespace_storage import NAMESPACE_NAME_SQL_PATTERN, is_valid_namespace_name
 from backend_core.persistence.runtime_events.models import RuntimeNamespaceWorkWake
 from backend_core.sqlmodel_typing import col
 
@@ -121,6 +121,9 @@ def list_due_schedule_namespaces(session: Session, *, limit: int = 100) -> list[
                     LIMIT :wake_limit
                 ) AS wake
             ) AS captured ON TRUE
+            -- Legacy names (e.g. with underscores) cannot be served; drop them
+            -- before LIMIT so they never fill the batch ahead of valid work.
+            WHERE candidate.namespace ~ :namespace_pattern AND candidate.namespace NOT LIKE 'xn--%'
             ORDER BY CASE
                 WHEN work.pending IS TRUE THEN work.updated_at
                 WHEN work.due_at <= statement_timestamp() THEN work.due_at
@@ -133,7 +136,12 @@ def list_due_schedule_namespaces(session: Session, *, limit: int = 100) -> list[
             LIMIT :limit
             """
         ),
-        {'kind': RuntimeWorkKind.SCHEDULE.value, 'limit': limit, 'wake_limit': _WAKE_BATCH_SIZE},
+        {
+            'kind': RuntimeWorkKind.SCHEDULE.value,
+            'limit': limit,
+            'wake_limit': _WAKE_BATCH_SIZE,
+            'namespace_pattern': NAMESPACE_NAME_SQL_PATTERN,
+        },
     ).all()
     return [
         (str(namespace), int(generation), [int(wake_id) for wake_id in wake_ids])
