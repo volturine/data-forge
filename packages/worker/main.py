@@ -247,8 +247,8 @@ async def _run_worker_manager_runtime(
 
     try:
         # Register and heartbeat before the warm-reserve wait, which can take
-        # several minutes: API upload admission treats a manager row silent
-        # for three minutes as compute being down. Nothing is claimed until
+        # several minutes: API upload admission refuses uploads while no
+        # manager row has heartbeated for 30 seconds. Nothing is claimed until
         # the dispatch lanes start below.
         await client.register_worker_async(
             worker_id=worker_id,

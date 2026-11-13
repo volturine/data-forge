@@ -717,39 +717,55 @@ def retire_unclaimed_request(
     *,
     reason: str,
     status_code: int,
+    retire_queued: bool = True,
 ) -> ComputeRequest | None:
     """Fail a request no live worker manager owns; work under a live lease keeps running.
 
-    Only a queued request, or a claimed one whose lease has expired (its
-    manager died), is retired. The row lock orders this against a claim or a
+    A claimed request whose lease has expired (its manager died or stalled) is
+    retired, and so is a queued one when ``retire_queued`` is set. The row lock orders this against a claim or a
     reclaim: one that commits first leaves the row running under a fresh lease
     and this returns ``None``, while one that follows skips the locked row or
     finds it terminal. Lease expiry is read with the database wall clock after
     the lock is held.
+
+    A retired file create hands its source back to the Excel preflight it took
+    it from, in the same transaction, so the caller's retry can take it again.
     """
+    from backend_core import storage_cleanup_service
+
     table = ComputeRequest.metadata.tables[ComputeRequest.__tablename__]
+    peek = session.execute(select(table.c.kind, table.c.artifact_path).where(table.c.id == request_id)).first()
+    create_source = peek.artifact_path if peek is not None and peek.kind == enums_pb2.COMPUTE_REQUEST_KIND_CREATE_FILE_DATASOURCE else None
+    if create_source is not None:
+        storage_cleanup_service.lock_retained_preflight(session, source_path=create_source, request_id=request_id)
     active_statuses = [enums_pb2.COMPUTE_REQUEST_STATUS_QUEUED, enums_pb2.COMPUTE_REQUEST_STATUS_RUNNING]
-    statement = select(ComputeRequest).where(table.c.id == request_id).where(table.c.status.in_(active_statuses)).with_for_update()
+    statement = (
+        select(ComputeRequest)
+        .where(table.c.id == request_id)
+        .where(table.c.status.in_(active_statuses))
+        .with_for_update()
+        .execution_options(populate_existing=True)
+    )
     request = session.execute(statement).scalars().first()
     if request is None:
         session.rollback()
         return None
     now = database_now(session, wall_clock=True)
+    lease_lapsed = and_(
+        table.c.status == enums_pb2.COMPUTE_REQUEST_STATUS_RUNNING,
+        or_(table.c.lease_expires_at.is_(None), table.c.lease_expires_at <= now),
+    )
     unowned = (
         select(table.c.id)
         .where(table.c.id == request_id)
-        .where(
-            or_(
-                table.c.status == enums_pb2.COMPUTE_REQUEST_STATUS_QUEUED,
-                table.c.lease_expires_at.is_(None),
-                table.c.lease_expires_at <= now,
-            )
-        )
+        .where(or_(table.c.status == enums_pb2.COMPUTE_REQUEST_STATUS_QUEUED, lease_lapsed) if retire_queued else lease_lapsed)
     )
     if session.execute(unowned).first() is None:
         session.rollback()
         return None
     _retire_request(session, request, reason=reason, now=now, payload={'error': reason, 'status_code': status_code})
+    if create_source is not None:
+        storage_cleanup_service.restore_preflight_source(session, source_path=create_source, request_id=request.id)
     session.commit()
     session.refresh(request)
     record_lease_transition(

@@ -825,6 +825,75 @@ def test_only_one_consumer_can_take_an_owned_preflight_source(test_db_session: S
     test_db_session.rollback()
 
 
+def _create_from(session: Session, source: str, name: str) -> ComputeRequest:
+    return compute_requests_service.create_request(
+        session,
+        namespace='default',
+        kind=enums_pb2.COMPUTE_REQUEST_KIND_CREATE_FILE_DATASOURCE,
+        command=command_from_payload(enums_pb2.COMPUTE_REQUEST_KIND_CREATE_FILE_DATASOURCE, {'name': name, 'file_path': source, 'file_type': 'excel'}),
+    )
+
+
+def _retire_as_unavailable(session: Session, request_id: str) -> ComputeRequest | None:
+    return compute_requests_service.retire_unclaimed_request(
+        session,
+        request_id,
+        reason='Compute is unavailable right now; try again shortly.',
+        status_code=503,
+        retire_queued=True,
+    )
+
+
+def test_retired_create_hands_its_source_back_so_the_confirm_retry_can_take_it(test_db_session: Session) -> None:
+    request = _preflight(test_db_session)
+    source = request.artifact_path
+    assert source is not None
+    event_id = cleanup._event_id(source)
+    intent = test_db_session.get(RuntimeOutboxEvent, event_id)
+    assert intent is not None
+    preflight_payload = dict(intent.payload_json)
+    preflight_expiry = intent.available_at
+    first = _create_from(test_db_session, source, 'First')
+    test_db_session.commit()
+
+    # The create waited unclaimed past the admission bound and got the 503.
+    assert _retire_as_unavailable(test_db_session, first.id) is not None
+
+    test_db_session.expire_all()
+    retained = test_db_session.get(ComputeRequest, request.id)
+    assert retained is not None
+    assert (retained.artifact_path, retained.artifact_name) == (source, 'preflight-source')
+    intent = test_db_session.get(RuntimeOutboxEvent, event_id)
+    assert intent is not None
+    assert intent.payload_json == preflight_payload
+    # The preflight's own expiry still owns cleanup, not the failed create.
+    assert intent.available_at == preflight_expiry
+    assert cleanup.claim_cleanups(test_db_session) == []
+
+    retry = _create_from(test_db_session, source, 'Retry')
+    test_db_session.commit()
+    test_db_session.expire_all()
+    intent = test_db_session.get(RuntimeOutboxEvent, event_id)
+    assert intent is not None
+    assert (intent.payload_json['owner_kind'], intent.payload_json['owner_id']) == (cleanup.StorageCleanupOwner.SOURCE.value, retry.id)
+
+
+def test_retired_create_leaves_its_source_to_cleanup_once_the_preflight_is_gone(test_db_session: Session) -> None:
+    request = _preflight(test_db_session)
+    source = request.artifact_path
+    assert source is not None
+    first = _create_from(test_db_session, source, 'First')
+    test_db_session.commit()
+    preflight._remove_preflight(test_db_session, request.id, delete_source=False)
+
+    assert _retire_as_unavailable(test_db_session, first.id) is not None
+
+    test_db_session.expire_all()
+    intent = test_db_session.get(RuntimeOutboxEvent, cleanup._event_id(source))
+    assert intent is not None
+    assert (intent.payload_json['owner_kind'], intent.payload_json['owner_id']) == (cleanup.StorageCleanupOwner.SOURCE.value, first.id)
+
+
 def test_preflight_future_deadline_survives_clearing_the_pending_marker(test_db_session: Session, monkeypatch: pytest.MonkeyPatch) -> None:
     engine = test_db_session.get_bind()
     assert engine.dialect.name == 'postgresql'

@@ -45,15 +45,19 @@ type _PipelineRequest = (
 _COMPUTE_WORKER_SHUTDOWN_CANCELLATION = 'Compute request cancelled because its compute worker was shut down'
 COMPUTE_UNAVAILABLE_MESSAGE = 'Compute is unavailable right now; try again shortly.'
 _HTTP_DISCONNECT_POLL_SECONDS = 0.5
-# The worker manager heartbeats every few seconds, and a stop also refreshes its
-# registration. A generation restart or takeover stops the old row, reconciles
-# containers, then registers and heartbeats the new one before its warm-reserve
-# wait, so only longer silence means no manager is coming back to claim work.
-_WORKER_MANAGER_GRACE_SECONDS = 180.0
-# How often an admission-bounded request that has not finished rechecks that a
-# manager is live. A live manager with every compute slot busy keeps it queued,
-# and work under a live lease is never cut off.
-_COMPUTE_ADMISSION_RECHECK_SECONDS = 15.0
+# The worker manager heartbeats every five seconds from its own thread, and a
+# stop also refreshes its registration, so a generation restart or takeover
+# that re-registers promptly stays inside this window. Silence past it means no
+# manager is coming back to claim work soon.
+_WORKER_MANAGER_LIVENESS_SECONDS = 30.0
+# How often an admission-bounded request that has not finished rechecks its
+# claim and the manager's liveness.
+_COMPUTE_ADMISSION_RECHECK_SECONDS = 5.0
+# A heartbeat proves the manager process is alive, not that it is claiming
+# work. An upload still unclaimed after this long gets the 503 even when a
+# registration looks live, so a stalled or saturated manager cannot hold the
+# HTTP request open without an answer.
+_COMPUTE_ADMISSION_QUEUE_SECONDS = 60.0
 logger = logging.getLogger(__name__)
 
 # Pipeline-to-protobuf conversion walks the complete analysis tree and can
@@ -219,23 +223,24 @@ async def _worker_manager_recently_seen() -> bool:
         run_settings_db,
         runtime_workers_service.has_recent_worker,
         kind=RuntimeWorkerKind.COORDINATOR,
-        within_seconds=_WORKER_MANAGER_GRACE_SECONDS,
+        within_seconds=_WORKER_MANAGER_LIVENESS_SECONDS,
     )
 
 
 async def require_compute_available() -> None:
-    """Refuse with 503 when no worker manager has been live or restarting within the grace window."""
+    """Refuse with 503 when no worker manager has been live or restarting within the liveness window."""
     if not await _worker_manager_recently_seen():
         raise ComputeUnavailableError()
 
 
-def _retire_unclaimed_request_in_new_session(request_id: str, namespace: str):
+def _retire_unclaimed_request_in_new_session(request_id: str, namespace: str, *, retire_queued: bool):
     with namespace_scope(namespace):
         return run_db(
             compute_requests_service.retire_unclaimed_request,
             request_id,
             reason=COMPUTE_UNAVAILABLE_MESSAGE,
             status_code=503,
+            retire_queued=retire_queued,
         )
 
 
@@ -387,12 +392,12 @@ async def _submit_and_wait(
 ):
     """Stage one durable request and wait for its terminal state.
 
-    ``admission_bounded`` bounds the wait for compute that is down: the request
-    is refused up front when no worker manager has been live or restarting
-    within the grace window, and once that is no longer true while it is
-    queued, or claimed under a lease that has expired (its manager died), it is
-    retired with a 503. A live but busy manager keeps it queued, and work under
-    a live lease is never cut off.
+    ``admission_bounded`` bounds the wait for compute that cannot serve it: the
+    request is refused up front when no worker manager has been live or
+    restarting within the liveness window. While it waits it is retired with a
+    503 once its claim's lease has expired (its manager died or stalled), or
+    while still unclaimed once the manager goes silent or the queue bound
+    passes. Work under a live lease is never cut off.
     """
     if admission_bounded:
         await require_compute_available()
@@ -475,14 +480,20 @@ async def _submit_and_wait(
                 break
             if admission_recheck_at is not None and time.monotonic() >= admission_recheck_at:
                 admission_recheck_at = time.monotonic() + _COMPUTE_ADMISSION_RECHECK_SECONDS
-                # A live manager claims queued work as compute slots free up and
-                # renews the leases of work it runs. Without one, a manager that
-                # died after claiming leaves the lease to expire.
-                if not await _worker_manager_recently_seen():
-                    retired = await run_api_blocking(_retire_unclaimed_request_in_new_session, request.id, request.namespace)
+                # A live manager renews the lease of work it runs, so an expired
+                # lease means its manager died or stalled even if its heartbeat
+                # thread still runs. Unclaimed work is retired once no manager
+                # is live or the queue bound has passed.
+                retire_queued = time.monotonic() - wait_started >= _COMPUTE_ADMISSION_QUEUE_SECONDS or not await _worker_manager_recently_seen()
+                if retire_queued or completed.status == enums_pb2.COMPUTE_REQUEST_STATUS_RUNNING:
+                    retired = await run_api_blocking(
+                        partial(_retire_unclaimed_request_in_new_session, retire_queued=retire_queued),
+                        request.id,
+                        request.namespace,
+                    )
                     if retired is not None:
                         logger.warning(
-                            'Compute request retired because no worker manager is live '
+                            'Compute request retired because no worker manager is serving it '
                             'durable_request_id=%s http_request_id=%s kind=%s namespace=%s wait_ms=%.1f',
                             request.id,
                             http_request_id,
