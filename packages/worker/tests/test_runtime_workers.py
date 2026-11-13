@@ -586,6 +586,154 @@ async def test_worker_generation_waits_for_runtime_teardown_after_monitor_error(
     assert teardown_finished.is_set()
 
 
+def _guard_deadline_exceeded() -> BackendWorkerRpcError:
+    return BackendWorkerRpcError(
+        status_code=504,
+        error="Internal runtime RPC admission deadline expired for general",
+        error_code="DEADLINE_EXCEEDED",
+    )
+
+
+@pytest.mark.asyncio
+async def test_transient_guard_deadline_does_not_end_worker_generation(monkeypatch) -> None:
+    class Client:
+        def __init__(self) -> None:
+            self.assertions = 0
+
+        def assert_coordinator_generation(self, generation: int) -> None:
+            assert generation == 7
+            self.assertions += 1
+            if self.assertions <= 3:
+                raise _guard_deadline_exceeded()
+
+        async def get_coordinator_generation_async(self) -> int:
+            return 7
+
+    reconciled = asyncio.Event()
+
+    async def runtime(*, stop_event: asyncio.Event, coordinator_guard, **_kwargs) -> None:
+        # Startup reconciliation proves ownership before its first Docker mutation.
+        await asyncio.to_thread(coordinator_guard)
+        reconciled.set()
+        await stop_event.wait()
+
+    monkeypatch.setattr(runtime_process, "run_worker_manager_runtime", runtime)
+    monkeypatch.setattr(runtime_process, "_COORDINATOR_GUARD_RETRY_INITIAL_SECONDS", 0.001, raising=False)
+    client = Client()
+    process_stop = asyncio.Event()
+    generation = asyncio.create_task(runtime_process._run_worker_manager_generation(process_stop, cast(WorkerRuntimeClient, client), 7))
+    reconciled_wait = asyncio.create_task(reconciled.wait())
+    try:
+        await asyncio.wait({generation, reconciled_wait}, timeout=5, return_when=asyncio.FIRST_COMPLETED)
+        failure = generation.exception() if generation.done() else None
+        assert reconciled.is_set(), f"generation ended on a transient guard failure: {failure!r}"
+        assert client.assertions == 4
+    finally:
+        process_stop.set()
+        reconciled_wait.cancel()
+        await asyncio.gather(generation, reconciled_wait, return_exceptions=True)
+    assert generation.exception() is None
+
+
+@pytest.mark.asyncio
+async def test_unconfirmed_transient_guard_blocks_mutation_until_generation_stops(monkeypatch) -> None:
+    class Client:
+        def __init__(self) -> None:
+            self.assertions = 0
+
+        def assert_coordinator_generation(self, generation: int) -> None:
+            del generation
+            self.assertions += 1
+            raise _guard_deadline_exceeded()
+
+        async def get_coordinator_generation_async(self) -> int:
+            # The coordinator moves on while this manager cannot confirm ownership.
+            return 7 if self.assertions < 3 else 8
+
+    mutated = threading.Event()
+    guard_errors: list[BaseException] = []
+
+    async def runtime(*, stop_event: asyncio.Event, coordinator_guard, **_kwargs) -> None:
+        try:
+            await asyncio.to_thread(coordinator_guard)
+        except BackendWorkerRpcError as exc:
+            guard_errors.append(exc)
+        else:
+            mutated.set()
+        await stop_event.wait()
+
+    monkeypatch.setattr(runtime_process, "run_worker_manager_runtime", runtime)
+    monkeypatch.setattr(runtime_process, "_COORDINATOR_GENERATION_POLL_SECONDS", 0.005)
+    monkeypatch.setattr(runtime_process, "_COORDINATOR_GUARD_RETRY_INITIAL_SECONDS", 0.001, raising=False)
+    client = Client()
+    process_stop = asyncio.Event()
+    try:
+        await asyncio.wait_for(
+            runtime_process._run_worker_manager_generation(process_stop, cast(WorkerRuntimeClient, client), 7),
+            timeout=5,
+        )
+    finally:
+        process_stop.set()
+
+    assert not mutated.is_set()
+    assert client.assertions >= 3
+    assert len(guard_errors) == 1
+
+
+def test_stale_generation_guard_answer_fences_without_retry(monkeypatch) -> None:
+    class Client:
+        def __init__(self) -> None:
+            self.assertions = 0
+
+        def assert_coordinator_generation(self, generation: int) -> None:
+            self.assertions += 1
+            raise BackendWorkerRpcError(
+                status_code=412,
+                error=f"Runtime coordinator generation {generation} is fenced by 8",
+                error_code="FAILED_PRECONDITION",
+            )
+
+    monkeypatch.setattr(runtime_process, "_COORDINATOR_GUARD_RETRY_INITIAL_SECONDS", 0.001, raising=False)
+    client = Client()
+    guard = runtime_process._coordinator_generation_guard(cast(WorkerRuntimeClient, client), 7, stopped=threading.Event())
+
+    with pytest.raises(BackendWorkerRpcError, match="fenced by 8"):
+        guard()
+    assert client.assertions == 1
+
+
+@pytest.mark.asyncio
+async def test_generation_monitor_treats_rejected_admission_as_transient(monkeypatch) -> None:
+    process_stop = asyncio.Event()
+
+    class Client:
+        def __init__(self) -> None:
+            self.calls = 0
+
+        async def get_coordinator_generation_async(self) -> int:
+            self.calls += 1
+            if self.calls == 1:
+                raise BackendWorkerRpcError(
+                    status_code=429,
+                    error="Internal runtime RPC admission is full for critical",
+                    error_code="RESOURCE_EXHAUSTED",
+                )
+            process_stop.set()
+            return 7
+
+    generation_stop = asyncio.Event()
+    monkeypatch.setattr(runtime_process, "_COORDINATOR_GENERATION_POLL_SECONDS", 0.001)
+    client = Client()
+
+    await asyncio.wait_for(
+        runtime_process._watch_coordinator_generation(process_stop, generation_stop, cast(WorkerRuntimeClient, client), generation=7),
+        timeout=1,
+    )
+
+    assert client.calls == 2
+    assert not generation_stop.is_set()
+
+
 @pytest.mark.asyncio
 async def test_supervised_runtime_loop_restarts_after_transient_failure(caplog) -> None:
     stop_event = asyncio.Event()

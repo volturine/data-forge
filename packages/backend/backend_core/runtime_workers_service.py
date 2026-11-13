@@ -80,6 +80,19 @@ def mark_worker_stopped(session: Session, *, worker_id: str, now: datetime | Non
     return worker
 
 
+def has_live_worker(session: Session, *, kind: RuntimeWorkerKind, heartbeat_seconds: float) -> bool:
+    """Return whether a registration of this kind is running and heartbeated recently."""
+    cutoff = _utcnow() - timedelta(seconds=heartbeat_seconds)
+    statement = (
+        select(RuntimeWorker.id)
+        .where(sa(RuntimeWorker.kind == kind))
+        .where(col(RuntimeWorker.stopped_at).is_(None))
+        .where(col(RuntimeWorker.last_heartbeat_at) >= cutoff)
+        .limit(1)
+    )
+    return session.exec(statement).first() is not None
+
+
 def reclaimable_worker_ids(session: Session, *, kind: RuntimeWorkerKind, heartbeat_seconds: float = 15.0) -> set[str]:
     cutoff = _utcnow() - timedelta(seconds=heartbeat_seconds)
     statement = (

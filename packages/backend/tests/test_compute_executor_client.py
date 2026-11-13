@@ -4,25 +4,28 @@ import asyncio
 import contextvars
 import os
 import threading
-from datetime import datetime
+from datetime import datetime, timedelta
 from functools import partial
 from types import SimpleNamespace
-from typing import cast
+from typing import Any, cast
 
 import pytest
-from fastapi import Request
+from fastapi import HTTPException, Request
 from pydantic import BaseModel, Field
 
-from backend_core import compute_requests_service
+from backend_core import compute_requests_service, runtime_workers_service
 from backend_core.api_execution_budget import (
     BoundedThreadPoolExecutor,
     install_api_blocking_executor,
     remove_api_blocking_executor,
 )
 from backend_core.compute_response_recovery import ComputeResponseRecovery
+from backend_core.database import run_settings_db
 from backend_core.domain.compute.schemas import AnalysisPipelinePayload, DownloadRequest
 from backend_core.domain.compute_requests.models import command_envelope
+from backend_core.domain.runtime_workers.models import RuntimeWorkerKind
 from backend_core.exceptions import AppError, ClientDisconnectedError
+from backend_core.time import utc_now
 from dataforge_protocol import compute_pb2, enums_pb2
 from modules.compute import executor_client
 
@@ -611,3 +614,164 @@ async def test_shared_flight_lock_wait_retries_without_blocking_the_event_loop(m
     assert await task is staged
     assert attempts == 3
     assert event_loop_ticks > 0
+
+
+_COMPUTE_UNAVAILABLE = 'Compute is unavailable right now; try again shortly.'
+
+
+def _staged_upload(**kwargs) -> SimpleNamespace:
+    envelope = command_envelope(kind=kwargs['kind'], request_id='upload-request-1', command=kwargs['command'])
+    return SimpleNamespace(
+        id='upload-request-1',
+        namespace=kwargs['namespace'],
+        kind=kwargs['kind'],
+        compute_worker_resource_id=None,
+        command_envelope=envelope.SerializeToString(),
+    )
+
+
+async def _create_uploaded_file_datasource():
+    return await executor_client.create_file_datasource(
+        name='upload',
+        description=None,
+        file_path='s3://uploads/upload.csv',
+        file_type='csv',
+    )
+
+
+def _install_upload_wait(monkeypatch: pytest.MonkeyPatch, state: dict[str, object]) -> list[dict[str, object]]:
+    staged_calls: list[dict[str, object]] = []
+
+    def stage(**kwargs):
+        staged_calls.append(kwargs)
+        return _staged_upload(**kwargs)
+
+    async def register(_request_id: str, _namespace: str) -> None:
+        return None
+
+    async def unregister(_request_id: str) -> None:
+        return None
+
+    async def terminal_request(_request_id: str):
+        return None
+
+    async def never_wake(_request_id: str, _last_seen: int) -> int:
+        # No worker manager claims or answers this request, so no wake arrives.
+        await asyncio.Future()
+        raise AssertionError('upload response wake unexpectedly arrived')
+
+    monkeypatch.setattr(executor_client, 'get_namespace', lambda: 'default')
+    monkeypatch.setattr(executor_client, '_stage_validated_request_in_new_session', stage)
+    monkeypatch.setattr(executor_client, '_read_request_in_new_session', lambda *_args: SimpleNamespace(status=state['status']))
+    monkeypatch.setattr(executor_client.response_recovery, 'register', register)
+    monkeypatch.setattr(executor_client.response_recovery, 'unregister', unregister)
+    monkeypatch.setattr(executor_client.response_recovery, 'terminal_request', terminal_request)
+    monkeypatch.setattr(executor_client.response_recovery, 'wait_for_wake', never_wake)
+    return staged_calls
+
+
+def _register_worker_manager(*, heartbeat_age: timedelta, stopped: bool = False) -> None:
+    worker_id = 'worker-manager:upload-admission-test'
+    run_settings_db(
+        runtime_workers_service.register_worker,
+        worker_id=worker_id,
+        kind=RuntimeWorkerKind.COORDINATOR,
+        hostname='worker-host',
+        pid=1,
+        capacity=1,
+        now=utc_now() - heartbeat_age,
+    )
+    if stopped:
+        run_settings_db(runtime_workers_service.mark_worker_stopped, worker_id=worker_id)
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize(
+    'manager',
+    [
+        pytest.param(None, id='no-worker-manager'),
+        pytest.param({'heartbeat_age': timedelta(minutes=24)}, id='stale-heartbeat-not-stopped'),
+        pytest.param({'heartbeat_age': timedelta(seconds=1), 'stopped': True}, id='stopped-worker-manager'),
+    ],
+)
+async def test_upload_admission_fails_fast_without_a_live_worker_manager(monkeypatch: pytest.MonkeyPatch, manager: dict[str, Any] | None) -> None:
+    if manager is not None:
+        _register_worker_manager(**manager)
+    staged_calls = _install_upload_wait(monkeypatch, {'status': enums_pb2.COMPUTE_REQUEST_STATUS_QUEUED})
+
+    with pytest.raises(HTTPException) as exc_info:
+        await asyncio.wait_for(_create_uploaded_file_datasource(), timeout=5)
+
+    assert exc_info.value.status_code == 503
+    assert exc_info.value.detail == _COMPUTE_UNAVAILABLE
+    assert staged_calls == []
+
+
+@pytest.mark.asyncio
+async def test_upload_admission_retires_an_unclaimed_request_after_its_deadline(monkeypatch: pytest.MonkeyPatch) -> None:
+    _register_worker_manager(heartbeat_age=timedelta(seconds=1))
+    state: dict[str, object] = {'status': enums_pb2.COMPUTE_REQUEST_STATUS_QUEUED}
+    staged_calls = _install_upload_wait(monkeypatch, state)
+    retired: list[str] = []
+
+    def retire(request_id: str, _namespace: str):
+        retired.append(request_id)
+        state['status'] = enums_pb2.COMPUTE_REQUEST_STATUS_FAILED
+        return SimpleNamespace(id=request_id)
+
+    monkeypatch.setattr(executor_client, '_COMPUTE_ADMISSION_TIMEOUT_SECONDS', 0.05, raising=False)
+    monkeypatch.setattr(executor_client, '_retire_unclaimed_request_in_new_session', retire, raising=False)
+    monkeypatch.setattr(
+        executor_client.compute_requests_service,
+        'response_payload',
+        lambda _request: {'error': _COMPUTE_UNAVAILABLE, 'status_code': 503},
+    )
+
+    with pytest.raises(HTTPException) as exc_info:
+        await asyncio.wait_for(_create_uploaded_file_datasource(), timeout=5)
+
+    assert exc_info.value.status_code == 503
+    assert exc_info.value.detail == _COMPUTE_UNAVAILABLE
+    assert len(staged_calls) == 1
+    assert retired == ['upload-request-1']
+
+
+@pytest.mark.asyncio
+async def test_upload_admission_deadline_does_not_cut_off_claimed_work(monkeypatch: pytest.MonkeyPatch) -> None:
+    _register_worker_manager(heartbeat_age=timedelta(seconds=1))
+    statuses = iter(
+        (
+            enums_pb2.COMPUTE_REQUEST_STATUS_QUEUED,
+            enums_pb2.COMPUTE_REQUEST_STATUS_RUNNING,
+            enums_pb2.COMPUTE_REQUEST_STATUS_COMPLETED,
+        )
+    )
+    reads: list[int] = []
+    created = object()
+
+    def read_request(*_args):
+        reads.append(next(statuses))
+        return SimpleNamespace(status=reads[-1])
+
+    async def wake_after_claim(_request_id: str, last_seen: int) -> int:
+        if reads[-1] == enums_pb2.COMPUTE_REQUEST_STATUS_QUEUED:
+            # A claim does not publish a response wake.
+            await asyncio.Future()
+        await asyncio.sleep(0.1)
+        return last_seen + 1
+
+    async def validated_response(_model, _completed):
+        return created
+
+    def unexpected_retire(*_args):
+        raise AssertionError('claimed upload work must not be retired by the admission deadline')
+
+    _install_upload_wait(monkeypatch, {'status': enums_pb2.COMPUTE_REQUEST_STATUS_QUEUED})
+    monkeypatch.setattr(executor_client, '_read_request_in_new_session', read_request)
+    monkeypatch.setattr(executor_client.response_recovery, 'wait_for_wake', wake_after_claim)
+    monkeypatch.setattr(executor_client, '_validated_response', validated_response)
+    monkeypatch.setattr(executor_client, '_COMPUTE_ADMISSION_TIMEOUT_SECONDS', 0.05, raising=False)
+    monkeypatch.setattr(executor_client, '_retire_unclaimed_request_in_new_session', unexpected_retire, raising=False)
+
+    assert await asyncio.wait_for(_create_uploaded_file_datasource(), timeout=5) is created
+    assert len(reads) == 3

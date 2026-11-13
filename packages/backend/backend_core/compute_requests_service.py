@@ -711,6 +711,41 @@ def cancel_disconnected_request(
     return request
 
 
+def retire_unclaimed_request(
+    session: Session,
+    request_id: str,
+    *,
+    reason: str,
+    status_code: int,
+) -> ComputeRequest | None:
+    """Fail a request no worker manager claimed in time; claimed work keeps running.
+
+    The row lock orders this against a claim: a claim that commits first leaves
+    the row running and this returns ``None``, while a claim that follows sees
+    the terminal status and skips it.
+    """
+    table = ComputeRequest.metadata.tables[ComputeRequest.__tablename__]
+    statement = select(ComputeRequest).where(table.c.id == request_id).where(table.c.status == enums_pb2.COMPUTE_REQUEST_STATUS_QUEUED).with_for_update()
+    request = session.execute(statement).scalars().first()
+    if request is None:
+        session.rollback()
+        return None
+    _retire_request(session, request, reason=reason, now=_utcnow(), payload={'error': reason, 'status_code': status_code})
+    session.commit()
+    session.refresh(request)
+    record_lease_transition(
+        kind='compute_request',
+        transition='cancel',
+        outcome=TransitionOutcome.APPLIED,
+        entity_id=request.id,
+        owner_id='compute-admission',
+        claim_token='cancelled',
+        generation=request.lease_generation,
+        attempt=request.attempts,
+    )
+    return request
+
+
 def cancel_active_requests_for_engine(
     session: Session,
     *,

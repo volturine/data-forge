@@ -18,13 +18,14 @@ from fastapi.exceptions import RequestValidationError
 from pydantic import BaseModel, ValidationError as PydanticValidationError
 from sqlmodel import Session, select
 
-from backend_core import build_datasource_dependencies, compute_requests_service, runtime_ipc
+from backend_core import build_datasource_dependencies, compute_requests_service, runtime_ipc, runtime_workers_service
 from backend_core.api_execution_budget import BoundedThreadPoolExecutor, run_api_blocking, run_in_bounded_executor
 from backend_core.compute_response_recovery import response_recovery
 from backend_core.data_plane_client import client_from_settings
-from backend_core.database import run_db
+from backend_core.database import run_db, run_settings_db
 from backend_core.domain.compute import schemas as compute_schemas
 from backend_core.domain.compute_requests.models import command_from_payload
+from backend_core.domain.runtime_workers.models import RuntimeWorkerKind
 from backend_core.exceptions import AppError, ClientDisconnectedError, PipelineExecutionCancelledError, PipelineExecutionError
 from backend_core.namespace import get_namespace, namespace_scope
 from backend_core.persistence.compute_requests.models import ComputeRequest
@@ -42,7 +43,14 @@ type _PipelineRequest = (
     | compute_schemas.ExportRequest
 )
 _COMPUTE_WORKER_SHUTDOWN_CANCELLATION = 'Compute request cancelled because its compute worker was shut down'
+COMPUTE_UNAVAILABLE_MESSAGE = 'Compute is unavailable right now; try again shortly.'
 _HTTP_DISCONNECT_POLL_SECONDS = 0.5
+# The worker manager heartbeats every few seconds. A minute of silence means no
+# manager is running, so a new request would only wait for one to come back.
+_WORKER_MANAGER_LIVENESS_SECONDS = 60.0
+# Bound how long an admission-bounded request may wait unclaimed. Once a
+# manager claims it, the work runs to completion under its own lease.
+_COMPUTE_ADMISSION_TIMEOUT_SECONDS = 60.0
 logger = logging.getLogger(__name__)
 
 # Pipeline-to-protobuf conversion walks the complete analysis tree and can
@@ -178,6 +186,7 @@ async def _submit_payload(
     datasource_ids: tuple[str, ...] = (),
     request_id: str | None = None,
     source_preflight_id: str | None = None,
+    admission_timeout_seconds: float | None = None,
 ):
     command = await _run_compute_serialization(command_from_payload, kind, payload)
     return await _submit_and_wait(
@@ -186,7 +195,33 @@ async def _submit_payload(
         request_id=request_id,
         source_preflight_id=source_preflight_id,
         datasource_ids=datasource_ids,
+        admission_timeout_seconds=admission_timeout_seconds,
     )
+
+
+def _compute_unavailable() -> HTTPException:
+    return HTTPException(status_code=503, detail=COMPUTE_UNAVAILABLE_MESSAGE, headers={'Retry-After': '5'})
+
+
+async def _require_live_worker_manager() -> None:
+    live = await run_api_blocking(
+        run_settings_db,
+        runtime_workers_service.has_live_worker,
+        kind=RuntimeWorkerKind.COORDINATOR,
+        heartbeat_seconds=_WORKER_MANAGER_LIVENESS_SECONDS,
+    )
+    if not live:
+        raise _compute_unavailable()
+
+
+def _retire_unclaimed_request_in_new_session(request_id: str, namespace: str):
+    with namespace_scope(namespace):
+        return run_db(
+            compute_requests_service.retire_unclaimed_request,
+            request_id,
+            reason=COMPUTE_UNAVAILABLE_MESSAGE,
+            status_code=503,
+        )
 
 
 def _submit(
@@ -333,10 +368,20 @@ async def _submit_and_wait(
     pipeline: compute_schemas.AnalysisPipelinePayload | None = None,
     datasource_ids: tuple[str, ...] = (),
     http_request: Request | None = None,
+    admission_timeout_seconds: float | None = None,
 ):
+    """Stage one durable request and wait for its terminal state.
+
+    ``admission_timeout_seconds`` bounds the wait for compute: the request is
+    refused up front when no worker manager is live, and retired with a 503 if
+    no manager claims it in time. Claimed work is never cut off.
+    """
+    if admission_timeout_seconds is not None:
+        await _require_live_worker_manager()
     namespace = get_namespace()
     process_id = os.getpid()
     wait_started = time.monotonic()
+    admission_deadline = None if admission_timeout_seconds is None else wait_started + admission_timeout_seconds
     slow_wait_reported = False
     last_wake_wait_ms: float | None = None
     stage = partial(
@@ -410,6 +455,23 @@ async def _submit_and_wait(
                     (time.monotonic() - wait_started) * 1000,
                 )
                 break
+            if completed.status != enums_pb2.COMPUTE_REQUEST_STATUS_QUEUED:
+                admission_deadline = None
+            if admission_deadline is not None and time.monotonic() >= admission_deadline:
+                admission_deadline = None
+                retired = await run_api_blocking(_retire_unclaimed_request_in_new_session, request.id, request.namespace)
+                if retired is not None:
+                    logger.warning(
+                        'Compute request was not claimed within its admission deadline '
+                        'durable_request_id=%s http_request_id=%s kind=%s namespace=%s wait_ms=%.1f',
+                        request.id,
+                        http_request_id,
+                        kind,
+                        request.namespace,
+                        (time.monotonic() - wait_started) * 1000,
+                    )
+                # Reread: either the retired terminal state or a claim that won the race.
+                continue
             # PostgreSQL NOTIFY wakes this exact request immediately. The
             # shared recovery task checks all pending IDs in one query every
             # five seconds when a notification is lost; do not add a private
@@ -421,9 +483,18 @@ async def _submit_and_wait(
                 # browser that first submitted it. Do not add one disconnect
                 # poller per viewer or let a disconnected leader retire work
                 # that followers may be awaiting.
-                seen_version = await response_recovery.wait_for_wake(request.id, seen_version)
+                response_wait = response_recovery.wait_for_wake(request.id, seen_version)
             else:
-                seen_version = await _wait_for_response_or_disconnect(request.id, seen_version, http_request)
+                response_wait = _wait_for_response_or_disconnect(request.id, seen_version, http_request)
+            if admission_deadline is None:
+                seen_version = await response_wait
+            else:
+                # A claim publishes no response wake; recheck the queue state
+                # when the admission deadline expires.
+                try:
+                    seen_version = await asyncio.wait_for(response_wait, timeout=max(admission_deadline - time.monotonic(), 0.0))
+                except TimeoutError:
+                    continue
             last_wake_wait_ms = (time.monotonic() - wake_wait_started) * 1000
             wake_logger = logger.warning if last_wake_wait_ms >= 5_000 else logger.debug
             wake_logger(
@@ -607,6 +678,10 @@ async def create_file_datasource(
             'owner_id': owner_id,
         },
         source_preflight_id=source_preflight_id,
+        # An upload holds its HTTP request open for the create; refuse it
+        # quickly with a clear message rather than queue it behind a manager
+        # that is not running or cannot claim work.
+        admission_timeout_seconds=_COMPUTE_ADMISSION_TIMEOUT_SECONDS,
     )
     return await _validated_response(datasource_schemas.DataSourceResponse, completed)
 

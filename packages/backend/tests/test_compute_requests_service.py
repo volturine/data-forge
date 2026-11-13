@@ -740,6 +740,41 @@ def test_cancel_disconnected_request_retires_non_shared_engine_work(test_db_sess
     assert compute_requests_service.claim_next_request(test_db_session, worker_id='worker-test') is None
 
 
+@pytest.mark.parametrize('claimed', [False, True])
+def test_retire_unclaimed_request_fails_only_queued_work(test_db_session, claimed) -> None:
+    request = _create_request(
+        test_db_session,
+        namespace='default',
+        kind=enums_pb2.COMPUTE_REQUEST_KIND_CREATE_FILE_DATASOURCE,
+        request_json={'name': 'upload', 'file_path': 's3://data/upload.csv', 'file_type': 'csv', 'options': {}},
+    )
+    if claimed:
+        assert compute_requests_service.claim_next_request(test_db_session, worker_id='worker-test') is not None
+
+    retired = compute_requests_service.retire_unclaimed_request(
+        test_db_session,
+        request.id,
+        reason='Compute is unavailable right now; try again shortly.',
+        status_code=503,
+    )
+
+    test_db_session.expire_all()
+    current = test_db_session.get(ComputeRequest, request.id)
+    assert current is not None
+    if claimed:
+        # Claimed work belongs to its worker; the admission deadline never cuts it off.
+        assert retired is None
+        assert current.status == enums_pb2.COMPUTE_REQUEST_STATUS_RUNNING
+        return
+    assert retired is not None
+    assert current.status == enums_pb2.COMPUTE_REQUEST_STATUS_FAILED
+    assert compute_requests_service.response_payload(current) == {
+        'error': 'Compute is unavailable right now; try again shortly.',
+        'status_code': 503,
+    }
+    assert compute_requests_service.claim_next_request(test_db_session, worker_id='worker-test') is None
+
+
 def test_empty_claim_does_not_refresh_namespace_work_marker(test_db_session, monkeypatch) -> None:
     def unexpected_refresh(*_args, **_kwargs) -> None:
         raise AssertionError('empty claims must not scan and refresh the durable namespace marker')

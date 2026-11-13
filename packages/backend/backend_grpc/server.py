@@ -298,9 +298,16 @@ async def _require_internal_token(context: grpc.aio.ServicerContext) -> RpcMetad
 
 _RPC_TIMING: contextvars.ContextVar[dict[str, Any] | None] = contextvars.ContextVar('runtime_rpc_timing', default=None)
 _RPC_PHASE_TIMINGS: contextvars.ContextVar[dict[str, float] | None] = contextvars.ContextVar('runtime_rpc_phase_timings', default=None)
-_SCHEDULER_HEARTBEAT_METHODS = frozenset({'HeartbeatScheduler'})
+# Registration is liveness too: a heartbeat that missed its deadline under load
+# re-registers next, and that must not queue behind claims and completions.
+_SCHEDULER_LIVENESS_METHODS = frozenset({'HeartbeatScheduler', 'RegisterScheduler'})
+# Every worker-manager Docker mutation first asserts its coordinator generation.
+# Assertions are coalesced per generation by the manager, so one reserved slot
+# keeps them out of the general lane without letting a burst take lease slots.
+_COORDINATOR_GUARD_METHODS = frozenset({'AssertCoordinatorGeneration'})
 _LEASE_VALIDATION_METHODS = frozenset(
     {
+        'RegisterWorker',
         'HeartbeatWorker',
         'RenewBuildJobLease',
         'RenewComputeRequestLeases',
@@ -311,9 +318,9 @@ _LEASE_VALIDATION_METHODS = frozenset(
 
 def _validation_executor(method: str) -> Executor:
     method_name = method.rsplit('/', 1)[-1]
-    if method_name in _SCHEDULER_HEARTBEAT_METHODS:
+    if method_name in _SCHEDULER_LIVENESS_METHODS:
         return _INTERNAL_SCHEDULER_VALIDATION_EXECUTOR
-    if method_name in _SCHEDULER_HEARTBEAT_METHODS | _LEASE_VALIDATION_METHODS:
+    if method_name in _LEASE_VALIDATION_METHODS | _COORDINATOR_GUARD_METHODS:
         return _INTERNAL_LEASE_VALIDATION_EXECUTOR
     return _INTERNAL_VALIDATION_EXECUTOR
 
@@ -471,6 +478,7 @@ class _RpcAdmissionLane:
 
 _RPC_ADMISSION_LANES = {
     'critical': _RpcAdmissionLane('critical', _INTERNAL_LEASE_RPC_WORKERS),
+    'coordinator': _RpcAdmissionLane('coordinator', 1),
     'general': _RpcAdmissionLane('general', _INTERNAL_GENERAL_RPC_WORKERS),
     'scheduler': _RpcAdmissionLane('scheduler', _INTERNAL_SCHEDULER_RPC_WORKERS),
     'external-io': _RpcAdmissionLane('external-io', _INTERNAL_EXTERNAL_IO_WORKERS),
@@ -479,8 +487,10 @@ _RPC_ADMISSION_LANES = {
 
 def _rpc_admission_lane(method: str) -> _RpcAdmissionLane:
     method_name = method.rsplit('/', 1)[-1]
-    if method_name in _SCHEDULER_HEARTBEAT_METHODS:
+    if method_name in _SCHEDULER_LIVENESS_METHODS:
         return _RPC_ADMISSION_LANES['scheduler']
+    if method_name in _COORDINATOR_GUARD_METHODS:
+        return _RPC_ADMISSION_LANES['coordinator']
     if method_name in _LEASE_VALIDATION_METHODS:
         return _RPC_ADMISSION_LANES['critical']
     if method_name == 'GenerateAI':
@@ -926,9 +936,9 @@ def _settle_build_job(
 
 
 class WorkerRuntimeServicer(worker_runtime_pb2_grpc.WorkerRuntimeServiceServicer):
-    @_general_rpc
+    @_lease_rpc
     def RegisterWorker(self, request: worker_runtime_pb2.RuntimeWorkerRegisterRequest, metadata: RpcMetadata) -> common_pb2.RuntimeWorkerResponse:
-        run_settings_db(
+        run_critical_settings_db(
             runtime_worker_service.register_worker,
             worker_id=request.worker_id,
             kind=_proto_runtime_worker_kind(request.kind),
@@ -1891,7 +1901,7 @@ class RuntimeCoordinatorServicer(runtime_coordinator_pb2_grpc.RuntimeCoordinator
             raise _ThreadedRpcAbort(grpc.StatusCode.UNAVAILABLE, 'Runtime coordinator generation is not active')
         return runtime_coordinator_pb2.RuntimeCoordinatorGenerationResponse(generation=generation)
 
-    @_general_rpc
+    @_lease_rpc
     def AssertCoordinatorGeneration(
         self, request: runtime_coordinator_pb2.RuntimeCoordinatorGenerationRequest, metadata: RpcMetadata
     ) -> runtime_coordinator_pb2.RuntimeCoordinatorGenerationResponse:
@@ -1915,9 +1925,9 @@ class RuntimeCoordinatorServicer(runtime_coordinator_pb2_grpc.RuntimeCoordinator
 
 
 class SchedulerRuntimeServicer(scheduler_runtime_pb2_grpc.SchedulerRuntimeServiceServicer):
-    @_general_rpc
+    @_scheduler_heartbeat_rpc
     def RegisterScheduler(self, request: scheduler_runtime_pb2.SchedulerRegisterRequest, metadata: RpcMetadata) -> common_pb2.RuntimeWorkerResponse:
-        run_settings_db(
+        run_critical_settings_db(
             runtime_worker_service.register_worker,
             worker_id=request.worker_id,
             kind=RuntimeWorkerKind.SCHEDULER,
