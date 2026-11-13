@@ -10,6 +10,8 @@ export interface UserPublic {
 	status: string;
 	email_verified: boolean;
 	has_password: boolean;
+	/** The deployment-managed default account (DEFAULT_USER_*) is the admin. */
+	is_admin: boolean;
 	preferences: Record<string, unknown>;
 	providers: string[];
 	created_at: string;

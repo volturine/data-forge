@@ -171,15 +171,15 @@ describe('NamespacePickerModal', () => {
 		await fireEvent.click(screen.getByRole('button', { name: 'New namespace' }));
 		const name = screen.getByRole('textbox', { name: 'Name' });
 		expect(name).toHaveFocus();
-		await fireEvent.input(name, { target: { value: 'analytics_1' } });
+		await fireEvent.input(name, { target: { value: 'analytics-1' } });
 
-		await screen.findByText('S3 bucket (root): analytics_1');
-		expect(mocks.previewNamespaceStorage).toHaveBeenCalledWith('analytics_1');
+		await screen.findByText('S3 bucket (root): analytics-1');
+		expect(mocks.previewNamespaceStorage).toHaveBeenCalledWith('analytics-1');
 		const create = screen.getByRole('button', { name: 'Create namespace' });
 		expect(create).toBeEnabled();
 
 		await fireEvent.click(create);
-		await waitFor(() => expect(onSelect).toHaveBeenCalledWith('analytics_1'));
+		await waitFor(() => expect(onSelect).toHaveBeenCalledWith('analytics-1'));
 		expect(onClose).toHaveBeenCalledOnce();
 	});
 
@@ -262,26 +262,26 @@ describe('NamespacePickerModal', () => {
 		renderPicker({ onSelect, onSelectError, onClose });
 
 		await fireEvent.input(screen.getByRole('textbox', { name: 'Search namespaces' }), {
-			target: { value: 'retry_space' }
+			target: { value: 'retry-space' }
 		});
 		await fireEvent.click(screen.getByRole('button', { name: 'New namespace' }));
 		const name = screen.getByRole('textbox', { name: 'Name' });
-		expect(name).toHaveValue('retry_space');
-		await screen.findByText('S3 bucket (root): retry_space');
+		expect(name).toHaveValue('retry-space');
+		await screen.findByText('S3 bucket (root): retry-space');
 		await fireEvent.click(screen.getByRole('button', { name: 'Create namespace' }));
 
 		expect(await screen.findByRole('alert')).toHaveTextContent('registration failed');
-		expect(name).toHaveValue('retry_space');
+		expect(name).toHaveValue('retry-space');
 		expect(onSelectError).toHaveBeenCalledWith('registration failed');
 		expect(onClose).not.toHaveBeenCalled();
 
 		await fireEvent.click(screen.getByRole('button', { name: 'Back to namespaces' }));
 		const search = screen.getByRole('textbox', { name: 'Search namespaces' });
-		expect(search).toHaveValue('retry_space');
+		expect(search).toHaveValue('retry-space');
 		expect(search).toHaveFocus();
 		await fireEvent.click(screen.getByRole('button', { name: 'New namespace' }));
 		const retryName = screen.getByRole('textbox', { name: 'Name' });
-		expect(retryName).toHaveValue('retry_space');
+		expect(retryName).toHaveValue('retry-space');
 		expect(retryName).toHaveFocus();
 	});
 

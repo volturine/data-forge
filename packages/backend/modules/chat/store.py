@@ -17,6 +17,7 @@ from backend_core.api_execution_budget import run_api_blocking
 from backend_core.database import RuntimeCoordinatorFenced, run_settings_db
 from backend_core.exceptions import SettingsConfigurationError
 from backend_core.live_hubs import KeyedVersionHub
+from backend_core.namespace import normalize_namespace
 from backend_core.runtime_ipc import NotifyKind, notify_on_commit
 from backend_core.secrets import decrypt_secret, encrypt_secret
 from backend_core.sqlmodel_typing import col
@@ -24,6 +25,7 @@ from modules.chat.models import ChatEvent, ChatMessage, ChatSession, ChatTurn, C
 from modules.chat.sessions import ACTIVE_TURN_STATUSES, MAX_EVENTS, MAX_MESSAGES, ChatSessionBusy, normalize_epoch_milliseconds
 
 _CHAT_CREDENTIAL_DECRYPTION_ERROR = 'Chat credentials could not be decrypted; update the session credentials and try again.'
+_CHAT_INVALID_NAMESPACE_ERROR = 'Chat turn namespace is no longer valid; start a new chat in a valid namespace.'
 logger = logging.getLogger(__name__)
 
 
@@ -145,6 +147,17 @@ def _enqueue(
     return turn_id
 
 
+def _fail_unclaimable_turn(db: Session, turn: ChatTurn, error: str) -> None:
+    turn.status = ChatTurnStatus.FAILED
+    turn.claim_token = None
+    turn.coordinator_generation = None
+    turn.confirmation_decision = None
+    turn.updated_at = datetime.now(UTC)
+    db.add(turn)
+    _append_event(db, session_id=turn.session_id, turn_id=turn.id, payload={'type': 'error', 'content': error})
+    _append_event(db, session_id=turn.session_id, turn_id=turn.id, payload={'type': 'done'})
+
+
 def _claim_batch(db: Session, *, generation: int, limit: int) -> list[TurnClaim]:
     rows = db.execute(
         select(ChatTurn, ChatSession)
@@ -166,22 +179,17 @@ def _claim_batch(db: Session, *, generation: int, limit: int) -> list[TurnClaim]
     claims: list[TurnClaim] = []
     for turn, session in rows:
         try:
+            normalize_namespace(turn.namespace)
+        except ValueError:
+            # Legacy namespaces (e.g. with underscores) predate the bucket-name
+            # rules; fail the turn instead of re-claiming it every epoch.
+            _fail_unclaimable_turn(db, turn, _CHAT_INVALID_NAMESPACE_ERROR)
+            continue
+        try:
             session_token = decrypt_secret(turn.session_token_encrypted)
             api_key = decrypt_secret(session.api_key)
         except SettingsConfigurationError:
-            turn.status = ChatTurnStatus.FAILED
-            turn.claim_token = None
-            turn.coordinator_generation = None
-            turn.confirmation_decision = None
-            turn.updated_at = datetime.now(UTC)
-            db.add(turn)
-            _append_event(
-                db,
-                session_id=turn.session_id,
-                turn_id=turn.id,
-                payload={'type': 'error', 'content': _CHAT_CREDENTIAL_DECRYPTION_ERROR},
-            )
-            _append_event(db, session_id=turn.session_id, turn_id=turn.id, payload={'type': 'done'})
+            _fail_unclaimable_turn(db, turn, _CHAT_CREDENTIAL_DECRYPTION_ERROR)
             continue
 
         claim_token = secrets.token_urlsafe(24)

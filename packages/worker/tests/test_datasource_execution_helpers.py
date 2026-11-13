@@ -34,6 +34,31 @@ def test_column_stats_histogram_uses_numeric_bins_and_excludes_nulls(tmp_path) -
     assert sum(bin.count for bin in stats.histogram) == stats.count - stats.null_count
 
 
+def test_column_stats_override_cannot_repoint_stored_datasource(tmp_path) -> None:
+    stored_path = tmp_path / "stored.csv"
+    stored_path.write_text("value\n1\n2\n")
+    other_path = tmp_path / "other.csv"
+    other_path.write_text("value\n1\n2\n3\n4\n5\n")
+    metadata = DatasourceMetadata(
+        found=True,
+        id="source-1",
+        name="Stored",
+        source_type="file",
+        config={"file_path": str(stored_path), "file_type": "csv"},
+        schema_cache=None,
+        is_hidden=False,
+    )
+
+    stats = get_column_stats_from_metadata(
+        metadata,
+        column_name="value",
+        use_sample=False,
+        datasource_config={"file_path": str(other_path), "query": "SELECT * FROM users", "connection_string": "postgresql://other"},
+    )
+
+    assert stats.count == 2
+
+
 def test_csv_opts_coerces_struct_float_skip_rows() -> None:
     from datasources.datasource_loading import _csv_opts
 

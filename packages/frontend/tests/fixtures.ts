@@ -86,8 +86,66 @@ async function createSessionState(browser: Browser, workerIndex: number): Promis
 	}
 }
 
+/**
+ * Sign in once per worker as the deployment-managed default account
+ * (`DEFAULT_USER_*`), the only admin. Only admin-gated tests use it; tests
+ * that change the account password, name, or delete the account must keep
+ * using their own registered user.
+ */
+async function createAdminSessionState(browser: Browser): Promise<E2EStorageState> {
+	const context = await browser.newContext({ baseURL });
+	installE2eContextGuards(context);
+	try {
+		if (authRequired) {
+			const email = process.env.DEFAULT_USER_EMAIL?.trim();
+			const password = process.env.DEFAULT_USER_PASSWORD;
+			if (!email || !password) {
+				throw new Error('Admin E2E tests require DEFAULT_USER_EMAIL and DEFAULT_USER_PASSWORD');
+			}
+			// The login page has no hydration marker; the API sets the same session cookie.
+			const response = await context.request.post('/api/v1/auth/login', {
+				data: { email, password }
+			});
+			if (!response.ok()) {
+				throw new Error(`Admin login failed: ${response.status()} ${await response.text()}`);
+			}
+		}
+		const sessionState = (await context.storageState()) as E2EStorageState;
+		if (authRequired && !sessionState.cookies.some((cookie) => cookie.name === 'session_token')) {
+			throw new Error('session_token cookie missing after admin login');
+		}
+		return sessionState;
+	} finally {
+		await context.close();
+	}
+}
+
+async function useSessionPage(
+	browser: Browser,
+	sessionState: E2EStorageState,
+	use: (page: Page) => Promise<void>
+): Promise<void> {
+	// A test owns its browser state. Reusing a worker context lets IndexedDB,
+	// cached query data, and namespace selections leak from one test into the
+	// next even when the server-side resources are unique.
+	const context = await browser.newContext({
+		baseURL,
+		storageState: structuredClone(sessionState)
+	});
+	rememberCleanupSessionState(context, sessionState);
+	installE2eContextGuards(context);
+	const page = await context.newPage();
+	try {
+		await use(page);
+	} finally {
+		await context.close();
+	}
+}
+
 type WorkerFixtures = {
 	workerAuth: WorkerAuth;
+	/** Session of the `DEFAULT_USER_*` admin account, created on first use per worker. */
+	adminSessionState: E2EStorageState;
 	/** One BrowserContext per worker for setup helpers (upload, import, shutdown). */
 	helperContext: BrowserContext;
 	/** One immutable baseline dataset per Playwright shard. */
@@ -121,6 +179,8 @@ type SharedDatasourceUse = (datasource: SharedDatasource) => Promise<void>;
 
 type TestFixtures = {
 	page: Page;
+	/** A fresh page signed in as the admin; never change its password, name, or delete it. */
+	adminPage: Page;
 	request: E2ERequest;
 	requestTrace: import('./utils/request-trace.js').RequestTrace | null;
 };
@@ -238,6 +298,13 @@ export const test = base.extend<TestFixtures, WorkerFixtures>({
 		{ scope: 'worker' }
 	],
 
+	adminSessionState: [
+		async ({ browser }, use) => {
+			await use(await createAdminSessionState(browser));
+		},
+		{ scope: 'worker' }
+	],
+
 	helperContext: [
 		async ({ browser, workerAuth }, use) => {
 			// Reuse one context for all withAuthedPage work on this worker.
@@ -343,21 +410,11 @@ export const test = base.extend<TestFixtures, WorkerFixtures>({
 	],
 
 	page: async ({ browser, workerAuth }, use) => {
-		// A test owns its browser state. Reusing a worker context lets IndexedDB,
-		// cached query data, and namespace selections leak from one test into the
-		// next even when the server-side resources are unique.
-		const context = await browser.newContext({
-			baseURL,
-			storageState: structuredClone(workerAuth.sessionState)
-		});
-		rememberCleanupSessionState(context, workerAuth.sessionState);
-		installE2eContextGuards(context);
-		const page = await context.newPage();
-		try {
-			await use(page);
-		} finally {
-			await context.close();
-		}
+		await useSessionPage(browser, workerAuth.sessionState, use);
+	},
+
+	adminPage: async ({ browser, adminSessionState }, use) => {
+		await useSessionPage(browser, adminSessionState, use);
 	},
 
 	request: async ({ browser, workerAuth, helperContext }, use) => {

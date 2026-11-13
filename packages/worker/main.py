@@ -66,6 +66,12 @@ _MANAGER_LEASE_RETRY_SECONDS = 1.0
 # is stuck and the container should look unhealthy.
 _TAKEOVER_HEALTH_GRACE_SECONDS = 600.0
 _DISPATCH_LANES = ("compute-active", "compute-shutdown", "build", "datasource-delete", "outbox-cleanup")
+# A coordinator that is restarting, overloaded or slow to admit the RPC has not
+# answered; only an authoritative reply (such as FAILED_PRECONDITION for a
+# stale generation) can fence this manager.
+_TRANSIENT_COORDINATOR_RPC_CODES = frozenset({"UNAVAILABLE", "DEADLINE_EXCEEDED", "RESOURCE_EXHAUSTED"})
+_COORDINATOR_GUARD_RETRY_INITIAL_SECONDS = 0.25
+_COORDINATOR_GUARD_RETRY_MAX_SECONDS = 2.0
 
 
 def worker_manager_id() -> str:
@@ -203,45 +209,13 @@ async def _run_worker_manager_runtime(
     )
     runtime_listener = None
     runtime_listener_task: asyncio.Task[None] | None = None
-    try:
-        warm_worker_timeout = max(float(settings.compute_worker_start_timeout_seconds) * 4, 120.0)
-        warm_workers_ready = await run_control_in_thread(
-            manager.wait_for_warm_workers_ready,
-            timeout_seconds=warm_worker_timeout,
-        )
-        if not warm_workers_ready:
-            logger.warning(
-                "Warm compute worker reserve was not ready after %.1fs; starting manager with %s worker(s)",
-                warm_worker_timeout,
-                manager.warm_worker_count,
-            )
-        if local_stop.is_set():
-            await run_control_in_thread(manager.shutdown_all)
-            await run_control_in_thread(snapshot_notifier.close)
-            return
-        try:
-            runtime_listener = await start_runtime_listener()
-            runtime_listener_task = asyncio.create_task(serve_runtime_notifications(runtime_listener, local_stop, handle_runtime_payload))
-        except Exception as exc:
-            # Polling remains a recovery path if Postgres LISTEN is unavailable
-            # during startup. Normal operation should be notification-driven.
-            logger.warning("Worker runtime notifications unavailable; using recovery polling: %s", exc)
-        await client.register_worker_async(
-            worker_id=worker_id,
-            kind=RuntimeWorkerKind.COORDINATOR.value,
-            hostname=os.uname().nodename,
-            pid=os.getpid(),
-            capacity=settings.compute_workers,
-        )
-        health.registered()
-    except BaseException:
-        if runtime_listener_task is not None:
-            runtime_listener_task.cancel()
-            await asyncio.gather(runtime_listener_task, return_exceptions=True)
-        await stop_runtime_listener(runtime_listener)
-        await run_control_in_thread(manager.shutdown_all)
-        await run_control_in_thread(snapshot_notifier.close)
-        raise
+    # Health reports the registration only once the dispatch lanes run; the
+    # heartbeat thread starts earlier, before the warm-reserve wait.
+    dispatching = threading.Event()
+
+    def registration_changed(is_registered: bool) -> None:
+        if dispatching.is_set():
+            health.registration_changed(is_registered)
 
     heartbeat_stop = threading.Event()
     heartbeat_thread = threading.Thread(
@@ -255,11 +229,73 @@ async def _run_worker_manager_runtime(
             "pid": os.getpid(),
             "capacity": settings.compute_workers,
             "on_reconnected": manager.resynchronize_snapshots,
-            "on_registration_changed": health.registration_changed,
+            "on_registration_changed": registration_changed,
         },
         daemon=True,
     )
-    heartbeat_thread.start()
+    registered = False
+
+    async def stop_heartbeat() -> None:
+        heartbeat_stop.set()
+        if heartbeat_thread.is_alive():
+            await run_control_in_thread(heartbeat_thread.join)
+
+    async def stop_registration() -> None:
+        if registered:
+            with contextlib.suppress(Exception):
+                await client.stop_worker_async(worker_id=worker_id, timeout_seconds=2.0)
+
+    try:
+        # Register and heartbeat before the warm-reserve wait, which can take
+        # several minutes: API upload admission treats a manager row silent
+        # for three minutes as compute being down. Nothing is claimed until
+        # the dispatch lanes start below.
+        await client.register_worker_async(
+            worker_id=worker_id,
+            kind=RuntimeWorkerKind.COORDINATOR.value,
+            hostname=os.uname().nodename,
+            pid=os.getpid(),
+            capacity=settings.compute_workers,
+        )
+        registered = True
+        heartbeat_thread.start()
+        warm_worker_timeout = max(float(settings.compute_worker_start_timeout_seconds) * 4, 120.0)
+        warm_workers_ready = await run_control_in_thread(
+            manager.wait_for_warm_workers_ready,
+            timeout_seconds=warm_worker_timeout,
+        )
+        if not warm_workers_ready:
+            logger.warning(
+                "Warm compute worker reserve was not ready after %.1fs; starting manager with %s worker(s)",
+                warm_worker_timeout,
+                manager.warm_worker_count,
+            )
+        if local_stop.is_set():
+            await stop_heartbeat()
+            await run_control_in_thread(manager.shutdown_all)
+            await run_control_in_thread(snapshot_notifier.close)
+            await stop_registration()
+            return
+        try:
+            runtime_listener = await start_runtime_listener()
+            runtime_listener_task = asyncio.create_task(serve_runtime_notifications(runtime_listener, local_stop, handle_runtime_payload))
+        except Exception as exc:
+            # Polling remains a recovery path if Postgres LISTEN is unavailable
+            # during startup. Normal operation should be notification-driven.
+            logger.warning("Worker runtime notifications unavailable; using recovery polling: %s", exc)
+        dispatching.set()
+        health.registered()
+    except BaseException:
+        await stop_heartbeat()
+        if runtime_listener_task is not None:
+            runtime_listener_task.cancel()
+            await asyncio.gather(runtime_listener_task, return_exceptions=True)
+        await stop_runtime_listener(runtime_listener)
+        await run_control_in_thread(manager.shutdown_all)
+        await run_control_in_thread(snapshot_notifier.close)
+        await stop_registration()
+        raise
+
     request_worker_count = compute_request_worker_count()
     # Keep claim transactions below one shared control-plane budget. A browser
     # burst is durable queue work, not a reason to create one claim per tab.
@@ -396,7 +432,7 @@ async def _wait_for_coordinator_generation(stop_event: asyncio.Event, client: Wo
         try:
             return await client.get_coordinator_generation_async()
         except BackendWorkerRpcError as exc:
-            if exc.error_code not in {"UNAVAILABLE", "DEADLINE_EXCEEDED"}:
+            if exc.error_code not in _TRANSIENT_COORDINATOR_RPC_CODES:
                 raise
             logger.info("Runtime coordinator unavailable; worker manager waiting to connect: %s", exc.error)
         if not await _stopped_within(stop_event, retry_seconds):
@@ -414,7 +450,7 @@ async def _watch_coordinator_generation(
         try:
             active_generation = await client.get_coordinator_generation_async()
         except BackendWorkerRpcError as exc:
-            if exc.error_code not in {"UNAVAILABLE", "DEADLINE_EXCEEDED"}:
+            if exc.error_code not in _TRANSIENT_COORDINATOR_RPC_CODES:
                 logger.warning("Worker coordinator generation check failed permanently: %s", exc.error)
                 generation_stop_event.set()
                 return
@@ -428,6 +464,47 @@ async def _watch_coordinator_generation(
         await _stopped_within(process_stop_event, _COORDINATOR_GENERATION_POLL_SECONDS)
 
 
+def _coordinator_generation_guard(
+    client: WorkerRuntimeClient,
+    generation: int,
+    *,
+    stopped: threading.Event,
+    manager_guard: Callable[[], None] | None = None,
+) -> Callable[[], None]:
+    """Return the ownership proof that precedes every Docker mutation and lifecycle RPC.
+
+    Each attempt proves this process still holds the manager lease, then that
+    the coordinator generation it works for is still the active one. A slow,
+    restarting or overloaded coordinator leaves ownership unconfirmed rather
+    than lost: the caller blocks, retrying with capped backoff, until the
+    coordinator confirms it, answers authoritatively that it is stale, or the
+    generation stops. Nothing is mutated while ownership is unconfirmed.
+    """
+
+    def guard() -> None:
+        delay = _COORDINATOR_GUARD_RETRY_INITIAL_SECONDS
+        while True:
+            if manager_guard is not None:
+                manager_guard()
+            try:
+                client.assert_coordinator_generation(generation)
+                return
+            except BackendWorkerRpcError as exc:
+                if exc.error_code not in _TRANSIENT_COORDINATOR_RPC_CODES:
+                    raise
+                logger.warning(
+                    "Coordinator generation is unconfirmed; holding the mutation and retrying in %.2fs generation=%s: %s",
+                    delay,
+                    generation,
+                    exc.error,
+                )
+                if stopped.wait(delay):
+                    raise
+            delay = min(delay * 2, _COORDINATOR_GUARD_RETRY_MAX_SECONDS)
+
+    return guard
+
+
 async def _run_worker_manager_generation(
     process_stop_event: asyncio.Event,
     client: WorkerRuntimeClient,
@@ -436,15 +513,17 @@ async def _run_worker_manager_generation(
     manager_guard: Callable[[], None] | None = None,
     health: DispatcherHealth | None = None,
 ) -> None:
-    def runtime_guard() -> None:
-        # Every Docker mutation and lifecycle RPC first proves this process
-        # still holds the manager lease, then that the coordinator generation
-        # it works for is still the active one.
-        if manager_guard is not None:
-            manager_guard()
-        client.assert_coordinator_generation(generation)
-
     generation_stop_event = asyncio.Event()
+    # Guards block in Docker and control threads; this releases any still
+    # waiting for ownership as soon as the generation stops.
+    guard_stopped = threading.Event()
+    runtime_guard = _coordinator_generation_guard(client, generation, stopped=guard_stopped, manager_guard=manager_guard)
+
+    async def release_guards_on_stop() -> None:
+        await generation_stop_event.wait()
+        guard_stopped.set()
+
+    guard_release_task = asyncio.create_task(release_guards_on_stop(), name=f"worker-generation-guard-release-{generation}")
     runtime_task = asyncio.create_task(
         run_worker_manager_runtime(
             stop_event=generation_stop_event,
@@ -475,10 +554,11 @@ async def _run_worker_manager_generation(
         primary_error = exc
     finally:
         generation_stop_event.set()
-        for task in (monitor_task, process_stop_task):
+        guard_stopped.set()
+        for task in (monitor_task, process_stop_task, guard_release_task):
             if not task.done():
                 task.cancel()
-        results = await asyncio.gather(runtime_task, monitor_task, process_stop_task, return_exceptions=True)
+        results = await asyncio.gather(runtime_task, monitor_task, process_stop_task, guard_release_task, return_exceptions=True)
 
     if primary_error is not None:
         raise primary_error

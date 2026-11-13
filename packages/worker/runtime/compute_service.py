@@ -44,7 +44,7 @@ from runtime.domain.compute import schemas as compute_schemas
 from runtime.domain.compute.base import ComputeWorker
 from runtime.domain.compute.schemas import BuildStatus, BuildTabStatus, ComputeRunStatus
 from runtime.domain.compute_worker_runs.schemas import ComputeWorkerRunExecutionCategory, ComputeWorkerRunKind, ComputeWorkerRunStatus
-from runtime.domain.datasource.source_types import DataSourceType
+from runtime.domain.datasource.source_types import DataSourceType, datasource_read_selection
 from runtime.exceptions import (
     AppError,
     ComputeWorkerShutdownError,
@@ -862,7 +862,11 @@ def _get_additional_datasources(
     steps: list[dict],
     analysis_pipeline: dict,
 ) -> dict[str, dict]:
-    """Extract and fetch additional datasources referenced in pipeline steps (e.g., for joins)."""
+    """Extract and fetch additional datasources referenced in pipeline steps (e.g., for joins).
+
+    ``analysis_pipeline`` is the request's execution pipeline (``_StepRequest.pipeline``),
+    whose tab datasources already carry worker-resolved config.
+    """
     steps = apply_steps(steps)
     additional: dict[str, dict] = {}
     pipeline_id = analysis_pipeline.get("analysis_id")
@@ -947,45 +951,79 @@ def _resolve_pipeline_datasource_config(
     pipeline: dict,
     datasource: dict,
 ) -> dict:
+    """Read config for a tab datasource of an execution pipeline (see ``_execution_pipeline``)."""
     datasource_id = datasource.get("id")
     if not datasource_id:
         raise ValueError("analysis_pipeline tab missing datasource.id")
-    overrides = datasource.get("config")
-    if not isinstance(overrides, dict):
+    config = datasource.get("config")
+    if not isinstance(config, dict):
         raise ValueError("analysis_pipeline tab datasource.config must be a dict")
-    branch = overrides.get("branch")
+    branch = config.get("branch")
     if not isinstance(branch, str) or not branch.strip():
         raise ValueError("analysis_pipeline tab datasource.config.branch is required")
     analysis_tab_id = datasource.get("analysis_tab_id")
-    output_to_tab = _pipeline_output_to_tab_id(pipeline)
     if analysis_tab_id:
         analysis_id = pipeline.get("analysis_id")
         if not analysis_id:
             raise ValueError("analysis_pipeline analysis_id is required for analysis sources")
-        return _analysis_source_config(analysis_id, analysis_tab_id, overrides)
-    if datasource_id in output_to_tab:
-        analysis_id = pipeline.get("analysis_id")
-        if not analysis_id:
-            raise ValueError("analysis_pipeline analysis_id is required for analysis outputs")
-        return _analysis_source_config(analysis_id, output_to_tab[datasource_id], overrides)
+        return _analysis_source_config(analysis_id, analysis_tab_id, config)
+    source_type = datasource.get("source_type")
+    if not source_type:
+        raise ValueError(f"analysis_pipeline missing datasource config for {datasource_id}")
+    return {"source_type": source_type, **config}
+
+
+def _stored_datasource_config(datasource_id: str) -> dict | None:
+    """Stored source type and config of a datasource; ``None`` when it does not exist."""
+    from runtime.exceptions import StaleComputeInputError
     from runtime.worker_runtime_client import frozen_datasource_metadata
 
-    frozen = frozen_datasource_metadata(get_namespace(), datasource_id)
-    if frozen is not None:
-        selectors = {"branch", "snapshot_id", "snapshot_timestamp_ms", "time_travel_snapshot_id", "time_travel_snapshot_timestamp_ms", "reader"}
-        selection = {key: value for key, value in overrides.items() if key in selectors}
-        return {"source_type": frozen.source_type, **(frozen.config or {}), **selection}
-    source_type = datasource.get("source_type")
-    if isinstance(source_type, str) and source_type.strip():
-        return {"source_type": source_type, **overrides}
-    metadata = client_from_env().datasource_metadata(namespace=get_namespace(), datasource_id=datasource_id)
+    try:
+        metadata = frozen_datasource_metadata(get_namespace(), datasource_id)
+    except StaleComputeInputError:
+        # Absent from the request's frozen inputs: the datasource did not exist when it was queued.
+        return None
+    if metadata is None:
+        metadata = client_from_env().datasource_metadata(namespace=get_namespace(), datasource_id=datasource_id)
     if not metadata.found or metadata.source_type is None or metadata.config is None:
-        raise ValueError(f"analysis_pipeline missing datasource config for {datasource_id}")
-    return {
-        "source_type": metadata.source_type,
-        **metadata.config,
-        **overrides,
-    }
+        return None
+    return {**metadata.config, "source_type": metadata.source_type}
+
+
+def _execution_pipeline(pipeline: dict) -> dict:
+    """Return ``pipeline`` with every tab datasource reduced to worker-owned config.
+
+    Request tab datasources are untrusted: a request could otherwise repoint a
+    stored datasource (``connection_string``, ``query``, file paths) at other
+    data, e.g. an onboarded internal Postgres table at any other application
+    table. Stored datasources get their stored source type and config, analysis
+    sources only their upstream tab, and in both cases only read selectors
+    (branch, snapshot, reader) come from the request. The engine loads embedded
+    upstream tabs from these payloads as-is. Each stored datasource is resolved
+    once; a missing one keeps no source type, so loading its tab fails.
+    """
+    output_to_tab = _pipeline_output_to_tab_id(pipeline)
+    stored: dict[str, dict | None] = {}
+    tabs: list[object] = []
+    for tab in pipeline.get("tabs", []):
+        datasource = tab.get("datasource") if isinstance(tab, dict) else None
+        if not isinstance(datasource, dict):
+            tabs.append(tab)
+            continue
+        datasource_id = str(datasource.get("id") or "")
+        overrides = datasource.get("config")
+        selection = datasource_read_selection(overrides if isinstance(overrides, dict) else None)
+        analysis_tab_id = datasource.get("analysis_tab_id") or output_to_tab.get(datasource_id)
+        if analysis_tab_id:
+            resolved = {**datasource, "analysis_tab_id": analysis_tab_id, "source_type": "analysis", "config": selection}
+        else:
+            if datasource_id not in stored:
+                stored[datasource_id] = _stored_datasource_config(datasource_id) if datasource_id else None
+            config = dict(stored[datasource_id] or {})
+            source_type = config.pop("source_type", None)
+            resolved = {**datasource, "source_type": source_type, "config": {**config, **selection}}
+        tabs.append({**tab, "datasource": resolved})
+    return {**pipeline, "tabs": tabs}
 
 
 def _resolve_step_source_config(
@@ -1064,6 +1102,8 @@ class _StepRequest:
     datasource_config: dict
     steps: list[dict]
     target_step_id: str
+    # The request pipeline with worker-resolved tab datasources; engine inputs read from this.
+    pipeline: dict
 
 
 def _resolve_pipeline_request(
@@ -1086,7 +1126,9 @@ def _resolve_pipeline_request(
 
     steps = selected.get("steps", [])
 
-    merged = _resolve_pipeline_datasource_config(pipeline, datasource)
+    execution_pipeline = _execution_pipeline(pipeline)
+    selected_index = next(index for index, tab in enumerate(pipeline["tabs"]) if tab is selected)
+    merged = _resolve_pipeline_datasource_config(execution_pipeline, execution_pipeline["tabs"][selected_index]["datasource"])
     pipeline_analysis_id = pipeline.get("analysis_id")
     pipeline_analysis_id = str(pipeline_analysis_id) if pipeline_analysis_id is not None else None
     if (
@@ -1094,7 +1136,7 @@ def _resolve_pipeline_request(
         and DataSourceType.read(merged.get("source_type"), default=None) == DataSourceType.ANALYSIS
         and str(merged.get("analysis_id")) == pipeline_analysis_id
     ):
-        merged = {**merged, "analysis_pipeline": pipeline}
+        merged = {**merged, "analysis_pipeline": execution_pipeline}
 
     resolved_target = resolve_applied_target(steps, target_step_id)
     resolved_analysis_id = pipeline_analysis_id if pipeline_analysis_id is not None else analysis_id
@@ -1107,6 +1149,7 @@ def _resolve_pipeline_request(
         datasource_config=merged,
         steps=steps,
         target_step_id=resolved_target,
+        pipeline=execution_pipeline,
     )
 
 
@@ -1179,7 +1222,7 @@ def preview_step(
             idempotency_key=request_id,
         )
 
-    additional_datasources = _get_additional_datasources(preview_steps, analysis_pipeline)
+    additional_datasources = _get_additional_datasources(preview_steps, request.pipeline)
     offset = (page - 1) * row_limit
     preview_resource_summary: dict[str, int | None] = {}
     result_data: dict | None = None
@@ -1315,7 +1358,7 @@ def get_step_schema(
         job_id = engine.get_schema(
             datasource_config=request.datasource_config,
             steps=schema_steps,
-            additional_datasources=_get_additional_datasources(schema_steps, analysis_pipeline),
+            additional_datasources=_get_additional_datasources(schema_steps, request.pipeline),
         )
         result_data = await_compute_worker_result(engine, job_id=job_id)
     _raise_engine_failure(result_data, operation="schema", datasource_id=request.datasource_id, failure_prefix="Schema fetch")
@@ -1377,7 +1420,7 @@ def get_step_row_count(
             job_id = engine.get_row_count(
                 datasource_config=request.datasource_config,
                 steps=count_steps,
-                additional_datasources=_get_additional_datasources(count_steps, analysis_pipeline),
+                additional_datasources=_get_additional_datasources(count_steps, request.pipeline),
             )
             result_data = await_compute_worker_result(engine, job_id=job_id)
         _raise_engine_failure(result_data, operation="row_count", datasource_id=request.datasource_id, failure_prefix="Row count")
@@ -1465,7 +1508,7 @@ def export_data(
             if build_id is not None
             else default_stateless_compute_worker_identity(_pipeline_analysis_id(analysis_pipeline))
         )
-    additional_datasources = _get_additional_datasources(export_steps, analysis_pipeline)
+    additional_datasources = _get_additional_datasources(export_steps, request.pipeline)
     source_metadata = client_from_env().datasource_metadata(namespace=get_namespace(), datasource_id=datasource_id)
     source_datasource_name = source_metadata.name if source_metadata.found else None
 
@@ -1817,7 +1860,7 @@ def download_step(
         },
         request.datasource_config,
     )
-    additional_datasources = _get_additional_datasources(download_steps, analysis_pipeline)
+    additional_datasources = _get_additional_datasources(download_steps, request.pipeline)
     export_fmt = get_export_format(export_format)
     download_name = f"{filename}{export_fmt.extension}"
 

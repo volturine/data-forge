@@ -2,12 +2,17 @@ from __future__ import annotations
 
 import asyncio
 import threading
+import uuid
+from datetime import UTC, datetime
 from io import BytesIO
+from types import SimpleNamespace
 
 import pytest
 from fastapi import HTTPException, UploadFile
 
+from modules.compute import executor_client
 from modules.datasource import routes
+from modules.datasource.preflight import ExcelPreflight
 
 
 @pytest.mark.asyncio
@@ -148,6 +153,10 @@ async def test_failed_datasource_creation_returns_server_error(monkeypatch: pyte
     async def fail_creation(**_kwargs):
         raise RuntimeError('datasource creation failed')
 
+    async def compute_available() -> None:
+        return None
+
+    monkeypatch.setattr(routes, 'require_compute_available', compute_available)
     monkeypatch.setattr(routes, '_stage_upload_to_object_store', stage_upload)
     monkeypatch.setattr(routes, 'create_remote_file_datasource', fail_creation)
 
@@ -165,3 +174,141 @@ async def test_failed_datasource_creation_returns_server_error(monkeypatch: pyte
 
     assert raised.value.status_code == 500
     assert staged_paths == [source_path]
+
+
+@pytest.mark.asyncio
+async def test_upload_is_refused_before_staging_when_compute_is_unavailable(monkeypatch: pytest.MonkeyPatch) -> None:
+    async def stage_upload(_file, _target_name: str) -> str:
+        raise AssertionError('an upload compute cannot read must not be copied to object storage')
+
+    monkeypatch.setattr(executor_client, '_worker_manager_recently_seen', _no_worker_manager)
+    monkeypatch.setattr(routes, '_stage_upload_to_object_store', stage_upload)
+
+    with pytest.raises(HTTPException) as raised:
+        await routes.upload_file(
+            file=UploadFile(file=BytesIO(b'name\nvalue\n'), filename='data.csv'),
+            name='published',
+            delimiter=',',
+            quote_char='"',
+            has_header=True,
+            skip_rows=0,
+            encoding='utf8',
+            user=None,
+        )
+    assert raised.value.status_code == 503
+
+    with pytest.raises(HTTPException) as raised:
+        await routes.preflight_excel(file=UploadFile(file=BytesIO(b'PK\x03\x04' + b'\x00' * 8), filename='book.xlsx'))
+    assert raised.value.status_code == 503
+
+
+@pytest.mark.asyncio
+async def test_confirm_keeps_the_staged_preflight_when_compute_is_unavailable(monkeypatch: pytest.MonkeyPatch) -> None:
+    cleared: list[tuple[str, bool]] = []
+    preflight_id = str(uuid.uuid4())
+
+    async def get_preflight(_preflight_id: str) -> ExcelPreflight:
+        return ExcelPreflight(
+            source_path='s3://analytics/uploads/book.xlsx',
+            sheets=['Sheet1'],
+            tables={},
+            named_ranges=[],
+            created_at=datetime.now(UTC),
+            delete_source=True,
+        )
+
+    async def clear_preflight(cleared_id: str, *, delete_source: bool = True) -> None:
+        cleared.append((cleared_id, delete_source))
+
+    monkeypatch.setattr(executor_client, '_worker_manager_recently_seen', _no_worker_manager)
+    monkeypatch.setattr(routes, 'get_preflight', get_preflight)
+    monkeypatch.setattr(routes, 'clear_preflight', clear_preflight)
+
+    with pytest.raises(HTTPException) as raised:
+        await routes.confirm_excel(
+            preflight_id=preflight_id,
+            name='book',
+            description=None,
+            sheet_name=None,
+            start_row=0,
+            start_col=0,
+            end_col=0,
+            end_row=None,
+            has_header=True,
+            table_name=None,
+            named_range=None,
+            cell_range=None,
+            user=SimpleNamespace(id='user-1'),
+        )
+
+    assert raised.value.status_code == 503
+    # The retry needs the preflight and its source; expiry still owns cleanup.
+    assert cleared == []
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize(
+    ('create_error', 'keeps_preflight'),
+    [
+        # Refused before staging, or staged and then retired because the
+        # manager went away (both raise ComputeUnavailableError). The create
+        # never takes over the source, so the preflight still owns it for a
+        # retry, and the retired create cannot complete late.
+        pytest.param(executor_client.ComputeUnavailableError(), True, id='compute-unavailable'),
+        # The create ran and failed; the preflight is spent.
+        pytest.param(HTTPException(status_code=400, detail='Selected range is empty'), False, id='create-failed'),
+    ],
+)
+async def test_confirm_keeps_the_preflight_only_when_compute_was_unavailable(
+    monkeypatch: pytest.MonkeyPatch, create_error: HTTPException, keeps_preflight: bool
+) -> None:
+    cleared: list[tuple[str, bool]] = []
+    preflight_id = str(uuid.uuid4())
+
+    async def get_preflight(_preflight_id: str) -> ExcelPreflight:
+        return ExcelPreflight(
+            source_path='s3://analytics/uploads/book.xlsx',
+            sheets=['Sheet1'],
+            tables={},
+            named_ranges=[],
+            created_at=datetime.now(UTC),
+            delete_source=True,
+        )
+
+    async def clear_preflight(cleared_id: str, *, delete_source: bool = True) -> None:
+        cleared.append((cleared_id, delete_source))
+
+    async def resolve_selection(**_kwargs) -> dict[str, object]:
+        return {'sheet_name': 'Sheet1', 'start_row': 0, 'start_col': 0, 'end_col': 1, 'detected_end_row': 9}
+
+    async def create_datasource(**_kwargs):
+        raise create_error
+
+    monkeypatch.setattr(routes, 'get_preflight', get_preflight)
+    monkeypatch.setattr(routes, 'clear_preflight', clear_preflight)
+    monkeypatch.setattr(routes, 'execute_excel_preflight', resolve_selection)
+    monkeypatch.setattr(routes, 'create_remote_file_datasource', create_datasource)
+
+    with pytest.raises(HTTPException) as raised:
+        await routes.confirm_excel(
+            preflight_id=preflight_id,
+            name='book',
+            description=None,
+            sheet_name=None,
+            start_row=0,
+            start_col=0,
+            end_col=0,
+            end_row=None,
+            has_header=True,
+            table_name=None,
+            named_range=None,
+            cell_range=None,
+            user=SimpleNamespace(id='user-1'),
+        )
+
+    assert raised.value.status_code == create_error.status_code
+    assert cleared == ([] if keeps_preflight else [(preflight_id, True)])
+
+
+async def _no_worker_manager() -> bool:
+    return False

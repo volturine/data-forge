@@ -1,5 +1,6 @@
 """Tests for backend-owned scheduler service."""
 
+import json
 import uuid
 from datetime import UTC, datetime, timedelta
 from typing import Any
@@ -23,6 +24,7 @@ from backend_core.persistence.analysis.models import Analysis, AnalysisDataSourc
 from backend_core.persistence.build_runs.models import BuildRun, BuildRunDatasource
 from backend_core.persistence.datasource.models import DataSource
 from backend_core.persistence.scheduler.models import Schedule
+from backend_core.secrets import MASKED_SECRET
 from backend_core.sqlmodel_typing import col
 from modules.scheduler.commands import create_schedule, delete_schedule, update_schedule
 from modules.scheduler.service import (
@@ -1043,6 +1045,106 @@ class TestEnqueueScheduleRun:
         assert build_run_service.has_active_build_for_datasource(test_db_session, namespace='default', datasource_id=output.id)
         job = build_job_service.get_job_by_build_id(test_db_session, run_id)
         assert job is not None
+
+    def test_enqueue_schedule_does_not_persist_stored_datasource_config(
+        self,
+        test_db_session: Session,
+        analysis_with_output: Analysis,
+        sample_datasource: DataSource,
+    ):
+        secret = 'postgresql://app:hunter2@appdb:5432/app'
+        sample_datasource.config = {
+            **sample_datasource.config,
+            'source': {'source_type': 'database', 'connection_string': secret, 'query': 'SELECT * FROM "default"."user_sessions"'},
+        }
+        output_id = analysis_with_output.pipeline_definition['tabs'][0]['output']['result_id']
+        output = DataSource(
+            id=output_id,
+            name='Analysis Output',
+            source_type='iceberg',
+            config={'analysis_tab_id': 'tab-1'},
+            created_by='analysis',
+            created_by_analysis_id=analysis_with_output.id,
+            is_hidden=True,
+            created_at=datetime.now(UTC),
+        )
+        test_db_session.add(sample_datasource)
+        test_db_session.add(output)
+        test_db_session.commit()
+        schedule = create_schedule(
+            test_db_session,
+            ScheduleCreate(datasource_id=output.id, cron_expression='0 * * * *'),
+        )
+        row = test_db_session.get(Schedule, schedule.id)
+        assert row is not None
+        claim_token, lease_generation = _assign_schedule_claim(row)
+        test_db_session.add(row)
+        test_db_session.commit()
+
+        run_id = enqueue_schedule_run(
+            test_db_session,
+            schedule.id,
+            worker_id='scheduler:test',
+            claim_token=claim_token,
+            lease_generation=lease_generation,
+        )
+
+        run = build_run_service.get_build_run(test_db_session, run_id)
+        assert run is not None
+        pipeline: Any = run.request_json['analysis_pipeline']
+        [tab, *_] = pipeline['tabs']
+        # The worker re-resolves stored location config; the persisted payload keeps only the read selection.
+        assert tab['datasource']['config'] == {'branch': 'master'}
+        assert tab['datasource']['source_type'] == sample_datasource.source_type
+        assert 'hunter2' not in json.dumps(run.request_json)
+
+    def test_build_detail_masks_secrets_in_legacy_request_json(self, test_db_session: Session, analysis_with_output: Analysis):
+        secret = 'postgresql://app:hunter2@appdb:5432/app'
+        run = build_run_service.stage_build_run(
+            test_db_session,
+            build_id=str(uuid.uuid4()),
+            namespace='default',
+            analysis_id=analysis_with_output.id,
+            analysis_name=analysis_with_output.name,
+            request_json={
+                'analysis_pipeline': {
+                    'analysis_id': analysis_with_output.id,
+                    'tabs': [
+                        {
+                            'id': 'tab-1',
+                            'datasource': {
+                                'id': 'source-1',
+                                'source_type': 'iceberg',
+                                'config': {
+                                    'branch': 'master',
+                                    'catalog_uri': secret,
+                                    'source': {'source_type': 'database', 'connection_string': secret, 'query': 'SELECT 1'},
+                                },
+                            },
+                            'steps': [],
+                        }
+                    ],
+                },
+                'tab_id': 'tab-1',
+            },
+            starter_json={'user_id': None, 'display_name': None, 'triggered_by': 'schedule'},
+            status=BuildRunStatus.QUEUED,
+            current_kind=ComputeWorkerRunKind.BUILD.value,
+            created_at=datetime.now(UTC),
+            started_at=datetime.now(UTC),
+        )
+        test_db_session.commit()
+
+        detail = build_run_service.fold_build_detail(test_db_session, run)
+
+        assert detail.request_json is not None
+        masked_pipeline: Any = detail.request_json['analysis_pipeline']
+        config = masked_pipeline['tabs'][0]['datasource']['config']
+        assert config['branch'] == 'master'
+        assert config['catalog_uri'] == MASKED_SECRET
+        assert config['source']['connection_string'] == MASKED_SECRET
+        assert config['source']['query'] == 'SELECT 1'
+        assert 'hunter2' not in json.dumps(detail.request_json)
 
     def test_enqueue_schedule_for_plain_datasource_fails_without_a_reader(self, test_db_session: Session, sample_datasource: DataSource):
         schedule = create_schedule(

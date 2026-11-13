@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+from collections.abc import Mapping
 from typing import ClassVar, Self
 
 from dataforge_protocol import enums_pb2
@@ -79,3 +80,17 @@ class IcebergReader(DomainEnumValue):
 
 IcebergReader.NATIVE = IcebergReader(enums_pb2.ICEBERG_READER_NATIVE)
 IcebergReader.PYICEBERG = IcebergReader(enums_pb2.ICEBERG_READER_PYICEBERG)
+
+
+# Request-time datasource overrides may only select a branch, snapshot, or
+# reader of the stored datasource. Location keys such as ``connection_string``
+# or ``query`` stay owned by the stored config, so a caller cannot repoint an
+# existing datasource at other data (e.g. another internal Postgres table).
+DATASOURCE_READ_SELECTOR_KEYS = frozenset(
+    {"branch", "snapshot_id", "snapshot_timestamp_ms", "time_travel_snapshot_id", "time_travel_snapshot_timestamp_ms", "reader"}
+)
+
+
+def datasource_read_selection(overrides: Mapping[str, object] | None) -> dict[str, object]:
+    """Return only the read-selector keys of request-time datasource overrides."""
+    return {key: value for key, value in (overrides or {}).items() if key in DATASOURCE_READ_SELECTOR_KEYS}

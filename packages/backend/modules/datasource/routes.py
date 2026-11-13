@@ -25,9 +25,11 @@ from backend_core.validation import (
     parse_preflight_id,
 )
 from dataforge_protocol import enums_pb2
-from modules.auth.dependencies import get_current_user
+from modules.auth.dependencies import get_current_user, require_admin
 from modules.auth.models import User
+from modules.auth.service import is_admin_user
 from modules.compute.executor_client import (
+    ComputeUnavailableError,
     compare_iceberg_snapshots as compare_remote_iceberg_snapshots,
     create_database_datasource as create_remote_database_datasource,
     create_file_datasource as create_remote_file_datasource,
@@ -37,6 +39,7 @@ from modules.compute.executor_client import (
     get_datasource_schema as get_remote_datasource_schema,
     ingest_datasource as ingest_remote_datasource,
     json_response,
+    require_compute_available,
 )
 from modules.datasource import schemas, service
 from modules.datasource.preflight import (
@@ -261,6 +264,17 @@ def _list_export_branches(metadata_path: str, current_branch: str | None = None)
     return branches
 
 
+_APPLICATION_DATABASE_ADMIN_ONLY = 'Connections to the application database require the admin account'
+
+
+async def _require_application_database_access(user: User, config: dict) -> None:
+    """Reject a non-admin datasource config that connects to the application database server."""
+    if is_admin_user(user):
+        return
+    if await run_api_blocking(service.InternalPostgresOnboarding.references_internal_connection, config):
+        raise HTTPException(status_code=403, detail=_APPLICATION_DATABASE_ADMIN_ONLY)
+
+
 def _required_datasource_name(name: str) -> str:
     normalized = name.strip()
     if not normalized:
@@ -296,6 +310,8 @@ async def upload_file(
     if not file_type.matches_magic_number(header):
         raise HTTPException(status_code=400, detail='File content does not match extension')
     unique_filename = f'{uuid.uuid4()}{Path(file.filename).suffix.lower()}'
+    # Refuse before copying a large upload to object storage that compute could not read.
+    await require_compute_available()
 
     try:
         file_path = await _stage_upload_to_object_store(file, unique_filename)
@@ -360,6 +376,7 @@ async def upload_bulk(
             status_code=400,
             detail='Bulk upload must use a single file type per batch',
         )
+    await require_compute_available()
 
     owner_id = user.id
     results: list[schemas.BulkUploadResult] = []
@@ -466,6 +483,7 @@ async def preflight_excel(
         raise HTTPException(status_code=400, detail='File content does not match extension')
 
     unique_filename = f'{uuid.uuid4()}{Path(file.filename).suffix.lower()}'
+    await require_compute_available()
     try:
         source_path = await _stage_upload_to_object_store(file, unique_filename)
     except HTTPException:
@@ -655,6 +673,13 @@ async def confirm_excel(
             owner_id=user.id,
         )
     except Exception as e:
+        if isinstance(e, ComputeUnavailableError):
+            # Compute was refused before staging, or the staged create was
+            # retired unfinished (its claim cleared, so it cannot complete
+            # late). This create never takes over the source, so the preflight
+            # still owns it: keep it for a retry; preflight expiry still owns
+            # its cleanup.
+            raise
         await clear_preflight(preflight_key)
         if isinstance(e, AppError | HTTPException):
             raise
@@ -681,6 +706,7 @@ async def connect_datasource(
     source_type = datasource.source_type
     if (error_message := source_type.connect_api_error_message) is not None:
         raise HTTPException(status_code=400, detail=error_message)
+    await _require_application_database_access(user, datasource.config)
 
     owner_id = user.id
     if source_type == DataSourceType.FILE:
@@ -731,7 +757,7 @@ async def connect_datasource(
     )
 
 
-@router.get('/internal-postgres/tables', response_model=list[schemas.InternalPostgresTable])
+@router.get('/internal-postgres/tables', response_model=list[schemas.InternalPostgresTable], dependencies=[Depends(require_admin)])
 @handle_errors(operation='list internal Postgres tables')
 async def list_internal_postgres_tables():
     return await run_api_blocking(run_db, service.list_internal_postgres_tables)
@@ -741,7 +767,7 @@ async def list_internal_postgres_tables():
 @handle_errors(operation='toggle internal Postgres table', value_error_status=400)
 async def toggle_internal_postgres_table(
     request: schemas.InternalPostgresToggleRequest,
-    user: User = Depends(get_current_user),
+    user: User = Depends(require_admin),
 ):
     return await run_api_blocking(run_db, service.toggle_internal_postgres_table, request, user.id)
 
@@ -937,9 +963,14 @@ async def get_column_stats_with_config(
 async def update_datasource(
     datasource_id: DataSourceId,
     update: schemas.DataSourceUpdate,
+    user: User = Depends(get_current_user),
 ):
     """Update a datasource's name or config. Use GET /datasource/{id} to see current values."""
     datasource_id_value = parse_datasource_id(datasource_id)
+    if update.config is not None and not is_admin_user(user):
+        change = await run_api_blocking(run_db, service.datasource_config_change, datasource_id_value, update)
+        if await run_api_blocking(service.config_change_reaches_application_database, change):
+            raise HTTPException(status_code=403, detail=_APPLICATION_DATABASE_ADMIN_ONLY)
     if update.config is None or not any(key in update.config for key in (*_EXCEL_PARSING_KEYS, 'csv_options', 'skip_rows')):
         return await run_api_blocking(run_db, service.update_datasource, datasource_id_value, update)
 

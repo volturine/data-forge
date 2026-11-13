@@ -28,6 +28,7 @@ class FauxDatasourceRuntime:
     def install(self, monkeypatch: pytest.MonkeyPatch) -> None:
         from modules.datasource import preflight, routes
 
+        monkeypatch.setattr(routes, 'require_compute_available', self.require_compute_available)
         monkeypatch.setattr(routes, 'create_remote_file_datasource', self.create_file_datasource)
         monkeypatch.setattr(routes, 'create_remote_database_datasource', self.create_database_datasource)
         monkeypatch.setattr(routes, 'create_remote_iceberg_datasource', self.create_iceberg_datasource)
@@ -42,6 +43,9 @@ class FauxDatasourceRuntime:
         monkeypatch.setattr(routes, 'get_preflight', self.get_preflight)
         monkeypatch.setattr(routes, 'clear_preflight', self.clear_preflight)
         monkeypatch.setattr(routes, 'execute_excel_preflight', self.execute_excel_preflight)
+
+    async def require_compute_available(self) -> None:
+        return None
 
     async def create_preflight(
         self,

@@ -10,7 +10,8 @@ import polars as pl
 from pydantic import BaseModel, ConfigDict, Field
 
 from operations.enums import WithColumnsExprType
-from operations.validation import validate_no_reflection_escape
+from operations.udf_sandbox import udf_polars_namespace
+from operations.validation import validate_no_reflection_escape, validate_udf_attribute_access
 from runtime.domain.compute.base import OperationParams
 
 # Builtins allowed inside UDF code.
@@ -86,8 +87,9 @@ def with_columns(lf: pl.LazyFrame, params: WithColumnsParams, **_) -> pl.LazyFra
             if not expr.code:
                 raise ValueError(f"UDF expression {expr.name!r} is missing its code")
             validate_no_reflection_escape(expr.code, label="UDF code")
+            validate_udf_attribute_access(expr.code, label="UDF code")
             scope: dict[str, Any] = {
-                "pl": pl,
+                "pl": udf_polars_namespace(),
                 "sleep": time.sleep,
                 "__builtins__": _SAFE_BUILTINS,
             }

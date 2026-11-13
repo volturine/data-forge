@@ -710,6 +710,195 @@ def test_with_columns_protocol_udf_number_computes_the_column() -> None:
     assert frame["value_f"].to_list() == [32.0, 212.0]
 
 
+def _run_udf_code(code: str, *, args: list[str] | None = None) -> pl.DataFrame:
+    return run_operation(
+        "with_columns",
+        pl.DataFrame({"value": [1, 2]}).lazy(),
+        {"expressions": [{"name": "out", "type": "udf", "args": args or ["value"], "code": code}]},
+    ).collect()
+
+
+def test_with_columns_udf_can_use_restricted_polars_api() -> None:
+    code = (
+        'doubled = pl.DataFrame({"value": [1, 2]}).select(pl.col("value").cast(pl.Int64) * 2)\n'
+        "numeric = pl.selectors.numeric()\n"
+        "def udf(value):\n"
+        "    return pl.Series([value, value]).sum()\n"
+    )
+
+    assert _run_udf_code(code)["out"].to_list() == [2, 4]
+
+
+@pytest.mark.parametrize(
+    "source",
+    [
+        pytest.param('"/proc/self/environ"', id="local-path"),
+        pytest.param('"file:///etc/passwd"', id="file-url"),
+        pytest.param('"https://example.com/data.csv"', id="http-url"),
+        pytest.param('b"a,b\\n1,2"', id="bytes"),
+        pytest.param('["s3://bucket/a.csv", "/etc/passwd"]', id="mixed-list"),
+    ],
+)
+def test_with_columns_udf_rejects_non_s3_reads(source: str) -> None:
+    with pytest.raises(ValueError, match="UDF code may only read from s3:// paths"):
+        _run_udf_code(f"data = pl.read_csv({source})\ndef udf(value):\n    return value")
+
+
+@pytest.mark.parametrize(
+    ("code", "message"),
+    [
+        pytest.param('pl.DataFrame({"a": [1]}).write_csv("/tmp/out.csv")', "write_csv", id="write"),
+        pytest.param('pl.LazyFrame({"a": [1]}).sink_parquet("/tmp/out.parquet")', "sink_parquet", id="sink"),
+        pytest.param('pl.DataFrame({"a": [1]}).sql("SELECT * FROM read_csv(\'/etc/passwd\')")', "sql", id="sql"),
+        pytest.param('pl.LazyFrame.deserialize("/tmp/plan.bin")', "deserialize", id="deserialize"),
+        pytest.param('pl.col("a")._pyexpr', "_pyexpr", id="private"),
+        pytest.param("import os", "cannot import modules", id="import"),
+        pytest.param('pl.Series(["abc"]).to_arrow()', "to_arrow", id="arrow-interop"),
+        pytest.param("arr.from_buffers(2, offsets, values)", "from_buffers", id="arrow-from-buffers"),
+        pytest.param("pl.Series([1]).to_numpy()", "to_numpy", id="numpy-interop"),
+        pytest.param("pl.DataFrame.with_columns = None", "cannot assign or delete attributes", id="attribute-store"),
+    ],
+)
+def test_with_columns_udf_rejects_forbidden_polars_capabilities(code: str, message: str) -> None:
+    with pytest.raises(ValueError, match=message):
+        _run_udf_code(f"{code}\ndef udf(value):\n    return value")
+
+
+@pytest.mark.parametrize("name", ["Config", "plugins", "SQLContext", "read_database", "api", "io", "scan_pyarrow_dataset"])
+def test_with_columns_udf_polars_omits_unsafe_entry_points(name: str) -> None:
+    with pytest.raises(AttributeError, match=name):
+        _run_udf_code(f"pl.{name}\ndef udf(value):\n    return value")
+
+
+def test_with_columns_udf_reads_s3_with_worker_storage_options(monkeypatch: pytest.MonkeyPatch) -> None:
+    calls: list[tuple[object, dict[str, Any]]] = []
+
+    def fake_scan_parquet(source: object, **kwargs: Any) -> pl.LazyFrame:
+        calls.append((source, kwargs))
+        return pl.DataFrame({"offset": [10]}).lazy()
+
+    monkeypatch.setattr(pl, "scan_parquet", fake_scan_parquet)
+    monkeypatch.setattr("operations.udf_sandbox.polars_storage_options", lambda: {"aws_endpoint_url": "http://object-store:9000"})
+    # Top-level UDF names land in the exec locals, which ``udf`` cannot see; the
+    # read itself still runs once when the code is executed.
+    code = 'lookup = pl.read_parquet("s3://namespace/lookup.parquet")\ndef udf(value):\n    return value'
+
+    assert _run_udf_code(code)["out"].to_list() == [1, 2]
+    assert calls == [("s3://namespace/lookup.parquet", {"storage_options": {"aws_endpoint_url": "http://object-store:9000"}})]
+
+
+def test_with_columns_udf_rejects_caller_storage_options() -> None:
+    with pytest.raises(ValueError, match="cannot override storage_options"):
+        _run_udf_code('data = pl.scan_csv("s3://namespace/a.csv", storage_options={"aws_endpoint_url": "http://evil"})\ndef udf(value):\n    return value')
+
+
+def test_with_columns_udf_rejects_generator_frame_escape() -> None:
+    # A generator that yields its own frame reaches the worker's real builtins
+    # and globals through ``f_back`` without any dunder.
+    code = (
+        "def gen(box):\n"
+        "    yield box[0].gi_frame.f_back\n"
+        "box = []\n"
+        "g = gen(box)\n"
+        "box.append(g)\n"
+        "for fr in g:\n"
+        "    break\n"
+        "outer = fr.f_back\n"
+        "outer.f_builtins['open']('/proc/self/environ').read()\n"
+        "outer.f_globals['pl'].read_csv('/etc/passwd')\n"
+        "def udf(value):\n"
+        "    return value"
+    )
+
+    with pytest.raises(ValueError, match="cannot define generators or coroutines|cannot use forbidden attribute"):
+        _run_udf_code(code)
+
+
+@pytest.mark.parametrize(
+    "code",
+    [
+        pytest.param("def gen():\n    yield 1", id="yield"),
+        pytest.param("def gen():\n    yield from [1]", id="yield-from"),
+        pytest.param("async def run():\n    return 1", id="async-def"),
+        pytest.param("values = [item async for item in items]", id="async-comprehension"),
+    ],
+)
+def test_with_columns_udf_rejects_generators_and_coroutines(code: str) -> None:
+    with pytest.raises(ValueError, match="cannot define generators or coroutines"):
+        _run_udf_code(f"{code}\ndef udf(value):\n    return value")
+
+
+@pytest.mark.parametrize(
+    ("code", "message"),
+    [
+        pytest.param('pl.DataFrame({"a": [1]}).iter_rows().gi_frame', "gi_frame", id="polars-generator-frame"),
+        pytest.param("rows.gi_code", "gi_code", id="generator-code"),
+        pytest.param("coro.cr_frame", "cr_frame", id="coroutine-frame"),
+        pytest.param("agen.ag_frame", "ag_frame", id="async-generator-frame"),
+        pytest.param("trace.tb_frame.f_back", "f_back", id="traceback-frame-back"),
+        pytest.param("trace.tb_next", "tb_next", id="traceback-next"),
+        pytest.param("frame.f_globals", "f_globals", id="frame-globals"),
+        pytest.param("frame.f_builtins", "f_builtins", id="frame-builtins"),
+        pytest.param("code.co_consts", "co_consts", id="code-consts"),
+        pytest.param("int.mro()", "mro", id="mro"),
+        pytest.param('"{0.gi_frame.f_globals[os].environ}".format(rows)', "format", id="str-format-traversal"),
+        pytest.param('"{rows.gi_frame}".format_map(scope)', "format_map", id="str-format-map-traversal"),
+    ],
+)
+def test_with_columns_udf_rejects_frame_introspection_attributes(code: str, message: str) -> None:
+    with pytest.raises(ValueError, match=f"cannot use forbidden attribute: {message}$"):
+        _run_udf_code(f"{code}\ndef udf(value):\n    return value")
+
+
+def test_with_columns_udf_allows_generator_expressions_and_lambdas() -> None:
+    code = "def udf(value):\n    double = lambda item: item * 2\n    return sum(double(item) for item in [value]) + len([item for item in [value]])"
+
+    assert _run_udf_code(code)["out"].to_list() == [3, 5]
+
+
+@pytest.mark.parametrize("option", ["_deletion_files", "_column_mapping", "_table_statistics"])
+def test_with_columns_udf_rejects_private_read_options(option: str) -> None:
+    with pytest.raises(ValueError, match=f"cannot pass private read options: {option}"):
+        _run_udf_code(f'data = pl.scan_parquet("s3://namespace/a.parquet", {option}=None)\ndef udf(value):\n    return value')
+
+
+@pytest.mark.parametrize(
+    ("call", "option"),
+    [
+        pytest.param('pl.read_parquet("s3://namespace/a.parquet", n_threads=2)', "n_threads", id="read-only-option"),
+        pytest.param('pl.read_csv("s3://namespace/a.csv", use_pyarrow=True)', "use_pyarrow", id="pyarrow-option"),
+        pytest.param('pl.scan_csv("s3://namespace/a.csv", columns=["a"])', "columns", id="scan-columns"),
+    ],
+)
+def test_with_columns_udf_rejects_unsupported_read_options(call: str, option: str) -> None:
+    with pytest.raises(ValueError, match=f"Unsupported option for UDF S3 reads: {option}"):
+        _run_udf_code(f"data = {call}\ndef udf(value):\n    return value")
+
+
+@pytest.mark.parametrize(
+    ("columns", "expected"),
+    [
+        pytest.param('["b"]', "b", id="names"),
+        pytest.param("[2, 0]", "c,a", id="indices"),
+        pytest.param('"b"', "b", id="single-name"),
+    ],
+)
+def test_with_columns_udf_read_selects_columns(monkeypatch: pytest.MonkeyPatch, columns: str, expected: str) -> None:
+    monkeypatch.setattr(pl, "scan_parquet", lambda source, **_: pl.DataFrame({"a": [1], "b": [2], "c": [3]}).lazy())
+    monkeypatch.setattr("operations.udf_sandbox.polars_storage_options", dict)
+    code = f'def udf(value):\n    return ",".join(pl.read_parquet("s3://namespace/a.parquet", columns={columns}).columns)'
+
+    assert _run_udf_code(code)["out"].to_list() == [expected, expected]
+
+
+def test_with_columns_udf_read_rejects_invalid_columns(monkeypatch: pytest.MonkeyPatch) -> None:
+    monkeypatch.setattr(pl, "scan_parquet", lambda source, **_: pl.DataFrame({"a": [1]}).lazy())
+    monkeypatch.setattr("operations.udf_sandbox.polars_storage_options", dict)
+
+    with pytest.raises(ValueError, match="columns must be a list of column names or a list of column indices"):
+        _run_udf_code('data = pl.read_parquet("s3://namespace/a.parquet", columns=[True])\ndef udf(value):\n    return value')
+
+
 def test_expression_rejects_dunder_escape() -> None:
     with pytest.raises(ValueError, match="forbidden dunder access"):
         parse_expression('pl.col("age").__class__')

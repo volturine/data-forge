@@ -26,6 +26,7 @@ class UserPublic(BaseModel):
     status: UserStatus
     email_verified: bool
     has_password: bool
+    is_admin: bool
     preferences: dict[str, object]
     providers: list[AuthProviderName]
     created_at: datetime

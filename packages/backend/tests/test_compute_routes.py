@@ -30,6 +30,7 @@ from backend_core.persistence.build_jobs.models import BuildJob
 from backend_core.persistence.build_runs.models import BuildRun
 from backend_core.persistence.datasource.models import DataSource
 from backend_core.persistence.runtime_events.models import RuntimeOutboxEvent, RuntimeOutboxStatus
+from backend_core.secrets import MASKED_SECRET
 from backend_core.sqlmodel_typing import sa
 from dataforge_protocol import compute_pb2, enums_pb2
 from modules.compute import executor_client, routes as compute_routes
@@ -646,6 +647,35 @@ def test_get_build_returns_preview_compute_worker_run_detail(client, test_db_ses
     assert body['duration_ms'] == 123
     assert body['request_json'] == {'target_step_id': 'source'}
     assert body['result_json'] == {'row_count': 2}
+
+
+def test_get_build_masks_secrets_in_compute_worker_run_request(client, test_db_session) -> None:
+    secret = 'postgresql://app:hunter2@appdb:5432/app'
+    created = compute_worker_run_service.create_compute_worker_run(
+        test_db_session,
+        compute_worker_run_service.create_compute_worker_run_payload(
+            analysis_id=None,
+            datasource_id='datasource-1',
+            kind=ComputeWorkerRunKind.PREVIEW,
+            status=ComputeWorkerRunStatus.SUCCESS,
+            request_json={
+                'target_step_id': 'source',
+                'datasource_config': {'branch': 'master', 'source': {'connection_string': secret, 'password': 'hunter2'}},
+                'max_tokens': 5,
+            },
+            result_json={'row_count': 2},
+        ),
+    )
+
+    response = client.get(f'/api/v1/compute/builds/{created.id}')
+
+    assert response.status_code == 200
+    body = response.json()
+    assert body['request_json'] == {
+        'target_step_id': 'source',
+        'datasource_config': {'branch': 'master', 'source': {'connection_string': MASKED_SECRET, 'password': MASKED_SECRET}},
+        'max_tokens': 5,
+    }
 
 
 def test_list_builds_excludes_compute_worker_runs_from_other_namespaces(client, test_db_session) -> None:

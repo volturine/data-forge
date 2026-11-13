@@ -2,6 +2,7 @@ from datetime import UTC, datetime
 
 from backend_core.domain.compute import schemas
 from backend_core.domain.compute_worker_runs.schemas import ComputeWorkerRunKind, ComputeWorkerRunResponseSchema, ComputeWorkerRunStatus
+from backend_core.secrets import mask_secret_fields
 
 
 def compute_worker_run_to_build_lifecycle_status(status: ComputeWorkerRunStatus) -> schemas.BuildLifecycleStatus:
@@ -91,6 +92,6 @@ def compute_worker_run_detail(run: ComputeWorkerRunResponseSchema, *, namespace:
         results=[],
         duration_ms=run.duration_ms,
         error=run.error_message,
-        request_json=dict(run.request_json),
+        request_json=mask_secret_fields(dict(run.request_json)),
         result_json=_result(run),
     )

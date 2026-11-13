@@ -112,7 +112,10 @@ compose files mirror this directory's topology and follow the same registry.
    password and settings encryption key, pins the compute-worker image to the
    release tag, and on Linux sets `DF_DOCKER_GID` from the Docker socket. It
    never overwrites an existing file. To configure by hand instead, copy the
-   template and replace every `replace-with-...` value.
+   template and replace every `replace-with-...` value. The
+   `DF_DEFAULT_USER_*` account is the admin account: only it can onboard
+   internal PostgreSQL tables as datasources, and it signs in with that
+   password only (no OAuth link or password reset).
 2. Set the five image variables to tags published from the same release. The checked deploy path pulls the worker's resolved `COMPUTE_WORKER_IMAGE` before the worker manager starts. Pin it to a `repository@sha256:<digest>` reference when compute workers must stay byte-identical across launches; tags remain accepted for custom compute-worker images with extra libraries.
 3. Set `DF_AUTH_FRONTEND_URL` and `DF_CORS_ORIGINS` to the public HTTPS origin.
    GitHub OAuth derives its callback from the incoming request host, so register

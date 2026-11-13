@@ -1142,6 +1142,43 @@ def test_submit_releases_the_lifecycle_lock_during_the_rpc(monkeypatch) -> None:
     assert lock_free_during_rpc.is_set()
 
 
+def test_submit_waits_for_an_unconfirmed_coordinator_without_the_lifecycle_lock(monkeypatch) -> None:
+    """A guard retrying against an unreachable coordinator must not block health or shutdown callers."""
+    guard_entered = threading.Event()
+    confirm = threading.Event()
+    submitted: list[str] = []
+
+    def unconfirmed_until_released() -> None:
+        guard_entered.set()
+        assert confirm.wait(5)
+
+    engine = DockerComputeWorker(compute_worker_identity(), namespace="tenant-a", coordinator_guard=unconfirmed_until_released)
+    engine._container = _FakeContainer()
+    engine._alive = True
+    engine._token = "token"
+
+    class FakeStub:
+        def SubmitJob(self, request, timeout=None, metadata=None):  # noqa: N802 - gRPC stub name
+            submitted.append(request.job_id)
+            return compute_worker_runtime_pb2.ComputeWorkerJobReference(job_id=request.job_id)
+
+    engine._stub = FakeStub()
+    monkeypatch.setattr(engine, "_watch_job", lambda job_id: None)
+
+    with ThreadPoolExecutor(max_workers=1) as pool:
+        submit = pool.submit(engine._submit, "preview", {})
+        assert guard_entered.wait(2)
+        # Nothing was submitted while ownership is unconfirmed, and the
+        # lifecycle lock stays available to every other caller.
+        assert engine._lock.acquire(timeout=1)
+        engine._lock.release()
+        assert submitted == []
+        confirm.set()
+        job_id = submit.result(timeout=5)
+
+    assert submitted == [job_id]
+
+
 def test_submit_restarts_an_engine_that_was_shut_down(monkeypatch) -> None:
     """A reaped or crashed engine is restarted by the next job, not reported broken."""
     engine = DockerComputeWorker(compute_worker_identity(), namespace="tenant-a")

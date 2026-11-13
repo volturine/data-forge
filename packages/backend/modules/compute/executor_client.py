@@ -18,13 +18,14 @@ from fastapi.exceptions import RequestValidationError
 from pydantic import BaseModel, ValidationError as PydanticValidationError
 from sqlmodel import Session, select
 
-from backend_core import build_datasource_dependencies, compute_requests_service, runtime_ipc
+from backend_core import build_datasource_dependencies, compute_requests_service, runtime_ipc, runtime_workers_service
 from backend_core.api_execution_budget import BoundedThreadPoolExecutor, run_api_blocking, run_in_bounded_executor
 from backend_core.compute_response_recovery import response_recovery
 from backend_core.data_plane_client import client_from_settings
-from backend_core.database import run_db
+from backend_core.database import run_db, run_settings_db
 from backend_core.domain.compute import schemas as compute_schemas
 from backend_core.domain.compute_requests.models import command_from_payload
+from backend_core.domain.runtime_workers.models import RuntimeWorkerKind
 from backend_core.exceptions import AppError, ClientDisconnectedError, PipelineExecutionCancelledError, PipelineExecutionError
 from backend_core.namespace import get_namespace, namespace_scope
 from backend_core.persistence.compute_requests.models import ComputeRequest
@@ -42,7 +43,17 @@ type _PipelineRequest = (
     | compute_schemas.ExportRequest
 )
 _COMPUTE_WORKER_SHUTDOWN_CANCELLATION = 'Compute request cancelled because its compute worker was shut down'
+COMPUTE_UNAVAILABLE_MESSAGE = 'Compute is unavailable right now; try again shortly.'
 _HTTP_DISCONNECT_POLL_SECONDS = 0.5
+# The worker manager heartbeats every few seconds, and a stop also refreshes its
+# registration. A generation restart or takeover stops the old row, reconciles
+# containers, then registers and heartbeats the new one before its warm-reserve
+# wait, so only longer silence means no manager is coming back to claim work.
+_WORKER_MANAGER_GRACE_SECONDS = 180.0
+# How often an admission-bounded request that has not finished rechecks that a
+# manager is live. A live manager with every compute slot busy keeps it queued,
+# and work under a live lease is never cut off.
+_COMPUTE_ADMISSION_RECHECK_SECONDS = 15.0
 logger = logging.getLogger(__name__)
 
 # Pipeline-to-protobuf conversion walks the complete analysis tree and can
@@ -178,6 +189,7 @@ async def _submit_payload(
     datasource_ids: tuple[str, ...] = (),
     request_id: str | None = None,
     source_preflight_id: str | None = None,
+    admission_bounded: bool = False,
 ):
     command = await _run_compute_serialization(command_from_payload, kind, payload)
     return await _submit_and_wait(
@@ -186,7 +198,45 @@ async def _submit_payload(
         request_id=request_id,
         source_preflight_id=source_preflight_id,
         datasource_ids=datasource_ids,
+        admission_bounded=admission_bounded,
     )
+
+
+class ComputeUnavailableError(HTTPException):
+    """503 raised when no worker manager is live or restarting.
+
+    Raised before anything is staged, or once a staged admission-bounded
+    request is retired unclaimed (or with an expired lease). Either way no
+    work ran to completion, so the caller still owns its inputs.
+    """
+
+    def __init__(self) -> None:
+        super().__init__(status_code=503, detail=COMPUTE_UNAVAILABLE_MESSAGE, headers={'Retry-After': '5'})
+
+
+async def _worker_manager_recently_seen() -> bool:
+    return await run_api_blocking(
+        run_settings_db,
+        runtime_workers_service.has_recent_worker,
+        kind=RuntimeWorkerKind.COORDINATOR,
+        within_seconds=_WORKER_MANAGER_GRACE_SECONDS,
+    )
+
+
+async def require_compute_available() -> None:
+    """Refuse with 503 when no worker manager has been live or restarting within the grace window."""
+    if not await _worker_manager_recently_seen():
+        raise ComputeUnavailableError()
+
+
+def _retire_unclaimed_request_in_new_session(request_id: str, namespace: str):
+    with namespace_scope(namespace):
+        return run_db(
+            compute_requests_service.retire_unclaimed_request,
+            request_id,
+            reason=COMPUTE_UNAVAILABLE_MESSAGE,
+            status_code=503,
+        )
 
 
 def _submit(
@@ -333,10 +383,23 @@ async def _submit_and_wait(
     pipeline: compute_schemas.AnalysisPipelinePayload | None = None,
     datasource_ids: tuple[str, ...] = (),
     http_request: Request | None = None,
+    admission_bounded: bool = False,
 ):
+    """Stage one durable request and wait for its terminal state.
+
+    ``admission_bounded`` bounds the wait for compute that is down: the request
+    is refused up front when no worker manager has been live or restarting
+    within the grace window, and once that is no longer true while it is
+    queued, or claimed under a lease that has expired (its manager died), it is
+    retired with a 503. A live but busy manager keeps it queued, and work under
+    a live lease is never cut off.
+    """
+    if admission_bounded:
+        await require_compute_available()
     namespace = get_namespace()
     process_id = os.getpid()
     wait_started = time.monotonic()
+    admission_recheck_at = wait_started + _COMPUTE_ADMISSION_RECHECK_SECONDS if admission_bounded else None
     slow_wait_reported = False
     last_wake_wait_ms: float | None = None
     stage = partial(
@@ -410,6 +473,27 @@ async def _submit_and_wait(
                     (time.monotonic() - wait_started) * 1000,
                 )
                 break
+            if admission_recheck_at is not None and time.monotonic() >= admission_recheck_at:
+                admission_recheck_at = time.monotonic() + _COMPUTE_ADMISSION_RECHECK_SECONDS
+                # A live manager claims queued work as compute slots free up and
+                # renews the leases of work it runs. Without one, a manager that
+                # died after claiming leaves the lease to expire.
+                if not await _worker_manager_recently_seen():
+                    retired = await run_api_blocking(_retire_unclaimed_request_in_new_session, request.id, request.namespace)
+                    if retired is not None:
+                        logger.warning(
+                            'Compute request retired because no worker manager is live '
+                            'durable_request_id=%s http_request_id=%s kind=%s namespace=%s wait_ms=%.1f',
+                            request.id,
+                            http_request_id,
+                            kind,
+                            request.namespace,
+                            (time.monotonic() - wait_started) * 1000,
+                        )
+                        # The retirement committed under the row lock and
+                        # cleared the claim, so no late completion can land.
+                        raise ComputeUnavailableError()
+                    # A claim or a live lease won; keep rechecking until terminal.
             # PostgreSQL NOTIFY wakes this exact request immediately. The
             # shared recovery task checks all pending IDs in one query every
             # five seconds when a notification is lost; do not add a private
@@ -421,9 +505,18 @@ async def _submit_and_wait(
                 # browser that first submitted it. Do not add one disconnect
                 # poller per viewer or let a disconnected leader retire work
                 # that followers may be awaiting.
-                seen_version = await response_recovery.wait_for_wake(request.id, seen_version)
+                response_wait = response_recovery.wait_for_wake(request.id, seen_version)
             else:
-                seen_version = await _wait_for_response_or_disconnect(request.id, seen_version, http_request)
+                response_wait = _wait_for_response_or_disconnect(request.id, seen_version, http_request)
+            if admission_recheck_at is None:
+                seen_version = await response_wait
+            else:
+                # A claim or a lease expiry publishes no response wake; recheck
+                # the request and manager liveness at the next admission recheck.
+                try:
+                    seen_version = await asyncio.wait_for(response_wait, timeout=max(admission_recheck_at - time.monotonic(), 0.0))
+                except TimeoutError:
+                    continue
             last_wake_wait_ms = (time.monotonic() - wake_wait_started) * 1000
             wake_logger = logger.warning if last_wake_wait_ms >= 5_000 else logger.debug
             wake_logger(
@@ -607,6 +700,10 @@ async def create_file_datasource(
             'owner_id': owner_id,
         },
         source_preflight_id=source_preflight_id,
+        # An upload holds its HTTP request open for the create; refuse it
+        # with a clear message rather than queue it behind a manager that is
+        # not running.
+        admission_bounded=True,
     )
     return await _validated_response(datasource_schemas.DataSourceResponse, completed)
 
@@ -635,6 +732,9 @@ async def execute_excel_preflight(
         payload,
         request_id=preflight_id if action == enums_pb2.DATASOURCE_PREFLIGHT_ACTION_INITIAL else None,
         datasource_ids=(datasource_id,) if datasource_id is not None else (),
+        # Every Excel preflight (upload, preview, confirm, bounds update) holds
+        # its HTTP request open on compute, like a file create.
+        admission_bounded=True,
     )
     return await _response_payload(completed)
 

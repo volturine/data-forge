@@ -1,9 +1,14 @@
+import ipaddress
 import logging
 import math
+import socket
 import uuid
+from dataclasses import dataclass
 from datetime import UTC, datetime
 from typing import Any
 
+import psycopg
+from psycopg.conninfo import conninfo_to_dict
 from sqlalchemy import func, inspect, select, text
 from sqlalchemy.orm import defer
 from sqlmodel import Session
@@ -36,6 +41,96 @@ logger = logging.getLogger(__name__)
 
 _INTERNAL_POSTGRES_EXCLUDED_TABLES = {'alembic_version'}
 _INTERNAL_POSTGRES_NAMESPACE_SCHEMA_PREFIX = 'df$tenant$'
+_DEFAULT_POSTGRES_PORT = 5432
+_LOCAL_POSTGRES_HOST_NAMES = frozenset({'', 'localhost', 'localhost.localdomain'})
+
+
+def _ip_address(value: str) -> ipaddress.IPv4Address | ipaddress.IPv6Address | None:
+    try:
+        address = ipaddress.ip_address(value.split('%', 1)[0])
+    except ValueError:
+        return None
+    if isinstance(address, ipaddress.IPv6Address) and address.ipv4_mapped is not None:
+        return address.ipv4_mapped
+    return address
+
+
+def _lookup_host(name: str) -> list[tuple]:
+    return socket.getaddrinfo(name, None)
+
+
+@dataclass(frozen=True, slots=True)
+class _PostgresHost:
+    """One host a PostgreSQL connection string can reach, with its resolved addresses."""
+
+    name: str
+    addresses: frozenset[ipaddress.IPv4Address | ipaddress.IPv6Address]
+
+    @classmethod
+    def resolve(cls, name: str) -> _PostgresHost:
+        normalized = name.strip().lower().rstrip('.')
+        literal = _ip_address(normalized)
+        if literal is not None:
+            return cls(normalized, frozenset({literal}))
+        if normalized in _LOCAL_POSTGRES_HOST_NAMES or normalized.startswith(('/', '@')):
+            return cls(normalized, frozenset())
+        try:
+            infos = _lookup_host(normalized)
+        except OSError, UnicodeError:
+            # Unresolvable here: fall back to comparing the literal host name.
+            return cls(normalized, frozenset())
+        addresses = {_ip_address(str(info[4][0])) for info in infos}
+        return cls(normalized, frozenset(address for address in addresses if address is not None))
+
+    @property
+    def is_local(self) -> bool:
+        # An empty host or a directory is a Unix socket; libpq connects locally.
+        if self.name in _LOCAL_POSTGRES_HOST_NAMES or self.name.startswith(('/', '@')):
+            return True
+        return any(address.is_loopback or address.is_unspecified for address in self.addresses)
+
+    def same_server(self, other: _PostgresHost) -> bool:
+        return self.name == other.name or bool(self.addresses & other.addresses) or (self.is_local and other.is_local)
+
+
+def _postgres_endpoints(connection_string: str) -> list[tuple[_PostgresHost, int]]:
+    """Every (host, port) libpq may connect to for ``connection_string``.
+
+    Parsed with libpq itself so query parameters (``?host=``), multiple hosts,
+    ``hostaddr`` and keyword/value strings resolve as the worker's connection
+    would. An unparseable string cannot connect and reaches no server.
+    """
+    try:
+        params = conninfo_to_dict(DataSource.normalize_connection_string(connection_string.strip()))
+    except psycopg.Error:
+        return []
+    # Without ``host`` (or ``hostaddr``) libpq uses the local Unix socket: ``''``.
+    names = str(params['host']).split(',') if 'host' in params else []
+    names += [name for name in str(params.get('hostaddr') or '').split(',') if name.strip()]
+    ports: set[int] = set()
+    for port in str(params.get('port') or '').split(','):
+        try:
+            ports.add(int(port) if port.strip() else _DEFAULT_POSTGRES_PORT)
+        except ValueError:
+            continue
+    hosts = [_PostgresHost.resolve(name) for name in dict.fromkeys(names or [''])]
+    return [(host, port) for host in hosts for port in ports or {_DEFAULT_POSTGRES_PORT}]
+
+
+def connects_to_application_database_server(connection_string: str) -> bool:
+    """Whether ``connection_string`` reaches the PostgreSQL server holding the application database.
+
+    Compares the server (host and port), not the database name: tenant
+    schemas and every other database on that server share its credentials
+    boundary, so any equivalent spelling of the server counts.
+    """
+    from backend_core.config import settings
+
+    candidates = _postgres_endpoints(connection_string)
+    if not candidates:
+        return False
+    application = _postgres_endpoints(settings.database_url)
+    return any(port == app_port and host.same_server(app_host) for host, port in candidates for app_host, app_port in application)
 
 
 class InternalPostgresOnboarding:
@@ -70,6 +165,13 @@ class InternalPostgresOnboarding:
         from backend_core.config import settings
 
         return DataSource.normalize_connection_string(settings.database_url)
+
+    @classmethod
+    def references_internal_connection(cls, config: dict) -> bool:
+        """Whether a datasource config connects to the application database server."""
+        source = config.get('source')
+        candidates = (config.get('connection_string'), source.get('connection_string') if isinstance(source, dict) else None)
+        return any(isinstance(value, str) and connects_to_application_database_server(value) for value in candidates)
 
     def matching_datasources(self, schema_name: str, table_name: str) -> list[DataSource]:
         query = self.query_for(schema_name, table_name)
@@ -263,6 +365,33 @@ def _coerce_row_count(raw: object | None) -> int | None:
 
 def list_internal_postgres_tables(session: Session) -> list[InternalPostgresTable]:
     return InternalPostgresOnboarding(session).list_tables()
+
+
+def datasource_config_change(session: Session, datasource_id: str, update: DataSourceUpdate) -> tuple[dict, dict] | None:
+    """Return the stored and resulting config when ``update`` changes it, else ``None``.
+
+    Callers check the pair against the application database server outside the
+    session: that check resolves user-supplied hostnames, which must not pin a
+    pooled connection.
+    """
+    if update.config is None:
+        return None
+    datasource = datasource_delete_service.get_active_datasource(session, datasource_id)
+    next_config = {**datasource.config, **update.config}
+    if next_config == datasource.config:
+        return None
+    return datasource.config, next_config
+
+
+def config_change_reaches_application_database(change: tuple[dict, dict] | None) -> bool:
+    """Whether a config change reads, or would read, the application database.
+
+    Onboarded internal tables keep the application connection string, so a
+    config edit (e.g. a new ``query``) could read any other internal table.
+    """
+    if change is None:
+        return False
+    return any(InternalPostgresOnboarding.references_internal_connection(config) for config in change)
 
 
 def toggle_internal_postgres_table(

@@ -34,7 +34,6 @@ from backend_core.api_execution_budget import (
     register_bootstrap_executor_lifecycle,
     run_api_blocking,
 )
-from backend_core.auth_config import settings as auth_settings
 from backend_core.compute_response_recovery import response_recovery
 from backend_core.compute_worker_live import registry as compute_worker_registry
 from backend_core.config import settings
@@ -65,10 +64,8 @@ from backend_core.logging import (
 )
 from backend_core.namespace import namespace_scope, normalize_namespace
 from backend_core.namespace_storage import NAMESPACE_NAME_RULES
-from backend_core.namespaces_service import register_namespace
 from backend_core.runtime_notifications import handle_runtime_payload, recover_runtime_notifications, refresh_build_projections, refresh_lock_projections
 from backend_core.settings_store import seed_settings_from_env
-from modules.auth.dependencies import resolve_session_token
 from modules.udf import service as udf_service
 
 register_settings_bootstrap_hook(seed_settings_from_env)
@@ -658,17 +655,8 @@ def _namespace_registered(session: Session, name: str) -> bool:
     return session.get(RuntimeNamespace, name) is not None
 
 
-def _has_valid_session(request: Request) -> bool:
-    from modules.auth.service import validate_session
-
-    token = resolve_session_token(request)
-    if not token:
-        return False
-
-    def _check(session: Session) -> bool:
-        return validate_session(session, token) is not None
-
-    return run_settings_db(_check)
+def _is_namespace_management_path(path: str) -> bool:
+    return path == '/api/v1/namespaces' or path.startswith('/api/v1/namespaces/')
 
 
 class NamespaceMiddleware:
@@ -698,30 +686,27 @@ class NamespaceMiddleware:
             return
 
         raw = scope_header(scope, b'x-namespace')
+        # Only POST /api/v1/namespaces provisions a namespace (bucket,
+        # credentials, tenant schema) before registering it. Requests never
+        # register namespaces implicitly. The management routes stay reachable
+        # with a stale or invalid header so the picker can list, preview and
+        # create; an invalid header there runs under the default namespace.
+        is_management_request = _is_namespace_management_path(path)
         try:
-            normalize_namespace(raw)
-        except ValueError:
-            await JSONResponse(status_code=400, content={'detail': f'Invalid namespace. {NAMESPACE_NAME_RULES}'})(scope, receive, send)
-            return
-        with namespace_scope(raw):
-            if not auth_settings.auth_required:
-                if not (is_health_request and raw is None):
-                    await run_api_blocking(run_settings_db, register_namespace, raw)
-                await self.app(scope, receive, send)
-                return
             normalized = normalize_namespace(raw)
-            known = normalized == settings.default_namespace or normalized in _KNOWN_NAMESPACES
-            if not known:
-                known = await run_api_blocking(run_settings_db, _namespace_registered, normalized)
-                if known:
-                    _KNOWN_NAMESPACES.add(normalized)
-            request = Request(scope, receive)
-            if not known and not await run_api_blocking(_has_valid_session, request):
-                await JSONResponse(status_code=403, content={'detail': f'Unknown namespace: {normalized}'})(scope, receive, send)
+        except ValueError:
+            if not is_management_request:
+                await JSONResponse(status_code=400, content={'detail': f'Invalid namespace. {NAMESPACE_NAME_RULES}'})(scope, receive, send)
                 return
+            normalized = settings.default_namespace
+        known = normalized == settings.default_namespace or normalized in _KNOWN_NAMESPACES or is_management_request
+        if not known:
+            known = await run_api_blocking(run_settings_db, _namespace_registered, normalized)
             if not known:
-                await run_api_blocking(run_settings_db, register_namespace, raw)
-                _KNOWN_NAMESPACES.add(normalized)
+                await JSONResponse(status_code=404, content={'detail': f'Unknown namespace: {normalized}. Create it first.'})(scope, receive, send)
+                return
+            _KNOWN_NAMESPACES.add(normalized)
+        with namespace_scope(normalized):
             await self.app(scope, receive, send)
 
 

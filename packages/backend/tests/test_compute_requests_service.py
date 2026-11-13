@@ -740,6 +740,61 @@ def test_cancel_disconnected_request_retires_non_shared_engine_work(test_db_sess
     assert compute_requests_service.claim_next_request(test_db_session, worker_id='worker-test') is None
 
 
+@pytest.mark.parametrize(
+    ('state', 'retires'),
+    [
+        pytest.param('queued', True, id='queued'),
+        # Work under a live lease belongs to its manager and is never cut off.
+        pytest.param('live-lease', False, id='claimed-under-live-lease'),
+        # The manager died after claiming; nothing renews the expired lease.
+        pytest.param('expired-lease', True, id='claimed-lease-expired'),
+        # A new manager reclaimed the expired lease first; the fresh lease wins.
+        pytest.param('reclaimed', False, id='reclaimed-after-expiry'),
+    ],
+)
+def test_retire_unclaimed_request_spares_work_under_a_live_lease(test_db_session, state: str, retires: bool) -> None:
+    request = _create_request(
+        test_db_session,
+        namespace='default',
+        kind=enums_pb2.COMPUTE_REQUEST_KIND_CREATE_FILE_DATASOURCE,
+        request_json={'name': 'upload', 'file_path': 's3://data/upload.csv', 'file_type': 'csv', 'options': {}},
+    )
+    if state != 'queued':
+        claimed = compute_requests_service.claim_next_request(test_db_session, worker_id='worker-dead')
+        assert claimed is not None
+        if state in {'expired-lease', 'reclaimed'}:
+            claimed.lease_expires_at = datetime.now(UTC) - timedelta(seconds=1)
+            test_db_session.add(claimed)
+            test_db_session.commit()
+        if state == 'reclaimed':
+            reclaimed = compute_requests_service.claim_next_request(test_db_session, worker_id='worker-new')
+            assert reclaimed is not None and reclaimed.id == request.id
+
+    retired = compute_requests_service.retire_unclaimed_request(
+        test_db_session,
+        request.id,
+        reason='Compute is unavailable right now; try again shortly.',
+        status_code=503,
+    )
+
+    test_db_session.expire_all()
+    current = test_db_session.get(ComputeRequest, request.id)
+    assert current is not None
+    if not retires:
+        assert retired is None
+        assert current.status == enums_pb2.COMPUTE_REQUEST_STATUS_RUNNING
+        assert current.lease_owner == ('worker-new' if state == 'reclaimed' else 'worker-dead')
+        return
+    assert retired is not None
+    assert current.status == enums_pb2.COMPUTE_REQUEST_STATUS_FAILED
+    assert current.lease_owner is None
+    assert compute_requests_service.response_payload(current) == {
+        'error': 'Compute is unavailable right now; try again shortly.',
+        'status_code': 503,
+    }
+    assert compute_requests_service.claim_next_request(test_db_session, worker_id='worker-test') is None
+
+
 def test_empty_claim_does_not_refresh_namespace_work_marker(test_db_session, monkeypatch) -> None:
     def unexpected_refresh(*_args, **_kwargs) -> None:
         raise AssertionError('empty claims must not scan and refresh the durable namespace marker')

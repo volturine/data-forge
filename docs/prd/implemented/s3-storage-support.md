@@ -19,7 +19,8 @@ That is the entire mapping:
 | `default`   | `default`   |
 | `analytics` | `analytics` |
 
-No base name, no suffix, no rewriting. Underscores are allowed (e.g. `team_a`).
+No base name, no suffix, no rewriting. Underscores are not allowed (S3 bucket names cannot
+contain them; use `team-a`).
 Invalid names are rejected.
 
 ### Keys

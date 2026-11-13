@@ -1,4 +1,6 @@
 import asyncio
+import logging
+import uuid
 from concurrent.futures import ThreadPoolExecutor
 from contextlib import contextmanager, nullcontext
 from threading import Barrier, Event
@@ -7,12 +9,15 @@ import pytest
 
 from backend_core.api_execution_budget import BoundedThreadPoolExecutor
 from backend_core.config import settings
+from backend_core.database import run_settings_db
 from backend_core.namespace import (
     get_namespace,
     namespace_database_schema,
     normalize_namespace,
     set_namespace_context,
 )
+from backend_core.namespaces_service import list_runtime_namespaces
+from backend_core.persistence.namespaces.models import RuntimeNamespace
 from modules.namespaces import routes as namespace_routes
 from tests.http_client import TestClient
 
@@ -31,9 +36,13 @@ def test_normalize_namespace_rejects_invalid():
         normalize_namespace('ab')
 
 
-def test_normalize_namespace_allows_underscores():
-    assert normalize_namespace('team_a') == 'team_a'
-    assert normalize_namespace('my_namespace') == 'my_namespace'
+def test_normalize_namespace_rejects_underscores():
+    # Namespace names are used verbatim as S3 bucket names, which forbid underscores.
+    with pytest.raises(ValueError, match='Invalid namespace'):
+        normalize_namespace('team_a')
+    with pytest.raises(ValueError, match='Invalid namespace'):
+        normalize_namespace('my_namespace')
+    assert normalize_namespace('team-a') == 'team-a'
 
 
 def test_set_namespace_context():
@@ -66,6 +75,60 @@ def test_namespaces_endpoint_reads_only_the_runtime_registry(monkeypatch):
 
     assert response.status_code == 200
     assert response.json() == {'namespaces': ['beta', 'default']}
+
+
+@contextmanager
+def _registered_rows(*names: str):
+    def insert(session) -> None:
+        for name in names:
+            session.add(RuntimeNamespace(name=name))
+        session.commit()
+
+    def remove(session) -> None:
+        for name in names:
+            row = session.get(RuntimeNamespace, name)
+            if row is not None:
+                session.delete(row)
+        session.commit()
+
+    run_settings_db(insert)
+    try:
+        yield
+    finally:
+        run_settings_db(remove)
+
+
+def test_list_runtime_namespaces_skips_rows_with_invalid_names(caplog: pytest.LogCaptureFixture) -> None:
+    suffix = uuid.uuid4().hex[:8]
+    valid = f'valid-{suffix}'
+    legacy = f'legacy_{suffix}'
+
+    with _registered_rows(valid, legacy), caplog.at_level(logging.WARNING, logger='backend_core.namespaces_service'):
+        names = run_settings_db(list_runtime_namespaces)
+
+    assert valid in names
+    assert settings.default_namespace in names
+    assert legacy not in names
+    warnings = [record for record in caplog.records if record.levelno == logging.WARNING]
+    assert len(warnings) == 1
+    assert legacy in warnings[0].getMessage()
+
+
+def test_bootstrap_migrates_only_valid_registered_namespaces(monkeypatch: pytest.MonkeyPatch) -> None:
+    from backend_core import database, migrations
+
+    suffix = uuid.uuid4().hex[:8]
+    valid = f'valid-{suffix}'
+    legacy = f'legacy_{suffix}'
+    migrated: list[list[str]] = []
+    monkeypatch.setattr(migrations, 'migrate_runtime', lambda namespaces: migrated.append(list(namespaces)))
+
+    with _registered_rows(valid, legacy):
+        database._bootstrap_postgres()
+
+    assert migrated[0] == [settings.default_namespace]
+    assert valid in migrated[1]
+    assert all(legacy not in batch for batch in migrated)
 
 
 @pytest.mark.asyncio

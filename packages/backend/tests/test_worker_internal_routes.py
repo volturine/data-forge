@@ -25,6 +25,7 @@ from backend_core.domain.compute_requests.models import command_from_payload, re
 from backend_core.domain.compute_worker_instances.models import ComputeWorkerInstanceStatus
 from backend_core.domain.compute_worker_runs.schemas import ComputeWorkerRunKind, ComputeWorkerRunStatus
 from backend_core.domain.datasource.source_types import DataSourceType
+from backend_core.domain.runtime_workers.models import RuntimeWorkerKind
 from backend_core.namespace import get_namespace
 from backend_core.namespace_credentials_service import NamespaceCredentialError
 from backend_core.persistence.datasource.models import DataSource
@@ -34,7 +35,7 @@ from backend_core.persistence.scheduler.models import Schedule
 from backend_core.persistence.telegram.models import TelegramListener, TelegramSubscriber
 from backend_core.persistence.udfs.models import Udf
 from backend_grpc.server import WorkerRuntimeServicer
-from dataforge_protocol import common_pb2, compute_pb2, datasource_pb2, enums_pb2, runtime_coordinator_pb2, worker_runtime_pb2
+from dataforge_protocol import common_pb2, compute_pb2, datasource_pb2, enums_pb2, runtime_coordinator_pb2, scheduler_runtime_pb2, worker_runtime_pb2
 from modules.scheduler.service import reconcile_schedule_run
 
 
@@ -257,8 +258,8 @@ async def test_lease_validation_isolated_from_general_rpc_validation(monkeypatch
     assert backend_grpc_server._validation_executor(f'{backend_grpc_server._WORKER_RUNTIME_SERVICE_PREFIX}HeartbeatWorker') is lease_executor
     assert backend_grpc_server._validation_executor(method) is lease_executor
     generation_assertion = f'{backend_grpc_server._WORKER_RUNTIME_SERVICE_PREFIX}AssertCoordinatorGeneration'
-    assert backend_grpc_server._validation_executor(generation_assertion) is general_executor
-    assert backend_grpc_server._rpc_admission_lane(generation_assertion) is backend_grpc_server._RPC_ADMISSION_LANES['general']
+    assert backend_grpc_server._validation_executor(generation_assertion) is lease_executor
+    assert backend_grpc_server._rpc_admission_lane(generation_assertion) is backend_grpc_server._RPC_ADMISSION_LANES['coordinator']
     assert backend_grpc_server._rpc_admission_lane(method) is backend_grpc_server._RPC_ADMISSION_LANES['critical']
     assert backend_grpc_server._validation_executor(generation_assertion.rsplit('/', 1)[0] + '/GetCoordinatorGeneration') is lease_executor
 
@@ -327,13 +328,14 @@ async def test_generation_assertion_burst_cannot_starve_worker_heartbeat(monkeyp
         lambda _session, *, worker_id, active_jobs: heartbeat_calls.append((worker_id, active_jobs)),
     )
 
-    general_lane = backend_grpc_server._RpcAdmissionLane('general-generation-test', 1, queue_limit=8)
+    guard_lane = backend_grpc_server._RpcAdmissionLane('coordinator-generation-test', 1, queue_limit=8)
     critical_lane = backend_grpc_server._RpcAdmissionLane('critical-heartbeat-test', 1)
     monkeypatch.setattr(
         backend_grpc_server,
         '_RPC_ADMISSION_LANES',
         {
-            'general': general_lane,
+            'general': backend_grpc_server._RpcAdmissionLane('general-test', 1),
+            'coordinator': guard_lane,
             'critical': critical_lane,
             'scheduler': backend_grpc_server._RpcAdmissionLane('scheduler-test', 1),
             'external-io': backend_grpc_server._RpcAdmissionLane('external-test', 1),
@@ -375,14 +377,14 @@ async def test_generation_assertion_burst_cannot_starve_worker_heartbeat(monkeyp
     blocked_call = asyncio.create_task(coordinator_handler.unary_unary(valid_request, cast(Any, Context())))
     try:
         assert await asyncio.to_thread(guard_started.wait, 2)
-        queued_guards = [asyncio.create_task(coordinator_handler.unary_unary(valid_request, cast(Any, Context()))) for _ in range(general_lane.queue_limit)]
+        queued_guards = [asyncio.create_task(coordinator_handler.unary_unary(valid_request, cast(Any, Context()))) for _ in range(guard_lane.queue_limit)]
         for _ in range(100):
-            if general_lane.pending_count == general_lane.queue_limit:
+            if guard_lane.pending_count == guard_lane.queue_limit:
                 break
             await asyncio.sleep(0.01)
-        assert general_lane.active_count == 1
-        assert general_lane.pending_count == general_lane.queue_limit
-        assert backend_grpc_server._rpc_admission_lane(coordinator_method) is general_lane
+        assert guard_lane.active_count == 1
+        assert guard_lane.pending_count == guard_lane.queue_limit
+        assert backend_grpc_server._rpc_admission_lane(coordinator_method) is guard_lane
         assert backend_grpc_server._rpc_admission_lane(heartbeat_method) is critical_lane
 
         heartbeat = worker_runtime_pb2.RuntimeWorkerHeartbeatRequest(worker_id='worker-heartbeat', active_jobs=0)
@@ -393,13 +395,13 @@ async def test_generation_assertion_burst_cannot_starve_worker_heartbeat(monkeyp
         release_guard.set()
         results = await asyncio.gather(blocked_call, *queued_guards)
         assert all(result.generation == generation for result in results)
-        assert guard_calls == general_lane.queue_limit + 1
+        assert guard_calls == guard_lane.queue_limit + 1
 
         stale_context = Context()
         stale_request = runtime_coordinator_pb2.RuntimeCoordinatorGenerationRequest(generation=generation - 1)
         with pytest.raises(RuntimeError, match='FAILED_PRECONDITION: Runtime coordinator generation 6 is fenced by 7'):
             await coordinator_handler.unary_unary(stale_request, cast(Any, stale_context))
-        assert guard_calls == general_lane.queue_limit + 1
+        assert guard_calls == guard_lane.queue_limit + 1
 
         class StaleMetadataContext(Context):
             def invocation_metadata(self):
@@ -410,10 +412,86 @@ async def test_generation_assertion_burst_cannot_starve_worker_heartbeat(monkeyp
 
         with pytest.raises(RuntimeError, match='FAILED_PRECONDITION: Runtime coordinator generation 6 is fenced by 7'):
             await coordinator_handler.unary_unary(valid_request, cast(Any, StaleMetadataContext()))
-        assert guard_calls == general_lane.queue_limit + 1
+        assert guard_calls == guard_lane.queue_limit + 1
     finally:
         release_guard.set()
         await asyncio.gather(blocked_call, *locals().get('queued_guards', []), return_exceptions=True)
+
+
+@pytest.mark.asyncio
+async def test_control_plane_liveness_rpcs_bypass_a_saturated_general_lane(monkeypatch: pytest.MonkeyPatch) -> None:
+    generation = 7
+
+    async def allow_internal_call(_context):
+        return MappingProxyType(dict(_context.invocation_metadata()))
+
+    registrations: list[tuple[str, RuntimeWorkerKind]] = []
+
+    def register_worker(_session, *, worker_id: str, kind: RuntimeWorkerKind, **_kwargs) -> None:
+        registrations.append((worker_id, kind))
+
+    monkeypatch.setattr(backend_grpc_server, 'active_runtime_coordinator_generation', lambda: generation)
+    monkeypatch.setattr(backend_grpc_server, '_require_internal_token', allow_internal_call)
+    monkeypatch.setattr(backend_grpc_server.runtime_worker_service, 'register_worker', register_worker)
+    for runner in ('run_settings_db', 'run_critical_settings_db'):
+        monkeypatch.setattr(backend_grpc_server, runner, lambda function, *args, **kwargs: function(object(), *args, **kwargs))
+    # A zero-capacity, zero-queue general lane rejects every admission, as the
+    # saturated lane did under host load: anything routed through it fails.
+    saturated_general = backend_grpc_server._RpcAdmissionLane('general-saturated-test', 0, queue_limit=0)
+    monkeypatch.setitem(backend_grpc_server._RPC_ADMISSION_LANES, 'general', saturated_general)
+
+    class Context:
+        def invocation_metadata(self):
+            return (
+                (backend_grpc_server._RUNTIME_GENERATION_METADATA_KEY, str(generation)),
+                ('x-internal-token', settings.internal_api_token),
+            )
+
+        def time_remaining(self):
+            return 1.0
+
+        async def abort(self, status, details):
+            raise RuntimeError(f'{status.name}: {details}')
+
+    interceptor = backend_grpc_server._BackendRequestValidationInterceptor()
+    interceptor._validator = cast(Any, SimpleNamespace(validate=lambda _request: None))
+    coordinator_service = runtime_coordinator_pb2.DESCRIPTOR.services_by_name['RuntimeCoordinatorService'].full_name
+    scheduler_service = scheduler_runtime_pb2.DESCRIPTOR.services_by_name['SchedulerRuntimeService'].full_name
+    calls = [
+        (
+            f'/{coordinator_service}/AssertCoordinatorGeneration',
+            backend_grpc_server.RuntimeCoordinatorServicer(lambda: None).AssertCoordinatorGeneration,
+            runtime_coordinator_pb2.RuntimeCoordinatorGenerationRequest(generation=generation),
+        ),
+        (
+            f'/{scheduler_service}/RegisterScheduler',
+            backend_grpc_server.SchedulerRuntimeServicer().RegisterScheduler,
+            scheduler_runtime_pb2.SchedulerRegisterRequest(worker_id='scheduler-1', hostname='host', pid=1, capacity=1),
+        ),
+        (
+            f'{backend_grpc_server._WORKER_RUNTIME_SERVICE_PREFIX}RegisterWorker',
+            WorkerRuntimeServicer().RegisterWorker,
+            worker_runtime_pb2.RuntimeWorkerRegisterRequest(
+                worker_id='worker-manager-1',
+                kind=enums_pb2.RUNTIME_WORKER_KIND_COORDINATOR,
+                hostname='host',
+                pid=1,
+                capacity=1,
+            ),
+        ),
+    ]
+    for method, handler, request in calls:
+
+        async def continuation(_details, handler=handler):
+            return backend_grpc_server.grpc.unary_unary_rpc_method_handler(handler)
+
+        wrapped = await interceptor.intercept_service(continuation, SimpleNamespace(method=method))
+        assert wrapped is not None and wrapped.unary_unary is not None
+        await asyncio.wait_for(cast(Any, wrapped.unary_unary)(request, Context()), timeout=5)
+        assert backend_grpc_server._rpc_admission_lane(method) is not saturated_general
+
+    assert registrations == [('scheduler-1', RuntimeWorkerKind.SCHEDULER), ('worker-manager-1', RuntimeWorkerKind.COORDINATOR)]
+    assert saturated_general.active_count == 0
 
 
 def test_compute_claim_rpc_executor_runs_a_db_pool_bounded_batch(monkeypatch: pytest.MonkeyPatch) -> None:
