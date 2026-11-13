@@ -545,6 +545,15 @@ def transfer_preflight_source(session: Session, *, source_path: str, request_id:
         raise StorageCleanupConflict('Source ownership has already transferred to another consumer')
     if not isinstance(owner, ComputeRequest) or owner.status != enums_pb2.COMPUTE_REQUEST_STATUS_COMPLETED:
         raise StorageCleanupConflict('Preflight source has not completed')
+    # Remember the preflight so a create retired as a retryable 503 can hand
+    # the source back; see ``restore_preflight_source``.
+    retry_owner = {
+        'owner_id': owner.id,
+        'resource_id': event.payload_json['resource_id'],
+        'artifact_name': owner.artifact_name,
+        'artifact_content_type': owner.artifact_content_type,
+        'available_at': aware_utc(event.available_at).isoformat(),
+    }
     owner.artifact_path = None
     owner.artifact_name = None
     owner.artifact_content_type = None
@@ -554,8 +563,72 @@ def transfer_preflight_source(session: Session, *, source_path: str, request_id:
         'owner_kind': StorageCleanupOwner.SOURCE.value,
         'owner_id': request_id,
         'resource_id': request_id,
+        'retry_owner': retry_owner,
     }
     _rearm(session, event)
+
+
+def _retained_preflight_intent(session: Session, *, source_path: str, request_id: str) -> tuple[dict[str, object], dict[str, object]] | None:
+    snapshot = session.get(RuntimeOutboxEvent, _event_id(source_path), populate_existing=True)
+    if snapshot is None or snapshot.kind != STORAGE_CLEANUP_KIND:
+        return None
+    payload = dict(snapshot.payload_json)
+    retry_owner = payload.get('retry_owner')
+    if (
+        payload.get('owner_kind') != StorageCleanupOwner.SOURCE
+        or payload.get('owner_id') != request_id
+        or _phase(payload) != StorageCleanupPhase.TRACKED
+        or not isinstance(retry_owner, dict)
+    ):
+        return None
+    return payload, retry_owner
+
+
+def lock_retained_preflight(session: Session, *, source_path: str, request_id: str) -> None:
+    """Lock the preflight a create took its source from, before the create row.
+
+    Preflight actions lock the preflight before the source intent's owner, so
+    retirement takes the same order ahead of ``restore_preflight_source``.
+    """
+    intent = _retained_preflight_intent(session, source_path=source_path, request_id=request_id)
+    if intent is not None:
+        session.get(ComputeRequest, str(intent[1]['owner_id']), with_for_update=True, populate_existing=True)
+
+
+def restore_preflight_source(session: Session, *, source_path: str, request_id: str) -> None:
+    """Hand a retired create's source back to the preflight it was taken from.
+
+    Runs in the transaction that retires the create with a retryable 503, so
+    the retained preflight owns the source again, with its original expiry,
+    before any cleanup could treat it as a failed create's input. A preflight
+    that is gone or not completed leaves the source to normal cleanup.
+    """
+    intent = _retained_preflight_intent(session, source_path=source_path, request_id=request_id)
+    if intent is None:
+        return
+    payload, retry_owner = intent
+    preflight = session.get(ComputeRequest, str(retry_owner['owner_id']), with_for_update=True, populate_existing=True)
+    event = session.get(RuntimeOutboxEvent, _event_id(source_path), with_for_update=True, populate_existing=True)
+    if event is None or event.payload_json != payload:
+        return
+    if (
+        preflight is None
+        or preflight.kind != enums_pb2.COMPUTE_REQUEST_KIND_DATASOURCE_PREFLIGHT
+        or preflight.status != enums_pb2.COMPUTE_REQUEST_STATUS_COMPLETED
+    ):
+        return
+    preflight.artifact_path = source_path
+    preflight.artifact_name = retry_owner['artifact_name'] if isinstance(retry_owner['artifact_name'], str) else None
+    preflight.artifact_content_type = retry_owner['artifact_content_type'] if isinstance(retry_owner['artifact_content_type'], str) else None
+    session.add(preflight)
+    restored = {key: value for key, value in payload.items() if key != 'retry_owner'}
+    event.payload_json = {
+        **restored,
+        'owner_kind': StorageCleanupOwner.PREFLIGHT.value,
+        'owner_id': preflight.id,
+        'resource_id': retry_owner['resource_id'],
+    }
+    _rearm(session, event, available_at=datetime.fromisoformat(str(retry_owner['available_at'])))
 
 
 def _refresh(session: Session) -> None:

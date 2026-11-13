@@ -676,9 +676,9 @@ async def confirm_excel(
         if isinstance(e, ComputeUnavailableError):
             # Compute was refused before staging, or the staged create was
             # retired unfinished (its claim cleared, so it cannot complete
-            # late). This create never takes over the source, so the preflight
-            # still owns it: keep it for a retry; preflight expiry still owns
-            # its cleanup.
+            # late) and handed the source back to the preflight in that same
+            # transaction. The preflight owns it either way: keep it for a
+            # retry; preflight expiry still owns its cleanup.
             raise
         await clear_preflight(preflight_key)
         if isinstance(e, AppError | HTTPException):
