@@ -182,9 +182,17 @@ async def _load_turn(claim: TurnClaim, app: FastAPI) -> TurnRuntime:
 
 
 async def _fail_claim(claim: TurnClaim, error: str) -> None:
-    fence = {'turn_id': claim.id, 'claim_token': claim.claim_token, 'generation': claim.coordinator_generation}
-    await _database(chat_turn_store.append_event, payload={'type': 'error', 'content': error}, **fence)
-    await _database(chat_turn_store.finish, status=ChatTurnStatus.FAILED, **fence)
+    fence = (claim.id, claim.claim_token, claim.coordinator_generation)
+    await _database(_append_error_event, *fence, error)
+    await _database(_finish_failed, *fence)
+
+
+def _append_error_event(turn_id: str, claim_token: str, generation: int, error: str) -> None:
+    chat_turn_store.append_event(turn_id=turn_id, claim_token=claim_token, generation=generation, payload={'type': 'error', 'content': error})
+
+
+def _finish_failed(turn_id: str, claim_token: str, generation: int) -> None:
+    chat_turn_store.finish(turn_id=turn_id, claim_token=claim_token, generation=generation, status=ChatTurnStatus.FAILED)
 
 
 class ChatTurnConsumer:

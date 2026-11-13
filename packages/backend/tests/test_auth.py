@@ -276,7 +276,7 @@ class TestUserService:
         assert provider.provider_subject == 'guest@example.com'
         assert isinstance(provider.provider_metadata, dict)
         assert provider.provider_metadata['managed_by'] == 'env_default_user'
-        assert verify_password('GuestPass123', cast(str, provider.provider_metadata['password_hash'])) is True
+        assert verify_password('GuestPass123', cast(str, (provider.provider_metadata or {})['password_hash'])) is True
 
     def test_ensure_default_user_uses_postgres_advisory_lock(self) -> None:
         class _Dialect:
@@ -326,7 +326,7 @@ class TestUserService:
         assert provider is not None
         assert provider.provider_subject == 'second@example.com'
         assert isinstance(provider.provider_metadata, dict)
-        assert verify_password('SecondPass123', cast(str, provider.provider_metadata['password_hash'])) is True
+        assert verify_password('SecondPass123', cast(str, (provider.provider_metadata or {})['password_hash'])) is True
 
     def test_ensure_default_user_keeps_email_when_new_env_email_is_taken(
         self,
@@ -359,7 +359,7 @@ class TestUserService:
         assert provider is not None
         assert provider.provider_subject == 'default@example.com'
         assert isinstance(provider.provider_metadata, dict)
-        assert verify_password('ChangedPass123', cast(str, provider.provider_metadata['password_hash'])) is True
+        assert verify_password('ChangedPass123', cast(str, (provider.provider_metadata or {})['password_hash'])) is True
 
     def test_create_user_success(self, auth_db_session: Session) -> None:
         user = create_user(auth_db_session, 'test@example.com', 'Password123', 'Test User')
@@ -1067,7 +1067,7 @@ class TestAuthRoutes:
         ).first()
         assert provider is not None
         assert provider.provider_metadata is not None
-        password_hash = cast(str, provider.provider_metadata['password_hash'])
+        password_hash = cast(str, (provider.provider_metadata or {})['password_hash'])
         assert verify_password('RuntimePass123', password_hash) is True
         assert verify_password('InitialPass123', password_hash) is False
 
@@ -1603,7 +1603,7 @@ class TestAuthRoutes:
                 sa(AuthProvider.provider == AuthProviderName.PASSWORD),
             ),
         ).one()
-        assert verify_password('Takeover123', cast(str, provider.provider_metadata['password_hash'])) is False
+        assert verify_password('Takeover123', cast(str, (provider.provider_metadata or {})['password_hash'])) is False
 
     def test_forgot_password_nonexistent_email_returns_success(
         self,

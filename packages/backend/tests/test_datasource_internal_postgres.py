@@ -523,7 +523,7 @@ class TestConnectsToApplicationDatabaseServer:
                 return [(socket.AF_INET, socket.SOCK_STREAM, 6, '', (addresses[host], 0))]
             raise socket.gaierror(socket.EAI_NONAME, 'unknown host')
 
-        monkeypatch.setattr(service.socket, 'getaddrinfo', fake_getaddrinfo)
+        monkeypatch.setattr(service, '_lookup_host', fake_getaddrinfo)
 
         def use(database_url: str) -> None:
             monkeypatch.setattr(settings, 'database_url', database_url)

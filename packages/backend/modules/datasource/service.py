@@ -55,6 +55,10 @@ def _ip_address(value: str) -> ipaddress.IPv4Address | ipaddress.IPv6Address | N
     return address
 
 
+def _lookup_host(name: str) -> list[tuple]:
+    return socket.getaddrinfo(name, None)
+
+
 @dataclass(frozen=True, slots=True)
 class _PostgresHost:
     """One host a PostgreSQL connection string can reach, with its resolved addresses."""
@@ -71,7 +75,7 @@ class _PostgresHost:
         if normalized in _LOCAL_POSTGRES_HOST_NAMES or normalized.startswith(('/', '@')):
             return cls(normalized, frozenset())
         try:
-            infos = socket.getaddrinfo(normalized, None)
+            infos = _lookup_host(normalized)
         except OSError, UnicodeError:
             # Unresolvable here: fall back to comparing the literal host name.
             return cls(normalized, frozenset())
