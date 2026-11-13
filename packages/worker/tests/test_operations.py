@@ -959,10 +959,11 @@ def test_fill_null_literal_boolean_parses_false_text():
 
 
 def test_fill_null_literal_without_columns_keeps_column_types():
-    frame = pl.DataFrame({"qty": [1, None], "label": [None, "x"]}).lazy()
+    frame = pl.DataFrame({"qty": [1, None], "label": [None, "x"], "empty": [None, None]}).lazy()
 
     result = run_operation("fill_null", frame, {"strategy": "literal", "value": "0", "value_type": "Utf8"}).collect()
 
-    assert result.schema == pl.Schema({"qty": pl.Int64, "label": pl.String})
+    assert result.schema == pl.Schema({"qty": pl.Int64, "label": pl.String, "empty": pl.String})
     assert result["qty"].to_list() == [1, None]
     assert result["label"].to_list() == ["0", "x"]
+    assert result["empty"].to_list() == ["0", "0"]

@@ -1,5 +1,6 @@
 <script lang="ts">
 	import { createQuery, createMutation, hashKey, useQueryClient } from '@tanstack/svelte-query';
+	import type { QueryKey } from '@tanstack/svelte-query';
 	import { afterNavigate, goto } from '$app/navigation';
 	import { onMount } from 'svelte';
 	import { resolve } from '$app/paths';
@@ -40,6 +41,7 @@
 
 	let deletingId = $state<string | null>(null);
 	let mutatingId = $state<string | null>(null);
+	let listsBeforeDelete: [QueryKey, DataSource[] | undefined][] = [];
 	let searchQuery = $state('');
 	let showComparison = $state(false);
 	let snapshotConfig = $state<Record<string, unknown> | null>(null);
@@ -99,7 +101,10 @@
 		},
 		onError: async (_error, failedId) => {
 			if (mutatingId === failedId) mutatingId = null;
-			// confirmDelete hid the row optimistically; bring it back from the server.
+			// confirmDelete hid the row optimistically; restore it even if the
+			// server is unreachable, then reconcile.
+			for (const [key, data] of listsBeforeDelete) queryClient.setQueryData(key, data);
+			listsBeforeDelete = [];
 			await queryClient.invalidateQueries({ queryKey: ['datasources', ns.value] });
 		}
 	}));
@@ -174,6 +179,9 @@
 		if (!deletingId) return;
 		const deletedId = deletingId;
 		mutatingId = deletedId;
+		listsBeforeDelete = queryClient.getQueriesData<DataSource[]>({
+			queryKey: ['datasources', ns.value]
+		});
 		// The API marks a datasource hidden/pending before asynchronous storage
 		// cleanup. Reflect that committed state immediately; waiting for cleanup
 		// would leave a visibly dead row until the request happens to finish.

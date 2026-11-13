@@ -221,3 +221,23 @@ def test_internal_postgres_onboarding_ignores_unrelated_datasource_with_internal
     untouched = test_db_session.get(DataSource, 'user-named-like-internal')
     assert untouched is not None
     assert untouched.is_pending_delete is False
+
+
+def test_list_internal_postgres_tables_recognizes_escaped_identifiers(test_db_session) -> None:
+    onboarding = service.InternalPostgresOnboarding(test_db_session)
+    test_db_session.add(
+        DataSource(
+            id='quoted-table-ds',
+            name='renamed',
+            source_type='database',
+            config={
+                'connection_string': service.InternalPostgresOnboarding.connection_string(),
+                'query': onboarding.query_for('default', 'a"b'),
+            },
+            created_by='import',
+            created_at=datetime.now(UTC),
+        )
+    )
+    test_db_session.commit()
+
+    assert onboarding.query_for('default', 'a"b') in onboarding._onboarded_table_queries()

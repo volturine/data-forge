@@ -110,6 +110,28 @@ test.describe('Datasources – list & management', () => {
 	});
 });
 
+test.describe('Datasources – failed delete', () => {
+	test('a failed delete keeps the row and shows the error', async ({ page, sharedDatasource }) => {
+		await gotoDatasourcesPage(page);
+		const row = page.locator(`[data-ds-row="${sharedDatasource.name}"]`);
+		await expect(row).toBeVisible();
+
+		// Only the DELETE is intercepted; the shared dataset is never deleted.
+		await page.route(`**/api/v1/datasource/${sharedDatasource.id}`, (route) =>
+			route.request().method() === 'DELETE'
+				? route.fulfill({ status: 503, json: { detail: 'Service unavailable' } })
+				: route.continue()
+		);
+
+		await row.locator('button[title="Delete"]').click();
+		const dialog = dialogByHeading(page, /Delete Datasource/i);
+		await dialog.getByRole('button', { name: /^Delete$/ }).click();
+
+		await expect(page.getByText(/Failed to delete datasource/)).toBeVisible();
+		await expect(row).toBeVisible();
+	});
+});
+
 test.describe('Datasources – upload page', () => {
 	test('upload page shows tabs, file input, description fields, and connection string field', async ({
 		page

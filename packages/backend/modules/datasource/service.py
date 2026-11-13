@@ -1,6 +1,5 @@
 import logging
 import math
-import re
 import uuid
 from datetime import UTC, datetime
 from typing import Any
@@ -37,7 +36,6 @@ logger = logging.getLogger(__name__)
 
 _INTERNAL_POSTGRES_EXCLUDED_TABLES = {'alembic_version'}
 _INTERNAL_POSTGRES_NAMESPACE_SCHEMA_PREFIX = 'df$tenant$'
-_INTERNAL_POSTGRES_QUERY_RE = re.compile(r'^SELECT \* FROM "([^"]+)"\."([^"]+)"$')
 
 
 class InternalPostgresOnboarding:
@@ -68,15 +66,6 @@ class InternalPostgresOnboarding:
         return f'Internal PostgreSQL table {cls.display_schema_name(schema_name)}.{table_name}'
 
     @staticmethod
-    def query_schema_and_table(query: str | None) -> tuple[str, str] | None:
-        if not isinstance(query, str):
-            return None
-        match = _INTERNAL_POSTGRES_QUERY_RE.fullmatch(query)
-        if match is None:
-            return None
-        return match.group(1), match.group(2)
-
-    @staticmethod
     def connection_string() -> str:
         from backend_core.config import settings
 
@@ -95,7 +84,7 @@ class InternalPostgresOnboarding:
             matches.append(datasource)
         return matches
 
-    def _onboarded_table_keys(self) -> set[tuple[str, str]]:
+    def _onboarded_table_queries(self) -> set[str]:
         """Load onboarding metadata once for the internal-table listing.
 
         Match on the stored query and connection, like ``matching_datasources``,
@@ -103,21 +92,18 @@ class InternalPostgresOnboarding:
         every datasource for each physical table. Names are user-editable, so
         they never identify an onboarded table.
         """
-        query_sources: set[tuple[str, str]] = set()
+        queries: set[str] = set()
         connection_string = self.connection_string()
         datasources = self.session.execute(select(DataSource)).scalars().all()
         for datasource in datasources:
             query, datasource_connection = datasource.query_and_connection()
-            if datasource_connection != connection_string:
-                continue
-            source = self.query_schema_and_table(query)
-            if source is not None:
-                query_sources.add(source)
-        return query_sources
+            if query is not None and datasource_connection == connection_string:
+                queries.add(query)
+        return queries
 
     def list_tables(self) -> list[InternalPostgresTable]:
         rows: list[InternalPostgresTable] = []
-        query_sources = self._onboarded_table_keys()
+        onboarded_queries = self._onboarded_table_queries()
         bind = self.session.get_bind()
         physical_tables: list[tuple[str, str]]
         if bind.dialect.name == 'postgresql':
@@ -153,7 +139,7 @@ class InternalPostgresOnboarding:
                 InternalPostgresTable(
                     schema_name=schema_name,
                     table_name=table_name,
-                    is_onboarded=(schema_name, table_name) in query_sources,
+                    is_onboarded=self.query_for(schema_name, table_name) in onboarded_queries,
                 ),
             )
         return rows

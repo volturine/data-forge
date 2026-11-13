@@ -54,10 +54,13 @@ def _literal_compatible_columns(lf: pl.LazyFrame, literal: pl.Expr) -> list[str]
     if literal_dtype == pl.Null:
         return schema.names()
     if literal_dtype.is_numeric():
-        return [name for name, dtype in schema.items() if dtype.is_numeric()]
-    if literal_dtype.is_temporal():
-        return [name for name, dtype in schema.items() if dtype.is_temporal()]
-    return [name for name, dtype in schema.items() if dtype == literal_dtype]
+        compatible = [name for name, dtype in schema.items() if dtype.is_numeric()]
+    elif literal_dtype.is_temporal():
+        compatible = [name for name, dtype in schema.items() if dtype.is_temporal()]
+    else:
+        compatible = [name for name, dtype in schema.items() if dtype == literal_dtype]
+    # An all-null column has no values to convert, so it takes any literal.
+    return [name for name, dtype in schema.items() if name in compatible or dtype == pl.Null]
 
 
 def fill_null(lf: pl.LazyFrame, params: FillNullParams, **_) -> pl.LazyFrame:

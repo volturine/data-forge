@@ -1,3 +1,4 @@
+import math
 import uuid
 from datetime import UTC, datetime
 from typing import Any
@@ -122,15 +123,14 @@ _BOUND_PAIRS = (('min_rows', 'max_rows'), ('min_columns', 'max_columns'), ('min'
 
 
 def _number(config: dict[str, Any], key: str) -> float | None:
+    # The worker casts these with int()/float() as stored, so accept only real
+    # finite numbers; text such as "1.0" or "NaN" would break or skip the check.
     value = config.get(key)
-    if value is None or value == '':
+    if value is None:
         return None
-    if isinstance(value, bool):
+    if isinstance(value, bool) or not isinstance(value, int | float) or not math.isfinite(value):
         raise HealthcheckValidationError(f'{key} must be a number', details={'field': key})
-    try:
-        return float(value)
-    except TypeError, ValueError:
-        raise HealthcheckValidationError(f'{key} must be a number', details={'field': key}) from None
+    return float(value)
 
 
 def _validate_config(check_type: HealthCheckType | str, config: dict[str, Any]) -> None:
