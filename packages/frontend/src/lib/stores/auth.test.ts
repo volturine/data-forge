@@ -41,6 +41,7 @@ function makeUser(overrides: Partial<UserPublic> = {}): UserPublic {
 		status: 'active',
 		email_verified: true,
 		has_password: false,
+		is_admin: false,
 		preferences: {},
 		providers: [],
 		created_at: '2025-01-01T00:00:00Z',

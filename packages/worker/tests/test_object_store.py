@@ -11,7 +11,7 @@ from runtime import object_store
 def test_namespace_is_the_bucket() -> None:
     assert object_store.namespace_bucket("default") == "default"
     assert object_store.namespace_bucket("analytics") == "analytics"
-    assert object_store.namespace_bucket("team_a") == "team_a"
+    assert object_store.namespace_bucket("team-a") == "team-a"
 
 
 def test_namespace_bucket_rejects_invalid_names() -> None:
@@ -21,6 +21,9 @@ def test_namespace_bucket_rejects_invalid_names() -> None:
         object_store.namespace_bucket("ab")
     with pytest.raises(ValueError, match="not a valid bucket name"):
         object_store.namespace_bucket("_leading")
+    # S3 bucket names cannot contain underscores.
+    with pytest.raises(ValueError, match="not a valid bucket name"):
+        object_store.namespace_bucket("team_a")
 
 
 def test_object_store_url_is_namespace_bucket_plus_key() -> None:

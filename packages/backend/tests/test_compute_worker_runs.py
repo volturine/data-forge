@@ -4,9 +4,11 @@ from datetime import UTC, datetime, timedelta
 import pytest
 
 from backend_core import build_runs_service, compute_worker_runs_service as compute_worker_run_service
+from backend_core.database import run_settings_db
 from backend_core.domain.build_runs.models import BuildRunStatus
 from backend_core.domain.compute_worker_runs.schemas import ComputeWorkerRunKind, ComputeWorkerRunStatus
 from backend_core.namespace import reset_namespace, set_namespace_context
+from backend_core.namespaces_service import register_namespace
 from backend_core.persistence.compute_worker_runs.models import ComputeWorkerRun
 
 
@@ -446,6 +448,8 @@ def test_compute_worker_runs_http_respects_namespace(client, test_db_session) ->
     finally:
         reset_namespace(default)
 
+    # Requests never register namespaces implicitly; 'beta' must exist first.
+    run_settings_db(register_namespace, 'beta')
     default_response = client.get('/api/v1/compute-worker-runs')
     beta_response = client.get('/api/v1/compute-worker-runs', headers={'X-Namespace': 'beta'})
 

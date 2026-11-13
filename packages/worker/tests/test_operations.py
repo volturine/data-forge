@@ -710,6 +710,85 @@ def test_with_columns_protocol_udf_number_computes_the_column() -> None:
     assert frame["value_f"].to_list() == [32.0, 212.0]
 
 
+def _run_udf_code(code: str, *, args: list[str] | None = None) -> pl.DataFrame:
+    return run_operation(
+        "with_columns",
+        pl.DataFrame({"value": [1, 2]}).lazy(),
+        {"expressions": [{"name": "out", "type": "udf", "args": args or ["value"], "code": code}]},
+    ).collect()
+
+
+def test_with_columns_udf_can_use_restricted_polars_api() -> None:
+    code = (
+        'doubled = pl.DataFrame({"value": [1, 2]}).select(pl.col("value").cast(pl.Int64) * 2)\n'
+        "numeric = pl.selectors.numeric()\n"
+        "def udf(value):\n"
+        "    return pl.Series([value, value]).sum()\n"
+    )
+
+    assert _run_udf_code(code)["out"].to_list() == [2, 4]
+
+
+@pytest.mark.parametrize(
+    "source",
+    [
+        pytest.param('"/proc/self/environ"', id="local-path"),
+        pytest.param('"file:///etc/passwd"', id="file-url"),
+        pytest.param('"https://example.com/data.csv"', id="http-url"),
+        pytest.param('b"a,b\\n1,2"', id="bytes"),
+        pytest.param('["s3://bucket/a.csv", "/etc/passwd"]', id="mixed-list"),
+    ],
+)
+def test_with_columns_udf_rejects_non_s3_reads(source: str) -> None:
+    with pytest.raises(ValueError, match="UDF code may only read from s3:// paths"):
+        _run_udf_code(f"data = pl.read_csv({source})\ndef udf(value):\n    return value")
+
+
+@pytest.mark.parametrize(
+    ("code", "message"),
+    [
+        pytest.param('pl.DataFrame({"a": [1]}).write_csv("/tmp/out.csv")', "write_csv", id="write"),
+        pytest.param('pl.LazyFrame({"a": [1]}).sink_parquet("/tmp/out.parquet")', "sink_parquet", id="sink"),
+        pytest.param('pl.DataFrame({"a": [1]}).sql("SELECT * FROM read_csv(\'/etc/passwd\')")', "sql", id="sql"),
+        pytest.param('pl.LazyFrame.deserialize("/tmp/plan.bin")', "deserialize", id="deserialize"),
+        pytest.param('pl.col("a")._pyexpr', "_pyexpr", id="private"),
+        pytest.param("import os", "cannot import modules", id="import"),
+        pytest.param("pl.DataFrame.with_columns = None", "cannot assign or delete attributes", id="attribute-store"),
+    ],
+)
+def test_with_columns_udf_rejects_forbidden_polars_capabilities(code: str, message: str) -> None:
+    with pytest.raises(ValueError, match=message):
+        _run_udf_code(f"{code}\ndef udf(value):\n    return value")
+
+
+@pytest.mark.parametrize("name", ["Config", "plugins", "SQLContext", "read_database", "api", "io", "scan_pyarrow_dataset"])
+def test_with_columns_udf_polars_omits_unsafe_entry_points(name: str) -> None:
+    with pytest.raises(AttributeError, match=name):
+        _run_udf_code(f"pl.{name}\ndef udf(value):\n    return value")
+
+
+def test_with_columns_udf_reads_s3_with_worker_storage_options(monkeypatch: pytest.MonkeyPatch) -> None:
+    calls: list[tuple[object, dict[str, Any]]] = []
+
+    def fake_scan_parquet(source: object, **kwargs: Any) -> pl.LazyFrame:
+        calls.append((source, kwargs))
+        return pl.DataFrame({"offset": [10]}).lazy()
+
+    monkeypatch.setattr(pl, "scan_parquet", fake_scan_parquet)
+    monkeypatch.setattr("operations.udf_sandbox.polars_storage_options", lambda: {"aws_endpoint_url": "http://object-store:9000"})
+    # Top-level UDF names land in the exec locals, which ``udf`` cannot see; the
+    # read itself still runs once when the code is executed.
+    code = 'lookup = pl.read_parquet("s3://namespace/lookup.parquet")\ndef udf(value):\n    return value'
+
+    assert _run_udf_code(code)["out"].to_list() == [1, 2]
+    assert calls == [("s3://namespace/lookup.parquet", {"storage_options": {"aws_endpoint_url": "http://object-store:9000"}})]
+
+
+def test_with_columns_udf_rejects_caller_storage_options() -> None:
+    with pytest.raises(ValueError, match="cannot override storage_options"):
+        _run_udf_code('data = pl.scan_csv("s3://namespace/a.csv", storage_options={"aws_endpoint_url": "http://evil"})\ndef udf(value):\n    return value')
+
+
 def test_expression_rejects_dunder_escape() -> None:
     with pytest.raises(ValueError, match="forbidden dunder access"):
         parse_expression('pl.col("age").__class__')

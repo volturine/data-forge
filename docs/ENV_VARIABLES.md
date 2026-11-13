@@ -244,7 +244,7 @@ s3://{namespace}/runtime-staging/...
 ```
 
 Namespace names must be valid bucket names (3–63 chars; lowercase letters,
-digits, hyphens, underscores; start and end alphanumeric). Invalid names are
+digits, hyphens; start and end alphanumeric). Invalid names are
 rejected; nothing is rewritten.
 
 `DATA_DIR` remains a local directory for process scratch only.
@@ -351,14 +351,21 @@ rejected explicitly while accepted compute requests remain durable.
 | ----------------------- | --------------------------------------------------- | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
 | `AUTH_REQUIRED`         | `false`                                             | Enables authenticated routes.                                                                                                                                                                                             |
 | `VERIFY_EMAIL_ADDRESS`  | `true`                                              | Require email verification before password login. Set explicitly for production according to the deployment's mail flow.                                                                                                  |
-| `DEFAULT_USER_EMAIL`    | `default@example.com`                               | Default env-managed account email.                                                                                                                                                                                        |
-| `DEFAULT_USER_PASSWORD` | `ChangeMe123`                                       | Must contain upper, lower, and digit, and be at least 8 chars.                                                                                                                                                            |
-| `DEFAULT_USER_NAME`     | `Default User`                                      | Default env-managed account name.                                                                                                                                                                                         |
+| `DEFAULT_USER_EMAIL`    | `default@example.com`                               | Email of the env-managed admin account. This account is the only admin: it alone can list and onboard internal PostgreSQL tables, and it cannot sign in through OAuth or use password reset.                              |
+| `DEFAULT_USER_PASSWORD` | `ChangeMe123`                                       | Admin account password, re-applied at every startup. Must contain upper, lower, and digit, and be at least 8 chars.                                                                                                       |
+| `DEFAULT_USER_NAME`     | `Default User`                                      | Admin account display name.                                                                                                                                                                                               |
 | `AUTH_FRONTEND_URL`     | `http://localhost:5173`                             | Frontend base URL used in verification and password-reset email links. In prod set the public app origin. In dev set the Vite dev-server URL — must match `FRONTEND_PORT` (default `http://localhost:3000`). |
 | `SESSION_MAX_AGE_DAYS`  | `30`                                                | Session lifetime in days.                                                                                                                                                                                                 |
 | `TRUSTED_PROXY_HOPS`    | `0`                                                 | Number of trusted reverse proxies in front of the app. `0` ignores forwarded client IP and scheme headers.                                                                                                               |
 | `GITHUB_CLIENT_ID`      | empty                                               | GitHub OAuth client id.                                                                                                                                                                                                   |
 | `GITHUB_CLIENT_SECRET`  | empty                                               | GitHub OAuth client secret.                                                                                                                                                                                               |
+
+The `DEFAULT_USER_*` account is the deployment's admin account. Listing and
+onboarding internal PostgreSQL tables (which include users and sessions), and
+changing the config of an onboarded internal datasource, require it; other
+accounts get `403 Admin access required`. With `AUTH_REQUIRED=false`, requests
+without a session act as this account, so local single-user mode keeps admin
+access.
 
 GitHub OAuth derives its callback URL and post-login frontend URL from the
 incoming request host. Behind a reverse proxy, set `TRUSTED_PROXY_HOPS` to the

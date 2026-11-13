@@ -5,7 +5,7 @@ from backend_core.api_execution_budget import run_api_blocking
 from backend_core.auth_config import settings as auth_settings
 from backend_core.database import run_settings_db
 from modules.auth.models import User
-from modules.auth.service import get_default_user_id, get_or_seed_default_user, validate_session
+from modules.auth.service import get_default_user_id, get_or_seed_default_user, is_admin_user, validate_session
 
 
 def resolve_session_token(request: HTTPConnection) -> str | None:
@@ -31,6 +31,14 @@ async def get_current_user(request: HTTPConnection) -> User | None:
     user = await _resolve_user(request)
     if user is None:
         raise HTTPException(status_code=401, detail='Not authenticated')
+    return user
+
+
+async def require_admin(user: User | None = Depends(get_current_user)) -> User:
+    # With AUTH_REQUIRED=false anonymous requests resolve to the default
+    # account, so local single-user mode keeps admin access.
+    if user is None or not is_admin_user(user):
+        raise HTTPException(status_code=403, detail='Admin access required')
     return user
 
 

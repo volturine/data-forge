@@ -71,6 +71,14 @@ class InternalPostgresOnboarding:
 
         return DataSource.normalize_connection_string(settings.database_url)
 
+    @classmethod
+    def references_internal_connection(cls, config: dict) -> bool:
+        """Whether a datasource config reads from the application database."""
+        source = config.get('source')
+        candidates = (config.get('connection_string'), source.get('connection_string') if isinstance(source, dict) else None)
+        internal = cls.connection_string()
+        return any(isinstance(value, str) and DataSource.normalize_connection_string(value) == internal for value in candidates)
+
     def matching_datasources(self, schema_name: str, table_name: str) -> list[DataSource]:
         query = self.query_for(schema_name, table_name)
         connection_string = self.connection_string()
@@ -263,6 +271,23 @@ def _coerce_row_count(raw: object | None) -> int | None:
 
 def list_internal_postgres_tables(session: Session) -> list[InternalPostgresTable]:
     return InternalPostgresOnboarding(session).list_tables()
+
+
+def update_changes_internal_postgres_config(session: Session, datasource_id: str, update: DataSourceUpdate) -> bool:
+    """Whether ``update`` changes the config of a datasource that reads the application database.
+
+    Onboarded internal tables keep the application connection string, so a
+    config edit (e.g. a new ``query``) could read any other internal table.
+    """
+    if update.config is None:
+        return False
+    datasource = datasource_delete_service.get_active_datasource(session, datasource_id)
+    next_config = {**datasource.config, **update.config}
+    if next_config == datasource.config:
+        return False
+    return InternalPostgresOnboarding.references_internal_connection(datasource.config) or InternalPostgresOnboarding.references_internal_connection(
+        next_config
+    )
 
 
 def toggle_internal_postgres_table(

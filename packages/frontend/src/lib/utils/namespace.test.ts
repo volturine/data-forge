@@ -5,7 +5,6 @@ describe('normalizeNamespace', () => {
 	test('returns valid lowercase name as-is', () => {
 		expect(normalizeNamespace('outputs')).toBe('outputs');
 		expect(normalizeNamespace('my-namespace')).toBe('my-namespace');
-		expect(normalizeNamespace('my_namespace')).toBe('my_namespace');
 	});
 
 	test('allows digits', () => {
@@ -33,6 +32,11 @@ describe('normalizeNamespace', () => {
 		expect(normalizeNamespace('ns.foo')).toBe('');
 		expect(normalizeNamespace('ns/bar')).toBe('');
 		expect(normalizeNamespace('MyNamespace')).toBe('');
+	});
+
+	test('rejects underscores because S3 bucket names cannot contain them', () => {
+		expect(normalizeNamespace('my_namespace')).toBe('');
+		expect(isValidNamespace('team_a')).toBe(false);
 	});
 
 	test('rejects too-short names', () => {

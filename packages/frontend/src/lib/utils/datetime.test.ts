@@ -26,6 +26,7 @@ function userWithTimezone(timezone: string): UserPublic {
 		status: 'active',
 		email_verified: true,
 		has_password: true,
+		is_admin: false,
 		preferences: { timezone },
 		providers: [],
 		created_at: '2026-01-01T00:00:00Z'

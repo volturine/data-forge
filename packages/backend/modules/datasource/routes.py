@@ -25,8 +25,9 @@ from backend_core.validation import (
     parse_preflight_id,
 )
 from dataforge_protocol import enums_pb2
-from modules.auth.dependencies import get_current_user
+from modules.auth.dependencies import get_current_user, require_admin
 from modules.auth.models import User
+from modules.auth.service import is_admin_user
 from modules.compute.executor_client import (
     compare_iceberg_snapshots as compare_remote_iceberg_snapshots,
     create_database_datasource as create_remote_database_datasource,
@@ -731,7 +732,7 @@ async def connect_datasource(
     )
 
 
-@router.get('/internal-postgres/tables', response_model=list[schemas.InternalPostgresTable])
+@router.get('/internal-postgres/tables', response_model=list[schemas.InternalPostgresTable], dependencies=[Depends(require_admin)])
 @handle_errors(operation='list internal Postgres tables')
 async def list_internal_postgres_tables():
     return await run_api_blocking(run_db, service.list_internal_postgres_tables)
@@ -741,7 +742,7 @@ async def list_internal_postgres_tables():
 @handle_errors(operation='toggle internal Postgres table', value_error_status=400)
 async def toggle_internal_postgres_table(
     request: schemas.InternalPostgresToggleRequest,
-    user: User = Depends(get_current_user),
+    user: User = Depends(require_admin),
 ):
     return await run_api_blocking(run_db, service.toggle_internal_postgres_table, request, user.id)
 
@@ -937,9 +938,12 @@ async def get_column_stats_with_config(
 async def update_datasource(
     datasource_id: DataSourceId,
     update: schemas.DataSourceUpdate,
+    user: User = Depends(get_current_user),
 ):
     """Update a datasource's name or config. Use GET /datasource/{id} to see current values."""
     datasource_id_value = parse_datasource_id(datasource_id)
+    if not is_admin_user(user) and await run_api_blocking(run_db, service.update_changes_internal_postgres_config, datasource_id_value, update):
+        raise HTTPException(status_code=403, detail='Admin access required')
     if update.config is None or not any(key in update.config for key in (*_EXCEL_PARSING_KEYS, 'csv_options', 'skip_rows')):
         return await run_api_blocking(run_db, service.update_datasource, datasource_id_value, update)
 

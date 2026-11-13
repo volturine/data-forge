@@ -15,14 +15,20 @@ const mockConfigStore = {
 	config: null as { default_namespace?: string } | null
 };
 const mockRegisterNamespace = vi.fn();
+const mockListNamespaces = vi.fn();
 
 vi.mock('#lib/stores/config.svelte.js', () => ({
 	configStore: mockConfigStore
 }));
 
 vi.mock('#lib/api/namespaces.js', () => ({
-	registerNamespace: (...args: unknown[]) => mockRegisterNamespace(...args)
+	registerNamespace: (...args: unknown[]) => mockRegisterNamespace(...args),
+	listNamespaces: (...args: unknown[]) => mockListNamespaces(...args)
 }));
+
+function listedNamespaces(namespaces: string[]) {
+	return { isErr: () => false, isOk: () => true, value: { namespaces } };
+}
 
 const {
 	initNamespace,
@@ -48,6 +54,13 @@ describe('namespace store', () => {
 			isOk: () => true,
 			value: { name: 'ok' }
 		});
+		// An unavailable listing keeps the stored selection.
+		mockListNamespaces.mockResolvedValue({
+			isErr: () => true,
+			isOk: () => false,
+			error: { message: 'unavailable' }
+		});
+		window.history.replaceState(null, '', '/');
 		await setNamespace('');
 	});
 
@@ -184,6 +197,60 @@ describe('namespace store', () => {
 			expect(mockIdbDelete).toHaveBeenCalledWith('namespace');
 			expect(isNamespaceReady()).toBe(false);
 			expect(getNamespaceStatus()).toBe('failed');
+		});
+
+		test('keeps a stored namespace that is still registered', async () => {
+			mockIdbGet.mockResolvedValue('stored-ns');
+			mockListNamespaces.mockResolvedValue(listedNamespaces(['default', 'stored-ns']));
+			await initNamespace();
+			expect(requireNamespace()).toBe('stored-ns');
+			expect(mockIdbDelete).not.toHaveBeenCalled();
+		});
+
+		test('falls back to the default when the stored namespace is no longer registered', async () => {
+			mockIdbGet.mockResolvedValue('gone-ns');
+			mockListNamespaces.mockResolvedValue(listedNamespaces(['default']));
+			mockConfigStore.config = { default_namespace: 'default' };
+			await initNamespace();
+			expect(mockIdbDelete).toHaveBeenCalledWith('namespace');
+			expect(mockIdbSet).toHaveBeenCalledWith('namespace', 'default');
+			expect(requireNamespace()).toBe('default');
+			expect(mockRegisterNamespace).not.toHaveBeenCalled();
+		});
+
+		test('does not list namespaces when the stored namespace is the default', async () => {
+			mockIdbGet.mockResolvedValue('default');
+			mockConfigStore.config = { default_namespace: 'default' };
+			await initNamespace();
+			expect(mockListNamespaces).not.toHaveBeenCalled();
+			expect(requireNamespace()).toBe('default');
+		});
+
+		test('registers a deep-linked namespace before marking it ready', async () => {
+			window.history.replaceState(null, '', '/?namespace=linked-ns');
+			const order: string[] = [];
+			mockRegisterNamespace.mockImplementationOnce(async () => {
+				order.push(`register:${isNamespaceReady()}`);
+				return { isErr: () => false, isOk: () => true, value: { name: 'linked-ns' } };
+			});
+			await initNamespace();
+			expect(order).toEqual(['register:false']);
+			expect(mockRegisterNamespace).toHaveBeenCalledWith('linked-ns');
+			expect(mockIdbSet).toHaveBeenCalledWith('namespace', 'linked-ns');
+			expect(requireNamespace()).toBe('linked-ns');
+		});
+
+		test('falls back to the stored namespace when deep-link registration fails', async () => {
+			window.history.replaceState(null, '', '/?namespace=linked-ns');
+			mockRegisterNamespace.mockResolvedValueOnce({
+				isErr: () => true,
+				isOk: () => false,
+				error: { message: 'Not authenticated' }
+			});
+			mockIdbGet.mockResolvedValue('stored-ns');
+			await initNamespace();
+			expect(mockIdbSet).not.toHaveBeenCalledWith('namespace', 'linked-ns');
+			expect(requireNamespace()).toBe('stored-ns');
 		});
 
 		test('fails with a contract error when config loads without default_namespace', async () => {

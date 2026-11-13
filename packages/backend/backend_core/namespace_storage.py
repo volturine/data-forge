@@ -6,12 +6,10 @@ import re
 from dataclasses import dataclass
 
 # Same rules as packages/worker/runtime/object_store.py — keep in lockstep.
-_NAMESPACE_BUCKET_RE = re.compile(r'^[a-z0-9][a-z0-9_-]{1,61}[a-z0-9]$')
+_NAMESPACE_BUCKET_RE = re.compile(r'^[a-z0-9][a-z0-9-]{1,61}[a-z0-9]$')
 
 NAMESPACE_NAME_RULES = (
-    '3–63 characters; lowercase letters, digits, hyphens, and underscores; '
-    'must start and end with a letter or digit. '
-    'The name is the S3 bucket — nothing is rewritten.'
+    '3–63 characters; lowercase letters, digits, and hyphens; must start and end with a letter or digit. The name is the S3 bucket — nothing is rewritten.'
 )
 
 

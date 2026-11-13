@@ -27,8 +27,8 @@ MAX_TRANSFER_BYTES = 2 * 1024 * 1024 * 1024
 _MULTIPART_PART_SIZE = 8 * 1024 * 1024
 
 # Namespace name == bucket name. No rewriting.
-# Lowercase letters, digits, hyphens, underscores; start/end alphanumeric.
-_NAMESPACE_BUCKET_RE = re.compile(r"^[a-z0-9][a-z0-9_-]{1,61}[a-z0-9]$")
+# Lowercase letters, digits, hyphens; start/end alphanumeric.
+_NAMESPACE_BUCKET_RE = re.compile(r"^[a-z0-9][a-z0-9-]{1,61}[a-z0-9]$")
 
 # Product key roots inside a namespace bucket. Managed deletes only apply here.
 _MANAGED_KEY_ROOTS = frozenset(
@@ -72,9 +72,7 @@ def namespace_bucket(namespace: str) -> str:
     name = namespace.strip()
     if not is_valid_namespace_bucket_name(name):
         raise ValueError(
-            f"Namespace {namespace!r} is not a valid bucket name. "
-            "Use 3–63 lowercase letters, digits, hyphens, or underscores; "
-            "must start and end with a letter or digit."
+            f"Namespace {namespace!r} is not a valid bucket name. Use 3–63 lowercase letters, digits, or hyphens; must start and end with a letter or digit."
         )
     return name
 

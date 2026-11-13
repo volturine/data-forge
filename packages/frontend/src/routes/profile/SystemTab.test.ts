@@ -35,6 +35,11 @@ vi.mock('#lib/stores/namespace.svelte.js', () => ({
 	})
 }));
 
+const mockAuthStore = vi.hoisted(() => ({ user: { is_admin: true } as { is_admin: boolean } | null }));
+vi.mock('#lib/stores/auth.svelte.js', () => ({
+	authStore: mockAuthStore
+}));
+
 const mockConfigRefresh = vi.fn().mockResolvedValue(undefined);
 vi.mock('#lib/stores/config.svelte.js', () => ({
 	configStore: {
@@ -59,6 +64,7 @@ const { default: SystemTab } = await import('./SystemTab.svelte');
 describe('SystemTab', () => {
 	beforeEach(() => {
 		vi.clearAllMocks();
+		mockAuthStore.user = { is_admin: true };
 		mockGetSettings.mockReturnValue(
 			okMatch({
 				public_idb_debug: false
@@ -122,5 +128,17 @@ describe('SystemTab', () => {
 			expect(onboardSwitch).toHaveAttribute('aria-checked', 'true');
 			expect(onboardSwitch).toBeEnabled();
 		});
+	});
+
+	test('non-admin users see the admin note and never request internal tables', async () => {
+		mockAuthStore.user = { is_admin: false };
+
+		render(SystemTab);
+
+		expect(await screen.findByTestId('internal-tables-admin-required')).toHaveTextContent(
+			'requires the admin account'
+		);
+		expect(mockListInternalPostgresTables).not.toHaveBeenCalled();
+		expect(screen.queryByLabelText('Onboard table default.analyses')).toBeNull();
 	});
 });

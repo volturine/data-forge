@@ -45,6 +45,7 @@ _RESEND_COOLDOWN_MINUTES = 5
 _DEFAULT_USER_ID = uuid.uuid5(uuid.NAMESPACE_URL, 'data-forge-default-user').hex
 _DEFAULT_USER_MARKER = 'env_default_user'
 _DEFAULT_USER_LOCK_ID = 0x4446474555534552
+_ADMIN_OAUTH_FORBIDDEN_MESSAGE = 'OAuth sign-in cannot be used for the admin account'
 
 logger = logging.getLogger(__name__)
 
@@ -155,6 +156,11 @@ def _build_default_provider_metadata(password: str) -> dict[str, object]:
 
 def get_default_user_id() -> str:
     return _DEFAULT_USER_ID
+
+
+def is_admin_user(user: User) -> bool:
+    """The deployment-managed default account (``DEFAULT_USER_*``) is the admin."""
+    return user.id == _DEFAULT_USER_ID
 
 
 def stage_ensure_default_user(session: Session) -> User:
@@ -465,9 +471,16 @@ def stage_find_or_create_oauth_user(
         user = get_user_by_id(session, existing.user_id)
         if not user:
             raise OAuthError('OAuth identity points to a missing user')
+        if is_admin_user(user):
+            raise OAuthError(_ADMIN_OAUTH_FORBIDDEN_MESSAGE)
         return user
     matched_email = get_user_by_email(session, normalized_email)
     if matched_email:
+        # The admin account signs in only with its deployment-managed
+        # password; linking an OAuth identity by email would hand admin
+        # access to whoever controls that email at the provider.
+        if is_admin_user(matched_email):
+            raise OAuthError(_ADMIN_OAUTH_FORBIDDEN_MESSAGE)
         stage_link_provider(
             session=session,
             user_id=matched_email.id,
@@ -614,7 +627,9 @@ def stage_prepare_resend_verification(session: Session, user_id: str) -> tuple[s
 
 def stage_create_password_reset_token(session: Session, email: str) -> str | None:
     user = get_user_by_email(session, email)
-    if not user:
+    # The admin password is managed by DEFAULT_USER_PASSWORD; its email may
+    # be a placeholder, so it never receives a reset link.
+    if not user or is_admin_user(user):
         return None
     return stage_create_verification_token(session, user_id=user.id, token_type=VerificationTokenType.PASSWORD_RESET, ttl_hours=1)
 
@@ -622,7 +637,7 @@ def stage_create_password_reset_token(session: Session, email: str) -> str | Non
 def stage_reset_password(session: Session, token: str, new_password: str) -> None:
     validate_password(new_password)
     user = get_user_by_id(session, stage_validate_verification_token(session, token=token, token_type=VerificationTokenType.PASSWORD_RESET))
-    if not user:
+    if not user or is_admin_user(user):
         raise TokenInvalidError()
     now = _utcnow()
     provider = get_password_provider(session, user.id)

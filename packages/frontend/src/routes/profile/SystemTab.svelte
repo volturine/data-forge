@@ -9,6 +9,7 @@
 		toggleInternalPostgresTable,
 		type InternalPostgresTable
 	} from '#lib/api/datasource.js';
+	import { authStore } from '#lib/stores/auth.svelte.js';
 	import { configStore } from '#lib/stores/config.svelte.js';
 	import { useNamespace } from '#lib/stores/namespace.svelte.js';
 	import FeedbackBanner from '#lib/components/ui/FeedbackBanner.svelte';
@@ -24,6 +25,8 @@
 	const collapsedSchemas = new SvelteSet<string>();
 
 	const ns = useNamespace();
+	// Internal tables include users and sessions; only the deployment-managed admin may onboard them.
+	const isAdmin = $derived(authStore.user?.is_admin === true);
 	let idb = $state(false);
 
 	onMount(() => {
@@ -42,24 +45,26 @@
 			}
 		);
 
-		internalTablesLoading = true;
+		internalTablesLoading = isAdmin;
 		internalTablesError = null;
 		togglingKey = null;
-		void listInternalPostgresTables().match(
-			(tables) => {
-				if (aborted) return;
-				internalTables = tables;
-				internalTablesLoading = false;
-				for (const table of tables) {
-					collapsedSchemas.add(table.schema_name);
+		if (isAdmin) {
+			void listInternalPostgresTables().match(
+				(tables) => {
+					if (aborted) return;
+					internalTables = tables;
+					internalTablesLoading = false;
+					for (const table of tables) {
+						collapsedSchemas.add(table.schema_name);
+					}
+				},
+				(error) => {
+					if (aborted) return;
+					internalTablesError = error.message;
+					internalTablesLoading = false;
 				}
-			},
-			(error) => {
-				if (aborted) return;
-				internalTablesError = error.message;
-				internalTablesLoading = false;
-			}
-		);
+			);
+		}
 
 		return () => {
 			aborted = true;
@@ -286,7 +291,14 @@
 			<p class={css({ fontSize: 'xs', color: 'fg.tertiary' })}>
 				Choose which internal PostgreSQL tables should be onboarded as datasources.
 			</p>
-			{#if internalTablesLoading}
+			{#if !isAdmin}
+				<p
+					class={css({ fontSize: 'sm', color: 'fg.muted' })}
+					data-testid="internal-tables-admin-required"
+				>
+					Onboarding internal tables requires the admin account configured for this deployment.
+				</p>
+			{:else if internalTablesLoading}
 				<div class={css({ display: 'flex', alignItems: 'center', gap: '2', color: 'fg.muted' })}>
 					<Loader2 size={14} class={css({ animation: 'spin 1s linear infinite' })} />
 					Loading internal tables…

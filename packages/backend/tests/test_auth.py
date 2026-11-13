@@ -17,6 +17,7 @@ from backend_core.auth_exceptions import (
     DefaultUserDeletionError,
     EmailAlreadyExistsError,
     InvalidCredentialsError,
+    OAuthError,
     ProviderUnlinkError,
     TokenExpiredError,
     TokenInvalidError,
@@ -829,6 +830,47 @@ class TestOAuthService:
         names = {item.provider for item in providers}
         assert names == {AuthProviderName.PASSWORD, AuthProviderName.GOOGLE}
 
+    def test_find_or_create_oauth_user_refuses_to_link_admin_account(self, auth_db_session: Session) -> None:
+        admin = ensure_default_user(auth_db_session)
+
+        with pytest.raises(OAuthError, match='admin account'):
+            find_or_create_oauth_user(
+                auth_db_session,
+                provider=AuthProviderName.GITHUB,
+                provider_subject='github-admin-takeover',
+                email=admin.email.upper(),
+                display_name='Not The Admin',
+                avatar_url=None,
+            )
+
+        auth_db_session.rollback()
+        providers = auth_db_session.exec(select(AuthProvider).where(sa(AuthProvider.user_id == admin.id))).all()
+        assert {item.provider for item in providers} == {AuthProviderName.PASSWORD}
+
+    def test_find_or_create_oauth_user_refuses_previously_linked_admin_identity(self, auth_db_session: Session) -> None:
+        admin = ensure_default_user(auth_db_session)
+        auth_db_session.add(
+            AuthProvider(
+                id=uuid.uuid4().hex,
+                user_id=admin.id,
+                provider=AuthProviderName.GITHUB,
+                provider_subject='github-legacy-admin-link',
+                provider_metadata={},
+                created_at=datetime.now(UTC),
+            )
+        )
+        auth_db_session.commit()
+
+        with pytest.raises(OAuthError, match='admin account'):
+            find_or_create_oauth_user(
+                auth_db_session,
+                provider=AuthProviderName.GITHUB,
+                provider_subject='github-legacy-admin-link',
+                email='someone@example.com',
+                display_name='Legacy Link',
+                avatar_url=None,
+            )
+
 
 class TestVerificationTokenService:
     def test_create_verification_token_returns_valid_token(self, auth_db_session: Session) -> None:
@@ -1154,6 +1196,7 @@ class TestAuthRoutes:
 
         assert response.status_code == 200
         assert response.json()['email'] == 'guest@example.com'
+        assert response.json()['is_admin'] is True
 
     def test_register_success(self, auth_client: TestClient) -> None:
         response = auth_client.post(
@@ -1333,6 +1376,7 @@ class TestAuthRoutes:
 
         assert response.status_code == 200
         assert response.json()['email'] == 'me@example.com'
+        assert response.json()['is_admin'] is False
 
     def test_me_unauthenticated(self, auth_client: TestClient, monkeypatch: pytest.MonkeyPatch) -> None:
         monkeypatch.setattr('backend_core.auth_config.settings.auth_required', True)
@@ -1529,6 +1573,37 @@ class TestAuthRoutes:
         ).first()
         assert row is not None
         assert row.used is False
+
+    def test_forgot_password_does_not_issue_reset_token_for_admin(self, auth_client: TestClient, auth_db_session: Session) -> None:
+        admin = ensure_default_user(auth_db_session)
+
+        response = auth_client.post('/api/v1/auth/forgot-password', json={'email': admin.email})
+
+        assert response.status_code == 200
+        assert response.json()['message'] == 'If the email exists, a password reset link has been sent'
+        rows = auth_db_session.exec(
+            select(VerificationToken).where(
+                sa(VerificationToken.user_id == admin.id),
+                sa(VerificationToken.token_type == VerificationTokenType.PASSWORD_RESET),
+            ),
+        ).all()
+        assert rows == []
+
+    def test_reset_password_rejects_admin_token(self, auth_client: TestClient, auth_db_session: Session) -> None:
+        admin = ensure_default_user(auth_db_session)
+        token = create_verification_token(auth_db_session, user_id=admin.id, token_type=VerificationTokenType.PASSWORD_RESET)
+
+        response = auth_client.post('/api/v1/auth/reset-password', json={'token': token, 'new_password': 'Takeover123'})
+
+        assert response.status_code == 400
+        auth_db_session.expire_all()
+        provider = auth_db_session.exec(
+            select(AuthProvider).where(
+                sa(AuthProvider.user_id == admin.id),
+                sa(AuthProvider.provider == AuthProviderName.PASSWORD),
+            ),
+        ).one()
+        assert verify_password('Takeover123', cast(str, provider.provider_metadata['password_hash'])) is False
 
     def test_forgot_password_nonexistent_email_returns_success(
         self,

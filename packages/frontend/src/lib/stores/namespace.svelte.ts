@@ -1,4 +1,4 @@
-import { registerNamespace } from '#lib/api/namespaces.js';
+import { listNamespaces, registerNamespace } from '#lib/api/namespaces.js';
 import { idbGet, idbSet, idbDelete } from '#lib/utils/indexeddb.js';
 import { configStore } from '#lib/stores/config.svelte.js';
 import { SvelteURLSearchParams } from 'svelte/reactivity';
@@ -41,6 +41,18 @@ function markPending(): void {
 	error = null;
 }
 
+/**
+ * The API rejects requests for unregistered namespaces, and a stored selection
+ * can outlive its registration (for example after a database reset). Only a
+ * confirmed absence drops it; a failed listing keeps the stored selection.
+ */
+async function isStoredNamespaceRegistered(value: string): Promise<boolean> {
+	if (value === configStore.config?.default_namespace) return true;
+	const result = await listNamespaces();
+	if (result.isErr()) return true;
+	return result.value.namespaces.includes(value);
+}
+
 export function isNamespaceReady(): boolean {
 	return status === 'ready' && isValid(namespace);
 }
@@ -56,7 +68,8 @@ export function getNamespaceError(): string | null {
 /**
  * Resolve the active namespace once per app load.
  *
- * Success: stored value, or config.default_namespace.
+ * Success: registered deep-link hint, registered stored value, or
+ * config.default_namespace.
  * Failure: terminal `failed` status — never leave callers on `pending` forever,
  * and never throw out of fire-and-forget layout effects.
  */
@@ -72,19 +85,19 @@ export async function initNamespace(): Promise<void> {
 		// target a namespace without clicking through the picker.
 		const urlNamespace = new SvelteURLSearchParams(window.location.search).get('namespace');
 		if (isValid(urlNamespace)) {
-			await idbSet(NAMESPACE_KEY, urlNamespace);
-			markReady(urlNamespace);
-			// Provisioning is fire-and-forget: failures surface on the first
-			// namespaced data request instead of blocking navigation.
-			registerNamespace(urlNamespace).match(
-				() => {},
-				() => {}
-			);
-			return;
+			// Requests never register namespaces implicitly, so provisioning must
+			// finish before any request carries this namespace. A failed hint
+			// falls back to the stored or default namespace.
+			const registered = await registerNamespace(urlNamespace);
+			if (registered.isOk()) {
+				await idbSet(NAMESPACE_KEY, urlNamespace);
+				markReady(urlNamespace);
+				return;
+			}
 		}
 
 		const stored = await idbGet<string>(NAMESPACE_KEY);
-		if (isValid(stored)) {
+		if (isValid(stored) && (await isStoredNamespaceRegistered(stored))) {
 			markReady(stored);
 			return;
 		}

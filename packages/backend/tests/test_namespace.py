@@ -31,9 +31,13 @@ def test_normalize_namespace_rejects_invalid():
         normalize_namespace('ab')
 
 
-def test_normalize_namespace_allows_underscores():
-    assert normalize_namespace('team_a') == 'team_a'
-    assert normalize_namespace('my_namespace') == 'my_namespace'
+def test_normalize_namespace_rejects_underscores():
+    # Namespace names are used verbatim as S3 bucket names, which forbid underscores.
+    with pytest.raises(ValueError, match='Invalid namespace'):
+        normalize_namespace('team_a')
+    with pytest.raises(ValueError, match='Invalid namespace'):
+        normalize_namespace('my_namespace')
+    assert normalize_namespace('team-a') == 'team-a'
 
 
 def test_set_namespace_context():

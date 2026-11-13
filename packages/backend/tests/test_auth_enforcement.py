@@ -238,22 +238,30 @@ class TestNamespaceMiddleware:
             raise AssertionError('Headerless process health must not access the namespace database')
 
         monkeypatch.setattr(application, '_namespace_registered', reject_namespace_database_work)
-        monkeypatch.setattr(application, '_has_valid_session', reject_namespace_database_work)
-        monkeypatch.setattr(application, 'register_namespace', reject_namespace_database_work)
 
         response = client.get('/health')
 
         assert response.status_code == 200
 
-    def test_rejects_unknown_namespace_without_session(self, client: TestClient, monkeypatch: pytest.MonkeyPatch) -> None:
-        monkeypatch.setattr('backend_core.auth_config.settings.auth_required', True)
+    @pytest.mark.parametrize('auth_required', [True, False])
+    @pytest.mark.parametrize('path', ['/health', '/api/v1/analysis'])
+    def test_rejects_unknown_namespace_without_registering_it(
+        self, client: TestClient, monkeypatch: pytest.MonkeyPatch, auth_required: bool, path: str
+    ) -> None:
+        from backend_core.namespaces_service import runtime_namespace_exists
+
+        monkeypatch.setattr('backend_core.auth_config.settings.auth_required', auth_required)
         namespace = f'ghost-{uuid.uuid4().hex[:8]}'
 
-        response = client.get('/health', headers={'X-Namespace': namespace})
+        response = client.get(path, headers={'X-Namespace': namespace})
 
-        assert response.status_code == 403
+        assert response.status_code == 404
+        assert response.json() == {'detail': f'Unknown namespace: {namespace}. Create it first.'}
+        assert run_settings_db(runtime_namespace_exists, namespace) is False
 
-    def test_authenticated_request_registers_unknown_namespace_and_caches_it(self, client: TestClient, monkeypatch: pytest.MonkeyPatch) -> None:
+    def test_authenticated_request_does_not_register_unknown_namespace(self, client: TestClient, monkeypatch: pytest.MonkeyPatch) -> None:
+        from backend_core.namespaces_service import runtime_namespace_exists
+
         monkeypatch.setattr('backend_core.auth_config.settings.auth_required', True)
         namespace = f'fresh-{uuid.uuid4().hex[:8]}'
 
@@ -267,15 +275,50 @@ class TestNamespaceMiddleware:
             return create_session(session, user.id, 'pytest-agent', '127.0.0.1')
 
         user_session = run_settings_db(_seed)
+        client.cookies.set('session_token', user_session.id)
+        response = client.get('/health', headers={'X-Namespace': namespace})
+        client.cookies.clear()
+
+        assert response.status_code == 404
+        assert run_settings_db(runtime_namespace_exists, namespace) is False
+
+    @pytest.mark.parametrize('auth_required', [True, False])
+    def test_registered_namespace_passes_and_is_cached(self, client: TestClient, monkeypatch: pytest.MonkeyPatch, auth_required: bool) -> None:
+        from backend_core import application
+        from backend_core.namespaces_service import register_namespace
+
+        monkeypatch.setattr('backend_core.auth_config.settings.auth_required', auth_required)
+        namespace = f'known-{uuid.uuid4().hex[:8]}'
+        run_settings_db(register_namespace, namespace)
         headers = {'X-Namespace': namespace}
 
-        client.cookies.set('session_token', user_session.id)
-        authenticated = client.get('/health', headers=headers)
-        client.cookies.clear()
-        anonymous_after_registration = client.get('/health', headers=headers)
+        first = client.get('/health', headers=headers)
 
-        assert authenticated.status_code == 200
-        assert anonymous_after_registration.status_code == 200
+        def reject_namespace_database_work(*_args, **_kwargs):
+            raise AssertionError('A known namespace must be served from the process cache')
+
+        monkeypatch.setattr(application, '_namespace_registered', reject_namespace_database_work)
+        second = client.get('/health', headers=headers)
+
+        assert first.status_code == 200
+        assert second.status_code == 200
+
+    @pytest.mark.parametrize('auth_required', [True, False])
+    def test_namespace_management_routes_accept_stale_namespace_header(self, client: TestClient, monkeypatch: pytest.MonkeyPatch, auth_required: bool) -> None:
+        from backend_core.namespaces_service import runtime_namespace_exists
+
+        monkeypatch.setattr('backend_core.auth_config.settings.auth_required', auth_required)
+        stale = f'stale-{uuid.uuid4().hex[:8]}'
+        headers = {'X-Namespace': stale}
+
+        listed = client.get('/api/v1/namespaces', headers=headers)
+        plan = client.get('/api/v1/namespaces/storage-plan', params={'name': 'next-ns'}, headers=headers)
+
+        assert listed.status_code == 200
+        assert stale not in listed.json()['namespaces']
+        assert plan.status_code == 200
+        assert plan.json()['bucket'] == 'next-ns'
+        assert run_settings_db(runtime_namespace_exists, stale) is False
 
     def test_invalid_namespace_header_returns_bad_request(self, client: TestClient, monkeypatch: pytest.MonkeyPatch) -> None:
         monkeypatch.setattr('backend_core.auth_config.settings.auth_required', False)
@@ -285,13 +328,13 @@ class TestNamespaceMiddleware:
         assert response.status_code == 400
         assert 'Invalid namespace' in response.json()['detail']
 
-    def test_allows_everything_when_auth_disabled(self, client: TestClient, monkeypatch: pytest.MonkeyPatch) -> None:
+    def test_underscore_namespace_header_returns_bad_request(self, client: TestClient, monkeypatch: pytest.MonkeyPatch) -> None:
         monkeypatch.setattr('backend_core.auth_config.settings.auth_required', False)
-        namespace = f'open-{uuid.uuid4().hex[:8]}'
 
-        response = client.get('/health', headers={'X-Namespace': namespace})
+        response = client.get('/api/v1/analysis', headers={'X-Namespace': 'team_a'})
 
-        assert response.status_code == 200
+        assert response.status_code == 400
+        assert 'Invalid namespace' in response.json()['detail']
 
 
 class TestSharedAnalysisAccess:

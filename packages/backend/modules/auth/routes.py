@@ -33,7 +33,7 @@ from modules.auth.schemas import (
     UserPublic,
     VerifyEmailRequest,
 )
-from modules.auth.service import get_or_seed_default_user, get_user_providers, send_auth_email, validate_session
+from modules.auth.service import get_or_seed_default_user, get_user_providers, is_admin_user, send_auth_email, validate_session
 
 router = APIRouter(prefix='/auth', tags=['auth'])
 
@@ -89,6 +89,7 @@ def _build_user_public(session: Session, user: User) -> UserPublic:
         status=user.status,
         email_verified=user.email_verified,
         has_password=user.has_password,
+        is_admin=is_admin_user(user),
         preferences=user.preferences,
         providers=get_user_providers(session, user.id),
         created_at=user.created_at,

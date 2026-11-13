@@ -152,7 +152,7 @@ def _downloaded_object_store_file(path: str) -> Iterator[Path]:
         temp_path.unlink(missing_ok=True)
 
 
-def _polars_storage_options() -> dict[str, str]:
+def polars_storage_options() -> dict[str, str]:
     options = {
         "aws_access_key_id": settings.object_store_access_key,
         "aws_secret_access_key": settings.object_store_secret_key,
@@ -178,7 +178,7 @@ def load_datasource_frame(config: dict[str, Any]) -> pl.LazyFrame:
             opts = {}
         opts = _merge_excel_opts(config, opts)
         if is_object_store_url(str(file_path)):
-            storage = _polars_storage_options()
+            storage = polars_storage_options()
             if file_type == DataSourceFileType.CSV:
                 return pl.scan_csv(file_path, storage_options=storage, **_csv_opts(opts))
             if file_type == DataSourceFileType.PARQUET:
