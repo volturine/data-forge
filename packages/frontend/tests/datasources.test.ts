@@ -110,6 +110,59 @@ test.describe('Datasources – list & management', () => {
 	});
 });
 
+test.describe('Datasources – failed delete', () => {
+	test('a failed delete keeps the row and shows the error', async ({ page, sharedDatasource }) => {
+		await gotoDatasourcesPage(page);
+		const row = page.locator(`[data-ds-row="${sharedDatasource.name}"]`);
+		await expect(row).toBeVisible();
+
+		// Only the DELETE is intercepted; the shared dataset is never deleted.
+		await page.route(`**/api/v1/datasource/${sharedDatasource.id}`, (route) =>
+			route.request().method() === 'DELETE'
+				? route.fulfill({ status: 503, json: { detail: 'Service unavailable' } })
+				: route.continue()
+		);
+
+		await row.locator('button[title="Delete"]').click();
+		const dialog = dialogByHeading(page, /Delete Datasource/i);
+		await dialog.getByRole('button', { name: /^Delete$/ }).click();
+
+		await expect(page.getByText(/Failed to delete datasource/)).toBeVisible();
+		await expect(row).toBeVisible();
+	});
+
+	test('other delete buttons stay disabled while a delete is pending', async ({
+		page,
+		sharedDatasource,
+		sharedAuxDatasource
+	}) => {
+		await gotoDatasourcesPage(page);
+		const row = page.locator(`[data-ds-row="${sharedDatasource.name}"]`);
+		const otherRow = page.locator(`[data-ds-row="${sharedAuxDatasource.name}"]`);
+		await expect(row).toBeVisible();
+
+		// Hold the DELETE open, then fail it; the shared dataset is never deleted.
+		let release: () => void = () => undefined;
+		const held = new Promise<void>((resolve) => (release = resolve));
+		await page.route(`**/api/v1/datasource/${sharedDatasource.id}`, async (route) => {
+			if (route.request().method() !== 'DELETE') return route.continue();
+			await held;
+			await route.fulfill({ status: 503, json: { detail: 'Service unavailable' } });
+		});
+
+		await row.locator('button[title="Delete"]').click();
+		await dialogByHeading(page, /Delete Datasource/i)
+			.getByRole('button', { name: /^Delete$/ })
+			.click();
+
+		await expect(otherRow.locator('button[title="Delete"]')).toBeDisabled();
+		release();
+		await expect(page.getByText(/Failed to delete datasource/)).toBeVisible();
+		await expect(row).toBeVisible();
+		await expect(otherRow.locator('button[title="Delete"]')).toBeEnabled();
+	});
+});
+
 test.describe('Datasources – upload page', () => {
 	test('upload page shows tabs, file input, description fields, and connection string field', async ({
 		page

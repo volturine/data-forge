@@ -1,5 +1,6 @@
 <script lang="ts">
 	import { createQuery, createMutation, hashKey, useQueryClient } from '@tanstack/svelte-query';
+	import type { QueryKey } from '@tanstack/svelte-query';
 	import { afterNavigate, goto } from '$app/navigation';
 	import { onMount } from 'svelte';
 	import { resolve } from '$app/paths';
@@ -40,6 +41,7 @@
 
 	let deletingId = $state<string | null>(null);
 	let mutatingId = $state<string | null>(null);
+	let listsBeforeDelete: [QueryKey, DataSource[] | undefined][] = [];
 	let searchQuery = $state('');
 	let showComparison = $state(false);
 	let snapshotConfig = $state<Record<string, unknown> | null>(null);
@@ -97,8 +99,13 @@
 			if (mutatingId === deletedId) mutatingId = null;
 			await queryClient.invalidateQueries({ queryKey: ['datasources', ns.value] });
 		},
-		onError: (_error, failedId) => {
+		onError: async (_error, failedId) => {
 			if (mutatingId === failedId) mutatingId = null;
+			// confirmDelete hid the row optimistically; restore it even if the
+			// server is unreachable, then reconcile.
+			for (const [key, data] of listsBeforeDelete) queryClient.setQueryData(key, data);
+			listsBeforeDelete = [];
+			await queryClient.invalidateQueries({ queryKey: ['datasources', ns.value] });
 		}
 	}));
 
@@ -169,9 +176,13 @@
 	}
 
 	function confirmDelete() {
-		if (!deletingId) return;
+		// One delete at a time: the rollback snapshot belongs to a single request.
+		if (!deletingId || deleteMutation.isPending) return;
 		const deletedId = deletingId;
 		mutatingId = deletedId;
+		listsBeforeDelete = queryClient.getQueriesData<DataSource[]>({
+			queryKey: ['datasources', ns.value]
+		});
 		// The API marks a datasource hidden/pending before asynchronous storage
 		// cleanup. Reflect that committed state immediately; waiting for cleanup
 		// would leave a visibly dead row until the request happens to finish.
@@ -337,6 +348,11 @@
 
 		<!-- Datasource List -->
 		<div class={css({ flex: '1', overflowY: 'auto' })}>
+			{#if deleteMutation.isError}
+				<Callout tone="error">
+					Failed to delete datasource: {deleteMutation.error?.message ?? 'Unknown error'}
+				</Callout>
+			{/if}
 			{#if ns.status === 'failed'}
 				<Callout tone="error">Namespace is unavailable: {ns.error ?? 'Unknown error'}</Callout>
 			{:else if !namespaceReady || query.isPending || (query.isFetching && !query.data)}
@@ -538,7 +554,7 @@
 									})}
 									title="Delete"
 									onclick={() => handleDelete(datasource.id)}
-									disabled={deleteMutation.isPending && mutatingId === datasource.id}
+									disabled={deleteMutation.isPending}
 								>
 									{#if deleteMutation.isPending && mutatingId === datasource.id}
 										<LoaderCircle size={14} class={css({ animation: 'spin 1s linear infinite' })} />
@@ -560,7 +576,7 @@
 	</aside>
 
 	<!-- Right Pane -->
-	<main class={css({ flex: '1', overflow: 'hidden' })}>
+	<section aria-label="Data source preview" class={css({ flex: '1', overflow: 'hidden' })}>
 		{#key `${ns.value}:${selectedId ?? ''}`}
 			{#if selectedDatasource}
 				<div class={css({ height: '100%', display: 'flex', flexDirection: 'column' })}>
@@ -669,7 +685,7 @@
 				</div>
 			{/if}
 		{/key}
-	</main>
+	</section>
 </div>
 
 <ConfirmDialog

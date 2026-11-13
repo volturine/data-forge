@@ -58,16 +58,6 @@ def test_list_internal_postgres_tables_reports_application_tables(client, test_d
 def test_list_internal_postgres_tables_materializes_onboarding_metadata_once(test_db_session, monkeypatch) -> None:
     test_db_session.add(
         DataSource(
-            id='internal-canonical-analyses',
-            name='internal.default.analyses',
-            source_type='iceberg',
-            config={},
-            created_by='import',
-            created_at=datetime.now(UTC),
-        )
-    )
-    test_db_session.add(
-        DataSource(
             id='internal-query-analyses',
             name='legacy-analysis-source',
             source_type='database',
@@ -199,3 +189,55 @@ def test_toggle_internal_postgres_table_creates_database_datasource_once_and_del
     assert relisted.status_code == 200
     row = next(item for item in relisted.json() if item['schema_name'] == 'default' and item['table_name'] == 'analyses')
     assert row['is_onboarded'] is False
+
+
+def test_internal_postgres_onboarding_ignores_unrelated_datasource_with_internal_name(client, test_db_session) -> None:
+    # A user datasource that merely carries an internal-looking name is not an
+    # onboarded table: listing must not report it, and disabling the table
+    # must not delete it.
+    test_db_session.add(
+        DataSource(
+            id='user-named-like-internal',
+            name='internal.default.analyses',
+            source_type='iceberg',
+            config={'metadata_path': '/tmp/user-upload'},
+            created_by='import',
+            created_at=datetime.now(UTC),
+        )
+    )
+    test_db_session.commit()
+
+    listed = client.get('/api/v1/datasource/internal-postgres/tables')
+    assert listed.status_code == 200
+    row = next(item for item in listed.json() if item['schema_name'] == 'default' and item['table_name'] == 'analyses')
+    assert row['is_onboarded'] is False
+
+    disabled = client.post(
+        '/api/v1/datasource/internal-postgres/toggle',
+        json={'schema_name': 'default', 'table_name': 'analyses', 'enabled': False},
+    )
+    assert disabled.status_code == 200
+    test_db_session.expire_all()
+    untouched = test_db_session.get(DataSource, 'user-named-like-internal')
+    assert untouched is not None
+    assert untouched.is_pending_delete is False
+
+
+def test_list_internal_postgres_tables_recognizes_escaped_identifiers(test_db_session) -> None:
+    onboarding = service.InternalPostgresOnboarding(test_db_session)
+    test_db_session.add(
+        DataSource(
+            id='quoted-table-ds',
+            name='renamed',
+            source_type='database',
+            config={
+                'connection_string': service.InternalPostgresOnboarding.connection_string(),
+                'query': onboarding.query_for('default', 'a"b'),
+            },
+            created_by='import',
+            created_at=datetime.now(UTC),
+        )
+    )
+    test_db_session.commit()
+
+    assert onboarding.query_for('default', 'a"b') in onboarding._onboarded_table_queries()

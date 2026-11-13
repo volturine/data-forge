@@ -12,4 +12,5 @@ class TopKParams(OperationParams):
 
 
 def topk(lf: pl.LazyFrame, params: TopKParams, **_) -> pl.LazyFrame:
-    return lf.sort(params.column, descending=params.descending, maintain_order=True).head(params.k)
+    # Nulls are never a "top" value, in either direction.
+    return lf.sort(params.column, descending=params.descending, nulls_last=True, maintain_order=True).head(params.k)

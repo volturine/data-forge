@@ -885,6 +885,37 @@ class TestAnalysisUpdate:
         assert response.headers['X-Analysis-Version'] == '2'
         assert response.headers['ETag'] == f'"analysis-{result["id"]}-2"'
 
+    def test_update_analysis_without_changes_keeps_revision_and_versions(self, client, sample_analysis: Analysis):
+        payload = {'name': 'Renamed Once', 'tabs': sample_analysis.pipeline_definition['tabs']}
+        current = client.get(f'/api/v1/analysis/{sample_analysis.id}')
+        first = client.put(f'/api/v1/analysis/{sample_analysis.id}', json=payload, headers={'If-Match': current.headers['ETag']})
+        assert first.status_code == 200
+        versions_before = client.get(f'/api/v1/analysis/{sample_analysis.id}/versions').json()
+
+        repeat = client.put(f'/api/v1/analysis/{sample_analysis.id}', json=payload, headers={'If-Match': first.headers['ETag']})
+
+        assert repeat.status_code == 200
+        assert repeat.json()['revision'] == first.json()['revision']
+        assert repeat.headers['ETag'] == first.headers['ETag']
+        assert client.get(f'/api/v1/analysis/{sample_analysis.id}/versions').json() == versions_before
+
+        renamed = client.put(
+            f'/api/v1/analysis/{sample_analysis.id}',
+            json={**payload, 'name': 'Renamed Twice'},
+            headers={'If-Match': repeat.headers['ETag']},
+        )
+        assert renamed.status_code == 200
+
+    def test_update_analysis_rejects_blank_name(self, client, sample_analysis: Analysis):
+        current = client.get(f'/api/v1/analysis/{sample_analysis.id}')
+        response = client.put(
+            f'/api/v1/analysis/{sample_analysis.id}',
+            json={'name': '   ', 'tabs': sample_analysis.pipeline_definition['tabs']},
+            headers={'If-Match': current.headers['ETag']},
+        )
+
+        assert response.status_code == 422
+
     def test_update_analysis_requires_revision(self, client, sample_analysis: Analysis):
         del client.headers['If-Match']
         response = client.put(

@@ -81,7 +81,7 @@ If you only want the high-value knobs, start with these:
 - `PORT` — backend port
 - `CORS_ORIGINS` — allowed browser origins (only needed in dev or multi-origin setups)
 - `AUTH_REQUIRED` — turn login on/off
-- `SETTINGS_ENCRYPTION_KEY` — strongly recommended when auth is enabled
+- `SETTINGS_ENCRYPTION_KEY` — required; encrypts stored secrets and compute-worker credentials
 - `COMPUTE_WORKERS` — the active compute capacity for the current single worker-manager topology
 - `COMPUTE_WARM_WORKERS` — additional ready workers reserved before assignment; they are the same worker type, not a second execution pool
 - `POLARS_CORES_AVAILABLE`, `POLARS_MAX_MEMORY_MB` — per-compute-worker resource limits
@@ -337,7 +337,7 @@ rejected explicitly while accepted compute requests remain durable.
 
 | Variable                  | Default | Notes                                                                                             |
 | ------------------------- | ------- | ------------------------------------------------------------------------------------------------- |
-| `SETTINGS_ENCRYPTION_KEY` | empty   | Strongly recommended in production when `AUTH_REQUIRED=true`; secrets stay unencrypted otherwise. |
+| `SETTINGS_ENCRYPTION_KEY` | empty   | Required. Encrypts stored secrets, including the per-namespace compute-worker storage credentials, so uploads, previews and builds fail without it. Keep it stable: changing it makes existing secrets unreadable. |
 | `SMTP_HOST`               | empty   | DB-seeded SMTP host.                                                                              |
 | `SMTP_PORT`               | `587`   | DB-seeded SMTP port.                                                                              |
 | `SMTP_USER`               | empty   | DB-seeded SMTP username.                                                                          |

@@ -1,6 +1,8 @@
 import uuid
 from datetime import UTC, datetime, timedelta
 
+import pytest
+
 from backend_core.persistence.datasource.models import DataSource
 from backend_core.persistence.healthchecks.models import HealthCheck, HealthCheckResult
 
@@ -125,6 +127,66 @@ def test_healthcheck_update_duplicate_row_count(test_db_session, client):
         json={'check_type': 'row_count'},
     )
     assert update_response.status_code == 400
+
+
+@pytest.mark.parametrize(
+    ('check_type', 'config', 'message'),
+    [
+        ('row_count', {'min_rows': 100, 'max_rows': 5}, 'min_rows cannot be greater than max_rows'),
+        ('row_count', {'min_rows': -1}, 'non-negative whole number'),
+        ('row_count', {'min_rows': 'abc'}, 'must be a number'),
+        ('row_count', {'min_rows': '1.0'}, 'must be a number'),
+        ('row_count', {'min_rows': ''}, 'must be a number'),
+        ('column_range', {'column': 'amount', 'min': 'NaN'}, 'must be a number'),
+        ('null_percentage', {'threshold': 250}, 'between 0 and 100'),
+        ('column_range', {'column': 'amount', 'min': 10, 'max': 1}, 'min cannot be greater than max'),
+        ('column_null', {'column': '  ', 'threshold': 5}, 'column is required'),
+    ],
+)
+def test_healthcheck_create_rejects_invalid_config(test_db_session, client, check_type, config, message):
+    datasource_id = str(uuid.uuid4())
+    _create_datasource(test_db_session, datasource_id)
+
+    response = client.post(
+        '/api/v1/healthchecks',
+        json={'datasource_id': datasource_id, 'name': 'Bad check', 'check_type': check_type, 'config': config},
+    )
+
+    assert response.status_code == 400
+    assert message in response.json()['detail']
+
+
+def test_healthcheck_toggle_keeps_working_for_legacy_config(test_db_session, client):
+    datasource_id = str(uuid.uuid4())
+    _create_datasource(test_db_session, datasource_id)
+    check_id = str(uuid.uuid4())
+    test_db_session.add(
+        HealthCheck(
+            id=check_id,
+            datasource_id=datasource_id,
+            name='Legacy check',
+            check_type='row_count',
+            config={'min_rows': '1'},
+            enabled=True,
+            critical=False,
+            created_at=datetime.now(UTC),
+        ),
+    )
+    test_db_session.commit()
+
+    response = client.put(f'/api/v1/healthchecks/{check_id}', json={'enabled': False})
+
+    assert response.status_code == 200
+    assert response.json()['enabled'] is False
+
+
+def test_healthcheck_create_requires_existing_datasource(client):
+    response = client.post(
+        '/api/v1/healthchecks',
+        json={'datasource_id': str(uuid.uuid4()), 'name': 'Orphan', 'check_type': 'row_count', 'config': {'min_rows': 1}},
+    )
+
+    assert response.status_code == 404
 
 
 def test_list_healthchecks_all_datasources(test_db_session, client):

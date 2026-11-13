@@ -734,17 +734,24 @@ def update_analysis(
 ) -> AnalysisResponseSchema:
     analysis = _require_analysis(session, analysis_id)
 
-    version_service.create_version(session, analysis)
-
-    if data.name is not None:
-        analysis.name = data.name
-
-    if data.description is not None:
-        analysis.description = data.description
-
+    next_name = data.name if data.name is not None else analysis.name
+    next_description = data.description if data.description is not None else analysis.description
+    next_pipeline = analysis.pipeline_definition
+    datasource_ids: list[str] | None = None
     if data.tabs is not None:
         tabs_payload, datasource_ids = _validate_analysis_payload(session, data, analysis_id)
-        analysis.pipeline_definition = PipelineDefinition(tabs=tabs_payload).to_dict()
+        next_pipeline = PipelineDefinition(tabs=tabs_payload).to_dict()
+
+    # Saving unchanged content must not create a version or bump the revision:
+    # a new revision makes every other open editor stale.
+    if (next_name, next_description, next_pipeline) == (analysis.name, analysis.description, analysis.pipeline_definition):
+        return _to_response(analysis)
+
+    version_service.create_version(session, analysis)
+    analysis.name = next_name
+    analysis.description = next_description
+    if datasource_ids is not None:
+        analysis.pipeline_definition = next_pipeline
         replace_datasource_links(session, analysis_id, datasource_ids)
 
     analysis.updated_at = datetime.now(UTC).replace(tzinfo=None)

@@ -212,7 +212,7 @@ async def update_analysis(
     then add steps via POST /analysis/{id}/tabs/{tab_id}/steps.
     """
     analysis_id_value = parse_analysis_id(analysis_id)
-    updated, revision = await run_api_blocking(
+    updated, _ = await run_api_blocking(
         run_db,
         _revisioned_operation,
         analysis_id_value,
@@ -220,6 +220,8 @@ async def update_analysis(
         owner_id,
         lambda session: service.update_analysis(session, analysis_id_value, data),
     )
+    # A save without changes keeps the current revision, so report what was stored.
+    revision = AnalysisRevisionSnapshot(id=updated.id, revision=updated.revision)
     return await executor_client.json_response(
         updated,
         headers={

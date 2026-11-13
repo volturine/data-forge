@@ -306,7 +306,7 @@
 
 		if (failed.length > 0) {
 			restoreAnalyses(failed.map((outcome) => outcome.id));
-			deleteError = `Failed to delete ${failed.length} analysis${failed.length > 1 ? 'es' : ''}.`;
+			deleteError = `Failed to delete ${failed.length} ${failed.length > 1 ? 'analyses' : 'analysis'}.`;
 		}
 	}
 
@@ -410,7 +410,7 @@
 		</div>
 	{/if}
 
-	<main>
+	<section aria-label="Analyses">
 		{#if query.isPending}
 			<div
 				class={css({
@@ -500,7 +500,7 @@
 				{/if}
 			{/if}
 		{/if}
-	</main>
+	</section>
 </div>
 
 <ConfirmDialog
@@ -518,7 +518,7 @@
 <ConfirmDialog
 	show={bulkDeleteConfirm}
 	heading="Delete Analyses"
-	message={`Are you sure you want to delete ${selectionCount} analysis${selectionCount > 1 ? 'es' : ''}? This action cannot be undone.`}
+	message={`Are you sure you want to delete ${selectionCount} ${selectionCount > 1 ? 'analyses' : 'analysis'}? This action cannot be undone.`}
 	confirmText="Delete"
 	cancelText="Cancel"
 	onConfirm={confirmBulkDelete}

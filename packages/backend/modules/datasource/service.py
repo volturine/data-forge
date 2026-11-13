@@ -1,6 +1,5 @@
 import logging
 import math
-import re
 import uuid
 from datetime import UTC, datetime
 from typing import Any
@@ -37,7 +36,6 @@ logger = logging.getLogger(__name__)
 
 _INTERNAL_POSTGRES_EXCLUDED_TABLES = {'alembic_version'}
 _INTERNAL_POSTGRES_NAMESPACE_SCHEMA_PREFIX = 'df$tenant$'
-_INTERNAL_POSTGRES_QUERY_RE = re.compile(r'^SELECT \* FROM "([^"]+)"\."([^"]+)"$')
 
 
 class InternalPostgresOnboarding:
@@ -68,15 +66,6 @@ class InternalPostgresOnboarding:
         return f'Internal PostgreSQL table {cls.display_schema_name(schema_name)}.{table_name}'
 
     @staticmethod
-    def query_schema_and_table(query: str | None) -> tuple[str, str] | None:
-        if not isinstance(query, str):
-            return None
-        match = _INTERNAL_POSTGRES_QUERY_RE.fullmatch(query)
-        if match is None:
-            return None
-        return match.group(1), match.group(2)
-
-    @staticmethod
     def connection_string() -> str:
         from backend_core.config import settings
 
@@ -85,12 +74,8 @@ class InternalPostgresOnboarding:
     def matching_datasources(self, schema_name: str, table_name: str) -> list[DataSource]:
         query = self.query_for(schema_name, table_name)
         connection_string = self.connection_string()
-        datasource_name = self.datasource_name_for(schema_name, table_name)
         matches: list[DataSource] = []
         for datasource in self.session.execute(select(DataSource)).scalars().all():
-            if datasource.name == datasource_name:
-                matches.append(datasource)
-                continue
             datasource_query, datasource_connection = datasource.query_and_connection()
             if datasource_query != query:
                 continue
@@ -99,32 +84,26 @@ class InternalPostgresOnboarding:
             matches.append(datasource)
         return matches
 
-    def _onboarded_table_keys(self) -> tuple[set[str], set[tuple[str, str]]]:
+    def _onboarded_table_queries(self) -> set[str]:
         """Load onboarding metadata once for the internal-table listing.
 
-        The old list implementation called ``matching_datasources`` for every
-        physical table. That method loaded every datasource on each call, so a
-        namespace-heavy test run turned this endpoint into an O(tables ×
-        datasources) query loop. Keep both matching rules, but materialize the
-        two lookup sets once per request.
+        Match on the stored query and connection, like ``matching_datasources``,
+        but materialize the lookup set once per request instead of loading
+        every datasource for each physical table. Names are user-editable, so
+        they never identify an onboarded table.
         """
-        canonical_names: set[str] = set()
-        query_sources: set[tuple[str, str]] = set()
+        queries: set[str] = set()
         connection_string = self.connection_string()
         datasources = self.session.execute(select(DataSource)).scalars().all()
         for datasource in datasources:
-            canonical_names.add(datasource.name)
             query, datasource_connection = datasource.query_and_connection()
-            if datasource_connection != connection_string:
-                continue
-            source = self.query_schema_and_table(query)
-            if source is not None:
-                query_sources.add(source)
-        return canonical_names, query_sources
+            if query is not None and datasource_connection == connection_string:
+                queries.add(query)
+        return queries
 
     def list_tables(self) -> list[InternalPostgresTable]:
         rows: list[InternalPostgresTable] = []
-        canonical_names, query_sources = self._onboarded_table_keys()
+        onboarded_queries = self._onboarded_table_queries()
         bind = self.session.get_bind()
         physical_tables: list[tuple[str, str]]
         if bind.dialect.name == 'postgresql':
@@ -160,7 +139,7 @@ class InternalPostgresOnboarding:
                 InternalPostgresTable(
                     schema_name=schema_name,
                     table_name=table_name,
-                    is_onboarded=(self.datasource_name_for(schema_name, table_name) in canonical_names or (schema_name, table_name) in query_sources),
+                    is_onboarded=self.query_for(schema_name, table_name) in onboarded_queries,
                 ),
             )
         return rows
@@ -612,7 +591,9 @@ def update_datasource(
     session.refresh(datasource)
 
     logger.info(f'Updated datasource {datasource_id}')
-    return _datasource_response(session, datasource)
+    response = _datasource_response(session, datasource)
+    response.config = _masked_config(response.config)
+    return response
 
 
 def delete_datasource(session: Session, datasource_id: str) -> None:

@@ -86,6 +86,12 @@ class TestGetSettings:
         assert 'telegram_bot_token' in data
         assert 'public_idb_debug' in data
 
+    @pytest.mark.parametrize('port', [0, -5, 65536, 10**20])
+    def test_rejects_out_of_range_smtp_port(self, client: TestClient, port: int) -> None:
+        response = client.put('/api/v1/settings', json={'smtp_port': port})
+
+        assert response.status_code == 422
+
     def test_returns_saved_values(self, client: TestClient, monkeypatch) -> None:
         monkeypatch.setenv('SETTINGS_ENCRYPTION_KEY', 'test-key')
         # First save some values

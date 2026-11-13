@@ -156,6 +156,12 @@
 						}
 						e.currentTarget.textContent = titleName;
 					}}
+					onkeydown={(e) => {
+						// A title is one line: Enter commits instead of inserting a line break.
+						if (e.key !== 'Enter') return;
+						e.preventDefault();
+						e.currentTarget.blur();
+					}}
 				>
 					{titleName}
 				</h1>
