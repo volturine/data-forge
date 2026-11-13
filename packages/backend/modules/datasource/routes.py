@@ -264,6 +264,17 @@ def _list_export_branches(metadata_path: str, current_branch: str | None = None)
     return branches
 
 
+_APPLICATION_DATABASE_ADMIN_ONLY = 'Connections to the application database require the admin account'
+
+
+async def _require_application_database_access(user: User, config: dict) -> None:
+    """Reject a non-admin datasource config that connects to the application database server."""
+    if is_admin_user(user):
+        return
+    if await run_api_blocking(service.InternalPostgresOnboarding.references_internal_connection, config):
+        raise HTTPException(status_code=403, detail=_APPLICATION_DATABASE_ADMIN_ONLY)
+
+
 def _required_datasource_name(name: str) -> str:
     normalized = name.strip()
     if not normalized:
@@ -695,6 +706,7 @@ async def connect_datasource(
     source_type = datasource.source_type
     if (error_message := source_type.connect_api_error_message) is not None:
         raise HTTPException(status_code=400, detail=error_message)
+    await _require_application_database_access(user, datasource.config)
 
     owner_id = user.id
     if source_type == DataSourceType.FILE:
@@ -955,8 +967,10 @@ async def update_datasource(
 ):
     """Update a datasource's name or config. Use GET /datasource/{id} to see current values."""
     datasource_id_value = parse_datasource_id(datasource_id)
-    if not is_admin_user(user) and await run_api_blocking(run_db, service.update_changes_internal_postgres_config, datasource_id_value, update):
-        raise HTTPException(status_code=403, detail='Admin access required')
+    if update.config is not None and not is_admin_user(user):
+        change = await run_api_blocking(run_db, service.datasource_config_change, datasource_id_value, update)
+        if await run_api_blocking(service.config_change_reaches_application_database, change):
+            raise HTTPException(status_code=403, detail=_APPLICATION_DATABASE_ADMIN_ONLY)
     if update.config is None or not any(key in update.config for key in (*_EXCEL_PARSING_KEYS, 'csv_options', 'skip_rows')):
         return await run_api_blocking(run_db, service.update_datasource, datasource_id_value, update)
 

@@ -140,12 +140,13 @@ def build_analysis_pipeline_payload(session: Session, analysis: Analysis) -> dic
             raise ValueError('Analysis pipeline tab missing datasource.id')
         analysis_tab_id = datasource.get('analysis_tab_id') if isinstance(datasource.get('analysis_tab_id'), str) else None
         source_type = 'analysis' if analysis_tab_id or str(tab_datasource_id) in output_to_tab else None
-        merged_config = dict(config)
         if source_type is None:
             datasource_model = session.get(DataSource, str(tab_datasource_id))
             if datasource_model is not None:
                 source_type = datasource_model.source_type
-                merged_config = {'branch': branch, **datasource_model.config, **config}
+        # Keep only the tab's own read selection: the worker re-resolves the
+        # stored location config (connection strings, paths), and this payload
+        # is persisted as the build's ``request_json``.
         next_tabs.append(
             {
                 **tab,
@@ -154,7 +155,7 @@ def build_analysis_pipeline_payload(session: Session, analysis: Analysis) -> dic
                     'id': tab_datasource_id,
                     'analysis_tab_id': analysis_tab_id,
                     'source_type': source_type,
-                    'config': merged_config,
+                    'config': dict(config),
                 },
                 'steps': tab.get('steps', []),
             }

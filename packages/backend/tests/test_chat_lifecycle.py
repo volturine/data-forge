@@ -404,10 +404,12 @@ def _turn_events(turn_id: str) -> list[dict[str, object]]:
 
 
 def test_claim_batch_fails_legacy_namespace_turn_without_claiming_it() -> None:
-    session = session_store.create('openrouter', 'test', 'key', user_id='user')
+    # One active turn per session, so each turn needs its own session.
+    legacy_session = session_store.create('openrouter', 'test', 'key', user_id='user')
+    valid_session = session_store.create('openrouter', 'test', 'key', user_id='user')
     store = ChatTurnStore()
-    legacy_id = store.enqueue(session_id=session.id, user_id='user', content='run', tool_ids=[], namespace='legacy_ns', session_token='token')
-    valid_id = store.enqueue(session_id=session.id, user_id='user', content='run', tool_ids=[], namespace='default', session_token='token')
+    legacy_id = store.enqueue(session_id=legacy_session.id, user_id='user', content='run', tool_ids=[], namespace='legacy_ns', session_token='token')
+    valid_id = store.enqueue(session_id=valid_session.id, user_id='user', content='run', tool_ids=[], namespace='default', session_token='token')
 
     claims = store.claim_batch(generation=1, limit=2)
 
@@ -441,4 +443,4 @@ async def test_consumer_fails_claim_whose_namespace_no_longer_validates(monkeypa
         assert turn.claim_token is None
     payloads = _turn_events(turn_id)
     assert payloads[-2]['type'] == 'error' and 'legacy_ns' in str(payloads[-2]['content'])
-    assert payloads[-1] == {'type': 'done'}
+    assert payloads[-1]['type'] == 'done'

@@ -19,6 +19,7 @@ from backend_core.namespace import get_namespace
 from backend_core.persistence.build_runs.models import BuildEvent, BuildRun, BuildRunDatasource
 from backend_core.persistence.datasource.models import DataSource
 from backend_core.persistence.runtime_events.models import RuntimeOutboxEvent
+from backend_core.secrets import mask_secret_fields
 from backend_core.sqlmodel_typing import col, sa
 from backend_core.time import aware_utc, utc_now as _utcnow
 from backend_core.transactions import committed, transaction
@@ -693,7 +694,8 @@ def fold_build_detail(session: Session, build_run: BuildRun) -> compute_schemas.
         results=results,
         duration_ms=build_run.duration_ms,
         error=build_run.error_message or orphan_error,
-        request_json=dict(build_run.request_json),
+        # Build payloads can carry datasource credentials (older scheduled runs merged stored configs).
+        request_json=mask_secret_fields(dict(build_run.request_json)),
     )
 
 

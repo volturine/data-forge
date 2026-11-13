@@ -1,7 +1,9 @@
+import socket
 from datetime import UTC, datetime
 from typing import Any
 
 import pytest
+from sqlalchemy.engine import make_url
 
 from backend_core import datasource_delete_service
 from backend_core.domain.datasource.source_types import DataSourceType
@@ -9,7 +11,9 @@ from backend_core.persistence.datasource.models import DataSource
 from modules.auth.dependencies import get_current_user
 from modules.auth.models import User, UserStatus
 from modules.auth.service import get_default_user_id
-from modules.datasource import service
+from modules.datasource import routes as datasource_routes, service
+
+_APPLICATION_DATABASE_ADMIN_ONLY = 'Connections to the application database require the admin account'
 
 
 @pytest.fixture
@@ -312,7 +316,7 @@ def test_non_admin_cannot_repoint_internal_datasource_query(client, test_db_sess
     response = client.put(f'/api/v1/datasource/{datasource.id}', json={'config': {'query': 'SELECT * FROM "default"."users"'}})
 
     assert response.status_code == 403
-    assert response.json()['detail'] == 'Admin access required'
+    assert response.json()['detail'] == _APPLICATION_DATABASE_ADMIN_ONLY
     test_db_session.expire_all()
     assert test_db_session.get(DataSource, datasource.id).config['query'] == original_query
 
@@ -366,3 +370,223 @@ def test_admin_can_edit_internal_datasource_query(admin_client, test_db_session)
     assert response.status_code == 200
     test_db_session.expire_all()
     assert test_db_session.get(DataSource, datasource.id).config['query'] == next_query
+
+
+def _application_server_variant(**changes: Any) -> str:
+    """The application database URL rewritten to an equivalent spelling of the same server."""
+    from backend_core.config import settings
+
+    return make_url(settings.database_url).set(**changes).render_as_string(hide_password=False)
+
+
+def _application_server_ip() -> str:
+    from backend_core.config import settings
+
+    host = make_url(settings.database_url).host
+    assert host is not None
+    return str(socket.getaddrinfo(host, None)[0][4][0])
+
+
+def _add_external_iceberg_datasource(session) -> DataSource:
+    datasource = DataSource(
+        id='external-iceberg',
+        name='external',
+        source_type=DataSourceType.ICEBERG.value,
+        config={
+            'metadata_path': '/tmp/external-iceberg',
+            'source': {'source_type': 'database', 'connection_string': 'postgresql://external/db', 'query': 'SELECT 1'},
+        },
+        created_by='import',
+        created_at=datetime.now(UTC),
+    )
+    session.add(datasource)
+    session.commit()
+    return datasource
+
+
+def test_non_admin_cannot_point_ingest_source_at_equivalent_application_server_url(client, test_db_session) -> None:
+    datasource = _add_external_iceberg_datasource(test_db_session)
+    connection_string = _application_server_variant(drivername='postgresql', database='postgres', query={'sslmode': 'disable'})
+
+    response = client.put(
+        f'/api/v1/datasource/{datasource.id}',
+        json={'config': {'source': {'source_type': 'database', 'connection_string': connection_string, 'query': 'SELECT * FROM "default"."users"'}}},
+    )
+
+    assert response.status_code == 403
+    assert response.json()['detail'] == _APPLICATION_DATABASE_ADMIN_ONLY
+    test_db_session.expire_all()
+    assert test_db_session.get(DataSource, datasource.id).config['source']['connection_string'] == 'postgresql://external/db'
+
+
+@pytest.mark.parametrize(
+    'connection_string',
+    [
+        pytest.param(service.InternalPostgresOnboarding.connection_string, id='exact'),
+        pytest.param(lambda: _application_server_variant(drivername='postgresql+psycopg', database='other_db'), id='driver-and-database'),
+        pytest.param(lambda: _application_server_variant(drivername='postgresql', query={'sslmode': 'require'}), id='sslmode'),
+        pytest.param(lambda: _application_server_variant(drivername='postgresql', host=_application_server_ip()), id='ip-address'),
+    ],
+)
+def test_non_admin_cannot_connect_database_datasource_to_application_server(client, monkeypatch, connection_string) -> None:
+    async def fail_if_called(**_kwargs):
+        raise AssertionError('application database connections must be rejected before the worker is asked')
+
+    monkeypatch.setattr(datasource_routes, 'create_remote_database_datasource', fail_if_called)
+
+    response = client.post(
+        '/api/v1/datasource/connect',
+        json={'name': 'sessions', 'source_type': 'database', 'config': {'connection_string': connection_string(), 'query': 'SELECT * FROM user_sessions'}},
+    )
+
+    assert response.status_code == 403
+    assert response.json()['detail'] == _APPLICATION_DATABASE_ADMIN_ONLY
+
+
+def test_non_admin_cannot_connect_iceberg_source_to_application_server(client, monkeypatch) -> None:
+    async def fail_if_called(**_kwargs):
+        raise AssertionError('application database connections must be rejected before the worker is asked')
+
+    monkeypatch.setattr(datasource_routes, 'create_remote_iceberg_datasource', fail_if_called)
+
+    response = client.post(
+        '/api/v1/datasource/connect',
+        json={
+            'name': 'sessions',
+            'source_type': 'iceberg',
+            'config': {
+                'source': {
+                    'source_type': 'database',
+                    'connection_string': _application_server_variant(drivername='postgresql', database='postgres'),
+                    'query': 'SELECT * FROM user_sessions',
+                },
+            },
+        },
+    )
+
+    assert response.status_code == 403
+    assert response.json()['detail'] == _APPLICATION_DATABASE_ADMIN_ONLY
+
+
+def test_non_admin_can_connect_database_datasource_on_another_server(client, monkeypatch) -> None:
+    calls: list[str] = []
+
+    async def create_stub(**kwargs):
+        calls.append(kwargs['connection_string'])
+        raise ValueError('stopped after the guard')
+
+    monkeypatch.setattr(datasource_routes, 'create_remote_database_datasource', create_stub)
+
+    response = client.post(
+        '/api/v1/datasource/connect',
+        json={
+            'name': 'warehouse',
+            'source_type': 'database',
+            'config': {'connection_string': 'postgresql://user:pass@203.0.113.10:5432/db', 'query': 'SELECT 1'},
+        },
+    )
+
+    assert response.status_code == 400
+    assert response.json()['detail'] == 'stopped after the guard'
+    assert calls == ['postgresql://user:pass@203.0.113.10:5432/db']
+
+
+def test_admin_can_connect_database_datasource_to_application_server(admin_client, monkeypatch) -> None:
+    calls: list[str] = []
+
+    async def create_stub(**kwargs):
+        calls.append(kwargs['connection_string'])
+        raise ValueError('stopped after the guard')
+
+    monkeypatch.setattr(datasource_routes, 'create_remote_database_datasource', create_stub)
+    connection_string = service.InternalPostgresOnboarding.connection_string()
+
+    response = admin_client.post(
+        '/api/v1/datasource/connect',
+        json={'name': 'internal', 'source_type': 'database', 'config': {'connection_string': connection_string, 'query': 'SELECT 1'}},
+    )
+
+    assert response.status_code == 400
+    assert response.json()['detail'] == 'stopped after the guard'
+    assert calls == [connection_string]
+
+
+class TestConnectsToApplicationDatabaseServer:
+    @pytest.fixture
+    def application_server(self, monkeypatch):
+        from backend_core.config import settings
+
+        addresses = {'appdb.internal': '10.0.0.5', 'appdb-alias.internal': '10.0.0.5', 'warehouse.internal': '10.0.0.9'}
+
+        def fake_getaddrinfo(host, *_args, **_kwargs):
+            if host in addresses:
+                return [(socket.AF_INET, socket.SOCK_STREAM, 6, '', (addresses[host], 0))]
+            raise socket.gaierror(socket.EAI_NONAME, 'unknown host')
+
+        monkeypatch.setattr(service.socket, 'getaddrinfo', fake_getaddrinfo)
+
+        def use(database_url: str) -> None:
+            monkeypatch.setattr(settings, 'database_url', database_url)
+
+        use('postgresql+psycopg://app:secret@appdb.internal:5432/app')
+        return use
+
+    @pytest.mark.parametrize(
+        'connection_string',
+        [
+            'postgresql://app:secret@appdb.internal:5432/app',
+            'postgresql://other@appdb.internal/other_db',
+            'postgresql://app@appdb.internal:5432/app?sslmode=require',
+            'postgresql+psycopg://app@appdb.internal:5432/app',
+            'postgresql://app@10.0.0.5:5432/app',
+            'postgresql://app@[::ffff:10.0.0.5]:5432/app',
+            'postgresql://app@appdb-alias.internal/app',
+            'postgresql://app@APPDB.INTERNAL./app',
+            'postgresql://app@warehouse.internal:5432/app?host=appdb.internal',
+            'postgresql://app@warehouse.internal,appdb.internal/app',
+            'postgresql://app@warehouse.internal/app?hostaddr=10.0.0.5',
+            'host=appdb.internal dbname=app',
+        ],
+    )
+    def test_equivalent_application_server_urls_match(self, application_server, connection_string: str) -> None:
+        assert service.connects_to_application_database_server(connection_string) is True
+        assert service.InternalPostgresOnboarding.references_internal_connection({'connection_string': connection_string}) is True
+        assert service.InternalPostgresOnboarding.references_internal_connection({'source': {'connection_string': connection_string}}) is True
+
+    @pytest.mark.parametrize(
+        'connection_string',
+        [
+            'postgresql://app@appdb.internal:5433/app',
+            'postgresql://app@warehouse.internal:5432/app',
+            'postgresql://app@10.0.0.9/app',
+            'postgresql://app@unknown.internal/app',
+            'postgresql://app@localhost:5432/app',
+            'not a connection string',
+        ],
+    )
+    def test_other_servers_do_not_match(self, application_server, connection_string: str) -> None:
+        assert service.connects_to_application_database_server(connection_string) is False
+
+    @pytest.mark.parametrize(
+        ('connection_string', 'expected'),
+        [
+            ('postgresql://app@127.0.0.1/app', True),
+            ('postgresql://app@127.0.0.2:5432/app', True),
+            ('postgresql://app@[::1]/app', True),
+            ('postgresql://app@0.0.0.0/app', True),
+            ('postgresql:///app', True),
+            ('postgresql://app@%2Fvar%2Frun%2Fpostgresql/app', True),
+            ('postgresql://app@127.0.0.1:6543/app', False),
+            ('postgresql://app@warehouse.internal/app', False),
+        ],
+    )
+    def test_loopback_hosts_match_a_local_application_server(self, application_server, connection_string: str, expected: bool) -> None:
+        application_server('postgresql+psycopg://app:secret@localhost:5432/app')
+
+        assert service.connects_to_application_database_server(connection_string) is expected
+
+    def test_unresolvable_application_host_falls_back_to_literal_comparison(self, application_server) -> None:
+        application_server('postgresql+psycopg://app:secret@db:5432/app')
+
+        assert service.connects_to_application_database_server('postgresql://other@db/other') is True
+        assert service.connects_to_application_database_server('postgresql://other@db-replica/other') is False

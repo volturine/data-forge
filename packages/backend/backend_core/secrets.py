@@ -4,6 +4,7 @@ import base64
 import hashlib
 import os
 from functools import lru_cache
+from typing import cast
 
 from cryptography.exceptions import InvalidTag
 from cryptography.hazmat.primitives.ciphers.aead import AESGCM
@@ -40,6 +41,30 @@ def is_masked_secret(value: str | None) -> bool:
 
 def mask_secret(value: str | None) -> str:
     return MASKED_SECRET if value else ''
+
+
+_SECRET_FIELD_NAMES = frozenset({'connection_string', 'catalog_uri', 'token', 'api_key'})
+_SECRET_FIELD_SUFFIXES = ('_token', '_api_key')
+
+
+def is_secret_field(key: str) -> bool:
+    lowered = key.lower()
+    return lowered in _SECRET_FIELD_NAMES or 'password' in lowered or 'secret' in lowered or lowered.endswith(_SECRET_FIELD_SUFFIXES)
+
+
+def mask_secret_fields[T](value: T) -> T:
+    """Recursively mask non-empty string values of secret-bearing keys in a JSON value."""
+    if isinstance(value, dict):
+        return cast(
+            T,
+            {
+                key: MASKED_SECRET if isinstance(key, str) and is_secret_field(key) and isinstance(item, str) and item else mask_secret_fields(item)
+                for key, item in value.items()
+            },
+        )
+    if isinstance(value, list):
+        return cast(T, [mask_secret_fields(item) for item in value])
+    return value
 
 
 def encrypt_secret(value: str) -> str:
