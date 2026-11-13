@@ -86,7 +86,9 @@ def update_healthcheck(
     if not check:
         raise healthcheck_not_found(healthcheck_id)
     _ensure_unique_row_count(session, check.datasource_id, payload.check_type or check.check_type, exclude_id=healthcheck_id)
-    _validate_config(payload.check_type or check.check_type, payload.config if payload.config is not None else check.config)
+    if payload.config is not None or payload.check_type is not None:
+        # Toggling or renaming must keep working for checks saved before validation existed.
+        _validate_config(payload.check_type or check.check_type, payload.config if payload.config is not None else check.config)
     for key, value in payload.model_dump(exclude_none=True).items():
         setattr(check, key, value)
     session.add(check)

@@ -176,7 +176,8 @@
 	}
 
 	function confirmDelete() {
-		if (!deletingId) return;
+		// One delete at a time: the rollback snapshot belongs to a single request.
+		if (!deletingId || deleteMutation.isPending) return;
 		const deletedId = deletingId;
 		mutatingId = deletedId;
 		listsBeforeDelete = queryClient.getQueriesData<DataSource[]>({
@@ -553,7 +554,7 @@
 									})}
 									title="Delete"
 									onclick={() => handleDelete(datasource.id)}
-									disabled={deleteMutation.isPending && mutatingId === datasource.id}
+									disabled={deleteMutation.isPending}
 								>
 									{#if deleteMutation.isPending && mutatingId === datasource.id}
 										<LoaderCircle size={14} class={css({ animation: 'spin 1s linear infinite' })} />

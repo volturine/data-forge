@@ -656,6 +656,22 @@ class TestClaimDueScheduleEligibility:
 
         assert claim_due_schedules(test_db_session, worker_id='test-scheduler') == []
 
+    def test_concurrent_dependency_edits_cannot_commit_a_cycle(self, test_db_session: Session, test_engine, output_datasource: DataSource) -> None:
+        first = create_schedule(test_db_session, ScheduleCreate(datasource_id=output_datasource.id, cron_expression='0 * * * *'))
+        second = create_schedule(test_db_session, ScheduleCreate(datasource_id=output_datasource.id, cron_expression='0 * * * *'))
+
+        def depend(schedule_id: str, depends_on: str) -> str:
+            with Session(test_engine) as session:
+                try:
+                    update_schedule(session, schedule_id, ScheduleUpdate(depends_on=depends_on))
+                except AppError:
+                    return 'rejected'
+                return 'saved'
+
+        results = run_concurrently([lambda: depend(first.id, second.id), lambda: depend(second.id, first.id)])
+
+        assert sorted(results) == ['rejected', 'saved']
+
     def test_schedule_cannot_trigger_on_its_own_target(self, test_db_session: Session, output_datasource: DataSource) -> None:
         with pytest.raises(AppError, match='its own target datasource'):
             create_schedule(

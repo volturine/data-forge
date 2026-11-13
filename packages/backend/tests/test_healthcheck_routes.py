@@ -156,6 +156,30 @@ def test_healthcheck_create_rejects_invalid_config(test_db_session, client, chec
     assert message in response.json()['detail']
 
 
+def test_healthcheck_toggle_keeps_working_for_legacy_config(test_db_session, client):
+    datasource_id = str(uuid.uuid4())
+    _create_datasource(test_db_session, datasource_id)
+    check_id = str(uuid.uuid4())
+    test_db_session.add(
+        HealthCheck(
+            id=check_id,
+            datasource_id=datasource_id,
+            name='Legacy check',
+            check_type='row_count',
+            config={'min_rows': '1'},
+            enabled=True,
+            critical=False,
+            created_at=datetime.now(UTC),
+        ),
+    )
+    test_db_session.commit()
+
+    response = client.put(f'/api/v1/healthchecks/{check_id}', json={'enabled': False})
+
+    assert response.status_code == 200
+    assert response.json()['enabled'] is False
+
+
 def test_healthcheck_create_requires_existing_datasource(client):
     response = client.post(
         '/api/v1/healthchecks',

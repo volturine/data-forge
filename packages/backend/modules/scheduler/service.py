@@ -16,7 +16,7 @@ from backend_core import (
     runtime_outbox_service,
     runtime_work_service,
 )
-from backend_core.claiming import claim_by_lease_owner, with_for_update_skip_locked
+from backend_core.claiming import advisory_xact_lock, claim_by_lease_owner, with_for_update_skip_locked
 from backend_core.domain.analysis.pipeline_types import PipelineTab
 from backend_core.domain.build_jobs.live import hub as build_job_hub
 from backend_core.domain.build_jobs.models import BuildJobStatus
@@ -391,6 +391,11 @@ def _validate_schedule_references(session: Session, depends_on: str | None, trig
         raise datasource_not_found(trigger_on_datasource_id)
 
 
+def _lock_schedule_graph(session: Session) -> None:
+    """Serialize dependency edits so concurrent writers cannot commit a cycle or orphan."""
+    advisory_xact_lock(session, f'schedule-graph:{get_namespace()}')
+
+
 def _validate_schedule_trigger(
     session: Session,
     *,
@@ -426,6 +431,8 @@ def stage_create_schedule(session: Session, payload: ScheduleCreate) -> Schedule
 
     analysis_id and tab_id are resolved from datasource provenance at execution time.
     """
+    if payload.depends_on:
+        _lock_schedule_graph(session)
     datasource = session.get(DataSource, payload.datasource_id)
     if not datasource:
         raise datasource_not_found(payload.datasource_id)
@@ -464,6 +471,8 @@ def stage_create_schedule(session: Session, payload: ScheduleCreate) -> Schedule
 
 
 def stage_update_schedule(session: Session, schedule_id: str, payload: ScheduleUpdate) -> Schedule:
+    if payload.depends_on:
+        _lock_schedule_graph(session)
     schedule = session.get(Schedule, schedule_id)
     if not schedule:
         raise schedule_not_found(schedule_id)
@@ -494,6 +503,7 @@ def stage_update_schedule(session: Session, schedule_id: str, payload: ScheduleU
 
 
 def stage_delete_schedule(session: Session, schedule_id: str) -> None:
+    _lock_schedule_graph(session)
     schedule = session.get(Schedule, schedule_id)
     if not schedule:
         raise schedule_not_found(schedule_id)
