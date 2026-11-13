@@ -1416,6 +1416,62 @@ async def test_runtime_coordinator_cleans_up_when_registration_fails(monkeypatch
     assert cleanup == ["listener", "manager", "notifier"]
 
 
+@pytest.mark.asyncio
+async def test_worker_manager_registers_and_heartbeats_through_the_warm_reserve_wait(monkeypatch) -> None:
+    """API upload admission must see a live manager while the warm reserve starts."""
+    client = FakeWorkerRuntimeClient()
+    stop_event = asyncio.Event()
+    heartbeat_started = threading.Event()
+    heartbeat_stopped = threading.Event()
+    seen_during_warm_wait: list[tuple[list[str], bool]] = []
+    health = runtime_process.manager_health("manager-1")
+    health.taking_over(60.0)
+
+    def fake_heartbeat_loop(*, stop_signal: threading.Event, on_registration_changed, **_kwargs) -> None:
+        heartbeat_started.set()
+        # A registration change during the wait must not report the manager
+        # as dispatching before its lanes run.
+        on_registration_changed(True)
+        stop_signal.wait()
+        heartbeat_stopped.set()
+
+    monkeypatch.setattr(runtime_process, "async_client_from_env", lambda: asyncio.sleep(0, result=client))
+    monkeypatch.setattr(runtime_process, "worker_manager_id", lambda: "manager-1")
+    monkeypatch.setattr(runtime_process, "configure_logging", lambda: None)
+    monkeypatch.setattr(runtime_process, "validate_compute_worker_runtime_readiness", lambda: None)
+    monkeypatch.setattr(runtime_process, "reconcile_deployment_containers", lambda **_kwargs: 0)
+    monkeypatch.setattr(runtime_process, "run_worker_heartbeat_loop", fake_heartbeat_loop)
+    monkeypatch.setattr(runtime_process, "create_snapshot_notifier", lambda **_kwargs: SimpleNamespace(close=lambda: None))
+
+    class FakeManager:
+        warm_worker_count = 0
+
+        def __init__(self, **_kwargs) -> None:
+            pass
+
+        def wait_for_warm_workers_ready(self, **_kwargs) -> bool:
+            assert heartbeat_started.wait(2)
+            seen_during_warm_wait.append(([name for name, _ in client.calls], health.snapshot()["registered"]))
+            # The generation stops before the reserve is ready.
+            stop_event.set()
+            return False
+
+        def shutdown_all(self) -> None:
+            client.calls.append(("shutdown_all", None))
+
+        def resynchronize_snapshots(self) -> None:
+            pass
+
+    monkeypatch.setattr(runtime_process, "ProcessManager", FakeManager)
+
+    await asyncio.wait_for(runtime_process.run_worker_manager_runtime(stop_event=stop_event, health=health), timeout=5)
+
+    assert seen_during_warm_wait == [(["register_worker"], False)]
+    assert heartbeat_stopped.is_set()
+    # The heartbeat stops first and the row is marked stopped last, as on a normal shutdown.
+    assert [name for name, _ in client.calls] == ["register_worker", "shutdown_all", "stop_worker"]
+
+
 def test_runtime_clients_share_one_channel_per_target(monkeypatch) -> None:
     """Creating a client per hop must not create a connection per hop."""
     from runtime import worker_runtime_client as client_module

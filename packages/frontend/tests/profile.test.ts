@@ -386,8 +386,28 @@ test.describe('Profile – System tab', () => {
 		});
 	});
 
+	test('regular users see the admin note and cannot list internal tables', async ({ page }) => {
+		await gotoProfile(page, 'system');
+		await waitForProfileTab(page, 'System');
+
+		await expect(page.getByTestId('internal-tables-admin-required')).toBeVisible();
+		await expect(page.locator('[data-testid="system-export-group-toggle"]')).toHaveCount(0);
+		const tablesUrl = '/api/v1/datasource/internal-postgres/tables';
+		const response = await page.context().request.get(tablesUrl);
+		expect(response.status()).toBe(403);
+	});
+});
+
+// Onboarding internal tables is restricted to the deployment-managed admin
+// (`DEFAULT_USER_*`). These tests only read and toggle onboarding; never change
+// the admin's password, name, or delete the account here.
+test.describe('Profile – System tab (admin)', () => {
+	test.afterEach(async ({ adminPage }) => {
+		await restoreDefaultNamespace(adminPage);
+	});
+
 	test('system internal postgres switch persists on refresh and can toggle off again', async ({
-		page
+		adminPage: page
 	}) => {
 		await test.step('system tab shows collapsible schema groups for export options', async () => {
 			await gotoProfile(page, 'system');
@@ -454,7 +474,7 @@ test.describe('Profile – System tab', () => {
 	});
 
 	test('system tab preserves hash and reloads onboard state when namespace changes', async ({
-		page
+		adminPage: page
 	}) => {
 		const nsA = E2E_SHARED_NAMESPACE_A;
 		const nsB = E2E_SHARED_NAMESPACE_B;
@@ -513,7 +533,9 @@ test.describe('Profile – System tab', () => {
 		}
 	});
 
-	test('system tab keeps public namespace distinct from app schema public', async ({ page }) => {
+	test('system tab keeps public namespace distinct from app schema public', async ({
+		adminPage: page
+	}) => {
 		await gotoProfile(page, 'system');
 		await waitForProfileTab(page, 'System');
 		await switchNamespace(page, 'public');

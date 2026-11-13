@@ -1016,8 +1016,14 @@ class DockerComputeWorker(ComputeWorker):
             return False
 
     def _submit(self, kind: str, payload: dict[str, object], *, job_id: str | None = None) -> str:
+        # The guard waits while the coordinator is unreachable; run it before
+        # taking the lifecycle lock so a submit to a running compute worker
+        # does not hold that lock through the wait. A restart below (start()
+        # under the lock) and shutdown() still wait while holding it, so other
+        # callers of this one compute worker queue behind those. The restart
+        # and the submit RPC each repeat the guard immediately before they act.
+        self._assert_coordinator_current()
         with self._lock:
-            self._assert_coordinator_current()
             # Check, restart and job registration stay atomic: an compute worker that is
             # shut down (idle reaping, a crash) between the check and the
             # registration has to be restarted, not reported as broken.

@@ -320,6 +320,31 @@ class TestNamespaceMiddleware:
         assert plan.json()['bucket'] == 'next-ns'
         assert run_settings_db(runtime_namespace_exists, stale) is False
 
+    @pytest.mark.parametrize('invalid', ['BAD NS', 'team_a'])
+    def test_namespace_management_routes_accept_invalid_namespace_header(self, client: TestClient, monkeypatch: pytest.MonkeyPatch, invalid: str) -> None:
+        from backend_core.config import settings
+        from backend_core.namespace import get_namespace
+        from modules.namespaces import routes as namespace_routes
+
+        monkeypatch.setattr('backend_core.auth_config.settings.auth_required', False)
+        scopes: list[str] = []
+
+        def list_namespaces(_session) -> list[str]:
+            scopes.append(get_namespace())
+            return [settings.default_namespace]
+
+        monkeypatch.setattr(namespace_routes, 'list_runtime_namespaces', list_namespaces)
+        headers = {'X-Namespace': invalid}
+
+        listed = client.get('/api/v1/namespaces', headers=headers)
+        plan = client.get('/api/v1/namespaces/storage-plan', params={'name': 'next-ns'}, headers=headers)
+
+        assert listed.status_code == 200
+        assert listed.json() == {'namespaces': [settings.default_namespace]}
+        assert scopes == [settings.default_namespace]
+        assert plan.status_code == 200
+        assert plan.json()['bucket'] == 'next-ns'
+
     def test_invalid_namespace_header_returns_bad_request(self, client: TestClient, monkeypatch: pytest.MonkeyPatch) -> None:
         monkeypatch.setattr('backend_core.auth_config.settings.auth_required', False)
 

@@ -80,16 +80,15 @@ def mark_worker_stopped(session: Session, *, worker_id: str, now: datetime | Non
     return worker
 
 
-def has_live_worker(session: Session, *, kind: RuntimeWorkerKind, heartbeat_seconds: float) -> bool:
-    """Return whether a registration of this kind is running and heartbeated recently."""
-    cutoff = _utcnow() - timedelta(seconds=heartbeat_seconds)
-    statement = (
-        select(RuntimeWorker.id)
-        .where(sa(RuntimeWorker.kind == kind))
-        .where(col(RuntimeWorker.stopped_at).is_(None))
-        .where(col(RuntimeWorker.last_heartbeat_at) >= cutoff)
-        .limit(1)
-    )
+def has_recent_worker(session: Session, *, kind: RuntimeWorkerKind, within_seconds: float) -> bool:
+    """Return whether a registration of this kind heartbeated or stopped gracefully within the window.
+
+    A graceful stop refreshes ``last_heartbeat_at``, so a process between a
+    stop and its next registration (a restart or takeover) still counts. A row
+    retired as abandoned keeps its old heartbeat and does not.
+    """
+    cutoff = _utcnow() - timedelta(seconds=within_seconds)
+    statement = select(RuntimeWorker.id).where(sa(RuntimeWorker.kind == kind)).where(col(RuntimeWorker.last_heartbeat_at) >= cutoff).limit(1)
     return session.exec(statement).first() is not None
 
 

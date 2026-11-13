@@ -1,5 +1,6 @@
 import { describe, expect, test, vi, beforeEach } from 'vitest';
 import { fireEvent, render, screen, waitFor } from '@testing-library/svelte';
+import type { UserPublic } from '#lib/api/auth.js';
 
 type Matchable<T> = {
 	match: (onOk: (value: T) => void, onErr?: (error: { message: string }) => void) => Promise<void>;
@@ -35,10 +36,12 @@ vi.mock('#lib/stores/namespace.svelte.js', () => ({
 	})
 }));
 
-const mockAuthStore = vi.hoisted(() => ({ user: { is_admin: true } as { is_admin: boolean } | null }));
-vi.mock('#lib/stores/auth.svelte.js', () => ({
-	authStore: mockAuthStore
-}));
+// The real store keeps `user` reactive, so tests can sign the admin in after mount.
+const { authStore } = await import('#lib/stores/auth.svelte.js');
+
+function setUser(isAdmin: boolean | null) {
+	authStore.user = isAdmin === null ? null : ({ is_admin: isAdmin } as UserPublic);
+}
 
 const mockConfigRefresh = vi.fn().mockResolvedValue(undefined);
 vi.mock('#lib/stores/config.svelte.js', () => ({
@@ -64,7 +67,7 @@ const { default: SystemTab } = await import('./SystemTab.svelte');
 describe('SystemTab', () => {
 	beforeEach(() => {
 		vi.clearAllMocks();
-		mockAuthStore.user = { is_admin: true };
+		setUser(true);
 		mockGetSettings.mockReturnValue(
 			okMatch({
 				public_idb_debug: false
@@ -131,7 +134,7 @@ describe('SystemTab', () => {
 	});
 
 	test('non-admin users see the admin note and never request internal tables', async () => {
-		mockAuthStore.user = { is_admin: false };
+		setUser(false);
 
 		render(SystemTab);
 
@@ -140,5 +143,34 @@ describe('SystemTab', () => {
 		);
 		expect(mockListInternalPostgresTables).not.toHaveBeenCalled();
 		expect(screen.queryByLabelText('Onboard table default.analyses')).toBeNull();
+	});
+
+	test('fetches internal tables once the admin user resolves after mount', async () => {
+		setUser(null);
+
+		render(SystemTab);
+
+		expect(await screen.findByTestId('internal-tables-admin-required')).toBeVisible();
+		expect(mockListInternalPostgresTables).not.toHaveBeenCalled();
+
+		setUser(true);
+
+		const groupToggle = await screen.findByRole('button', { name: /Namespace tables: default/i });
+		expect(groupToggle).toBeVisible();
+		expect(screen.queryByTestId('internal-tables-admin-required')).toBeNull();
+		expect(mockListInternalPostgresTables).toHaveBeenCalledTimes(1);
+	});
+
+	test('drops the table list when the user is no longer the admin', async () => {
+		render(SystemTab);
+
+		const groupToggle = await screen.findByRole('button', { name: /Namespace tables: default/i });
+		expect(groupToggle).toBeVisible();
+
+		setUser(false);
+
+		expect(await screen.findByTestId('internal-tables-admin-required')).toBeVisible();
+		expect(screen.queryByRole('button', { name: /Namespace tables: default/i })).toBeNull();
+		expect(mockListInternalPostgresTables).toHaveBeenCalledTimes(1);
 	});
 });

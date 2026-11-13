@@ -181,6 +181,12 @@ async def _load_turn(claim: TurnClaim, app: FastAPI) -> TurnRuntime:
     return TurnRuntime(claim, app, await _database(session_store.messages, claim.session_id))
 
 
+async def _fail_claim(claim: TurnClaim, error: str) -> None:
+    fence = {'turn_id': claim.id, 'claim_token': claim.claim_token, 'generation': claim.coordinator_generation}
+    await _database(chat_turn_store.append_event, payload={'type': 'error', 'content': error}, **fence)
+    await _database(chat_turn_store.finish, status=ChatTurnStatus.FAILED, **fence)
+
+
 class ChatTurnConsumer:
     """Run bounded chat work under the active runtime coordinator generation."""
 
@@ -237,7 +243,13 @@ class ChatTurnConsumer:
 
     async def _run_claim(self, claim: TurnClaim) -> None:
         with contextlib.suppress(ChatClaimRevoked):
-            runtime = await _load_turn(claim, self.app)
+            try:
+                runtime = await _load_turn(claim, self.app)
+            except ValueError as exc:
+                # Backstop for a stored namespace that no longer validates: an
+                # escaping error would tear down the epoch and re-claim this turn.
+                await _fail_claim(claim, str(exc))
+                return
             stop_requested, _decision = await runtime.control_state()
             if stop_requested:
                 runtime.stop_requested = True

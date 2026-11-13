@@ -686,23 +686,27 @@ class NamespaceMiddleware:
             return
 
         raw = scope_header(scope, b'x-namespace')
-        try:
-            normalized = normalize_namespace(raw)
-        except ValueError:
-            await JSONResponse(status_code=400, content={'detail': f'Invalid namespace. {NAMESPACE_NAME_RULES}'})(scope, receive, send)
-            return
         # Only POST /api/v1/namespaces provisions a namespace (bucket,
         # credentials, tenant schema) before registering it. Requests never
         # register namespaces implicitly. The management routes stay reachable
-        # with a stale header so the picker can list, preview and create.
-        known = normalized == settings.default_namespace or normalized in _KNOWN_NAMESPACES or _is_namespace_management_path(path)
+        # with a stale or invalid header so the picker can list, preview and
+        # create; an invalid header there runs under the default namespace.
+        is_management_request = _is_namespace_management_path(path)
+        try:
+            normalized = normalize_namespace(raw)
+        except ValueError:
+            if not is_management_request:
+                await JSONResponse(status_code=400, content={'detail': f'Invalid namespace. {NAMESPACE_NAME_RULES}'})(scope, receive, send)
+                return
+            normalized = settings.default_namespace
+        known = normalized == settings.default_namespace or normalized in _KNOWN_NAMESPACES or is_management_request
         if not known:
             known = await run_api_blocking(run_settings_db, _namespace_registered, normalized)
             if not known:
                 await JSONResponse(status_code=404, content={'detail': f'Unknown namespace: {normalized}. Create it first.'})(scope, receive, send)
                 return
             _KNOWN_NAMESPACES.add(normalized)
-        with namespace_scope(raw):
+        with namespace_scope(normalized):
             await self.app(scope, receive, send)
 
 

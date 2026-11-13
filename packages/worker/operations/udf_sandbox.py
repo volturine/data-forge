@@ -6,6 +6,7 @@ full polars module is never exposed because it reads and writes local files,
 runs SQL table functions, loads native plugins and changes global config.
 """
 
+import inspect
 from collections.abc import Callable
 from types import SimpleNamespace
 from typing import Any
@@ -19,6 +20,8 @@ _S3_ONLY_MESSAGE = "UDF code may only read from s3:// paths"
 _FORBIDDEN_READ_OPTIONS = frozenset({"storage_options", "credential_provider"})
 
 # In-memory polars API: data types, frame classes and expression functions.
+# ``format`` is left out because UDF code may not use the ``format`` attribute
+# name (see ``validate_udf_attribute_access``).
 _ALLOWED_POLARS_NAMES = (
     "Array",
     "Binary",
@@ -95,7 +98,6 @@ _ALLOWED_POLARS_NAMES = (
     "field",
     "first",
     "fold",
-    "format",
     "from_dict",
     "from_dicts",
     "from_epoch",
@@ -145,7 +147,8 @@ _ALLOWED_POLARS_NAMES = (
 )
 
 # Readers whose s3:// paths go through polars' native object store, so the
-# worker's storage options apply. ``read_*`` collects the matching scan.
+# worker's storage options apply. ``read_*`` collects the matching scan, so
+# its only extra option is ``columns``, applied as a select on the scan.
 _S3_SCANS = {
     "read_csv": "scan_csv",
     "read_ipc": "scan_ipc",
@@ -164,18 +167,46 @@ def _require_s3_source(source: object) -> None:
         raise ValueError(_S3_ONLY_MESSAGE)
 
 
+def _require_supported_options(scan: Callable[..., pl.LazyFrame], kwargs: dict[str, Any]) -> None:
+    # Underscore options are polars internals; some take local paths, such as
+    # ``scan_parquet(_deletion_files=...)``.
+    private = sorted(key for key in kwargs if key.startswith("_"))
+    if private:
+        raise ValueError(f"UDF code cannot pass private read options: {', '.join(private)}")
+    overridden = _FORBIDDEN_READ_OPTIONS.intersection(kwargs)
+    if overridden:
+        raise ValueError(f"UDF code cannot override {', '.join(sorted(overridden))}")
+    parameters = inspect.signature(scan).parameters
+    if any(parameter.kind is inspect.Parameter.VAR_KEYWORD for parameter in parameters.values()):
+        return
+    unsupported = sorted(key for key in kwargs if key not in parameters)
+    if unsupported:
+        raise ValueError(f"Unsupported option for UDF S3 reads: {', '.join(unsupported)}")
+
+
+def _select_columns(frame: pl.LazyFrame, columns: object) -> pl.LazyFrame:
+    if isinstance(columns, str):
+        return frame.select(columns)
+    if isinstance(columns, list | tuple) and all(isinstance(column, str) for column in columns):
+        return frame.select(columns)
+    if isinstance(columns, list | tuple) and all(isinstance(column, int) and not isinstance(column, bool) for column in columns):
+        return frame.select(pl.nth(*columns))
+    raise ValueError("columns must be a list of column names or a list of column indices")
+
+
 def _s3_reader(name: str, scan_name: str) -> Callable[..., pl.DataFrame | pl.LazyFrame]:
     collect = name.startswith("read_")
 
     def read(source: object, **kwargs: Any) -> pl.DataFrame | pl.LazyFrame:
         _require_s3_source(source)
-        overridden = _FORBIDDEN_READ_OPTIONS.intersection(kwargs)
-        if overridden:
-            raise ValueError(f"UDF code cannot override {', '.join(sorted(overridden))}")
+        columns = kwargs.pop("columns", None) if collect else None
         # Look up the scan at call time; the worker's object-store settings are
         # only final after the compute worker is initialized.
         scan: Callable[..., pl.LazyFrame] = getattr(pl, scan_name)
+        _require_supported_options(scan, kwargs)
         frame = scan(source, storage_options=polars_storage_options(), **kwargs)
+        if columns is not None:
+            frame = _select_columns(frame, columns)
         return frame.collect() if collect else frame
 
     read.__name__ = name

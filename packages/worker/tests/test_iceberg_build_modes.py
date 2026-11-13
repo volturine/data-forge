@@ -13,7 +13,7 @@ from runtime.compute_service import _schema_cache_payload_from_arrow, export_dat
 from runtime.domain.compute.base import ComputeWorkerResult
 from runtime.iceberg_metadata import sync_iceberg_schema
 from runtime.namespace import namespace_paths
-from runtime.worker_runtime_client import ClaimedBuildJob, ComputeWorkerRunState
+from runtime.worker_runtime_client import ClaimedBuildJob, ComputeWorkerRunState, DatasourceMetadata
 
 
 class TestSyncIcebergSchema:
@@ -141,8 +141,18 @@ class TestBuildModeWiring:
         manager.acquire_engine.return_value = nullcontext(engine)
         return manager
 
-    def _make_internal_client_mock(self, output_ds_id: str) -> MagicMock:
+    def _make_internal_client_mock(self, output_ds_id: str, datasource: SimpleNamespace) -> MagicMock:
         client = MagicMock()
+        # Builds resolve the stored datasource config instead of trusting the request pipeline.
+        client.datasource_metadata.return_value = DatasourceMetadata(
+            found=True,
+            id=datasource.id,
+            name=datasource.name,
+            source_type=datasource.source_type,
+            config=datasource.config,
+            schema_cache=None,
+            is_hidden=False,
+        )
         client.create_compute_worker_run.return_value = "run-1"
         client.compute_worker_run_state.return_value = ComputeWorkerRunState(status=None, result_json={}, cancelled_at=None, cancelled_by=None)
         client.list_healthchecks.return_value = []
@@ -193,7 +203,7 @@ class TestBuildModeWiring:
             export_kwargs["build_mode"] = build_mode
         mock_catalog, mock_table, mock_arrow = self._setup_mocks(table_exists=table_exists)
         with (
-            self._export_patches(mock_catalog, mock_arrow, self._make_internal_client_mock(output_ds_id)),
+            self._export_patches(mock_catalog, mock_arrow, self._make_internal_client_mock(output_ds_id, sample_datasource)),
             patch("runtime.compute_service.sync_iceberg_schema", return_value=False) as mock_sync,
         ):
             export_data(
@@ -248,7 +258,7 @@ class TestBuildModeWiring:
         output_ds_id = str(uuid.uuid4())
         pipeline = self._make_pipeline(sample_datasource, output_ds_id, build_mode="full")
         mock_catalog, mock_table, mock_arrow = self._setup_mocks(table_exists=True)
-        internal_client = self._make_internal_client_mock(output_ds_id)
+        internal_client = self._make_internal_client_mock(output_ds_id, sample_datasource)
         claim = ClaimedBuildJob(
             job_id="job-1",
             build_id="build-1",
@@ -286,3 +296,33 @@ class TestBuildModeWiring:
         assert publication["publication"].lease_generation == 3
         assert publication["config"]["table"].endswith("_claim_claim_token_1")
         assert "/claims/claim-token-1" in publication["config"]["metadata_path"]
+
+    def test_build_export_ignores_request_datasource_location_overrides(self, sample_datasource: SimpleNamespace):
+        output_ds_id = str(uuid.uuid4())
+        pipeline = self._make_pipeline(sample_datasource, output_ds_id)
+        # A build request may select a branch, not repoint the stored datasource at other data.
+        pipeline["tabs"][0]["datasource"]["source_type"] = "database"
+        pipeline["tabs"][0]["datasource"]["config"] = {
+            "branch": "master",
+            "file_path": "s3://other-tenant/secret.csv",
+            "connection_string": "postgresql://app@db/app",
+            "query": 'SELECT * FROM "public"."user"',
+        }
+        mock_catalog, _mock_table, mock_arrow = self._setup_mocks(table_exists=True)
+        manager = self._make_manager_mock()
+
+        with (
+            self._export_patches(mock_catalog, mock_arrow, self._make_internal_client_mock(output_ds_id, sample_datasource)),
+            patch("runtime.compute_service.sync_iceberg_schema", return_value=False),
+        ):
+            export_data(
+                manager=manager,
+                target_step_id="source",
+                analysis_pipeline=pipeline,
+                filename="test_out",
+                iceberg_options={"namespace": "ns", "table_name": "tbl", "branch": "master"},
+                result_id=output_ds_id,
+            )
+
+        datasource_config = manager.get_engine.return_value.export.call_args.kwargs["datasource_config"]
+        assert datasource_config == {**sample_datasource.config, "source_type": "file", "branch": "master"}

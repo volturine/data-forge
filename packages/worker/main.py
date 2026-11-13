@@ -209,45 +209,13 @@ async def _run_worker_manager_runtime(
     )
     runtime_listener = None
     runtime_listener_task: asyncio.Task[None] | None = None
-    try:
-        warm_worker_timeout = max(float(settings.compute_worker_start_timeout_seconds) * 4, 120.0)
-        warm_workers_ready = await run_control_in_thread(
-            manager.wait_for_warm_workers_ready,
-            timeout_seconds=warm_worker_timeout,
-        )
-        if not warm_workers_ready:
-            logger.warning(
-                "Warm compute worker reserve was not ready after %.1fs; starting manager with %s worker(s)",
-                warm_worker_timeout,
-                manager.warm_worker_count,
-            )
-        if local_stop.is_set():
-            await run_control_in_thread(manager.shutdown_all)
-            await run_control_in_thread(snapshot_notifier.close)
-            return
-        try:
-            runtime_listener = await start_runtime_listener()
-            runtime_listener_task = asyncio.create_task(serve_runtime_notifications(runtime_listener, local_stop, handle_runtime_payload))
-        except Exception as exc:
-            # Polling remains a recovery path if Postgres LISTEN is unavailable
-            # during startup. Normal operation should be notification-driven.
-            logger.warning("Worker runtime notifications unavailable; using recovery polling: %s", exc)
-        await client.register_worker_async(
-            worker_id=worker_id,
-            kind=RuntimeWorkerKind.COORDINATOR.value,
-            hostname=os.uname().nodename,
-            pid=os.getpid(),
-            capacity=settings.compute_workers,
-        )
-        health.registered()
-    except BaseException:
-        if runtime_listener_task is not None:
-            runtime_listener_task.cancel()
-            await asyncio.gather(runtime_listener_task, return_exceptions=True)
-        await stop_runtime_listener(runtime_listener)
-        await run_control_in_thread(manager.shutdown_all)
-        await run_control_in_thread(snapshot_notifier.close)
-        raise
+    # Health reports the registration only once the dispatch lanes run; the
+    # heartbeat thread starts earlier, before the warm-reserve wait.
+    dispatching = threading.Event()
+
+    def registration_changed(is_registered: bool) -> None:
+        if dispatching.is_set():
+            health.registration_changed(is_registered)
 
     heartbeat_stop = threading.Event()
     heartbeat_thread = threading.Thread(
@@ -261,11 +229,73 @@ async def _run_worker_manager_runtime(
             "pid": os.getpid(),
             "capacity": settings.compute_workers,
             "on_reconnected": manager.resynchronize_snapshots,
-            "on_registration_changed": health.registration_changed,
+            "on_registration_changed": registration_changed,
         },
         daemon=True,
     )
-    heartbeat_thread.start()
+    registered = False
+
+    async def stop_heartbeat() -> None:
+        heartbeat_stop.set()
+        if heartbeat_thread.is_alive():
+            await run_control_in_thread(heartbeat_thread.join)
+
+    async def stop_registration() -> None:
+        if registered:
+            with contextlib.suppress(Exception):
+                await client.stop_worker_async(worker_id=worker_id, timeout_seconds=2.0)
+
+    try:
+        # Register and heartbeat before the warm-reserve wait, which can take
+        # several minutes: API upload admission treats a manager row silent
+        # for three minutes as compute being down. Nothing is claimed until
+        # the dispatch lanes start below.
+        await client.register_worker_async(
+            worker_id=worker_id,
+            kind=RuntimeWorkerKind.COORDINATOR.value,
+            hostname=os.uname().nodename,
+            pid=os.getpid(),
+            capacity=settings.compute_workers,
+        )
+        registered = True
+        heartbeat_thread.start()
+        warm_worker_timeout = max(float(settings.compute_worker_start_timeout_seconds) * 4, 120.0)
+        warm_workers_ready = await run_control_in_thread(
+            manager.wait_for_warm_workers_ready,
+            timeout_seconds=warm_worker_timeout,
+        )
+        if not warm_workers_ready:
+            logger.warning(
+                "Warm compute worker reserve was not ready after %.1fs; starting manager with %s worker(s)",
+                warm_worker_timeout,
+                manager.warm_worker_count,
+            )
+        if local_stop.is_set():
+            await stop_heartbeat()
+            await run_control_in_thread(manager.shutdown_all)
+            await run_control_in_thread(snapshot_notifier.close)
+            await stop_registration()
+            return
+        try:
+            runtime_listener = await start_runtime_listener()
+            runtime_listener_task = asyncio.create_task(serve_runtime_notifications(runtime_listener, local_stop, handle_runtime_payload))
+        except Exception as exc:
+            # Polling remains a recovery path if Postgres LISTEN is unavailable
+            # during startup. Normal operation should be notification-driven.
+            logger.warning("Worker runtime notifications unavailable; using recovery polling: %s", exc)
+        dispatching.set()
+        health.registered()
+    except BaseException:
+        await stop_heartbeat()
+        if runtime_listener_task is not None:
+            runtime_listener_task.cancel()
+            await asyncio.gather(runtime_listener_task, return_exceptions=True)
+        await stop_runtime_listener(runtime_listener)
+        await run_control_in_thread(manager.shutdown_all)
+        await run_control_in_thread(snapshot_notifier.close)
+        await stop_registration()
+        raise
+
     request_worker_count = compute_request_worker_count()
     # Keep claim transactions below one shared control-plane budget. A browser
     # burst is durable queue work, not a reason to create one claim per tab.

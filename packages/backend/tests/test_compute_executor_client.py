@@ -4,6 +4,7 @@ import asyncio
 import contextvars
 import os
 import threading
+from collections.abc import Awaitable, Callable
 from datetime import datetime, timedelta
 from functools import partial
 from types import SimpleNamespace
@@ -672,6 +673,7 @@ def _install_upload_wait(monkeypatch: pytest.MonkeyPatch, state: dict[str, objec
 
 def _register_worker_manager(*, heartbeat_age: timedelta, stopped: bool = False) -> None:
     worker_id = 'worker-manager:upload-admission-test'
+    seen_at = utc_now() - heartbeat_age
     run_settings_db(
         runtime_workers_service.register_worker,
         worker_id=worker_id,
@@ -679,10 +681,20 @@ def _register_worker_manager(*, heartbeat_age: timedelta, stopped: bool = False)
         hostname='worker-host',
         pid=1,
         capacity=1,
-        now=utc_now() - heartbeat_age,
+        now=seen_at,
     )
     if stopped:
-        run_settings_db(runtime_workers_service.mark_worker_stopped, worker_id=worker_id)
+        run_settings_db(runtime_workers_service.mark_worker_stopped, worker_id=worker_id, now=seen_at)
+
+
+async def _execute_upload_preflight():
+    return await executor_client.execute_excel_preflight(
+        preflight_id='upload-request-1',
+        source_path='s3://uploads/upload.xlsx',
+        action=enums_pb2.DATASOURCE_PREFLIGHT_ACTION_INITIAL,
+        selection={'sheet_name': 'Sheet1'},
+        delete_source=True,
+    )
 
 
 @pytest.mark.asyncio
@@ -691,49 +703,156 @@ def _register_worker_manager(*, heartbeat_age: timedelta, stopped: bool = False)
     [
         pytest.param(None, id='no-worker-manager'),
         pytest.param({'heartbeat_age': timedelta(minutes=24)}, id='stale-heartbeat-not-stopped'),
-        pytest.param({'heartbeat_age': timedelta(seconds=1), 'stopped': True}, id='stopped-worker-manager'),
+        pytest.param({'heartbeat_age': timedelta(minutes=24), 'stopped': True}, id='stopped-long-ago-worker-manager'),
     ],
 )
-async def test_upload_admission_fails_fast_without_a_live_worker_manager(monkeypatch: pytest.MonkeyPatch, manager: dict[str, Any] | None) -> None:
+@pytest.mark.parametrize('submit_upload', [_create_uploaded_file_datasource, _execute_upload_preflight], ids=['file-create', 'excel-preflight'])
+async def test_upload_admission_fails_fast_without_a_live_worker_manager(
+    monkeypatch: pytest.MonkeyPatch, manager: dict[str, Any] | None, submit_upload: Callable[[], Awaitable[object]]
+) -> None:
     if manager is not None:
         _register_worker_manager(**manager)
     staged_calls = _install_upload_wait(monkeypatch, {'status': enums_pb2.COMPUTE_REQUEST_STATUS_QUEUED})
 
     with pytest.raises(HTTPException) as exc_info:
-        await asyncio.wait_for(_create_uploaded_file_datasource(), timeout=5)
+        await asyncio.wait_for(submit_upload(), timeout=5)
 
     assert exc_info.value.status_code == 503
     assert exc_info.value.detail == _COMPUTE_UNAVAILABLE
+    # Callers keep their inputs for a retry on this typed refusal.
+    assert isinstance(exc_info.value, executor_client.ComputeUnavailableError)
     assert staged_calls == []
 
 
 @pytest.mark.asyncio
-async def test_upload_admission_retires_an_unclaimed_request_after_its_deadline(monkeypatch: pytest.MonkeyPatch) -> None:
+@pytest.mark.parametrize(
+    'manager',
+    [
+        pytest.param({'heartbeat_age': timedelta(seconds=1)}, id='live-worker-manager'),
+        # A generation restart or takeover stops the row and re-registers only
+        # after reconcile and the warm-reserve wait.
+        pytest.param({'heartbeat_age': timedelta(seconds=90), 'stopped': True}, id='restarting-worker-manager'),
+    ],
+)
+async def test_upload_admission_queues_behind_a_live_or_restarting_worker_manager(monkeypatch: pytest.MonkeyPatch, manager: dict[str, Any]) -> None:
+    _register_worker_manager(**manager)
+    staged_calls = _install_upload_wait(monkeypatch, {'status': enums_pb2.COMPUTE_REQUEST_STATUS_COMPLETED})
+    created = object()
+
+    async def validated_response(_model, _completed):
+        return created
+
+    monkeypatch.setattr(executor_client, '_validated_response', validated_response)
+
+    assert await asyncio.wait_for(_create_uploaded_file_datasource(), timeout=5) is created
+    assert len(staged_calls) == 1
+
+
+@pytest.mark.asyncio
+async def test_upload_admission_keeps_waiting_while_a_busy_worker_manager_is_live(monkeypatch: pytest.MonkeyPatch) -> None:
+    _register_worker_manager(heartbeat_age=timedelta(seconds=1))
+    state: dict[str, object] = {'status': enums_pb2.COMPUTE_REQUEST_STATUS_QUEUED}
+    _install_upload_wait(monkeypatch, state)
+    liveness_checks = 0
+    has_recent_worker = runtime_workers_service.has_recent_worker
+    created = object()
+
+    def counted_liveness(session, **kwargs) -> bool:
+        nonlocal liveness_checks
+        liveness_checks += 1
+        if liveness_checks == 4:
+            # Every compute slot was busy for several rechecks; a slot frees and
+            # the manager finishes the upload.
+            state['status'] = enums_pb2.COMPUTE_REQUEST_STATUS_COMPLETED
+        return has_recent_worker(session, **kwargs)
+
+    def unexpected_retire(*_args):
+        raise AssertionError('a live worker manager with busy slots must not get its queued upload retired')
+
+    async def validated_response(_model, _completed):
+        return created
+
+    monkeypatch.setattr(executor_client.runtime_workers_service, 'has_recent_worker', counted_liveness)
+    monkeypatch.setattr(executor_client, '_COMPUTE_ADMISSION_RECHECK_SECONDS', 0.02)
+    monkeypatch.setattr(executor_client, '_retire_unclaimed_request_in_new_session', unexpected_retire)
+    monkeypatch.setattr(executor_client, '_validated_response', validated_response)
+
+    assert await asyncio.wait_for(_create_uploaded_file_datasource(), timeout=5) is created
+    # One admission check, then rechecks that each found the manager live.
+    assert liveness_checks == 4
+
+
+@pytest.mark.asyncio
+async def test_upload_admission_retires_an_unclaimed_request_once_the_worker_manager_is_gone(monkeypatch: pytest.MonkeyPatch) -> None:
     _register_worker_manager(heartbeat_age=timedelta(seconds=1))
     state: dict[str, object] = {'status': enums_pb2.COMPUTE_REQUEST_STATUS_QUEUED}
     staged_calls = _install_upload_wait(monkeypatch, state)
     retired: list[str] = []
+    stage = executor_client._stage_validated_request_in_new_session
+
+    def stage_then_lose_manager(**kwargs):
+        staged = stage(**kwargs)
+        # The manager dies after admission and stays silent past the grace window.
+        _register_worker_manager(heartbeat_age=timedelta(minutes=24), stopped=True)
+        return staged
+
+    monkeypatch.setattr(executor_client, '_stage_validated_request_in_new_session', stage_then_lose_manager)
 
     def retire(request_id: str, _namespace: str):
         retired.append(request_id)
         state['status'] = enums_pb2.COMPUTE_REQUEST_STATUS_FAILED
         return SimpleNamespace(id=request_id)
 
-    monkeypatch.setattr(executor_client, '_COMPUTE_ADMISSION_TIMEOUT_SECONDS', 0.05, raising=False)
-    monkeypatch.setattr(executor_client, '_retire_unclaimed_request_in_new_session', retire, raising=False)
-    monkeypatch.setattr(
-        executor_client.compute_requests_service,
-        'response_payload',
-        lambda _request: {'error': _COMPUTE_UNAVAILABLE, 'status_code': 503},
-    )
+    monkeypatch.setattr(executor_client, '_COMPUTE_ADMISSION_RECHECK_SECONDS', 0.05)
+    monkeypatch.setattr(executor_client, '_retire_unclaimed_request_in_new_session', retire)
 
     with pytest.raises(HTTPException) as exc_info:
         await asyncio.wait_for(_create_uploaded_file_datasource(), timeout=5)
 
     assert exc_info.value.status_code == 503
     assert exc_info.value.detail == _COMPUTE_UNAVAILABLE
+    # A retired create raises the same typed refusal, so confirm keeps its preflight.
+    assert isinstance(exc_info.value, executor_client.ComputeUnavailableError)
     assert len(staged_calls) == 1
     assert retired == ['upload-request-1']
+
+
+@pytest.mark.asyncio
+async def test_upload_admission_retires_claimed_work_once_its_dead_manager_lease_expires(monkeypatch: pytest.MonkeyPatch) -> None:
+    _register_worker_manager(heartbeat_age=timedelta(seconds=1))
+    # The manager claimed the upload, then died: nothing renews its lease and
+    # no response wake ever arrives.
+    state: dict[str, object] = {'status': enums_pb2.COMPUTE_REQUEST_STATUS_RUNNING}
+    staged_calls = _install_upload_wait(monkeypatch, state)
+    retire_attempts: list[str] = []
+    stage = executor_client._stage_validated_request_in_new_session
+
+    def stage_then_lose_manager(**kwargs):
+        staged = stage(**kwargs)
+        _register_worker_manager(heartbeat_age=timedelta(minutes=24), stopped=True)
+        return staged
+
+    def retire(request_id: str, _namespace: str):
+        retire_attempts.append(request_id)
+        if len(retire_attempts) == 1:
+            # The claim's lease has not expired yet; the row stays untouched.
+            return None
+        state['status'] = enums_pb2.COMPUTE_REQUEST_STATUS_FAILED
+        return SimpleNamespace(id=request_id)
+
+    monkeypatch.setattr(executor_client, '_stage_validated_request_in_new_session', stage_then_lose_manager)
+    monkeypatch.setattr(executor_client, '_COMPUTE_ADMISSION_RECHECK_SECONDS', 0.02)
+    monkeypatch.setattr(executor_client, '_retire_unclaimed_request_in_new_session', retire)
+
+    with pytest.raises(HTTPException) as exc_info:
+        await asyncio.wait_for(_create_uploaded_file_datasource(), timeout=5)
+
+    assert exc_info.value.status_code == 503
+    assert exc_info.value.detail == _COMPUTE_UNAVAILABLE
+    assert isinstance(exc_info.value, executor_client.ComputeUnavailableError)
+    assert len(staged_calls) == 1
+    # Rechecking continued past the attempt that found a live lease.
+    assert retire_attempts == ['upload-request-1', 'upload-request-1']
 
 
 @pytest.mark.asyncio
@@ -770,8 +889,8 @@ async def test_upload_admission_deadline_does_not_cut_off_claimed_work(monkeypat
     monkeypatch.setattr(executor_client, '_read_request_in_new_session', read_request)
     monkeypatch.setattr(executor_client.response_recovery, 'wait_for_wake', wake_after_claim)
     monkeypatch.setattr(executor_client, '_validated_response', validated_response)
-    monkeypatch.setattr(executor_client, '_COMPUTE_ADMISSION_TIMEOUT_SECONDS', 0.05, raising=False)
-    monkeypatch.setattr(executor_client, '_retire_unclaimed_request_in_new_session', unexpected_retire, raising=False)
+    monkeypatch.setattr(executor_client, '_COMPUTE_ADMISSION_RECHECK_SECONDS', 0.05)
+    monkeypatch.setattr(executor_client, '_retire_unclaimed_request_in_new_session', unexpected_retire)
 
     assert await asyncio.wait_for(_create_uploaded_file_datasource(), timeout=5) is created
     assert len(reads) == 3

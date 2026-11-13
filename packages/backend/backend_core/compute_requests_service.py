@@ -718,19 +718,38 @@ def retire_unclaimed_request(
     reason: str,
     status_code: int,
 ) -> ComputeRequest | None:
-    """Fail a request no worker manager claimed in time; claimed work keeps running.
+    """Fail a request no live worker manager owns; work under a live lease keeps running.
 
-    The row lock orders this against a claim: a claim that commits first leaves
-    the row running and this returns ``None``, while a claim that follows sees
-    the terminal status and skips it.
+    Only a queued request, or a claimed one whose lease has expired (its
+    manager died), is retired. The row lock orders this against a claim or a
+    reclaim: one that commits first leaves the row running under a fresh lease
+    and this returns ``None``, while one that follows skips the locked row or
+    finds it terminal. Lease expiry is read with the database wall clock after
+    the lock is held.
     """
     table = ComputeRequest.metadata.tables[ComputeRequest.__tablename__]
-    statement = select(ComputeRequest).where(table.c.id == request_id).where(table.c.status == enums_pb2.COMPUTE_REQUEST_STATUS_QUEUED).with_for_update()
+    active_statuses = [enums_pb2.COMPUTE_REQUEST_STATUS_QUEUED, enums_pb2.COMPUTE_REQUEST_STATUS_RUNNING]
+    statement = select(ComputeRequest).where(table.c.id == request_id).where(table.c.status.in_(active_statuses)).with_for_update()
     request = session.execute(statement).scalars().first()
     if request is None:
         session.rollback()
         return None
-    _retire_request(session, request, reason=reason, now=_utcnow(), payload={'error': reason, 'status_code': status_code})
+    now = database_now(session, wall_clock=True)
+    unowned = (
+        select(table.c.id)
+        .where(table.c.id == request_id)
+        .where(
+            or_(
+                table.c.status == enums_pb2.COMPUTE_REQUEST_STATUS_QUEUED,
+                table.c.lease_expires_at.is_(None),
+                table.c.lease_expires_at <= now,
+            )
+        )
+    )
+    if session.execute(unowned).first() is None:
+        session.rollback()
+        return None
+    _retire_request(session, request, reason=reason, now=now, payload={'error': reason, 'status_code': status_code})
     session.commit()
     session.refresh(request)
     record_lease_transition(

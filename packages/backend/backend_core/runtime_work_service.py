@@ -11,10 +11,24 @@ from sqlmodel import Session
 
 from backend_core.claiming import is_postgres
 from backend_core.config import settings
+from backend_core.namespace_storage import is_valid_namespace_name
 from backend_core.persistence.runtime_events.models import RuntimeNamespaceWorkWake
 from backend_core.sqlmodel_typing import col
 
 logger = logging.getLogger(__name__)
+# Legacy rows are rescanned forever; warn once per namespace per process.
+_WARNED_INVALID_NAMESPACES: set[str] = set()
+
+
+def _servable_namespace(namespace: str) -> bool:
+    # Work rows left by namespaces registered before the bucket-name rules
+    # (e.g. with underscores) cannot be served; one must not stall the batch.
+    if is_valid_namespace_name(namespace):
+        return True
+    if namespace not in _WARNED_INVALID_NAMESPACES:
+        _WARNED_INVALID_NAMESPACES.add(namespace)
+        logger.warning('Skipping runtime work for invalid namespace %r', namespace)
+    return False
 
 
 class RuntimeWorkKind(StrEnum):
@@ -121,7 +135,11 @@ def list_due_schedule_namespaces(session: Session, *, limit: int = 100) -> list[
         ),
         {'kind': RuntimeWorkKind.SCHEDULE.value, 'limit': limit, 'wake_limit': _WAKE_BATCH_SIZE},
     ).all()
-    return [(str(namespace), int(generation), [int(wake_id) for wake_id in wake_ids]) for namespace, generation, wake_ids in rows]
+    return [
+        (str(namespace), int(generation), [int(wake_id) for wake_id in wake_ids])
+        for namespace, generation, wake_ids in rows
+        if _servable_namespace(str(namespace))
+    ]
 
 
 def finish_schedule_scan(
@@ -218,7 +236,7 @@ def list_pending_namespaces(
         ),
         {'kinds': kind_values},
     ).all()
-    return [str(namespace) for namespace, _priority_at in rows]
+    return [str(namespace) for namespace, _priority_at in rows if _servable_namespace(str(namespace))]
 
 
 def refresh_pending_work(

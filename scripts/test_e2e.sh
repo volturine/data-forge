@@ -434,6 +434,9 @@ run_playwright_shard() {
         "E2E_CONCURRENCY_BROWSERS=${E2E_CONCURRENCY_BROWSERS:-}"
         "PLAYWRIGHT_TEST_TIMEOUT_MS=${PLAYWRIGHT_TEST_TIMEOUT_MS:-}"
         "DEFAULT_NAMESPACE=${DEFAULT_NAMESPACE}"
+        # Admin-gated tests (internal table onboarding) sign in as the default account.
+        "DEFAULT_USER_EMAIL=${DEFAULT_USER_EMAIL}"
+        "DEFAULT_USER_PASSWORD=${DEFAULT_USER_PASSWORD}"
         "E2E_GLOBAL_RUN_STAMP=${E2E_GLOBAL_RUN_STAMP}"
         "E2E_ARTIFACTS_DIR=$(playwright_artifacts_root)"
         "E2E_SHARED_FIXTURES_READ_ONLY=1"

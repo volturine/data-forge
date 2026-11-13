@@ -7,6 +7,7 @@ from worker_test_support import FakeEngine
 from runtime import compute_service
 from runtime.compute_manager import ProcessManager
 from runtime.domain.compute.result import ComputeWorkerResult
+from runtime.worker_runtime_client import DatasourceMetadata
 
 
 class _PreviewEngine(FakeEngine):
@@ -71,9 +72,19 @@ def _pipeline(sample_datasource, analysis_id: str) -> dict[str, object]:
     }
 
 
-def _internal_client_mock() -> MagicMock:
+def _internal_client_mock(sample_datasource) -> MagicMock:
     client = MagicMock()
     client.create_compute_worker_run.return_value = "run-1"
+    # The worker resolves stored datasource config instead of trusting the request pipeline.
+    client.datasource_metadata.return_value = DatasourceMetadata(
+        found=True,
+        id=sample_datasource.id,
+        name=sample_datasource.name,
+        source_type=sample_datasource.source_type,
+        config=sample_datasource.config,
+        schema_cache=None,
+        is_hidden=False,
+    )
     return client
 
 
@@ -92,7 +103,7 @@ def test_preview_step_persists_compute_worker_run_by_default(sample_datasource, 
     analysis_id = f"preview-log-{uuid.uuid4()}"
     pipeline = _pipeline(sample_datasource, analysis_id)
     manager = ProcessManager(engine_factory=_PreviewEngine)
-    internal_client = _internal_client_mock()
+    internal_client = _internal_client_mock(sample_datasource)
     try:
         with patch("runtime.compute_service.client_from_env", return_value=internal_client):
             result = compute_service.preview_step(
@@ -133,7 +144,7 @@ def test_preview_step_skips_compute_worker_run_persistence_when_disabled(sample_
     analysis_id = f"preview-no-log-{uuid.uuid4()}"
     pipeline = _pipeline(sample_datasource, analysis_id)
     manager = ProcessManager(engine_factory=_PreviewEngine)
-    internal_client = _internal_client_mock()
+    internal_client = _internal_client_mock(sample_datasource)
     try:
         with patch("runtime.compute_service.client_from_env", return_value=internal_client):
             result = compute_service.preview_step(
@@ -158,7 +169,7 @@ def test_preview_step_finalizes_run_when_engine_fails(sample_datasource, monkeyp
     monkeypatch.setattr(compute_service.settings, "persist_preview_runs", True)
     analysis_id = f"preview-engine-failure-{uuid.uuid4()}"
     pipeline = _pipeline(sample_datasource, analysis_id)
-    internal_client = _internal_client_mock()
+    internal_client = _internal_client_mock(sample_datasource)
 
     manager = ProcessManager(engine_factory=_PreviewEngine)
     with (
@@ -231,7 +242,7 @@ def test_row_count_records_run_when_engine_acquire_fails(sample_datasource) -> N
 
     analysis_id = f"row-count-failure-{uuid.uuid4()}"
     pipeline = _pipeline(sample_datasource, analysis_id)
-    internal_client = _internal_client_mock()
+    internal_client = _internal_client_mock(sample_datasource)
     internal_client.compute_worker_run_state.return_value = None
     manager = ProcessManager(engine_factory=_PreviewEngine)
 
@@ -274,7 +285,7 @@ def test_download_step_finalizes_validation_failure_without_query_plan(sample_da
 
     analysis_id = f"download-failure-{uuid.uuid4()}"
     pipeline = _pipeline(sample_datasource, analysis_id)
-    internal_client = _internal_client_mock()
+    internal_client = _internal_client_mock(sample_datasource)
     internal_client.compute_worker_run_state.return_value = None
     manager = ProcessManager(engine_factory=_ValidationFailureEngine)
 

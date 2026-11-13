@@ -30,7 +30,7 @@ from datasources.schemas import (
 from runtime.compute_manager import ProcessManager
 from runtime.domain.compute.identity import datasource_compute_worker_identity
 from runtime.domain.compute_worker_runs.schemas import ComputeWorkerRunKind, ComputeWorkerRunStatus, SchemaDiffStatus
-from runtime.domain.datasource.source_types import DataSourceFileType, DataSourceType
+from runtime.domain.datasource.source_types import DataSourceFileType, DataSourceType, datasource_read_selection
 from runtime.exceptions import DataSourceConnectionError, DataSourceValidationError
 from runtime.iceberg_catalog import ensure_catalog_namespace, load_runtime_catalog
 from runtime.namespace import get_namespace
@@ -47,13 +47,6 @@ from runtime.worker_runtime_client import BackendWorkerRpcError, DatasourceMetad
 
 logger = logging.getLogger(__name__)
 _MAX_DATASOURCE_MANIFEST_BYTES = 1024 * 1024
-# Request-time datasource overrides may only select a branch, snapshot, or
-# reader of the stored datasource. Location keys such as ``connection_string``
-# or ``query`` stay owned by the stored config, so a caller cannot repoint an
-# existing datasource at other data (e.g. another internal Postgres table).
-_DATASOURCE_READ_SELECTOR_KEYS = frozenset(
-    {"branch", "snapshot_id", "snapshot_timestamp_ms", "time_travel_snapshot_id", "time_travel_snapshot_timestamp_ms", "reader"}
-)
 
 
 class DatasourcePublicationClaimLost(RuntimeError):
@@ -803,8 +796,7 @@ def get_column_stats_from_metadata(
     sample_size: int = 10000,
     datasource_config: dict[str, object] | None = None,
 ) -> ColumnStatsResponse:
-    selection = {key: value for key, value in (datasource_config or {}).items() if key in _DATASOURCE_READ_SELECTOR_KEYS}
-    config = {"source_type": metadata.source_type, **(metadata.config or {}), **selection}
+    config = {"source_type": metadata.source_type, **(metadata.config or {}), **datasource_read_selection(datasource_config)}
     lazy = load_datasource_frame(config)
     schema = lazy.collect_schema()
     if column_name not in schema:

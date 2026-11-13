@@ -1,5 +1,6 @@
 import { listNamespaces, registerNamespace } from '#lib/api/namespaces.js';
 import { idbGet, idbSet, idbDelete } from '#lib/utils/indexeddb.js';
+import { isValidNamespace } from '#lib/utils/namespace.js';
 import { configStore } from '#lib/stores/config.svelte.js';
 import { SvelteURLSearchParams } from 'svelte/reactivity';
 
@@ -10,6 +11,11 @@ export type NamespaceStatus = 'pending' | 'ready' | 'failed';
 
 function isValid(value: unknown): value is string {
 	return typeof value === 'string' && value.trim().length > 0;
+}
+
+/** A stored or deep-linked name must satisfy the bucket-name rules verbatim. */
+function isSelectable(value: unknown): value is string {
+	return typeof value === 'string' && value === value.trim() && isValidNamespace(value);
 }
 
 let namespace = $state<string>('');
@@ -84,7 +90,7 @@ export async function initNamespace(): Promise<void> {
 		// browser profile with x (persisted below), so tests and shared links can
 		// target a namespace without clicking through the picker.
 		const urlNamespace = new SvelteURLSearchParams(window.location.search).get('namespace');
-		if (isValid(urlNamespace)) {
+		if (isSelectable(urlNamespace)) {
 			// Requests never register namespaces implicitly, so provisioning must
 			// finish before any request carries this namespace. A failed hint
 			// falls back to the stored or default namespace.
@@ -97,7 +103,7 @@ export async function initNamespace(): Promise<void> {
 		}
 
 		const stored = await idbGet<string>(NAMESPACE_KEY);
-		if (isValid(stored) && (await isStoredNamespaceRegistered(stored))) {
+		if (isSelectable(stored) && (await isStoredNamespaceRegistered(stored))) {
 			markReady(stored);
 			return;
 		}

@@ -9,7 +9,7 @@ from unittest.mock import AsyncMock, create_autospec
 
 import pytest
 from fastapi import FastAPI, HTTPException
-from sqlalchemy import Connection, Engine, create_engine
+from sqlalchemy import Connection, Engine, create_engine, select
 from sqlalchemy.dialects.postgresql.psycopg import PGDialect_psycopg
 from sqlalchemy.exc import OperationalError
 from sqlalchemy.pool import StaticPool
@@ -21,9 +21,10 @@ from backend_core import database
 from backend_core.ai_clients import AIClient
 from backend_core.config import settings
 from backend_core.database import RuntimeCoordinatorFenced
+from backend_core.sqlmodel_typing import col
 from modules.auth.models import User
 from modules.chat.consumer import ChatTurnConsumer, TurnRuntime
-from modules.chat.models import ChatSession, ChatTurn, ChatTurnStatus
+from modules.chat.models import ChatEvent, ChatSession, ChatTurn, ChatTurnStatus
 from modules.chat.sessions import session_store
 from modules.chat.store import ChatClaimRevoked, ChatTurnStore, TurnClaim, _verify_claim
 from modules.mcp.models import MCPHttpMethod, MCPToolDefinition
@@ -394,3 +395,50 @@ async def test_revocation_during_sync_provider_io_keeps_admission_until_thread_e
     finally:
         release.set()
         await asyncio.gather(task, return_exceptions=True)
+
+
+def _turn_events(turn_id: str) -> list[dict[str, object]]:
+    with Session(database.get_settings_engine()) as db:
+        events = db.execute(select(ChatEvent).where(col(ChatEvent.turn_id) == turn_id).order_by(col(ChatEvent.sequence))).scalars().all()
+        return [dict(event.payload) for event in events]
+
+
+def test_claim_batch_fails_legacy_namespace_turn_without_claiming_it() -> None:
+    session = session_store.create('openrouter', 'test', 'key', user_id='user')
+    store = ChatTurnStore()
+    legacy_id = store.enqueue(session_id=session.id, user_id='user', content='run', tool_ids=[], namespace='legacy_ns', session_token='token')
+    valid_id = store.enqueue(session_id=session.id, user_id='user', content='run', tool_ids=[], namespace='default', session_token='token')
+
+    claims = store.claim_batch(generation=1, limit=2)
+
+    assert [claim.id for claim in claims] == [valid_id]
+    with Session(database.get_settings_engine()) as db:
+        legacy = db.get(ChatTurn, legacy_id)
+        assert legacy is not None
+        assert legacy.status == ChatTurnStatus.FAILED
+        assert legacy.claim_token is None and legacy.coordinator_generation is None
+    payloads = _turn_events(legacy_id)
+    assert [payload['type'] for payload in payloads if payload['type'] in ('error', 'done')] == ['error', 'done']
+    assert store.claim_batch(generation=2, limit=2) == []
+
+
+@pytest.mark.asyncio
+async def test_consumer_fails_claim_whose_namespace_no_longer_validates(monkeypatch: pytest.MonkeyPatch) -> None:
+    session = session_store.create('openrouter', 'test', 'key', user_id='user')
+    store = ChatTurnStore()
+    turn_id = store.enqueue(session_id=session.id, user_id='user', content='run', tool_ids=[], namespace='default', session_token='token')
+    claim = replace(store.claim_batch(generation=1, limit=1)[0], namespace='legacy_ns')
+    provider = AsyncMock()
+    monkeypatch.setattr(routes_module, 'chat_with_tools', provider)
+
+    await ChatTurnConsumer(FastAPI(), 1)._run_claim(claim)
+
+    provider.assert_not_awaited()
+    with Session(database.get_settings_engine()) as db:
+        turn = db.get(ChatTurn, turn_id)
+        assert turn is not None
+        assert turn.status == ChatTurnStatus.FAILED
+        assert turn.claim_token is None
+    payloads = _turn_events(turn_id)
+    assert payloads[-2]['type'] == 'error' and 'legacy_ns' in str(payloads[-2]['content'])
+    assert payloads[-1] == {'type': 'done'}

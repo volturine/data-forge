@@ -813,6 +813,31 @@ def test_schedule_work_generation_preserves_wakeup_during_scan(monkeypatch, tmp_
 
 
 @pytest.mark.timeout(300)
+def test_runtime_work_listings_skip_invalid_legacy_namespaces(monkeypatch, tmp_path: Path) -> None:
+    require_docker()
+
+    from backend_core import database, runtime_work_service
+    from backend_core.runtime_work_service import RuntimeWorkKind
+
+    with PostgresContainer() as container:
+        _configure_postgres_settings(monkeypatch, container, tmp_path)
+        asyncio.run(database.init_db())
+
+        with Session(database._get_tenant_engine()) as session:
+            # A namespace registered before underscores were rejected still has work rows.
+            runtime_work_service.mark_schedule_pending(session, namespace='team_a')
+            runtime_work_service.mark_schedule_pending(session, namespace='default')
+            runtime_work_service.append_wake(session, namespace='team_a', kind=RuntimeWorkKind.BUILD)
+            runtime_work_service.append_wake(session, namespace='default', kind=RuntimeWorkKind.BUILD)
+            session.commit()
+
+            assert [row[0] for row in runtime_work_service.list_due_schedule_namespaces(session)] == ['default']
+            assert runtime_work_service.list_pending_namespaces(session) == ['default']
+
+        _clear_database_state()
+
+
+@pytest.mark.timeout(300)
 def test_runtime_wake_appends_do_not_wait_for_marker_lock(monkeypatch, tmp_path: Path) -> None:
     require_docker()
 

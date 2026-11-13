@@ -1,5 +1,5 @@
 <script lang="ts">
-	import { onMount } from 'svelte';
+	import { onMount, untrack } from 'svelte';
 	import { SvelteSet } from 'svelte/reactivity';
 	import { CheckCircle, Save, Loader2, Database, ChevronDown } from '@lucide/svelte';
 	import { getSettings, updateSettings } from '#lib/api/settings.js';
@@ -45,10 +45,22 @@
 			}
 		);
 
-		internalTablesLoading = isAdmin;
-		internalTablesError = null;
-		togglingKey = null;
-		if (isAdmin) {
+		return () => {
+			aborted = true;
+		};
+	});
+
+	// The signed-in user can resolve after mount; fetch exactly when the template
+	// shows the table list. A namespace change remounts this tab via {#key}.
+	$effect(() => {
+		const admin = isAdmin;
+		let aborted = false;
+		untrack(() => {
+			internalTables = [];
+			internalTablesLoading = admin;
+			internalTablesError = null;
+			togglingKey = null;
+			if (!admin) return;
 			void listInternalPostgresTables().match(
 				(tables) => {
 					if (aborted) return;
@@ -64,8 +76,7 @@
 					internalTablesLoading = false;
 				}
 			);
-		}
-
+		});
 		return () => {
 			aborted = true;
 		};

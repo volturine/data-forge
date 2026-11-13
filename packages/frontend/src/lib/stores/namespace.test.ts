@@ -62,6 +62,8 @@ describe('namespace store', () => {
 		});
 		window.history.replaceState(null, '', '/');
 		await setNamespace('');
+		// The reset above deletes the stored value; tests observe only their own deletes.
+		mockIdbDelete.mockClear();
 	});
 
 	describe('requireNamespace', () => {
@@ -251,6 +253,29 @@ describe('namespace store', () => {
 			await initNamespace();
 			expect(mockIdbSet).not.toHaveBeenCalledWith('namespace', 'linked-ns');
 			expect(requireNamespace()).toBe('stored-ns');
+		});
+
+		test.each(['team_a', 'Team-A', 'ab', ' padded-ns '])(
+			'discards stored namespace %j that breaks the naming rules',
+			async (stored) => {
+				mockIdbGet.mockResolvedValue(stored);
+				mockListNamespaces.mockResolvedValue(listedNamespaces(['default', stored]));
+				mockConfigStore.config = { default_namespace: 'default' };
+				await initNamespace();
+				expect(mockListNamespaces).not.toHaveBeenCalled();
+				expect(mockIdbDelete).toHaveBeenCalledWith('namespace');
+				expect(mockIdbSet).toHaveBeenCalledWith('namespace', 'default');
+				expect(requireNamespace()).toBe('default');
+			}
+		);
+
+		test('ignores a deep-linked namespace that breaks the naming rules', async () => {
+			window.history.replaceState(null, '', '/?namespace=team_a');
+			mockConfigStore.config = { default_namespace: 'default' };
+			await initNamespace();
+			expect(mockRegisterNamespace).not.toHaveBeenCalled();
+			expect(mockIdbSet).not.toHaveBeenCalledWith('namespace', 'team_a');
+			expect(requireNamespace()).toBe('default');
 		});
 
 		test('fails with a contract error when config loads without default_namespace', async () => {
