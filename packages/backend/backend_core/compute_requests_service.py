@@ -717,11 +717,12 @@ def retire_unclaimed_request(
     *,
     reason: str,
     status_code: int,
+    retire_queued: bool = True,
 ) -> ComputeRequest | None:
     """Fail a request no live worker manager owns; work under a live lease keeps running.
 
-    Only a queued request, or a claimed one whose lease has expired (its
-    manager died), is retired. The row lock orders this against a claim or a
+    A claimed request whose lease has expired (its manager died or stalled) is
+    retired, and so is a queued one when ``retire_queued`` is set. The row lock orders this against a claim or a
     reclaim: one that commits first leaves the row running under a fresh lease
     and this returns ``None``, while one that follows skips the locked row or
     finds it terminal. Lease expiry is read with the database wall clock after
@@ -735,16 +736,14 @@ def retire_unclaimed_request(
         session.rollback()
         return None
     now = database_now(session, wall_clock=True)
+    lease_lapsed = and_(
+        table.c.status == enums_pb2.COMPUTE_REQUEST_STATUS_RUNNING,
+        or_(table.c.lease_expires_at.is_(None), table.c.lease_expires_at <= now),
+    )
     unowned = (
         select(table.c.id)
         .where(table.c.id == request_id)
-        .where(
-            or_(
-                table.c.status == enums_pb2.COMPUTE_REQUEST_STATUS_QUEUED,
-                table.c.lease_expires_at.is_(None),
-                table.c.lease_expires_at <= now,
-            )
-        )
+        .where(or_(table.c.status == enums_pb2.COMPUTE_REQUEST_STATUS_QUEUED, lease_lapsed) if retire_queued else lease_lapsed)
     )
     if session.execute(unowned).first() is None:
         session.rollback()

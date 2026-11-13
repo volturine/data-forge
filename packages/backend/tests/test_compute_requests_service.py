@@ -740,6 +740,7 @@ def test_cancel_disconnected_request_retires_non_shared_engine_work(test_db_sess
     assert compute_requests_service.claim_next_request(test_db_session, worker_id='worker-test') is None
 
 
+@pytest.mark.parametrize('retire_queued', [True, False], ids=['queued-retirable', 'expired-leases-only'])
 @pytest.mark.parametrize(
     ('state', 'retires'),
     [
@@ -752,7 +753,10 @@ def test_cancel_disconnected_request_retires_non_shared_engine_work(test_db_sess
         pytest.param('reclaimed', False, id='reclaimed-after-expiry'),
     ],
 )
-def test_retire_unclaimed_request_spares_work_under_a_live_lease(test_db_session, state: str, retires: bool) -> None:
+def test_retire_unclaimed_request_spares_work_under_a_live_lease(test_db_session, state: str, retires: bool, retire_queued: bool) -> None:
+    if state == 'queued':
+        # Only an expired claim is retired while a live manager may still claim queued work.
+        retires = retire_queued
     request = _create_request(
         test_db_session,
         namespace='default',
@@ -775,6 +779,7 @@ def test_retire_unclaimed_request_spares_work_under_a_live_lease(test_db_session
         request.id,
         reason='Compute is unavailable right now; try again shortly.',
         status_code=503,
+        retire_queued=retire_queued,
     )
 
     test_db_session.expire_all()
@@ -782,6 +787,10 @@ def test_retire_unclaimed_request_spares_work_under_a_live_lease(test_db_session
     assert current is not None
     if not retires:
         assert retired is None
+        if state == 'queued':
+            assert current.status == enums_pb2.COMPUTE_REQUEST_STATUS_QUEUED
+            assert current.lease_owner is None
+            return
         assert current.status == enums_pb2.COMPUTE_REQUEST_STATUS_RUNNING
         assert current.lease_owner == ('worker-new' if state == 'reclaimed' else 'worker-dead')
         return
