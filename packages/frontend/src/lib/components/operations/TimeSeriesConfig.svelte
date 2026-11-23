@@ -117,9 +117,9 @@
 		>
 			Operation Type
 		</h4>
-		<label for="ts-select-operation" class={label({ variant: 'hidden' })}
-			>Select operation type</label
-		>
+		<label for="ts-select-operation" class={label({ variant: 'hidden' })}>
+			Select operation type
+		</label>
 		<select
 			id="ts-select-operation"
 			data-testid="ts-operation-select"
@@ -158,9 +158,9 @@
 			>
 				Extract Component
 			</h4>
-			<label for="ts-select-component" class={label({ variant: 'hidden' })}
-				>Select component to extract</label
-			>
+			<label for="ts-select-component" class={label({ variant: 'hidden' })}>
+				Select component to extract
+			</label>
 			<select
 				id="ts-select-component"
 				data-testid="ts-component-select"
@@ -198,9 +198,9 @@
 			>
 				Timestamp Unit
 			</h4>
-			<label for="ts-select-timestamp-unit" class={label({ variant: 'hidden' })}
-				>Select timestamp time unit</label
-			>
+			<label for="ts-select-timestamp-unit" class={label({ variant: 'hidden' })}>
+				Select timestamp time unit
+			</label>
 			<select
 				id="ts-select-timestamp-unit"
 				data-testid="ts-timestamp-unit-select"
@@ -208,13 +208,13 @@
 				bind:value={config.unit}
 			>
 				{#each timestampUnits as unit (unit)}
-					<option value={unit}
-						>{unit} ({unit === 'ns'
+					<option value={unit}>
+						{unit} ({unit === 'ns'
 							? 'nanoseconds'
 							: unit === 'us'
 								? 'microseconds'
-								: 'milliseconds'})</option
-					>
+								: 'milliseconds'})
+					</option>
 				{/each}
 			</select>
 			<p class={css({ fontSize: 'sm', marginTop: '2', marginBottom: '0', color: 'fg.muted' })}>
@@ -259,8 +259,10 @@
 							textTransform: 'none',
 							letterSpacing: 'normal',
 							marginBottom: '1'
-						})}>Value:</label
+						})}
 					>
+						Value:
+					</label>
 					<input
 						id="ts-input-value"
 						data-testid="ts-value-input"
@@ -299,8 +301,10 @@
 							textTransform: 'none',
 							letterSpacing: 'normal',
 							marginBottom: '1'
-						})}>Unit:</label
+						})}
 					>
+						Unit:
+					</label>
 					<select
 						id="ts-select-unit"
 						data-testid="ts-unit-select"
@@ -390,9 +394,9 @@
 			>
 				{config.operation_type === 'truncate' ? 'Truncate' : 'Round'} Unit
 			</h4>
-			<label for="ts-select-truncate-unit" class={label({ variant: 'hidden' })}
-				>Select unit for {config.operation_type}</label
-			>
+			<label for="ts-select-truncate-unit" class={label({ variant: 'hidden' })}>
+				Select unit for {config.operation_type}
+			</label>
 			<select
 				id="ts-select-truncate-unit"
 				data-testid="ts-truncate-unit-select"

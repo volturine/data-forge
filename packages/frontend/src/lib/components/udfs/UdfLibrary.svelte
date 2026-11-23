@@ -261,9 +261,9 @@
 			>
 				<p>{search.trim() ? 'No matching UDFs.' : 'No UDFs yet.'}</p>
 				{#if !search.trim()}
-					<button class={button({ variant: 'primary' })} onclick={onCreate} type="button"
-						>Create your first UDF</button
-					>
+					<button class={button({ variant: 'primary' })} onclick={onCreate} type="button">
+						Create your first UDF
+					</button>
 				{/if}
 			</div>
 		{:else}
@@ -292,9 +292,9 @@
 										{#each udf.signature.inputs as input, i (i)}
 											<ColumnTypeBadge columnType={input.dtype} size="xs" showIcon={false} />
 											{#if i < udf.signature.inputs.length - 1}
-												<span class={css({ marginX: '0.5', fontSize: 'xs', color: 'fg.muted' })}
-													>,</span
-												>
+												<span class={css({ marginX: '0.5', fontSize: 'xs', color: 'fg.muted' })}>
+													,
+												</span>
 											{/if}
 										{/each}
 									{:else}
@@ -351,11 +351,13 @@
 							{#if deletingId === udf.id}
 								<button
 									class={button({ variant: 'danger', size: 'sm' })}
-									onclick={() => confirmDelete(udf.id)}>Confirm</button
+									onclick={() => confirmDelete(udf.id)}
 								>
-								<button class={button({ variant: 'secondary', size: 'sm' })} onclick={cancelDelete}
-									>Cancel</button
-								>
+									Confirm
+								</button>
+								<button class={button({ variant: 'secondary', size: 'sm' })} onclick={cancelDelete}>
+									Cancel
+								</button>
 							{:else}
 								<button
 									class={button({ variant: 'ghost', size: 'sm' })}
@@ -441,9 +443,9 @@
 		</div>
 		<PanelFooter>
 			<button class={button({ variant: 'secondary' })} onclick={closeImport}>Cancel</button>
-			<button class={button({ variant: 'primary' })} disabled={importing} onclick={handleImport}
-				>Import</button
-			>
+			<button class={button({ variant: 'primary' })} disabled={importing} onclick={handleImport}>
+				Import
+			</button>
 		</PanelFooter>
 	{/snippet}
 </BaseModal>

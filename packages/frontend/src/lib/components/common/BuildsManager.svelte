@@ -1137,9 +1137,9 @@
 														animation: 'spin 1s linear infinite'
 													})}
 												/>
-												<span class={css({ color: 'fg.secondary' })}
-													>{buildLifecycleStatusLabel(currentStatus(run))}</span
-												>
+												<span class={css({ color: 'fg.secondary' })}>
+													{buildLifecycleStatusLabel(currentStatus(run))}
+												</span>
 											{:else if currentStatus(run) === 'running'}
 												<Loader
 													size={14}
@@ -1148,24 +1148,24 @@
 														animation: 'spin 1s linear infinite'
 													})}
 												/>
-												<span class={css({ color: 'accent.primary' })}
-													>{buildLifecycleStatusLabel(currentStatus(run))}</span
-												>
+												<span class={css({ color: 'accent.primary' })}>
+													{buildLifecycleStatusLabel(currentStatus(run))}
+												</span>
 											{:else if currentStatus(run) === 'completed'}
 												<CircleCheck size={14} class={css({ color: 'fg.success' })} />
-												<span class={css({ color: 'fg.success' })}
-													>{buildLifecycleStatusLabel(currentStatus(run))}</span
-												>
+												<span class={css({ color: 'fg.success' })}>
+													{buildLifecycleStatusLabel(currentStatus(run))}
+												</span>
 											{:else if currentStatus(run) === 'cancelled'}
 												<CircleX size={14} class={css({ color: 'fg.warning' })} />
-												<span class={css({ color: 'fg.warning' })}
-													>{buildLifecycleStatusLabel(currentStatus(run))}</span
-												>
+												<span class={css({ color: 'fg.warning' })}>
+													{buildLifecycleStatusLabel(currentStatus(run))}
+												</span>
 											{:else}
 												<CircleX size={14} class={css({ color: 'fg.error' })} />
-												<span class={css({ color: 'fg.error' })}
-													>{buildLifecycleStatusLabel(currentStatus(run))}</span
-												>
+												<span class={css({ color: 'fg.error' })}>
+													{buildLifecycleStatusLabel(currentStatus(run))}
+												</span>
 											{/if}
 										</span>
 										{#if canCancelRun(run)}

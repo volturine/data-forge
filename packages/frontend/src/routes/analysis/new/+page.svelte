@@ -471,8 +471,9 @@
 							type="button"
 							class={button({ variant: 'ghost', size: 'sm' })}
 							onclick={() => (visibleCount += PAGE_SIZE)}
-							>Show {Math.min(PAGE_SIZE, filteredDatasources.length - visibleDatasources.length)} more</button
 						>
+							Show {Math.min(PAGE_SIZE, filteredDatasources.length - visibleDatasources.length)} more
+						</button>
 					{/if}
 				</div>
 			{/if}

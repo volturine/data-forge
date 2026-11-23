@@ -555,8 +555,10 @@
 									fontSize: 'xs',
 									fontFamily: 'mono',
 									color: 'fg.secondary'
-								})}>{snapshotMonth}</span
+								})}
 							>
+								{snapshotMonth}
+							</span>
 							<button
 								class={css({
 									borderWidth: '1',
@@ -614,8 +616,10 @@
 										<span
 											class={day.count > 0
 												? css({ color: 'fg.secondary' })
-												: css({ color: 'fg.tertiary' })}>{day.day}</span
+												: css({ color: 'fg.tertiary' })}
 										>
+											{day.day}
+										</span>
 										{#if day.count > 0}
 											<span
 												class={css({

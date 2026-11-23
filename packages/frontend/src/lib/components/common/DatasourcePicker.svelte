@@ -268,8 +268,9 @@
 	>
 		<span
 			class={css({ flex: '1', overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' })}
-			>{option.label}</span
 		>
+			{option.label}
+		</span>
 		{#if option.kind === 'datasource'}
 			{@const ds = option.payload as DataSource}
 			{#if ds.id === highlightId}
@@ -283,8 +284,10 @@
 						paddingY: '1',
 						fontSize: 'xs',
 						color: 'accent.primary'
-					})}>current</span
+					})}
 				>
+					current
+				</span>
 			{:else if ds.source_type === 'file'}
 				<FileTypeBadge path={(ds.config?.file_path as string) ?? ''} size="sm" showIcon={false} />
 			{:else}
@@ -301,8 +304,10 @@
 					paddingY: '1',
 					fontSize: 'xs',
 					color: 'fg.muted'
-				})}>analysis</span
+				})}
 			>
+				analysis
+			</span>
 		{/if}
 	</button>
 {/snippet}

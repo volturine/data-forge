@@ -45,9 +45,9 @@
 			onChange={(val) => (config.id_vars = val)}
 			placeholder="Select index columns..."
 		/>
-		<span class={css({ marginTop: '1', display: 'block', fontSize: 'xs', color: 'fg.tertiary' })}
-			>Columns to use as identifiers</span
-		>
+		<span class={css({ marginTop: '1', display: 'block', fontSize: 'xs', color: 'fg.tertiary' })}>
+			Columns to use as identifiers
+		</span>
 	</div>
 
 	<div class={css({ marginBottom: '5' })}>
@@ -70,9 +70,9 @@
 			onChange={(val) => (config.value_vars = val)}
 			placeholder="Select columns to unpivot..."
 		/>
-		<span class={css({ marginTop: '1', display: 'block', fontSize: 'xs', color: 'fg.tertiary' })}
-			>Columns that will be transformed to rows</span
-		>
+		<span class={css({ marginTop: '1', display: 'block', fontSize: 'xs', color: 'fg.tertiary' })}>
+			Columns that will be transformed to rows
+		</span>
 	</div>
 
 	<div class={css({ marginBottom: '5' })}>

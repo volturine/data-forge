@@ -37,9 +37,9 @@
 		aria-labelledby="fill-strategy-heading"
 	>
 		<span id="fill-strategy-heading"><SectionHeader>Fill Strategy</SectionHeader></span>
-		<label for="fill-select-strategy" class={label({ variant: 'hidden' })}
-			>Select fill strategy</label
-		>
+		<label for="fill-select-strategy" class={label({ variant: 'hidden' })}>
+			Select fill strategy
+		</label>
 		<select
 			id="fill-select-strategy"
 			data-testid="fill-strategy-select"

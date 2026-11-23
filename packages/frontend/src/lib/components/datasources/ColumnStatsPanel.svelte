@@ -89,9 +89,9 @@
 							Column Stats
 						</h3>
 						{#if columnName}
-							<span class={css({ fontSize: 'xs', color: 'fg.muted', fontFamily: 'mono' })}
-								>{columnName}</span
-							>
+							<span class={css({ fontSize: 'xs', color: 'fg.muted', fontFamily: 'mono' })}>
+								{columnName}
+							</span>
 						{/if}
 						{#if stats}
 							<span class={css({ fontSize: 'xs', color: 'fg.muted' })}>({stats.dtype})</span>
@@ -188,8 +188,10 @@
 											fontSize: 'xs',
 											fontWeight: 'semibold',
 											fontFamily: 'mono'
-										})}>{stats.count.toLocaleString()}</span
+										})}
 									>
+										{stats.count.toLocaleString()}
+									</span>
 								</div>
 								<div
 									class={css({
@@ -247,8 +249,10 @@
 												fontSize: 'xs',
 												fontWeight: 'semibold',
 												fontFamily: 'mono'
-											})}>{stats.unique.toLocaleString()}</span
+											})}
 										>
+											{stats.unique.toLocaleString()}
+										</span>
 									</div>
 								{/if}
 							</div>
@@ -282,8 +286,10 @@
 												fontSize: 'xs',
 												fontWeight: 'semibold',
 												fontFamily: 'mono'
-											})}>{fmt(stats.mean)}</span
+											})}
 										>
+											{fmt(stats.mean)}
+										</span>
 									</div>
 									{#if stats.median !== null && stats.median !== undefined}
 										<div
@@ -300,8 +306,10 @@
 													fontSize: 'xs',
 													fontWeight: 'semibold',
 													fontFamily: 'mono'
-												})}>{fmt(stats.median)}</span
+												})}
 											>
+												{fmt(stats.median)}
+											</span>
 										</div>
 									{/if}
 									{#if stats.std !== null && stats.std !== undefined}
@@ -319,8 +327,10 @@
 													fontSize: 'xs',
 													fontWeight: 'semibold',
 													fontFamily: 'mono'
-												})}>{fmt(stats.std)}</span
+												})}
 											>
+												{fmt(stats.std)}
+											</span>
 										</div>
 									{/if}
 									<div
@@ -337,8 +347,10 @@
 												fontSize: 'xs',
 												fontWeight: 'semibold',
 												fontFamily: 'mono'
-											})}>{stats.min}</span
+											})}
 										>
+											{stats.min}
+										</span>
 									</div>
 									{#if stats.q25 !== null && stats.q25 !== undefined}
 										<div
@@ -355,8 +367,10 @@
 													fontSize: 'xs',
 													fontWeight: 'semibold',
 													fontFamily: 'mono'
-												})}>{fmt(stats.q25)}</span
+												})}
 											>
+												{fmt(stats.q25)}
+											</span>
 										</div>
 									{/if}
 									{#if stats.q75 !== null && stats.q75 !== undefined}
@@ -374,8 +388,10 @@
 													fontSize: 'xs',
 													fontWeight: 'semibold',
 													fontFamily: 'mono'
-												})}>{fmt(stats.q75)}</span
+												})}
 											>
+												{fmt(stats.q75)}
+											</span>
 										</div>
 									{/if}
 									<div
@@ -392,8 +408,10 @@
 												fontSize: 'xs',
 												fontWeight: 'semibold',
 												fontFamily: 'mono'
-											})}>{stats.max}</span
+											})}
 										>
+											{stats.max}
+										</span>
 									</div>
 								</div>
 							{/if}
@@ -427,8 +445,10 @@
 												fontSize: 'xs',
 												fontWeight: 'semibold',
 												fontFamily: 'mono'
-											})}>{stats.min}</span
+											})}
 										>
+											{stats.min}
+										</span>
 									</div>
 									<div
 										class={css({
@@ -444,8 +464,10 @@
 												fontSize: 'xs',
 												fontWeight: 'semibold',
 												fontFamily: 'mono'
-											})}>{stats.max}</span
+											})}
 										>
+											{stats.max}
+										</span>
 									</div>
 								</div>
 							{/if}
@@ -492,12 +514,12 @@
 											marginTop: '1'
 										})}
 									>
-										<span class={css({ color: 'accent.primary' })}
-											>True: {stats.true_count.toLocaleString()}</span
-										>
-										<span class={css({ color: 'fg.muted' })}
-											>False: {(stats.false_count ?? 0).toLocaleString()}</span
-										>
+										<span class={css({ color: 'accent.primary' })}>
+											True: {stats.true_count.toLocaleString()}
+										</span>
+										<span class={css({ color: 'fg.muted' })}>
+											False: {(stats.false_count ?? 0).toLocaleString()}
+										</span>
 									</div>
 								</div>
 							{/if}
@@ -531,8 +553,10 @@
 												fontSize: 'xs',
 												fontWeight: 'semibold',
 												fontFamily: 'mono'
-											})}>{stats.min_length}</span
+											})}
 										>
+											{stats.min_length}
+										</span>
 									</div>
 									<div
 										class={css({
@@ -548,8 +572,10 @@
 												fontSize: 'xs',
 												fontWeight: 'semibold',
 												fontFamily: 'mono'
-											})}>{fmt(stats.avg_length)}</span
+											})}
 										>
+											{fmt(stats.avg_length)}
+										</span>
 									</div>
 									<div
 										class={css({
@@ -565,8 +591,10 @@
 												fontSize: 'xs',
 												fontWeight: 'semibold',
 												fontFamily: 'mono'
-											})}>{stats.max_length}</span
+											})}
 										>
+											{stats.max_length}
+										</span>
 									</div>
 								</div>
 							{/if}
@@ -673,11 +701,13 @@
 															whiteSpace: 'nowrap',
 															maxWidth: 'listSm'
 														})}
-														title={val}>{val}</span
+														title={val}
 													>
-													<span class={css({ fontSize: 'xs', color: 'fg.muted' })}
-														>{cnt.toLocaleString()}</span
-													>
+														{val}
+													</span>
+													<span class={css({ fontSize: 'xs', color: 'fg.muted' })}>
+														{cnt.toLocaleString()}
+													</span>
 												</div>
 												<div
 													class={css({

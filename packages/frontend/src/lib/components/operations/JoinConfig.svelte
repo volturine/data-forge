@@ -298,8 +298,10 @@
 								marginBottom: '1',
 								textTransform: 'uppercase',
 								letterSpacing: 'wider'
-							})}>Left Column</label
+							})}
 						>
+							Left Column
+						</label>
 						<ColumnDropdown
 							{schema}
 							value={joinCol.left_column ?? ''}
@@ -318,8 +320,10 @@
 								marginBottom: '1',
 								textTransform: 'uppercase',
 								letterSpacing: 'wider'
-							})}>Right Column</label
+							})}
 						>
+							Right Column
+						</label>
 						<ColumnDropdown
 							schema={{ columns: rightColumns, row_count: rightSchema?.row_count ?? 0 }}
 							value={joinCol.right_column ?? ''}
@@ -367,8 +371,9 @@
 		role="group"
 		aria-labelledby="right-columns-heading"
 	>
-		<span id="right-columns-heading"><SectionHeader>Columns from Right Dataset</SectionHeader></span
-		>
+		<span id="right-columns-heading">
+			<SectionHeader>Columns from Right Dataset</SectionHeader>
+		</span>
 
 		{#if !hasRightSource}
 			<p
@@ -446,9 +451,9 @@
 		aria-labelledby="suffix-heading"
 	>
 		<span id="suffix-heading"><SectionHeader>Column Suffix</SectionHeader></span>
-		<label for="join-input-suffix" class={label({ variant: 'hidden' })}
-			>Suffix for right dataset columns</label
-		>
+		<label for="join-input-suffix" class={label({ variant: 'hidden' })}>
+			Suffix for right dataset columns
+		</label>
 		<input
 			id="join-input-suffix"
 			data-testid="join-suffix-input"

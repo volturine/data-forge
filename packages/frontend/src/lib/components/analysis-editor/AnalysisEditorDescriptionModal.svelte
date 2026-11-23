@@ -88,9 +88,9 @@
 		})}
 	>
 		<button class={button({ variant: 'secondary' })} onclick={onClose} type="button">Cancel</button>
-		<button class={button({ variant: 'primary' })} onclick={saveDescriptionDraft} type="button"
-			>Apply</button
-		>
+		<button class={button({ variant: 'primary' })} onclick={saveDescriptionDraft} type="button">
+			Apply
+		</button>
 	</div>
 {/snippet}
 

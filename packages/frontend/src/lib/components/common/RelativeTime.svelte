@@ -34,5 +34,7 @@
 		fontVariantNumeric: 'tabular-nums'
 	})}
 	datetime={iso}
-	title={formatDateTimeDisplay(timestamp)}>{label}</time
+	title={formatDateTimeDisplay(timestamp)}
 >
+	{label}
+</time>

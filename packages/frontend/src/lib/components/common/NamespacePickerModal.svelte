@@ -584,9 +584,9 @@
 								Preparing namespace…
 							</p>
 						{:else}
-							<span class={css({ color: 'fg.muted', fontSize: 'sm' })}
-								>Namespace names cannot be changed later.</span
-							>
+							<span class={css({ color: 'fg.muted', fontSize: 'sm' })}>
+								Namespace names cannot be changed later.
+							</span>
 						{/if}
 						<button
 							class={button({ variant: 'primary' })}

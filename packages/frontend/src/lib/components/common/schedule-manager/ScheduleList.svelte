@@ -393,9 +393,9 @@
 								</div>
 							{:else}
 								<div class={css({ display: 'flex', flexDirection: 'column', gap: '1' })}>
-									<span class={css({ fontSize: '2xs', color: 'fg.muted' })}
-										>On Datasource Update</span
-									>
+									<span class={css({ fontSize: '2xs', color: 'fg.muted' })}>
+										On Datasource Update
+									</span>
 									<select
 										class={input({ variant: 'micro' })}
 										id="sched-{schedule.id}-trigger"
@@ -752,9 +752,9 @@
 									})}
 								>
 									<div class={css({ display: 'flex', flexDirection: 'column', gap: '1' })}>
-										<span class={css({ fontSize: '2xs', color: 'fg.muted' })}
-											>Target Datasource</span
-										>
+										<span class={css({ fontSize: '2xs', color: 'fg.muted' })}>
+											Target Datasource
+										</span>
 										<div class={css({ display: 'flex', alignItems: 'center', gap: '1' })}>
 											<ChartColumn size={10} class={css({ color: 'fg.muted' })} />
 											<span class={css({ fontSize: '2xs', color: 'fg.secondary' })}>
@@ -771,9 +771,9 @@
 									{@render descriptionBlock(schedule)}
 									{#if triggerTypeValue === 'cron'}
 										<div class={css({ display: 'flex', flexDirection: 'column', gap: '1' })}>
-											<span class={css({ fontSize: '2xs', color: 'fg.muted' })}
-												>Cron Expression</span
-											>
+											<span class={css({ fontSize: '2xs', color: 'fg.muted' })}>
+												Cron Expression
+											</span>
 											<CronField
 												variant="table"
 												scheduleId={schedule.id}
@@ -810,9 +810,9 @@
 										</div>
 									{:else}
 										<div class={css({ display: 'flex', flexDirection: 'column', gap: '1' })}>
-											<span class={css({ fontSize: '2xs', color: 'fg.muted' })}
-												>On Datasource Update</span
-											>
+											<span class={css({ fontSize: '2xs', color: 'fg.muted' })}>
+												On Datasource Update
+											</span>
 											<div class={css({ display: 'flex', alignItems: 'center', gap: '1' })}>
 												<select
 													class={input({ variant: 'micro' })}

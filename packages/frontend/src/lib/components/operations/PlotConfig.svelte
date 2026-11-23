@@ -1047,9 +1047,9 @@
 				role="group"
 				aria-labelledby={`${uid}-plot-reference-lines`}
 			>
-				<span id={`${uid}-plot-reference-lines`}
-					><SectionHeader>Reference Lines</SectionHeader></span
-				>
+				<span id={`${uid}-plot-reference-lines`}>
+					<SectionHeader>Reference Lines</SectionHeader>
+				</span>
 				<div class={css({ display: 'grid', gap: '3' })}>
 					<div>
 						<label class={label()} for={`${uid}-ref-axis`}>Axis</label>

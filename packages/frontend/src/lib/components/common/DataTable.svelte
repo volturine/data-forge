@@ -529,9 +529,9 @@
 				>
 					Prev
 				</button>
-				<span class={css({ fontSize: 'xs', color: 'fg.muted' })} data-testid="pagination-page"
-					>Page {pagination.page}</span
-				>
+				<span class={css({ fontSize: 'xs', color: 'fg.muted' })} data-testid="pagination-page">
+					Page {pagination.page}
+				</span>
 				<button
 					class={css({
 						paddingY: '1',
@@ -930,24 +930,24 @@
 												bind:this={columnMenuRef}
 												use:overlayStack.action={columnMenuOverlayConfig}
 											>
-												<button class={menuItem()} onclick={() => setSort(header.id, 'asc')}
-													>Sort A-Z</button
-												>
-												<button class={menuItem()} onclick={() => setSort(header.id, 'desc')}
-													>Sort Z-A</button
-												>
-												<button class={menuItem()} onclick={() => setSort(header.id, 'none')}
-													>Clear sort</button
-												>
-												<button class={menuItem()} onclick={() => pinColumn(header.id, 'left')}
-													>Pin left</button
-												>
-												<button class={menuItem()} onclick={() => pinColumn(header.id, 'right')}
-													>Pin right</button
-												>
-												<button class={menuItem()} onclick={() => pinColumn(header.id, 'none')}
-													>Unpin</button
-												>
+												<button class={menuItem()} onclick={() => setSort(header.id, 'asc')}>
+													Sort A-Z
+												</button>
+												<button class={menuItem()} onclick={() => setSort(header.id, 'desc')}>
+													Sort Z-A
+												</button>
+												<button class={menuItem()} onclick={() => setSort(header.id, 'none')}>
+													Clear sort
+												</button>
+												<button class={menuItem()} onclick={() => pinColumn(header.id, 'left')}>
+													Pin left
+												</button>
+												<button class={menuItem()} onclick={() => pinColumn(header.id, 'right')}>
+													Pin right
+												</button>
+												<button class={menuItem()} onclick={() => pinColumn(header.id, 'none')}>
+													Unpin
+												</button>
 												<button
 													class={menuItem()}
 													onclick={() => toggleColumnVisibility(header.id)}
@@ -1025,8 +1025,10 @@
 													textOverflow: 'ellipsis',
 													display: 'block'
 												})}
-												data-cell-value="true">{display}</span
+												data-cell-value="true"
 											>
+												{display}
+											</span>
 											{#if enableCopy}
 												<button
 													class={css({
@@ -1052,13 +1054,17 @@
 													<span
 														class={css({
 															display: copiedCells.has(cell.id) ? 'none' : 'block'
-														})}><Copy size={14} /></span
+														})}
 													>
+														<Copy size={14} />
+													</span>
 													<span
 														class={css({
 															display: copiedCells.has(cell.id) ? 'block' : 'none'
-														})}><Check size={14} /></span
+														})}
 													>
+														<Check size={14} />
+													</span>
 												</button>
 											{/if}
 										</div>

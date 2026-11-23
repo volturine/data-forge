@@ -113,8 +113,10 @@
 					color: 'fg.warning',
 					fontWeight: 'medium',
 					flexShrink: '0'
-				})}>Confirm?</span
+				})}
 			>
+				Confirm?
+			</span>
 		{:else if elapsed !== undefined}
 			<span
 				class={css({
@@ -122,8 +124,10 @@
 					color: elapsed > 5000 ? 'fg.warning' : 'fg.muted',
 					fontFamily: 'mono',
 					flexShrink: '0'
-				})}>{formatDuration(elapsed)}</span
+				})}
 			>
+				{formatDuration(elapsed)}
+			</span>
 		{:else if tc.duration_ms !== undefined}
 			<span
 				class={css({
@@ -131,8 +135,10 @@
 					color: 'fg.muted',
 					fontFamily: 'mono',
 					flexShrink: '0'
-				})}>{formatDuration(tc.duration_ms)}</span
+				})}
 			>
+				{formatDuration(tc.duration_ms)}
+			</span>
 		{/if}
 		{#if summary}
 			<span
@@ -141,8 +147,10 @@
 					color: 'fg.muted',
 					fontFamily: 'mono',
 					flexShrink: '0'
-				})}>{summary}</span
+				})}
 			>
+				{summary}
+			</span>
 		{/if}
 		{#if tc.expanded}<ChevronUp size={10} />{:else}<ChevronDown size={10} />{/if}
 	</button>
@@ -231,8 +239,10 @@
 					class={css({
 						color: methodColor(tc.method),
 						fontWeight: 'medium'
-					})}>{tc.method}</span
+					})}
 				>
+					{tc.method}
+				</span>
 				{tc.path}
 			</div>
 			{#if toolDef?.output_schema}

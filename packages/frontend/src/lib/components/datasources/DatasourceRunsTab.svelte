@@ -254,8 +254,10 @@
 					class={css({
 						color: 'accent.primary',
 						_hover: { textDecoration: 'underline' }
-					})}>View all runs</a
+					})}
 				>
+					View all runs
+				</a>
 			</p>
 		{/if}
 	{/if}

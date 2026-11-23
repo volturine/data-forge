@@ -251,8 +251,8 @@
 					>
 						{namespace}
 					</span>
-				</span></button
-			>
+				</span>
+			</button>
 		{/if}
 	</div>
 

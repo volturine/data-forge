@@ -242,9 +242,9 @@
 						/>
 					</div>
 					<div>
-						<label for="compute-workers-activity" class={label({ variant: 'compact' })}
-							>Activity</label
-						>
+						<label for="compute-workers-activity" class={label({ variant: 'compact' })}>
+							Activity
+						</label>
 						<select
 							id="compute-workers-activity"
 							class={input({ variant: 'panelSelect' })}
@@ -462,9 +462,9 @@
 													minWidth: '0'
 												})}
 											>
-												<span class={css({ fontSize: 'xs', color: 'fg.muted' })}
-													>{detail.label}</span
-												>
+												<span class={css({ fontSize: 'xs', color: 'fg.muted' })}>
+													{detail.label}
+												</span>
 												<span
 													class={css({
 														fontSize: 'sm',

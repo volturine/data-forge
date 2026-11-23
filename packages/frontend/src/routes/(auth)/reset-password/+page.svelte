@@ -147,9 +147,9 @@
 	{/if}
 
 	{#if !token}
-		<a href={resolve('forgot-password')} class={button({ variant: 'primary' })}
-			>Request new reset link</a
-		>
+		<a href={resolve('forgot-password')} class={button({ variant: 'primary' })}>
+			Request new reset link
+		</a>
 	{/if}
 
 	<p class={css({ fontSize: 'sm', color: 'fg.muted', textAlign: 'center' })}>

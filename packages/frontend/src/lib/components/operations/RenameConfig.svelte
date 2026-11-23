@@ -182,8 +182,10 @@
 								textOverflow: 'ellipsis',
 								whiteSpace: 'nowrap'
 							})}
-							title={mapping.oldName}>{mapping.oldName}</span
+							title={mapping.oldName}
 						>
+							{mapping.oldName}
+						</span>
 						<ArrowRight size={12} class={css({ color: 'fg.muted' })} aria-hidden="true" />
 						<span
 							class={css({
@@ -194,8 +196,10 @@
 								whiteSpace: 'nowrap',
 								color: 'accent.primary'
 							})}
-							title={mapping.newName}>{mapping.newName}</span
+							title={mapping.newName}
 						>
+							{mapping.newName}
+						</span>
 					</div>
 					<button
 						id={`rename-btn-remove-${mapping.oldName}`}

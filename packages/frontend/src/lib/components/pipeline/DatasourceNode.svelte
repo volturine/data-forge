@@ -362,8 +362,10 @@
 						alignItems: 'center',
 						lineHeight: '1',
 						transform: 'translateY(1px)'
-					})}>copy</span
+					})}
 				>
+					copy
+				</span>
 			</button>
 		</div>
 
@@ -475,9 +477,9 @@
 						</button>
 					</div>
 				{:else}
-					<span class={css({ fontSize: 'sm', fontWeight: 'medium' })}
-						>{tabName ?? datasourceLabel ?? datasource?.name ?? 'Untitled'}</span
-					>
+					<span class={css({ fontSize: 'sm', fontWeight: 'medium' })}>
+						{tabName ?? datasourceLabel ?? datasource?.name ?? 'Untitled'}
+					</span>
 					{#if onRenameTab && !readOnly}
 						<button
 							class={css({

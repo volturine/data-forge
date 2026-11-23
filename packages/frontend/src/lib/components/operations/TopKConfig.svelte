@@ -77,7 +77,9 @@
 				clip: 'rect(0, 0, 0, 0)',
 				whiteSpace: 'nowrap',
 				border: '0'
-			})}>Sort in descending order (largest values first)</span
+			})}
 		>
+			Sort in descending order (largest values first)
+		</span>
 	</div>
 </div>

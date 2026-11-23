@@ -220,9 +220,9 @@
 							Chat setup could not be completed.
 						{:else if !chatStore.configured}
 							No AI provider is configured.
-							<a href={providerSetupHref} class={css({ color: 'accent.primary' })}
-								>Set one up in Profile</a
-							>
+							<a href={providerSetupHref} class={css({ color: 'accent.primary' })}>
+								Set one up in Profile
+							</a>
 						{:else if chatStore.sessionId}
 							Send a message to get started.
 						{:else}
@@ -418,9 +418,9 @@
 				})}
 			>
 				<div class={css({ flex: '1', height: '1px', backgroundColor: 'border.subtle' })}></div>
-				<span class={css({ fontSize: '10px', color: 'fg.muted', whiteSpace: 'nowrap' })}
-					>{dateLabel}</span
-				>
+				<span class={css({ fontSize: '10px', color: 'fg.muted', whiteSpace: 'nowrap' })}>
+					{dateLabel}
+				</span>
 				<div class={css({ flex: '1', height: '1px', backgroundColor: 'border.subtle' })}></div>
 			</div>
 		{/if}

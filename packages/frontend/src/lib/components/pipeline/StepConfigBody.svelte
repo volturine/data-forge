@@ -412,9 +412,9 @@
 		{:else if !schema && !isLoadingSchema}
 			<Callout tone="warn">
 				<p>Schema not available. Please ensure the data source is loaded.</p>
-				<button class={button({ variant: 'ghost', size: 'sm' })} onclick={onClose} type="button"
-					>Close</button
-				>
+				<button class={button({ variant: 'ghost', size: 'sm' })} onclick={onClose} type="button">
+					Close
+				</button>
 			</Callout>
 		{:else if waitingForSelectedStepSchema}
 			<div
@@ -527,8 +527,10 @@
 						_hover: { backgroundColor: 'bg.hover' }
 					})}
 					onclick={onClose}
-					type="button">Close</button
+					type="button"
 				>
+					Close
+				</button>
 			</div>
 		{/if}
 		{#if pivotApplyError}

@@ -204,9 +204,9 @@
 		<span data-testid="build-preview-id" class={css({ display: 'none' })}>{store.buildId}</span>
 	{/if}
 	{#if store.computeWorkerRunId}
-		<span data-testid="build-preview-compute-worker-run-id" class={css({ display: 'none' })}
-			>{store.computeWorkerRunId}</span
-		>
+		<span data-testid="build-preview-compute-worker-run-id" class={css({ display: 'none' })}>
+			{store.computeWorkerRunId}
+		</span>
 	{/if}
 	<div
 		class={css({
@@ -601,9 +601,9 @@
 									>
 										{buildStepLabel(step.name, step.stepType)}
 										{#if isSlowest}
-											<span class={css({ color: 'fg.warning', fontSize: '2xs', marginLeft: '1' })}
-												>slowest</span
-											>
+											<span class={css({ color: 'fg.warning', fontSize: '2xs', marginLeft: '1' })}>
+												slowest
+											</span>
 										{/if}
 									</span>
 									{#if step.rowCount !== null}
@@ -754,12 +754,12 @@
 								gap: '1'
 							})}
 						>
-							<span class={css({ fontSize: '2xs', color: 'fg.muted', textTransform: 'uppercase' })}
-								>Max Threads</span
-							>
-							<span class={css({ fontFamily: 'mono', fontSize: 'sm' })}
-								>{store.resourceConfig.max_threads ?? 'auto'}</span
-							>
+							<span class={css({ fontSize: '2xs', color: 'fg.muted', textTransform: 'uppercase' })}>
+								Max Threads
+							</span>
+							<span class={css({ fontFamily: 'mono', fontSize: 'sm' })}>
+								{store.resourceConfig.max_threads ?? 'auto'}
+							</span>
 						</div>
 						<div
 							class={css({
@@ -771,12 +771,12 @@
 								gap: '1'
 							})}
 						>
-							<span class={css({ fontSize: '2xs', color: 'fg.muted', textTransform: 'uppercase' })}
-								>Max Memory</span
-							>
-							<span class={css({ fontFamily: 'mono', fontSize: 'sm' })}
-								>{store.resourceConfig.max_memory_mb ?? 'auto'} MB</span
-							>
+							<span class={css({ fontSize: '2xs', color: 'fg.muted', textTransform: 'uppercase' })}>
+								Max Memory
+							</span>
+							<span class={css({ fontFamily: 'mono', fontSize: 'sm' })}>
+								{store.resourceConfig.max_memory_mb ?? 'auto'} MB
+							</span>
 						</div>
 						<div
 							class={css({
@@ -788,12 +788,12 @@
 								gap: '1'
 							})}
 						>
-							<span class={css({ fontSize: '2xs', color: 'fg.muted', textTransform: 'uppercase' })}
-								>Chunk Size</span
-							>
-							<span class={css({ fontFamily: 'mono', fontSize: 'sm' })}
-								>{store.resourceConfig.streaming_chunk_size ?? 'auto'}</span
-							>
+							<span class={css({ fontSize: '2xs', color: 'fg.muted', textTransform: 'uppercase' })}>
+								Chunk Size
+							</span>
+							<span class={css({ fontFamily: 'mono', fontSize: 'sm' })}>
+								{store.resourceConfig.streaming_chunk_size ?? 'auto'}
+							</span>
 						</div>
 					</div>
 				{/if}
@@ -1067,8 +1067,10 @@
 												: entry.level === 'warning'
 													? 'fg.warning'
 													: 'fg.muted'
-									})}>[{entry.level}]</span
+									})}
 								>
+									[{entry.level}]
+								</span>
 								{#if entry.step_name}
 									<span class={css({ color: 'fg.faint' })}>[{entry.step_name}]</span>
 								{/if}
@@ -1135,8 +1137,10 @@
 									textTransform: 'uppercase',
 									letterSpacing: 'widest',
 									color: 'fg.faint'
-								})}>Request</span
+								})}
 							>
+								Request
+							</span>
 							<pre
 								data-testid="build-payload-request"
 								class={css({
@@ -1160,8 +1164,10 @@
 									textTransform: 'uppercase',
 									letterSpacing: 'widest',
 									color: 'fg.faint'
-								})}>Result</span
+								})}
 							>
+								Result
+							</span>
 							<pre
 								data-testid="build-payload-result"
 								class={css({
