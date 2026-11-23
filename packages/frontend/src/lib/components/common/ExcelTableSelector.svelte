@@ -507,8 +507,10 @@
 				textTransform: 'none',
 				letterSpacing: 'normal',
 				margin: '0'
-			})}>First row is header</label
+			})}
 		>
+			First row is header
+		</label>
 	</div>
 
 	{#if preflightId}
@@ -534,29 +536,29 @@
 					color: 'fg.muted'
 				})}
 			>
-				<span class={css({ display: 'flex', alignItems: 'center', gap: '1' })}
-					><span class={css({ color: 'fg.tertiary' })}>Start row:</span>
-					<span class={css({ fontWeight: 'semibold' })}>{startRow + 1}</span></span
-				>
-				<span class={css({ display: 'flex', alignItems: 'center', gap: '1' })}
-					><span class={css({ color: 'fg.tertiary' })}>Start col:</span>
-					<span class={css({ fontWeight: 'semibold' })}>{cellLabel(startCol)}</span></span
-				>
-				<span class={css({ display: 'flex', alignItems: 'center', gap: '1' })}
-					><span class={css({ color: 'fg.tertiary' })}>End col:</span>
-					<span class={css({ fontWeight: 'semibold' })}>{cellLabel(endCol)}</span></span
-				>
+				<span class={css({ display: 'flex', alignItems: 'center', gap: '1' })}>
+					<span class={css({ color: 'fg.tertiary' })}>Start row:</span>
+					<span class={css({ fontWeight: 'semibold' })}>{startRow + 1}</span>
+				</span>
+				<span class={css({ display: 'flex', alignItems: 'center', gap: '1' })}>
+					<span class={css({ color: 'fg.tertiary' })}>Start col:</span>
+					<span class={css({ fontWeight: 'semibold' })}>{cellLabel(startCol)}</span>
+				</span>
+				<span class={css({ display: 'flex', alignItems: 'center', gap: '1' })}>
+					<span class={css({ color: 'fg.tertiary' })}>End col:</span>
+					<span class={css({ fontWeight: 'semibold' })}>{cellLabel(endCol)}</span>
+				</span>
 				{#if endRow !== null}
-					<span class={css({ display: 'flex', alignItems: 'center', gap: '1' })}
-						><span class={css({ color: 'fg.tertiary' })}>End row:</span>
-						<span class={css({ fontWeight: 'semibold' })}>{endRow + 1}</span></span
-					>
+					<span class={css({ display: 'flex', alignItems: 'center', gap: '1' })}>
+						<span class={css({ color: 'fg.tertiary' })}>End row:</span>
+						<span class={css({ fontWeight: 'semibold' })}>{endRow + 1}</span>
+					</span>
 				{/if}
 				{#if detectedEndRow !== null}
-					<span class={css({ display: 'flex', alignItems: 'center', gap: '1' })}
-						><span class={css({ color: 'fg.tertiary' })}>Detected end:</span>
-						<span class={css({ fontWeight: 'semibold' })}>{detectedEndRow + 1}</span></span
-					>
+					<span class={css({ display: 'flex', alignItems: 'center', gap: '1' })}>
+						<span class={css({ color: 'fg.tertiary' })}>Detected end:</span>
+						<span class={css({ fontWeight: 'semibold' })}>{detectedEndRow + 1}</span>
+					</span>
 				{/if}
 			</div>
 			<div

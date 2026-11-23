@@ -177,7 +177,7 @@ check:
     cd packages/protocol && {{buf}} format --diff --exit-code
     cd packages/protocol && {{buf}} lint
     if git cat-file -e HEAD:packages/protocol/buf.yaml 2>/dev/null; then cd packages/protocol && {{buf}} breaking --against '../../.git#branch=HEAD,subdir=packages/protocol'; else echo 'Skipping Buf breaking check: no protocol Buf module exists in HEAD yet.'; fi
-    if rg -n 'remote: buf\.build/(protocolbuffers|grpc)' packages/protocol Justfile; then echo 'Protocol generation must use the local packages/protocol toolchain, not Buf remote plugins.'; exit 1; fi
+    rc=0; grep -rnE --exclude-dir=node_modules --exclude-dir=.venv 'remote: buf\.build/(protocolbuffers|grpc)' packages/protocol Justfile || rc=$?; if [ "$rc" -eq 0 ]; then echo 'Protocol generation must use the local packages/protocol toolchain, not Buf remote plugins.'; exit 1; elif [ "$rc" -ne 1 ]; then exit "$rc"; fi
     just check-protocol-generated
     scripts/check_no_generated_protocol.sh
     scripts/test_test_container_teardown.sh

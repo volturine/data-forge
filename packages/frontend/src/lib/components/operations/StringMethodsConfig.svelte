@@ -169,8 +169,10 @@
 							textTransform: 'none',
 							letterSpacing: 'normal',
 							marginBottom: '1'
-						})}>Start Index:</label
+						})}
 					>
+						Start Index:
+					</label>
 					<input
 						id="str-input-start"
 						data-testid="str-start-input"
@@ -191,8 +193,10 @@
 							clip: 'rect(0, 0, 0, 0)',
 							whiteSpace: 'nowrap',
 							border: '0'
-						})}>Starting index for substring</span
+						})}
 					>
+						Starting index for substring
+					</span>
 				</div>
 				<div class={css({ flex: '1' })}>
 					<label
@@ -205,8 +209,10 @@
 							textTransform: 'none',
 							letterSpacing: 'normal',
 							marginBottom: '1'
-						})}>End Index (optional):</label
+						})}
 					>
+						End Index (optional):
+					</label>
 					<input
 						id="str-input-end"
 						data-testid="str-end-input"
@@ -228,8 +234,10 @@
 							clip: 'rect(0, 0, 0, 0)',
 							whiteSpace: 'nowrap',
 							border: '0'
-						})}>Ending index for substring (leave empty for end of string)</span
+						})}
 					>
+						Ending index for substring (leave empty for end of string)
+					</span>
 				</div>
 			</div>
 		</div>
@@ -272,8 +280,10 @@
 						textTransform: 'none',
 						letterSpacing: 'normal',
 						marginBottom: '1'
-					})}>Pattern to find:</label
+					})}
 				>
+					Pattern to find:
+				</label>
 				<input
 					id="str-input-pattern"
 					data-testid="str-pattern-input"
@@ -295,8 +305,10 @@
 						clip: 'rect(0, 0, 0, 0)',
 						whiteSpace: 'nowrap',
 						border: '0'
-					})}>Text or regular expression pattern to find and replace</span
+					})}
 				>
+					Text or regular expression pattern to find and replace
+				</span>
 			</div>
 			<div>
 				<label
@@ -309,8 +321,10 @@
 						textTransform: 'none',
 						letterSpacing: 'normal',
 						marginBottom: '1'
-					})}>Replacement:</label
+					})}
 				>
+					Replacement:
+				</label>
 				<input
 					id="str-input-replacement"
 					data-testid="str-replacement-input"
@@ -332,8 +346,10 @@
 						clip: 'rect(0, 0, 0, 0)',
 						whiteSpace: 'nowrap',
 						border: '0'
-					})}>Text to replace the matched pattern with</span
+					})}
 				>
+					Text to replace the matched pattern with
+				</span>
 			</div>
 		</div>
 	{/if}
@@ -375,8 +391,10 @@
 						textTransform: 'none',
 						letterSpacing: 'normal',
 						marginBottom: '1'
-					})}>Regex Pattern:</label
+					})}
 				>
+					Regex Pattern:
+				</label>
 				<input
 					id="str-input-extract-pattern"
 					data-testid="str-extract-pattern-input"
@@ -398,8 +416,10 @@
 						clip: 'rect(0, 0, 0, 0)',
 						whiteSpace: 'nowrap',
 						border: '0'
-					})}>Regular expression with capture group to extract</span
+					})}
 				>
+					Regular expression with capture group to extract
+				</span>
 			</div>
 			<div>
 				<label
@@ -412,8 +432,10 @@
 						textTransform: 'none',
 						letterSpacing: 'normal',
 						marginBottom: '1'
-					})}>Group Index:</label
+					})}
 				>
+					Group Index:
+				</label>
 				<input
 					id="str-input-group-index"
 					data-testid="str-group-index-input"
@@ -435,8 +457,10 @@
 						clip: 'rect(0, 0, 0, 0)',
 						whiteSpace: 'nowrap',
 						border: '0'
-					})}>Index of the capture group to extract (0-based)</span
+					})}
 				>
+					Index of the capture group to extract (0-based)
+				</span>
 			</div>
 		</div>
 	{/if}
@@ -478,8 +502,10 @@
 						textTransform: 'none',
 						letterSpacing: 'normal',
 						marginBottom: '1'
-					})}>Delimiter:</label
+					})}
 				>
+					Delimiter:
+				</label>
 				<input
 					id="str-input-delimiter-only"
 					data-testid="str-delimiter-only-input"
@@ -501,8 +527,10 @@
 						clip: 'rect(0, 0, 0, 0)',
 						whiteSpace: 'nowrap',
 						border: '0'
-					})}>Delimiter to split the string into a list</span
+					})}
 				>
+					Delimiter to split the string into a list
+				</span>
 			</div>
 		</div>
 	{/if}
@@ -544,8 +572,10 @@
 						textTransform: 'none',
 						letterSpacing: 'normal',
 						marginBottom: '1'
-					})}>Delimiter:</label
+					})}
 				>
+					Delimiter:
+				</label>
 				<input
 					id="str-input-delimiter"
 					data-testid="str-delimiter-input"
@@ -567,8 +597,10 @@
 						clip: 'rect(0, 0, 0, 0)',
 						whiteSpace: 'nowrap',
 						border: '0'
-					})}>Delimiter character or string to split on</span
+					})}
 				>
+					Delimiter character or string to split on
+				</span>
 			</div>
 			<div>
 				<label
@@ -581,8 +613,10 @@
 						textTransform: 'none',
 						letterSpacing: 'normal',
 						marginBottom: '1'
-					})}>Part Index:</label
+					})}
 				>
+					Part Index:
+				</label>
 				<input
 					id="str-input-part-index"
 					data-testid="str-part-index-input"
@@ -604,8 +638,10 @@
 						clip: 'rect(0, 0, 0, 0)',
 						whiteSpace: 'nowrap',
 						border: '0'
-					})}>Index of the part to take after splitting (0-based)</span
+					})}
 				>
+					Index of the part to take after splitting (0-based)
+				</span>
 			</div>
 		</div>
 	{/if}
@@ -659,7 +695,9 @@
 				clip: 'rect(0, 0, 0, 0)',
 				whiteSpace: 'nowrap',
 				border: '0'
-			})}>Name for the new column that will contain the result</span
+			})}
 		>
+			Name for the new column that will contain the result
+		</span>
 	</div>
 </div>

@@ -95,9 +95,9 @@
 		<div class={css({ display: 'flex', flexDirection: 'column', gap: '1' })}>
 			{#if currentDatasource}
 				<strong>{currentDatasource.name}</strong>
-				<span class={css({ fontSize: 'xs', color: 'fg.tertiary' })}
-					>{schema.columns.length} columns</span
-				>
+				<span class={css({ fontSize: 'xs', color: 'fg.tertiary' })}>
+					{schema.columns.length} columns
+				</span>
 			{:else}
 				<span class={css({ color: 'fg.muted' })}>No active datasource selected</span>
 			{/if}

@@ -217,14 +217,18 @@
 						active={config.logic === 'AND'}
 						radius="left"
 						onclick={() => (config.logic = 'AND')}
-						ariaPressed={config.logic === 'AND'}>AND</ToggleButton
+						ariaPressed={config.logic === 'AND'}
 					>
+						AND
+					</ToggleButton>
 					<ToggleButton
 						active={config.logic === 'OR'}
 						radius="right"
 						onclick={() => (config.logic = 'OR')}
-						ariaPressed={config.logic === 'OR'}>OR</ToggleButton
+						ariaPressed={config.logic === 'OR'}
 					>
+						OR
+					</ToggleButton>
 				</div>
 				<button
 					type="button"
@@ -303,8 +307,10 @@
 									marginBottom: '1.5',
 									textTransform: 'uppercase',
 									letterSpacing: 'wider'
-								})}>#{i + 1}</span
+								})}
 							>
+								#{i + 1}
+							</span>
 							{#if cond.column}
 								<span class={css({ fontSize: 'sm', fontWeight: 'medium' })}>{cond.column}</span>
 							{/if}
@@ -359,8 +365,10 @@
 										fontSize: 'xs',
 										fontWeight: 'normal',
 										color: 'fg.muted'
-									})}>Column</span
+									})}
 								>
+									Column
+								</span>
 								<ColumnDropdown
 									{schema}
 									value={cond.column}
@@ -387,8 +395,10 @@
 										marginBottom: '0',
 										color: 'fg.muted'
 									})}
-									for="{uid}-operator-{i}">Operator</label
+									for="{uid}-operator-{i}"
 								>
+									Operator
+								</label>
 								<select
 									id="{uid}-operator-{i}"
 									data-testid={`filter-operator-select-${i}`}
@@ -429,21 +439,27 @@
 												marginBottom: '1.5',
 												textTransform: 'uppercase',
 												letterSpacing: 'wider'
-											})}>Compare to</span
+											})}
 										>
+											Compare to
+										</span>
 										<div class={css({ display: 'flex' })} role="radiogroup" aria-label="Value mode">
 											<ToggleButton
 												active={!isColumn}
 												radius="left"
 												onclick={() => handleModeChange(i, 'value')}
-												ariaPressed={!isColumn}>Value</ToggleButton
+												ariaPressed={!isColumn}
 											>
+												Value
+											</ToggleButton>
 											<ToggleButton
 												active={isColumn}
 												radius="right"
 												onclick={() => handleModeChange(i, 'column')}
-												ariaPressed={isColumn}>Column</ToggleButton
+												ariaPressed={isColumn}
 											>
+												Column
+											</ToggleButton>
 										</div>
 									</div>
 
@@ -539,8 +555,10 @@
 																	overflow: 'hidden',
 																	textOverflow: 'ellipsis',
 																	whiteSpace: 'nowrap'
-																})}>{token}</span
+																})}
 															>
+																{token}
+															</span>
 															<button
 																class={css({
 																	display: 'inline-flex',
@@ -595,8 +613,10 @@
 											marginBottom: '1.5',
 											textTransform: 'uppercase',
 											letterSpacing: 'wider'
-										})}>Value</span
+										})}
 									>
+										Value
+									</span>
 									<div
 										class={css({
 											display: 'flex',

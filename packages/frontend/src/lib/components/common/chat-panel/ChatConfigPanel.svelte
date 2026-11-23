@@ -162,9 +162,9 @@
 								type="button"
 							>
 								{m.name}
-								<span class={css({ color: 'fg.muted', fontFamily: 'mono', fontSize: 'xs' })}
-									>{m.id}</span
-								>
+								<span class={css({ color: 'fg.muted', fontFamily: 'mono', fontSize: 'xs' })}>
+									{m.id}
+								</span>
 							</button>
 						{/each}
 					</div>

@@ -259,13 +259,17 @@
 	>
 		<button
 			class={tabButton({ active: activeTab === 'file', size: 'lg' })}
-			onclick={() => (activeTab = 'file')}>File Upload</button
+			onclick={() => (activeTab = 'file')}
 		>
+			File Upload
+		</button>
 
 		<button
 			class={tabButton({ active: activeTab === 'database', size: 'lg' })}
-			onclick={() => (activeTab = 'database')}>External DB</button
+			onclick={() => (activeTab = 'database')}
 		>
+			External DB
+		</button>
 	</div>
 
 	{#if error}
@@ -511,8 +515,10 @@
 										textTransform: 'none',
 										letterSpacing: 'normal',
 										marginBottom: '1.5'
-									})}>Quote</label
+									})}
 								>
+									Quote
+								</label>
 
 								<select
 									id="csv-quote"

@@ -474,8 +474,9 @@
 							}}
 				>
 					<div class={css({ display: 'flex', flexDirection: 'column', gap: '1' })}>
-						<label for="hc-dup-threshold" class={label({ variant: 'compact' })}>Threshold (%)</label
-						>
+						<label for="hc-dup-threshold" class={label({ variant: 'compact' })}>
+							Threshold (%)
+						</label>
 						<input
 							id="hc-dup-threshold"
 							type="number"
@@ -484,9 +485,9 @@
 						/>
 					</div>
 					<div class={css({ display: 'flex', flexDirection: 'column', gap: '1' })}>
-						<label for="hc-dup-cols" class={label({ variant: 'compact' })}
-							>Columns (optional, comma separated)</label
-						>
+						<label for="hc-dup-cols" class={label({ variant: 'compact' })}>
+							Columns (optional, comma separated)
+						</label>
 						<input
 							id="hc-dup-cols"
 							type="text"
@@ -548,9 +549,9 @@
 						/>
 					</div>
 					<div class={css({ display: 'flex', flexDirection: 'column', gap: '1' })}>
-						<label for="hc-expected" class={label({ variant: 'compact' })}
-							>Expected Unique Count</label
-						>
+						<label for="hc-expected" class={label({ variant: 'compact' })}>
+							Expected Unique Count
+						</label>
 						<input
 							id="hc-expected"
 							type="number"
@@ -934,8 +935,10 @@
 									paddingY: '1.5',
 									textAlign: 'left',
 									fontWeight: 'medium'
-								})}>Status</th
+								})}
 							>
+								Status
+							</th>
 							<th
 								class={css({
 									borderBottomWidth: '1',
@@ -943,8 +946,10 @@
 									paddingY: '1.5',
 									textAlign: 'left',
 									fontWeight: 'medium'
-								})}>Name</th
+								})}
 							>
+								Name
+							</th>
 							{#if !datasourceId}
 								<th
 									class={css({
@@ -953,8 +958,10 @@
 										paddingY: '1.5',
 										textAlign: 'left',
 										fontWeight: 'medium'
-									})}>Datasource</th
+									})}
 								>
+									Datasource
+								</th>
 							{/if}
 							<th
 								class={css({
@@ -963,8 +970,10 @@
 									paddingY: '1.5',
 									textAlign: 'left',
 									fontWeight: 'medium'
-								})}>Type</th
+								})}
 							>
+								Type
+							</th>
 							<th
 								class={css({
 									width: 'colNarrow',
@@ -973,8 +982,10 @@
 									paddingY: '1.5',
 									textAlign: 'left',
 									fontWeight: 'medium'
-								})}>Critical</th
+								})}
 							>
+								Critical
+							</th>
 							<th
 								class={css({
 									width: 'colNarrow',
@@ -983,8 +994,10 @@
 									paddingY: '1.5',
 									textAlign: 'left',
 									fontWeight: 'medium'
-								})}>Enabled</th
+								})}
 							>
+								Enabled
+							</th>
 							<th
 								class={css({
 									width: 'logoXl',
@@ -1238,42 +1251,44 @@
 											</div>
 											{#if !datasourceId}
 												<div class={css({ display: 'flex', flexDirection: 'column', gap: '1' })}>
-													<span class={css({ fontSize: '2xs', color: 'fg.muted' })}>Datasource</span
-													>
+													<span class={css({ fontSize: '2xs', color: 'fg.muted' })}>
+														Datasource
+													</span>
 													<span class={css({ fontSize: '2xs', color: 'fg.secondary' })}>
 														{resolveDatasource(check.datasource_id)}
 													</span>
 												</div>
 											{/if}
 											<div class={css({ display: 'flex', flexDirection: 'column', gap: '1' })}>
-												<span class={css({ fontSize: '2xs', color: 'fg.muted' })}
-													>Configuration</span
-												>
+												<span class={css({ fontSize: '2xs', color: 'fg.muted' })}>
+													Configuration
+												</span>
 												<span class={css({ fontSize: '2xs', color: 'fg.secondary' })}>
 													{formatConfig(check.config)}
 												</span>
 											</div>
 											{#if latest}
 												<div class={css({ display: 'flex', flexDirection: 'column', gap: '1' })}>
-													<span class={css({ fontSize: '2xs', color: 'fg.muted' })}
-														>Latest Result</span
-													>
+													<span class={css({ fontSize: '2xs', color: 'fg.muted' })}>
+														Latest Result
+													</span>
 													<div class={css({ display: 'flex', alignItems: 'center', gap: '1' })}>
 														{#if latest.passed}
 															<Check size={10} class={css({ color: 'fg.success' })} />
-															<span class={css({ fontSize: '2xs', color: 'fg.success' })}
-																>Passed</span
-															>
+															<span class={css({ fontSize: '2xs', color: 'fg.success' })}>
+																Passed
+															</span>
 														{:else}
 															<X size={10} class={css({ color: 'fg.error' })} />
-															<span class={css({ fontSize: '2xs', color: 'fg.error' })}>Failed</span
-															>
+															<span class={css({ fontSize: '2xs', color: 'fg.error' })}>
+																Failed
+															</span>
 														{/if}
 													</div>
 													{#if latest.message}
-														<span class={css({ fontSize: '2xs', color: 'fg.muted' })}
-															>{latest.message}</span
-														>
+														<span class={css({ fontSize: '2xs', color: 'fg.muted' })}>
+															{latest.message}
+														</span>
 													{/if}
 												</div>
 											{/if}

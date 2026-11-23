@@ -580,9 +580,9 @@
 	</div>
 
 	<PanelFooter>
-		<button type="button" class={button({ variant: 'secondary' })} onclick={closeDuplicate}
-			>Cancel</button
-		>
+		<button type="button" class={button({ variant: 'secondary' })} onclick={closeDuplicate}>
+			Cancel
+		</button>
 
 		<button
 			type="button"

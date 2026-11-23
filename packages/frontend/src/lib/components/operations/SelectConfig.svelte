@@ -101,8 +101,10 @@
 									overflow: 'hidden',
 									textOverflow: 'ellipsis',
 									whiteSpace: 'nowrap'
-								})}>{col.name}</span
+								})}
 							>
+								{col.name}
+							</span>
 						</div>
 						{#if safeCasts[col.name]}
 							<ArrowRight size={14} />
@@ -121,13 +123,13 @@
 		</div>
 
 		<Callout tone="info">
-			<strong
-				>Selected {safeColumns.length} column{safeColumns.length !== 1 ? 's' : ''}{Object.keys(
+			<strong>
+				Selected {safeColumns.length} column{safeColumns.length !== 1 ? 's' : ''}{Object.keys(
 					safeCasts
 				).length > 0
 					? `, ${Object.keys(safeCasts).length} cast${Object.keys(safeCasts).length !== 1 ? 's' : ''}`
-					: ''}</strong
-			>
+					: ''}
+			</strong>
 		</Callout>
 	{/if}
 </div>

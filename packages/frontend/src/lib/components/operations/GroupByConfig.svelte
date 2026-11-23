@@ -116,9 +116,9 @@
 				/>
 			</div>
 
-			<label for="{uid}-agg-function" class={label({ variant: 'hidden' })}
-				>Aggregation function</label
-			>
+			<label for="{uid}-agg-function" class={label({ variant: 'hidden' })}>
+				Aggregation function
+			</label>
 			<select
 				id="{uid}-agg-function"
 				data-testid="agg-function-select"

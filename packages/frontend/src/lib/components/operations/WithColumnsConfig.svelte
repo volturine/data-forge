@@ -278,14 +278,18 @@
 						<button
 							type="button"
 							class={button({ variant: 'secondary', size: 'sm' })}
-							onclick={openPicker}>Select UDF</button
+							onclick={openPicker}
 						>
+							Select UDF
+						</button>
 						{#if selectedUdf}
 							<button
 								type="button"
 								class={button({ variant: 'ghost', size: 'sm' })}
-								onclick={openEditor}>Edit UDF</button
+								onclick={openEditor}
 							>
+								Edit UDF
+							</button>
 							<span class={label()}>Selected: {selectedUdf.name}</span>
 						{:else}
 							<span class={label()}>No UDF selected</span>
@@ -300,8 +304,10 @@
 					<button
 						type="button"
 						class={button({ variant: 'secondary', size: 'sm' })}
-						onclick={openEditor}>Edit UDF</button
+						onclick={openEditor}
 					>
+						Edit UDF
+					</button>
 					<p class={css({ color: 'fg.muted', fontSize: 'xs', margin: '0' })}>
 						Edit the function, inputs, and output type in the UDF editor. You can also save it to
 						the library.
@@ -332,18 +338,22 @@
 					type="button"
 					class={button({ variant: 'primary' })}
 					onclick={saveExpression}
-					disabled={!canAdd}>Save</button
+					disabled={!canAdd}
 				>
-				<button type="button" class={button({ variant: 'secondary' })} onclick={resetForm}
-					>Cancel</button
-				>
+					Save
+				</button>
+				<button type="button" class={button({ variant: 'secondary' })} onclick={resetForm}>
+					Cancel
+				</button>
 			{:else}
 				<button
 					type="button"
 					class={button({ variant: 'primary' })}
 					onclick={addExpression}
-					disabled={!canAdd}>Add</button
+					disabled={!canAdd}
 				>
+					Add
+				</button>
 			{/if}
 		</div>
 	</div>
@@ -385,8 +395,10 @@
 								textOverflow: 'ellipsis',
 								whiteSpace: 'nowrap'
 							})}
-							title={expr.name}>{expr.name}</span
+							title={expr.name}
 						>
+							{expr.name}
+						</span>
 						<span class={css({ fontSize: 'xs', color: 'fg.muted' })}>
 							{expr.type === 'column'
 								? `<- ${expr.column ?? ''}`

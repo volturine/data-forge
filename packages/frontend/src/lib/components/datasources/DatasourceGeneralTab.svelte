@@ -64,8 +64,10 @@
 				textTransform: 'none',
 				letterSpacing: 'normal',
 				marginBottom: '1.5'
-			})}>Name</label
+			})}
 		>
+			Name
+		</label>
 		<input
 			id="datasource-name-{datasourceId}"
 			type="text"
@@ -90,8 +92,10 @@
 				textTransform: 'none',
 				letterSpacing: 'normal',
 				marginBottom: '1.5'
-			})}>Description</label
+			})}
 		>
+			Description
+		</label>
 		<textarea
 			id="datasource-description-{datasourceId}"
 			value={description}
@@ -130,8 +134,10 @@
 						textTransform: 'uppercase',
 						letterSpacing: 'wide',
 						color: 'fg.muted'
-					})}>Source</span
+					})}
 				>
+					Source
+				</span>
 				{#if isOutputDatasource}
 					<span
 						class={css({
@@ -178,15 +184,19 @@
 						textTransform: 'uppercase',
 						letterSpacing: 'wide',
 						color: 'fg.muted'
-					})}>Datasource ID</span
+					})}
 				>
+					Datasource ID
+				</span>
 				<span
 					class={css({
 						wordBreak: 'break-all',
 						color: 'fg.secondary',
 						fontFamily: 'mono'
-					})}>{ds.id}</span
+					})}
 				>
+					{ds.id}
+				</span>
 			</div>
 
 			{#if datasourceIsFile(ds)}
@@ -197,15 +207,19 @@
 							textTransform: 'uppercase',
 							letterSpacing: 'wide',
 							color: 'fg.muted'
-						})}>Location</span
+						})}
 					>
+						Location
+					</span>
 					<span
 						class={css({
 							wordBreak: 'break-all',
 							color: 'fg.secondary',
 							fontFamily: 'mono'
-						})}>{config.file_path}</span
+						})}
 					>
+						{config.file_path}
+					</span>
 				</div>
 			{/if}
 
@@ -218,15 +232,19 @@
 								textTransform: 'uppercase',
 								letterSpacing: 'wide',
 								color: 'fg.muted'
-							})}>Location</span
+							})}
 						>
+							Location
+						</span>
 						<span
 							class={css({
 								wordBreak: 'break-all',
 								color: 'fg.secondary',
 								fontFamily: 'mono'
-							})}>{config.connection_string}</span
+							})}
 						>
+							{config.connection_string}
+						</span>
 					</div>
 				{/if}
 			{/if}
@@ -251,16 +269,20 @@
 								letterSpacing: 'wider',
 								color: 'fg.muted',
 								fontWeight: 'semibold'
-							})}>Original Source</span
+							})}
 						>
+							Original Source
+						</span>
 						<div class={css({ display: 'flex', alignItems: 'center', gap: '2' })}>
 							<span
 								class={css({
 									textTransform: 'uppercase',
 									letterSpacing: 'wide',
 									color: 'fg.muted'
-								})}>Type</span
+								})}
 							>
+								Type
+							</span>
 							<FileTypeBadge
 								sourceType={externalSourceType ?? undefined}
 								path={typeof externalSource?.file_path === 'string'
@@ -276,15 +298,19 @@
 										textTransform: 'uppercase',
 										letterSpacing: 'wide',
 										color: 'fg.muted'
-									})}>File</span
+									})}
 								>
+									File
+								</span>
 								<span
 									class={css({
 										wordBreak: 'break-all',
 										color: 'fg.secondary',
 										fontFamily: 'mono'
-									})}>{externalSource.file_path}</span
+									})}
 								>
+									{externalSource.file_path}
+								</span>
 							</div>
 						{/if}
 						{#if typeof externalSource?.connection_string === 'string'}
@@ -294,15 +320,19 @@
 										textTransform: 'uppercase',
 										letterSpacing: 'wide',
 										color: 'fg.muted'
-									})}>Connection</span
+									})}
 								>
+									Connection
+								</span>
 								<span
 									class={css({
 										wordBreak: 'break-all',
 										color: 'fg.secondary',
 										fontFamily: 'mono'
-									})}>{externalSource.connection_string}</span
+									})}
 								>
+									{externalSource.connection_string}
+								</span>
 							</div>
 						{/if}
 						{#if typeof externalSource?.query === 'string'}
@@ -312,15 +342,19 @@
 										textTransform: 'uppercase',
 										letterSpacing: 'wide',
 										color: 'fg.muted'
-									})}>Query</span
+									})}
 								>
+									Query
+								</span>
 								<span
 									class={css({
 										wordBreak: 'break-all',
 										color: 'fg.secondary',
 										fontFamily: 'mono'
-									})}>{externalSource.query}</span
+									})}
 								>
+									{externalSource.query}
+								</span>
 							</div>
 						{/if}
 					</div>
@@ -334,8 +368,10 @@
 							textTransform: 'uppercase',
 							letterSpacing: 'wide',
 							color: 'fg.muted'
-						})}>Created</span
+						})}
 					>
+						Created
+					</span>
 					<span class={css({ fontWeight: 'medium' })}>{formatDateDisplay(ds.created_at)}</span>
 				</div>
 				<div class={css({ display: 'flex', alignItems: 'center', gap: '2' })}>
@@ -344,11 +380,13 @@
 							textTransform: 'uppercase',
 							letterSpacing: 'wide',
 							color: 'fg.muted'
-						})}>Rows</span
+						})}
 					>
-					<span data-testid="datasource-row-count" class={css({ fontWeight: 'medium' })}
-						>{rowCount?.toLocaleString() ?? 'Unknown'}</span
-					>
+						Rows
+					</span>
+					<span data-testid="datasource-row-count" class={css({ fontWeight: 'medium' })}>
+						{rowCount?.toLocaleString() ?? 'Unknown'}
+					</span>
 				</div>
 				{#if schema}
 					<div class={css({ display: 'flex', alignItems: 'center', gap: '2' })}>
@@ -357,8 +395,10 @@
 								textTransform: 'uppercase',
 								letterSpacing: 'wide',
 								color: 'fg.muted'
-							})}>Columns</span
+							})}
 						>
+							Columns
+						</span>
 						<span class={css({ fontWeight: 'medium' })}>{schema.columns.length}</span>
 					</div>
 				{/if}
@@ -371,8 +411,10 @@
 							textTransform: 'uppercase',
 							letterSpacing: 'wide',
 							color: 'fg.muted'
-						})}>Last updated</span
+						})}
 					>
+						Last updated
+					</span>
 					{#if ds.last_data_update}
 						<span class={css({ fontWeight: 'medium' })}>
 							<RelativeTime timestamp={ds.last_data_update} />

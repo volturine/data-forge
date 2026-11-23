@@ -284,8 +284,10 @@
 							whiteSpace: 'nowrap',
 							fontSize: '2xs',
 							color: 'fg.faint'
-						})}>{stepType.description}</span
+						})}
 					>
+						{stepType.description}
+					</span>
 				</div>
 			</button>
 		{/each}

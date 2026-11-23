@@ -83,8 +83,10 @@
 					clip: 'rect(0, 0, 0, 0)',
 					whiteSpace: 'nowrap',
 					border: '0'
-				})}>Select column to sort</span
+				})}
 			>
+				Select column to sort
+			</span>
 			<ColumnDropdown
 				{schema}
 				value={newColumn}

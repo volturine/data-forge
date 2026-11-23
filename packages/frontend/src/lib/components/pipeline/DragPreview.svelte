@@ -49,8 +49,10 @@
 					letterSpacing: 'wide',
 					backgroundColor: 'fg.warning',
 					color: 'fg.inverse'
-				})}>Move</span
+				})}
 			>
+				Move
+			</span>
 		{/if}
 	</div>
 {/if}

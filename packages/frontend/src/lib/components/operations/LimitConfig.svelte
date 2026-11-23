@@ -24,7 +24,8 @@
 		<span
 			id="limit-n-help"
 			class={css({ marginTop: '1', display: 'block', fontSize: 'xs', color: 'fg.muted' })}
-			>Enter the maximum number of rows to keep in the dataset</span
 		>
+			Enter the maximum number of rows to keep in the dataset
+		</span>
 	</div>
 </div>

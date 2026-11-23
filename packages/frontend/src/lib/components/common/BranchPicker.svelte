@@ -203,8 +203,10 @@
 					overflow: 'hidden',
 					textOverflow: 'ellipsis',
 					whiteSpace: 'nowrap'
-				})}>{currentValue}</span
+				})}
 			>
+				{currentValue}
+			</span>
 		{:else}
 			<span class={css({ color: 'fg.muted' })}>{placeholder}</span>
 		{/if}

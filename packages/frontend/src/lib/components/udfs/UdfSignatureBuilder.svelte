@@ -34,9 +34,9 @@
 <div class={css({ display: 'flex', flexDirection: 'column', gap: '3' })}>
 	<div class={css({ display: 'flex', alignItems: 'center', justifyContent: 'space-between' })}>
 		<h4 class={css({ margin: '0', fontSize: 'sm', color: 'fg.secondary' })}>Inputs</h4>
-		<button type="button" class={button({ variant: 'secondary', size: 'sm' })} onclick={addInput}
-			>Add input</button
-		>
+		<button type="button" class={button({ variant: 'secondary', size: 'sm' })} onclick={addInput}>
+			Add input
+		</button>
 	</div>
 	{#if inputs.length === 0}
 		<p class={emptyText({ size: 'inline' })}>No inputs yet.</p>
@@ -64,8 +64,10 @@
 							textAlign: 'left',
 							md: { textAlign: 'center' }
 						})}
-						for="udf-input-{index}-label">{index + 1}</label
+						for="udf-input-{index}-label"
 					>
+						{index + 1}
+					</label>
 					<input
 						type="text"
 						id="udf-input-{index}-label"

@@ -662,8 +662,10 @@
 					backgroundColor: 'bg.tertiary',
 					borderWidth: '1',
 					color: 'fg.faint'
-				})}>sink</span
+				})}
 			>
+				sink
+			</span>
 		</div>
 
 		{#if outputConfig}
@@ -996,8 +998,10 @@
 											overflow: 'hidden',
 											textOverflow: 'ellipsis',
 											whiteSpace: 'nowrap'
-										})}>{outputConfig.build_mode}</span
+										})}
 									>
+										{outputConfig.build_mode}
+									</span>
 									<ChevronDown size={14} class={css({ color: 'fg.muted' })} />
 								</button>
 								{#if modeMenuOpen}

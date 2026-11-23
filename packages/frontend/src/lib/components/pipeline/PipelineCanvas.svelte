@@ -490,8 +490,10 @@
 										fontSize: 'sm',
 										fontWeight: 'medium',
 										textTransform: 'lowercase'
-									})}>{drag.type ?? 'step'}</span
+									})}
 								>
+									{drag.type ?? 'step'}
+								</span>
 							{/if}
 						</div>
 						<ConnectionLine highlighted={hoverIndex === 0} />
@@ -621,8 +623,10 @@
 											fontSize: 'sm',
 											fontWeight: 'medium',
 											textTransform: 'lowercase'
-										})}>{drag.type ?? 'step'}</span
+										})}
 									>
+										{drag.type ?? 'step'}
+									</span>
 								{/if}
 							</div>
 							<ConnectionLine highlighted={hoverIndex === i + 1} />

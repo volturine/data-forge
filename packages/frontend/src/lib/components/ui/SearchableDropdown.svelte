@@ -321,8 +321,10 @@
 								textOverflow: 'ellipsis',
 								whiteSpace: 'nowrap'
 							})
-						: css({ color: 'fg.muted' })}>{displayLabel}</span
+						: css({ color: 'fg.muted' })}
 				>
+					{displayLabel}
+				</span>
 				{#if !(clearable && selectedCount > 0)}
 					<ChevronDown size={14} class={css({ color: 'fg.muted' })} />
 				{/if}
@@ -355,8 +357,10 @@
 						onChange(mode === 'multi' ? [] : '');
 						onClose?.();
 					}}
-					aria-label="Clear selection">✕</button
+					aria-label="Clear selection"
 				>
+					✕
+				</button>
 			{/if}
 		</div>
 	{/if}

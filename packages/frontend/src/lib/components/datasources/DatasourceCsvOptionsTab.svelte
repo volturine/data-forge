@@ -49,8 +49,10 @@
 					textTransform: 'none',
 					letterSpacing: 'normal',
 					marginBottom: '1.5'
-				})}>Delimiter</label
+				})}
 			>
+				Delimiter
+			</label>
 			<select
 				id="csv-delimiter-{datasourceId}"
 				value={config.delimiter}
@@ -76,8 +78,10 @@
 					textTransform: 'none',
 					letterSpacing: 'normal',
 					marginBottom: '1.5'
-				})}>Quote</label
+				})}
 			>
+				Quote
+			</label>
 			<select
 				id="csv-quote-{datasourceId}"
 				value={config.quote_char}
@@ -101,8 +105,10 @@
 					textTransform: 'none',
 					letterSpacing: 'normal',
 					marginBottom: '1.5'
-				})}>Encoding</label
+				})}
 			>
+				Encoding
+			</label>
 			<select
 				id="csv-encoding-{datasourceId}"
 				value={config.encoding}
@@ -127,8 +133,10 @@
 					textTransform: 'none',
 					letterSpacing: 'normal',
 					marginBottom: '1.5'
-				})}>Skip Rows</label
+				})}
 			>
+				Skip Rows
+			</label>
 			<input
 				id="csv-skip-rows-{datasourceId}"
 				type="number"
@@ -158,8 +166,10 @@
 				textTransform: 'none',
 				letterSpacing: 'normal',
 				margin: '0'
-			})}>First row is header</label
+			})}
 		>
+			First row is header
+		</label>
 	</div>
 
 	{#if hasChanges}

@@ -361,9 +361,9 @@
 			gap: '2'
 		})}
 	>
-		<button class={button({ variant: 'secondary' })} onclick={closeVersionModal} type="button"
-			>Close</button
-		>
+		<button class={button({ variant: 'secondary' })} onclick={closeVersionModal} type="button">
+			Close
+		</button>
 	</div>
 {/snippet}
 

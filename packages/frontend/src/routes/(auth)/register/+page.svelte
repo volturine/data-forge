@@ -108,8 +108,10 @@
 			<button
 				type="button"
 				class={button({ variant: 'primary' })}
-				onclick={() => goto(resolve('verify'))}>Check verification status</button
+				onclick={() => goto(resolve('verify'))}
 			>
+				Check verification status
+			</button>
 		{:else}
 			<button
 				type="button"

@@ -32,9 +32,9 @@
 		aria-labelledby="expr-expression-heading"
 	>
 		<span id="expr-expression-heading"><SectionHeader>Expression</SectionHeader></span>
-		<label for="expr-textarea-expression" class={label({ variant: 'hidden' })}
-			>Polars expression</label
-		>
+		<label for="expr-textarea-expression" class={label({ variant: 'hidden' })}>
+			Polars expression
+		</label>
 		<textarea
 			id="expr-textarea-expression"
 			data-testid="expr-expression-textarea"
@@ -73,8 +73,10 @@
 				clip: 'rect(0, 0, 0, 0)',
 				whiteSpace: 'nowrap',
 				border: '0'
-			})}>Enter a Polars expression using pl.col() to reference columns</span
+			})}
 		>
+			Enter a Polars expression using pl.col() to reference columns
+		</span>
 
 		<div
 			id="expr-syntax-help"
@@ -103,8 +105,10 @@
 					fontFamily: 'mono',
 					fontSize: 'xs',
 					color: 'accent.primary'
-				})}>pl.col("column")</code
+				})}
 			>
+				pl.col("column")
+			</code>
 			to reference columns.<br />
 			Examples:<br />
 			-
@@ -116,8 +120,10 @@
 					fontFamily: 'mono',
 					fontSize: 'xs',
 					color: 'accent.primary'
-				})}>pl.col("price") * 1.2</code
+				})}
 			>
+				pl.col("price") * 1.2
+			</code>
 			- Multiply<br />
 			-
 			<code
@@ -128,8 +134,10 @@
 					fontFamily: 'mono',
 					fontSize: 'xs',
 					color: 'accent.primary'
-				})}>pl.col("value").cast(pl.Float64)</code
+				})}
 			>
+				pl.col("value").cast(pl.Float64)
+			</code>
 			- Cast type<br />
 			-
 			<code
@@ -140,8 +148,10 @@
 					fontFamily: 'mono',
 					fontSize: 'xs',
 					color: 'accent.primary'
-				})}>pl.col("name").str.to_uppercase()</code
+				})}
 			>
+				pl.col("name").str.to_uppercase()
+			</code>
 			- String method<br />
 			-
 			<code
@@ -152,8 +162,10 @@
 					fontFamily: 'mono',
 					fontSize: 'xs',
 					color: 'accent.primary'
-				})}>pl.col("date").dt.year()</code
-			> - Date component
+				})}
+			>
+				pl.col("date").dt.year()
+			</code> - Date component
 		</div>
 	</div>
 

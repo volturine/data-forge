@@ -436,12 +436,12 @@
 											>
 												<div class={css({ minWidth: '0' })}>
 													<div class={css({ display: 'flex', alignItems: 'center', gap: '2' })}>
-														<span class={css({ fontFamily: 'mono', fontSize: 'xs' })}
-															>{run.build_id.slice(0, 8)}...</span
-														>
-														<span class={css({ fontSize: 'xs', color: 'fg.tertiary' })}
-															>{run.current_kind ?? ''}</span
-														>
+														<span class={css({ fontFamily: 'mono', fontSize: 'xs' })}>
+															{run.build_id.slice(0, 8)}...
+														</span>
+														<span class={css({ fontSize: 'xs', color: 'fg.tertiary' })}>
+															{run.current_kind ?? ''}
+														</span>
 													</div>
 													<div class={css({ fontSize: 'xs', color: 'fg.muted' })}>
 														{formatDateTimeDisplay(run.started_at)}
@@ -552,9 +552,9 @@
 											})}
 										>
 											<div class={css({ display: 'flex', alignItems: 'center', gap: '2' })}>
-												<span class={css({ fontFamily: 'mono' })}
-													>{run.build_id.slice(0, 8)}...</span
-												>
+												<span class={css({ fontFamily: 'mono' })}>
+													{run.build_id.slice(0, 8)}...
+												</span>
 												<span class={css({ color: 'fg.tertiary' })}>{run.current_kind ?? ''}</span>
 											</div>
 											<button
@@ -681,8 +681,10 @@
 													paddingY: '1.5',
 													textAlign: 'left',
 													fontWeight: 'medium'
-												})}>Column</th
+												})}
 											>
+												Column
+											</th>
 											<th
 												class={css({
 													borderBottomWidth: '1',
@@ -690,8 +692,10 @@
 													paddingY: '1.5',
 													textAlign: 'left',
 													fontWeight: 'medium'
-												})}>Change</th
+												})}
 											>
+												Change
+											</th>
 											<th
 												class={css({
 													borderBottomWidth: '1',
@@ -699,8 +703,10 @@
 													paddingY: '1.5',
 													textAlign: 'left',
 													fontWeight: 'medium'
-												})}>Type A</th
+												})}
 											>
+												Type A
+											</th>
 											<th
 												class={css({
 													borderBottomWidth: '1',
@@ -708,8 +714,10 @@
 													paddingY: '1.5',
 													textAlign: 'left',
 													fontWeight: 'medium'
-												})}>Type B</th
+												})}
 											>
+												Type B
+											</th>
 										</tr>
 									</thead>
 									<tbody>
@@ -722,8 +730,10 @@
 														paddingY: '1.5',
 														fontFamily: 'mono',
 														fontSize: 'xs'
-													})}>{diff.column}</td
+													})}
 												>
+													{diff.column}
+												</td>
 												<td
 													class={css({
 														borderBottomWidth: '1',
@@ -853,8 +863,10 @@
 													paddingY: '1.5',
 													textAlign: 'left',
 													fontWeight: 'medium'
-												})}>Column</th
+												})}
 											>
+												Column
+											</th>
 											<th
 												class={css({
 													borderBottomWidth: '1',
@@ -862,8 +874,10 @@
 													paddingY: '1.5',
 													textAlign: 'left',
 													fontWeight: 'medium'
-												})}>Type</th
+												})}
 											>
+												Type
+											</th>
 											<th
 												class={css({
 													borderBottomWidth: '1',
@@ -871,8 +885,10 @@
 													paddingY: '1.5',
 													textAlign: 'left',
 													fontWeight: 'medium'
-												})}>Null Count (A → B)</th
+												})}
 											>
+												Null Count (A → B)
+											</th>
 											<th
 												class={css({
 													borderBottomWidth: '1',
@@ -880,8 +896,10 @@
 													paddingY: '1.5',
 													textAlign: 'left',
 													fontWeight: 'medium'
-												})}>Unique Count (A → B)</th
+												})}
 											>
+												Unique Count (A → B)
+											</th>
 											<th
 												class={css({
 													borderBottomWidth: '1',
@@ -889,8 +907,10 @@
 													paddingY: '1.5',
 													textAlign: 'left',
 													fontWeight: 'medium'
-												})}>Min (A → B)</th
+												})}
 											>
+												Min (A → B)
+											</th>
 											<th
 												class={css({
 													borderBottomWidth: '1',
@@ -898,8 +918,10 @@
 													paddingY: '1.5',
 													textAlign: 'left',
 													fontWeight: 'medium'
-												})}>Max (A → B)</th
+												})}
 											>
+												Max (A → B)
+											</th>
 										</tr>
 									</thead>
 									<tbody>
